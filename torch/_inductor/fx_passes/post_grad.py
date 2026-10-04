@@ -23,6 +23,7 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import (
+    canonicalize_dim,
     is_boolean_dtype,
     is_expandable_to,
     is_integer_dtype,
@@ -1245,8 +1246,12 @@ def is_valid_splitwithsizes_cat(match):
     if len(split_nodes) != 1 or len(cat_nodes) != 1:
         return False
     split_node, cat_node = split_nodes[0], cat_nodes[0]
-    # The dim of split and cat should match for passthrough
-    if get_arg_value(split_node, 2, "dim") != get_arg_value(cat_node, 1, "dim"):
+    # The dim of split and cat should match for passthrough; a negative dim
+    # and its positive twin name the same axis
+    split_dim = get_arg_value(split_node, 2, "dim")
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    rank = cat_node.meta["val"].ndim
+    if _canonicalize_dim_arg(rank, split_dim) != _canonicalize_dim_arg(rank, cat_dim):
         return False
     get_item_args = OrderedSet(
         get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
@@ -1267,6 +1272,11 @@ def is_valid_splitwithsizes_cat(match):
         return False
 
     return True
+
+
+def _canonicalize_dim_arg(rank, dim):
+    # a dim left at its default comes through as None; that default is 0
+    return canonicalize_dim(rank, dim if dim is not None else 0)
 
 
 def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
@@ -1928,30 +1938,33 @@ def decompose_auto_functionalized(graph):
         raise AssertionError("auto_functionalized_v2 was not removed")
 
 
-@register_lowering_pattern(
-    CallFunction(
-        aten.cat,
-        ListOf(
-            CallFunction(
-                operator.getitem,
+# see cat_splitwithsizes below for why both arities are registered
+for _cat_arity, _split_arity in itertools.product((1, 2), (2, 3)):
+
+    @register_lowering_pattern(
+        CallFunction(
+            aten.cat,
+            ListOf(
                 CallFunction(
-                    aten.split_with_sizes,
-                    KeywordArg("input_"),
+                    operator.getitem,
+                    CallFunction(
+                        aten.split_with_sizes,
+                        KeywordArg("input_"),
+                        Ignored(),
+                        *([Ignored()] * (_split_arity - 2)),
+                        _users=MULTIPLE,
+                    ),
                     Ignored(),
-                    Ignored(),
-                    _users=MULTIPLE,
                 ),
-                Ignored(),
             ),
+            *([Ignored()] * (_cat_arity - 1)),
         ),
-        Ignored(),
-    ),
-    pass_number=2,
-    extra_check=is_valid_splitwithsizes_cat,
-    output_metadata_is_input="input_",
-)
-def splitwithsizes_cat_replace(match, input_):
-    return input_
+        pass_number=2,
+        extra_check=is_valid_splitwithsizes_cat,
+        output_metadata_is_input="input_",
+    )
+    def splitwithsizes_cat_replace(match, input_):
+        return input_
 
 
 def is_valid_cat_splitwithsizes(match):
@@ -1965,12 +1978,17 @@ def is_valid_cat_splitwithsizes(match):
     if len(cat_node.users) > 1:
         return False
 
-    # the dim of the cat and split should match
-    dim = get_arg_value(split_node, 2, "dim")
-    if dim != get_arg_value(cat_node, 1, "dim"):
+    cat_inputs = list(get_arg_value(cat_node, 0))
+
+    # the dim of the cat and split should match; a negative dim and its
+    # positive twin name the same axis. rank comes from the cat output since
+    # inputs can be legacy 1D empties
+    rank = cat_node.meta["val"].ndim
+    dim = _canonicalize_dim_arg(rank, get_arg_value(split_node, 2, "dim"))
+    cat_dim = _canonicalize_dim_arg(rank, get_arg_value(cat_node, 1, "dim"))
+    if dim != cat_dim:
         return False
 
-    cat_inputs = list(get_arg_value(cat_node, 0))
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
     # the number of input tensors in cat and the
     # length of the split sizes should match
@@ -1982,6 +2000,10 @@ def is_valid_cat_splitwithsizes(match):
         # should match the corresponding split size
         if "val" not in cat_input.meta:
             return False
+        if cat_input.meta["val"].ndim != rank:
+            # legacy 1D empties ride along in cat with a lower rank than the
+            # output; indexing them on the canonical dim would raise
+            return False
         cat_input_size = cat_input.meta["val"].size(dim)
         if cat_input_size != split_size:
             return False
@@ -1989,24 +2011,28 @@ def is_valid_cat_splitwithsizes(match):
     return True
 
 
-@register_lowering_pattern(
-    CallFunction(
-        aten.split_with_sizes,
+# dim defaults to 0 for both ops, and aot autograd does not fill in defaults,
+# so every omitted trailing dim arg needs its own pattern arity
+for _split_arity, _cat_arity in itertools.product((2, 3), (1, 2)):
+
+    @register_lowering_pattern(
         CallFunction(
-            aten.cat,
-            KeywordArg("input_"),
+            aten.split_with_sizes,
+            CallFunction(
+                aten.cat,
+                KeywordArg("input_"),
+                *([Ignored()] * (_cat_arity - 1)),
+                _users=MULTIPLE,
+            ),
             Ignored(),
-            _users=MULTIPLE,
+            *([Ignored()] * (_split_arity - 2)),
         ),
-        Ignored(),
-        Ignored(),
-    ),
-    pass_number=2,
-    extra_check=is_valid_cat_splitwithsizes,
-    output_metadata_is_input="input_",
-)
-def cat_splitwithsizes_replace(match, input_):
-    return input_
+        pass_number=2,
+        extra_check=is_valid_cat_splitwithsizes,
+        output_metadata_is_input="input_",
+    )
+    def cat_splitwithsizes_replace(match, input_):
+        return input_
 
 
 # reciprocal(sqrt(x)) -> rsqrt(x): an unconditional algebraic identity

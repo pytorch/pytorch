@@ -1205,6 +1205,177 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 0, 0)
 
+    def test_cat_splitwithsizes_negative_dim(self):
+        # cat on dim=1, split on dim=-1 name the same axis on a 2D input:
+        # the pair must be eliminated exactly as with positive dims (#196905).
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], -1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(2, 2, device=GPU_TYPE),
+            torch.randn(2, 3, device=GPU_TYPE),
+            torch.randn(2, 5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # the mirror: cat dim negative, split dim positive
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], -1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], 1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        self.common(fn, args, 1, 2)
+
+        # negative dims on both sides, on a 3D input where the normalization
+        # has to use the real rank
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], -2)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], -2
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(2, 2, 4, device=GPU_TYPE),
+            torch.randn(2, 3, 4, device=GPU_TYPE),
+            torch.randn(2, 5, 4, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # a true mismatch still rejects: on 3D, cat dim=-1 vs split dim=1
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], -1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [1, 1], 1)
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(4, 2, 2, device=GPU_TYPE),
+            torch.randn(4, 2, 3, device=GPU_TYPE),
+            torch.randn(4, 2, 5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+        # a dim left at its default shows up as None in the graph; that
+        # default is 0 and must match an explicit cat(dim=0)
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 0)
+            return torch.split_with_sizes(cat, [2, 3, 5])
+
+        args = [
+            torch.randn(2, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # a legacy 1D empty riding along in the cat inputs has a lower rank
+        # than the cat output; the extra_check must decline the match instead
+        # of indexing it on the canonical dim and raising
+        def fn(a, b):
+            cat = torch.ops.aten.cat.default([a, b], 1)
+            return torch.ops.aten.split_with_sizes.default(cat, [0, 0], -1)
+
+        args = [
+            torch.empty(0, device=GPU_TYPE),
+            torch.empty(2, 0, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+    def test_splitwithsizes_cat_negative_dim(self):
+        # the sibling direction: split on dim=1, cat on dim=-1 is the same
+        # axis and must pass through the same as positive dims (#196905).
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], 1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], -1)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 4)
+
+        # negative dims on both sides also match
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], -1)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], -1)
+            return cat**2
+
+        self.common(fn, args, 1, 4)
+
+        # cat dim -1 vs split dim 0 is a true mismatch and must not collapse
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [1, 1], 0)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], -1)
+            return cat**2
+
+        args = [
+            torch.randn(2, 32, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+    def test_splitwithsizes_cat_omitted_dim(self):
+        # dim defaults to 0 for both ops and aot autograd does not fill in
+        # defaults, so an omitted dim traces to a different arity. Both sides
+        # omitted must collapse exactly like the explicit case.
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24])
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1])
+            return cat**2
+
+        args = [
+            torch.randn(32, 2, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 4)
+
+        # only the split dim omitted: the default 0 must match an explicit
+        # cat(dim=0)
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24])
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 0)
+            return cat**2
+
+        self.common(fn, args, 1, 4)
+
+        # only the cat dim omitted
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [8, 24], 0)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1])
+            return cat**2
+
+        self.common(fn, args, 1, 4)
+
+        # split's default dim 0 against an explicit cat dim 1 is a true
+        # mismatch and must not collapse
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [16, 16])
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2
+
+        args = [
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
     def test_symint_pattern_matching(self):
         import torch._inductor.config as config
         from torch._inductor.pattern_matcher import (
