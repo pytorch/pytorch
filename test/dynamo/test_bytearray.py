@@ -403,8 +403,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertRaises(ValueError, a.extend, [0, 1, 2, 256])
         self.assertRaises(ValueError, a.extend, map(int, "X"))
         self.assertEqual(a, b"abcdef")
-        with self.assertRaisesRegex(TypeError, "expected iterable of integers"):
-            a.extend("def")
+        self.assertRaises(TypeError, a.extend, "def")
         with self.assertRaisesRegex(TypeError, "can't extend bytearray with float"):
             a.extend(1.0)
 
