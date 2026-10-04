@@ -16110,6 +16110,66 @@ fn
 """,
         )
 
+    def test_funcname_cache_single_line(self):
+        from torch._dynamo.funcname_cache import get_funcname
+
+        src = """\
+class E(Exception): pass
+def f():
+    return 1
+def one_line(): pass
+value = 1
+class A:
+    @overload
+    def to(self, x: int): ...
+    @overload
+    def to(self, x: str): ...
+    @staticmethod
+    def bar(
+    ):
+        # Comment before the body.
+
+        return 1
+    def inline(self): pass
+    value = 2
+    async def async_inline(self): pass
+    def last(self):
+        return 2
+value = 3
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "source.py")
+            with open(filename, "w") as f:
+                f.write(src)
+            names = [get_funcname(filename, i + 1) for i in range(src.count("\n"))]
+
+        self.assertExpectedInline(
+            "\n".join(names),
+            """\
+E
+f
+f
+one_line
+
+A
+A
+A.to
+A
+A.to
+A
+A.bar
+A.bar
+A.bar
+A.bar
+A.bar
+A.inline
+A
+A.async_inline
+A.last
+A.last
+""",
+        )
+
     def test_return_dict_with_graph_break_and_update(self):
         def create():
             torch._dynamo.graph_break()
