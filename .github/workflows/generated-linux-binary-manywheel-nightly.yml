@@ -42,7 +42,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.15
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -99,7 +99,7 @@ jobs:
           suffix=""
           registry_host=""
           if [[ "${GITHUB_REF}" == refs/tags/ciflow/binaries* ]]; then
-            # PR test run: content-addressed image, from Docker Hub if main has
+            # PR test run: content-addressed image, from Docker Hub if release/2.15 has
             # published this tree, else from ECR via the PR's ciflow/docker run.
             suffix="-$(git rev-parse HEAD:.ci/docker)"
             registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
@@ -127,7 +127,7 @@ jobs:
       # them.
       - name: Login to ECR
         if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') && steps.calc.outputs.docker_registry_host != '' }}
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@release/2.15
       - name: Wait for content-addressed builder image in ECR
         if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') && steps.calc.outputs.docker_registry_host != '' }}
         env:
@@ -162,7 +162,7 @@ jobs:
     name: manywheel-cpu-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/release/2.15' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
       image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cpu${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -245,7 +245,7 @@ jobs:
     name: manywheel-cuda-cu130-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/release/2.15' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
       image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.0${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -329,7 +329,7 @@ jobs:
     name: manywheel-cuda-cu132-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/release/2.15' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
       image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.2${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -413,7 +413,7 @@ jobs:
     name: manywheel-cuda-cu134-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/release/2.15' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 280
     container:
       image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:cuda13.4${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -497,7 +497,7 @@ jobs:
     name: manywheel-xpu-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
     needs: [get-label-type, get-docker-tag]
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ (github.ref == 'refs/heads/release/2.15' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}"
     timeout-minutes: 420
     container:
       image: ${{ needs.get-docker-tag.outputs.docker_registry_host }}pytorch/manylinux2_28-builder:xpu${{ needs.get-docker-tag.outputs.docker_image_suffix }}
@@ -723,7 +723,7 @@ jobs:
       DOCKER_IMAGE_REGISTRY_HOST: "${{ needs.get-docker-tag.outputs.docker_registry_host }}"
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}
+      runs_on: ${{ (github.ref == 'refs/heads/release/2.15' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}
       use_container_directive: true
       ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}

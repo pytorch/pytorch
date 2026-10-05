@@ -55,7 +55,7 @@ jobs:
           chmod +x /usr/bin/sudo
 
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@release/2.15
         with:
           submodules: false
           use-arc: true
