@@ -42,6 +42,7 @@ import time
 import traceback
 import types
 import typing
+import unicodedata
 import uuid
 import warnings
 import weakref
@@ -1390,6 +1391,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
         variables.FakeItemVariable,
         variables.FrozensetVariable,
         variables.ListIteratorVariable,
+        variables.ListReverseIteratorVariable,
         variables.ListVariable,
         variables.MappingProxyVariable,
         variables.NNModuleHooksDictVariable,
@@ -3208,12 +3210,19 @@ range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 deque_iterator = type(iter(collections.deque()))
 deque_rev_iterator = type(reversed(collections.deque()))
+list_reverseiterator = type(reversed([]))
+list_reverseiterator_len = list_reverseiterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 dict_new = dict.__new__
 dict_methods = {
     method
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
+}
+# defaultdict adds __init__/__repr__/__missing__/copy on top of dict's; a
+# defaultdict subclass inherits both, so UDOV slot delegation needs the union.
+defaultdict_methods = dict_methods | {
+    method for method in collections.defaultdict.__dict__.values() if callable(method)
 }
 set_methods = {method for method in set.__dict__.values() if callable(method)}
 frozenset_methods = {
@@ -3303,6 +3312,15 @@ def product(it: Iterable[T]) -> int:
 def tuple_iterator_getitem(it: Any, index: int) -> Any:
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+def list_reverseiterator_backing_list(it: Any) -> list[Any]:
+    return it.__reduce__()[1][0]
+
+
+def list_reverseiterator_setstate(it: Any, it_index: int) -> Any:
+    it.__setstate__(it_index)
+    return it
 
 
 def dataclass_fields(cls: Any) -> Any:
@@ -3905,7 +3923,7 @@ def same(
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500
+                        fp64_ref.numel() < 1000
                     ):
                         multiplier = 8.0
                     elif (
@@ -4977,12 +4995,14 @@ class numpy_operator_wrapper(Generic[_P, R]):
         if kwargs:
             raise AssertionError(f"Expected no kwargs, got {kwargs}")
 
-        # pyrefly: ignore [bad-assignment]
-        args = (
-            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
-        )
-        out = self.op(*args)
-        return numpy_to_tensor(out)
+        with torch._C.DisableTorchFunction():
+            # pyrefly: ignore [bad-assignment]
+            args = (
+                tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg
+                for arg in args
+            )
+            out = self.op(*args)
+            return numpy_to_tensor(out)
 
 
 @functools.lru_cache(maxsize=1)
@@ -5172,6 +5192,28 @@ def _fix_offset(str: str, offset: int) -> int:
     return len(as_utf8[:offset].decode("utf-8", errors="replace"))
 
 
+def _expand_source_and_marker(source: str, marker: str) -> tuple[str, str]:
+    expanded_source: list[str] = []
+    expanded_marker: list[str] = []
+    column = 0
+    for index, char in enumerate(source):
+        if char == "\t":
+            width = 8 - column % 8
+            expanded_source.append(" " * width)
+        elif unicodedata.category(char) in {"Mn", "Me", "Cf"}:
+            # Combining marks, variation selectors, and format characters
+            # render in zero columns.
+            width = 0
+            expanded_source.append(char)
+        else:
+            width = 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+            expanded_source.append(char)
+        if index < len(marker):
+            expanded_marker.append(marker[index] * width)
+        column += width
+    return "".join(expanded_source), "".join(expanded_marker)
+
+
 @dataclasses.dataclass
 class _Anchors:
     # inclusive
@@ -5338,6 +5380,23 @@ def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
     return None
 
 
+def _is_expression_range(
+    source_lines: list[str], col_offset: int, end_col_offset: int
+) -> bool:
+    import ast
+
+    first = source_lines[0][_fix_offset(source_lines[0], col_offset) :]
+    last = source_lines[-1][: _fix_offset(source_lines[-1], end_col_offset)]
+    # Wrap in parentheses so continuation lines, comments, and indentation
+    # inside a multiline expression do not trip the parser.
+    segment = "\n".join([first, *source_lines[1:-1], last])
+    try:
+        ast.parse(f"({segment}\n)", mode="eval")
+    except SyntaxError:
+        return False
+    return True
+
+
 def format_source_range(
     filename: str,
     lineno: int | None,
@@ -5359,11 +5418,24 @@ def format_source_range(
         return ""
 
     if (
+        end_lineno is not None
+        and end_lineno != lineno
+        and col_offset is not None
+        and end_col_offset is not None
+        and not _is_expression_range(source_lines, col_offset, end_col_offset)
+    ):
+        # Python 3.11 gives statement-level instructions such as FOR_ITER a
+        # range spanning the whole statement body. Only multiline expressions
+        # are rendered as ranges.
+        return source_lines[0]
+
+    if (
         sys.version_info >= (3, 13)
         and end_lineno is not None
         and end_lineno != lineno
         and col_offset is not None
         and end_col_offset is not None
+        and not any("\t" in line for line in source_lines)
     ):
         # Keep single-line ranges on Dynamo's manual path. The stdlib traceback
         # formatter is useful for multiline spans on 3.13+, but for single-line
@@ -5450,6 +5522,7 @@ def format_source_range(
 
     result = ""
     for line, marker in zip(source_lines, markers):
+        line, marker = _expand_source_and_marker(line, marker)
         result += line + "\n"
         result += marker + "\n"
     return result
