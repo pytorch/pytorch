@@ -3309,11 +3309,12 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        fake_impl_out = torch._library.fake_impl.run_fake_impl(
-            self, func, args, kwargs, real
-        )
-        if fake_impl_out is not NotImplemented:
-            return maybe_propagate_real_tensors(fake_impl_out)
+        entry = torch._library.simple_registry.singleton.find(func.name())
+        if entry.fake_impl.kernel is not None:
+            fake_out = torch._library.fake_impl.run_fake_impl(
+                self, func, args, kwargs, real
+            )
+            return maybe_propagate_real_tensors(fake_out)
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
