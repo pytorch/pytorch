@@ -1659,6 +1659,78 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
 
+    @parametrize("prebound", (False, True))
+    def test_raw_tensor_descriptor_bypasses_subclass_override(self, prebound):
+        class S(torch.Tensor):
+            def add(self, other):
+                return self * 0 - 777
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        x = torch.ones(2).as_subclass(S)
+        descriptor = torch.Tensor.add
+        if prebound:
+            bound = descriptor.__get__(x, S)
+
+            def fn():
+                return bound(1)
+
+            args = ()
+        else:
+
+            def fn(x):
+                return descriptor(x, 1)
+
+            args = (x,)
+
+        expected = fn(*args)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(actual, expected)
+        self.assertIsInstance(actual, S)
+
+    @parametrize("prebound", (False, True))
+    def test_raw_tensor_inplace_view_descriptor_unsupported(self, prebound):
+        class S(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        descriptor = torch.Tensor.unsqueeze_
+
+        def run(x, compile_fn):
+            if prebound:
+                bound = descriptor.__get__(x, S)
+
+                def fn():
+                    return bound(0) + 1
+
+                return compile_fn(fn)()
+
+            def fn(x):
+                return descriptor(x, 0) + 1
+
+            return compile_fn(fn)(x)
+
+        fullgraph_x = torch.ones(2).as_subclass(S)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "inplace view op on input tensor"
+        ):
+            run(
+                fullgraph_x,
+                partial(torch.compile, backend="eager", fullgraph=True),
+            )
+        self.assertEqual(fullgraph_x.shape, (2,))
+
+        eager_x = torch.ones(2).as_subclass(S)
+        expected = run(eager_x, lambda fn: fn)
+
+        compiled_x = torch.ones(2).as_subclass(S)
+        actual = run(compiled_x, partial(torch.compile, backend="eager"))
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_x, eager_x)
+
     def test_subclass_dont_invoke_torch_function_on_overridden_attr(self):
         from types import MethodWrapperType
 

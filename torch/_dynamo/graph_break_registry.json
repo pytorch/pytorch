@@ -936,6 +936,26 @@
       ]
     }
   ],
+  "GB8929": [
+    {
+      "Gb_type": "Unsupported dict subclass fromkeys() construction",
+      "Context": "{user_cls_name}.fromkeys(): {args} {kwargs}",
+      "Explanation": "Dynamo cannot safely construct {user_cls_name} because its class or metaclass cannot be reconstructed without running unmodeled user code.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0732": [
+    {
+      "Gb_type": "Unsupported dict subclass fromkeys() result",
+      "Context": "{user_cls_name}.fromkeys(): {args} {kwargs}",
+      "Explanation": "Dynamo expected constructing {user_cls_name} to produce an instance of that dict subclass.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0058": [
     {
       "Gb_type": "Failed to set tensor attribute",
@@ -5719,6 +5739,17 @@
       "Explanation": "Expected additional_inputs to be a list/tuple but got {additional_inputs.python_type()}",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB6153": [
+    {
+      "Gb_type": "Unsupported classmethod descriptor on dict subclass instance",
+      "Context": "name={name}",
+      "Explanation": "Dynamo cannot safely trace a C classmethod descriptor through a dict subclass instance.",
+      "Hints": [
+        "Call the descriptor through the class instead of an instance.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
