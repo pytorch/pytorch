@@ -376,11 +376,15 @@ function(torch_compile_options libname)
       -Wno-strict-aliasing
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wredundant-move)
+      list(APPEND private_compile_options -Wredundant-move -Wpessimizing-move)
       # -Wno-interference-size only exists in GCC 12+
       if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
         list(APPEND private_compile_options -Wno-interference-size)
       endif()
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+      # icpx uses the clang frontend but reports its own compiler ID
+      list(APPEND private_compile_options -Wmove)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       if(NOT USE_CUDA)
@@ -604,6 +608,7 @@ function(torch_optimize_layout_if_enabled tgt)
     set(_prebolt "$<TARGET_FILE_DIR:${tgt}>/prebolt/$<TARGET_FILE_NAME:${tgt}>")
     add_custom_command(
       TARGET ${tgt} POST_BUILD
+      BYPRODUCTS "${_logfile}"
       COMMAND "${CMAKE_COMMAND}" -E make_directory "$<PATH:GET_PARENT_PATH,${_logfile}>"
       COMMAND "${CMAKE_COMMAND}" -E make_directory "$<PATH:GET_PARENT_PATH,${_prebolt}>"
       COMMAND "${CMAKE_COMMAND}" -E rename "$<TARGET_FILE:${tgt}>" "${_prebolt}"
@@ -617,5 +622,6 @@ function(torch_optimize_layout_if_enabled tgt)
       COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
       VERBATIM
     )
+    add_dependencies(bolt_profile_quality_summary ${tgt})
   endif()
 endfunction()
