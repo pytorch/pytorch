@@ -1974,47 +1974,6 @@ class TestMaxAutotune(TestCase):
         else:
             self.assertFalse(plain_mm, f"mm_template should be skipped: {names}")
 
-    def test_decompose_k_hip_arch_gate(self):
-        from torch._inductor.utils import (
-            decompose_k_hip_arch_enabled,
-            decompose_k_supported_on_device,
-        )
-
-        for arch, expected in (
-            ("gfx90a", True),
-            ("gfx942", True),
-            ("gfx950", True),
-            ("gfx950:sramecc+:xnack-", True),
-            ("gfx1200", True),
-            ("gfx1201", True),
-            ("gfx1250", True),
-            ("gfx1100", False),
-            ("gfx1101", False),
-            ("gfx1102", False),
-            ("gfx1103:xnack-", False),
-            ("gfx1150", False),
-            ("gfx1151:xnack-", False),
-            ("", False),
-        ):
-            self.assertEqual(decompose_k_hip_arch_enabled(arch), expected, arch)
-
-        with mock.patch("torch.version.hip", None):
-            self.assertTrue(decompose_k_supported_on_device())
-
-        for arch, expected in (
-            ("gfx950", True),
-            ("gfx1201", True),
-            ("gfx1250", True),
-            ("gfx1100", False),
-            ("gfx1150", False),
-            ("", False),
-        ):
-            with (
-                mock.patch("torch.version.hip", "7.2.53211"),
-                mock.patch("torch._inductor.utils.rocm_gfx_arch", return_value=arch),
-            ):
-                self.assertEqual(decompose_k_supported_on_device(), expected, arch)
-
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )

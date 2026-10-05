@@ -3165,6 +3165,7 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 
 _IntLike: TypeAlias = int | sympy.Expr
 
+
 def decompose_k_hip_arch_enabled(arch: str) -> bool:
     """Whether this HIP gfx name may autotune decompose_k.
 
