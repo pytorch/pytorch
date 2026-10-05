@@ -1342,7 +1342,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def _strict_cuda_pointwise() -> bool:
         return (
-            config.is_strict_pointwise()
+            config.strict_pointwise
             and torch.version.hip is None
             and V.graph.get_current_device_or_throw().type == "cuda"
         )

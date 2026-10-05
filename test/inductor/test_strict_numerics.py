@@ -111,8 +111,10 @@ EFFECTIVE_NUMERICS = (
 
 def _numerics_options(numerics, enabled):
     return {
-        key: numerics if key == "numerics" else enabled
-        for key in ("numerics", *EFFECTIVE_NUMERICS)
+        "numerics": numerics,
+        "strict_pointwise": False,
+        "strict_reduction": False,
+        **dict.fromkeys(EFFECTIVE_NUMERICS, enabled),
     }
 
 
@@ -129,25 +131,43 @@ class StrictNumericsConfigTest(TestCase):
     @parametrize("numerics", NUMERICS_MODES)
     def test_config_patch_enables_eager_numerics(self, numerics):
         enabled = numerics in ("strict_pointwise", "strict")
+        reduction_enabled = numerics in ("strict_reduction", "strict")
         with config.patch(_numerics_options("strict", False)):
             with config.patch(numerics=numerics):
-                self.assertEqual(config.is_strict_pointwise(), enabled)
+                self.assertEqual(config.strict_pointwise, enabled)
+                self.assertEqual(config.strict_reduction, reduction_enabled)
                 self.assertEqual(
                     _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, enabled)
                 )
-            self.assertTrue(config.is_strict_pointwise())
+            self.assertTrue(config.strict_pointwise)
+            self.assertTrue(config.strict_reduction)
             self.assertEqual(
                 _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
             )
         with config.patch(_numerics_options(numerics, True)):
-            self.assertEqual(config.is_strict_pointwise(), enabled)
+            self.assertEqual(config.strict_pointwise, enabled)
+            self.assertEqual(config.strict_reduction, reduction_enabled)
             self.assertEqual(
                 _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
+            )
+
+    @parametrize("enabled", (False, True))
+    def test_strict_pointwise_enables_eager_numerics(self, enabled):
+        with config.patch(_numerics_options("default", False)):
+            with config.patch(strict_pointwise=enabled):
+                self.assertEqual(config.numerics, "default")
+                self.assertEqual(
+                    _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, enabled)
+                )
+            self.assertFalse(config.strict_pointwise)
+            self.assertEqual(
+                _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, False)
             )
 
     @parametrize("numerics", NUMERICS_MODES)
     def test_env_enables_eager_numerics(self, numerics):
         enabled = numerics in ("strict_pointwise", "strict")
+        reduction_enabled = numerics in ("strict_reduction", "strict")
         env = os.environ.copy()
         env["TORCHINDUCTOR_NUMERICS"] = numerics
         env["TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING"] = "0"
@@ -158,7 +178,8 @@ class StrictNumericsConfigTest(TestCase):
                 "-c",
                 (
                     "from torch._inductor import config; "
-                    "print(config.eager_numerics.division_rounding, "
+                    "print(config.strict_reduction, config.strict_pointwise, "
+                    "config.eager_numerics.division_rounding, "
                     "config.eager_numerics.disable_ftz, "
                     "config.emulate_precision_casts)"
                 ),
@@ -166,7 +187,10 @@ class StrictNumericsConfigTest(TestCase):
             env=env,
             text=True,
         )
-        self.assertEqual(output.split(), [str(enabled)] * len(EFFECTIVE_NUMERICS))
+        self.assertEqual(
+            output.split(),
+            [str(reduction_enabled)] + [str(enabled)] * (1 + len(EFFECTIVE_NUMERICS)),
+        )
 
 
 @unittest.skipUnless(
