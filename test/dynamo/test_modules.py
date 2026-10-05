@@ -3,6 +3,7 @@
 
 import collections
 import copy
+import inspect
 import itertools
 import os
 import tempfile
@@ -27,7 +28,12 @@ from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import skipIfHpu
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfHpu,
+)
 
 
 try:
@@ -1195,6 +1201,8 @@ def temporary_tensor_subclass(torch_function=None):
 
 
 class NNModuleTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     test_seq = make_test(Seq())
     test_basicmodule1 = make_test(BasicModule())
     test_basicmodule2 = make_test(BasicModule())
@@ -1309,6 +1317,33 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         r = opt_m(i)
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
+
+    def test_rnn_graph_break_resumes_after_call(self):
+        class RecurrentModel(torch.nn.Module):
+            def __init__(self, recurrent_cls) -> None:
+                super().__init__()
+                self.pre = torch.nn.Linear(8, 8)
+                self.rnn = recurrent_cls(8, 8, batch_first=True)
+                self.post = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                x = self.pre(x)
+                x, _ = self.rnn(x)
+                return self.post(x[:, -1, :])
+
+        inp = torch.randn(2, 3, 8)
+
+        for recurrent_cls in (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM):
+            with self.subTest(recurrent_cls=recurrent_cls):
+                m = RecurrentModel(recurrent_cls).eval()
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_m = torch.compile(m, backend=cnt)
+
+                r = opt_m(inp)
+
+                self.assertTrue(torch._dynamo.testing.same(r, m(inp)))
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(cnt.op_count, 3)
 
     @patch.object(torch._dynamo.config, "allow_unspec_int_on_nn_module", True)
     def test_self_mutating1(self):
@@ -1818,6 +1853,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfHpu
     def test_lazy_module3(self, device):
         m = LazyMLP()
@@ -1849,6 +1886,26 @@ class MockModule(torch.nn.Module):
 
 
 class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_wrapping_does_not_use_getattr_static(self):
+        # Wrapping a module can happen while the eval frame callback is
+        # installed (compiled autograd compiles the backward graph that way),
+        # and Dynamo then intercepts and traces CPython's inspect internals.
+        # Use _static_getattr instead (gh-190500).
+        seen = []
+        orig = inspect.getattr_static
+
+        def spy(obj, name, default=None):
+            seen.append(name)
+            return orig(obj, name, default)
+
+        with patch("inspect.getattr_static", spy):
+            torch.compile(MockModule(), backend="eager")
+
+        static = [n for n in seen if n in ("_initialize_hook", "get_compiler_config")]
+        self.assertFalse(static, "should be looked up with _static_getattr")
+
     def test_nn_module(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -2262,6 +2319,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
         self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("specialize", [False, True])
+    def test_compile_module_with_compiled_no_grad_method(self, specialize):
+        class Mod(torch.nn.Module):
+            @torch.compile(backend="eager", fullgraph=True)
+            @torch.no_grad()
+            def foo(self, x):
+                return x.sin() + 1
+
+            def forward(self, x):
+                y = x
+                # Keep the call inside a loop to match the original nested compile repro.
+                for _ in range(1):
+                    y = self.foo(x)
+                return y
+
+        mod = Mod()
+        if specialize:
+            mod.torchdynamo_force_dynamic = False
+        x = torch.randn(4, requires_grad=True)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+
+        ref = mod(x)
+        res = opt_mod(x)
+
+        self.assertEqual(ref, res)
+        self.assertFalse(res.requires_grad)
 
     def test_composition_with_opt_mod(self):
         class InnerModule(torch.nn.Module):
@@ -3901,6 +3985,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled = torch.compile(model, backend="eager", fullgraph=True)(x)
         self.assertEqual(eager, compiled)
 
+
+instantiate_parametrized_tests(OptimizedModuleTest)
 
 instantiate_device_type_tests(
     NNModuleTestsDevice, globals(), except_for="cpu", allow_xpu=True

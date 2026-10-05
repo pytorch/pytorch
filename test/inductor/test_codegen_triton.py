@@ -2,6 +2,7 @@
 import ast
 import contextlib
 import dataclasses
+import re
 import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
@@ -21,18 +22,21 @@ from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import (
     _materialize_trunc_to_float_expr,
+    BlockParameters,
     FixedTritonConfig,
     get_triton_reduction_function,
     IndexingOptions,
+    TMACompatibilityChecker,
     TritonCSEVariable,
     TritonKernel,
     TritonKernelOverrides,
+    TritonScheduling,
     TritonSymbols,
 )
 from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
-from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
@@ -40,7 +44,11 @@ from torch._inductor.utils import (
     run_and_get_code,
     run_and_get_kernels,
 )
-from torch._inductor.virtualized import V
+from torch._inductor.virtualized import ops, V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -143,7 +151,7 @@ if has_triton_package():
 
 
 try:
-    from triton_constexpr_configs import (
+    from .triton_constexpr_configs import (
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
@@ -155,7 +163,7 @@ try:
         UserDefinedTritonKernelNonInitConfig,
     )
 except ImportError:
-    from test.inductor.triton_constexpr_configs import (
+    from triton_constexpr_configs import (
         tl as TritonLanguageShadowConfig,
         UserDefinedAttrsLikeConfig,
         UserDefinedPydanticLikeConfig,
@@ -168,6 +176,18 @@ except ImportError:
     )
 
 
+class _FixedConfigChoices(InductorChoices):
+    def __init__(self, fixed_config):
+        self.fixed_config = fixed_config
+
+    def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+        return {
+            **kernel_kwargs,
+            "fixed_config": FixedTritonConfig(self.fixed_config),
+        }
+
+
+@instantiate_parametrized_tests
 class TestCodegenTriton(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -431,6 +451,157 @@ def helper(x):
 
         self.assertFalse(kernel.persistent_reduction)
         self.assertEqual(seen_scores, [tiling_scores])
+
+    @parametrize(
+        "reduction_type,identity,reduction_fn",
+        (("sum", "0", "tl.sum"), ("prod", "1", "triton_helpers.prod")),
+    )
+    @parametrize(
+        "xnumel,optimize_mask",
+        ((sympy.Integer(40961), False), (sympy.Integer(1), True)),
+    )
+    def test_mix_order_partial_accumulate_masks_x(
+        self, reduction_type, identity, reduction_fn, xnumel, optimize_mask
+    ):
+        self._stack.enter_context(self._graph.set_current_device(torch.device("cpu")))
+        rnumel = sympy.Integer(129)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            mix_order_reduction=True,
+            optimize_mask=optimize_mask,
+            override_persistent_reduction=True,
+            override_cooperative_reduction=False,
+        )
+
+        with kernel:
+            x_tree, r_tree = kernel.range_trees
+            xvalue = ops.index_expr(x_tree.full_range().symbol(), torch.float32)
+            rvalue = ops.index_expr(r_tree.full_range().symbol(), torch.float32)
+            value = ops.add(xvalue, rvalue)
+            value = ops.add(value, ops.constant(0.25, torch.float32))
+            ops.partial_accumulate("out", reduction_type, value, {})
+            kernel.codegen_body()
+
+        code = kernel.body.getvalue()
+        masked_reduction = re.compile(
+            rf"(?P<masked>tmp\d+) = tl\.where\(xmask, tmp\d+, {identity}\)\n"
+            rf"\s+tmp\d+ = {re.escape(reduction_fn)}\((?P=masked), 0\)"
+        )
+        self.assertRegex(code, masked_reduction)
+
+    def test_mix_order_rejects_tma_xblock_above_heuristic_limit(self):
+        xnumel = sympy.Integer(8192)
+        rnumel = sympy.Integer(8)
+        with self._graph.set_current_device(torch.device("cpu")):
+            kernel = TritonKernel(
+                {"x": xnumel, "r0_": rnumel},
+                features=SIMDKernelFeatures([], xnumel, rnumel),
+                mix_order_reduction=True,
+                override_persistent_reduction=True,
+                override_cooperative_reduction=False,
+            )
+        kernel.rsplit_size = 64
+        xblock = TritonSymbols.block_sizes[SymT.XBLOCK]
+        block_params = BlockParameters(
+            shape=[rnumel, xnumel],
+            block_shape=[rnumel, FloorDiv(xblock, rnumel)],
+            strides=[xnumel, sympy.Integer(1)],
+            offsets=[sympy.Integer(0), sympy.Integer(0)],
+        )
+
+        checker = TMACompatibilityChecker(
+            kernel, torch.float32, for_store=False, force=False
+        )
+        with self._graph.set_current_device(torch.device("cuda")):
+            compatible = checker.are_block_parameters_compatible(block_params)
+        self.assertFalse(compatible)
+        self.assertEqual(kernel.tma_min_block_sizes, {})
+
+    def test_tma_metadata_uses_own_removed_buffers(self):
+        xnumel = sympy.Integer(4096)
+        rnumel = sympy.Integer(128)
+        with self._graph.set_current_device(torch.device("cpu")):
+            kernel = TritonKernel(
+                {"x": xnumel, "r0_": rnumel},
+                features=SIMDKernelFeatures([], xnumel, rnumel),
+                mix_order_reduction=True,
+                override_persistent_reduction=True,
+                override_cooperative_reduction=False,
+            )
+            ambient_kernel = TritonKernel(
+                {"x": xnumel},
+                features=SIMDKernelFeatures([], xnumel, sympy.Integer(1)),
+                override_cooperative_reduction=False,
+            )
+
+        removed_name = "buf0"
+        kernel._device_tma_buffers.add(removed_name)
+        kernel._record_tma_min_block_size(removed_name, "XBLOCK", 4)
+        kernel.removed_buffers.add(removed_name)
+        with V.set_kernel_handler(ambient_kernel):
+            metadata = kernel.inductor_meta_per_kernel()
+
+        self.assertNotIn("uses_tma", metadata)
+        self.assertNotIn("uses_device_tma", metadata)
+        self.assertNotIn("tma_min_block_sizes", metadata)
+
+    @parametrize(
+        "split_size,fixed_config,error",
+        (
+            (
+                48,
+                {"XBLOCK": 32},
+                "RSPLIT_SIZE=48 is incompatible with fixed XBLOCK=32",
+            ),
+            (
+                18,
+                {"XBLOCK": 2, "RSPLIT_SIZE": 32, "NUM_STAGES": 1},
+                "fixed RSPLIT_SIZE=32 does not match scheduled RSPLIT_SIZE=18",
+            ),
+            (
+                18,
+                {"XBLOCK": 3, "NUM_STAGES": 1},
+                "fixed XBLOCK=3 must be a positive power of two",
+            ),
+        ),
+    )
+    def test_mix_order_rejects_incompatible_fixed_config(
+        self, split_size, fixed_config, error
+    ):
+        xnumel = sympy.Integer(40961)
+        rnumel = sympy.Integer(129)
+        with (
+            self._graph.set_current_device(torch.device("cpu")),
+            V.set_choices_handler(_FixedConfigChoices(fixed_config)),
+            self.assertRaisesRegex(ValueError, error),
+        ):
+            TritonScheduling(None)._create_kernel_for_mix_order_reduction(
+                SIMDKernelFeatures([], xnumel, rnumel),
+                split_size=split_size,
+            )
+
+    @parametrize(
+        "fixed_config",
+        (
+            {"XBLOCK": 1, "RSPLIT_SIZE": 18, "NUM_STAGES": 1},
+            {"XBLOCK": 2, "NUM_STAGES": 1},
+        ),
+    )
+    def test_mix_order_normalizes_fixed_config(self, fixed_config):
+        xnumel = sympy.Integer(40961)
+        rnumel = sympy.Integer(129)
+        with (
+            self._graph.set_current_device(torch.device("cpu")),
+            V.set_choices_handler(_FixedConfigChoices(fixed_config)),
+        ):
+            kernel = TritonScheduling(None)._create_kernel_for_mix_order_reduction(
+                SIMDKernelFeatures([], xnumel, rnumel),
+                split_size=18,
+            )
+
+        self.assertFalse(kernel.no_x_dim)
+        self.assertEqual(kernel.fixed_config["RSPLIT_SIZE"], 18)
 
     def test_reduction_invariant_load_indexing(self):
         self._stack.enter_context(self._graph.set_current_device(torch.device("cuda")))
@@ -1110,6 +1281,122 @@ def helper(x):
         code_str = " ".join(code)
         self.assertIn("tt.pointer_range", code_str)
 
+    def _skip_unless_annotation_is_literal(self):
+        """Only the V4 descriptor puts ``tt.pointer_range`` in the generated code.
+
+        Earlier versions carry it as a ``pointer_range_32`` field on a descriptor
+        object, so asserting on the literal string would pass whatever the code did.
+        """
+        from torch._inductor.utils import (
+            get_triton_attrs_descriptor_version,
+            TritonAttrsDescriptorVersion,
+        )
+
+        if (
+            get_triton_attrs_descriptor_version()
+            != TritonAttrsDescriptorVersion.V4_DICT
+        ):
+            self.skipTest(
+                "tt.pointer_range is only literal with the V4 attrs descriptor"
+            )
+
+    @staticmethod
+    def _flex_inputs(requires_grad=False):
+        return [
+            torch.randn(
+                1,
+                4,
+                256,
+                64,
+                device=GPU_TYPE,
+                dtype=torch.float16,
+                requires_grad=requires_grad,
+            )
+            for _ in range(3)
+        ]
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_pointer_range_applied_to_template_kernel(self):
+        """A template kernel without atomics must still be tagged.
+
+        The positive half of the two tests below: without it, a regression that
+        dropped the annotation for every template kernel -- losing buffer ops on
+        every matmul and attention kernel on ROCm -- would leave them all green.
+        """
+        self._skip_unless_annotation_is_literal()
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = self._flex_inputs()
+        _, kernels = run_and_get_kernels(
+            torch.compile(flex_attention, fullgraph=True), q, k, v, remove_quote=True
+        )
+        templates = [x for x in kernels if "triton_tem_" in x]
+        self.assertTrue(templates, "no template kernel was generated")
+        self.assertTrue(
+            any("tt.pointer_range" in x for x in templates),
+            "template kernel without atomics should carry tt.pointer_range",
+        )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch("triton.emit_pointer_range_32", False)
+    def test_pointer_range_disabled_for_template_kernels(self):
+        """The config flag must reach template kernels, not just the pointwise path.
+
+        Template kernels build their own triton_meta in
+        TritonTemplateKernel.jit_lines() rather than going through
+        TritonKernel.codegen_kernel(), so the two can disagree.
+        """
+        self._skip_unless_annotation_is_literal()
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = self._flex_inputs()
+        _, kernels = run_and_get_kernels(
+            torch.compile(flex_attention, fullgraph=True), q, k, v, remove_quote=True
+        )
+        templates = [x for x in kernels if "triton_tem_" in x]
+        self.assertTrue(templates, "no template kernel was generated")
+        for kernel in templates:
+            self.assertNotIn("tt.pointer_range", kernel)
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_pointer_range_not_applied_to_template_kernel_with_atomics(self):
+        """Kernels using atomics must not be tagged, including template kernels.
+
+        A score_mod capturing a tensor that requires grad makes the flex_attention
+        backward accumulate into it with tl.atomic_add. Tagging that kernel lets the
+        backend pick buffer atomics, which are far slower than global atomics when
+        many lanes target the same address.
+        """
+        self._skip_unless_annotation_is_literal()
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q, k, v = self._flex_inputs(requires_grad=True)
+        bias = torch.randn(4, device=GPU_TYPE, dtype=torch.float16, requires_grad=True)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[h]
+
+        def fwd_bwd(q, k, v):
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, score_mod=score_mod
+            )
+            out.sum().backward()
+            return out
+
+        _, kernels = run_and_get_kernels(fwd_bwd, q, k, v, remove_quote=True)
+        atomic = [x for x in kernels if re.search(r"tl\.atomic_\w+", x)]
+        # the whole point is the *template* kernel, so a pointwise atomic kernel
+        # alone would not exercise this
+        self.assertTrue(
+            any("triton_tem_" in x for x in atomic),
+            "no template kernel using atomics was generated",
+        )
+        for kernel in atomic:
+            self.assertNotIn("tt.pointer_range", kernel)
+
     def test_is_multiple_of_rules(self):
         """Test structural divisibility rules in _is_multiple_of."""
         from torch.utils._sympy.functions import FloorDiv, Mod
@@ -1599,7 +1886,7 @@ def helper(x):
             _triton_jit_decorator_from_source(noinline_helper_for_codegen)
 
     @unittest.skipUnless(
-        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
         "requires CPU or GPU Triton",
     )
     def test_user_defined_triton_kernel_non_builtin_constexpr(self):
@@ -1644,7 +1931,7 @@ def helper(x):
         self.assertEqual(actual, x + 2)
 
     @unittest.skipUnless(
-        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
         "requires CPU or GPU Triton",
     )
     def test_user_defined_triton_kernel_python_float_arg_signature_matches_triton(self):
@@ -1850,6 +2137,29 @@ def helper(x):
         self.assertEqual(fn(x), res)
         # Verify generated code doesn't contain invalid Enum repr like <Mode.ADD: 1>
         self.assertNotIn("<Mode.", code[0])
+
+    def test_autotune_hints_meta_is_ordered(self):
+        # inductor_meta is rendered into the kernel source, so the hints must
+        # not depend on set iteration order.
+        xnumel, rnumel = sympy.Integer(64), sympy.Integer(8192)
+        kernel = TritonKernel(
+            {"x": xnumel, "r0_": rnumel},
+            features=SIMDKernelFeatures([], xnumel, rnumel),
+            override_persistent_reduction=False,
+            override_cooperative_reduction=False,
+        )
+        kernel.autotune_hints.add(AutotuneHint.SCALAR_ACCUMULATORS)
+        kernel.autotune_hints.add(AutotuneHint.ONE_ELEMENT_PER_THREAD)
+        with V.set_kernel_handler(kernel):
+            hints = kernel.inductor_meta_per_kernel()["autotune_hints"]
+        self.assertEqual(
+            hints,
+            (AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS),
+        )
+        self.assertEqual(
+            repr(hints),
+            "(AutotuneHint.ONE_ELEMENT_PER_THREAD, AutotuneHint.SCALAR_ACCUMULATORS)",
+        )
 
 
 if __name__ == "__main__":

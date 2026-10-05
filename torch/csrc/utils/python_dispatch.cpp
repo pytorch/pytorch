@@ -14,6 +14,7 @@
 
 #include <c10/core/SafePyObject.h>
 #include <c10/util/SmallVector.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -201,6 +202,7 @@ static py::object ophandle_call_boxed(
     const c10::OperatorHandle& handle,
     const py::args& args,
     const py::kwargs& kwargs) {
+  HANDLE_TH_ERRORS
   auto stack = torch::jit::createStackForSchema(
       handle.schema(),
       args,
@@ -211,6 +213,7 @@ static py::object ophandle_call_boxed(
     handle.callBoxed(stack);
   }
   return torch::jit::createPyObjectForStack(std::move(stack));
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 // Function that performs PyObject dispatch
@@ -709,6 +712,7 @@ void initDispatchBindings(PyObject* module) {
              c10::DispatchKeySet keyset,
              const py::args& args,
              const py::kwargs& kwargs) {
+            HANDLE_TH_ERRORS
             auto& handle = self.cast<c10::OperatorHandle&>();
             auto stack = torch::jit::createStackForSchema(
                 handle.schema(),
@@ -720,6 +724,7 @@ void initDispatchBindings(PyObject* module) {
               handle.redispatchBoxed(keyset, &stack);
             }
             return torch::jit::createPyObjectForStack(std::move(stack));
+            END_HANDLE_TH_ERRORS_PYBIND
           });
 
   m.def("_dispatch_call_boxed", &ophandle_call_boxed);
@@ -1436,16 +1441,16 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
-    return at::functionalization::impl::replace_(a, b);
+    at::functionalization::impl::replace_(a, b);
   });
   m.def("_propagate_xla_data", [](const at::Tensor& a, const at::Tensor& b) {
     at::functionalization::impl::propagate_xla_data(a, b);
   });
   m.def("_commit_update", [](const at::Tensor& a) {
-    return at::functionalization::impl::commit_update(a);
+    at::functionalization::impl::commit_update(a);
   });
   m.def("_unsafe_reset_storage", [](const at::Tensor& a) {
-    return at::functionalization::impl::unsafe_reset_storage(a);
+    at::functionalization::impl::unsafe_reset_storage(a);
   });
 
   m.def("_dispatch_key_for_device", [](const std::string& device_type) {

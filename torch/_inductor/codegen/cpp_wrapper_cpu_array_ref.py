@@ -16,7 +16,9 @@ from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
     BufferLike,
+    EnterKernelProfileScopeLine,
     EnterSubgraphLine,
+    ExitKernelProfileScopeLine,
     ExitSubgraphLine,
     MemoryPlanningLine,
     MemoryPlanningState,
@@ -126,6 +128,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # assert_size_stride would fail to compile.
         return
 
+    # Alignment assertions are queued only for ExternKernel outputs. Fallback
+    # codegen disables stack allocation below, so those values are
+    # RAIIAtenTensorHandle and can use CppWrapperCpu's assertion emitter.
+
     def _codegen_v2_raw_input_bindings(self, code: IndentedBuffer):
         for idx, (input_key, input_value) in enumerate(V.graph.graph_inputs.items()):
             input_cpp_type = CppWrapperCpuArrayRef.get_input_element_cpp_type(
@@ -199,8 +205,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def _codegen_v2_raw_outputs(
         self, code: IndentedBuffer, output_refs: list[str]
     ) -> None:
-        cst_names = V.graph.constants.keys()
-
         def write_output_to_c_array(idx: int, output: str) -> None:
             output_arrayref_name = f"output_arrayref_{idx}"
             code.splice(
@@ -215,17 +219,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if output == "nullptr":
                 continue
 
-            is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
-            if isinstance(output_buffer, ir.BaseView):
-                output_storage = output_buffer.unwrap_view()
-                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
-                    raise AssertionError(
-                        f"expected output_storage to be BaseView or MutableBox, got "
-                        f"{type(output_storage).__name__}"
-                    )
-                if isinstance(output_storage.data, ir.ConstantBuffer):
-                    is_constant_buffer = True
+            is_constant_buffer = self.output_aliases_constant(output, output_buffer)
 
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 output_tensor = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
@@ -609,7 +604,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 )
 
     def generate_return(self, output_refs: list[str]):
-        cst_names = V.graph.constants.keys()
         arr_iface = (
             not V.graph.is_const_graph
             and config.aot_inductor.use_minimal_arrayref_interface
@@ -658,17 +652,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if output == "nullptr":
                 continue
 
-            is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
-            if isinstance(output_buffer, ir.BaseView):
-                output_storage = output_buffer.unwrap_view()
-                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
-                    raise AssertionError(
-                        f"expected output_storage to be BaseView or MutableBox, got "
-                        f"{type(output_storage).__name__}"
-                    )
-                if isinstance(output_storage.data, ir.ConstantBuffer):
-                    is_constant_buffer = True
+            is_constant_buffer = self.output_aliases_constant(output, output_buffer)
 
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors
@@ -802,6 +787,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             elif isinstance(line, EnterSubgraphLine):
                 planning_states.append(MemoryPlanningState())
             elif isinstance(line, ExitSubgraphLine):
+                past_planning_states.append(planning_states.pop())
+            elif isinstance(line, EnterKernelProfileScopeLine):
+                # A profiling block is a C++ scope, so a buffer reused across
+                # one of its braces would be declared on the wrong side of it.
+                # This mirrors the base wrapper; the two loops differ only in
+                # what they do with the resulting states.
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitKernelProfileScopeLine):
                 past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:
@@ -989,6 +982,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             )
             self.writeline(f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);")
 
+    def codegen_invoke_subgraph(self, invoke_subgraph):
+        # The region's outputs are pre-declared as RAIIAtenTensorHandle and
+        # codegen_subgraph_suffix std::moves the region's output buffer into
+        # them. A stack-allocated buffer is an ArrayRefTensor<T>, which has no
+        # conversion to RAIIAtenTensorHandle, so that assignment would not
+        # compile -- the same clash cond and while_loop hit. Turn stack
+        # allocation off for the graph, as the extern-kernel paths below do,
+        # rather than emitting C++ that fails to build.
+        self.allow_stack_allocation = False
+        return super().codegen_invoke_subgraph(invoke_subgraph)
+
     def codegen_while_loop(self, while_loop, stack_output=False):
         if stack_output:
             raise NotImplementedError("NYI cpp wrapper for while_loop_stack_output")
@@ -1112,6 +1116,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x)
             for x in inputs
         ]
+
+    def records_profiling_args(self) -> bool:
+        # An ArrayRefTensor is not an AtenTensorHandle, so the ivalue
+        # conversion the metadata is built from cannot be called on one. The
+        # record is emitted without it, and nothing is built here -- deriving
+        # it would make a reinterpret view mint a handle with no owner.
+        return False
 
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op

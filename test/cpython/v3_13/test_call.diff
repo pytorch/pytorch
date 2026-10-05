@@ -1,0 +1,204 @@
+diff --git a/test/cpython/v3_13/test_call.py b/test/cpython/v3_13/test_call.py
+index 7ea27929138da3c424aec976e0a97b4f4b85be02..d0b9a7b828003561bc47743feb6e26933e70d597 100644
+--- a/test/cpython/v3_13/test_call.py
++++ b/test/cpython/v3_13/test_call.py
+@@ -1,3 +1,57 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_call.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ from test.support import (cpython_only, is_wasi, requires_limited_api, Py_DEBUG,
+                           set_recursion_limit, skip_on_s390x, import_helper)
+@@ -26,7 +80,7 @@ class BadStr(str):
+         return str.__hash__(self) ^ 3
+ 
+ 
+-class FunctionCalls(unittest.TestCase):
++class FunctionCalls(CPythonTestCase):
+ 
+     def test_kwargs_order(self):
+         # bpo-34320:  **kwargs should preserve order of passed OrderedDict
+@@ -60,7 +114,7 @@ class FunctionCalls(unittest.TestCase):
+ 
+ 
+ @cpython_only
+-class CFunctionCallsErrorMessages(unittest.TestCase):
++class CFunctionCallsErrorMessages(CPythonTestCase):
+ 
+     def test_varargs0(self):
+         msg = r"__contains__\(\) takes exactly one argument \(0 given\)"
+@@ -250,7 +304,7 @@ class CFunctionCallsErrorMessages(unittest.TestCase):
+ 
+ 
+ @unittest.skipIf(_testcapi is None, "requires _testcapi")
+-class TestCallingConventions(unittest.TestCase):
++class TestCallingConventions(CPythonTestCase):
+     """Test calling using various C calling conventions (METH_*) from Python
+ 
+     Subclasses test several kinds of functions (module-level, methods,
+@@ -262,6 +316,7 @@ class TestCallingConventions(unittest.TestCase):
+     """
+ 
+     def setUp(self):
++        super().setUp()
+         self.obj = self.expected_self = _testcapi
+ 
+     def test_varargs(self):
+@@ -393,6 +448,7 @@ class TestCallingConventionsInstance(TestCallingConventions):
+     """Test calling instance methods using various calling conventions"""
+ 
+     def setUp(self):
++        super().setUp()
+         self.obj = self.expected_self = _testcapi.MethInstance()
+ 
+ 
+@@ -400,6 +456,7 @@ class TestCallingConventionsClass(TestCallingConventions):
+     """Test calling class methods using various calling conventions"""
+ 
+     def setUp(self):
++        super().setUp()
+         self.obj = self.expected_self = _testcapi.MethClass
+ 
+ 
+@@ -407,6 +464,7 @@ class TestCallingConventionsClassInstance(TestCallingConventions):
+     """Test calling class methods on instance"""
+ 
+     def setUp(self):
++        super().setUp()
+         self.obj = _testcapi.MethClass()
+         self.expected_self = _testcapi.MethClass
+ 
+@@ -415,6 +473,7 @@ class TestCallingConventionsStatic(TestCallingConventions):
+     """Test calling static methods using various calling conventions"""
+ 
+     def setUp(self):
++        super().setUp()
+         self.obj = _testcapi.MethStatic()
+         self.expected_self = None
+ 
+@@ -448,7 +507,7 @@ PYTHON_INSTANCE = PythonClass()
+ NULL_OR_EMPTY = object()
+ 
+ 
+-class FastCallTests(unittest.TestCase):
++class FastCallTests(CPythonTestCase):
+     """Test calling using various callables from C
+     """
+ 
+@@ -621,7 +680,7 @@ ADAPTIVE_WARMUP_DELAY = 2
+ 
+ 
+ @unittest.skipIf(_testcapi is None, "requires _testcapi")
+-class TestPEP590(unittest.TestCase):
++class TestPEP590(CPythonTestCase):
+ 
+     def test_method_descriptor_flag(self):
+         import functools
+@@ -901,7 +960,7 @@ class A:
+         pass
+ 
+ @cpython_only
+-class TestErrorMessagesUseQualifiedName(unittest.TestCase):
++class TestErrorMessagesUseQualifiedName(CPythonTestCase):
+ 
+     @contextlib.contextmanager
+     def check_raises_type_error(self, message):
+@@ -935,7 +994,7 @@ class TestErrorMessagesUseQualifiedName(unittest.TestCase):
+             A().method_two_args("x", "y", x="oops")
+ 
+ @cpython_only
+-class TestErrorMessagesSuggestions(unittest.TestCase):
++class TestErrorMessagesSuggestions(CPythonTestCase):
+     @contextlib.contextmanager
+     def check_suggestion_includes(self, message):
+         with self.assertRaises(TypeError) as cm:
+@@ -1029,7 +1088,7 @@ class TestErrorMessagesSuggestions(unittest.TestCase):
+             ImportError(blech=1, namez="oops")
+ 
+ @cpython_only
+-class TestRecursion(unittest.TestCase):
++class TestRecursion(CPythonTestCase):
+ 
+     @skip_on_s390x
+     @unittest.skipIf(is_wasi and Py_DEBUG, "requires deep stack")
+@@ -1066,7 +1125,7 @@ class TestRecursion(unittest.TestCase):
+                 c_py_recurse(100_000)
+ 
+ 
+-class TestFunctionWithManyArgs(unittest.TestCase):
++class TestFunctionWithManyArgs(CPythonTestCase):
+     def test_function_with_many_args(self):
+         for N in (10, 500, 1000):
+             with self.subTest(N=N):
+@@ -1078,7 +1137,7 @@ class TestFunctionWithManyArgs(unittest.TestCase):
+ 
+ 
+ @unittest.skipIf(_testcapi is None, 'need _testcapi')
+-class TestCAPI(unittest.TestCase):
++class TestCAPI(CPythonTestCase):
+     def test_cfunction_call(self):
+         def func(*args, **kwargs):
+             return (args, kwargs)
+@@ -1096,5 +1155,10 @@ class TestCAPI(unittest.TestCase):
+         self.assertEqual(PyCFunction_Call(func, "arg", num=5), (("arg",), {'num': 5}))
+ 
+ 
++# pytest collects module-level `test*` callables; these two are C-API helper
++# callables from the pristine file, not tests.
++testfunction.__test__ = False  # type: ignore[attr-defined]
++testfunction_kw.__test__ = False  # type: ignore[attr-defined]
++
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

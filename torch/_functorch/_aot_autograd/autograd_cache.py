@@ -5,6 +5,7 @@ Utils for caching the outputs of AOTAutograd
 from __future__ import annotations
 
 import base64
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -17,6 +18,7 @@ import shutil
 import time
 import traceback
 import uuid
+import weakref
 from copy import copy
 from typing import Any, TYPE_CHECKING
 from typing_extensions import override
@@ -92,6 +94,10 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 
+
+_CanonicalSetMetadata = collections.namedtuple(
+    "_CanonicalSetMetadata", ["container_type", "elements"]
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
@@ -242,13 +248,19 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_sum",
         "torch.autograd.grad",
         "torch.distributed.tensor._api.from_local",
-        # An autocast context manager *inside* a compiled region is traced into
-        # these calls. What they do is fully determined by their arguments
-        # (device type, dtype, enabled, cache_enabled), which are constants in
-        # the graph and therefore part of the cache key, so a graph compiled
-        # under one autocast setting can never be reused for another.
+        # Autocast/inference_mode regions inside a compiled function trace these
+        # _enter_*/_exit_* nodes into the graph. Their args are hashed into the
+        # cache key; autocast's dtype=None resolves to the ambient autocast
+        # dtype, which _record_runtime_state also keys on. See #191106.
         "torch.amp.autocast_mode._enter_autocast",
         "torch.amp.autocast_mode._exit_autocast",
+        "torch.autograd.grad_mode._enter_inference_mode",
+        "torch.autograd.grad_mode._exit_inference_mode",
+        # torch.tensor(data) with a data-dependent scalar in `data` traces a raw
+        # torch._refs.tensor node instead of decomposing. Its behavior is fully
+        # determined by its args (the data list), which are in the graph and
+        # hashed into the cache key. See #191106.
+        "torch._refs.tensor",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -603,16 +615,14 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         )
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
-        # region_activation_memory_budget is graph-wide (the partitioner enforces
-        # a single value across the graph) and propagates to every node, so the
-        # cache key only needs the value off the first node. node.meta is stripped
-        # by GraphModule.__reduce__, so without recording it here a budget change
-        # would not invalidate the cache.
-        first_node = next(iter(gm.graph.nodes), None)
-        self.region_activation_memory_budget: float | None = (
-            _get_memory_budget_annotation(first_node)
-            if first_node is not None
-            else None
+        # node.meta is stripped by GraphModule.__reduce__, so preserve the
+        # location and value of every budget annotation in the cache key.
+        self.region_activation_memory_budget_annotations = tuple(
+            (module_name, node_index, budget)
+            for module_name, module in gm.named_modules()
+            if isinstance(module, torch.fx.GraphModule)
+            for node_index, node in enumerate(module.graph.nodes)
+            if (budget := _get_memory_budget_annotation(node)) is not None
         )
 
         # Note: We use the live config module, not self.autograd_config (the
@@ -625,13 +635,18 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 
     def _record_runtime_state(self, gm: torch.fx.GraphModule) -> None:
         self.grad_enabled = torch.is_grad_enabled()
-        # Include per-device autocast dtype in cache key to avoid reusing
+        # Include per-device autocast state in cache key to avoid reusing
         # a graph compiled for one autocast dtype (e.g. bfloat16) when
-        # running under a different autocast dtype (e.g. float16).
-        self.autocast_state: dict[str, torch.dtype] = {}
-        for device_type in torch._C._autocast_supported_devices():
-            if torch.is_autocast_enabled(device_type):
-                self.autocast_state[device_type] = torch.get_autocast_dtype(device_type)
+        # running under a different autocast dtype (e.g. float16). The dtype
+        # is recorded even when autocast is disabled because an in-graph
+        # torch.autocast(device) with no dtype picks up the ambient one.
+        self.autocast_state: dict[str, tuple[bool, torch.dtype]] = {
+            device_type: (
+                torch.is_autocast_enabled(device_type),
+                torch.get_autocast_dtype(device_type),
+            )
+            for device_type in torch._C._autocast_supported_devices()
+        }
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         if has_triton_package():
@@ -813,10 +828,27 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             return tuple(self._stabilize_tensor_subclass_metadata(x) for x in obj)
         if isinstance(obj, list):
             return [self._stabilize_tensor_subclass_metadata(x) for x in obj]
-        if isinstance(obj, dict):
+        if isinstance(
+            obj, (dict, weakref.WeakValueDictionary, weakref.WeakKeyDictionary)
+        ):
             return {
-                k: self._stabilize_tensor_subclass_metadata(v) for k, v in obj.items()
+                self._stabilize_tensor_subclass_metadata(
+                    k
+                ): self._stabilize_tensor_subclass_metadata(v)
+                for k, v in obj.items()
             }
+        if isinstance(obj, (set, frozenset)):
+            return _CanonicalSetMetadata(
+                container_type=type(obj),
+                elements=tuple(
+                    sorted(
+                        (self._stabilize_tensor_subclass_metadata(x) for x in obj),
+                        key=pickle.dumps,
+                    )
+                ),
+            )
+        if isinstance(obj, weakref.WeakSet):
+            return {self._stabilize_tensor_subclass_metadata(x) for x in obj}
         return obj
 
     def _default_stable_hash_for_caching(self, tensor: torch.Tensor) -> str:
@@ -948,7 +980,7 @@ def create_fx_config(
         boxed_forward_device_index = None
     else:
         cudagraphs = compiler_config_extra.cudagraphs
-        boxed_forward_device_index = compiler_config_extra.forward_device
+        boxed_forward_device_index = compiler_config_extra.forward_device_index
     return {
         "cudagraphs": cudagraphs,
         "boxed_forward_device_index": boxed_forward_device_index,
@@ -1464,15 +1496,13 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     def _write_to_local_cache(key: str, content: bytes) -> None:
         """Write an entry to the local cache."""
         subdir = AOTAutogradCache._get_tmp_dir_for_key(key)
-        if not os.path.exists(subdir):
-            os.makedirs(subdir, exist_ok=True)
 
         # Use a hash of the serialized entry to get a unique file
         # name. The specific name doesn't matter since a lookup involves
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
         log.info("Writing AOTAutograd cache entry to %s", path)
-        write_atomic(path, content)
+        write_atomic(path, content, make_dirs=True)
 
     @staticmethod
     def _find_unpicklable_field(
@@ -1554,7 +1584,16 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 artifact = BundledAOTAutogradCacheArtifact(precompile_key, entry)
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(artifact)
-            AOTAutogradCache._write_to_local_cache(key, content)
+            try:
+                AOTAutogradCache._write_to_local_cache(key, content)
+            except OSError as e:
+                # The local cache root is shared across processes, so a concurrent
+                # AOTAutogradCache.clear() can remove the key's subdir between the
+                # temp write and the rename inside write_atomic(). Losing that race
+                # means we don't save the entry; it is not a bypass, and it is not a
+                # reason to fail the compile, so don't re-raise even in strict mode.
+                log.warning("AOTAutograd cache unable to write compiled graph: %s", e)
+                return None
             counters["aot_autograd"]["autograd_cache_saved"] += 1
             cache_stats.put("LocalAOTAutogradCache")
         except BypassAOTAutogradCache as e:

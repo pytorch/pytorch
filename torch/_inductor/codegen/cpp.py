@@ -1548,10 +1548,11 @@ class CppVecOverrides(CppOverrides):
                 "remainder vec implementation expect the same inputs' dtype."
             )
         if is_integer_dtype(a.dtype):
-            # Doing blend to set the remaining bits of b to non-zero
-            _t = f"decltype({a})"
-            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
-                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+            # Padded divisor lanes must stay non-zero: masked tail loads
+            # zero-fill the unused lanes, and a zero there trips the
+            # divide-by-zero check even though the lane is never stored.
+            _t = f"decltype({b})"
+            b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
             return f"remainder_integral({a}, {b})"
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
@@ -1842,17 +1843,15 @@ class CppVecOverrides(CppOverrides):
         dtype = result.dtype
         body_code = f"{var}()"
 
-        def maskify_or_vecify(code):
-            return (
-                f"{V.kernel._get_mask_type()}::from({code})"
-                if dtype == torch.bool
-                else f"{V.kernel._get_vec_type(dtype)}({code})"
-            )
+        def maskify_or_vecify(code, is_vec=False):
+            if dtype == torch.bool:
+                if is_vec:
+                    num_vectors = V.kernel._get_num_vectors(torch.float)
+                    return f"inductor_vec_mask_cast<float,{num_vectors}>({code})"
+                return f"{V.kernel._get_mask_type()}::from({code})"
+            return code if is_vec else f"{V.kernel._get_vec_type(dtype)}({code})"
 
-        if result.is_vec:
-            body_code_vec = body_code
-        else:
-            body_code_vec = maskify_or_vecify(body_code)
+        body_code_vec = maskify_or_vecify(body_code, result.is_vec)
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
         # loading bool as VecMask<float, N>
         other_code_vec = maskify_or_vecify(other_code)
@@ -2906,11 +2905,6 @@ class CppVecKernel(CppKernel):
         if num_vectors < 1:
             raise AssertionError("expected num_vectors >= 1")
         return num_vectors
-
-    def _get_raw_num_vectors(self, dtype: torch.dtype) -> float:
-        # This utility function is used to check if the vector lanes has been
-        # fully utilized. For example, uint8 will only use 1/4 of the vector lanes.
-        return self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
 
     def _get_vec_type(self, dtype: torch.dtype) -> str:
         num_vectors = self._get_num_vectors(dtype)
@@ -6010,7 +6004,8 @@ class CppScheduling(BaseScheduling):
                 user.node.mark_run()
 
         self.codegen_comment(node_schedule, kernel_name)
-        kernel.call_kernel(kernel_name, ctb)
+        with V.graph.wrapper_code.kernel_profile_scope(kernel_name, node_schedule):
+            kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
 
@@ -6076,19 +6071,11 @@ class CppScheduling(BaseScheduling):
                 src_code, self.kernel_group.scheduled_nodes
             )
             self.codegen_comment(self.kernel_group.scheduled_nodes, kernel_name)
-            if config.cpp.enable_kernel_profile:
-                V.graph.wrapper_code.write_kernel_context_guard_begin()
-            if (
-                config.cpp.enable_kernel_profile
-                and config.cpp.enable_kernel_context_guard
+            with V.graph.wrapper_code.kernel_profile_scope(
+                kernel_name,
+                self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
             ):
-                V.graph.wrapper_code.write_kernel_context_guard(
-                    kernel_name,
-                    self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
-                )
-            self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
-            if config.cpp.enable_kernel_profile:
-                V.graph.wrapper_code.write_kernel_context_guard_end()
+                self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.reset_kernel_group()
         self._set_flush_status(False)
