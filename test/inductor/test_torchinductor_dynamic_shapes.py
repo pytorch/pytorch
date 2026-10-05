@@ -501,6 +501,20 @@ class TestInductorDynamic(DynamicShapesTestCase):
         opt_f = torch.compile(f, fullgraph=True)
         self.assertEqual(opt_f(mask1, mask2, *tensors), f(mask1, mask2, *tensors))
 
+    @parametrize("op", [torch.unique, torch.unique_consecutive])
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_cse_unique_unbacked_bindings(self, device, op):
+        # Different flags keep two unique nodes, but CSE merges their inputs.
+        def f(x, y, z):
+            a = op(z.floor()).long()
+            b, counts = op(z.floor(), return_counts=True)
+            return x[a].sum() + y[b.long()].sum() + counts.sum()
+
+        x = torch.randn(8, device=device, requires_grad=True)
+        y = torch.randn(8, device=device, requires_grad=True)
+        z = torch.tensor([0.5, 0.7, 1.7, 3.2, 3.9, 0.1], device=device)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x, y, z), f(x, y, z))
+
     def test_adaptive_max_pool3d_with_indices(self, device):
         x = 5
         y = torch.rand([9, 10, 9, 8, 6], dtype=torch.float32, device=device)
