@@ -9683,6 +9683,19 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
+# The _quantized ops with a hand-written C shim (see shim.h). Other _quantized
+# ops, e.g. wrapped_quantized_linear left undecomposed in lite mode, use the
+# proxy executor.
+_QUANTIZED_OPS_WITH_C_SHIM = OrderedSet(
+    [
+        "_quantized._wrapped_linear_prepack.default",
+        "_quantized._wrapped_quantized_linear_prepacked.default",
+        "_quantized.wrapped_fbgemm_linear_fp16_weight.default",
+        "_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16.default",
+    ]
+)
+
+
 class FallbackKernel(ExternKernelAlloc):
     """
     A class that represents a fallback kernel for handling operators that are not
@@ -9726,8 +9739,6 @@ class FallbackKernel(ExternKernelAlloc):
 
         # args that are aliased
         self.alias_names: list[str] = []
-        # args that are mutated AND returned from the op
-        self.mutation_names: list[str] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             # We assume here that HOPs with FallbackKernel are functional.
@@ -9757,10 +9768,16 @@ class FallbackKernel(ExternKernelAlloc):
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
-            self.mutation_names.append(tensor_args[0].get_name())
-            # Record aliasing relationship so memory planning doesn't wrongly
-            # reuse its storage.
-            self.alias_names.append(tensor_args[0].get_name())
+            # The returned tensor aliases arg0; it is not a rename of it.
+            # Track the write separately via a MutationOutput.
+            arg = tensor_args[0]
+            mutation_output = MutationOutput(
+                NoneLayout(device=arg.get_device()), arg, self
+            )
+            self.mutation_outputs.append(mutation_output)
+            # Include the sibling mutation version so compute_dependencies merges
+            # its reader list with those of arg0 and the returned alias.
+            self.alias_names.extend((arg.get_name(), mutation_output.get_name()))
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
@@ -9969,11 +9986,6 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             return self.alias_names
 
-    def get_mutation_names(self) -> Sequence[str]:
-        if len(self.mutation_names) > 1:
-            raise AssertionError("Expected len(self.mutation_names) <= 1")
-        return self.mutation_names
-
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
         """
         ProxyExecutor Design Note
@@ -10141,6 +10153,9 @@ class FallbackKernel(ExternKernelAlloc):
             # Internal Quantized Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
                 raise AssertionError(type(kernel))
+            self.use_runtime_dispatch = (
+                V.graph.cpp_wrapper and str(kernel) not in _QUANTIZED_OPS_WITH_C_SHIM
+            )
         elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
             # If the op is in custom_ops_to_c_shims, generate direct function call
@@ -10271,7 +10286,7 @@ class FallbackKernel(ExternKernelAlloc):
 
             return str(kernel) not in inductor_fallback_ops
         if kernel.namespace == "_quantized":
-            return False
+            return str(kernel) not in _QUANTIZED_OPS_WITH_C_SHIM
         return kernel not in config.aot_inductor.custom_ops_to_c_shims
 
     @staticmethod

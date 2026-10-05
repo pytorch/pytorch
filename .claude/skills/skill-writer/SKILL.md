@@ -41,7 +41,7 @@ Determine where to create the Skill:
 - Experimental Skills
 - Personal productivity tools
 
-**Project Skills** (`.agents/skills/`; `.claude/skills` links here for Claude Code):
+**Project Skills** (`.claude/skills/`):
 - Team workflows and conventions
 - Project-specific expertise
 - Shared utilities (committed to git)
@@ -55,7 +55,7 @@ Create the directory and files:
 mkdir -p ~/.claude/skills/skill-name
 
 # Project
-mkdir -p .agents/skills/skill-name
+mkdir -p .claude/skills/skill-name
 ```
 
 For multi-file Skills:
@@ -249,7 +249,7 @@ If Claude doesn't use the Skill:
 2. **Check file location**:
    ```bash
    ls ~/.claude/skills/skill-name/SKILL.md
-   ls .agents/skills/skill-name/SKILL.md
+   ls .claude/skills/skill-name/SKILL.md
    ```
 
 3. **Validate YAML**:
