@@ -38,13 +38,14 @@ class FakePermissionGitHub:
 
 
 class GateFactTest(unittest.TestCase):
-    def test_already_handled_uses_only_prior_outcome_labels(self) -> None:
+    def test_already_handled_uses_only_prior_outcome_and_opt_out_labels(self) -> None:
         self.assertFalse(is_already_handled([{"name": "open source"}]))
         self.assertFalse(is_already_handled([]))
         for label in (
             "triaged",
             "bot-triaged",
             "bot-triage-error",
+            "no automated triage",
         ):
             with self.subTest(label=label):
                 self.assertTrue(is_already_handled([{"name": label}]))
