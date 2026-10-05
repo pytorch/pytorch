@@ -48,7 +48,7 @@ name: !{{ build_environment }}
     with GHA's native `container:` directive. They share the same reusable
     workflows but pass `use_container_directive: false` so the build/test
     container is launched via `docker run` from a step instead. -#}
-{%- set release_runner_if = "(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))" %}
+{%- set release_runner_if = "(github.ref == 'refs/heads/release/2.15' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))" %}
 {%- if "aarch64" in build_environment %}
   {%- set build_runs_on = "${{ " ~ release_runner_if ~ " && 'rel-l-arm64g3-44-340' || 'l-arm64g3-61-463' }}" %}
   {%- set alpine_image  = "arm64v8/alpine" %}
@@ -72,7 +72,7 @@ name: !{{ build_environment }}
 {#- On release-candidate tag builds the manylinux builder image is pinned to the
     .ci/docker tree hash (computed at runtime by the get-docker-tag job below) so
     the release uses the reproducible image binary-docker-build published as
-    ${prefix}-${CI_FOLDER_SHA}, instead of main's floating tag. Doing this at
+    ${prefix}-${CI_FOLDER_SHA}, instead of release/2.15's floating tag. Doing this at
     runtime means .ci/docker changes on a release branch need no workflow
     regeneration. s390x is intentionally excluded. -#}
 {%- set pin_docker_image = "s390x" not in build_environment %}
@@ -80,7 +80,7 @@ name: !{{ build_environment }}
   {%- set docker_image_suffix = "${{ needs.get-docker-tag.outputs.docker_image_suffix }}" %}
   {#- Registry host prefix (with trailing slash) for the builder image. Blank
       (-> Docker Hub) on nightly/release and on ciflow/binaries PR test runs
-      whose .ci/docker tree main has already published; get-docker-tag sets it
+      whose .ci/docker tree release/2.15 has already published; get-docker-tag sets it
       to the ECR host only when the tree is one the PR's own ciflow/docker run
       built. A skipped get-docker-tag reads blank, preserving the Docker Hub
       floating tag. -#}
@@ -138,7 +138,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.15
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -196,7 +196,7 @@ jobs:
           suffix=""
           registry_host=""
           if [[ "${GITHUB_REF}" == refs/tags/ciflow/binaries* ]]; then
-            # PR test run: content-addressed image, from Docker Hub if main has
+            # PR test run: content-addressed image, from Docker Hub if release/2.15 has
             # published this tree, else from ECR via the PR's ciflow/docker run.
             suffix="-$(git rev-parse HEAD:.ci/docker)"
             registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
@@ -226,7 +226,7 @@ jobs:
       # them.
       - name: Login to ECR
         if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') && steps.calc.outputs.docker_registry_host != '' }}
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@release/2.15
 {%- if ns.groups %}
       - name: Wait for content-addressed builder image in ECR
         if: ${{ startsWith(github.ref, 'refs/tags/ciflow/binaries') && steps.calc.outputs.docker_registry_host != '' }}
