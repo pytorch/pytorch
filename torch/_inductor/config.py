@@ -2444,7 +2444,8 @@ class triton:
     # Note: it may also need to be used with config.compile_threads = 1
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
-    # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
+    # Number of K splits to autotune for decompose_k. 0 disables it.
+    # On HIP the candidate is only offered on gfx90a, gfx942, and gfx950.
     num_decompose_k_splits = int(
         os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
     )

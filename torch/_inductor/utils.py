@@ -3165,6 +3165,22 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 
 _IntLike: TypeAlias = int | sympy.Expr
 
+# HIP archs where decompose_k is offered. gfx1100 hangs in test_max_autotune
+# and has no perf data for this candidate; gfx90a and gfx942 are the other
+# datacenter CDNA targets this default is scoped to.
+DECOMPOSE_K_HIP_ARCHS = frozenset({"gfx90a", "gfx942", "gfx950"})
+
+
+def decompose_k_supported_on_device() -> bool:
+    """CUDA may autotune decompose_k. HIP may on gfx90a, gfx942, and gfx950.
+
+    ``TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS=0`` still disables it on every
+    device. That check stays in ``use_decompose_k_choice``.
+    """
+    if torch.version.hip is None:
+        return True
+    return rocm_gfx_arch() in DECOMPOSE_K_HIP_ARCHS
+
 
 @functools.cache
 def use_decompose_k_choice(
@@ -3184,6 +3200,7 @@ def use_decompose_k_choice(
         and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
         and not V.graph.cpp_wrapper
         and config.triton.num_decompose_k_splits > 0
+        and decompose_k_supported_on_device()
         # Callers rely on False to retain the regular MM fallback.
         and bool(get_k_splits(m, n, k))
     )

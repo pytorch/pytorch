@@ -1932,9 +1932,9 @@ class TestMaxAutotune(TestCase):
     )
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_decompose_k_shape_keeps_mm_template_when_exhaustive(self, search_space):
-        """On a shape where decompose_k applies even at threshold_multiple=2, tuned_mm
-        drops the plain mm template to save autotuning time -- except under EXHAUSTIVE,
-        where the user asked for every choice."""
+        """On a shape where decompose_k applies even at threshold_multiple=2, CUDA
+        drops the plain mm template in the default search. EXHAUSTIVE keeps it.
+        HIP keeps it in both search spaces."""
         a, b = self._make_matrices(
             M=32,
             K=32768,
@@ -1969,10 +1969,30 @@ class TestMaxAutotune(TestCase):
         # the shape must actually be in decompose_k territory, else the test is vacuous
         self.assertTrue(any(n.startswith("decompose_k") for n in names), names)
         plain_mm = [n for n in names if n.startswith("triton_mm")]
-        if search_space == "EXHAUSTIVE":
-            self.assertTrue(plain_mm, f"mm_template dropped under EXHAUSTIVE: {names}")
+        if search_space == "EXHAUSTIVE" or torch.version.hip is not None:
+            self.assertTrue(plain_mm, f"mm_template missing: {names}")
         else:
             self.assertFalse(plain_mm, f"mm_template should be skipped: {names}")
+
+    def test_decompose_k_hip_arch_gate(self):
+        from torch._inductor.utils import decompose_k_supported_on_device
+
+        with mock.patch("torch.version.hip", None):
+            self.assertTrue(decompose_k_supported_on_device())
+
+        for arch, expected in (
+            ("gfx90a", True),
+            ("gfx942", True),
+            ("gfx950", True),
+            ("gfx1100", False),
+            ("gfx1201", False),
+            ("", False),
+        ):
+            with (
+                mock.patch("torch.version.hip", "7.2.53211"),
+                mock.patch("torch._inductor.utils.rocm_gfx_arch", return_value=arch),
+            ):
+                self.assertEqual(decompose_k_supported_on_device(), expected, arch)
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"

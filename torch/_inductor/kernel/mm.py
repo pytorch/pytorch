@@ -661,13 +661,16 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         if use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
-        # Triton Templates typically perform very poorly for large K.
-        # Its highly unlikely that if we want to use decompose_k, then
-        # Triton will ever win.
-        #
-        # To be conservative we increase this threshold for N/M by 2.
-        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
-        if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
+        # On CUDA, once decompose_k is eligible at twice the usual K/M and K/N
+        # threshold, Triton mm leaves the default search. The exhaustive search
+        # still includes it. On HIP, Triton mm stays in the search: on gfx950
+        # it still wins that band, and dropping it regresses the winner.
+        keep_triton_mm = (
+            torch.version.hip is not None
+            or inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+            or not use_decompose_k_choice(m, n, k, threshold_multiple=2)
+        )
+        if keep_triton_mm:
             templates_to_use.append(mm_template)
 
             if use_triton_blackwell_tma_template(
