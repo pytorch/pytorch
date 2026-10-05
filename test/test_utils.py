@@ -1052,12 +1052,13 @@ class TestCppExtensionUtils(TestCase):
 
     def test_cmake_prefix_path_falls_back_when_get_file_path_raises(self):
         # Build systems that do not ship the CMake package files have a
-        # get_file_path that raises for them; torch.utils must still import.
+        # get_file_path that raises for them, with an exception type of their
+        # choosing; torch.utils must still import.
         expected = os.path.join(os.path.dirname(torch.__file__), "share", "cmake")
-        with mock.patch.object(
-            torch.utils, "_get_file_path", side_effect=OSError("not shipped")
-        ):
-            self.assertEqual(torch.utils._resolve_cmake_prefix_path(), expected)
+        for exc in (OSError("not shipped"), ValueError("not packaged")):
+            with self.subTest(exc=type(exc).__name__):
+                with mock.patch.object(torch.utils, "_get_file_path", side_effect=exc):
+                    self.assertEqual(torch.utils._resolve_cmake_prefix_path(), expected)
 
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
