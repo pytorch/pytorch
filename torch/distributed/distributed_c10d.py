@@ -1659,6 +1659,18 @@ def _get_object_coll_device(group: ProcessGroup | None = None) -> str:
         return devices[0].type
 
 
+def _get_object_coll_tensor_device(
+    group: ProcessGroup | None = None,
+) -> torch.device | str:
+    """Return ``group``'s bound device if its type matches ``_get_object_coll_device``, else that device type."""
+    group = group or _get_default_group()
+    device_type = _get_object_coll_device(group)
+    bound_device = getattr(group, "bound_device_id", None)
+    if bound_device is None or bound_device.type != device_type:
+        return device_type
+    return bound_device
+
+
 def _get_pg_default_device(group: ProcessGroup | None = None) -> torch.device:
     """
     .. note:: This method will be deprecated, it only stays for
@@ -4432,7 +4444,8 @@ def all_gather_object(
 
     .. note:: For NCCL-based processed groups, internal tensor representations
         of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
+        place. In this case, the device used is the group's bound device
+        (e.g. ``device_id`` in ``init_process_group``) if set, otherwise
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
@@ -4467,7 +4480,7 @@ def all_gather_object(
         _warn_not_in_group("all_gather_object")
         return
 
-    current_device = _get_object_coll_device(group)
+    current_device = _get_object_coll_tensor_device(group)
     input_tensor, local_size = _object_to_tensor(
         obj, current_device, group, weights_only
     )
@@ -4538,7 +4551,8 @@ def gather_object(
 
     .. note:: For NCCL-based processed groups, internal tensor representations
         of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
+        place. In this case, the device used is the group's bound device
+        (e.g. ``device_id`` in ``init_process_group``) if set, otherwise
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
@@ -4585,7 +4599,7 @@ def gather_object(
     # Ensure object_gather_list is specified appropriately.
     my_group_rank = group.rank()
     _validate_output_list_for_rank(my_group_rank, group_dst, object_gather_list)
-    current_device = _get_object_coll_device(group)
+    current_device = _get_object_coll_tensor_device(group)
     input_tensor, local_size = _object_to_tensor(
         obj, current_device, group, weights_only
     )
@@ -4680,7 +4694,8 @@ def send_object_list(
 
     .. note:: For NCCL-based process groups, internal tensor representations
         of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
+        place. In this case, the device used is the group's bound device
+        (e.g. ``device_id`` in ``init_process_group``) if set, otherwise
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
@@ -4730,7 +4745,7 @@ def send_object_list(
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # sent to this device.
-    current_device = device or _get_object_coll_device(group)
+    current_device = device or _get_object_coll_tensor_device(group)
     # Serialize object_list elements to tensors on src rank.
     tensor_list, size_list = zip(
         *[
@@ -4806,7 +4821,8 @@ def recv_object_list(
 
     .. note:: For NCCL-based process groups, internal tensor representations
         of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
+        place. In this case, the device used is the group's bound device
+        (e.g. ``device_id`` in ``init_process_group``) if set, otherwise
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
@@ -4856,7 +4872,7 @@ def recv_object_list(
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # received to this device.
-    current_device = device or _get_object_coll_device(group)
+    current_device = device or _get_object_coll_tensor_device(group)
     object_sizes_tensor = torch.empty(
         len(object_list), dtype=torch.long, device=current_device
     )
@@ -4955,7 +4971,8 @@ def broadcast_object_list(
 
     .. note:: For NCCL-based process groups, internal tensor representations
         of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
+        place. In this case, the device used is the group's bound device
+        (e.g. ``device_id`` in ``init_process_group``) if set, otherwise
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
@@ -5008,7 +5025,7 @@ def broadcast_object_list(
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # broadcasted to this device.
-    current_device = device or _get_object_coll_device(group)
+    current_device = device or _get_object_coll_tensor_device(group)
     my_group_rank = group.rank()
     # Serialize object_list elements to tensors on src rank.
     if my_group_rank == group_src:
@@ -5148,7 +5165,7 @@ def scatter_object_list(
         )
 
     my_group_rank = group.rank()
-    pg_device = _get_object_coll_device(group)
+    pg_device = _get_object_coll_tensor_device(group)
     if my_group_rank == group_src:
         if scatter_object_input_list is None:
             raise ValueError(
