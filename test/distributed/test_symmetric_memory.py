@@ -1459,6 +1459,19 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.set_deterministic_debug_mode("warn")
         torch.utils.deterministic.fill_uninitialized_memory = True
 
+    def _assert_matmul_accuracy(self, out, baseline, A, B):
+        # Two GEMMs that sum K in different orders legitimately differ near zero,
+        # so bound each output's float64 error by the baseline's plus the fp32
+        # accumulation error bound sqrt(K) * eps * (|A| @ |B|).
+        A, B = A.double(), B.double()
+        reference = A @ B
+        slack = A.shape[1] ** 0.5 * torch.finfo(torch.float32).eps * (A.abs() @ B.abs())
+        out_err = (out.double() - reference).abs()
+        baseline_err = (baseline.double() - reference).abs()
+        excess = out_err - baseline_err - slack
+        worst = divmod(excess.argmax().item(), excess.shape[1])
+        self.assertLessEqual(excess.max().item(), 0.0, f"at index {worst}")
+
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -1567,20 +1580,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         self.assertTrue(any(event_name in event.key for event in prof.events()))
 
         torch.testing.assert_close(ag_target, ag_baseline)
-        # Two GEMMs that sum K in different orders legitimately differ near zero,
-        # so compare their accuracy against float64 rather than each other.
-        reference = ag_baseline.double() @ B.double()
-        native_err = (mm_target[0].double() - reference).abs()
-        fallback_err = (mm_baseline[0].double() - reference).abs()
-        rounding_atol = K**0.5 * torch.finfo(torch.float32).eps
-        self.assertLessEqual(
-            native_err.mean().item(),
-            fallback_err.mean().item() + rounding_atol * reference.abs().mean().item(),
-        )
-        self.assertLessEqual(
-            native_err.max().item(),
-            fallback_err.max().item() + rounding_atol * reference.abs().max().item(),
-        )
+        self._assert_matmul_accuracy(mm_target[0], mm_baseline[0], ag_baseline, B)
 
     @skipIf(not TEST_WITH_ROCM, "Native graph capture is only validated on ROCm")
     @skip_if_lt_x_gpu(2)
@@ -1621,7 +1621,7 @@ class AsyncTPTest(MultiProcContinuousTest):
             graph.replay()
             torch.cuda.synchronize()
             torch.testing.assert_close(ag_target, ag_baseline)
-            torch.testing.assert_close(mm_target[0], mm_baseline[0])
+            self._assert_matmul_accuracy(mm_target[0], mm_baseline[0], ag_baseline, B)
 
     @skip_if_lt_x_gpu(2)
     @requires_multicast_support()
