@@ -94,8 +94,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     ),
     # dependency on latest patch version for (major, minor)
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
-    # release candidate; switch to ==10.1.* once 10.1 is released
-    "10.1": ("rocm[libraries,device-all]==10.1.0rc3"),
+    "10.1": ("rocm[libraries,device-all]==10.1.*"),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.2 | "
         "intel-cmplr-lib-ur==2026.1.2 | "
