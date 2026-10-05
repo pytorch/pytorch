@@ -3828,6 +3828,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     args=list(exc.args),
                 )
 
+        fn = self.get_function()
+        raw_tensor_descriptor = (
+            bool(args)
+            and isinstance(args[0], TensorWithTFOverrideVariable)
+            and inspect.ismethoddescriptor(fn)
+            and getattr(fn, "__objclass__", None) is torch._C.TensorBase
+        )
         if self.is_tensor_method():
             name = self.value.__name__
             # Guard against inplace view op on input tensor (not supported)
@@ -3851,7 +3858,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                 "Ensure you do not modify input tensor in place.",
                             ],
                         )
-            return self.call_tensor_method(tx, list(args), kwargs)
+            if not raw_tensor_descriptor:
+                return self.call_tensor_method(tx, list(args), kwargs)
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
