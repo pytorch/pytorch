@@ -3090,7 +3090,14 @@ class DeviceCachingAllocator {
       // in graph_pools and only return the blocks from it.
       auto pool = graph_pools.find(mempool_id);
       if (pool != graph_pools.end()) {
-        all_blocks = get_private_pool_head_blocks(pool->second.get());
+        // Not get_private_pool_head_blocks: in an expandable segment, a mapped
+        // run after an unmapped hole has a prev but is reported on its own.
+        const PrivatePool* pp = pool->second.get();
+        for (Block* b : get_all_blocks()) {
+          if (b->pool == &pp->small_blocks || b->pool == &pp->large_blocks) {
+            all_blocks.push_back(b);
+          }
+        }
       }
     } else {
       // When snapshot is called with non-default mempool_id, we return
