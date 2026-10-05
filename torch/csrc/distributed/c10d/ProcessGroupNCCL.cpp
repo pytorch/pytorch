@@ -1,6 +1,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <nlohmann/json.hpp>
+#include <array>
 #include <exception>
 #include <map>
 #include <memory>
@@ -429,8 +430,41 @@ static std::
 #endif // (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
 }
 
+// The in-tree NCCL backends recorded by FlightRecorderHook, each into its own
+// recorder (getFlightRecorder(<backend name>)). The NCCL dump APIs fold them
+// into this backend's trace so callers see every NCCL group in the process.
+// They hold disjoint groups (the hook skips natively recording backends) with
+// unique group names, so merging keeps every entry. record_id and pg_id are
+// numbered per recorder, so pg_status keeps this backend's entry on a pg_id
+// collision.
+static constexpr std::array<const char*, 2> kHookedNCCLBackends = {
+    "nccl2",
+    "nccl-lazy"};
+
 void reset_nccl_trace() {
   FlightRecorderCUDA::get()->reset_all();
+  for (const char* backend : kHookedNCCLBackends) {
+    reset_fr_trace(backend);
+  }
+}
+
+static void mergeNCCLTrace(
+    c10::Dict<c10::IValue, c10::IValue>& trace,
+    const c10::Dict<c10::IValue, c10::IValue>& other) {
+  for (const auto& key : {pg_config_key, pg_status_key}) {
+    auto dst = trace.at(key).toGenericDict();
+    for (const auto& item : other.at(key).toGenericDict()) {
+      dst.insert(item.key(), item.value());
+    }
+  }
+  auto it = other.find(entries_key);
+  if (it == other.end()) {
+    return;
+  }
+  auto dst = trace.at(entries_key).toList();
+  for (const auto& entry : it->value().toList()) {
+    dst.push_back(entry);
+  }
 }
 
 std::string dump_nccl_trace(
@@ -443,14 +477,51 @@ std::string dump_nccl_trace(
     printNcclCommProxyTrace("Received dump signal " + ncclUniqueIDStr, dump);
   }
 #endif // defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
+  std::optional<c10::Dict<c10::IValue, c10::IValue>> trace;
+  for (const char* backend : kHookedNCCLBackends) {
+    auto other = dump_fr_trace_dict(
+        includeCollectives, includeStackTraces, onlyActive, backend);
+    // No group was ever attached to this recorder.
+    if (other.at(pg_config_key).toGenericDict().empty()) {
+      continue;
+    }
+    if (!trace) {
+      trace = FlightRecorderCUDA::get()->dump_dict(
+          ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
+    }
+    mergeNCCLTrace(*trace, other);
+  }
+  if (trace) {
+    return pickle_str(*trace);
+  }
   return FlightRecorderCUDA::get()->dump(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
-  return FlightRecorderCUDA::get()->dump_json(
+  auto json = FlightRecorderCUDA::get()->dump_json(
       ncclDumpMap, includeCollectives, onlyActive);
+  std::optional<nlohmann::json> trace;
+  for (const char* backend : kHookedNCCLBackends) {
+    auto other = nlohmann::json::parse(
+        dump_fr_trace_json(includeCollectives, onlyActive, backend));
+    if (other[pg_config_key_str].empty()) {
+      continue;
+    }
+    if (!trace) {
+      trace = nlohmann::json::parse(json);
+    }
+    for (const auto& key : {pg_config_key_str, pg_status_key_str}) {
+      for (const auto& item : other[key].items()) {
+        (*trace)[key].emplace(item.key(), item.value());
+      }
+    }
+    for (const auto& entry : other[entries_key_str]) {
+      (*trace)[entries_key_str].push_back(entry);
+    }
+  }
+  return trace ? trace->dump() : json;
 }
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&

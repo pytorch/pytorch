@@ -634,14 +634,13 @@ std::string FlightRecorder<EventType>::dump_json(
 }
 
 template <typename EventType>
-std::string FlightRecorder<EventType>::dump(
+c10::Dict<c10::IValue, c10::IValue> FlightRecorder<EventType>::dump_dict(
     const std::optional<std::unordered_map<
         std::string,
         std::unordered_map<std::string, std::string>>>& extraDumpMap,
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
-  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.FlightRecorder__dump);
   auto result = new_dict();
   // common values
   result.insert(version_key, version_val);
@@ -669,6 +668,19 @@ std::string FlightRecorder<EventType>::dump(
   if (!per_comm_dict.empty()) {
     result.insert(nccl_comm_key, per_comm_dict);
   }
-  return pickle_str(result);
+  return result;
+}
+
+template <typename EventType>
+std::string FlightRecorder<EventType>::dump(
+    const std::optional<std::unordered_map<
+        std::string,
+        std::unordered_map<std::string, std::string>>>& extraDumpMap,
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.FlightRecorder__dump);
+  return pickle_str(dump_dict(
+      extraDumpMap, includeCollectives, includeStackTraces, onlyActive));
 }
 } // namespace c10d
