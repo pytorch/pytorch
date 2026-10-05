@@ -547,6 +547,7 @@
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: add_sparse_csr
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
+    Meta: add_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_add_Tensor
   tags: [core, pointwise]
 
@@ -558,6 +559,7 @@
     SparseCPU, SparseCUDA, SparseMPS, SparseMeta, SparseXPU: add_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: add_sparse_csr_
     MkldnnCPU: mkldnn_add_
+    Meta: add__Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_add__Tensor
   tags: pointwise
 
@@ -2107,6 +2109,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: div_sparse
     ZeroTensor: div_zerotensor
+    Meta: div_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_div_Tensor
   tags: [core, pointwise]
 
@@ -4252,6 +4255,7 @@
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta, SparseCsrXPU: mul_sparse_csr
     MkldnnCPU: mkldnn_mul
     ZeroTensor: mul_zerotensor
+    Meta: mul_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_mul_Tensor
   tags: [core, pointwise]
 
@@ -6948,6 +6952,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sub_sparse
     ZeroTensor: sub_zerotensor
+    Meta: sub_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_sub_Tensor
   tags: [core, pointwise]
 
@@ -8433,6 +8438,8 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   structured_delegate: bitwise_and.Tensor_out
+  dispatch:
+    Meta: bitwise_and_Tensor_meta
   tags: [core, pointwise]
 
 - func: bitwise_and_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -8950,6 +8957,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: ne_quantized_cpu
+    Meta: ne_Scalar_meta
   tags: [core, pointwise]
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -9029,6 +9037,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: eq_quantized_cpu
+    Meta: eq_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: eq_tensor_nested
   tags: [core, pointwise]
 
@@ -9109,6 +9118,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: le_quantized_cpu
+    Meta: le_Scalar_meta
   tags: [core, pointwise]
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -9126,6 +9136,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: le_quantized_cpu
+    Meta: le_Tensor_meta
   tags: [core, pointwise]
 
 - func: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
