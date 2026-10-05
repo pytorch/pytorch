@@ -53,6 +53,7 @@ HANDLED_LABELS = frozenset(
         "triaged",
         "bot-triaged",
         "bot-triage-error",
+        "no automated triage",
     }
 )
 # GitHub does not link references inside comments or code.
@@ -334,7 +335,7 @@ def fetch_actionable_labelers(
 
 
 def is_already_handled(labels: Any) -> bool:
-    """Return whether a prior triage outcome makes this run a no-op."""
+    """Return whether a prior triage outcome or an opt-out label makes this run a no-op."""
 
     if not isinstance(labels, list) or any(
         not isinstance(label, dict)
@@ -647,7 +648,7 @@ def main() -> int:
     elif not facts.is_open_non_draft_pr_against_main:
         status = "PR is outside the active target state"
     elif facts.is_already_handled:
-        status = "existing triage outcome recorded"
+        status = "existing triage outcome or opt-out label recorded"
     else:
         status = "fails intake unless a team's bypass matches"
     print(f"{args.repository}#{args.pr}: {status}", flush=True)
