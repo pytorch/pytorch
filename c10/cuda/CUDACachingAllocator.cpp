@@ -546,14 +546,19 @@ struct ExpandableSegment {
     C10_CUDA_DRIVER_CHECK(reserve_err);
     // A hint is advisory: the driver reports success having placed the
     // reservation elsewhere, so the caller only got its address if this
-    // matches.
-    TORCH_CHECK(
-        !requested_addr.has_value() || ptr_ == *requested_addr,
-        "could not reserve the recorded expandable segment address ",
-        *requested_addr,
-        "; the driver placed the reservation at ",
-        ptr_,
-        " instead");
+    // matches. Throwing skips the destructor, so free the stray range here.
+    if (requested_addr.has_value() && ptr_ != *requested_addr) {
+      const CUdeviceptr placed = ptr_;
+      C10_CUDA_DRIVER_CHECK(
+          DriverAPI::get()->cuMemAddressFree_(placed, reserve_bytes));
+      TORCH_CHECK(
+          false,
+          "could not reserve the recorded expandable segment address ",
+          *requested_addr,
+          "; the driver placed the reservation at ",
+          placed,
+          " instead");
+    }
 #endif
     // Reservation succeeded (a failure would have thrown above): publish
     // gauges.
@@ -3477,7 +3482,7 @@ class DeviceCachingAllocator {
   // another process (fabric for multi-node NVLink) still can be, rather than
   // failing later when a peer tries to import it; UNSPECIFIED leaves the choice
   // to this process. `mapped_ranges` are (offset from the segment base, length)
-  // pairs and must be sorted, non-overlapping and segment_size-aligned.
+  // pairs and must be sorted, non-adjacent and segment_size-aligned.
   void restore_expandable_segment(
       cudaStream_t stream,
       MempoolId_t mempool_id,
@@ -3524,7 +3529,10 @@ class DeviceCachingAllocator {
         " byte expandable reservation cannot be made of ",
         segment_size,
         " byte segments");
-    size_t prev_end = 0;
+    // Ranges are a snapshot's maximal mapped runs, so never adjacent. Requiring
+    // that keeps each one a separate block: one cudaMalloc_count each, matched
+    // by one unmap.
+    std::optional<size_t> prev_end;
     for (const auto& [offset, length] : mapped_ranges) {
       TORCH_CHECK(
           offset % segment_size == 0 && length % segment_size == 0,
@@ -3536,9 +3544,9 @@ class DeviceCachingAllocator {
           segment_size,
           " byte segment size");
       TORCH_CHECK(
-          length > 0 && offset >= prev_end && length <= reserve_size &&
-              offset <= reserve_size - length,
-          "mapped ranges must be non-empty, sorted, non-overlapping and fit in a ",
+          length > 0 && (!prev_end || offset > *prev_end) &&
+              length <= reserve_size && offset <= reserve_size - length,
+          "mapped ranges must be non-empty, sorted, non-adjacent and fit in a ",
           reserve_size,
           " byte expandable segment; got (",
           offset,
@@ -3588,35 +3596,63 @@ class DeviceCachingAllocator {
     pool->unmapped.insert(whole);
 
     const auto base = reinterpret_cast<uintptr_t>(es->ptr());
-    for (const auto& [offset, length] : mapped_ranges) {
-      // Look the containing unmapped block up by address rather than caching a
-      // pointer: map_block merges neighbours, which deletes Blocks.
-      Block search_key(device_id, stream, 0);
-      // NOLINTNEXTLINE(performance-no-int-to-ptr)
-      search_key.ptr = reinterpret_cast<void*>(base + offset);
-      auto it = pool->unmapped.upper_bound(&search_key);
-      TORCH_INTERNAL_ASSERT(it != pool->unmapped.begin());
-      --it;
-      Block* containing = *it;
-      const auto block_begin = reinterpret_cast<uintptr_t>(containing->ptr);
-      TORCH_INTERNAL_ASSERT(
-          block_begin <= base + offset &&
-          base + offset + length <= block_begin + containing->size);
-      Block* target =
-          split_unmapped_block(containing, base + offset - block_begin);
-      TORCH_CHECK_WITH(
-          OutOfMemoryError,
-          map_block(target, length, nullptr),
-          "failed to map ",
-          length,
-          " bytes at offset ",
-          offset,
-          " of a restored expandable segment");
-      // alloc_block counts one per mapped block, and unmap_block asserts on the
-      // way down, so a restored mapping has to be counted the same way.
-      if (pool->owner_PrivatePool) {
-        pool->owner_PrivatePool->cudaMalloc_count++;
+    try {
+      for (const auto& [offset, length] : mapped_ranges) {
+        // Look the containing unmapped block up by address rather than caching
+        // a pointer: map_block merges neighbours, which deletes Blocks.
+        Block search_key(device_id, stream, 0);
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        search_key.ptr = reinterpret_cast<void*>(base + offset);
+        auto it = pool->unmapped.upper_bound(&search_key);
+        TORCH_INTERNAL_ASSERT(it != pool->unmapped.begin());
+        --it;
+        Block* containing = *it;
+        const auto block_begin = reinterpret_cast<uintptr_t>(containing->ptr);
+        TORCH_INTERNAL_ASSERT(
+            block_begin <= base + offset &&
+            base + offset + length <= block_begin + containing->size);
+        Block* target =
+            split_unmapped_block(containing, base + offset - block_begin);
+        TORCH_CHECK_WITH(
+            OutOfMemoryError,
+            map_block(target, length, nullptr),
+            "failed to map ",
+            length,
+            " bytes at offset ",
+            offset,
+            " of a restored expandable segment");
+        // alloc_block counts one per mapped block, and unmap_block asserts on
+        // the way down, so a restored mapping has to be counted the same way.
+        if (pool->owner_PrivatePool) {
+          pool->owner_PrivatePool->cudaMalloc_count++;
+        }
       }
+    } catch (...) {
+      // Leave nothing behind, so that a retry (say after freeing memory) can
+      // reserve this address again: release_blocks only visits mapped blocks,
+      // so it would never free a reservation left partly or wholly unmapped.
+      std::vector<Block*> mapped;
+      for (Block* b : pool->blocks) {
+        if (b->expandable_segment_ == es) {
+          mapped.push_back(b);
+        }
+      }
+      for (Block* b : mapped) {
+        unmap_block(b, nullptr);
+      }
+      Block* head = nullptr;
+      for (Block* b : pool->unmapped) {
+        if (b->expandable_segment_ == es && !b->prev) {
+          head = b;
+          break;
+        }
+      }
+      TORCH_INTERNAL_ASSERT(head);
+      while (head->next) {
+        try_merge_blocks(head, head->next, *pool);
+      }
+      release_expandable_segment(head);
+      throw;
     }
   }
 
