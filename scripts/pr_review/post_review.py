@@ -65,7 +65,8 @@ API = "https://api.github.com"
 # mention costs nothing and missing a live one runs a command.
 _BOT_MENTION = re.compile(r"@(?=pytorch(?:merge)?bot\b|pytorch-bot\b)", re.IGNORECASE)
 
-_SEVERITY_LABEL = {"major": "Major", "minor": "Minor", "info": "Info"}
+BLOCKING_MARK = "\U0001f534"  # red circle
+FOLDED_MARK = "\u26aa"  # grey circle
 _VERDICT_LINE = {
     "changes_requested": "changes requested before human review",
     "ready_for_human_review": "nothing blocking; ready for human review",
@@ -157,9 +158,25 @@ def load_review(row: dict) -> tuple[str, str, list[dict]] | None:
     return verdict, summary, published_findings({"findings": raw})
 
 
+# A line that starts markdown block syntax: heading, list, quote, table row,
+# indented code, or an (escaped) fence run. Prefixing a mark would turn it into
+# plain text, so the mark then goes on a line of its own.
+_BLOCK_START = re.compile(r"^(?: {4}|\s*(?:#|[-*+>|]|\d+[.)]|\\[`~]))")
+
+
+def marked(mark: str, lines: list[str]) -> list[str]:
+    if _BLOCK_START.match(lines[0]):
+        return [mark, "", *lines]
+    return [f"{mark} {lines[0]}", *lines[1:]]
+
+
 def comment_body(finding: dict) -> str:
-    label = _SEVERITY_LABEL[finding["severity"]]
-    return defuse_bot_commands(f"**{label}** (automated review): {finding['message']}")
+    message = finding["message"].split("\n")
+    return defuse_bot_commands("\n".join(marked(BLOCKING_MARK, message)))
+
+
+def count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
 def blocking_findings(verdict: str, findings: list[dict]) -> list[dict]:
@@ -210,17 +227,22 @@ def permalink(repo: str, sha: str, finding: dict) -> str:
     return f"https://github.com/{repo}/blob/{sha}/{path}#L{finding['line']}"
 
 
-def finding_blocks(repo: str, sha: str, findings: list[dict]) -> list[str]:
+def finding_blocks(
+    repo: str, sha: str, findings: list[dict], mark: str = ""
+) -> list[str]:
     """Each finding as its code link with the message under it, rule-separated.
 
     The blank line after the link is required: GitHub renders the code only
-    for a link alone in its paragraph.
+    for a link alone in its paragraph. `mark` leads the message's first line.
     """
     lines: list[str] = []
     for i, f in enumerate(findings):
         if i:
             lines += ["---", ""]
-        lines += [permalink(repo, sha, f), "", *contained(f["message"]), ""]
+        message = contained(f["message"])
+        if mark:
+            message = marked(mark, message)
+        lines += [permalink(repo, sha, f), "", *message, ""]
     return lines
 
 
@@ -276,21 +298,23 @@ def _compose(
     ]
     if blocking and inline:
         lines += [
-            f"{len(blocking)} blocking finding(s) are attached to the code below.",
+            f"{BLOCKING_MARK} {count(len(blocking), 'blocking finding')} "
+            f"{'is' if len(blocking) == 1 else 'are'} attached to the code below.",
             "",
         ]
-    lines += finding_blocks(repo, sha, in_body)
+    lines += finding_blocks(repo, sha, in_body, BLOCKING_MARK)
     if folded:
         lines += [
             "<details>",
-            f"<summary>{len(folded)} non-blocking finding(s)</summary>",
+            f"<summary>{FOLDED_MARK} {count(len(folded), 'non-blocking finding')}"
+            "</summary>",
             "",
         ]
         lines += finding_blocks(repo, sha, folded)
         lines += ["</details>", ""]
     if omitted:
         lines += [
-            f"{omitted} more finding(s) did not fit in this review; the Dr.CI "
+            f"{count(omitted, 'more finding')} did not fit in this review; the Dr.CI "
             "comment lists them.",
             "",
         ]

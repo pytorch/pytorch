@@ -176,7 +176,7 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertIn("comments", first)
         self.assertNotIn("comments", second)
         self.assertIn(
-            f"\nhttps://github.com/o/r/blob/{SHA}/torch/x.py#L3\n\nOff by one.\n",
+            f"\nhttps://github.com/o/r/blob/{SHA}/torch/x.py#L3\n\n\U0001f534 Off by one.\n",
             second["body"],
         )
 
@@ -191,10 +191,10 @@ class TestWhatIsPosted(unittest.TestCase):
         (body,) = gh.posted()
         self.assertEqual([c["path"] for c in body["comments"]], ["a.py"])
         text = body["body"]
-        self.assertIn("1 blocking finding(s) are attached", text)
+        self.assertIn("\U0001f534 1 blocking finding is attached", text)
         details = text.split("<details>\n", 1)[1].split("</details>", 1)[0]
         self.assertTrue(
-            details.startswith("<summary>2 non-blocking finding(s)</summary>\n\n")
+            details.startswith("<summary>\u26aa 2 non-blocking findings</summary>\n\n")
         )
         # Each permalink stands alone on its line, which is what makes GitHub
         # render the code it points at.
@@ -212,7 +212,7 @@ class TestWhatIsPosted(unittest.TestCase):
         go(gh, row(verdict="ready_for_human_review", findings=[minor]))
         (body,) = gh.posted()
         self.assertNotIn("comments", body)
-        self.assertIn("<summary>1 non-blocking finding(s)</summary>", body["body"])
+        self.assertIn("<summary>\u26aa 1 non-blocking finding</summary>", body["body"])
 
     def test_changes_requested_on_minor_findings_alone_keeps_them_inline(self):
         minor = {"path": "b.py", "line": 7, "severity": "minor", "message": "Nit."}
@@ -251,8 +251,8 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertLessEqual(len(text), 5000)
         shown = text.count("https://github.com/o/r/blob/")
         self.assertGreater(shown, 0)
-        self.assertIn(f"{25 - shown} more finding(s) did not fit", text)
-        self.assertIn(f"<summary>{shown} non-blocking finding(s)</summary>", text)
+        self.assertIn(f"{25 - shown} more findings did not fit", text)
+        self.assertIn(f"<summary>\u26aa {shown} non-blocking findings</summary>", text)
 
     def test_the_footer_is_small_and_no_text_is_quoted(self):
         minor = {"path": "b.py", "line": 7, "severity": "minor", "message": "Nit."}
@@ -263,6 +263,31 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertIn("\n\nFine.\n\n", text)
         self.assertFalse([ln for ln in text.splitlines() if ln.startswith(">")])
         self.assertNotIn("**Minor**", text)
+
+    def test_counts_are_pluralized(self):
+        major = {"path": "a.py", "line": 1, "severity": "major", "message": "Bug."}
+        gh = FakeGitHub()
+        go(gh, row(findings=[major, dict(major, line=2)]))
+        body = gh.posted()[0]
+        self.assertIn("\U0001f534 2 blocking findings are attached", body["body"])
+        self.assertEqual(body["comments"][0]["body"], "\U0001f534 Bug.")
+
+    def test_the_mark_never_breaks_a_leading_block(self):
+        table = "| a | b |" + chr(10) + "| --- | --- |"
+        for message, first in (
+            ("Plain.", "\U0001f534 Plain."),
+            ("# Heading", "\U0001f534"),
+            (table, "\U0001f534"),
+            ("- item", "\U0001f534"),
+            ("1. item", "\U0001f534"),
+        ):
+            f = {"path": "a.py", "line": 1, "severity": "major", "message": message}
+            gh = FakeGitHub()
+            go(gh, row(findings=[f]))
+            lines = gh.posted()[0]["comments"][0]["body"].split(chr(10))
+            self.assertEqual(lines[0], first, message)
+            if first == "\U0001f534":
+                self.assertEqual(lines[1:], ["", *message.split(chr(10))])
 
     def test_permalink_path_is_percent_encoded(self):
         path = neutralize_path("docs/a b/@x#1.md")
