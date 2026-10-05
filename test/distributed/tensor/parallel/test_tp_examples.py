@@ -38,8 +38,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorContinuousTestBase,
-    LocalDTensorContinuousTestBase,
+    DTensorTestBase,
     MLPModule,
     ModelArgs,
     NUM_DEVICES,
@@ -63,9 +62,7 @@ class ExpCommCounts(NamedTuple):
     optim: dict | None = None
 
 
-class DistTensorParallelExampleTest(DTensorContinuousTestBase):
-    world_size = NUM_DEVICES
-
+class DistTensorParallelExampleTest(DTensorTestBase):
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
@@ -871,7 +868,7 @@ class DistTensorParallelExampleTest(DTensorContinuousTestBase):
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
 
 DistTensorParallelExampleTestWithLocalTensor = create_local_tensor_test_class(
-    DistTensorParallelExampleTest, base_class=LocalDTensorContinuousTestBase
+    DistTensorParallelExampleTest,
 )
 
 if __name__ == "__main__":

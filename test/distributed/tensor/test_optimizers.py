@@ -19,10 +19,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorContinuousTestBase,
-    LocalDTensorContinuousTestBase,
+    DTensorTestBase,
     MLPModule,
-    NUM_DEVICES,
     with_comms,
 )
 
@@ -55,9 +53,7 @@ def output_fn(mod, outputs, device_mesh):
     return outputs.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
 
 
-class TestDTensorOptimizer(DTensorContinuousTestBase):
-    world_size = NUM_DEVICES
-
+class TestDTensorOptimizer(DTensorTestBase):
     def _assert_optimizer(
         self,
         mesh,
@@ -783,7 +779,7 @@ class TestDTensorOptimizer(DTensorContinuousTestBase):
 instantiate_parametrized_tests(TestDTensorOptimizer)
 
 TestDTensorOptimizerWithLocalTensor = create_local_tensor_test_class(
-    TestDTensorOptimizer, base_class=LocalDTensorContinuousTestBase
+    TestDTensorOptimizer,
 )
 
 if __name__ == "__main__":
