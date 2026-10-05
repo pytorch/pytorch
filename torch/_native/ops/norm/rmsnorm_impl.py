@@ -12,18 +12,18 @@ from functools import cache
 import torch
 
 from ... import cutedsl_utils as cu
-from .norms import _const_data_ptr, _device_properties, _required_align_bytes
+from ...cutedsl.hw_caps import caps
+from ...utils.capability import device_ok, is_traced
+from ...utils.tensor import const_data_ptr, row_alignment
 from .rmsnorm_launch import NORMALIZED_SIZES, weight_grad_min_rows
 
 
 def _is_supported(input: torch.Tensor) -> bool:
-    if input.device.type != "cuda":
-        return False
-    if torch.version.hip is not None:
-        return False
-    if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        return False
-    return _device_properties(input.device).major in (9, 10, 12)
+    return (
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and not is_traced(input)
+        and device_ok(input, (9, 10, 12))
+    )
 
 
 # quack splits each row across a CTA cluster (at most 16 on SM90/SM100 and 8
@@ -44,16 +44,11 @@ _BWD_SMEM_STAGES = 2
 
 @cache
 def _smem_budget_bytes(device: torch.device) -> int:
-    props = _device_properties(device)
-    smem = (
-        getattr(props, "shared_memory_per_block_optin", None)
-        or props.shared_memory_per_block
-    )
-    return smem - _SMEM_RESERVED_BYTES
+    return caps(device).smem_per_block_optin - _SMEM_RESERVED_BYTES
 
 
 def _max_cluster_n(device: torch.device) -> int:
-    return 8 if _device_properties(device).major == 12 else 16
+    return 8 if caps(device).cc[0] == 12 else 16
 
 
 @cache
@@ -85,7 +80,7 @@ def _bwd_fits_smem(input: torch.Tensor, grad_out: torch.Tensor, n: int) -> bool:
 
 
 # A contiguous input with a misaligned base pointer must be cloned before the
-# kernel can run (see norms._reshape_2d). The clone's extra read+write only
+# kernel can run (see reshape_contiguous). The clone's extra read+write only
 # pays off once quack's bandwidth advantage over aten can absorb it: measured
 # on B200 (fwd, bf16/fp32), clone+quack wins 1.8-2.9x at 2^24 elements and
 # loses below 2^23. Misaligned inputs smaller than this fall back to aten.
@@ -96,12 +91,12 @@ _MISALIGNED_MIN_NUMEL = 1 << 24
 
 
 def _misaligned_clone_unprofitable(t: torch.Tensor, n: int) -> bool:
-    # Only contiguous tensors hit the clone path in norms._reshape_2d;
+    # Only contiguous tensors hit the clone path in reshape_contiguous;
     # non-contiguous ones pay the reshape+contiguous materialization either
     # way, which always lands on an aligned fresh buffer.
     if not t.is_contiguous():
         return False
-    if _const_data_ptr(t) % _required_align_bytes(t, n) == 0:
+    if const_data_ptr(t) % row_alignment(n, t.element_size()) == 0:
         return False
     return t.numel() < _MISALIGNED_MIN_NUMEL
 
@@ -114,26 +109,30 @@ def _n_yields_valid_cp_size(n: int, dtype: torch.dtype) -> bool:
     # produce a 16-bit vector copy that fails CuTe IR verification at compile
     # time; fall through to aten in that case.
     dtype_bits = torch.finfo(dtype).bits
-    vecsize = math.gcd(n, 128 // dtype_bits)
-    return vecsize * dtype_bits in (32, 64, 128)
+    return row_alignment(n, dtype_bits // 8) in (4, 8, 16)
 
 
-def _shape_is_valid(
+def _supported_size(
     input: torch.Tensor,
     normalized_shape: list[int],
     weight: torch.Tensor | None,
-) -> bool:
-    # Mirror aten's _check_layer_norm_inputs: on any mismatch the aten path
-    # raises, so we fall through and let it produce the proper error rather
-    # than silently running the override on ill-shaped inputs.
-    n = len(normalized_shape)
-    if n < 1 or input.ndim < n:
-        return False
-    if list(input.shape[-n:]) != list(normalized_shape):
-        return False
-    if weight is not None and list(weight.shape) != list(normalized_shape):
-        return False
-    return True
+) -> int | None:
+    if not _is_supported(input) or input.numel() == 0:
+        return None
+    # Let ATen diagnose invalid shapes and handle weight casts or copies.
+    ndim = len(normalized_shape)
+    if ndim < 1 or input.ndim < ndim:
+        return None
+    if list(input.shape[-ndim:]) != list(normalized_shape):
+        return None
+    if weight is not None and (
+        list(weight.shape) != list(normalized_shape)
+        or weight.dtype != input.dtype
+        or weight.device != input.device
+        or not weight.is_contiguous()
+    ):
+        return None
+    return math.prod(normalized_shape)
 
 
 def _fused_rms_norm_cond(
@@ -142,32 +141,14 @@ def _fused_rms_norm_cond(
     weight: torch.Tensor | None,
     eps: float | None,
 ) -> bool:
-    if not _is_supported(input):
+    n = _supported_size(input, normalized_shape, weight)
+    if n is None:
         return False
-    if not _shape_is_valid(input, normalized_shape, weight):
-        return False
-    # Weight must match input dtype and device for quack's kernel; mismatches
-    # are legal under aten (it casts), so fall through.
-    if weight is not None and (
-        weight.dtype != input.dtype or weight.device != input.device
-    ):
-        return False
-    # Empty inputs crash quack with cudaErrorInvalidConfiguration -- the bad
-    # launch config poisons the CUDA context for subsequent calls. Quack's own
-    # rmsnorm_bwd guards against this with `if x.numel() > 0` (rmsnorm.py:1111)
-    # but the fwd path doesn't.
-    if input.numel() == 0:
-        return False
-    n = math.prod(normalized_shape)
     if not _n_yields_valid_cp_size(n, input.dtype):
         return False
     if not _fwd_fits_smem(input, n):
         return False
     if _misaligned_clone_unprofitable(input, n):
-        return False
-    # Non-contiguous weight would require a reshape+copy that we haven't
-    # measured; fall through to aten until we do.
-    if weight is not None and not weight.is_contiguous():
         return False
     return True
 
@@ -197,24 +178,15 @@ def _fused_rms_norm_backward_cond(
     weight: torch.Tensor | None,
     output_mask: list[bool],
 ) -> bool:
-    if not _is_supported(input):
+    n = _supported_size(input, normalized_shape, weight)
+    if n is None:
         return False
-    if not _shape_is_valid(input, normalized_shape, weight):
-        return False
-    if weight is not None and (
-        weight.dtype != input.dtype or weight.device != input.device
-    ):
-        return False
-    if input.numel() == 0:
-        return False
-    n = math.prod(normalized_shape)
-    props = _device_properties(input.device)
     if (
         not output_mask[0]
         and weight is not None
         and output_mask[1]
         and n in NORMALIZED_SIZES
-        and (props.major, props.minor) in ((9, 0), (10, 0))
+        and caps(input.device.index).cc in ((9, 0), (10, 0))
     ):
         min_rows = weight_grad_min_rows(n, input.element_size())
         if min_rows is None or input.numel() // n < min_rows:
@@ -226,8 +198,6 @@ def _fused_rms_norm_backward_cond(
     if _misaligned_clone_unprofitable(input, n) or _misaligned_clone_unprofitable(
         grad_out, n
     ):
-        return False
-    if weight is not None and not weight.is_contiguous():
         return False
     return True
 

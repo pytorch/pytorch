@@ -87,6 +87,20 @@ def should_decompose_bmm(mat1, mat2) -> bool:
             return False
         return True
     elif check_device(mat1, mat2, device="cpu"):
+        if config.post_grad_fusion_options["decompose_mm_pass"].get(
+            "bmm_skip_dynamic_shape_dim_check", False
+        ):
+            return (
+                statically_known_true(
+                    mat1.shape[1] <= cpu_max_other_dimension_decomposition
+                )
+                and statically_known_true(
+                    mat1.shape[2] <= cpu_max_other_dimension_decomposition
+                )
+                and statically_known_true(
+                    mat2.shape[2] <= cpu_max_other_dimension_decomposition
+                )
+            )
         if (
             mat1.shape[0] <= cpu_max_first_dimension_decomposition
             and mat2.shape[0] <= cpu_max_first_dimension_decomposition
