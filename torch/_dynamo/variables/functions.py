@@ -3013,6 +3013,16 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
     def get_source(self) -> Source | None:
         return self.wrapped.get_source()
 
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        if name == "__wrapped__":
+            return self.wrapped
+        return super().lookup_instance_dict(tx, name)
+
+    def get_real_python_backed_value(self) -> object:
+        return NO_SUCH_SUBOBJ
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
