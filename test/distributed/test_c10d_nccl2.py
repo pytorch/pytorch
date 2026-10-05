@@ -1299,6 +1299,104 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_profiler_emits_nccl_op_events(self) -> None:
+        # Traces and tests look collectives up by stock ProcessGroupNCCL's
+        # "nccl:<op>" event; nccl2 used to name them without the prefix.
+        ws, rank = self.world_size, self.rank
+        t = torch.ones(4, device=self.device)
+        t2 = torch.ones(4, device=self.device)
+        gathered = [torch.empty_like(t) for _ in range(ws)]
+        flat = torch.empty(ws * 4, device=self.device)
+        a2a_in = torch.ones(ws, 2, device=self.device)
+        a2a_out = torch.empty_like(a2a_in)
+        p2p_ops = [
+            dist.P2POp(dist.isend, t, (rank + 1) % ws),
+            dist.P2POp(dist.irecv, t2, (rank - 1) % ws),
+        ]
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+
+        with torch.autograd.profiler.profile(record_shapes=True) as prof:
+            dist.all_reduce(t)
+            dist.all_reduce(t, async_op=True).wait()
+            dist.broadcast(t, src=0)
+            dist.reduce(t, dst=0)
+            dist.barrier()
+            dist.all_gather(gathered, t)
+            dist.all_gather_into_tensor(flat, t)
+            dist.reduce_scatter_tensor(t, flat)
+            dist.all_to_all_single(a2a_out, a2a_in)
+            dist.scatter(t, gathered if rank == 0 else None, src=0)
+            with dist._coalescing_manager(device=self.device):
+                dist.all_reduce(t)
+                dist.all_reduce(t2)
+            for work in dist.batch_isend_irecv(p2p_ops):
+                work.wait()
+            if rank == 0:
+                dist.send(t, 1)
+            elif rank == 1:
+                dist.recv(t, 0)
+            torch.cuda.synchronize()
+
+        shape = list(t.shape)
+        expected = {
+            "nccl:all_reduce": [[shape]] * 2,
+            "nccl:broadcast": [[shape]],
+            "nccl:reduce": [[shape]],
+            "nccl:all_reduce_barrier": [[[1]]],
+            "nccl:all_gather": [[shape]],
+            "nccl:_all_gather_base": [[shape]],
+            "nccl:_reduce_scatter_base": [[list(flat.shape)]],
+            "nccl:all_to_all": [[list(a2a_in.shape)]],
+            "nccl:scatter": [[shape]],
+            "nccl:allreduce_coalesced": [[shape, shape]],
+            # batch_isend_irecv: one event, send tensors only.
+            "nccl:coalesced": [[shape]],
+            "nccl:send": [[shape]] if rank == 0 else [],
+            "nccl:recv": [[shape]] if rank == 1 else [],
+        }
+        for name, shapes in expected.items():
+            events = [e for e in prof.function_events if e.name == name]
+            self.assertEqual([e.input_shapes for e in events], shapes, name)
+            for e in events:
+                self.assertTrue(e.is_async)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_record_comm_and_no_shapes(self) -> None:
+        # dist.record_comm renames the op's single event, as in stock
+        # ProcessGroupNCCL; nccl2 used to add an input-less one.
+        ws, rank = self.world_size, self.rank
+        t = torch.ones(4, device=self.device)
+        t2 = torch.empty_like(t)
+        p2p_ops = [
+            dist.P2POp(dist.isend, t, (rank + 1) % ws),
+            dist.P2POp(dist.irecv, t2, (rank - 1) % ws),
+        ]
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+
+        with torch.autograd.profiler.profile(record_shapes=True) as prof:
+            with dist.record_comm("custom_comm"):
+                dist.all_reduce(t)
+                for work in dist.batch_isend_irecv(p2p_ops):
+                    work.wait()
+            torch.cuda.synchronize()
+        names = [e.name for e in prof.function_events]
+        custom = [e for e in prof.function_events if e.name == "custom_comm"]
+        shape = list(t.shape)
+        self.assertEqual([e.input_shapes for e in custom], [[shape], [shape]])
+        self.assertNotIn("nccl:all_reduce", names)
+        self.assertNotIn("nccl:coalesced", names)
+
+        with torch.autograd.profiler.profile(record_shapes=False) as prof:
+            dist.all_reduce(t)
+            torch.cuda.synchronize()
+        events = [e for e in prof.function_events if e.name == "nccl:all_reduce"]
+        self.assertEqual([e.input_shapes for e in events], [[]])
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_split_group_child_global_ranks(self) -> None:
         # nccl2's split() copied everything into the child's options except the
         # parent-global rank map, which FlightRecorderHook then falls back to
