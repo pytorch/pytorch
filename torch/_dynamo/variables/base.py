@@ -2791,9 +2791,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         also owns guard installation for that classification. Thus, ``source``
         must reproduce the exact value without changing its lookup semantics.
         Values without a source are unguarded and should be compiler-created or
-        otherwise ephemeral. Compiler-owned functions that must bypass user
-        trace-rule overrides use
-        ``SourcelessBuilder.create_internal_user_function``.
+        otherwise ephemeral. Compiler-selected callables that must bypass
+        normal classification use the corresponding
+        ``SourcelessBuilder.create_internal_*`` entry point.
         Other direct construction requires a local rationale for why builder
         classification or guarding cannot preserve the intended semantics.
         """

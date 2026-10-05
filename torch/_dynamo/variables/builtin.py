@@ -851,6 +851,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         # combinations. Handlers are attempted in order, and will be used if the type checks
         # match. They are expected to have the signature:
         # fn(tx, arg0: VariableTracker, arg1: VariableTracker) -> VariableTracker
+        from .builder import SourcelessBuilder
         from .functions import BaseUserFunctionVariable
         from .nn_module import NNModuleVariable
         from .tensor import supported_const_comparison_ops
@@ -985,7 +986,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     ((ConstantVariable, ConstantVariable), compare_by_value),
                 ]
 
-                op_var = BuiltinVariable(op)
+                op_var = SourcelessBuilder.create_internal_builtin(op)
                 # Special handling of SymNode variable
                 result.extend(
                     [
@@ -1056,7 +1057,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     ]
                 )
 
-                op_var = BuiltinVariable(op)
+                op_var = SourcelessBuilder.create_internal_builtin(op)
                 result.extend(
                     [
                         (
@@ -1251,13 +1252,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         ],
         VariableTracker | None,
     ]:
+        from .builder import SourcelessBuilder
         from .lazy import (
             ComputedLazyConstantVariable,
             LazyConstantVariable,
             LazyVariableTracker,
         )
 
-        obj = BuiltinVariable(fn)
+        obj = SourcelessBuilder.create_internal_builtin(fn)
         handlers: list[_HandlerCallback] = []
 
         lazy_constant_types = (LazyConstantVariable, ComputedLazyConstantVariable)
@@ -2222,10 +2224,13 @@ class BuiltinVariable(BaseBuiltinVariable):
         # SymInt keys graph break.
         keyvals = [key.call_function(tx, [item], {}) for item in items]
         best_item, best_key = items[0], keyvals[0]
+        from .builder import SourcelessBuilder
+
         for item, keyval in zip(items[1:], keyvals[1:]):
             left, right = (best_key, keyval) if self.fn is max else (keyval, best_key)
-            # Internal comparison semantics must ignore trace-rule overrides.
-            cmp = BuiltinVariable(operator.lt).call_function(tx, [left, right], {})
+            cmp = SourcelessBuilder.create_internal_builtin(operator.lt).call_function(
+                tx, [left, right], {}
+            )
             if not cmp.is_python_constant():
                 unimplemented(
                     gb_type="min/max with non-constant key",
