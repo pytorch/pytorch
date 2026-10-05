@@ -557,7 +557,7 @@ def flex_gemm_grouped_mm(
     gemm_kwargs: dict[str, Any],
     kernel_options: dict[str, Any],
 ) -> Any:
-    """Normalize variable-length-M grouped GEMM: 2-D A, 3-D B, ``offs`` as a tensor operand.
+    """Normalize variable-length-M/K grouped GEMM with ``offs`` as a tensor operand.
 
     ``offs`` moves from ``gemm_kwargs`` into the HOP's tensor operands so Dynamo
     and the body graph carry it as a tensor rather than a constant.
@@ -583,12 +583,12 @@ def flex_gemm_grouped_mm(
         or not isinstance(mat_a, torch.Tensor)
         or not isinstance(mat_b, torch.Tensor)
         or mat_a.ndim != 2
-        or mat_b.ndim != 3
+        or mat_b.ndim not in (2, 3)
     ):
         raise NotImplementedError(
-            "FlexGEMM grouped_mm supports only the variable-length-M form: 2-D A "
-            "[total_m, K], 3-D B [E, K, N] and an int32 offs tensor; 3-D A, the "
-            "2-D/2-D weight-gradient form and offs=None are not supported"
+            "FlexGEMM grouped_mm supports variable-length-M (2-D A, 3-D B) or "
+            "variable-length-K (2-D A, 2-D B) with an int32 offs tensor; "
+            "3-D A and offs=None are not supported"
         )
 
     def body_fn(*args: Any) -> Any:
