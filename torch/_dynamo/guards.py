@@ -191,7 +191,6 @@ from .utils import (
     constants_identical,
     dataclass_fields,
     dict_keys,
-    find_bound_builtin_method_descriptor,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -644,15 +643,12 @@ class GuardManagerWrapper:
                     node.mark_tag_safe()
             elif (
                 issubclass(node.get_type_of_guarded_value(), tuple)
-                and (
-                    node.get_source().endswith(dunder_attrs_assumed_constants)
-                    or node.get_source().startswith("type.__dict__['__mro__'].__get__(")
-                )
+                and node.get_source().endswith(dunder_attrs_assumed_constants)
                 and config.assume_dunder_attributes_remain_unchanged
             ):
-                # We trust class MRO tuples and tuples obtained from a function's
-                # __closure__ or __defaults__. Any *other* tuple-valued attribute
-                # can be silently replaced—for example:
+                # We trust tuples obtained from a function's __closure__ or
+                # __defaults__. Any *other* tuple-valued attribute can be
+                # silently replaced—for example:
                 #
                 #     foo.bar = (1, 2)      # original
                 #     foo.bar = (3, 4)      # rebinding that our dict-tag optimisation won't see
@@ -2978,24 +2974,6 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_lambda_guard(
             opaque_guard_checker,
             get_verbose_code_parts(global_name, guard),
-            guard.user_stack,
-        )
-
-    @unsupported_guard_check_spec
-    def BUILTIN_METHOD_MATCH(self, guard: Guard, descriptor: object) -> None:
-        value = self.get(guard)
-        if find_bound_builtin_method_descriptor(value) is not descriptor:
-            raise AssertionError(
-                "bound builtin method descriptor changed during tracing"
-            )
-
-        def check_fn(current: object) -> bool:
-            return find_bound_builtin_method_descriptor(current) is descriptor
-
-        code = [f"bound builtin method matches {descriptor!r}"]
-        self.get_guard_manager(guard).add_lambda_guard(
-            check_fn,
-            get_verbose_code_parts(code, guard),
             guard.user_stack,
         )
 
@@ -5425,7 +5403,6 @@ class CheckFunctionManager:
         "CLASS_MATCH",
         "MODULE_MATCH",
         "CLOSURE_MATCH",
-        "BUILTIN_METHOD_MATCH",
         "WEAKREF_ALIVE",
     )
 
