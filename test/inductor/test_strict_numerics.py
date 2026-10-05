@@ -172,6 +172,60 @@ class StrictNumericsConfigTest(TestCase):
 )
 class StrictNumericsCompileTest(TestCase):
     @ops(
+        [op for op in op_db if op.name in ("byte", "char", "short")],
+        allowed_dtypes=(
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.int64,
+        ),
+    )
+    @parametrize("numerics", NUMERICS_MODES)
+    @parametrize("upcast", (False, True))
+    def test_narrow_integer_cast(self, device, dtype, op, numerics, upcast):
+        if dtype in (torch.float16, torch.bfloat16):
+            x = _exhaustive_16bit(dtype, device)
+        elif dtype == torch.float32:
+            x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)
+        else:
+            values: list[int | float] = [
+                sign * 2**power + delta
+                for power in (7, 8, 15, 16, 31, 32)
+                for sign in (-1, 1)
+                for delta in (-1, 0, 1)
+            ]
+            values += [torch.iinfo(torch.int64).min, torch.iinfo(torch.int64).max]
+            if dtype == torch.float64:
+                limit = torch.finfo(dtype).max
+                values += [
+                    sign * value
+                    for value in (0.5, 257.999999999, 2.0**63, 2.0**64, limit)
+                    for sign in (-1, 1)
+                ]
+                values += [float("nan"), float("inf"), -float("inf")]
+            x = torch.tensor(values, device=device, dtype=dtype)
+        result, codes = run_and_get_code(
+            torch.compile(
+                op.op,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+        )
+        strict = numerics in ("strict_pointwise", "strict")
+        if strict or not dtype.is_floating_point:
+            self.assertEqual(result, op.op(x))
+        intermediate = "int64" if op.name == "byte" else "int32"
+        target = {"byte": "uint8", "char": "int8", "short": "int16"}[op.name]
+        marker = f".to(tl.{intermediate}).to(tl.{target})"
+        enabled = strict and dtype.is_floating_point
+        self.assertEqual(marker in "\n".join(codes), enabled)
+
+    @ops(
         [op for op in op_db if op.name == "sigmoid"],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32),
     )
@@ -767,12 +821,6 @@ POINTWISE_XFAIL = frozenset(
         ("angle", "bfloat16"),
         ("angle", "float16"),
         ("angle", "float32"),
-        ("byte", "bfloat16"),
-        ("byte", "float16"),
-        ("byte", "float32"),
-        ("char", "bfloat16"),
-        ("char", "float16"),
-        ("char", "float32"),
         ("clamp", "bfloat16"),
         ("clamp", "float16"),
         ("clamp", "float32"),
@@ -866,9 +914,6 @@ POINTWISE_XFAIL = frozenset(
         ("rsub", "bfloat16"),
         ("rsub", "float16"),
         ("rsub", "float32"),
-        ("short", "bfloat16"),
-        ("short", "float16"),
-        ("short", "float32"),
         ("special_bessel_j0", "float32"),
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
