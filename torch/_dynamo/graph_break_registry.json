@@ -158,6 +158,16 @@
       ]
     }
   ],
+  "GB3780": [
+    {
+      "Gb_type": "non-literal key in object __dict__",
+      "Context": "key={key}, type={type(key)}",
+      "Explanation": "Dynamo models object __dict__ keys as literal constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0010": [
     {
       "Gb_type": "Attempted to read a deleted variable",
@@ -2075,6 +2085,16 @@
       ]
     }
   ],
+  "GB1472": [
+    {
+      "Gb_type": "classmethod of non-Python function",
+      "Context": "tp_descr_get {self} on {owner}",
+      "Explanation": "Dynamo can only bind a classmethod wrapping a Python function to its class.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0133": [
     {
       "Gb_type": "Unsupported arguments for itertools.accumulate",
@@ -2346,6 +2366,18 @@
       "Context": "source: {self.source}",
       "Explanation": "Dynamo determined that a graph break should occur when calling `{self.source.name}`. Reason: {self.msg}",
       "Hints": []
+    }
+  ],
+  "GB5210": [
+    {
+      "Gb_type": "Constant fold with a rank-relative device",
+      "Context": "fqn(self.value)",
+      "Explanation": "`{fqn(self.value)}` was called with the current device, whose index is only known at runtime under compile_on_one_rank, so the result cannot be folded into the graph.",
+      "Hints": [
+        "This graph break is expected under compile_on_one_rank.",
+        "The resumed eager call observes the running rank's device.",
+        "Pass an explicit device if the value is the same on every rank."
+      ]
     }
   ],
   "GB9672": [
@@ -2799,6 +2831,16 @@
       ]
     }
   ],
+  "GB1583": [
+    {
+      "Gb_type": "builtin isinstance() with classinfo that does not support issubclass()",
+      "Context": "isinstance({arg}, {isinstance_type})",
+      "Explanation": "issubclass({arg_type}, {member}) raised TypeError: {e}. Dynamo emulates isinstance() with issubclass() for this argument and cannot determine the result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0170": [
     {
       "Gb_type": "Data-dependent branching",
@@ -2848,6 +2890,14 @@
     }
   ],
   "GB0172": [
+    {
+      "Gb_type": "async_op=True for distributed collectives",
+      "Context": "{self.fn}, args={args}, kwargs={kwargs}",
+      "Explanation": "_ASYNC_OP_REMAP_ERROR",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "async_op=True for distributed collectives",
       "Context": "{self.fn}, args={args}, kwargs={kwargs}",
@@ -3323,6 +3373,16 @@
       ]
     }
   ],
+  "GB6602": [
+    {
+      "Gb_type": "setattr() on Tensor.data with different shape",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable tensors. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB9352": [
     {
       "Gb_type": "Data-dependent uint64 torch.Size element in torch._C._infer_size",
@@ -3763,6 +3823,17 @@
       "Hints": [
         "Ensure the argument to `torch.nn.Parameter()` is a `torch.Tensor`.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB9890": [
+    {
+      "Gb_type": "bytes() with non-constant arguments",
+      "Context": "bytes(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call bytes() with non-constant args.",
+      "Hints": [
+        "Ensure that the args to bytes() are constant (int, str, etc.).",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -4292,6 +4363,26 @@
       "Explanation": "Dynamo does not support tracing TypedDict with optional keys",
       "Hints": [
         "Avoid using TypedDict with optional keys",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3837": [
+    {
+      "Gb_type": "bytearray constructor",
+      "Context": "arg type: {type(arg).__name__}",
+      "Explanation": "Dynamo cannot trace bytearray() with this argument type.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5460": [
+    {
+      "Gb_type": "bytearray constructor with non-constant args",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo cannot trace bytearray() with non-constant arguments.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -5983,6 +6074,16 @@
       "Gb_type": "missing_mp_ass_subscript",
       "Context": "mp_ass_subscript_impl not defined for {self.python_type_name()}",
       "Explanation": "Dynamo does not yet support item assignment on '{self.python_type_name()}'.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9182": [
+    {
+      "Gb_type": "setattr() on Parameter.data with different shape",
+      "Context": "setattr({obj}, {name}, {val})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable parameters. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
