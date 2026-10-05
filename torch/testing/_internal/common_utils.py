@@ -2010,8 +2010,8 @@ def lazy_skip_if(condition_fn, reason):
     For function targets the condition is evaluated each time the test
     runs, matching the historical PyTorch convention of checking skip
     flags inside a wrapper. For class targets the condition is evaluated
-    once at class-decoration time and the standard ``__unittest_skip__``
-    attributes are set, since unittest's TestLoader makes class-level
+    once at class-decoration time and the standard unittest.skipIf decorator
+    is applied to the class, since unittest's TestLoader makes class-level
     skip decisions before instantiation.
 
     Prefer this helper over hand-rolled ``@wraps + raise SkipTest``
@@ -2021,10 +2021,7 @@ def lazy_skip_if(condition_fn, reason):
 
     def decorator(fn):
         if isinstance(fn, type):
-            if condition_fn():
-                fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-                fn.__unittest_skip_why__ = reason  # type: ignore[attr-defined]
-            return fn
+            return unittest.skipIf(condition_fn(), reason)(fn)
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -2040,8 +2037,7 @@ requires_accelerator = lazy_skip_if(
 )
 
 
-def skipIfCrossRef(fn):
-    return lazy_skip_if(lambda: TEST_WITH_CROSSREF, "test doesn't currently with crossref")(fn)
+skipIfCrossRef = unittest.skipIf(TEST_WITH_CROSSREF, "test doesn't currently with crossref")
 
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -2481,7 +2477,7 @@ def skipIfNNModuleInlined(
     return decorator
 
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
-    decorator = lazy_skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
+    decorator = unittest.skipIf(TEST_WITH_ROCM, f"skipIfRocm: {msg}")
     return decorator(func) if func is not None else decorator
 
 def skipIfRocm_BUGGY(func=None, *, msg="test doesn't currently work on the ROCm stack"):
@@ -2547,7 +2543,7 @@ def xfailIf(condition):
     return wrapper
 
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
-    decorator = lazy_skip_if(lambda: TEST_XPU, f"skipIfXpu: {msg}")
+    decorator = unittest.skipIf(TEST_XPU, f"skipIfXpu: {msg}")
     return decorator(func) if func is not None else decorator
 
 def skipIfXpu_BUGGY(func=None, *, msg="test doesn't currently work on the XPU stack"):
@@ -2604,8 +2600,7 @@ def skipIfMPS(fn):
     return wrapper
 
 
-def skipIfHpu(fn):
-    return lazy_skip_if(lambda: TEST_HPU, "test doesn't currently work with HPU")(fn)
+skipIfHpu = unittest.skipIf(TEST_HPU, "test doesn't currently work with HPU")
 
 def skipIfHpu_BUGGY(fn):
     """Old skipIfHpu that silently drops classes from discovery. Migrate to skipIfHpu."""
@@ -2623,50 +2618,45 @@ def getRocmVersion() -> tuple[int, ...]:
 
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
-    def _should_skip():
-        if not TEST_WITH_ROCM:
-            return False
+    if not TEST_WITH_ROCM:
+        should_skip = False
+    else:
         rocm_version_tuple = getRocmVersion()
-        return (
+        should_skip = (
             rocm_version_tuple is None
             or version is None
             or rocm_version_tuple < tuple(version)
         )
-    return lazy_skip_if(_should_skip, f"ROCm version less than {version} required")
+    return unittest.skipIf(should_skip, f"ROCm version less than {version} required")
 
 # Skips a test on ROCm if the version is at least the given major.minor tuple.
 # Use for failures introduced in a ROCm release that pass on older versions,
 # e.g. skipIfRocmVersionAtLeast([7, 14]) skips on 7.14+ but runs on 7.2.x.
-# Built on lazy_skip_if so it works on both test methods and test classes.
 def skipIfRocmVersionAtLeast(version=None):
-    def _should_skip():
-        if not TEST_WITH_ROCM:
-            return False
+    if not TEST_WITH_ROCM:
+        should_skip = False
+    else:
         rocm_version_tuple = getRocmVersion()
-        return (
-            rocm_version_tuple is not None
-            and version is not None
-            and rocm_version_tuple >= tuple(version)
+        should_skip = (
+            rocm_version_tuple is None
+            or version is None
+            or rocm_version_tuple >= tuple(version)
         )
-    return lazy_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
+    return unittest.skipIf(should_skip, f"ROCm version at least {version}: known failure")
 
 # Skips a test on ROCm when the version is in [first_bad, first_good), for a
 # regression introduced in one release and fixed in a later one. The window
 # lives only here, so the skip reason cannot drift from the version check.
 def skipIfRocmVersionInRange(first_bad, first_good, reason):
-    def _should_skip():
-        return TEST_WITH_ROCM and tuple(first_bad) <= getRocmVersion() < tuple(first_good)
     window = f"ROCm >= {'.'.join(map(str, first_bad))}, < {'.'.join(map(str, first_good))}"
-    return lazy_skip_if(_should_skip, f"{reason} ({window})")
+    return unittest.skipIf(TEST_WITH_ROCM and tuple(first_bad) <= getRocmVersion() < tuple(first_good), f"{reason} ({window})")
 
-def skipIfNotMiopenSuggestNHWC(fn):
-    return lazy_skip_if(
-        lambda: not TEST_WITH_MIOPEN_SUGGEST_NHWC,
-        "test doesn't currently work without MIOpen NHWC activation",
-    )(fn)
-
+skipIfNotMiopenSuggestNHWC = unittest.skipUnless(
+    TEST_WITH_MIOPEN_SUGGEST_NHWC,
+    "test doesn't currently work without MIOpen NHWC activation",
+)
 def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows stack"):
-    decorator = lazy_skip_if(lambda: IS_WINDOWS, f"skipIfWindows: {msg}")
+    decorator = unittest.skipIf(IS_WINDOWS, f"skipIfWindows: {msg}")
     return decorator(func) if func is not None else decorator
 
 def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windows stack"):
@@ -2898,14 +2888,9 @@ def _test_function(fn, device):
         return fn(self, device)
     return run_test_function
 
-def skipIfNoXNNPACK(fn):
-    return lazy_skip_if(
-        lambda: not torch.backends.xnnpack.enabled,  # type: ignore[attr-defined]
-        "XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.",
-    )(fn)
+skipIfNoXNNPACK = unittest.skipUnless(torch.backends.xnnpack.enabled, "XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.")
 
-def skipIfNoLapack(fn):
-    return lazy_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
+skipIfNoLapack = unittest.skipUnless(torch._C.has_lapack, "PyTorch compiled without Lapack")
 
 def skipIfNoNativeAot(op, *, device="cuda"):
     """Skip unless this op has native-AOT kernels embedded for the given device."""
@@ -2937,16 +2922,14 @@ def skipIfNotRegistered(op_name, message):
     """
     return unittest.skip("Pytorch is compiled without Caffe2")
 
-def skipIfNoSciPy(fn):
-    return lazy_skip_if(lambda: not TEST_SCIPY, "test require SciPy, but SciPy not found")(fn)
+skipIfNoSciPy = unittest.skipIf(not TEST_SCIPY, "test require SciPy, but SciPy not found")
 
 def skip_if_pytest(fn):
     return lazy_skip_if(
         lambda: "PYTEST_CURRENT_TEST" in os.environ, "does not work under pytest"
     )(fn)
 
-def skipIfNoXPU(fn):
-    return lazy_skip_if(lambda: not TEST_XPU, "test required PyTorched compiled with XPU")(fn)
+skipIfNoXPU = unittest.skipUnless(TEST_XPU, "test requires PyTorched compiled with XPU")
 
 def skipIfCachingAllocatorDisabled(fn):
     """Skip if the CUDA/HIP caching allocator is not active. Covers both the
@@ -6788,9 +6771,7 @@ def recover_orig_fp32_precision(fn):
 
 def skipIfPythonVersionMismatch(predicate):
     vi = sys.version_info
-    return lazy_skip_if(
-        lambda: not predicate(vi.major, vi.minor, vi.micro), "Python version mismatch"
-    )
+    return unittest.skipUnless(predicate(vi.major, vi.minor, vi.micro), "Python version mismatch")
 
 # Decorator to patch multiple test class members for the duration of the subtest
 def patch_test_members(updates: dict[str, Any]):
