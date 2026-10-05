@@ -23,15 +23,29 @@ try:
 except ImportError:
     HAS_NCCL4PY = False
 
-# nccl4py imports cleanly on ROCm but dlopens libnccl.so.2 on first use, which
-# only NVIDIA ships.
-HAS_CUDA = torch.cuda.is_available() and not TEST_WITH_ROCM
+
+def _rocm_nccl4py_ready() -> bool:
+    """True unless this is ROCm with RCCL older than 2.31.2.
+
+    On ROCm, torch.cuda.nccl.version() is RCCL. NVIDIA nccl4py dlopens
+    libnccl.so.2; RCCL's package dlopens librccl.so. These host collectives
+    pass on RCCL 2.31.2. A missing nccl package still skips via HAS_NCCL4PY.
+    """
+    if not TEST_WITH_ROCM:
+        return True
+    if not dist.is_nccl_available():
+        return False
+    return torch.cuda.nccl.version() >= (2, 31, 2)
 
 
 def skip_unless_nccl4py(func):
-    return unittest.skipUnless(HAS_NCCL4PY and HAS_CUDA, "nccl4py and CUDA required")(
-        func
-    )
+    if not HAS_NCCL4PY or not torch.cuda.is_available():
+        return unittest.skipUnless(False, "nccl4py and CUDA required")(func)
+    if not _rocm_nccl4py_ready():
+        return unittest.skipUnless(False, "nccl4py requires RCCL 2.31.2 or later")(
+            func
+        )
+    return func
 
 
 @skip_unless_nccl4py
