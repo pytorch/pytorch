@@ -2224,6 +2224,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         best_item, best_key = items[0], keyvals[0]
         for item, keyval in zip(items[1:], keyvals[1:]):
             left, right = (best_key, keyval) if self.fn is max else (keyval, best_key)
+            # Internal comparison semantics must ignore trace-rule overrides.
             cmp = BuiltinVariable(operator.lt).call_function(tx, [left, right], {})
             if not cmp.is_python_constant():
                 unimplemented(
@@ -3099,7 +3100,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         if not pysequence_check(obj_type):
             raise_type_error(tx, "argument to reversed() must be a sequence")
 
-        return variables.UserFunctionVariable(
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create_internal_user_function(
             polyfills.builtins.reversed_sequence_iterator
         ).call_function(tx, [obj], {})
 
@@ -3692,7 +3695,9 @@ class IterBuiltinVariable(BaseBuiltinVariable):
         if len(args) == 1:
             return generic_getiter(tx, args[0])
         else:
-            return variables.UserFunctionVariable(
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder.create_internal_user_function(
                 polyfills.builtins.callable_iterator
             ).call_function(tx, args, kwargs)
 

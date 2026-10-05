@@ -2123,6 +2123,12 @@ class UserMethodVariable(BaseUserFunctionVariable):
         }
 
 
+def _create_fn_with_ctx_variable() -> UserFunctionVariable:
+    from .builder import SourcelessBuilder
+
+    return SourcelessBuilder.create_internal_user_function(polyfills._fn_with_ctx)
+
+
 class WrappedUserMethodVariable(UserMethodVariable):
     def __init__(
         self,
@@ -2143,7 +2149,7 @@ class WrappedUserMethodVariable(UserMethodVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if config.nested_graph_breaks:
-            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
+            wrapper_fn = _create_fn_with_ctx_variable()
             return wrapper_fn.call_function(
                 tx, [self.context, self.wrapped] + list(args), kwargs
             )
@@ -2177,7 +2183,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if config.nested_graph_breaks:
-            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
+            wrapper_fn = _create_fn_with_ctx_variable()
             return wrapper_fn.call_function(
                 tx, [self.context, self.wrapped] + list(args), kwargs
             )
@@ -2608,7 +2614,7 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if config.nested_graph_breaks:
-            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
+            wrapper_fn = _create_fn_with_ctx_variable()
             return wrapper_fn.call_function(
                 tx, [self.context, self.wrapped] + list(args), kwargs
             )
@@ -2998,7 +3004,7 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if config.nested_graph_breaks:
-            wrapper_fn = UserFunctionVariable(polyfills._fn_with_ctx)
+            wrapper_fn = _create_fn_with_ctx_variable()
             return wrapper_fn.call_function(
                 tx, [self.context, self.wrapped] + list(args), kwargs
             )

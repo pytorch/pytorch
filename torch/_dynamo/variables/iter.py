@@ -853,8 +853,10 @@ class FilterVariable(IteratorVariable):
                 res = item
             else:
                 res = self.fn.call_function(tx, [item], {})
-            pred_res = variables.UserFunctionVariable(
-                polyfills.predicate  # type: ignore[arg-type]
+            from .builder import SourcelessBuilder
+
+            pred_res = SourcelessBuilder.create_internal_user_function(
+                polyfills.predicate
             ).call_function(tx, [res], {})
             if pred_res.as_python_constant():
                 return item
