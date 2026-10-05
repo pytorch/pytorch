@@ -12028,6 +12028,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
+        # SM90+ CUDA accumulates with BF16 atomics, which round after every update.
+        if self.device == "cuda" and (
+            torch.version.hip or torch.cuda.get_device_capability() < (9, 0)
+        ):
+
+            def bf16_fn(x):
+                idx = torch.zeros(1000, device=x.device, dtype=torch.int64)
+                vals = torch.ones(1000, device=x.device, dtype=x.dtype)
+                x.index_put_((idx,), vals, accumulate=True)
+                return x
+
+            self.common(bf16_fn, (torch.zeros(1, dtype=torch.bfloat16),))
+
     @skipCPUIf(True, "requires Triton atomic_or on tl.int1")
     @skip_if_pallas
     def test_index_put_bool_accumulate(self):
@@ -20537,6 +20550,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    def test_masked_cse_recomputed_load(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199642
+        # When an input load is first emitted inside ops.masked (via F.pad),
+        # then loaded unmasked into the kernel-level CSE cache, and subsequently
+        # loaded again inside ops.masked, the second ops.masked block has an
+        # empty scoped_body and returns the outer CSE variable directly.
+        def fn(x, y, table):
+            padded_x = torch.nn.functional.pad(x, (1, 1, 1, 1))
+            padded_y = torch.nn.functional.pad(y, (1, 1, 1, 1))
+            m = (padded_x**2 + padded_y**2)[..., 1:-1, 1:-1]
+            i = ((x + y) * 3).round()
+            idx1 = (i % 8).long()
+            idx2 = ((i + 4) % 8).long()
+            return (m > table.gather(1, idx1)) & (m > table.gather(1, idx2))
+
+        x, y = torch.randn(2, 1, 1, 64, 80, device=self.device).unbind(0)
+        table = torch.rand(1, 8, 64, 80, device=self.device) * 4
+        self.common(fn, (x, y, table), check_lowp=False)
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -22616,11 +22648,11 @@ if RUN_GPU:
             output = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
 
             result, code = run_and_get_code(torch.compile(fn), output, indices, values)
-            if output.device.type == "xpu":
-                # xpu fallback bf16 atomic add for better performance
+            if output.device.type == "xpu" or torch.version.hip:
+                # xpu and ROCm fall back for bf16 atomic add
                 self.assertFalse(
                     "tl.atomic_add" in code[0],
-                    "bf16 should not generate tl.atomic_add on xpu",
+                    "bf16 should not generate tl.atomic_add on xpu or ROCm",
                 )
             else:
                 self.assertTrue(

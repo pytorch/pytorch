@@ -99,7 +99,8 @@ jobs:
           [[ "$READY_EVENT_COUNT" =~ ^[0-9]+$ ]] || exit 1
           # Adding `open source` needs triage permission, so every such event
           # is a deliberate request to triage; a PR that already has an outcome
-          # label is a no-op. Remove and re-add the label to triage again.
+          # label or `no automated triage` is a no-op. To triage again, remove
+          # those labels, then remove and re-add `open source`.
           if [[ "$EVENT_ACTION" == "labeled" ]]; then
             echo "should-run=true" >> "$GITHUB_OUTPUT"
           elif [[ "$HISTORY_TRUNCATED" == "true" ]]; then
