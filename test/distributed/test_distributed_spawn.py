@@ -4,8 +4,9 @@ import os
 import sys
 
 
+# Default to legacy NCCL; set TORCH_DIST_USE_NCCL2=1 to run the suite on nccl2.
 if os.environ.get("BACKEND") == "nccl":
-    os.environ["TORCH_DIST_USE_NCCL2"] = "0"
+    os.environ.setdefault("TORCH_DIST_USE_NCCL2", "0")
 
 import torch
 import torch.distributed as dist
