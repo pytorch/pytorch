@@ -64,6 +64,35 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_cse_shared_bool_mask_index(self, device):
+        # CSE merges m1/m2, so retracing reuses one mask for both index ops.
+        def fn(x, y, z):
+            m1 = z > 0
+            m2 = z > 0
+            return x[m1].sum() + y[m2].sum()
+
+        x = torch.randn(8, device=device, requires_grad=True)
+        y = torch.randn(8, device=device, requires_grad=True)
+        z = torch.randn(8, device=device)
+        actual = torch.compile(fn, fullgraph=True)(x, y, z)
+        torch.testing.assert_close(actual, fn(x, y, z))
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_repeated_item_same_tensor(self, device):
+        def fn(x):
+            idx = x.argmax()
+            a = idx.item()
+            b = idx.item()
+            torch._check(a >= 0)
+            return torch.ones(a, device=x.device) + torch.ones(b, device=x.device)
+
+        x = torch.randn(8, device=device)
+        actual = torch.compile(fn, fullgraph=True)(x)
+        torch.testing.assert_close(actual, fn(x))
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_broadcast_tensors(self, device):
         def fn(x):
             nz = x.nonzero()
