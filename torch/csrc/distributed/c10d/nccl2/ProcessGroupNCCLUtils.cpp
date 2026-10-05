@@ -419,8 +419,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
     const std::vector<at::Tensor>& inputTensors) {
   // Only create the work object without enqueuing it
   auto [workTimeout, ownedTimeout] = applyEphemeralTimeout(timeout);
-  auto work =
-      c10::make_intrusive<WorkNCCL>(this, stream, workTimeout, inputTensors);
+  auto work = makeWork<WorkNCCL>(this, stream, workTimeout, inputTensors);
   work->setOwnedEphemeralTimeout(ownedTimeout);
   work->setSequenceNumber(sequence_number_);
   return work;
@@ -432,8 +431,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::createWork(
     const at::Tensor& inputTensor) {
   // Single-tensor overload to avoid vector allocation
   auto [workTimeout, ownedTimeout] = applyEphemeralTimeout(timeout);
-  auto work =
-      c10::make_intrusive<WorkNCCL>(this, stream, workTimeout, inputTensor);
+  auto work = makeWork<WorkNCCL>(this, stream, workTimeout, inputTensor);
   work->setOwnedEphemeralTimeout(ownedTimeout);
   work->setSequenceNumber(sequence_number_);
   return work;
