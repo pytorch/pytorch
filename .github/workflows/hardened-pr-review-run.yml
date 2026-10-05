@@ -1333,9 +1333,11 @@ jobs:
       - name: Post the automated review on the PR
         # A native review notifies the author, which an edit to the Dr.CI
         # comment never did, and puts each finding on its line. The script
-        # posts only a `succeeded` verdict, re-checks every string from the
-        # row, skips a moved head or an opted-out PR, defuses `@pytorchbot`,
-        # and replaces the previous automated review. It never fails the job.
+        # posts only a `succeeded` verdict (REQUEST_CHANGES or COMMENT),
+        # re-checks every string from the row, skips a moved head, defuses
+        # `@pytorchbot`, and replaces the previous automated review. On a run
+        # that did not succeed, or an opted-out PR, it withdraws change
+        # requests the pipeline will not replace. It never fails the job.
         # After the label move, so a review-posting problem cannot touch labels.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

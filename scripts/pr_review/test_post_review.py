@@ -72,7 +72,6 @@ class FakeGitHub(GitHub):
         labels=(),
         reviews=(),
         refuse_inline=False,
-        refuse_delete_review=False,
     ):
         super().__init__("token", "o/r")
         self.head = head
@@ -80,7 +79,6 @@ class FakeGitHub(GitHub):
         self.reviews = list(reviews)
         self.review_comments = {r["id"]: [{"id": r["id"] * 10}] for r in self.reviews}
         self.refuse_inline = refuse_inline
-        self.refuse_delete_review = refuse_delete_review
         self.calls: list[tuple] = []
 
     def request(self, method, path, body=None):
@@ -109,8 +107,6 @@ class FakeGitHub(GitHub):
             self.reviews.append(new)
             return new
         if method == "POST" and path == "/graphql":
-            if "deletePullRequestReview" in body["query"] and self.refuse_delete_review:
-                return {"errors": [{"message": "Can not delete a non-pending review"}]}
             return {"data": {}}
         return None
 
@@ -127,8 +123,17 @@ class FakeGitHub(GitHub):
         ]
 
 
-def old_review(rid, author=AUTHOR, body=MARKER + "\nold"):
-    return {"id": rid, "node_id": f"N{rid}", "user": {"login": author}, "body": body}
+def old_review(
+    rid, author=AUTHOR, body=MARKER + "\nold", state="COMMENTED", commit="c" * 40
+):
+    return {
+        "id": rid,
+        "node_id": f"N{rid}",
+        "user": {"login": author},
+        "body": body,
+        "state": state,
+        "commit_id": commit,
+    }
 
 
 def go(gh, r=None):
@@ -141,7 +146,7 @@ class TestWhatIsPosted(unittest.TestCase):
         go(gh)
         (body,) = gh.posted()
         self.assertEqual(body["commit_id"], SHA)
-        self.assertEqual(body["event"], "COMMENT")
+        self.assertEqual(body["event"], "REQUEST_CHANGES")
         self.assertTrue(body["body"].startswith(MARKER))
         (c,) = body["comments"]
         self.assertEqual((c["path"], c["line"], c["side"]), ("torch/x.py", 3, "RIGHT"))
@@ -170,6 +175,27 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertNotIn("comments", second)
         self.assertIn("`torch/x.py` line 3 (Major): Off by one.", second["body"])
 
+    def test_a_ready_verdict_is_a_comment_never_an_approval(self):
+        gh = FakeGitHub()
+        go(gh, row(verdict="ready_for_human_review"))
+        self.assertEqual(gh.posted()[0]["event"], "COMMENT")
+
+    def test_a_refused_request_changes_falls_back_to_a_comment(self):
+        class NoRequestChanges(FakeGitHub):
+            def request(self, method, path, body=None):
+                if body and body.get("event") == "REQUEST_CHANGES":
+                    self.calls.append((method, path, body))
+                    raise GitHubError(422, "cannot request changes")
+                return super().request(method, path, body)
+
+        gh = NoRequestChanges()
+        go(gh)
+        events = [(b["event"], "comments" in b) for b in gh.posted()]
+        self.assertEqual(
+            events,
+            [("REQUEST_CHANGES", True), ("REQUEST_CHANGES", False), ("COMMENT", False)],
+        )
+
     def test_a_clean_verdict_with_no_findings_still_posts(self):
         gh = FakeGitHub()
         go(gh, row(verdict="ready_for_human_review", findings=[]))
@@ -195,7 +221,7 @@ class TestNothingIsPosted(unittest.TestCase):
         for status in ("model_error", "sanitizer_rejected", "blocked"):
             gh = FakeGitHub()
             go(gh, row(status=status))
-            self.assertEqual(gh.calls, [], status)
+            self.assertEqual(gh.writes(), [], status)
 
     def test_on_a_summary_the_sanitizer_could_not_have_written(self):
         gh = FakeGitHub()
@@ -213,33 +239,101 @@ class TestNothingIsPosted(unittest.TestCase):
         self.assertEqual(gh.writes(), [])
 
 
+class TestStandingChangeRequestsAreWithdrawn(unittest.TestCase):
+    def dismissed(self, gh):
+        return [w[1].split("/")[7] for w in gh.writes() if w[1].endswith("/dismissals")]
+
+    def test_a_failed_run_withdraws_a_request_on_an_earlier_commit(self):
+        gh = FakeGitHub(
+            reviews=[
+                old_review(5, state="CHANGES_REQUESTED"),  # earlier commit
+                old_review(6, state="CHANGES_REQUESTED", commit=SHA),  # this commit
+                old_review(7, state="CHANGES_REQUESTED", author="someone"),
+            ]
+        )
+        go(gh, row(status="model_error"))
+        self.assertEqual(self.dismissed(gh), ["5"])
+        self.assertEqual(gh.posted(), [])
+
+    def test_a_failed_run_on_a_moved_head_touches_nothing(self):
+        gh = FakeGitHub(
+            head="b" * 40, reviews=[old_review(5, state="CHANGES_REQUESTED")]
+        )
+        go(gh, row(status="model_error"))
+        self.assertEqual(gh.writes(), [])
+
+    def test_a_newer_runs_request_is_not_withdrawn_by_a_failed_run(self):
+        class NewerRunPosts(FakeGitHub):
+            def request(self, method, path, body=None):
+                out = super().request(method, path, body)
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews?"):
+                    self.head = "b" * 40  # the newer head's review is in this list
+                return out
+
+        newer = old_review(6, state="CHANGES_REQUESTED", commit="b" * 40)
+        gh = NewerRunPosts(reviews=[newer])
+        go(gh, row(status="model_error"))
+        self.assertEqual(gh.writes(), [])
+
+    def test_opting_out_withdraws_every_standing_request(self):
+        gh = FakeGitHub(
+            labels=("no automated review",),
+            reviews=[old_review(5, state="CHANGES_REQUESTED", commit=SHA)],
+        )
+        go(gh)
+        self.assertEqual(self.dismissed(gh), ["5"])
+        self.assertEqual(gh.posted(), [])
+
+
 class TestTheEarlierReviewIsReplaced(unittest.TestCase):
-    def test_earlier_review_is_deleted_after_the_new_one_posts(self):
+    def test_earlier_review_is_taken_down_after_the_new_one_posts(self):
         gh = FakeGitHub(reviews=[old_review(5)])
         go(gh)
         writes = gh.writes()
         self.assertEqual(writes[0][:2], ("POST", "/repos/o/r/pulls/1/reviews"))
-        self.assertIn(("DELETE", "/repos/o/r/pulls/comments/50", None), writes)
-        delete = [w for w in writes if w[1] == "/graphql"]
-        self.assertEqual(len(delete), 1)
-        self.assertIn("deletePullRequestReview", delete[0][2]["query"])
-        self.assertEqual(delete[0][2]["variables"], {"id": "N5"})
-        self.assertEqual(gh.writes("PUT"), [])
-
-    def test_undeletable_review_is_marked_superseded_and_minimized(self):
-        gh = FakeGitHub(reviews=[old_review(5)], refuse_delete_review=True)
-        go(gh)
-        (put,) = gh.writes("PUT")
-        self.assertEqual(put[1], "/repos/o/r/pulls/1/reviews/5")
-        self.assertTrue(put[2]["body"].startswith(SUPERSEDED_MARKER))
-        self.assertIn("https://x/999", put[2]["body"])
-        self.assertTrue(
-            any(
-                "minimizeComment" in w[2]["query"]
-                for w in gh.writes()
-                if w[1] == "/graphql"
-            )
+        self.assertEqual(
+            [w[:2] for w in writes[1:]],
+            [
+                ("DELETE", "/repos/o/r/pulls/comments/50"),
+                ("PUT", "/repos/o/r/pulls/1/reviews/5"),
+                ("POST", "/graphql"),
+            ],
         )
+        put, minimize = writes[2][2], writes[3][2]
+        self.assertTrue(put["body"].startswith(SUPERSEDED_MARKER))
+        self.assertIn("https://x/999", put["body"])
+        self.assertIn("minimizeComment", minimize["query"])
+        self.assertEqual(minimize["variables"], {"id": "N5"})
+
+    def test_a_changes_requested_review_is_dismissed_first(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        go(gh)
+        after_post = gh.writes()[1:]
+        self.assertEqual(
+            after_post[0][:2], ("PUT", "/repos/o/r/pulls/1/reviews/5/dismissals")
+        )
+        self.assertEqual(after_post[0][2]["event"], "DISMISS")
+        self.assertIn("https://x/999", after_post[0][2]["message"])
+
+    def test_a_failed_dismissal_leaves_the_review_whole(self):
+        class NoDismiss(FakeGitHub):
+            def request(self, method, path, body=None):
+                if path.endswith("/dismissals"):
+                    self.calls.append((method, path, body))
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = NoDismiss(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        go(gh)
+        self.assertEqual(
+            [w[:2] for w in gh.writes()[1:]],
+            [("PUT", "/repos/o/r/pulls/1/reviews/5/dismissals")],
+        )
+
+    def test_a_comment_review_is_not_dismissed(self):
+        gh = FakeGitHub(reviews=[old_review(5)])
+        go(gh)
+        self.assertFalse(any("dismissals" in w[1] for w in gh.writes()))
 
     def test_only_this_workflows_reviews_are_touched(self):
         gh = FakeGitHub(
@@ -263,7 +357,6 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
     def test_a_superseded_review_gets_its_leftover_comments_retried(self):
         gh = FakeGitHub(
             reviews=[old_review(7, body=SUPERSEDED_MARKER + "\nx")],
-            refuse_delete_review=True,
         )
         go(gh)
         self.assertIn(("DELETE", "/repos/o/r/pulls/comments/70", None), gh.writes())

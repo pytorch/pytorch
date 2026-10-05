@@ -13,11 +13,12 @@ same predicates, and anything that fails is dropped rather than repaired.
 
 ONE AUTOMATED REVIEW PER PR. A new review is posted first; only once that has
 succeeded are the earlier automated reviews taken down, so a failed post never
-leaves the PR with no review at all. Taking one down means deleting each of its
-inline comments, then deleting the review itself. GitHub may refuse to delete a
-SUBMITTED review; when it does, the body is replaced by a pointer to the new
-review and the review is minimized as outdated, which is the closest the API
-allows.
+leaves the PR with no review at all. GitHub cannot delete a SUBMITTED review
+(GraphQL `deletePullRequestReview` answers "Can not delete a non-pending pull
+request review"; measured on pytorch/ciforge, 2026-10-05), so taking one down is
+the most the API allows: dismiss it if it requested changes, delete its inline
+comments, replace its body with a pointer to the new review, and minimize it as
+outdated.
 
 `@pytorchbot` IS DEFUSED IN EVERYTHING POSTED. pytorch-bot parses submitted and
 edited review bodies for commands (torchci/lib/bot/pytorchBot.ts) and only skips
@@ -194,12 +195,19 @@ def review_body(
 def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
     """Create the review with inline comments, or with findings in the body.
 
+    A `changes_requested` verdict is a REQUEST_CHANGES review, so the PR shows
+    it the way it shows a human's; anything else is a COMMENT. Never APPROVE: a
+    bot approval would read as a maintainer's sign-off.
+
     GitHub refuses the WHOLE review (422) if any comment's line is not in its
     diff. The sanitizer anchored every finding to our own diff, which should
-    match, but a refusal must cost the anchoring, not the review.
+    match, but a refusal must cost the anchoring, not the review. If a
+    REQUEST_CHANGES review is refused outright (the token cannot request changes
+    on this PR), it is posted as a COMMENT rather than not at all.
     """
     path = f"/repos/{gh.repo}/pulls/{pr}/reviews"
-    base = {"commit_id": sha, "event": "COMMENT"}
+    event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
+    base = {"commit_id": sha, "event": event}
     if findings:
         comments = [
             {
@@ -222,7 +230,13 @@ def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
                 f"GitHub refused the inline comments ({exc}); posting them in the body"
             )
     body = review_body(verdict, summary, findings, sha, inline=False)
-    return gh.request("POST", path, {**base, "body": body})
+    try:
+        return gh.request("POST", path, {**base, "body": body})
+    except GitHubError as exc:
+        if exc.status != 422 or event == "COMMENT":
+            raise
+        warn(f"GitHub refused {event} ({exc}); posting the review as a COMMENT")
+    return gh.request("POST", path, {**base, "event": "COMMENT", "body": body})
 
 
 def earlier_reviews(gh: GitHub, pr: int, author: str, new_id: int) -> list[dict]:
@@ -243,24 +257,37 @@ def earlier_reviews(gh: GitHub, pr: int, author: str, new_id: int) -> list[dict]
     ]
 
 
-_DELETE = "mutation($id: ID!) { deletePullRequestReview(input: {pullRequestReviewId: $id}) { clientMutationId } }"
 _MINIMIZE = "mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { clientMutationId } }"
 
 
 def take_down(gh: GitHub, pr: int, review: dict, new_url: str) -> None:
+    """Remove an earlier automated review from the PR as far as GitHub allows.
+
+    A REQUEST_CHANGES review is DISMISSED first, so the PR stops showing changes
+    requested even if a later step fails; dismissal is what GitHub offers for
+    taking back a review, and the timeline keeps a "dismissed" entry.
+    """
     rid = review["id"]
+    if review.get("state") == "CHANGES_REQUESTED":
+        message = f"Superseded by a newer automated review: {new_url}"
+        try:
+            gh.request(
+                "PUT",
+                f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}/dismissals",
+                {"message": message, "event": "DISMISS"},
+            )
+        except GitHubError as exc:
+            # Leave it whole: hiding a change request that still stands would
+            # make the PR claim a verdict nobody can read. The next
+            # publication retries it.
+            warn(f"could not dismiss review {rid}; leaving it in place: {exc}")
+            return
     for c in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}/comments"):
         try:
             gh.request("DELETE", f"/repos/{gh.repo}/pulls/comments/{c['id']}")
         except GitHubError as exc:
             if exc.status != 404:
                 warn(f"could not delete comment {c['id']} of review {rid}: {exc}")
-    try:
-        gh.graphql(_DELETE, {"id": review["node_id"]})
-        print(f"deleted earlier automated review {rid}")
-        return
-    except GitHubError as exc:
-        print(f"review {rid} cannot be deleted ({exc}); marking it superseded")
     body = f"{SUPERSEDED_MARKER}\nSuperseded by a newer automated review: {new_url}"
     try:
         if not review.get("body", "").startswith(SUPERSEDED_MARKER):
@@ -268,6 +295,7 @@ def take_down(gh: GitHub, pr: int, review: dict, new_url: str) -> None:
                 "PUT", f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}", {"body": body}
             )
         gh.graphql(_MINIMIZE, {"id": review["node_id"]})
+        print(f"superseded earlier automated review {rid}")
     except GitHubError as exc:
         warn(f"could not mark review {rid} superseded: {exc}")
 
@@ -278,13 +306,45 @@ def head_sha(gh: GitHub, pr: int):
     ).get("sha")
 
 
+def withdraw(gh: GitHub, pr: int, author: str, message: str, keep_commit=None):
+    """Dismiss this workflow's standing change requests, except on `keep_commit`.
+
+    A REQUEST_CHANGES review stays until it is dismissed, and only a write user
+    can dismiss it, so a request the pipeline will not replace has to be taken
+    back here. Dismissal only: the findings stay readable under the dismissal.
+    """
+    standing = [
+        r
+        for r in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
+        if r.get("state") == "CHANGES_REQUESTED"
+        and (r.get("user") or {}).get("login") == author
+        and (r.get("body") or "").startswith((MARKER, SUPERSEDED_MARKER))
+        and not (keep_commit and r.get("commit_id") == keep_commit)
+    ]
+    # LIST, THEN RE-READ THE HEAD. A run for a newer head may have posted a
+    # change request on that head; if it did so before this read, the head has
+    # moved and nothing is dismissed. If it posts after, it is not in the list.
+    if keep_commit and standing and head_sha(gh, pr) != keep_commit:
+        print("head moved while withdrawing; leaving change requests alone")
+        return
+    for r in standing:
+        try:
+            gh.request(
+                "PUT",
+                f"/repos/{gh.repo}/pulls/{pr}/reviews/{r['id']}/dismissals",
+                {"message": message, "event": "DISMISS"},
+            )
+            print(f"withdrew automated change request {r['id']}")
+        except GitHubError as exc:
+            warn(f"could not dismiss review {r['id']}: {exc}")
+
+
 def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> int:
     review = load_review(row)
-    if review is None:
-        print(f"status={row.get('status')}; no review to post")
-        return 0
     current = head_sha(gh, pr)
     if current != sha:
+        # A run for the newer head is coming; anything done here could act on
+        # that run's review.
         print(f"head moved {sha} -> {current}; not posting a stale review")
         return 0
     labels = (
@@ -292,6 +352,20 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
     )
     if any(str(lb.get("name", "")).lower() == opt_out.lower() for lb in labels):
         print(f"PR carries '{opt_out}'; not posting")
+        withdraw(gh, pr, author, "Withdrawn: this PR opted out of automated review.")
+        return 0
+    if review is None:
+        # The head is `sha`, so a change request on any other commit is about
+        # code that has since changed, and no review is replacing it.
+        print(f"status={row.get('status')}; no review to post")
+        withdraw(
+            gh,
+            pr,
+            author,
+            f"Withdrawn: the automated review of {sha[:12]} did not complete, "
+            "and this request was about an earlier commit.",
+            keep_commit=sha,
+        )
         return 0
     verdict, summary, findings = review
     new = post(gh, pr, sha, verdict, summary, findings[:MAX_FINDINGS])
