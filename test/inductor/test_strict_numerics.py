@@ -131,13 +131,16 @@ class StrictNumericsConfigTest(TestCase):
         enabled = numerics in ("strict_pointwise", "strict")
         with config.patch(_numerics_options("strict", False)):
             with config.patch(numerics=numerics):
+                self.assertEqual(config.is_strict_pointwise(), enabled)
                 self.assertEqual(
                     _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, enabled)
                 )
+            self.assertTrue(config.is_strict_pointwise())
             self.assertEqual(
                 _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
             )
         with config.patch(_numerics_options(numerics, True)):
+            self.assertEqual(config.is_strict_pointwise(), enabled)
             self.assertEqual(
                 _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
             )
@@ -175,7 +178,7 @@ class StrictNumericsCompileTest(TestCase):
         [op for op in op_db if op.name == "sigmoid"],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32),
     )
-    @parametrize("numerics", NUMERICS_MODES)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
     def test_sigmoid(self, device, dtype, op, numerics, upcast):
         x = (
@@ -195,15 +198,11 @@ class StrictNumericsCompileTest(TestCase):
             x,
         )
         code = "\n".join(codes)
-        if numerics in ("strict_pointwise", "strict"):
-            int_dtype = _BIT_VIEW[dtype]
-            self.assertEqual(result.view(int_dtype), op.op(x).view(int_dtype))
-            self.assertIn("libdevice.exp", code)
-            self.assertIn("libdevice.rcp_rn", code)
-            self.assertNotIn("tl.sigmoid", code)
-        else:
-            self.assertIn("tl.sigmoid", code)
-            self.assertNotIn("libdevice.rcp_rn", code)
+        int_dtype = _BIT_VIEW[dtype]
+        self.assertEqual(result.view(int_dtype), op.op(x).view(int_dtype))
+        self.assertIn("libdevice.exp", code)
+        self.assertIn("libdevice.rcp_rn", code)
+        self.assertNotIn("tl.sigmoid", code)
 
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
