@@ -98,6 +98,15 @@ except ImportError:
         pass
 
 
+try:
+    from torch.testing._internal.test_report import finalize_report
+
+    HAS_TEST_REPORT = True
+except ImportError:
+    # The installed torch predates the report writer (tests sometimes run
+    # against a nightly), so no report is requested or finalized.
+    HAS_TEST_REPORT = False
+
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -521,6 +530,25 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     return executable
 
 
+def _test_run_report_args(
+    test_file: str, is_cpp_test: bool, reports_dir: str | None
+) -> list[str]:
+    if not HAS_TEST_REPORT:
+        return []
+    if not is_cpp_test:
+        if reports_dir:
+            return [f"--save-test-run-reports={reports_dir}"]
+        return ["--no-save-test-run-reports"]
+    if not reports_dir:
+        return []
+    report_dir = Path(reports_dir) / sanitize_file_name(test_file)
+    return [
+        "-p",
+        "torch.testing._internal.test_report",
+        f"--report-dir={report_dir}",
+    ]
+
+
 def run_test(
     test_module: ShardedTest,
     test_directory,
@@ -596,6 +624,10 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    unittest_args.extend(
+        _test_run_report_args(test_file, is_cpp_test, options.save_test_run_reports)
+    )
 
     if options.hw_classification:
         # forward hw classification filter to test subprocess
@@ -813,16 +845,35 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
+    cache_dir = REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
 
     def read_pytest_cache(key: str) -> Any:
-        cache_file = (
-            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
-        )
         try:
-            with open(cache_file) as f:
+            with open(cache_dir / key) as f:
                 return f.read()
         except FileNotFoundError:
             return None
+
+    def finalize_test_report(ret_code: int, signal_name: str) -> None:
+        # The report writer (torch/testing/_internal/test_report.py) publishes its
+        # path and the running test here; a process that died left that test
+        # unrecorded.
+        report_path = read_pytest_cache("report_path")
+        if not HAS_TEST_REPORT or report_path is None:
+            return
+        inflight = read_pytest_cache("report_inflight")
+        try:
+            finalize_report(
+                json.loads(report_path),
+                json.loads(inflight) if inflight is not None else None,
+                "timed_out" if ret_code == 124 else "crashed",
+                f"the test process exited with code {ret_code}{signal_name}",
+            )
+        except OSError as e:
+            # A broken report must not fail the test run or its retries.
+            print_to_file(f"Could not finalize the test report: {e}")
+        for key in ("report_path", "report_inflight"):
+            (cache_dir / key).unlink(missing_ok=True)
 
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
@@ -842,6 +893,8 @@ def run_test_retries(
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
+        if ret_code != 0:
+            finalize_test_report(ret_code, signal_name)
 
         # Read what just failed/ran
         try:
@@ -1585,6 +1638,23 @@ def parse_args():
         help="enable coverage",
         default=PYTORCH_COLLECT_COVERAGE,
     )
+    default_run_reports_dir = str(REPO_ROOT / "test/test-run-reports")
+    parser.add_argument(
+        "--save-test-run-reports",
+        nargs="?",
+        const=default_run_reports_dir,
+        default=default_run_reports_dir if IS_CI else None,
+        metavar="DIR",
+        help="write JSONL test run reports (default: test/test-run-reports)",
+    )
+    parser.add_argument(
+        "--no-save-test-run-reports",
+        dest="save_test_run_reports",
+        action="store_const",
+        const=None,
+        default=argparse.SUPPRESS,
+        help="do not write JSONL test run reports",
+    )
     parser.add_argument(
         "-i",
         "--include",
@@ -1744,6 +1814,10 @@ def parse_args():
     args, extra = parser.parse_known_args()
     if "--" in extra:
         extra.remove("--")
+    if args.save_test_run_reports and not os.path.isabs(args.save_test_run_reports):
+        args.save_test_run_reports = str(
+            REPO_ROOT / "test" / args.save_test_run_reports
+        )
     args.additional_args = extra
     return args
 

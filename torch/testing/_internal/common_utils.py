@@ -184,6 +184,7 @@ SLOW_TESTS_FILE = ""
 TEST_BAILOUTS = False
 TEST_DISCOVER = False
 TEST_IN_SUBPROCESS = False
+TEST_SAVE_RUN_JSONL = ""
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
@@ -270,6 +271,11 @@ class TestEnvironment:
     # Specifically, this includes env vars that are set to non-default values and
     # are not implied. Maps from env var name -> value (int)
     repro_env_vars: dict = {}
+    # Every env var registered below with include_in_repro, mapped to the value in
+    # effect: "1" or "0" for flags (implied ones included), the parsed value for
+    # settings ("" when unset). The test report stores these as the environment's
+    # flags (torch/testing/_internal/test_report.py).
+    env_var_values: dict = {}
 
     # Defines a flag usable throughout the test suite, determining its value by querying
     # the specified environment variable.
@@ -314,8 +320,10 @@ class TestEnvironment:
         if env_var_val is None:
             implied = implied_by_fn()
             enabled = enabled or implied
-        if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[env_var] = env_var_val
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = "1" if enabled else "0"
+            if (enabled != default) and not implied:
+                TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         if name in globals():
@@ -350,6 +358,8 @@ class TestEnvironment:
     ):
         value = default if env_var is None else os.getenv(env_var)
         value = parse_fn(value)
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = "" if value is None else str(value)
         if include_in_repro and (value != default):
             TestEnvironment.repro_env_vars[env_var] = value
 
@@ -1119,6 +1129,11 @@ def prof_meth_call(*args, **kwargs):
 torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[method-assign]
 torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[method-assign]
 
+# The test run reports (torch/testing/_internal/test_report.py). Relative to the
+# cwd like the junit path, so a run from test/ matches run_test.py's directory.
+TEST_RUN_REPORTS_DIR = 'test-run-reports'
+
+
 def _get_test_report_path():
     # allow users to override the test file location. We need this
     # because the distributed tests run the same test file multiple
@@ -1140,6 +1155,7 @@ def parse_cmd_line_args():
     global TEST_BAILOUTS
     global TEST_DISCOVER
     global TEST_IN_SUBPROCESS
+    global TEST_SAVE_RUN_JSONL
     global TEST_SAVE_XML
     global UNITTEST_ARGS
     global USE_PYTEST
@@ -1157,6 +1173,11 @@ def parse_cmd_line_args():
     parser.add_argument('--save-xml', nargs='?', type=str,
                         const=_get_test_report_path(),
                         default=_get_test_report_path() if IS_CI else None)
+    parser.add_argument('--save-test-run-reports', nargs='?', type=str,
+                        const=TEST_RUN_REPORTS_DIR,
+                        default=TEST_RUN_REPORTS_DIR if IS_CI else None)
+    parser.add_argument('--no-save-test-run-reports', dest='save_test_run_reports',
+                        action='store_const', const=None, default=argparse.SUPPRESS)
     parser.add_argument('--discover-tests', action='store_true')
     parser.add_argument('--log-suffix', type=str, default="")
     parser.add_argument('--run-parallel', type=int, default=1)
@@ -1198,6 +1219,7 @@ def parse_cmd_line_args():
     PYTEST_SINGLE_TEST = args.pytest_single_test
     TEST_DISCOVER = args.discover_tests
     TEST_IN_SUBPROCESS = args.subprocess
+    TEST_SAVE_RUN_JSONL = args.save_test_run_reports
     TEST_SAVE_XML = args.save_xml
     REPEAT_COUNT = args.repeat
     SHOWLOCALS = args.showlocals
@@ -1527,6 +1549,10 @@ def run_tests(argv=None):
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
             other_args += ['--save-xml', TEST_SAVE_XML]
+        if TEST_SAVE_RUN_JSONL:
+            other_args.append(f'--save-test-run-reports={TEST_SAVE_RUN_JSONL}')
+        else:
+            other_args.append('--no-save-test-run-reports')
         if HW_CLASSIFICATION is not None:
             other_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
 
@@ -1592,6 +1618,12 @@ def run_tests(argv=None):
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+        if (
+            TEST_SAVE_RUN_JSONL
+            and not any(arg.startswith('--report-dir') for arg in pytest_args)
+        ):
+            report_dir = os.path.join(TEST_SAVE_RUN_JSONL, sanitize_test_filename(argv[0]))
+            pytest_args += ['-p', 'torch.testing._internal.test_report', f'--report-dir={report_dir}']
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 
