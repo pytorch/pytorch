@@ -52,6 +52,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
+from torch.nn.modules.linear_cross_entropy_options import _MM_FP32_ACCUM_DEVICES, _MM_OUT_DTYPE_DEVICES
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
@@ -5735,6 +5736,143 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             explicit._adjust(4096, 16384, 4096, torch.bfloat16, cuda).batch_chunk_size,
             4096,
         )
+
+    def _skip_unless_current_accelerator(self, device_type):
+        accelerator = torch.accelerator.current_accelerator(check_available=True)
+        if accelerator is None or accelerator.type != device_type:
+            self.skipTest(f"{device_type} is not available")
+
+    @contextlib.contextmanager
+    def _default_reduced_precision_matmul(self):
+        # The LCE device tuples claim fp32 accumulation under the default matmul
+        # precision flags; e.g. allow_fp16_accumulation=True breaks it on CUDA.
+        # Only CUDA has such flags today.
+        matmul = torch.backends.cuda.matmul
+        fp16_accumulation = matmul.allow_fp16_accumulation
+        fp16_reduction = (matmul.allow_fp16_reduced_precision_reduction,
+                          matmul.allow_fp16_reduced_precision_reduction_split_k)
+        bf16_reduction = (matmul.allow_bf16_reduced_precision_reduction,
+                          matmul.allow_bf16_reduced_precision_reduction_split_k)
+        matmul.allow_fp16_accumulation = False
+        matmul.allow_fp16_reduced_precision_reduction = (True, True)
+        matmul.allow_bf16_reduced_precision_reduction = (True, True)
+        try:
+            yield
+        finally:
+            matmul.allow_fp16_accumulation = fp16_accumulation
+            matmul.allow_fp16_reduced_precision_reduction = fp16_reduction
+            matmul.allow_bf16_reduced_precision_reduction = bf16_reduction
+
+    @parametrize_test("device_type", _MM_FP32_ACCUM_DEVICES)
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    def test_linear_cross_entropy_mm_fp32_accum_devices(self, device_type, dtype):
+        """A device in ``_MM_FP32_ACCUM_DEVICES`` must accumulate a same-dtype
+        ``addmm_`` in fp32, as ``acc_policy="compact"`` relies on it to skip the
+        weight-grad scratch.
+
+        Row ``[+L, s, ..., s, -L]`` against a column of ones: an fp32 accumulator
+        holds every partial sum exactly and returns ``254*s``; a ``dtype``
+        accumulator loses each ``s`` added while ``+-L`` is held, under any split
+        of K that does not isolate ``+-L``. The 1024x1024 output keeps this on
+        the tiled GEMM that ``grad_linear_weight.addmm_`` uses rather than a GEMV.
+        """
+        self._skip_unless_current_accelerator(device_type)
+        K, L, s = 256, 2048.0, 2.0 ** -6
+        row = torch.full((K,), s, dtype=dtype, device=device_type)
+        row[0], row[-1] = L, -L
+        a = row.expand(1024, K).contiguous()
+        b = torch.ones(K, 1024, dtype=dtype, device=device_type)
+        with self._default_reduced_precision_matmul():
+            out = torch.zeros(1024, 1024, dtype=dtype, device=device_type).addmm_(a, b)
+        self.assertEqual(
+            out, torch.full_like(out, (K - 2) * s), atol=0, rtol=0,
+            msg=f"{device_type} {dtype}: addmm_ does not accumulate in fp32. "
+                f"Remove {device_type!r} from _MM_FP32_ACCUM_DEVICES.",
+        )
+
+    @parametrize_test("device_type", _MM_OUT_DTYPE_DEVICES)
+    @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    def test_linear_cross_entropy_mm_out_dtype_devices(self, device_type, dtype):
+        """A device in ``_MM_OUT_DTYPE_DEVICES`` must compute the four
+        ``out_dtype=torch.float32`` overloads as fp32 matmuls of the upcast
+        operands. Integer-valued operands keep every partial sum exact in fp32,
+        so the comparison is exact whatever the summation order.
+        """
+        self._skip_unless_current_accelerator(device_type)
+        f32 = torch.float32
+        a, b, c = (
+            torch.randint(-4, 5, shape, dtype=dtype, device=device_type)
+            for shape in ((2, 128, 256), (2, 256, 128), (2, 128, 128))
+        )
+        ref = a.to(f32) @ b.to(f32)
+        with self._default_reduced_precision_matmul():
+            actual = {
+                "mm": torch.mm(a[0], b[0], out_dtype=f32, out=torch.empty_like(ref[0])),
+                "addmm": torch.addmm(c[0], a[0], b[0], out_dtype=f32, out=torch.empty_like(ref[0])),
+                "bmm": torch.bmm(a, b, out_dtype=f32, out=torch.empty_like(ref)),
+                "baddbmm": torch.baddbmm(c, a, b, out_dtype=f32, out=torch.empty_like(ref)),
+            }
+        expected = {"mm": ref[0], "addmm": ref[0] + c[0].to(f32), "bmm": ref, "baddbmm": ref + c.to(f32)}
+        for op, out in actual.items():
+            self.assertEqual(
+                out, expected[op], atol=0, rtol=0,
+                msg=f"{device_type} {dtype}: {op}(out_dtype=torch.float32) does not match the fp32 "
+                    f"reference. Remove {device_type!r} from _MM_OUT_DTYPE_DEVICES.",
+            )
+
+    @parametrize_test("device_type", sorted(set(_MM_OUT_DTYPE_DEVICES) & set(_MM_FP32_ACCUM_DEVICES)))
+    def test_linear_cross_entropy_device_gates_independent(self, device_type):
+        """Force all four combinations of the two device gates on a device that
+        passes both. The flags driven by ``_MM_OUT_DTYPE_DEVICES`` must not move
+        with the accumulator gate, ``alloc_weight_grad_chunk`` must not move with
+        the ``out_dtype=`` gate, and every combination must match the fp64
+        reference. bf16 input with fp32 ``acc_dtype`` under ``compact`` is the
+        configuration in which both gates are consulted.
+        """
+        import torch.nn.modules.linear_cross_entropy as lce
+
+        self._skip_unless_current_accelerator(device_type)
+        N, D, V, chunk = 64, 32, 256, 16
+        dtype, acc_dtype = torch.bfloat16, torch.float32
+        inp = torch.randn(N, D, dtype=dtype, device=device_type)
+        lw = torch.randn(V, D, dtype=dtype, device=device_type)
+        target = torch.randint(V, (N,), device=device_type)
+        options = nn.LinearCrossEntropyOptions(acc_policy="compact", acc_dtype=acc_dtype, batch_chunk_size=chunk)
+
+        ref_inp, ref_lw = (t.detach().cpu().double().requires_grad_() for t in (inp, lw))
+        ref_loss = F.linear_cross_entropy(ref_inp, ref_lw, target.cpu())
+        ref_loss.backward()
+        feps = 3 * torch.finfo(dtype).eps
+
+        out_dtype_flags = (
+            "linear_weight_cast_dtype", "alloc_input_grad_acc_buf", "alloc_input_chunk_acc_buf",
+            "forward_uses_acc_input", "forward_uses_mm_out_dtype", "input_grad_uses_logits_lw",
+        )
+        configs = {}
+        for gates in product([True, False], repeat=2):
+            mm_out_dtype, mm_fp32_accum = gates
+            # An eligible torch._native override replaces the op body and never reads the gates.
+            with mock.patch.object(lce, "_MM_OUT_DTYPE_DEVICES", (device_type,) if mm_out_dtype else ()), \
+                    mock.patch.object(lce, "_MM_FP32_ACCUM_DEVICES", (device_type,) if mm_fp32_accum else ()), \
+                    torch.backends.python_native.operations_disabled("_linear_cross_entropy_batch_chunked"):
+                ctx = lce._ChunkContext.build(
+                    inp, lw, target, linear_bias=None, weight=None, reduction="mean", ignore_index=-100,
+                    label_smoothing=0.0, batch_chunk_size=chunk, acc_policy="compact", acc_dtype=acc_dtype,
+                    compute_input_grad=True, compute_linear_weight_grad=True, compute_linear_bias_grad=False,
+                )
+                x, w = (t.detach().clone().requires_grad_() for t in (inp, lw))
+                loss = F.linear_cross_entropy(x, w, target, options=options)
+                loss.backward()
+            configs[gates] = (tuple(getattr(ctx, f) for f in out_dtype_flags), ctx.alloc_weight_grad_chunk)
+            for name, actual, expected in (
+                ("loss", loss, ref_loss), ("input grad", x.grad, ref_inp.grad), ("weight grad", w.grad, ref_lw.grad),
+            ):
+                err = (actual.cpu().double() - expected).norm() / expected.norm()
+                self.assertLessEqual(err.item(), feps, msg=f"{name}, (mm_out_dtype, mm_fp32_accum) = {gates}")
+        for gate in (True, False):
+            self.assertEqual(configs[gate, True][0], configs[gate, False][0])
+            self.assertEqual(configs[True, gate][1], configs[False, gate][1])
+        self.assertEqual(len(set(configs.values())), 4)
 
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)

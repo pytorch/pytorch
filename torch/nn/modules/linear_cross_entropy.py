@@ -3,10 +3,7 @@ from functools import cached_property
 
 import torch
 
-from .linear_cross_entropy_options import (
-    _gemm_accumulates_in_fp32,
-    _mm_supports_out_dtype,
-)
+from .linear_cross_entropy_options import _MM_FP32_ACCUM_DEVICES, _MM_OUT_DTYPE_DEVICES
 
 
 __all__ = []
@@ -216,7 +213,7 @@ class _ChunkViews:
     @property
     def weight_grad_input(self) -> torch.Tensor:
         ctx = self.ctx
-        if ctx.mm_has_out_dtype and not ctx.weight_grad_mm_same_dtype:
+        if ctx.mm_out_dtype and not ctx.weight_grad_mm_same_dtype:
             return self.input_chunk
         return self.input_chunk_acc
 
@@ -225,7 +222,7 @@ class _ChunkViews:
         # Without out_dtype= mm, mixed dtypes need a matching-dtype copy in
         # logits_acc_buf.
         ctx = self.ctx
-        if ctx.mm_has_out_dtype or ctx.weight_grad_mm_same_dtype:
+        if ctx.mm_out_dtype or ctx.weight_grad_mm_same_dtype:
             return self.logits
         return ctx.logits_acc_buf.narrow(0, 0, self.bchunk_size).copy_(self.logits)
 
@@ -274,7 +271,7 @@ class _ChunkContext:
     num_batches: int
     in_features: int
     num_classes: int
-    mm_has_out_dtype: bool
+    mm_out_dtype: bool
     use_acc_dtype: bool
 
     acc_dtype: torch.dtype
@@ -524,10 +521,10 @@ class _ChunkContext:
         dtype = input.dtype
         num_batches, in_features = input.shape
         num_classes, _ = linear_weight.shape
-        # Backends with a validated out_dtype= mm take the fast path; the
-        # rest route mixed-dtype mm through explicit casts.
-        mm_has_out_dtype = _mm_supports_out_dtype(device.type)
-        gemm_fp32_accum = _gemm_accumulates_in_fp32(device.type)
+        # Devices without a validated out_dtype= mm route mixed-dtype mm
+        # through explicit casts; see _MM_OUT_DTYPE_DEVICES.
+        mm_out_dtype = device.type in _MM_OUT_DTYPE_DEVICES
+        mm_fp32_accum = device.type in _MM_FP32_ACCUM_DEVICES
         is_mps = device.type == "mps"
 
         _check_acc_dtype_compatible(dtype, acc_dtype)
@@ -555,14 +552,14 @@ class _ChunkContext:
         # ===== Dispatch flags =====
         # out_dtype= mm under compact writes the wider output directly; no cast.
         needs_linear_weight_cast = use_acc_dtype and (
-            not mm_has_out_dtype
+            not mm_out_dtype
             or (compute_input_grad and grad_input_dtype == logits_buf_dtype)
         )
         linear_weight_cast_dtype = (
             logits_buf_dtype if needs_linear_weight_cast else dtype
         )
         alloc_weight_grad_chunk = compute_linear_weight_grad and not (
-            acc_policy == "compact" and (gemm_fp32_accum or logits_buf_dtype == dtype)
+            acc_policy == "compact" and (mm_fp32_accum or logits_buf_dtype == dtype)
         )
         # Per-chunk acc_dtype scratch for grad_linear_bias; same
         # bulk-+-correction precision rationale as
@@ -572,24 +569,22 @@ class _ChunkContext:
         alloc_linear_bias_grad_chunk = compute_linear_bias_grad and use_acc_dtype
         alloc_input_grad_acc_buf = (
             compute_input_grad
-            and not mm_has_out_dtype
+            and not mm_out_dtype
             and (grad_input_dtype != linear_weight_cast_dtype or is_mps)
         )
         alloc_input_chunk_acc_buf = use_acc_dtype and (
             compute_linear_weight_grad
-            or (not mm_has_out_dtype and dtype != logits_buf_dtype)
+            or (not mm_out_dtype and dtype != logits_buf_dtype)
         )
         forward_uses_acc_input = (
-            use_acc_dtype and not mm_has_out_dtype and dtype != logits_buf_dtype
+            use_acc_dtype and not mm_out_dtype and dtype != logits_buf_dtype
         )
-        forward_uses_mm_out_dtype = mm_has_out_dtype and use_acc_dtype
+        forward_uses_mm_out_dtype = mm_out_dtype and use_acc_dtype
         weight_grad_mm_same_dtype = logits_buf_dtype == acc_dtype
         # Storage-trick fires when logits' dtype differs from the input-
         # grad accumulator dtype.
         input_grad_uses_logits_lw = (
-            mm_has_out_dtype
-            and compute_input_grad
-            and logits_buf_dtype != grad_input_dtype
+            mm_out_dtype and compute_input_grad and logits_buf_dtype != grad_input_dtype
         )
         # Per-iter ``logits.to(linear_weight.dtype)`` shared between the
         # inlined input-grad addmm and the inlined direct weight-grad addmm_.
@@ -600,7 +595,7 @@ class _ChunkContext:
         )
         alloc_logits_acc_buf = (
             alloc_weight_grad_chunk
-            and not mm_has_out_dtype
+            and not mm_out_dtype
             and logits_buf_dtype != acc_dtype
         )
         # Direct weight-grad path: reuse logits_buf storage for the
@@ -630,7 +625,7 @@ class _ChunkContext:
             num_batches=num_batches,
             in_features=in_features,
             num_classes=num_classes,
-            mm_has_out_dtype=mm_has_out_dtype,
+            mm_out_dtype=mm_out_dtype,
             use_acc_dtype=use_acc_dtype,
             acc_dtype=acc_dtype,
             weight_chunk_dtype=weight_chunk_dtype,
@@ -868,7 +863,7 @@ def _linear_cross_entropy_batch_chunked_accumulator(
       buffer-reuse decisions behind a single math call.
 
     The function body therefore should not introduce inline
-    ``if ctx.use_acc_dtype`` / ``if ctx.mm_has_out_dtype`` / etc. branches; new
+    ``if ctx.use_acc_dtype`` / ``if ctx.mm_out_dtype`` / etc. branches; new
     policy-aware behaviour belongs in one of the three locations
     above. The two existing inline branches (``if compute_input_grad``,
     ``if compute_linear_weight_grad``, etc.) gate optional outputs,
