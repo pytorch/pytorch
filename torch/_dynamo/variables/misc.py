@@ -143,14 +143,40 @@ class SuperVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         no_keywords(tx, "super", kwargs)
-        check_positional(tx, "super", len(args), 1, 2)
-        typevar = args[0]
+        check_positional(tx, "super", len(args), 0, 2)
+        if args:
+            typevar = args[0]
+            objvar = args[1] if len(args) == 2 else None
+        else:
+            if not tx.f_code.co_argcount:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): no arguments"]
+                )
+            name = tx.f_code.co_varnames[0]
+            objvar = tx.symbolic_locals.get(name)
+            if name in tx.f_code.co_cellvars:
+                objvar = cast(CellVariable, tx._cellvar(name))._current_contents(tx)
+            if objvar is None or isinstance(objvar, (NullVariable, DeletedVariable)):
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): arg[0] deleted"]
+                )
+            if "__class__" not in tx.f_code.co_freevars:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): __class__ cell not found"]
+                )
+            typevar = cast(CellVariable, tx._cellvar("__class__"))._current_contents(tx)
+            if typevar is None:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): empty __class__ cell"]
+                )
         if not issubclass(typevar.python_type(), type):
+            if not args:
+                msg = f"super(): __class__ is not a type ({typevar.python_type_name()})"
+                raise_observed_exception(RuntimeError, tx, args=[msg])
             raise_type_error(
                 tx, f"super() argument 1 must be type, not {typevar.python_type_name()}"
             )
         type_arg = typevar.as_python_constant()
-        objvar = args[1] if len(args) == 2 else None
         if objvar is not None and objvar.is_constant_none():
             objvar = None
         if objvar is not None:
@@ -165,6 +191,14 @@ class SuperVariable(VariableTracker):
                 try:
                     classvar = generic_getattr(tx, objvar, "__class__")
                     class_type = classvar.get_real_python_backed_value()
+                    if class_type is NO_SUCH_SUBOBJ:
+                        unimplemented(
+                            gb_type="super(): unresolved __class__",
+                            context=f"objvar: {objvar}, classvar: {classvar}",
+                            explanation="Dynamo cannot determine the object's __class__ "
+                            "to validate super() initialization.",
+                            hints=[*graph_break_hints.SUPPORTABLE],
+                        )
                 except ObservedAttributeError:
                     handle_observed_exception(tx)
                     class_type = None

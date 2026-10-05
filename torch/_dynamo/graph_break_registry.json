@@ -4909,6 +4909,16 @@
       ]
     }
   ],
+  "GB8378": [
+    {
+      "Gb_type": "super(): unresolved __class__",
+      "Context": "objvar: {objvar}, classvar: {classvar}",
+      "Explanation": "Dynamo cannot determine the object's __class__ to validate super() initialization.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0283": [
     {
       "Gb_type": "Failed to make weakref to graph-created external object",

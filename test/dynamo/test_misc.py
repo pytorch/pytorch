@@ -6050,6 +6050,177 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
+    @parametrize("case", ["constructor", "instance", "classmethod", "cell", "none"])
+    def test_super_init_without_arguments(self, case):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            def value(self, x):
+                if case == "constructor":
+                    return super().value(x)
+                super_obj = super(Base, self)
+                if case == "none":
+                    self = None
+                super.__init__(super_obj)
+                if case == "none":
+                    return x + 1
+                return super_obj.value(x)
+
+            @classmethod
+            def class_value(cls, x):
+                super_obj = super(Base, cls)
+                super.__init__(super_obj)
+                return super_obj.value(cls, x)
+
+            def cell_value(self, x):
+                def get_self():
+                    return self
+
+                super_obj = super(Base, get_self())
+                super.__init__(super_obj)
+                return super_obj.value(x)
+
+        def fn(x):
+            if case == "classmethod":
+                return Derived.class_value(x)
+            if case == "cell":
+                return Derived().cell_value(x)
+            return Derived().value(x)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize(
+        "case",
+        [
+            "no_arguments",
+            "missing_class",
+            "deleted",
+            "deleted_cell",
+            "non_type",
+            "empty_class",
+        ],
+    )
+    def test_super_init_without_arguments_errors(self, case):
+        class Base:
+            def value(self, x):
+                return x + 1
+
+        class Derived(Base):
+            def value(self, x):
+                def get_self():
+                    return self
+
+                super_obj = super(Derived, self)
+                del self
+                try:
+                    super.__init__(super_obj)
+                except RuntimeError as error:
+                    return super_obj.value(x), str(error)
+                return x, "no error"
+
+            def deleted_value(self, x):
+                super_obj = super(Derived, self)
+                del self
+                try:
+                    super.__init__(super_obj)
+                except RuntimeError as error:
+                    return super_obj.value(x), str(error)
+                return x, "no error"
+
+        x = torch.ones(1)
+
+        def no_arguments():
+            super_obj = super(Derived, Derived())
+            try:
+                super.__init__(super_obj)
+            except RuntimeError as error:
+                return super_obj.value(x), str(error)
+            return x, "no error"
+
+        def missing_class(x):
+            super_obj = super(Derived, Derived())
+            try:
+                super.__init__(super_obj)
+            except RuntimeError as error:
+                return super_obj.value(x), str(error)
+            return x, "no error"
+
+        __class__ = 1
+
+        def invalid_class(x):
+            # Keep __class__ in co_freevars without reading a possibly empty cell.
+            if False:
+                return __class__
+            super_obj = super(Derived, Derived())
+            try:
+                super.__init__(super_obj)
+            except RuntimeError as error:
+                return super_obj.value(x), str(error)
+            return x, "no error"
+
+        if case == "no_arguments":
+            fn, args = no_arguments, ()
+        elif case == "missing_class":
+            fn, args = missing_class, (x,)
+        elif case in ("non_type", "empty_class"):
+            if case == "empty_class":
+                del __class__
+            fn, args = invalid_class, (x,)
+        elif case == "deleted_cell":
+            fn, args = Derived().value, (x,)
+        else:
+            fn, args = Derived().deleted_value, (x,)
+        expected = fn(*args)
+        self.assertNotEqual(expected[1], "no error")
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(*args), expected
+        )
+
+    @parametrize("fullgraph", [False, True])
+    def test_super_init_deferred_class(self, fullgraph):
+        from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
+
+        class Base:
+            pass
+
+        class Derived(Base):
+            pass
+
+        class Proxy:
+            @property
+            def __class__(self):
+                return Derived
+
+        def fn(x, obj):
+            super_obj = super(Base, Derived())
+            try:
+                super.__init__(super_obj, Derived, obj)
+            except TypeError:
+                return x + 2
+            return x + 1
+
+        getattro = UserDefinedObjectVariable.tp_getattro_impl
+
+        def deferred_getattro(obj, tx, name):
+            if type(obj.value) is Proxy and name == "__class__":
+                raise NotImplementedError
+            return getattro(obj, tx, name)
+
+        x, obj = torch.ones(1), Proxy()
+        expected = fn(x, obj)
+        with patch.object(
+            UserDefinedObjectVariable, "tp_getattro_impl", deferred_getattro
+        ):
+            compiled = torch.compile(fn, backend="eager", fullgraph=fullgraph)
+            if fullgraph:
+                with self.assertRaisesRegex(Unsupported, "super.*__class__"):
+                    compiled(x, obj)
+            else:
+                self.assertEqual(compiled(x, obj), expected)
+
     @parametrize(
         "case",
         [
