@@ -1,5 +1,5 @@
 """GitHub-native PR stacks for the merge bot: reading and validating them, finding
-what landed, and building the commits that rebase them."""
+what landed, and building the commits that merge or rebase them."""
 
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ def get_native_stack(org: str, project: str, pr_num: int) -> NativeStack | None:
 
 
 def stack_dependencies_line(numbers: list[int]) -> str:
-    """The `Stack dependencies` line of the landed commit of a stacked PR, which names
+    """The line that the merge bot adds to the landed commit of a stacked PR to name
     the PRs below it, bottom first."""
     return STACK_DEPENDENCIES + ", ".join(f"#{num}" for num in numbers)
 
@@ -139,10 +139,10 @@ def _log(repo: GitRepo, rev: str, *options: str) -> list[tuple[str, str]]:
 def _own_trailers(message: str) -> tuple[str, list[int]]:
     """The URL of the last `Pull Request resolved` line of `message` ("" if none) and
     the PRs, bottom first, that the `Stack dependencies` line after it names. A
-    commit lands the PR of that URL: the merge bot appends that URL's line to the
-    PR's body, which may quote other commits' lines. Only LF ends a line, as for `git
-    log --grep`: the Co-authored-by lines after the bot's lines hold author names,
-    which may contain other line separators."""
+    commit lands the PR of that URL: the merge bot appends these lines to the PR's
+    body, which may quote other commits' lines. Only LF ends a line, as for `git log
+    --grep`: the Co-authored-by lines after the bot's lines hold author names, which
+    may contain other line separators."""
     lines = message.split("\n")
     resolved = [i for i, x in enumerate(lines) if x.startswith(PULL_REQUEST_RESOLVED)]
     if not resolved:
@@ -485,6 +485,37 @@ def _merge_tree(
     if merge.returncode == 1:
         raise NativeStackError(conflict)
     return merge.stdout.split("\n", 1)[0]
+
+
+def build_native_stack_commits(
+    repo: GitRepo,
+    base_sha: str,
+    landing: list[tuple[StackEntry, str]],
+    commits: list[tuple[str, str]],
+) -> str:
+    """Commit the changes of each PR in `landing`, as returned by
+    get_native_stack_landing_prs, on top of `base_sha`, without touching the
+    worktree or the index, and return the last commit. `commits` holds the author
+    (`Name <email>`) and the message of each PR's commit; the message is cleaned up
+    like `git commit -m` does."""
+    current = base_sha
+    for (entry, lower), (author, message) in zip(landing, commits, strict=True):
+        conflict = f"PR #{entry.number} has conflicts with the commits below it. "
+        tree = _merge_tree(repo, current, entry.head_oid, conflict + REBASE_HINT, lower)
+        if tree == repo.rev_parse(f"{current}^{{tree}}"):
+            raise NativeStackError(
+                f"PR #{entry.number} has no changes to land: it is empty, or its "
+                "changes already landed"
+            )
+        name, _, email = author.rpartition("<")
+        env = {
+            "GIT_AUTHOR_NAME": name.strip(),
+            "GIT_AUTHOR_EMAIL": email.removesuffix(">"),
+        }
+        message = _git(repo, "stripspace", stdin=message).stdout
+        commit = _git(repo, "commit-tree", tree, "-p", current, stdin=message, env=env)
+        current = commit.stdout.strip()
+    return current
 
 
 def _commit(repo: GitRepo, tree: str, parents: list[str], message: str) -> str:
