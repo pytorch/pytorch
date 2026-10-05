@@ -1830,7 +1830,7 @@ class TestInductorOpInfo(TestCase):
                 + "; ".join(accepted)
             )
         if not tested:
-            self.skipTest("no error input could be compiled with fullgraph=True")
+            self.skipTest("no error input to check under fullgraph=True")
 
 
 instantiate_device_type_tests(TestInductorOpInfo, globals(), allow_xpu=True)
