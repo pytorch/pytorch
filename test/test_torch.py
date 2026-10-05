@@ -10063,6 +10063,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             for expect, t in zip(expects, out):
                 self.assertTrue(expect.eq(t).all().item())
 
+        # Empty inputs, including all-empty splits, copy nothing
+        for shape, dim, split_sizes in (((30, 0, 50), 1, [0, 0]), ((0, 40), 1, [10, 30])):
+            x = torch.rand(*shape, device=device)
+            views = x.split_with_sizes(split_sizes, dim=dim)
+            out = [torch.empty_like(v) for v in views]
+            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            self.assertEqual([t.shape for t in out], [v.shape for v in views])
+
     def test_type(self):
         x = torch.randn(3, 3).double()
         self.assertEqual(x.type('torch.FloatTensor').dtype, torch.float32)
