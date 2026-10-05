@@ -6,7 +6,9 @@
 #include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/TransformationHelper.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/PhiloxStatelessRNG.h>
+#include <ATen/native/cpu/Loops.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -252,6 +254,27 @@ Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double
 
     philox_distribution_kernel<scalar_t>(
         "_philox_uniform_", self, key, sample_func, param_func);
+  });
+  return self;
+}
+
+Tensor& _philox_uniform_tensor_cpu_(
+    Tensor& self, const Tensor& key, const Tensor& low, const Tensor& high) {
+  philox_check_bound("_philox_uniform_", "low", low, self);
+  philox_check_bound("_philox_uniform_", "high", high, self);
+  auto iter = TensorIteratorConfig()
+      .add_output(self)
+      .add_const_input(self)
+      .add_owned_const_input(low.to(self.scalar_type()))
+      .add_owned_const_input(high.to(self.scalar_type()))
+      .build();
+  // Sample with the default [0, 1) bounds, then rescale in a second pass.
+  _philox_uniform_cpu_(self, key, 0.0, 1.0);
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
+    cpu_kernel(iter, [](scalar_t x, scalar_t lo, scalar_t hi) -> scalar_t {
+      return static_cast<scalar_t>(static_cast<dist_acctype<scalar_t>>(x) * (hi - lo) + lo);
+    });
   });
   return self;
 }
