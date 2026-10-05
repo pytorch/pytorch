@@ -1123,12 +1123,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // opaque hook_id so they can be individually unregistered. Registration is
   // expected to happen at setup time, not concurrently with collectives. See
   // Hooks.hpp.
-  //
-  // Gated pre/post hooks fire only while gated hooks are enabled process-wide
-  // (setGatedHooksEnabled), and otherwise cost an atomic load per collective.
-  // They suit a consumer that is needed only for some windows of a run, e.g.
-  // while a profiler records, and so stays registered rather than
-  // (un)registering mid-run.
   virtual bool supportsAbortHooks() const {
     return getDefaultBackend()->supportsAbortHooks();
   }
@@ -1157,46 +1151,20 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual void registerPreHook(int64_t hook_id, PreHook hook) {
-    preHooks_[hook_id] = {std::move(hook), /*gated=*/false};
-    updateHookFlags();
+    preHooks_[hook_id] = std::move(hook);
   }
 
   virtual void unregisterPreHook(int64_t hook_id) {
     preHooks_.erase(hook_id);
-    updateHookFlags();
   }
 
   virtual void registerPostHook(int64_t hook_id, PostHook hook) {
-    postHooks_[hook_id] = {std::move(hook), /*gated=*/false};
-    updateHookFlags();
+    postHooks_[hook_id] = std::move(hook);
   }
 
   virtual void unregisterPostHook(int64_t hook_id) {
     postHooks_.erase(hook_id);
-    updateHookFlags();
   }
-
-  // Unregistered with unregisterPreHook / unregisterPostHook.
-  void registerGatedPreHook(int64_t hook_id, PreHook hook) {
-    preHooks_[hook_id] = {std::move(hook), /*gated=*/true};
-    updateHookFlags();
-  }
-
-  void registerGatedPostHook(int64_t hook_id, PostHook hook) {
-    postHooks_[hook_id] = {std::move(hook), /*gated=*/true};
-    updateHookFlags();
-  }
-
-  // Returned by firePreHook and passed to the matching firePostHook, so the
-  // post-hooks of an op fire the gated hooks iff its pre-hooks did.
-  struct HookOpId {
-    int64_t id = 0;
-    bool gated = false;
-  };
-
-  // Returns the previous value, for the caller to restore.
-  static bool setGatedHooksEnabled(bool enabled);
-  static bool gatedHooksEnabled();
 
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.
@@ -1271,39 +1239,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Hooks.hpp. Ordered, so hooks fire in hook_id order: a consumer that has to
   // observe another hook's state (or be observed by it) picks its id instead of
   // depending on an unspecified traversal.
-  template <typename Hook>
-  struct HookEntry {
-    Hook hook;
-    bool gated = false;
-  };
-  std::map<int64_t, HookEntry<PreHook>> preHooks_;
-  std::map<int64_t, HookEntry<PostHook>> postHooks_;
-  bool hasGatedHooks_ = false;
-  bool hasUngatedHooks_ = false;
+  std::map<int64_t, PreHook> preHooks_;
+  std::map<int64_t, PostHook> postHooks_;
   // Monotonic id correlating a pre-hook call with its matching post-hook call.
-  // Starts at 1: HookOpId{} (id 0) means no hook fired.
-  std::atomic<int64_t> hookOpIdCounter_{1};
-
-  void updateHookFlags() {
-    hasGatedHooks_ = false;
-    hasUngatedHooks_ = false;
-    auto note = [this](bool gated) {
-      (gated ? hasGatedHooks_ : hasUngatedHooks_) = true;
-    };
-    for (const auto& entry : preHooks_) {
-      note(entry.second.gated);
-    }
-    for (const auto& entry : postHooks_) {
-      note(entry.second.gated);
-    }
-  }
-
-  // Whether a collective issued now fires any hook, and if so whether the
-  // gated ones fire too.
-  bool hooksActive(bool& gated) const {
-    gated = hasGatedHooks_ && gatedHooksEnabled();
-    return gated || hasUngatedHooks_;
-  }
+  std::atomic<int64_t> hookOpIdCounter_{0};
 
   static std::vector<at::Tensor> flattenTensorLists(
       const std::vector<std::vector<at::Tensor>>& tensorLists) {
@@ -1314,14 +1253,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return flat;
   }
 
-  HookOpId firePreHookImpl(
+  int64_t firePreHookImpl(
       HookOpName name,
       bool async_op,
       int64_t root,
-      bool gated,
       std::vector<at::Tensor> input_tensors,
       std::vector<at::Tensor> output_tensors) {
-    HookOpId op{hookOpIdCounter_++, gated};
+    int64_t op_id = hookOpIdCounter_++;
     if (!preHooks_.empty()) {
       PreHookArgs args{
           name,
@@ -1329,95 +1267,85 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
           std::move(input_tensors),
           std::move(output_tensors),
           root,
-          op.id};
+          op_id};
       for (auto& entry : preHooks_) {
-        if (gated || !entry.second.gated) {
-          entry.second.hook(args);
-        }
+        entry.second(args);
       }
     }
-    return op;
+    return op_id;
   }
 
  public:
   // Fire registered pre-hooks for a collective and return the op_id assigned to
-  // it (id 0 when no hooks fire). The tensor lists are only copied /
+  // it (0 when no hooks are registered). The tensor lists are only copied /
   // flattened into the hook args when a pre-hook is registered, so the common
   // no-hook path adds no work. Overloaded for the various collective tensor
   // shapes (flat, list-of-lists, single tensor, none). Invoked from the
   // dispatcher kernels in Ops.cpp; see firePostHook for the matching post-hook.
-  HookOpId firePreHook(
+  int64_t firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
       const std::vector<at::Tensor>& input_tensors,
       const std::vector<at::Tensor>& output_tensors = {}) {
-    bool gated = false;
-    if (!hooksActive(gated)) {
-      return {};
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
     }
-    return firePreHookImpl(
-        name, async_op, root, gated, input_tensors, output_tensors);
+    return firePreHookImpl(name, async_op, root, input_tensors, output_tensors);
   }
 
-  HookOpId firePreHook(
+  int64_t firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
       const std::vector<at::Tensor>& input_tensors,
       const std::vector<std::vector<at::Tensor>>& output_tensor_lists) {
-    bool gated = false;
-    if (!hooksActive(gated)) {
-      return {};
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
     }
     return firePreHookImpl(
         name,
         async_op,
         root,
-        gated,
         input_tensors,
         flattenTensorLists(output_tensor_lists));
   }
 
-  HookOpId firePreHook(
+  int64_t firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
       const std::vector<std::vector<at::Tensor>>& input_tensor_lists,
       const std::vector<at::Tensor>& output_tensors) {
-    bool gated = false;
-    if (!hooksActive(gated)) {
-      return {};
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
     }
     return firePreHookImpl(
         name,
         async_op,
         root,
-        gated,
         flattenTensorLists(input_tensor_lists),
         output_tensors);
   }
 
-  HookOpId firePreHook(
+  int64_t firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
       const at::Tensor& input_tensor,
       const at::Tensor& output_tensor) {
-    bool gated = false;
-    if (!hooksActive(gated)) {
-      return {};
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
     }
     return firePreHookImpl(
-        name, async_op, root, gated, {input_tensor}, {output_tensor});
+        name, async_op, root, {input_tensor}, {output_tensor});
   }
 
-  HookOpId firePreHook(HookOpName name, bool async_op, int64_t root) {
-    bool gated = false;
-    if (!hooksActive(gated)) {
-      return {};
+  int64_t firePreHook(HookOpName name, bool async_op, int64_t root) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
     }
-    return firePreHookImpl(name, async_op, root, gated, {}, {});
+    return firePreHookImpl(name, async_op, root, {}, {});
   }
 
   // Fire registered post-hooks for a collective, correlated with the matching
@@ -1425,16 +1353,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   void firePostHook(
       HookOpName name,
       bool async_op,
-      HookOpId op,
+      int64_t op_id,
       const c10::intrusive_ptr<Work>& work) {
-    if (op.id == 0) {
+    if (postHooks_.empty()) {
       return;
     }
-    PostHookArgs args{name, async_op, work, op.id};
+    PostHookArgs args{name, async_op, work, op_id};
     for (auto& entry : postHooks_) {
-      if (op.gated || !entry.second.gated) {
-        entry.second.hook(args);
-      }
+      entry.second(args);
     }
   }
 };

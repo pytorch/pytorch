@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import gzip
 import json
 import logging
 import os
@@ -48,12 +49,24 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_cuda import _get_torch_rocm_version, TEST_MULTIGPU
+from torch.profiler import (
+    CuspyConfig,
+    profile,
+    ProfilerActivity,
+    ProfilerActivityConfig,
+)
+from torch.testing._internal.common_cuda import (
+    _get_torch_rocm_version,
+    TEST_CUDA_GRAPH_TOOLS_ID,
+    TEST_CUPTI_V13_3,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_distributed import (
     core_dumps_disabled,
     get_required_world_size,
     get_timeout,
     init_multigpu_helper,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
@@ -80,7 +93,9 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
     skipIfRocmArch,
+    TemporaryFileName,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -7751,6 +7766,75 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         torch.cuda.synchronize()
         # This must not hang.
         dist.destroy_process_group()
+
+
+class CollectiveAnnotationTest(MultiProcContinuousTest):
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_captured_collective_is_annotated(self):
+        if not TEST_CUDA_GRAPH_TOOLS_ID:
+            self.skipTest("CUDA graph annotations are unavailable")
+        from torch.cuda.graph_annotations import get_kernel_annotations
+
+        torch.cuda.set_device(self.device)
+        x = torch.ones(1024, device=self.device)
+        dist.all_reduce(x)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, enable_annotations=True):
+            dist.all_reduce(x)
+        annotations = [
+            a
+            for kernel_annotations in get_kernel_annotations().values()
+            for a in kernel_annotations
+            if "Collective name" in a
+        ]
+        self.assertTrue(annotations, "no kernel carries collective metadata")
+        for annotation in annotations:
+            self.assertEqual(annotation["Collective name"], "allreduce")
+            self.assertEqual(annotation["In msg nelems"], 1024)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_cuspy_collective_is_annotated(self):
+        if not TEST_CUPTI_V13_3:
+            self.skipTest("requires libcupti >= 13.3")
+        torch.cuda.set_device(self.device)
+        x = torch.ones(1024, device=self.device)
+        dist.all_reduce(x)
+        torch.cuda.synchronize()
+        cuda_config = ProfilerActivityConfig(profiler_configs=[CuspyConfig()])
+        with TemporaryFileName(mode="w+") as trace_path:
+            with profile(
+                activities=[ProfilerActivity.CPU, {ProfilerActivity.CUDA: cuda_config}]
+            ) as prof:
+                dist.all_reduce(x)
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(trace_path)
+            if os.path.exists(trace_path + ".gz"):
+                with gzip.open(trace_path + ".gz", "rt") as f:
+                    events = json.load(f)["traceEvents"]
+            else:
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+        kernels = [
+            e
+            for e in events
+            if e.get("cat") == "kernel" and "nccl" in e.get("name", "").lower()
+        ]
+        self.assertTrue(kernels, "no NCCL kernel in the trace")
+        for kernel in kernels:
+            self.assertEqual(kernel["args"]["Collective name"], "allreduce")
+            self.assertEqual(kernel["args"]["In msg nelems"], 1024)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
+import torch
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -376,44 +378,45 @@ class CuspyObserver:
         finally:
             self.pop_annotation()
 
-    @contextlib.contextmanager
-    def annotate_collective(self, metadata: dict[str, Any]) -> Iterator[None]:
-        """Attach ``metadata`` to the kernels launched inside the block, for a
-        collective whose CPU op Cuspy does not see (c10d's ``record_param_comms``).
-        Eager only: captured kernels are tagged through ``mark_kernels``."""
-        import torch
+    def push_collective_kernel_metadata(self, metadata: dict[str, Any]) -> None:
+        """Attach a collective's ``record_param_comms`` fields to the kernels it
+        launches. Cuspy doesn't see ``record_param_comms``, so c10d calls this from a
+        pre-hook (see ``_set_collective_annotation_hooks``).
 
+        Pushes a new external correlation id and keys ``metadata`` on it, so the
+        fields land on every kernel this thread launches until the matching
+        :meth:`pop_collective_kernel_metadata`. The kernels also keep the name of the
+        innermost enclosing ``record_function`` scope.
+        """
         cuspy = self._cuspy
-        if (
-            not self.available
-            or cuspy is None
-            or torch.cuda.is_current_stream_capturing()
-        ):
-            yield
+        if not self.available or cuspy is None:
             return
-        chain = cuspy.external_id_chain(cuspy.current_external_correlation_id() or 0)
-        with self._ann_lock:
-            name = next(
-                (self._ext_names[i] for i in reversed(chain) if i in self._ext_names),
-                None,
-            )
+        # Only record_function scopes are named, and the chain runs outermost to
+        # innermost.
+        record_function_scope = None
+        current_id = cuspy.current_external_correlation_id()
+        if current_id is not None:
+            with self._ann_lock:
+                for i in reversed(cuspy.external_id_chain(current_id)):
+                    if i in self._ext_names:
+                        record_function_scope = self._ext_names[i]
+                        break
         ext_id = cuspy.push_external_correlation_id()
-        try:
-            if ext_id is not None:
-                # CUPTI tags a kernel with only the innermost external id, so carry
-                # the enclosing record_function name onto the new one.
-                if name is not None:
-                    with self._ann_lock:
-                        self._ext_names[ext_id] = name
-                # Keyed by ext_id rather than the current id: if CUPTI rejected the
-                # push, the current id is still the enclosing region's.
-                torch._C._profiler._cuspy.metadata_put_external(
-                    json.dumps(metadata), ext_id
-                )
-            yield
-        finally:
-            if ext_id is not None:
-                cuspy.pop_external_correlation_id()
+        if ext_id is None:
+            raise AssertionError(
+                "Cuspy is not started, but a collective annotation hook is still set; "
+                "the hooks must be unset before the Cuspy observer is closed"
+            )
+        # CUPTI tags a kernel with only the innermost external id, so carry the
+        # innermost record_function scope onto the new one.
+        if record_function_scope is not None:
+            with self._ann_lock:
+                self._ext_names[ext_id] = record_function_scope
+        # Keyed by ext_id rather than the current id: if CUPTI rejected the push, the
+        # current id is still the enclosing region's.
+        torch._C._profiler._cuspy.metadata_put_external(json.dumps(metadata), ext_id)
+
+    pop_collective_kernel_metadata = pop_annotation
 
     def annotation_names(self, *, reset: bool = False) -> dict[int, str]:
         """Snapshot of the ``external_id -> name`` map pushed so far; pass

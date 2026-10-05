@@ -1,18 +1,17 @@
 # Owner(s): ["oncall: distributed"]
 
-import subprocess
-import sys
+from unittest import mock
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import _set_gated_hooks_enabled, HookOpName
-from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-    TestCase,
+from torch._C._distributed_c10d import HookOpName
+from torch.distributed.distributed_c10d import (
+    _get_default_group,
+    _set_collective_annotation_hooks,
+    _unset_collective_annotation_hooks,
 )
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 class TestProcessGroupHooks(MultiProcContinuousTest):
@@ -111,8 +110,6 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         # each post correlates with its pre via op_id.
         self.assertEqual(len(pre_ops), len(post_ops))
         self.assertEqual(pre_op_ids, post_op_ids)
-        # firePreHook returns 0 when no hooks are registered.
-        self.assertNotIn(0, pre_op_ids)
 
         # After unregistering, no further hooks fire.
         pg.unregister_pre_hook(0)
@@ -153,64 +150,73 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
 
         dist.barrier()
 
-    def test_gated_hooks(self):
+    def test_collective_annotation_metadata(self):
         pg = _get_default_group()
-        calls: list[str] = []
-        pg.register_pre_hook(0, lambda args: calls.append("pre"), gated=True)
-        pg.register_post_hook(0, lambda args: calls.append("post"), gated=True)
+        seq = pg._get_sequence_number_for_group()
+        ws = self.world_size
+        peer = (self.rank + 1) % ws
+        annotator = mock.Mock()
+        _set_collective_annotation_hooks(annotator)
         try:
-            dist.all_reduce(torch.ones(2))
-            self.assertEqual(calls, [])
-            self.assertFalse(_set_gated_hooks_enabled(True))
-            try:
-                dist.all_reduce(torch.ones(2))
-            finally:
-                self.assertTrue(_set_gated_hooks_enabled(False))
-            self.assertEqual(calls, ["pre", "post"])
-            calls.clear()
-            dist.all_reduce(torch.ones(2))
-            self.assertEqual(calls, [])
+            dist.all_reduce(torch.ones(3))
+            dist.all_gather_into_tensor(torch.zeros(2 * ws), torch.ones(2))
+            if self.rank == 0:
+                dist.send(torch.ones(2), dst=peer)
+            else:
+                dist.recv(torch.zeros(2), src=peer)
         finally:
-            pg.unregister_post_hook(0)
-            pg.unregister_pre_hook(0)
+            _unset_collective_annotation_hooks(annotator)
+
+        allreduce, allgather, p2p = (
+            c.args[0] for c in annotator.push_collective_kernel_metadata.call_args_list
+        )
+        self.assertEqual(
+            allreduce,
+            {
+                "Collective name": "allreduce",
+                "In msg nelems": 3,
+                "Out msg nelems": 3,
+                "Group size": ws,
+                "Process Group Name": pg.group_name,
+                "Process Group Description": pg.group_desc,
+                "Process Group Ranks": str(list(range(ws))),
+                "Is asynchronized op": False,
+                "Rank": self.rank,
+                "dtype": "float32",
+                "Seq": seq + 1,
+            },
+        )
+        self.assertEqual(allgather["Collective name"], "_allgather_base")
+        self.assertEqual(allgather["In msg nelems"], 2)
+        self.assertEqual(allgather["Out msg nelems"], 2 * ws)
+        self.assertEqual(allgather["Seq"], seq + 2)
+        if self.rank == 0:
+            self.assertEqual(p2p["Collective name"], "send")
+            self.assertEqual(p2p["Dst Rank"], peer)
+        else:
+            self.assertEqual(p2p["Collective name"], "recv")
+            self.assertEqual(p2p["Src Rank"], peer)
+        self.assertEqual(p2p["Rank"], peer)
+        self.assertNotIn("Seq", p2p)
 
         dist.barrier()
 
-    def test_gated_post_hook_fires_if_pre_hook_did(self):
-        pg = _get_default_group()
-        posts: list[int] = []
-        # Disabling between the pre and post hooks doesn't drop the post hook.
-        pg.register_pre_hook(
-            0, lambda args: _set_gated_hooks_enabled(False), gated=True
+    def test_collective_annotation_hooks(self):
+        group = dist.new_group()
+        annotator = mock.Mock()
+        _set_collective_annotation_hooks(annotator)
+        dist.all_reduce(torch.ones(1), group=group)
+        _unset_collective_annotation_hooks(annotator)
+        dist.all_reduce(torch.ones(1), group=group)
+        self.assertEqual(
+            [name for name, _, _ in annotator.mock_calls],
+            ["push_collective_kernel_metadata", "pop_collective_kernel_metadata"],
         )
-        pg.register_post_hook(0, lambda args: posts.append(args.op_id), gated=True)
-        _set_gated_hooks_enabled(True)
-        try:
-            dist.all_reduce(torch.ones(2))
-        finally:
-            pg.unregister_post_hook(0)
-            pg.unregister_pre_hook(0)
-        self.assertEqual(len(posts), 1)
+        metadata = annotator.push_collective_kernel_metadata.call_args.args[0]
+        self.assertEqual(metadata["Process Group Name"], group.group_name)
+        dist.destroy_process_group(group)
 
         dist.barrier()
-
-
-class TestProcessGroupHooksAtExit(TestCase):
-    def test_python_hook_on_group_alive_at_exit(self):
-        # The group registry destroys the group, and with it the hook, after
-        # the interpreter has finalized.
-        script = """
-import torch.distributed as dist
-from torch._C._distributed_c10d import _register_process_group, ProcessGroup
-pg = ProcessGroup(dist.HashStore(), 0, 1)
-pg.register_pre_hook(0, lambda args: None)
-_register_process_group("hooked", pg)
-del pg
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, text=True
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
