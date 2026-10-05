@@ -596,6 +596,34 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compiler.call_count, 2)
         compiled.assert_called_once()
 
+    def test_compiled_cache_compiles_for_device_arch(self):
+        """A cold compile targets the dispatch device's arch, not a guess."""
+        seen_arch = []
+
+        def compiler(jit_func, *args):
+            seen_arch.append(os.environ.get("FLYDSL_GPU_ARCH"))
+            return mock.Mock()
+
+        def invoke(key):
+            dispatch = SimpleNamespace(device=SimpleNamespace(type="cuda", index=0))
+            run_cached_flydsl(
+                SimpleNamespace(),
+                object(),
+                constexpr_param=_CacheParam(key),
+                compiler=compiler,
+                dispatch_args=(dispatch,),
+            )
+
+        props = SimpleNamespace(gcnArchName="gfx950:sramecc+:xnack-")
+        with mock.patch("torch.cuda.get_device_properties", return_value=props):
+            with mock.patch.dict(os.environ, {"FLYDSL_GPU_ARCH": ""}):
+                invoke("detected")
+                # Scoped to the compile: the process environment is untouched.
+                self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "")
+            with mock.patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx942"}):
+                invoke("explicit")
+        self.assertEqual(seen_arch, ["gfx950", "gfx942"])
+
     def test_compiled_cache_serializes_same_param(self):
         jit_func = SimpleNamespace()
         compile_started = threading.Event()
@@ -629,6 +657,26 @@ class TestFlyDSLTemplate(TestCase):
 
         self.assertEqual(compile_calls, 1)
         compiled.assert_called_once_with("second")
+
+    @parametrize("block_m", (2, 4, 8))
+    def test_grouped_row_tile_upper_bound(self, block_m):
+        from itertools import product
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_config import (
+            grouped_row_tiles_upper_bound,
+        )
+
+        for total in range(9):
+            for groups in range(1, 5):
+                actual_max = max(
+                    sum((rows + block_m - 1) // block_m for rows in partition)
+                    for partition in product(range(total + 1), repeat=groups)
+                    if sum(partition) == total
+                )
+                self.assertEqual(
+                    grouped_row_tiles_upper_bound(total, groups, block_m),
+                    actual_max,
+                )
 
     def _assert_compiled_mm(
         self,
@@ -1199,6 +1247,173 @@ class TestFlyDSLTemplate(TestCase):
         self.assertNotIn("async_compile.flydsl", code)
         self.assertIn("extern_kernels._grouped_mm", code)
         self.assertEqual(result, fn(a_unaligned_base, b, offs), atol=3e-2, rtol=3e-2)
+
+    # ------------------------------------------------------------------
+    # MXFP8 ragged grouped GEMM (aten._scaled_grouped_mm_v2)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _mxfp8_quantize(x, block=32):
+        """Cast the last dim of `x` to MXFP8: e4m3 data + e8m0 block scales.
+
+        Returns (fp8 data, e8m0 scales, f32 scales) -- the f32 scales are the
+        exact values the e8m0 ones encode, so a reference can dequantize
+        without re-deriving the exponent.
+        """
+        k = x.shape[-1]
+        blocks = x.reshape(*x.shape[:-1], k // block, block)
+        amax = blocks.abs().amax(-1)
+        # e4m3 max is 448 = 2**8.8; take the exponent that maps amax below it.
+        exponent = torch.floor(torch.log2(amax.clamp(min=1e-30))).to(torch.int32) - 7
+        exponent = exponent.clamp(-127, 127)
+        scale_f32 = torch.exp2(exponent.float())
+        data = (
+            (blocks / scale_f32.unsqueeze(-1))
+            .clamp(-448, 448)
+            .to(torch.float8_e4m3fn)
+            .reshape(*x.shape[:-1], k)
+        )
+        scale_e8m0 = (exponent + 127).to(torch.uint8).view(torch.float8_e8m0fnu)
+        return data, scale_e8m0, scale_f32
+
+    @classmethod
+    def _mxfp8_grouped_reference(cls, a, a_scale, b, b_scale, offs, block=32):
+        """Dequantize and matmul per group, in f32."""
+        m, k = a.shape
+        g, n = b.shape[0], b.shape[1]
+        a_deq = a.float().reshape(m, k // block, block) * a_scale.unsqueeze(-1)
+        b_deq = b.float().reshape(g, n, k // block, block) * b_scale.unsqueeze(-1)
+        a_deq = a_deq.reshape(m, k)
+        b_deq = b_deq.reshape(g, n, k)
+        out = torch.zeros(m, n, device=a.device, dtype=torch.float32)
+        start = 0
+        for group in range(g):
+            end = int(offs[group])
+            if end > start:
+                out[start:end] = a_deq[start:end] @ b_deq[group].t()
+            start = end
+        return out.to(torch.bfloat16)
+
+    @classmethod
+    def _make_mxfp8_grouped_inputs(cls, group_sizes, k, n, device="cuda"):
+        offs = torch.tensor(group_sizes, device=device, dtype=torch.int32).cumsum(0)
+        offs = offs.to(torch.int32)
+        m = int(sum(group_sizes))
+        g = len(group_sizes)
+        a_hp = torch.randn(m, k, device=device) * 0.5
+        # The weight is generated as [G, N, K] row-major and handed to the op
+        # as the [G, K, N] view of it, which is the layout every scaled GEMM
+        # already requires of mat_b.
+        b_hp = torch.randn(g, n, k, device=device) * 0.5
+        a, a_scale, a_scale_f32 = cls._mxfp8_quantize(a_hp)
+        b, b_scale, b_scale_f32 = cls._mxfp8_quantize(b_hp)
+        reference = cls._mxfp8_grouped_reference(a, a_scale_f32, b, b_scale_f32, offs)
+        return (
+            a,
+            b.transpose(-2, -1),
+            a_scale,
+            b_scale.reshape(g, -1),
+            offs,
+            reference,
+        )
+
+    def test_flydsl_mxfp8_grouped_mm_row_windows(self):
+        """A token dim past the int32 operand limit is split, not truncated."""
+        import importlib
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_grouped_gemm_gfx950"
+        )
+        param = module.make_mxfp8_grouped_gemm_param(2048, 2048, 2, 256, 256)
+        total_m = 1 << 22
+        offs = torch.tensor([total_m // 2, total_m], dtype=torch.int32)
+        windows = list(
+            module._row_windows(total_m, param.k, param.n, offs, param.block_r)
+        )
+        # M * K here is 2**33, so this must split.
+        self.assertGreater(len(windows), 1)
+        covered = 0
+        for row_start, rows, window_offs in windows:
+            # Disjoint, contiguous, and never splitting a row tile.
+            self.assertEqual(row_start, covered)
+            self.assertEqual(rows % param.block_r, 0)
+            # Offsets are rebased into the window and clamped to it, so a group
+            # straddling the boundary ends at `rows` here and starts at 0 next.
+            self.assertEqual(int(window_offs.max()), rows)
+            self.assertGreaterEqual(int(window_offs.min()), 0)
+            covered += rows
+        self.assertEqual(covered, total_m)
+
+    def test_flydsl_mxfp8_grouped_mm_rejects_oversized_weight(self):
+        """B is passed whole, so an (E, N, K) past int32 must fail validation."""
+        import importlib
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_grouped_gemm_gfx950"
+        )
+        # 256 experts x N=2048 x K=7168 is ~3.76e9 elements.
+        with self.assertRaisesRegex(ValueError, "int32"):
+            module.make_mxfp8_grouped_gemm_param(7168, 2048, 256, 256, 256)
+        self.assertIsNone(
+            module.make_mxfp8_grouped_gemm_param_and_validate(7168, 2048, 256, 256, 256)
+        )
+        # The same layer with fewer experts per rank still fits.
+        self.assertIsNotNone(
+            module.make_mxfp8_grouped_gemm_param_and_validate(7168, 2048, 32, 256, 256)
+        )
+
+    def test_flydsl_mxfp8_grouped_mm_tile_starvation_follows_cu_count(self):
+        """The starvation threshold is the device's CU count, not a constant."""
+        import importlib
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_grouped_gemm_gfx950"
+        )
+        # 8 groups of 512 rows at N=2048: 16 row tiles x 8 col tiles = 128
+        # blocks at the default (256, 256) tile -- one full wave on a 128-CU
+        # partition, half a wave on a full 256-CU MI350X.
+        m, e, n = 8 * 512, 8, 2048
+        self.assertEqual(module.pick_tile(m, e, n, num_cus=128), (256, 256))
+        self.assertEqual(module.pick_tile(m, e, n, num_cus=256), (256, 128))
+        with mock.patch.object(module, "_current_device_cu_count", return_value=128):
+            self.assertEqual(module.pick_tile(m, e, n), (256, 256))
+
+    def test_flydsl_mxfp8_grouped_mm_refuses_non_gfx950_target(self):
+        """gfx942 has no MX support; compiling for it must fail loudly."""
+        import importlib
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_grouped_gemm_gfx950"
+        )
+        with (
+            mock.patch.object(module.flyc, "compile") as compile_,
+            mock.patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx942"}),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "requires gfx950.*gfx942"):
+                module._compile_gfx950(object())
+            compile_.assert_not_called()
+        with (
+            mock.patch.object(module.flyc, "compile") as compile_,
+            mock.patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx950"}),
+        ):
+            module._compile_gfx950("jit", 1)
+            compile_.assert_called_once_with("jit", 1)
 
 
 def _mxfp_case(mxfp_format, shape, device, a_is_transposed=False, b_is_transposed=True):
