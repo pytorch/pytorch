@@ -83,7 +83,7 @@ case ${image} in
         ROCM_VERSION="${GPU_ARCH_VERSION}"
         if [[ "${DOCKER_TAG_PREFIX}" == "rocm-preview" ]]; then
             THEROCK_INDEX_URL="https://nightly.repo.amd.com/rocm/core/whl-next/"
-            ROCM_VERSION=$(cat "${TOPDIR}/.ci/docker/ci_commit_pins/rocm-preview.txt")
+            ROCM_VERSION=$(tr -d '[:space:]' < "${TOPDIR}/.ci/docker/ci_commit_pins/rocm-preview.txt")
         elif [[ "${GPU_ARCH_VERSION}" == "7.14" ]]; then
             THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
         else

@@ -1184,9 +1184,14 @@ def main() -> None:
             if requested is not None:
                 pip_source = available_sources.get(requested)
                 if pip_source is None:
+                    versioned = sorted(
+                        (v for v in available_sources if v[:1].isdigit()),
+                        key=Version,
+                    )
+                    named = sorted(v for v in available_sources if not v[:1].isdigit())
                     print(
                         f"{toolkit} {requested} is not available on platform {PLATFORM}. "
-                        f"Available version(s): {', '.join(sorted(available_sources))}"
+                        f"Available version(s): {', '.join(versioned + named)}"
                     )
                     sys.exit(1)
             else:

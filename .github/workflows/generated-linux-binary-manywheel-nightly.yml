@@ -114,6 +114,18 @@ jobs:
             else
               echo "docker.io/${repo}:${tag} not on Docker Hub; using ECR"
             fi
+            # A representative image can exist after a partial image-build run
+            # while the independently built preview image is still missing.
+            if [[ -z "${registry_host}" ]]; then
+              repo="pytorch/manylinux2_28-builder"
+              tag="rocm-preview${suffix}"
+              if curl -fsS --retry 3 -o /dev/null "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"; then
+                echo "docker.io/${repo}:${tag} exists; using Docker Hub"
+              else
+                echo "docker.io/${repo}:${tag} not on Docker Hub; using ECR"
+                registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
+              fi
+            fi
           elif [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" == v* ]]; then
             # Release candidate: pin the Docker Hub image.
             suffix="-$(git rev-parse HEAD:.ci/docker)"
@@ -154,6 +166,25 @@ jobs:
               exit 1
             fi
             echo "  not in ECR yet (build-manywheel-images still running); retrying in 5 min..."
+            sleep 300
+          done
+          echo "Found ${repo}:${tag}"
+          # Matrix image builds complete independently, so the representative
+          # image above is not a readiness signal for the preview image.
+          repo="pytorch/manylinux2_28-builder"
+          tag="rocm-preview-${tree_hash}"
+          echo "Waiting for ${repo}:${tag} to be pushed to ECR by build-manywheel-images..."
+          deadline=$(( SECONDS + 60 * 60 ))
+          until aws ecr describe-images \
+              --region us-east-1 \
+              --repository-name "${repo}" \
+              --image-ids imageTag="${tag}" >/dev/null 2>&1; do
+            if (( SECONDS > deadline )); then
+              echo "ERROR: timed out (60 min) waiting for ${repo}:${tag} in ECR." >&2
+              echo "Did the rocm-preview build-manywheel-images job fail?" >&2
+              exit 1
+            fi
+            echo "  preview image not in ECR yet; retrying in 5 min..."
             sleep 300
           done
           echo "Found ${repo}:${tag}"

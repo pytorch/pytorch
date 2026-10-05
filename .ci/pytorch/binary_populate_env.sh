@@ -69,7 +69,7 @@ else
 fi
 # Keep stable HUD names while recording the exact preview pin in wheel metadata.
 if [[ "$DESIRED_CUDA" == "rocmpreview" ]]; then
-  ROCM_PREVIEW_PIN=$(cat "${PYTORCH_ROOT}/.ci/docker/ci_commit_pins/rocm-preview.txt")
+  ROCM_PREVIEW_PIN=$(tr -d '[:space:]' < "${PYTORCH_ROOT}/.ci/docker/ci_commit_pins/rocm-preview.txt")
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+rocm${ROCM_PREVIEW_PIN}"
 fi
 
