@@ -2213,6 +2213,10 @@ def is_valid_addmm_fusion(match):
     ):
         return False
 
+    alpha = match.output_node().kwargs.get("alpha", 1)
+    if not isinstance(alpha, (int, float)) or alpha != 1:
+        return False  # The addmm replacement doesn't carry add's alpha
+
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 
