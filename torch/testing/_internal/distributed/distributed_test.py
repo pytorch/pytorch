@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 import copy
+import functools
 import io
 import itertools
 import json
@@ -104,12 +105,16 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
 
 
-try:
-    import torchvision
+# Imported lazily: torchvision (and the torch._dynamo it pulls in) adds ~0.5s
+# to every spawned rank.
+@functools.cache
+def _torchvision():
+    try:
+        import torchvision
+    except Exception:  # Covering both ImportError and RuntimeError
+        return None
+    return torchvision
 
-    HAS_TORCHVISION = True
-except Exception:  # Covering both ImportError and RuntimeError
-    HAS_TORCHVISION = False
 
 if sys.platform == "win32":
     import msvcrt
@@ -201,9 +206,15 @@ class TestNamedTupleInput_1(NamedTuple):
     b: torch.tensor
 
 
-skipIfNoTorchVision = skip_but_pass_in_sandcastle_if(
-    not HAS_TORCHVISION, "no torchvision"
-)
+def skipIfNoTorchVision(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if _torchvision() is None:
+            raise unittest.SkipTest("no torchvision")
+        return func(*args, **kwargs)
+
+    return wrapper
+
 
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
@@ -4573,7 +4584,7 @@ class DistributedTest:
             models_to_test = [
                 (LargeNet(), torch.randn(1, 1000).cuda()),
             ]
-            if HAS_TORCHVISION:
+            if (torchvision := _torchvision()) is not None:
                 models_to_test.append(
                     (torchvision.models.resnet50(), torch.randn(1, 3, 3, 1000).cuda())
                 )
@@ -4823,7 +4834,7 @@ class DistributedTest:
                     nn.Linear(3, 1024), nn.Linear(1024, 1024), nn.Linear(1024, 3)
                 ).cuda(),
             ]
-            if HAS_TORCHVISION:
+            if (torchvision := _torchvision()) is not None:
                 models_to_test.append(torchvision.models.resnet50().cuda())
 
             for j, model in enumerate(models_to_test):
@@ -6553,7 +6564,7 @@ class DistributedTest:
 
             process_ids = 0
             process_group = torch.distributed.new_group([process_ids])
-            res50_model = torchvision.models.resnet50()
+            res50_model = _torchvision().models.resnet50()
             res50_model_sync = nn.SyncBatchNorm.convert_sync_batchnorm(
                 copy.deepcopy(res50_model), process_group
             )
@@ -7525,7 +7536,7 @@ class DistributedTest:
             models_to_test.extend(models_with_hook)
 
             # Add resnet model if we have torchvision installed.
-            if HAS_TORCHVISION:
+            if (torchvision := _torchvision()) is not None:
                 resnet_model = torchvision.models.resnet50()
                 models_to_test.append(
                     DDPUnevenTestInput(

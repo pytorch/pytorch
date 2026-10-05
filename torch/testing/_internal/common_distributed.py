@@ -27,7 +27,6 @@ from io import StringIO
 from typing import Any, NamedTuple
 
 import torch
-import torch._dynamo.test_case
 import torch.cuda.nccl
 import torch.distributed as c10d
 import torch.nn as nn
@@ -1819,38 +1818,52 @@ def _dynamo_dist_per_rank_init(
             c10d.destroy_process_group()
 
 
-class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
-    """
-    Test harness for single-process dynamo distributed tests,
-    initializes dist process group.
+# Built on first access so importing this module doesn't import torch._dynamo
+# (~0.4s per spawned rank).
+@functools.cache
+def _make_dynamo_distributed_single_proc_test_case():
+    import torch._dynamo.test_case
 
-    Prefer this for simple tests, as it's easier to debug.
-    """
+    class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
+        """
+        Test harness for single-process dynamo distributed tests,
+        initializes dist process group.
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            cls.rdvz_file = f.name
-        cls.rank = 0
-        device = torch.accelerator.current_accelerator().type
-        cls.device = f"{device}:{cls.rank}"
-        cls.device_ids = None if device in cls.device else [cls.rank]
-        c10d.init_process_group(
-            c10d.get_default_backend_for_device(device),
-            store=c10d.FileStore(cls.rdvz_file, 1),
-            rank=cls.rank,
-            world_size=1,
-        )
+        Prefer this for simple tests, as it's easier to debug.
+        """
 
-    @classmethod
-    def tearDownClass(cls):
-        c10d.destroy_process_group()
-        try:
-            os.remove(cls.rdvz_file)
-        except OSError:
-            pass
-        super().tearDownClass()
+        @classmethod
+        def setUpClass(cls):
+            super().setUpClass()
+            with tempfile.NamedTemporaryFile(delete=False) as f:
+                cls.rdvz_file = f.name
+            cls.rank = 0
+            device = torch.accelerator.current_accelerator().type
+            cls.device = f"{device}:{cls.rank}"
+            cls.device_ids = None if device in cls.device else [cls.rank]
+            c10d.init_process_group(
+                c10d.get_default_backend_for_device(device),
+                store=c10d.FileStore(cls.rdvz_file, 1),
+                rank=cls.rank,
+                world_size=1,
+            )
+
+        @classmethod
+        def tearDownClass(cls):
+            c10d.destroy_process_group()
+            try:
+                os.remove(cls.rdvz_file)
+            except OSError:
+                pass
+            super().tearDownClass()
+
+    return DynamoDistributedSingleProcTestCase
+
+
+def __getattr__(name):
+    if name == "DynamoDistributedSingleProcTestCase":
+        return _make_dynamo_distributed_single_proc_test_case()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class DynamoDistributedMultiProcTestCase(DistributedTestBase):
