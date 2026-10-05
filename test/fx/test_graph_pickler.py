@@ -60,6 +60,11 @@ def make_test_cls(cls, xfail_prop="_expected_failure_graph_pickler"):
 GraphPicklerCommonTemplate = make_test_cls(CommonTemplate)
 
 
+class _Unpicklable:
+    def __reduce__(self):
+        raise TypeError("cannot pickle")
+
+
 if HAS_CPU and HAS_DILL:
 
     class GraphPicklerCpuTests(TestCase):
@@ -116,29 +121,29 @@ class TestDebugDumps(TestCase):
         result = self.GraphPickler.debug_dumps([1, 2, 3], verbose=False)
         self.assertIsNone(result)
 
-    def test_simple_unpicklable_lambda(self):
+    def test_simple_unpicklable_object(self):
         """
-        A lambda at the root should return "root" as the unpicklable path.
+        An unpicklable object at the root should return "root" as its path.
         """
-        bad_obj = lambda x: x  # noqa: E731
+        bad_obj = _Unpicklable()
         result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
         self.assertIn("root", result)
 
     def test_nested_unpicklable_in_list(self):
         """
-        When a lambda is nested in a list, debug_dumps should find the path
+        When an unpicklable object is nested in a list, debug_dumps should find the path
         to it (e.g., "root[1]").
         """
-        bad_obj = [1, lambda x: x, 3]
+        bad_obj = [1, _Unpicklable(), 3]
         result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
         self.assertIn("root[1]", result)
 
     def test_nested_unpicklable_in_dict(self):
         """
-        When a lambda is nested in a dict, debug_dumps should find the path
+        When an unpicklable object is nested in a dict, debug_dumps should find the path
         to it (e.g., "root['bad_key']").
         """
-        bad_obj = {"good": 1, "bad": lambda x: x}
+        bad_obj = {"good": 1, "bad": _Unpicklable()}
         result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
         self.assertIn("root['bad']", result)
 
@@ -146,7 +151,7 @@ class TestDebugDumps(TestCase):
         """
         debug_dumps should find unpicklables even when deeply nested.
         """
-        bad_obj = {"level1": {"level2": {"level3": [1, 2, lambda x: x]}}}
+        bad_obj = {"level1": {"level2": {"level3": [1, 2, _Unpicklable()]}}}
         result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
         self.assertIn("level3", result)
         self.assertIn("[2]", result)
@@ -155,7 +160,7 @@ class TestDebugDumps(TestCase):
         """
         debug_dumps should handle tuples correctly.
         """
-        bad_obj = (1, 2, lambda x: x)
+        bad_obj = (1, 2, _Unpicklable())
         result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
         self.assertIn("root[2]", result)
 
@@ -176,7 +181,7 @@ class TestDebugDumps(TestCase):
 
         def build_nested(depth):
             if depth == 0:
-                return lambda x: x
+                return _Unpicklable()
             return [build_nested(depth - 1)]
 
         deeply_nested = build_nested(100)
@@ -193,7 +198,7 @@ class TestDebugDumps(TestCase):
         class Container:
             def __init__(self):
                 self.good = 1
-                self.bad = lambda x: x
+                self.bad = _Unpicklable()
 
         obj = Container()
         result = self.GraphPickler.debug_dumps(obj, verbose=False)
@@ -210,7 +215,7 @@ class TestDebugDumps(TestCase):
             good: int
             bad: object
 
-        obj = MyData(good=1, bad=lambda x: x)
+        obj = MyData(good=1, bad=_Unpicklable())
         result = self.GraphPickler.debug_dumps(obj, verbose=False)
         self.assertIn("bad", result)
 
