@@ -18,6 +18,7 @@ from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
     AllGatherInput,
+    DefaultAllGatherLayout,
 )
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -803,7 +804,9 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             reshard_after_forward=True,
         )
         if native_copy:
-            model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
+            model.set_all_gather_layout(
+                DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+            )
         local_weight = model.weight._local_tensor
         local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
         local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)

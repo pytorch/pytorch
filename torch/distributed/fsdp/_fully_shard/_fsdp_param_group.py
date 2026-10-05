@@ -21,12 +21,12 @@ from torch.distributed.fsdp._common_utils import (
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
+from ._all_gather_layout import AllGatherLayout, DEFAULT_ALL_GATHER_LAYOUT
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
-    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    _wait_all_gather,
     AllGather,
-    AllGatherOutputFn,
     AllGatherResult,
     DefaultAllGather,
     DefaultReduceScatter,
@@ -260,7 +260,7 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
-        self._all_gather_output_fn: AllGatherOutputFn = _default_all_gather_output_fn
+        self._all_gather_layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
         self._prepare_reduce_scatter_inputs: PrepareReduceScatterInputsFn = (
             _default_reduce_scatter_input_fn
         )
@@ -505,6 +505,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                self._all_gather_layout,
             )
 
     @_disable_functorch_if_active
@@ -561,7 +562,6 @@ class FSDPParamGroup:
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
-                    all_gather_output_fn=self._all_gather_output_fn,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -605,12 +605,9 @@ class FSDPParamGroup:
         # accumulated grad-reduction state, and restores sharded params.
         current_stream = self.device_handle.current_stream()
         if self._all_gather_result is not None:
-            if (event := self._all_gather_result.all_gather_event) is not None:
-                current_stream.wait_event(event)
-            work = self._all_gather_result.all_gather_work
-            if isinstance(work, dist.distributed_c10d.Work):
-                work.wait()
+            _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
+            self._all_gather_comm.release_output()
         if self._post_reduce_event is not None:
             current_stream.wait_event(self._post_reduce_event)
             self._post_reduce_event = None
@@ -627,7 +624,7 @@ class FSDPParamGroup:
             self._reshard_after_forward_event = None
         for fsdp_param in self.fsdp_params:
             fsdp_param.sharded_param.grad = None
-            leaf = getattr(fsdp_param, "_unsharded_param", None)
+            leaf = fsdp_param._unsharded_param
             if leaf is not None:
                 leaf.grad = None
         self._set_unsharded_grad_dtypes(defer_upcast=False)
@@ -901,12 +898,9 @@ class FSDPParamGroup:
         if self._all_gather_result is not None:
             # If there was a mistargeted unshard without a corresponding wait,
             # then we wait here and clear the unshard
-            if (event := self._all_gather_result.all_gather_event) is not None:
-                torch.accelerator.current_stream().wait_event(event)
-            work = self._all_gather_result.all_gather_work
-            if isinstance(work, dist.distributed_c10d.Work):
-                work.wait()
+            _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
+            self._all_gather_comm.release_output()
         self._post_forward_indices.clear()
 
     def _get_partial_reduce_grad(self, param: FSDPParam) -> torch.Tensor | None:
@@ -941,7 +935,7 @@ class FSDPParamGroup:
         # gradients, and the reduce-scatter copy-in upcasts the rest. Only a
         # gradient that starts accumulating across backwards needs the cast.
         for fsdp_param in self._fsdp_params_with_wider_grad_dtype:
-            param = getattr(fsdp_param, "_unsharded_param", None)
+            param = fsdp_param._unsharded_param
             if param is None or not param.requires_grad:
                 continue
             grad, dtype = param.grad, fsdp_param.unsharded_grad_dtype
@@ -992,7 +986,7 @@ class FSDPParamGroup:
 
     def _get_unsharded_grad_to_reduce(self, param: FSDPParam) -> torch.Tensor | None:
         """Returns the unsharded gradient to reduce-scatter, or ``None`` to skip."""
-        if not hasattr(param, "_unsharded_param"):
+        if param._unsharded_param is None:
             return None
         unsharded_param = param.unsharded_param
         # A group unused in this microbatch may still own gradients from an
@@ -1120,15 +1114,21 @@ class FSDPParamGroup:
     # Utilities #
     def _to_sharded(self):
         if not self.is_sharded:
+            if self._all_gather_result is not None:
+                # Discard a post-forward mesh prefetch before changing meshes
+                _wait_all_gather(self._all_gather_result)
+                self._all_gather_result = None
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
+            self._all_gather_comm.release_output()
 
     def _to_sharded_post_forward(self):
         if not self.is_sharded_post_forward:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded_post_forward()
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
+            self._all_gather_comm.release_output()
 
     def _to_unsharded(self):
         if not self.is_unsharded:
