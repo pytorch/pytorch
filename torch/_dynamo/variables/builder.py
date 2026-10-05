@@ -163,9 +163,7 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
-    TypeDictSource,
     TypeMROSource,
-    TypeSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
@@ -179,12 +177,9 @@ from ..utils import (
     common_constant_types,
     dict_keys,
     enumerate_items_with_dict_position,
-    find_bound_builtin_method_descriptor,
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
-    get_type_dict_no_user_code,
-    get_type_mro_no_user_code,
     is_frozen_dataclass,
     is_function,
     is_function_or_wrapper,
@@ -198,7 +193,6 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
-    iter_mro_static_attrs,
     list_reverseiterator,
     list_reverseiterator_backing_list,
     list_reverseiterator_len,
@@ -239,7 +233,6 @@ from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
-    ClassMethodDescriptorVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
@@ -248,10 +241,8 @@ from .functions import (
     GetSetDescriptorVariable,
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
-    MethodDescriptorVariable,
     MethodWrapperVariable,
     PropertyVariable,
-    SkipFunctionVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
@@ -647,114 +638,34 @@ def lookup_spec_from_dynamo_source(
     return _walk_spec(current_spec, full_path=path, start_index=1)
 
 
-def bound_builtin_method_descriptor(
-    value: Any, *, allow_torch: bool = False
-) -> Any | None:
+def bound_builtin_method_descriptor(value: Any) -> Any | None:
     if not isinstance(value, types.BuiltinMethodType):
         return None
 
     method_self = value.__self__
-    method_self_type = type(method_self)
-    method_self_is_type = issubclass(method_self_type, type)
     # BuiltinMethodType also covers module-level C functions like len and
     # torch.add.  Keep those on the existing function/trace-rule path.
-    if method_self is None or issubclass(method_self_type, types.ModuleType):
+    if method_self is None or isinstance(method_self, types.ModuleType):
         return None
 
     # random.Random methods mutate RNG state.  Existing random handling either
     # records RandomValueSource calls from a RandomVariable, or graph-breaks for
     # pre-bound module helpers like random.random.
-    if not method_self_is_type and isinstance(method_self, random.Random):
+    if isinstance(method_self, random.Random):
         return None
 
-    owner = cast(type, method_self if method_self_is_type else method_self_type)
+    owner = method_self if isinstance(method_self, type) else type(method_self)
 
     # Torch-internal bound methods already have dedicated Dynamo paths. Do not
     # route them through the generic bound-builtin descriptor VT, which changes
     # graph break boundaries for calls like Tensor.mul(...).
-    if not allow_torch and is_torch_class(owner):
+    if is_torch_class(owner):
         return None
 
-    return find_bound_builtin_method_descriptor(value)
-
-
-def guard_bound_builtin_method(
-    tx: "InstructionTranslatorBase",
-    source: Source,
-    value: types.BuiltinMethodType,
-    descriptor: object,
-) -> tuple[Source, Source]:
-    receiver = value.__self__
-    receiver_source = AttrSource(source, "__self__")
-    receiver_is_type = issubclass(type(receiver), type)
-    receiver_guard = (
-        GuardBuilder.CLASS_MATCH if receiver_is_type else GuardBuilder.ID_MATCH
-    )
-    install_guard(
-        source.make_guard(
-            functools.partial(GuardBuilder.BUILTIN_METHOD_MATCH, descriptor=descriptor)
-        ),
-        AttrSource(source, "__name__").make_guard(GuardBuilder.CONSTANT_MATCH),
-        receiver_source.make_guard(receiver_guard),
-    )
-
-    owner = cast(type, receiver if receiver_is_type else type(receiver))
-    owner_source: Source = (
-        receiver_source if receiver_is_type else TypeSource(receiver_source)
-    )
-    from .object_protocol import mro_attr_source
-
-    descriptor_source = mro_attr_source(
-        tx, owner, owner_source, value.__name__, expected=descriptor
-    )
-    if descriptor_source is None:
-        raise AssertionError(f"could not find {descriptor!r} in the MRO of {owner!r}")
-    install_guard(descriptor_source.make_guard(GuardBuilder.ID_MATCH))
-    return receiver_source, descriptor_source
-
-
-def normalize_descriptor_source(
-    tx: "InstructionTranslatorBase",
-    source: Source,
-    descriptor: types.ClassMethodDescriptorType | types.MethodDescriptorType,
-) -> Source:
-    if not isinstance(source, (DictGetItemSource, GetItemSource)) or not isinstance(
-        source.index, str
-    ):
-        return source
-    name = source.index
-    if isinstance(source.base, TypeDictSource):
-        return DictGetItemSource(source.base, name)
-    if isinstance(source.base, AttrSource) and source.base.member == "__dict__":
-        cls = tx.output.resolve_source_value(source.base.base)
-        if issubclass(type(cls), type):
-            metacls = type(cls)
-            custom_getattribute = (
-                next(iter_mro_static_attrs(metacls, "__getattribute__"), None)
-                is not type.__dict__["__getattribute__"]
-            )
-            custom_dict = (
-                next(iter_mro_static_attrs(metacls, "__dict__"), None)
-                is not type.__dict__["__dict__"]
-            )
-            if custom_getattribute or custom_dict:
-                unimplemented(
-                    gb_type="Unsupported descriptor source",
-                    context="class __dict__ source",
-                    explanation="Dynamo cannot safely guard a method descriptor "
-                    "returned by a custom metaclass __dict__.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            if get_type_dict_no_user_code(cls).get(name) is descriptor:
-                return DictGetItemSource(TypeDictSource(source.base.base), name)
-            unimplemented(
-                gb_type="Unsupported descriptor source",
-                context="class __dict__ source",
-                explanation="Dynamo cannot safely guard a method descriptor "
-                "returned by a custom metaclass __dict__.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-    return source
+    # BoundBuiltinMethodVariable needs the descriptor that created this bound
+    # method.  For class-bound methods, look on the class object itself (e.g.
+    # dict.fromkeys); for instance-bound methods, look on type(self).
+    return inspect.getattr_static(owner, value.__name__, None)
 
 
 class _missing:
@@ -1607,23 +1518,23 @@ class VariableBuilder:
                 ),
             )
         elif (
-            isinstance(value, types.BuiltinMethodType)
+            isinstance(value, types.MethodType)
             and istype(
                 getattr(value, "__self__", None), torch.autograd.function.FunctionMeta
             )
             and getattr(value, "__name__", "") == "apply"
-            and (descriptor := bound_builtin_method_descriptor(value, allow_torch=True))
-            is get_type_dict_no_user_code(torch._C._FunctionBase)["apply"]
+            and value == getattr(value.__self__, "apply", None)
         ):
             # handle aliased autograd function `apply` calls
-            value_source = self.get_source()
-            self_source, _ = guard_bound_builtin_method(
-                self.tx, value_source, value, descriptor
+            install_guard(
+                AttrSource(self.get_source(), "__func__").make_guard(
+                    GuardBuilder.CLOSURE_MATCH
+                )
             )
             return GetAttrVariable(
                 AutogradFunctionVariable(
                     value.__self__,
-                    source=self_source,
+                    source=AttrSource(self.source, member="__self__"),
                 ),
                 "apply",
                 py_type=type(value),
@@ -1681,15 +1592,6 @@ class VariableBuilder:
             return ErrorOnGraphBreakVariable(value.error_on_graph_break)
         elif isinstance(value, CudagraphOverrideContextManager):
             return CudagraphOverrideVariable(value.fwd, value.bwd)
-        elif (
-            isinstance(value, types.MethodDescriptorType)
-            and not is_torch_class(value.__objclass__)
-            and trace_rules.lookup_callable(value) in (None, SkipFunctionVariable)
-        ):
-            source = normalize_descriptor_source(self.tx, self.get_source(), value)
-            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            owner = VariableTracker.build(self.tx, value.__objclass__)
-            return MethodDescriptorVariable(value, owner=owner, source=source)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1995,17 +1897,11 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             return CollectionsNamedTupleFunction(value, source=self.source)
         elif (descriptor := bound_builtin_method_descriptor(value)) is not None:
-            value_source = self.get_source()
-            obj_source, descriptor_source = guard_bound_builtin_method(
-                self.tx, value_source, value, descriptor
-            )
-            obj_vt = VariableTracker.build(self.tx, value.__self__, obj_source)
-            return BoundBuiltinMethodVariable(
-                descriptor,
-                obj_vt,
-                descriptor_source=descriptor_source,
-                source=value_source,
-            )
+            self.install_guards(GuardBuilder.ID_MATCH)
+            method_self = value.__self__
+            obj_source = self.source and AttrSource(self.source, "__self__")
+            obj_vt = VariableTracker.build(self.tx, method_self, obj_source)
+            return BoundBuiltinMethodVariable(descriptor, obj_vt, source=self.source)
         elif is_function(value) and value in (float.fromhex, float.hex):
             self.install_guards(GuardBuilder.ID_MATCH)
             return GetAttrVariable(
@@ -2090,10 +1986,6 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = PropertyVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, types.ClassMethodDescriptorType):
-            source = normalize_descriptor_source(self.tx, self.get_source(), value)
-            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return ClassMethodDescriptorVariable(value, source=source)
         elif isinstance(value, types.MethodWrapperType):
             # Method-wrappers are written in C, and they are not guaranteed to
             # return the same object on attribute lookup. Therefore, we cannot
@@ -2590,7 +2482,7 @@ class VariableBuilder:
             first_item = value[0]
             if (
                 isinstance(first_item, type)
-                and get_type_mro_no_user_code(first_item) is value
+                and type.__getattribute__(first_item, "__mro__") is value
             ):
                 first_item_source = list_source.base
         output = [

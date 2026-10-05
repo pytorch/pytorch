@@ -47,12 +47,7 @@ from ..source import (
     TypeMROSource,
     TypeSource,
 )
-from ..utils import (
-    get_type_mro_no_user_code,
-    iter_mro_static_attrs,
-    iter_mro_static_dicts,
-    specialize_symnode,
-)
+from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -2212,23 +2207,10 @@ def mro_lookup(py_type: type, name: str) -> object:
     chain.  Returns the raw descriptor/value from the class __dict__,
     or NO_SUCH_SUBOBJ if not found.
     """
-    for value in iter_mro_static_attrs(py_type, name):
-        return value
+    for base in py_type.__mro__:
+        if name in base.__dict__:
+            return base.__dict__[name]
     return NO_SUCH_SUBOBJ
-
-
-def _raise_unsupported_classmethod_descriptor_on_dict_subclass(
-    name: str,
-) -> NoReturn:
-    unimplemented(
-        gb_type="Unsupported classmethod descriptor on dict subclass instance",
-        context=f"name={name}",
-        explanation="Dynamo cannot safely trace a C classmethod descriptor through a dict subclass instance.",
-        hints=[
-            "Call the descriptor through the class instead of an instance.",
-            *graph_break_hints.SUPPORTABLE,
-        ],
-    )
 
 
 def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
@@ -2238,7 +2220,7 @@ def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     every MRO CPython computes. A metaclass overriding ``mro()`` can put
     something else there, so check rather than assume.
     """
-    if not idx and get_type_mro_no_user_code(klass)[0] is klass:
+    if not idx and klass.__mro__[0] is klass:
         return klass_source
     return GetItemSource(TypeMROSource(klass_source), idx)
 
@@ -2248,9 +2230,6 @@ def mro_attr_source(
     klass: type,
     klass_source: Source,
     name: str,
-    expected: object = NO_SUCH_SUBOBJ,
-    *,
-    start_index: int = 0,
 ) -> "DictGetItemSource | None":
     """Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
 
@@ -2259,32 +2238,27 @@ def mro_attr_source(
     the class chain -- a different object than `mro_lookup` returned. Index the
     owning class's ``__dict__`` instead.
 
-    Returns None if *name* is absent from the searched MRO suffix; callers
-    decide whether that is an error.
+    Returns None if *name* is absent from the whole MRO; callers decide whether
+    that is an error.
     """
-    entries = tuple(iter_mro_static_dicts(klass))
-    for idx in range(start_index, len(entries)):
-        base, namespace = entries[idx]
-        if name not in namespace:
-            continue
-        descriptor = namespace[name]
-        if expected is not NO_SUCH_SUBOBJ and descriptor is not expected:
+    mro = klass.__mro__
+    for idx, base in enumerate(mro):
+        if name not in base.__dict__:
             continue
 
         # Guard the classes we walked past, so the owner stays the owner if one
         # of them later gains *name*. Deduplicated by (id(klass), name): the
         # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
-        if expected is NO_SUCH_SUBOBJ:
-            for absent_idx in range(start_index, idx):
-                absent_key = (id(entries[absent_idx][0]), name)
-                if absent_key in tx.output.guarded_mro_absent_keys:
-                    continue
-                tx.output.guarded_mro_absent_keys.add(absent_key)
-                install_guard(
-                    TypeDictSource(
-                        _mro_entry_source(klass, klass_source, absent_idx)
-                    ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
-                )
+        for absent_idx in range(idx):
+            absent_key = (id(mro[absent_idx]), name)
+            if absent_key in tx.output.guarded_mro_absent_keys:
+                continue
+            tx.output.guarded_mro_absent_keys.add(absent_key)
+            install_guard(
+                TypeDictSource(
+                    _mro_entry_source(klass, klass_source, absent_idx)
+                ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
+            )
 
         # Reuse the source when the same owner is reached again for the same
         # name, even from a differently-sourced object, so it does not collect
@@ -2353,19 +2327,7 @@ def _resolve_descriptor_get(
         )
         return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.ClassMethodDescriptorType):
-        descriptor_source = None
-        cls = class_vt.get_real_python_backed_value()
-        if (
-            cls is not NO_SUCH_SUBOBJ
-            and issubclass(type(cls), type)
-            and class_vt.source is not None
-        ):
-            descriptor_source = mro_attr_source(
-                tx, typing.cast(type, cls), class_vt.source, name
-            )
-        cmd_vt = variables.ClassMethodDescriptorVariable(
-            type_attr, source=descriptor_source
-        )
+        cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
         return cmd_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.WrapperDescriptorType):
         wd_vt = variables.WrapperDescriptorVariable(
@@ -2373,18 +2335,8 @@ def _resolve_descriptor_get(
         )
         return wd_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MethodDescriptorType):
-        descriptor_source = None
-        cls = class_vt.get_real_python_backed_value()
-        if (
-            cls is not NO_SUCH_SUBOBJ
-            and issubclass(type(cls), type)
-            and class_vt.source is not None
-        ):
-            descriptor_source = mro_attr_source(
-                tx, typing.cast(type, cls), class_vt.source, name
-            )
         md_vt = variables.MethodDescriptorVariable(
-            type_attr, owner=class_vt, source=descriptor_source
+            type_attr, owner=class_vt, source=source
         )
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.FunctionType):
@@ -2454,16 +2406,7 @@ def object_generic_getattr(
 
     # Step 2: Data descriptor takes priority over instance dict.
     if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
-        class_source = (
-            TypeSource(obj.source)
-            if isinstance(
-                type_attr,
-                (types.ClassMethodDescriptorType, types.MethodDescriptorType),
-            )
-            and obj.source is not None
-            else None
-        )
-        class_vt = VariableTracker.build(tx, py_type, class_source)
+        class_vt = VariableTracker.build(tx, py_type)
         result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source, name)
         if result is not None:
             return result
@@ -2491,16 +2434,7 @@ def object_generic_getattr(
         ):
             return variables.CallMethodVariable(obj, name, source=source)
 
-        class_source = (
-            TypeSource(obj.source)
-            if isinstance(
-                type_attr,
-                (types.ClassMethodDescriptorType, types.MethodDescriptorType),
-            )
-            and obj.source is not None
-            else None
-        )
-        class_vt = VariableTracker.build(tx, py_type, class_source)
+        class_vt = VariableTracker.build(tx, py_type)
         result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source, name)
         if result is not None:
             return result
