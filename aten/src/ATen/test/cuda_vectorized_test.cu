@@ -35,11 +35,20 @@ void reset_buffers() {
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
 
+#ifdef USE_ROCM
+  // ROCm vectorizes 1-byte types up to 16 and caps 4/8-byte types at 4.
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 16);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 16);
+  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), 4);
+#else
   ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), 8);
+#endif
 
   ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 1), 1);
   ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 1), 1);
