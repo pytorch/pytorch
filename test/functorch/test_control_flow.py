@@ -12493,6 +12493,77 @@ class TestControlFlowTracedDevice(TestCase):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
+    @parametrize("backend", ["raw", "raw_annotated", "eager", "aot_eager"])
+    @parametrize("inference_mode", [False, True])
+    def test_while_loop_body_carried_mutation_cudagraph_raises(
+        self, device, backend, inference_mode
+    ):
+        def cond_fn(i, acc, y, limit):
+            return i < limit
+
+        def body_fn(i, acc, y, limit):
+            acc.add_(1)
+            y.add_(3)
+            return i + 1, acc + 0
+
+        def f(x, y, limit):
+            y.mul_(0.5)
+            carried = (torch.zeros_like(limit), x)
+            if backend in ("raw", "raw_annotated"):
+                return torch.ops.higher_order.while_loop(
+                    cond_fn,
+                    body_fn,
+                    carried,
+                    (y, limit),
+                    mutated_arg_indices="1,2" if backend == "raw_annotated" else "",
+                )
+            return torch.while_loop(
+                lambda i, acc: cond_fn(i, acc, y, limit),
+                lambda i, acc: body_fn(i, acc, y, limit),
+                carried,
+            )
+
+        fn = (
+            f
+            if backend in ("raw", "raw_annotated")
+            else torch.compile(f, backend=backend, fullgraph=True)
+        )
+        with torch.inference_mode(inference_mode), torch.no_grad():
+            x = torch.ones(4, device=device)
+            y = torch.ones_like(x)
+            limit = torch.tensor(2, device=device)
+            out = fn(x, y, limit)
+            self.assertEqual(x, torch.full_like(x, 2))
+            self.assertEqual(out[1], torch.full_like(x, 3))
+
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            error = "body_fn must not mutate carried_inputs during CUDA graph capture"
+            for num_iters in (0, 2):
+                limit.fill_(num_iters)
+                stream.wait_stream(torch.cuda.current_stream())
+                with (
+                    self.subTest(num_iters=num_iters, phase="warmup"),
+                    self.assertRaisesRegex(RuntimeError, error),
+                    torch.cuda.stream(stream),
+                    ControlFlowOpWarmupDispatchMode(),
+                ):
+                    fn(x, y, limit)
+                graph = torch.cuda.CUDAGraph()
+                with (
+                    self.subTest(num_iters=num_iters, phase="capture"),
+                    self.assertRaisesRegex(RuntimeError, error),
+                    torch.cuda.graph(graph, stream=stream),
+                    CUDAGraphCaptureControlFlowOpDispatchMode(),
+                ):
+                    fn(x, y, limit)
+            torch.cuda.current_stream().wait_stream(stream)
+
+    @onlyCUDA
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
     @parametrize("backend", ["eager", "aot_eager"])
     def test_while_loop_cond_carried_mutation_cudagraph(self, device, backend):
         def f(x, y, limit):
