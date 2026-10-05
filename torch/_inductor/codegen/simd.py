@@ -106,7 +106,8 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 pexpr = PythonPrinter().doprint
 
-all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
+all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_", "r2_"])
+TRITON_MAX_TENSOR_DIMS = 5
 
 
 def get_max_tiles(default: int = 2) -> int:
@@ -552,9 +553,7 @@ def finished_after_kernel(
     results = OrderedSet().union(*(node.get_buffer_names() for node in partials))
     after = []
     for node in epilogue_nodes:
-        if node not in partials and any(
-            dep.name in results for dep in node.read_writes.reads
-        ):
+        if any(dep.name in results for dep in node.read_writes.reads):
             after.append(node)
             results |= node.get_buffer_names()
     return partials, after
@@ -870,7 +869,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         grid_dims = ["x", "y", "z"]
         pointwise_tensor_dims = list(reversed(grid_dims))
-        reduction_dims = ["r0_", "r1_"]
+        reduction_dims = ["r0_", "r1_", "r2_"]
         if no_x_dim:
             tensor_dims = reduction_dims
         elif no_r_dim:
@@ -4979,6 +4978,7 @@ class SIMDScheduling(BaseScheduling):
         self,
         node_info: NodeInfo,
         only_gen_src_code: bool,
+        is_first_combo_launch: bool,
     ) -> tuple[str, TritonKernel]:
         kernel_kwargs: dict[str, Any] = {}
         self.kernel_type.apply_feature_required_overrides(
@@ -4990,6 +4990,8 @@ class SIMDScheduling(BaseScheduling):
             tiling_scores=node_info.tiling_scores,
             **kernel_kwargs,
         )
+        kernel._from_combo_codegen = True
+        kernel._is_first_combo_launch = is_first_combo_launch
         self.process_kernel(kernel, node_info.node_schedule, only_gen_src_code)
         with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
@@ -5421,7 +5423,7 @@ class SIMDScheduling(BaseScheduling):
                     kernel_code_list.append((None, None, node_group))
                 else:
                     src_code, kernel = self._codegen_standalone_kernel(
-                        node_info, only_gen_src_code
+                        node_info, only_gen_src_code, not kernel_code_list
                     )
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
@@ -5476,7 +5478,9 @@ class SIMDScheduling(BaseScheduling):
                         carve_out = list(group)
                     for pn in carve_out:
                         co_src, co_kernel = self._codegen_standalone_kernel(
-                            node_schedule_map[pn], only_gen_src_code
+                            node_schedule_map[pn],
+                            only_gen_src_code,
+                            not kernel_code_list,
                         )
                         # pyrefly: ignore [bad-argument-type]
                         kernel_code_list.append((co_src, co_kernel, [pn]))
@@ -5539,7 +5543,9 @@ class SIMDScheduling(BaseScheduling):
 
                 for pn in carve_out_pns:
                     co_src_code, co_kernel = self._codegen_standalone_kernel(
-                        node_schedule_map[pn], only_gen_src_code
+                        node_schedule_map[pn],
+                        only_gen_src_code,
+                        not kernel_code_list,
                     )
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((co_src_code, co_kernel, [pn]))
@@ -5718,7 +5724,7 @@ class SIMDScheduling(BaseScheduling):
         Create a tiling dict from pointwise and reduction splits.
         """
         pw_prefixes = ("z", "y", "x")
-        reduction_prefixes = ("r0_", "r1_")
+        reduction_prefixes = ("r0_", "r1_", "r2_")
         if len(pw_tiling) > len(pw_prefixes):
             raise AssertionError(
                 f"expected len(pw_tiling) <= len(pw_prefixes), "
@@ -5784,20 +5790,16 @@ class SIMDScheduling(BaseScheduling):
         """
 
         def collapse_dims(
-            dims: Sequence[sympy.Expr], fallback_numel: sympy.Expr
+            dims: Sequence[sympy.Expr],
+            fallback_numel: sympy.Expr,
+            max_tiles: int | None = None,
         ) -> tuple[sympy.Expr, ...]:
             """
             Collapse dimensions to the maximum allowed number of tiles.
             """
             if not dims:
                 return (fallback_numel,)
-            max_tiles = get_max_tiles(2)
-            if V.graph.sizevars.statically_known_equals(
-                pointwise_numel, 1
-            ) and V.graph.sizevars.statically_known_gt(reduction_numel, 1):
-                # We only have at most two dimensions to tile over when emitting a
-                # reduction-only kernel.
-                max_tiles = min(max_tiles, 2)
+            max_tiles = min(max_tiles if max_tiles is not None else get_max_tiles(2), 3)
             num_leading_dims = max(0, len(dims) - max_tiles)
             first_trailing_dim = num_leading_dims + 1
             collapsed_leading_dim = sympy_product(dims[:first_trailing_dim])
@@ -5907,6 +5909,15 @@ class SIMDScheduling(BaseScheduling):
             for pointwise_tiling, reduction_tiling in itertools.product(
                 *zip(*node_tilings)
             ):
+                if (
+                    len(pointwise_tiling) + len(reduction_tiling)
+                    > TRITON_MAX_TENSOR_DIMS
+                ):
+                    pointwise_tiling = collapse_dims(
+                        pointwise_tiling,
+                        pointwise_numel,
+                        TRITON_MAX_TENSOR_DIMS - len(reduction_tiling),
+                    )
                 tilings.add(cls.create_tiling(pointwise_tiling, reduction_tiling))
 
         # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
