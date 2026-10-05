@@ -21,6 +21,27 @@ namespace c10d::nccl2 {
 
 namespace {
 std::atomic<uint64_t> nextCompletionKey{1};
+// Set while a CoalescedProfilerEvent is open on this thread.
+thread_local bool suppressWorkProfilerEvents = false;
+
+// Starts an async event named like stock ProcessGroupNCCL's: the
+// dist.record_comm name if set, else `nccl:<coll_name>`.
+void startProfilerEvent(
+    at::RecordFunction& recordFunction,
+    std::string_view coll_name,
+    c10::ArrayRef<at::Tensor> inputs) {
+  recordFunction._setAsync();
+  const auto& customName = get_comm_profiling_name();
+  const auto name =
+      customName.empty() ? c10::str("nccl:", coll_name) : customName;
+  if (!recordFunction.needsInputs()) {
+    recordFunction.before(name);
+    return;
+  }
+  std::vector<c10::IValue> args(inputs.begin(), inputs.end());
+  recordFunction.before(
+      name, c10::ArrayRef<const c10::IValue>(args.data(), args.size()));
+}
 } // namespace
 
 NCCLEventPool::NCCLEventPool(
@@ -150,29 +171,22 @@ WorkNCCL::WorkNCCL(
 
 WorkNCCL::~WorkNCCL() = default;
 
-void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
-  recordFunction_.emplace(at::RecordScope::USER_SCOPE);
-  if (!recordFunction_->isActive()) {
+void WorkNCCL::recordFunctionStart(
+    std::string_view coll_name,
+    c10::ArrayRef<at::Tensor> inputs) {
+  if (suppressWorkProfilerEvents) {
     return;
   }
-
-  std::lock_guard<std::mutex> lock(inputTensors_->mutex);
-  if (!inputTensors_->tensors.empty()) {
-    std::vector<c10::IValue> inputs;
-    inputs.reserve(inputTensors_->tensors.size());
-    for (const auto& tensor : inputTensors_->tensors) {
-      inputs.emplace_back(tensor);
-    }
-    recordFunction_->before(
-        coll_name,
-        c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
-  } else {
-    recordFunction_->before(coll_name, c10::ArrayRef<const c10::IValue>{});
+  recordFunction_.emplace(at::RecordScope::USER_SCOPE);
+  if (recordFunction_->isActive()) {
+    startProfilerEvent(*recordFunction_, coll_name, inputs);
   }
 }
 
-void WorkNCCL::recordStart(std::string_view coll_name) {
-  recordFunctionStart(coll_name);
+void WorkNCCL::recordStart(
+    std::string_view coll_name,
+    c10::ArrayRef<at::Tensor> inputs) {
+  recordFunctionStart(coll_name, inputs);
   state_->events->start->record(state_->stream);
 }
 
@@ -182,6 +196,20 @@ void WorkNCCL::recordEnd() {
   if (recordFunction_ && recordFunction_->isActive()) {
     recordFunction_->end();
   }
+}
+
+CoalescedProfilerEvent::CoalescedProfilerEvent(
+    std::string_view coll_name,
+    c10::ArrayRef<at::Tensor> inputs)
+    : prevSuppressed_(std::exchange(suppressWorkProfilerEvents, true)) {
+  if (recordFunction_.isActive()) {
+    startProfilerEvent(recordFunction_, coll_name, inputs);
+  }
+}
+
+// recordFunction_'s destructor ends the event.
+CoalescedProfilerEvent::~CoalescedProfilerEvent() {
+  suppressWorkProfilerEvents = prevSuppressed_;
 }
 
 bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {

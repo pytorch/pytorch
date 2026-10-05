@@ -508,6 +508,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
     const ::c10d::AllreduceCoalescedOptions& opts) {
   TORCH_CHECK(!tensors.empty(), "Tensor list must be nonempty");
   ++sequence_number_;
+  CoalescedProfilerEvent profilerEvent("allreduce_coalesced", tensors);
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(tensors.size());
   for (auto& tensor : tensors) {
@@ -577,7 +578,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
   auto staging = at::empty(
       {static_cast<int64_t>(getSize()) * input.numel()},
       input.options().memory_format(at::MemoryFormat::Contiguous));
-  auto work = allGatherSingleImpl(staging, input, opts.asyncOp, timeout);
+  auto work = allGatherSingleImpl(
+      staging, input, opts.asyncOp, timeout, /*profiling_title=*/"all_gather");
   work->setOutputs(outputList);
   auto rows = staging.view({getSize(), input.numel()});
   work->wait();
@@ -595,6 +597,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
       !inputTensors.empty() && outputTensorLists.size() == inputTensors.size(),
       "Input and output tensor lists must have the same nonzero size");
   ++sequence_number_;
+  CoalescedProfilerEvent profilerEvent("allgather_coalesced", inputTensors);
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   std::vector<at::Tensor> outputs;
   works.reserve(inputTensors.size());
@@ -625,6 +628,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
       !inputs.empty() && outputs.size() == inputs.size(),
       "Input and output tensor lists must have the same nonzero size");
   ++sequence_number_;
+  CoalescedProfilerEvent profilerEvent(
+      "all_gather_into_tensor_coalesced", inputs);
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(inputs.size());
   for (const auto i : c10::irange(inputs.size())) {
@@ -726,7 +731,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
       inputBuffer,
       static_cast<int>(opts.rootRank),
       opts.asyncOp,
-      operationTimeout(opts.timeout));
+      operationTimeout(opts.timeout),
+      /*profiling_title=*/"gather_single");
   work->setOutputs(std::vector<at::Tensor>{outputBuffer});
   return work;
 }
@@ -791,6 +797,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
       !outputs.empty() && inputs.size() == outputs.size(),
       "Input and output tensor lists must have the same nonzero size");
   ++sequence_number_;
+  CoalescedProfilerEvent profilerEvent(
+      "reduce_scatter_tensor_coalesced", inputs);
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(outputs.size());
   for (const auto i : c10::irange(outputs.size())) {
@@ -887,7 +895,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::send(
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   if (coalescing_batch_.has_value()) {
     coalescing_batch_->send(tensors.at(0), dstRank);
-    return c10::make_intrusive<CompletedWork>(tensors);
+    return makeWork<CompletedWork>(tensors);
   }
   auto work = sendImpl(
       tensors.at(0), dstRank, /*async_op=*/true, options_c10d_->timeout);
@@ -902,7 +910,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::recv(
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   if (coalescing_batch_.has_value()) {
     coalescing_batch_->recv(tensors.at(0), srcRank);
-    return c10::make_intrusive<CompletedWork>(tensors);
+    return makeWork<CompletedWork>(tensors);
   }
   auto work = recvImpl(
       tensors.at(0), srcRank, /*async_op=*/true, options_c10d_->timeout);
@@ -930,7 +938,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
       coalesced_work_.reset();
       return work;
     }
-    return c10::make_intrusive<CompletedWork>();
+    return makeWork<CompletedWork>();
   }
   return batch_op_issue(batch.ops, /*async_op=*/true, options_c10d_->timeout);
 }

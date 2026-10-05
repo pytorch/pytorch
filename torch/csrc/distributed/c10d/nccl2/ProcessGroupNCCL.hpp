@@ -541,7 +541,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      std::string_view profiling_title = "_all_gather_base");
   c10::intrusive_ptr<WorkNCCL> reduce_scatter(
       at::Tensor& output,
       const std::vector<at::Tensor>& input_list,
@@ -585,7 +586,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const at::Tensor& input_tensor,
       int root,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      std::string_view profiling_title = "gather");
 
   // Resolve a c10d per-op timeout (kUnsetTimeout -> communicator default).
   std::chrono::milliseconds operationTimeout(
@@ -639,7 +641,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // reads/writes `rank_` directly, which resolves to that protected member.
   std::optional<at::cuda::CUDAStream> internal_stream_;
   std::optional<at::cuda::CUDAEvent> dependency_event_;
-  at::DataPtr barrier_buffer_;
+  at::Tensor barrier_buffer_;
   enum class InitializationState {
     UNINITIALIZED,
     INITIALIZED,
