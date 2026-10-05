@@ -45,7 +45,7 @@ from ..exc import (
     Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, Source, TypeSource
+from ..source import AttrSource, Source
 from ..utils import format_source_range, istype
 
 
@@ -506,10 +506,6 @@ def getset_read(
     return lambda self, tx: accessor(self)
 
 
-def type_name_no_user_code(type_: type) -> str:
-    return type.__dict__["__name__"].__get__(type_, type(type_))
-
-
 def getset_build(
     accessor: Callable[[Any], Any],
 ) -> Getter:
@@ -943,25 +939,7 @@ def _wrap_descr_get(
     if all(a.is_constant_none() for a in args):
         raise_type_error(tx, "__get__(None, None) is invalid")
     obj = args[0]
-    obj_is_none = (
-        obj.peek_value() is None
-        if type(obj) is variables.LazyVariableTracker and not obj.is_realized()
-        else obj.is_constant_none()
-    )
-    owner_is_none = len(args) == 1 or args[1].is_constant_none()
-    # wrap_descr_get treats None as absent for both arguments and rejects the
-    # call when both are absent.
-    if obj_is_none and owner_is_none:
-        raise_type_error(tx, "__get__(None, None) is invalid")
-    if not owner_is_none:
-        owner = args[1]
-    else:
-        owner_source = TypeSource(obj.source) if obj.source else None
-        if owner_source is None and isinstance(
-            obj, variables.UserDefinedObjectVariable
-        ):
-            owner_source = obj.cls_source
-        owner = VariableTracker.build(tx, obj.python_type(), owner_source)
+    owner = args[1] if len(args) > 1 else obj.tp_getattro_impl(tx, "__class__")
     return func(self, tx, obj, owner)
 
 
