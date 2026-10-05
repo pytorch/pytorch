@@ -98,40 +98,69 @@ if triton is not None:
         class IntelGPUError(Exception):  # type: ignore[no-redef]
             pass
 
+    def _validate_launcher_source(
+        src: str, marker: str, scratch_binding_line: str
+    ) -> None:
+        """Validate Intel Triton launcher source has expected format.
+
+        Args:
+            src: Launcher source code to validate
+            marker: Expected marker string in the source
+            scratch_binding_line: Expected binding line (should not already be present)
+
+        Raises:
+            RuntimeError: If launcher format is unrecognized
+        """
+        if scratch_binding_line in src:
+            # Binding already injected, nothing to do
+            return
+        if src and marker not in src:
+            # Source is non-empty but lacks expected marker
+            raise RuntimeError(
+                "Intel Triton launcher source layout is not recognized; "
+                "expected the 'if (shared_memory)' block for the "
+                "global_scratch compatibility fix."
+            )
+
     def _patch_triton_intel_launcher(intel_driver: Any | None = None) -> None:
         if intel_driver is None:
             try:
                 import triton.backends.intel.driver as intel_driver  # type: ignore[import-not-found]
             except ImportError:
+                # Intel Triton is not available in this environment.
                 return
 
         make_launcher = getattr(intel_driver, "make_launcher", None)
-        if make_launcher is None or getattr(
-            make_launcher, "_torch_patched_global_scratch", False
-        ):
+        if make_launcher is None:
+            # Older or unexpected Intel Triton builds may not expose this hook.
+            return
+
+        if getattr(make_launcher, "_torch_patched_global_scratch", False):
+            # Avoid wrapping the launcher multiple times.
             return
 
         try:
             make_launcher_source = inspect.getsource(make_launcher)
         except (OSError, TypeError):
+            # Some launchers may not have inspectable Python source.
             make_launcher_source = ""
 
         scratch_binding = (
             "    set_scalar_arg<void*>(cgh, num_params - 1, &global_scratch);\n"
         )
         scratch_binding_line = scratch_binding.strip()
-        if scratch_binding_line in make_launcher_source:
-            return
-
         marker = "    if (shared_memory) {"
-        if make_launcher_source and marker not in make_launcher_source:
+
+        # Validate launcher source and check if patch is needed
+        _validate_launcher_source(make_launcher_source, marker, scratch_binding_line)
+        if scratch_binding_line in make_launcher_source:
+            # Newer launchers may already bind global_scratch correctly.
             return
 
         def patched_make_launcher(constants: Any, signature: Any) -> str:
             src = make_launcher(constants, signature)
+            _validate_launcher_source(src, marker, scratch_binding_line)
             if scratch_binding_line in src:
-                return src
-            if marker not in src:
                 return src
             return src.replace(marker, scratch_binding + marker, 1)
 

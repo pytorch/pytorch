@@ -117,8 +117,6 @@ class TestTritonHeuristics(TestCase):
                 set_scalar_arg<int32_t>(cgh, 0, params[0]);
                 if (shared_memory) {
                     cgh.parallel_for(parallel_work_size, kernel_ptr);
-                } else {
-                    cgh.parallel_for(parallel_work_size, kernel_ptr);
                 }
             };
         """)
@@ -129,20 +127,28 @@ class TestTritonHeuristics(TestCase):
         intel_driver = types.SimpleNamespace(make_launcher=fake_make_launcher)
 
         # Patch inspect.getsource so that the patching logic doesn't shortcut
-        with patch("inspect.getsource", side_effect=OSError):
+        with patch("inspect.getsource", return_value=launcher_source):
             _patch_triton_intel_launcher(intel_driver)
 
         patched = intel_driver.make_launcher({}, {})
-        self.assertIn(
-            "set_scalar_arg<void*>(cgh, num_params - 1, &global_scratch);",
-            patched,
-        )
         self.assertEqual(
             patched.count(
                 "set_scalar_arg<void*>(cgh, num_params - 1, &global_scratch);"
             ),
             1,
         )
+
+    def test_patch_triton_intel_launcher_raises_for_unrecognized_layout(self):
+        def fake_make_launcher(constants, signature):
+            return "auto cgf = [&](sycl::handler &cgh) {\n    foo();\n};\n"
+
+        intel_driver = types.SimpleNamespace(make_launcher=fake_make_launcher)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Intel Triton launcher source layout is not recognized",
+        ):
+            _patch_triton_intel_launcher(intel_driver)
 
     def test_find_names_ignores_frame_locals(self):
         """
@@ -2013,7 +2019,6 @@ class TestMakeLaunchersMemory(TestCase):
             gc.enable()
 
         self.assertEqual(len(fake_self.launchers), 1)
-
 
 if __name__ == "__main__":
     if IS_LINUX:
