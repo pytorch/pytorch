@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes as device_dtypes,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyNativeDeviceTypes,
     OpDTypes,
     ops,
@@ -403,6 +404,35 @@ test_skips_or_fails = (
         inductor_gradient_expected_failures_single_sample, xfails=True
     )
 )
+
+# Ops with an error_inputs sample that eager rejects but the compiled call
+# accepts. Fixing one should remove it from here.
+# See https://github.com/pytorch/pytorch/issues/197554
+inductor_lost_error_inputs = {
+    # Unbound Tensor dunder applied to a Python scalar: eager raises TypeError,
+    # dynamo returns NotImplemented or computes on the scalars.
+    "__radd__",
+    "__rand__",
+    "__rmul__",
+    "__ror__",
+    "__rxor__",
+    "aminmax",  # overlapping min/max out= tensors
+    "cat",  # out= overlapping an input
+    "complex",  # out= with the wrong dtype
+    "index_add",  # source shape mismatch
+    "take",  # out= overlapping the input
+    "uniform",  # from > to
+}
+
+# Accepted under compile, but whether the compiled path is reached depends on
+# test order, so these cannot be strict expected failures.
+inductor_lost_error_inputs_flaky = {
+    "multinomial",  # out= with a non-Long dtype
+}
+
+test_errors_xfails = {
+    (op, "", "cpu", None, True) for op in inductor_lost_error_inputs
+} | {(op, "", "cpu", None, False) for op in inductor_lost_error_inputs_flaky}
 
 
 def wrapper_noop_set_seed(op, *args, **kwargs):
@@ -1742,6 +1772,65 @@ class TestInductorOpInfo(TestCase):
 
         # with open("test_output.txt", "a") as f:
         #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+
+    @onlyCPU
+    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipCPUIf(IS_MACOS, "Skipped under macOS")
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @skipIfCrossRef
+    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    @skipOps(test_errors_xfails)
+    def test_errors(self, device, op):
+        # Every input eager rejects should also be rejected by the compiled
+        # function. Samples whose eager error is NotImplementedError are skipped:
+        # an eager kernel missing for a dtype is not a validation compile must keep.
+        def fn(*args, **kwargs):
+            return op.op(*args, **kwargs)
+
+        tested = 0
+        accepted = []
+        for i, ei in enumerate(op.error_inputs(device)):
+            if not issubclass(ei.error_type, Exception) or issubclass(
+                ei.error_type, NotImplementedError
+            ):
+                continue
+            si = ei.sample_input
+            try:
+                fn(si.input, *si.args, **si.kwargs)
+            except Exception:
+                pass
+            else:
+                # Not every error input raises on every device; only inputs eager
+                # actually rejects are in scope.
+                continue
+            torch._dynamo.reset()
+            # fullgraph=True: a graph break would fall back to eager, which
+            # raises and would hide a missing check in the compiled path.
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            try:
+                compiled(si.input, *si.args, **si.kwargs)
+            except torch._dynamo.exc.Unsupported as e:
+                # The op raising while dynamo traces it means the compiled path
+                # rejected the input too. Any other graph break is inconclusive.
+                if e.gb_type not in (
+                    "TypeError when making fake tensor call",
+                    "Observed exception",
+                ):
+                    continue
+            except Exception:
+                pass
+            else:
+                accepted.append(
+                    f"sample {i}: expected {ei.error_type.__name__}({ei.error_regex!r})"
+                )
+            tested += 1
+        if accepted:
+            self.fail(
+                f"torch.compile accepted inputs eager rejects for {op.name}: "
+                + "; ".join(accepted)
+            )
+        if not tested:
+            self.skipTest("no error input could be compiled with fullgraph=True")
 
 
 instantiate_device_type_tests(TestInductorOpInfo, globals(), allow_xpu=True)
