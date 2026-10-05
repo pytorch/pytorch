@@ -22,6 +22,27 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
 
       // Use the checkStatus function to determine the work status
       WorkNCCL::WorkStatus status = work.state->checkStatus();
+      const auto& state = *work.state;
+      const auto seq = static_cast<int64_t>(state.seq);
+
+      // A work is checked until it completes, so only record its start once.
+      if ((status == WorkNCCL::WorkStatus::INPROGRESS ||
+           status == WorkNCCL::WorkStatus::COMPLETED) &&
+          status_.lastStartedSeq < seq) {
+        status_.lastStartedSeq = seq;
+        status_.lastStartedWorkName = state.opType;
+        status_.lastStartedNumelIn = static_cast<size_t>(state.numelIn);
+        status_.lastStartedNumelOut = static_cast<size_t>(state.numelOut);
+      }
+
+      // Queues are walked in stream order, not seq order.
+      if (status == WorkNCCL::WorkStatus::COMPLETED &&
+          status_.lastCompletedSeq < seq) {
+        status_.lastCompletedSeq = seq;
+        status_.lastCompletedWorkName = state.opType;
+        status_.lastCompletedNumelIn = static_cast<size_t>(state.numelIn);
+        status_.lastCompletedNumelOut = static_cast<size_t>(state.numelOut);
+      }
 
       if (status == WorkNCCL::WorkStatus::COMPLETED) {
         completed.push_back(work.state);
@@ -121,11 +142,21 @@ void WorkNCCLQueue::enqueueWork(
     std::lock_guard<std::mutex> lock(work_queues_mutex_);
     completedInputTensors.swap(completedInputTensors_);
     stream_work_queues_[stream].push({work->state_, work->inputTensors_});
+    const auto& state = *work->state_;
+    status_.lastEnqueuedSeq = static_cast<int64_t>(state.seq);
+    status_.lastEnqueuedWorkName = state.opType;
+    status_.lastEnqueuedNumelIn = static_cast<size_t>(state.numelIn);
+    status_.lastEnqueuedNumelOut = static_cast<size_t>(state.numelOut);
   }
   while (!completedInputTensors.empty()) {
     completedInputTensors.front()->clear();
     completedInputTensors.pop();
   }
+}
+
+::c10d::ProcessGroupStatus WorkNCCLQueue::status() {
+  std::lock_guard<std::mutex> lock(work_queues_mutex_);
+  return status_;
 }
 
 } // namespace c10d::nccl2

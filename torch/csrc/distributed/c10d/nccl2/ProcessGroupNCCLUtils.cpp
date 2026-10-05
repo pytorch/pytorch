@@ -8,17 +8,44 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/WaitCounter.h>
 #include <nccl.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
 namespace c10d::nccl2 {
 
 namespace {
+
+// Maps nccl2 op names to legacy ProcessGroupNCCL's opTypeToString() names so
+// work status records group with legacy rows. Unknown names pass through.
+std::string legacyWorkName(const std::string& name) {
+  static const std::unordered_map<std::string, std::string> kNames = {
+      {"send", "SEND"},
+      {"recv", "RECV"},
+      {"batch_op_issue", "COALESCED"},
+      {"broadcast", "BROADCAST"},
+      {"all_reduce", "ALLREDUCE"},
+      {"reduce", "REDUCE"},
+      {"all_gather", "ALLGATHER"},
+      {"allGatherSingleImpl", "_ALLGATHER_BASE"},
+      {"reduce_scatter", "REDUCE_SCATTER"},
+      {"reduceScatterSingleImpl", "_REDUCE_SCATTER_BASE"},
+      {"allToAllSingleImpl", "ALLTOALL_BASE"},
+      {"all_to_all_v_single", "ALLTOALL_BASE"},
+      {"all_to_all", "ALLTOALL"},
+      {"barrier", "BARRIER"},
+      {"scatter", "SCATTER"},
+      {"gather", "GATHER"},
+  };
+  auto it = kNames.find(name);
+  return it == kNames.end() ? name : it->second;
+}
 
 // Scaling factor for a PREMUL_SUM reduction: either a per-element device tensor
 // or a host scalar.
@@ -267,6 +294,62 @@ void ProcessGroupNCCL::checkWorkQueue() {
   }
 }
 
+void ProcessGroupNCCL::logWorkStatus() {
+  const auto status = workq_.status();
+  TC_LOG(INFO, this) << "[PG ID " << local_id_ << " PG GUID " << getGroupUid()
+                     << "(" << getGroupDesc() << ")] "
+                     << "NCCL Work update periodically: "
+                     << "last enqueued NCCL work: " << status.lastEnqueuedSeq
+                     << ", last completed NCCL work: "
+                     << status.lastCompletedSeq << ".";
+  auto logger = ::c10d::C10dLogger::getLogger();
+  if (!logger) {
+    return;
+  }
+  int64_t global_rank = rank_;
+  const auto& global_ranks = options_c10d_->global_ranks_in_group;
+  if (static_cast<size_t>(rank_) < global_ranks.size()) {
+    global_rank = static_cast<int64_t>(global_ranks[rank_]);
+  }
+  ::c10d::C10dLoggingData data;
+  // logging integers
+  data.integers["pg_id"] = static_cast<int64_t>(local_id_);
+  data.integers["rank"] = rank_;
+  data.integers["global_rank"] = global_rank;
+  data.integers["last_enqueued_work"] = status.lastEnqueuedSeq;
+  data.integers["last_started_work"] = status.lastStartedSeq;
+  data.integers["last_completed_work"] = status.lastCompletedSeq;
+  data.integers["last_enqueued_numel_in"] =
+      static_cast<int64_t>(status.lastEnqueuedNumelIn);
+  data.integers["last_enqueued_numel_out"] =
+      static_cast<int64_t>(status.lastEnqueuedNumelOut);
+  data.integers["last_completed_numel_in"] =
+      static_cast<int64_t>(status.lastCompletedNumelIn);
+  data.integers["last_completed_numel_out"] =
+      static_cast<int64_t>(status.lastCompletedNumelOut);
+  data.integers["last_started_numel_in"] =
+      static_cast<int64_t>(status.lastStartedNumelIn);
+  data.integers["last_started_numel_out"] =
+      static_cast<int64_t>(status.lastStartedNumelOut);
+  // logging strings
+  data.strings["last_enqueued_work_name"] =
+      legacyWorkName(status.lastEnqueuedWorkName);
+  data.strings["last_started_work_name"] =
+      legacyWorkName(status.lastStartedWorkName);
+  data.strings["last_completed_work_name"] =
+      legacyWorkName(status.lastCompletedWorkName);
+  data.strings["pg_name"] = getGroupUid();
+  data.strings["pg_desc"] = getGroupDesc();
+  // A logger failure must not stop the watchdog.
+  try {
+    logger->log(data);
+  } catch (const std::exception& e) {
+    TC_LOG(WARNING, this) << "Failed to log work status: " << e.what();
+  } catch (...) {
+    TC_LOG(WARNING, this) << "Failed to log work status: unknown exception";
+  }
+}
+
 // Retire completed work and graph states and check for timeouts.
 void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__Watchdog__run);
@@ -280,6 +363,7 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
     c10::cuda::CUDAGuard device_guard(device_);
     c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
         cudaStreamCaptureModeThreadLocal);
+    auto last_status_update = std::chrono::steady_clock::now();
     while (!shutdown_) {
       {
         std::unique_lock<std::mutex> lock(timeout_mutex_);
@@ -308,6 +392,11 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
       checkWorkQueue();
       if (shutdown_) {
         break;
+      }
+      if (std::chrono::steady_clock::now() - last_status_update >=
+          std::chrono::milliseconds(::c10d::kWorkStatusUpdatePeriodMs)) {
+        logWorkStatus();
+        last_status_update = std::chrono::steady_clock::now();
       }
       if (comm_state_ != CommState::NORMAL) {
         handleWatchdogFailure(

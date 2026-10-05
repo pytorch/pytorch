@@ -1535,6 +1535,51 @@ class ProcessGroupNCCL2TelemetryTest(TestCase):
         self.assertNotIn(_WORK_EXCEPTION_KEY, out)
 
 
+_WORK_STATUS_SCRIPT = """\
+import time
+
+import torch
+import torch.distributed as dist
+
+device = torch.device("cuda:0")
+torch.cuda.set_device(device)
+dist.init_process_group(
+    "nccl2", rank=0, world_size=1, store=dist.HashStore(), device_id=device
+)
+for _ in range(3):
+    dist.all_reduce(torch.ones(1, device=device))
+torch.cuda.synchronize()
+# Outlive one kWorkStatusUpdatePeriodMs (30s) watchdog status update.
+time.sleep(35)
+dist.destroy_process_group()
+"""
+
+
+class ProcessGroupNCCL2WorkStatusTest(TestCase):
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_periodic_work_status(self) -> None:
+        # The C10dLogger record can't be captured from Python, so check the
+        # INFO line logged with it.
+        env = {**os.environ, "TORCH_CPP_LOG_LEVEL": "INFO"}
+        try:
+            out = subprocess.check_output(
+                [sys.executable, "-c", _WORK_STATUS_SCRIPT],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                env=env,
+                timeout=300,
+            ).decode()
+        except subprocess.CalledProcessError as e:
+            self.fail(f"child process failed with:\n{e.output.decode()}")
+        self.assertRegex(
+            out,
+            r"PG GUID 0\(default_pg\)\] NCCL Work update periodically: "
+            r"last enqueued NCCL work: 3, last completed NCCL work: 3\.",
+        )
+
+
 if __name__ == "__main__":
     if TEST_CUDA:
         run_tests()

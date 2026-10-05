@@ -603,6 +603,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclComm_t comm,
       const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
+  // Logs the periodic work status record, like stock ProcessGroupNCCL's
+  // watchdog.
+  void logWorkStatus();
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
@@ -671,6 +674,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   bool is_high_priority_stream_{false};
   std::string name_;
+  // Process-wide creation index, logged as pg_id like stock ProcessGroupNCCL.
+  const size_t local_id_;
 
   const ::c10d::ErrorHandlingMode async_error_handling_;
   const bool blocking_wait_;
