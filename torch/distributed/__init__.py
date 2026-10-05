@@ -94,6 +94,11 @@ if is_available():
         TCPStore,
         Work as _Work,
     )
+    from torch.distributed._process_group_subclass import (
+        _install as _install_process_group_subclass_hook,
+    )
+
+    _install_process_group_subclass_hook()
 
     def _make_distributed_pdb():
         """

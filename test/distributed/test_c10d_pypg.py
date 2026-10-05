@@ -11,8 +11,10 @@ import test_c10d_common
 
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch._C._distributed_c10d import _create_work_from_future
+from torch._C._distributed_c10d import _create_work_from_future, FakeProcessGroup
+from torch.distributed._process_group_subclass import _ALIAS_PAIRS, _NORMALIZED_METHODS
 from torch.distributed.distributed_c10d import (
     _coalescing_manager,
     _get_default_group,
@@ -28,6 +30,7 @@ from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 def create_work(result):
@@ -651,6 +654,380 @@ class TestPyProcessGroup(TestCase):
 
             stream.synchronize()
             self.assertTrue(event.query())
+
+
+class FakeBackedProcessGroup(dist.ProcessGroup):
+    """
+    A Python ProcessGroup whose collectives are executed by a FakeProcessGroup
+    backend. Subclasses override collectives, record what they receive, and
+    delegate to the backend through super().
+    """
+
+    def __init__(self, store, rank, size):
+        super().__init__(store, rank, size)
+        backend = FakeProcessGroup._create_internal(rank, world_size=size)
+        self._register_backend(
+            torch.device("cpu"), dist.ProcessGroup.BackendType.CUSTOM, backend
+        )
+        self._set_default_backend(dist.ProcessGroup.BackendType.CUSTOM)
+        self.calls = []
+
+
+class CanonicalProcessGroup(FakeBackedProcessGroup):
+    """Overrides every collective that has convenience overloads using exactly
+    the signature of the C++ virtual."""
+
+    def allreduce(self, tensors, opts):
+        self.calls.append(("allreduce", tensors, opts))
+        return super().allreduce(tensors, opts)
+
+    def broadcast(self, tensors, opts):
+        self.calls.append(("broadcast", tensors, opts))
+        return super().broadcast(tensors, opts)
+
+    def reduce(self, tensors, opts):
+        self.calls.append(("reduce", tensors, opts))
+        return super().reduce(tensors, opts)
+
+    def allgather(self, output_tensors, input_tensors, opts):
+        self.calls.append(("allgather", output_tensors, input_tensors, opts))
+        return super().allgather(output_tensors, input_tensors, opts)
+
+    def gather(self, output_tensors, input_tensors, opts):
+        self.calls.append(("gather", output_tensors, input_tensors, opts))
+        return super().gather(output_tensors, input_tensors, opts)
+
+    def scatter(self, output_tensors, input_tensors, opts):
+        self.calls.append(("scatter", output_tensors, input_tensors, opts))
+        return super().scatter(output_tensors, input_tensors, opts)
+
+    def reduce_scatter(self, output_tensors, input_tensors, opts):
+        self.calls.append(("reduce_scatter", output_tensors, input_tensors, opts))
+        return super().reduce_scatter(output_tensors, input_tensors, opts)
+
+    def all_to_all_single(self, output, input, output_splits, input_splits, opts):
+        self.calls.append(
+            ("all_to_all_single", output, input, output_splits, input_splits, opts)
+        )
+        return super().all_to_all_single(
+            output, input, output_splits, input_splits, opts
+        )
+
+    def barrier(self, opts):
+        self.calls.append(("barrier", opts))
+        return super().barrier(opts)
+
+
+class VarargsProcessGroup(FakeBackedProcessGroup):
+    """Overrides written before normalization existed, which parse the
+    convenience forms themselves."""
+
+    def allreduce(self, *args, **kwargs):
+        tensors = args[0] if args else kwargs["tensors"]
+        if isinstance(tensors, torch.Tensor):
+            tensors = [tensors]
+        opts = args[1] if len(args) > 1 else kwargs.get("opts", kwargs.get("op"))
+        if not isinstance(opts, dist.AllreduceOptions):
+            op = dist.ReduceOp.SUM if opts is None else opts
+            opts = dist.AllreduceOptions()
+            opts.reduceOp = op
+        self.calls.append(("allreduce", tensors, opts))
+        return super().allreduce(tensors, opts)
+
+    def broadcast(self, tensor_list, opts=None):
+        self.calls.append(("broadcast", tensor_list, opts))
+        return create_work(tensor_list)
+
+    def barrier(self, opts=None):
+        # Like ProcessLocalGroup, call a collective with a keyword argument that
+        # only this override's signature knows about.
+        return self.broadcast(tensor_list=[torch.ones(1)])
+
+
+class DeprecatedFallbackProcessGroup(FakeBackedProcessGroup):
+    """Overrides only the deprecated name of a pair the trampoline falls back
+    to."""
+
+    def alltoall_base(self, output, input, output_splits, input_splits, opts):
+        self.calls.append(
+            ("alltoall_base", output, input, output_splits, input_splits, opts)
+        )
+        return super().alltoall_base(output, input, output_splits, input_splits, opts)
+
+
+class TestProcessGroupSubclassNormalization(TestCase):
+    def _init_pg(self, pg_cls):
+        def create(common_opts, backend_options):
+            return pg_cls(
+                common_opts.store, common_opts.group_rank, common_opts.group_size
+            )
+
+        dist.Backend.register_backend(
+            "pypg_subclass", create, extended_api=True, devices=["cpu"]
+        )
+        dist.init_process_group(
+            "pypg_subclass", rank=0, world_size=2, store=FakeStore()
+        )
+        self.addCleanup(dist.destroy_process_group)
+        pg = dist.group.WORLD
+        self.assertIsInstance(pg, pg_cls)
+        return pg
+
+    def _pop_call(self, pg, name):
+        self.assertEqual(len(pg.calls), 1, pg.calls)
+        call = pg.calls.pop()
+        self.assertEqual(call[0], name)
+        return call[1:]
+
+    def test_canonical_override_convenience_overloads(self):
+        pg = self._init_pg(CanonicalProcessGroup)
+        unset = timedelta(milliseconds=-1)
+        timeout = timedelta(seconds=5)
+        t = torch.ones(2)
+        scalar = torch.tensor(1.0)
+        o0, o1, i0, i1 = (torch.zeros(2) for _ in range(4))
+
+        # allreduce(tensor, op, timeout) and allreduce(tensors, op, timeout)
+        pg.allreduce(scalar, op=dist.ReduceOp.MAX).wait()
+        tensors, opts = self._pop_call(pg, "allreduce")
+        self.assertEqual(len(tensors), 1)
+        self.assertIs(tensors[0], scalar)
+        self.assertEqual(opts.reduceOp.op, dist.ReduceOp.MAX)
+        self.assertEqual(opts.timeout, unset)
+
+        pg.allreduce(t, dist.ReduceOp.MIN, timeout).wait()
+        tensors, opts = self._pop_call(pg, "allreduce")
+        self.assertIs(tensors[0], t)
+        self.assertEqual(opts.reduceOp.op, dist.ReduceOp.MIN)
+        self.assertEqual(opts.timeout, timeout)
+
+        pg.allreduce([t], dist.ReduceOp.PRODUCT).wait()
+        tensors, opts = self._pop_call(pg, "allreduce")
+        self.assertIs(tensors[0], t)
+        self.assertEqual(opts.reduceOp.op, dist.ReduceOp.PRODUCT)
+
+        # A canonical call without opts gets the default options.
+        pg.allreduce([t]).wait()
+        tensors, opts = self._pop_call(pg, "allreduce")
+        self.assertEqual(opts.reduceOp.op, dist.ReduceOp.SUM)
+        self.assertEqual(opts.timeout, unset)
+
+        # broadcast(tensor, root, timeout)
+        pg.broadcast(scalar, 1, timeout).wait()
+        tensors, opts = self._pop_call(pg, "broadcast")
+        self.assertIs(tensors[0], scalar)
+        self.assertEqual(opts.rootRank, 1)
+        self.assertEqual(opts.timeout, timeout)
+
+        # reduce(tensor, root, op, timeout)
+        pg.reduce(scalar, root=1, op=dist.ReduceOp.MAX).wait()
+        tensors, opts = self._pop_call(pg, "reduce")
+        self.assertIs(tensors[0], scalar)
+        self.assertEqual(opts.rootRank, 1)
+        self.assertEqual(opts.reduceOp.op, dist.ReduceOp.MAX)
+
+        # allgather(list, Tensor, timeout)
+        pg.allgather([o0, o1], t, timeout=timeout).wait()
+        outputs, inputs, opts = self._pop_call(pg, "allgather")
+        self.assertEqual(len(outputs), 1)
+        self.assertIs(outputs[0][0], o0)
+        self.assertIs(outputs[0][1], o1)
+        self.assertEqual(len(inputs), 1)
+        self.assertIs(inputs[0], t)
+        self.assertEqual(opts.timeout, timeout)
+
+        # gather(list, Tensor, root, timeout); an empty output list (non-root)
+        # becomes an empty list of lists.
+        pg.gather([o0, o1], t, 0).wait()
+        outputs, inputs, opts = self._pop_call(pg, "gather")
+        self.assertIs(outputs[0][1], o1)
+        self.assertIs(inputs[0], t)
+        self.assertEqual(opts.rootRank, 0)
+        pg.gather([], t, root=1).wait()
+        outputs, inputs, opts = self._pop_call(pg, "gather")
+        self.assertEqual(outputs, [])
+        self.assertEqual(opts.rootRank, 1)
+
+        # scatter(Tensor, list, root, timeout)
+        pg.scatter(t, [i0, i1], 0).wait()
+        outputs, inputs, opts = self._pop_call(pg, "scatter")
+        self.assertIs(outputs[0], t)
+        self.assertIs(inputs[0][1], i1)
+        self.assertEqual(opts.rootRank, 0)
+        pg.scatter(t, [], root=1).wait()
+        outputs, inputs, opts = self._pop_call(pg, "scatter")
+        self.assertEqual(inputs, [])
+        self.assertEqual(opts.rootRank, 1)
+
+        # reduce_scatter(Tensor, list, op, timeout)
+        pg.reduce_scatter(t, [i0, i1], op=dist.ReduceOp.MAX).wait()
+        outputs, inputs, opts = self._pop_call(pg, "reduce_scatter")
+        self.assertIs(outputs[0], t)
+        self.assertIs(inputs[0][0], i0)
+        self.assertIs(inputs[0][1], i1)
+        self.assertEqual(opts.reduceOp.op, dist.ReduceOp.MAX)
+
+        # all_to_all_single(output, input, output_splits, input_splits, timeout)
+        pg.all_to_all_single(o0, t, [1, 1], [1, 1], timeout).wait()
+        output, input, output_splits, input_splits, opts = self._pop_call(
+            pg, "all_to_all_single"
+        )
+        self.assertIs(output, o0)
+        self.assertIs(input, t)
+        self.assertEqual(output_splits, [1, 1])
+        self.assertEqual(input_splits, [1, 1])
+        self.assertIsInstance(opts, dist.AllToAllOptions)
+        self.assertEqual(opts.timeout, timeout)
+
+        # barrier(timeout) and barrier()
+        pg.barrier(timeout=timeout).wait()
+        (opts,) = self._pop_call(pg, "barrier")
+        self.assertEqual(opts.timeout, timeout)
+        pg.barrier().wait()
+        (opts,) = self._pop_call(pg, "barrier")
+        self.assertEqual(opts.timeout, unset)
+
+    def test_canonical_call_passes_through(self):
+        pg = self._init_pg(CanonicalProcessGroup)
+        tensors = [torch.ones(2)]
+        opts = dist.AllreduceOptions()
+        pg.allreduce(tensors, opts).wait()
+        self.assertEqual(self._pop_call(pg, "allreduce"), (tensors, opts))
+        pg.allreduce(tensors, opts=opts).wait()
+        self.assertEqual(self._pop_call(pg, "allreduce"), (tensors, opts))
+        barrier_opts = dist.BarrierOptions()
+        pg.barrier(barrier_opts).wait()
+        self.assertEqual(self._pop_call(pg, "barrier"), (barrier_opts,))
+
+    def test_canonical_override_dist_callers(self):
+        pg = self._init_pg(CanonicalProcessGroup)
+        t = torch.ones(2)
+
+        dist.all_reduce(t, op=dist.ReduceOp.MAX)
+        tensors, opts = self._pop_call(pg, "allreduce")
+        self.assertIs(tensors[0], t)
+        self.assertEqual(opts.reduceOp.op, dist.ReduceOp.MAX)
+
+        dist.broadcast(t, src=1)
+        tensors, opts = self._pop_call(pg, "broadcast")
+        self.assertEqual(opts.rootRank, 1)
+
+        dist.reduce(t, dst=1)
+        self._pop_call(pg, "reduce")
+
+        dist.all_gather([torch.zeros(2), torch.zeros(2)], t)
+        self._pop_call(pg, "allgather")
+
+        dist.gather(t, [torch.zeros(2), torch.zeros(2)], dst=0)
+        self._pop_call(pg, "gather")
+
+        dist.scatter(t, [torch.zeros(2), torch.zeros(2)], src=0)
+        self._pop_call(pg, "scatter")
+
+        dist.reduce_scatter(t, [torch.zeros(2), torch.zeros(2)])
+        self._pop_call(pg, "reduce_scatter")
+
+        dist.all_to_all_single(torch.zeros(2), t)
+        self._pop_call(pg, "all_to_all_single")
+
+        dist.barrier()
+        self._pop_call(pg, "barrier")
+
+        # Functional collectives dispatch from C++ through the trampoline.
+        funcol.wait_tensor(funcol.all_reduce(t, "avg", pg))
+        tensors, opts = self._pop_call(pg, "allreduce")
+        self.assertEqual(opts.reduceOp.op, dist.ReduceOp.AVG)
+
+        funcol.wait_tensor(funcol.broadcast(t, 1, pg))
+        tensors, opts = self._pop_call(pg, "broadcast")
+        self.assertEqual(opts.rootRank, 1)
+
+        funcol.wait_tensor(funcol.all_to_all_single(t, [1, 1], [1, 1], pg))
+        call = self._pop_call(pg, "all_to_all_single")
+        self.assertEqual(call[2:4], ([1, 1], [1, 1]))
+
+    def test_varargs_override(self):
+        pg = self._init_pg(VarargsProcessGroup)
+        scalar = torch.tensor(1.0)
+
+        pg.allreduce(scalar, op=dist.ReduceOp.MAX).wait()
+        tensors, opts = self._pop_call(pg, "allreduce")
+        self.assertIs(tensors[0], scalar)
+        self.assertEqual(opts.reduceOp.op, dist.ReduceOp.MAX)
+
+        dist.all_reduce(scalar, op=dist.ReduceOp.MIN)
+        tensors, opts = self._pop_call(pg, "allreduce")
+        self.assertEqual(opts.reduceOp.op, dist.ReduceOp.MIN)
+
+        funcol.wait_tensor(funcol.all_reduce(scalar, "sum", pg))
+        self._pop_call(pg, "allreduce")
+
+        # Keyword arguments that match no pybind overload reach the override
+        # unchanged.
+        pg.barrier()
+        tensors, opts = self._pop_call(pg, "broadcast")
+        self.assertEqual(tensors, [torch.ones(1)])
+        self.assertIsNone(opts)
+
+    def test_alias_pair_overrides_rejected(self):
+        for canonical, deprecated, falls_back in _ALIAS_PAIRS:
+            with self.subTest(canonical=canonical, falls_back=falls_back):
+                namespace = {
+                    canonical: lambda self, *args: None,
+                    deprecated: lambda self, *args: None,
+                }
+                with self.assertRaisesRegex(TypeError, f"Override only {canonical}"):
+                    type("PG", (dist.ProcessGroup,), namespace)
+
+    def test_deprecated_fallback_override(self):
+        pg = self._init_pg(DeprecatedFallbackProcessGroup)
+        output, input = torch.zeros(2), torch.ones(2)
+        timeout = timedelta(seconds=5)
+
+        # Convenience form of the deprecated name is normalized.
+        pg.alltoall_base(output, input, [1, 1], [1, 1], timeout).wait()
+        call = self._pop_call(pg, "alltoall_base")
+        self.assertIs(call[0], output)
+        self.assertEqual(call[4].timeout, timeout)
+
+        # The canonical name, dist.* and functional collectives reach the
+        # deprecated override through the trampoline's fallback.
+        pg.all_to_all_single(output, input, [], [], timeout).wait()
+        self._pop_call(pg, "alltoall_base")
+        dist.all_to_all_single(output, input)
+        self._pop_call(pg, "alltoall_base")
+        funcol.wait_tensor(funcol.all_to_all_single(input, [1, 1], [1, 1], pg))
+        self._pop_call(pg, "alltoall_base")
+
+    def test_deprecated_non_fallback_override_warns(self):
+        with self.assertWarnsRegex(
+            FutureWarning, "only reached by direct calls to _reduce_scatter_base"
+        ):
+
+            class PG(FakeBackedProcessGroup):
+                def _reduce_scatter_base(self, output, input, opts):
+                    self.calls.append(("_reduce_scatter_base", output, input, opts))
+                    return super()._reduce_scatter_base(output, input, opts)
+
+        pg = self._init_pg(PG)
+        output, input = torch.zeros(1), torch.ones(2)
+        pg._reduce_scatter_base(output, input, dist.ReduceScatterOptions()).wait()
+        self._pop_call(pg, "_reduce_scatter_base")
+
+        dist.reduce_scatter_tensor(output, input)
+        self.assertEqual(pg.calls, [])
+
+    def test_normalized_methods_match_bindings(self):
+        # Every ProcessGroup method with pybind convenience overloads must be
+        # normalized for subclasses.
+        overloaded = {
+            name
+            for name in dir(dist.ProcessGroup)
+            if not name.startswith("__")
+            and "Overloaded function"
+            in (getattr(getattr(dist.ProcessGroup, name), "__doc__", None) or "")
+        }
+        self.assertEqual(overloaded, set(_NORMALIZED_METHODS))
 
 
 class TestBatchSendRecv(MultiProcessTestCase):
