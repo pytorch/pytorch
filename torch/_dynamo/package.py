@@ -1197,6 +1197,11 @@ class CompilePackage:
             code_source=code_source,
         )
 
+    @property
+    def current_entry(self) -> _DynamoCodeCacheEntry | None:
+        """The entry of the code object being compiled inside ``code_context``."""
+        return self._current_entry
+
     @contextlib.contextmanager
     def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
         if self._current_entry is not None:
@@ -1750,7 +1755,9 @@ class DiskDynamoCache(DiskDynamoStore):
                 return result
             except Exception:
                 counters["dynamo_cache"]["dynamo_cache_error"] += 1
-                logger.warning("Failed to load package from path %s", exc_info=True)
+                logger.warning(
+                    "Failed to load package from path %s", path, exc_info=True
+                )
                 return None
         logger.info("No package found for %s", key)
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1

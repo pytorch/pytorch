@@ -58,10 +58,11 @@ void registerOpaqueType(const std::string& type_name) {
   std::lock_guard<std::mutex> lock(getOpaqueTypesMutex());
   auto& global_opaque_types = getOpaqueTypes();
   auto [_, inserted] = global_opaque_types.insert(type_name);
-  if (!inserted) {
-    throw std::runtime_error(
-        "Type '" + type_name + "' is already registered as an opaque type");
-  }
+  TORCH_CHECK(
+      inserted,
+      "Type '",
+      type_name,
+      "' is already registered as an opaque type");
 }
 
 void unregisterOpaqueType(const std::string& type_name) {

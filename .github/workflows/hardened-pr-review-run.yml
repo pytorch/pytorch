@@ -51,7 +51,7 @@ env:
   # the role it is paid for with. Matches .github/workflows/claude-code.yml.
   # The `model` column of the telemetry row is NOT set from this: it is read
   # back out of the run's own usage file, so the row records what answered.
-  REVIEW_MODEL: global.anthropic.claude-opus-5
+  REVIEW_MODEL: global.anthropic.claude-opus-5-5
   AWS_REGION: us-east-1
   S3_BUCKET: ossci-raw-job-status
   S3_PREFIX: pr_review_verdicts
@@ -63,6 +63,9 @@ env:
   # against a value the artifact cannot influence, whoever authored it.
   REVIEW_LABEL: "in progress"
   DONE_LABEL: "ready for review"
+  # Opt-out: a PR carrying this label is never reviewed, whatever triggered
+  # the run. Stage 1 skips it too; this copy decides.
+  OPT_OUT_LABEL: "no automated review"
   # Skip PRs too large to review usefully or affordably. Recorded as
   # skipped_too_large rather than silently dropped.
   MAX_CHANGED_FILES: 100
@@ -309,9 +312,15 @@ jobs:
           # for another review and overrides the marker, anything else does not.
           IS_DONE=$(jq -r --arg l "$DONE_LABEL" \
                         'if any(.labels[]?.name; ascii_downcase == ($l | ascii_downcase)) then "true" else "false" end' <<<"$PR_JSON")
+          # The opt-out, read now rather than trusted from Stage 1, so a label
+          # added while the capture was in flight still counts. No trigger
+          # overrides it.
+          OPTED_OUT=$(jq -r --arg l "$OPT_OUT_LABEL" \
+                        'if any(.labels[]?.name; ascii_downcase == ($l | ascii_downcase)) then "true" else "false" end' <<<"$PR_JSON")
           if [ "$IS_DRAFT" != "false" ] || [ "$HAS_LABEL" != "true" ] \
+             || [ "$OPTED_OUT" != "false" ] \
              || { [ "$IS_DONE" = "true" ] && [ "$TRIGGER_EVENT" != "labeled" ]; }; then
-            echo "::notice::PR #${PR_NUMBER} is not eligible (draft=${IS_DRAFT}, labelled=${HAS_LABEL}, done=${IS_DONE}, trigger=${TRIGGER_EVENT}); no review, no rows"
+            echo "::notice::PR #${PR_NUMBER} is not eligible (draft=${IS_DRAFT}, labelled=${HAS_LABEL}, opted_out=${OPTED_OUT}, done=${IS_DONE}, trigger=${TRIGGER_EVENT}); no review, no rows"
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -355,13 +364,13 @@ jobs:
           # pinned by TestTheReviewJobsTrustedSurfaceIsPinned's
           # prompt-hash tests, which also EXECUTE this step.
           #
-          # The rubric is four files: pr-review-readiness/SKILL.md delegates the
-          # review logic to pr-review's three, so they shape the verdict as
-          # directly as it does and must move the hash when they change.
+          # The rubric delegates the review logic to the pr-review files, so
+          # they shape the verdict too and must move the hash when they change.
           HASH=$(cat .github/workflows/hardened-pr-review-run.yml \
                      scripts/pr_review/extract_verdict.py \
                      scripts/pr_review/emit_row.py \
                      scripts/pr_review/validate_findings.py \
+                     scripts/pr_review/verdict_after_subagents.py \
                      .claude/hooks/pr_review/restrict-write.sh \
                      .claude/hooks/pr_review/validate-findings.sh \
                      .claude/hooks/pr_review/validate-on-stop.sh \
@@ -369,7 +378,8 @@ jobs:
                      .claude/skills/pr-review-readiness/SKILL.md \
                      .claude/skills/pr-review/SKILL.md \
                      .claude/skills/pr-review/review-checklist.md \
-                     .claude/skills/pr-review/bc-guidelines.md | sha256sum | cut -c1-16)
+                     .claude/skills/pr-review/bc-guidelines.md \
+                     .claude/skills/pr-review/ci-runner-naming.md | sha256sum | cut -c1-16)
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials via OIDC
@@ -462,13 +472,15 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.fresh == 'true' && needs.prepare.outputs.too_large != 'true'
     runs-on: ubuntu-latest
-    # 20 was calibrated on ciforge. Here the model step alone may take 12, and a
+    # 20 was calibrated on ciforge. Here the model step alone may take 55 (about
+    # an hour while sub-agent fan-out is new; tighten once live durations are
+    # known), and a
     # job-level timeout lands AFTER the model call is paid for and is then
     # recorded as `model_error` - the infra/model conflation `downgrade()`
     # exists to avoid. The headroom above that is for the checkout: the PR tree
     # is fetched shallow and then deepened only to the merge base, which is
     # ordinarily one round but is not bounded by anything we control.
-    timeout-minutes: 30
+    timeout-minutes: 90
     # A second, narrower guard than Stage 1's. Stage-1 concurrency cannot cancel
     # a Stage 2 that has already started, so without this a burst of pushes can
     # still put several reviews in flight against one PR.
@@ -492,6 +504,9 @@ jobs:
             sts.us-east-1.amazonaws.com:443
             bedrock-runtime.us-east-1.amazonaws.com:443
             api.anthropic.com:443
+            claude.ai:443
+            downloads.claude.ai:443
+            release-assets.githubusercontent.com:443
             github.com:443
             api.github.com:443
             codeload.github.com:443
@@ -679,7 +694,9 @@ jobs:
         with:
           role-to-assume: ${{ env.REVIEW_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
-          role-duration-seconds: 900
+          # The role's ceiling. The review step's 55-minute timeout leaves room
+          # for the steps between here and it. The credential stays Bedrock-only.
+          role-duration-seconds: 3600
 
       - name: Check the findings path resolved
         if: steps.diff.outputs.too_large == 'false'
@@ -711,7 +728,7 @@ jobs:
       - name: Run the PR review
         id: claude
         if: steps.diff.outputs.too_large == 'false'
-        timeout-minutes: 12
+        timeout-minutes: 55
         env:
           # Read by the validation hooks below AND by the model's own on-demand
           # runs of the same script. Setting them here keeps the paths in one
@@ -726,9 +743,25 @@ jobs:
           PR_REVIEW_FILES_FILE: /tmp/pr-files.txt
           PR_REVIEW_SCRIPTS_DIR: ${{ github.workspace }}/trusted/scripts/pr_review
           PR_REVIEW_HOOK_LOG: ${{ runner.temp }}/pr-review-hooks.log
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+          # Sub-agents run on the review model, even when a spawn asks for
+          # another: without FORCE an explicit `model: haiku` wins over
+          # CLAUDE_CODE_SUBAGENT_MODEL (checked on Claude Code 2.1.280). One
+          # model also keeps emit_row.py's single `model` column true.
+          CLAUDE_CODE_SUBAGENT_MODEL: ${{ env.REVIEW_MODEL }}
+          CLAUDE_CODE_SUBAGENT_MODEL_FORCE: "1"
+          # Sub-agents must finish inside the reviewer's turn. A backgrounded one
+          # reports after the headless session has already ended, and the
+          # reviewer's early draft verdict was published instead (seen in CI:
+          # "Draft; review in progress." marked ready, 6 of 6 fan-out runs).
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+        uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
+          # The actor is whoever applied the `in progress` label in Stage 1.
+          # pytorch-bot applies it on `@pytorchbot pre-review accept` once
+          # every assigned reviewer has accepted, and the action rejects bot
+          # actors unless listed here. Name it exactly; never "*".
+          allowed_bots: "pytorch-bot[bot]"
           settings: |
             {
               "hooks": {
@@ -785,6 +818,19 @@ jobs:
           # `pr-review/**` does not match `pr-review-readiness/`; both are
           # needed.
           #
+          # `Agent` lets the review spawn pr-review's sub-agents (fan-out and
+          # per-finding fact-checks). They share this session's permission
+          # rules and hooks. Checked locally on Claude Code 2.1.280 with the same
+          # flag shapes: the deny list removed Bash from a sub-agent's tools, a
+          # deny rule refused its Read, it got the same Read outcomes as the
+          # main session, and restrict-write.sh's hook fired on its Write. That
+          # hook refuses every sub-agent write, so only the reviewer writes the
+          # verdict. A Read outside every allow rule with NO deny rule could not
+          # be tested there, so the credential paths carry explicit Read denies
+          # in --disallowedTools. Checked the same way, each against a no-deny
+          # control that succeeded: they refused a sub-agent's Read, and the
+          # main session's Grep and Glob on those paths.
+          #
           # `--setting-sources user`, and the value is load-bearing in BOTH
           # directions. It must not be empty: the action's parser treats a flag
           # whose next token is falsy as a boolean and records `null`, and its
@@ -804,8 +850,8 @@ jobs:
           # `pr/` needs none: it sits under the action's cwd.
           claude_args: |
             --model ${{ env.REVIEW_MODEL }}
-            --allowedTools "Read(/${{ github.workspace }}/pr/**),Grep(/${{ github.workspace }}/pr/**),Glob(/${{ github.workspace }}/pr/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review-readiness/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review/**),Read(//tmp/pr-diff.txt),Read(//tmp/pr-files.txt),Read(/${{ runner.temp }}/pr-review-findings.json),Write"
-            --disallowedTools "Bash,Edit,NotebookEdit,WebFetch,WebSearch,Task"
+            --allowedTools "Read(/${{ github.workspace }}/pr/**),Grep(/${{ github.workspace }}/pr/**),Glob(/${{ github.workspace }}/pr/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review-readiness/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review/**),Read(//tmp/pr-diff.txt),Read(//tmp/pr-files.txt),Read(/${{ runner.temp }}/pr-review-findings.json),Write,Agent"
+            --disallowedTools "Bash,Edit,NotebookEdit,WebFetch,WebSearch,Read(//proc/**),Read(~/.aws/**),ScheduleWakeup"
             --setting-sources user
             --add-dir ${{ runner.temp }}
             --strict-mcp-config
@@ -879,7 +925,9 @@ jobs:
 
             IT IS CHECKED THE MOMENT YOU WRITE IT, and the errors come back to
             you. Write it early and rewrite it as often as you like — that is the
-            intended way to work, not a fallback. The check is the same code that
+            intended way to work, not a fallback. If you use sub-agents, your last
+            write must come after the last of them has reported: an earlier file
+            is a draft and is not published. The check is the same code that
             publishes, so if it reports a problem the finding really would be
             lost, and if it reports none nothing will be dropped behind your back.
             You cannot finish while it still reports a problem.
@@ -910,9 +958,16 @@ jobs:
           TOO_LARGE: ${{ steps.diff.outputs.too_large }}
           CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
           FINDINGS_FILE: ${{ runner.temp }}/pr-review-findings.json
+          PR_REVIEW_HOOK_LOG: ${{ runner.temp }}/pr-review-hooks.log
         run: |
           set -euo pipefail
           mkdir -p out
+          # validate-on-stop.sh writes this when the session ended on a findings
+          # file older than the last sub-agent report: a draft, not the review.
+          if grep -q '^STALE_VERDICT' "$PR_REVIEW_HOOK_LOG" 2>/dev/null; then
+            echo "::warning::the findings file predates the last sub-agent report; recording a failed run"
+            CLAUDE_OUTCOME=failure
+          fi
           if [ "$TOO_LARGE" = "true" ]; then
             printf '%s' '{"status":"skipped_too_large","verdict":null,"summary":"","findings":[],"findings_dropped":0}' > out/verdict.json
           else
@@ -1087,9 +1142,11 @@ jobs:
           echo "--- terminal.json ---"
           cat terminal.json
 
-          # Export the EFFECTIVE status -- the override when there is one --
-          # so the label step cannot reach a different answer than the row.
-          EFFECTIVE_STATUS="${STATUS_OVERRIDE:-$(jq -r '.status // "unknown"' out/verdict.json 2>/dev/null || echo unknown)}"
+          # Export the status the ROW recorded, so the label step cannot reach
+          # a different answer than the row. emit_row.py applies the override
+          # and can itself refuse a verdict as sanitizer_rejected, so reading
+          # out/verdict.json here let the row and the label disagree.
+          EFFECTIVE_STATUS="$(jq -r '.status // "unknown"' terminal.json 2>/dev/null || echo unknown)"
           echo "effective_status=${EFFECTIVE_STATUS}" >> "$GITHUB_OUTPUT"
 
           aws s3 cp terminal.json \
@@ -1119,8 +1176,9 @@ jobs:
           set -euo pipefail
 
           STATUS="${EFFECTIVE_STATUS:-unknown}"
-          # Read the SANITIZED verdict, never the model's own file.
-          VERDICT=$(jq -r '.verdict // "none"' out/verdict.json 2>/dev/null || echo none)
+          # Read the verdict the ROW recorded: sanitized, re-checked, and null
+          # whenever the row refused it. Never the model's own file.
+          VERDICT=$(jq -r '.verdict // "none"' terminal.json 2>/dev/null || echo none)
 
           # Tolerate the 404 that means the label is already gone — a normal
           # concurrent state — and WARN on anything else. `|| true` on the whole
@@ -1150,8 +1208,8 @@ jobs:
             exit 0
           fi
 
-          # FRESHNESS, re-checked here and not only in `prepare`. The review job
-          # is allowed 20 minutes, and job-level concurrency is declared on
+          # FRESHNESS, re-checked here and not only in `prepare`. The review's
+          # model step may run for most of an hour, and job-level concurrency is declared on
           # `review` so it does not cancel a `publish` already under way. A
           # commit pushed in that window would otherwise get the ready marker
           # for a review of code nobody looked at — and because the gating label
@@ -1176,6 +1234,21 @@ jobs:
             # rather than implying the pipeline recovers on its own.
             echo "::notice::head moved ${REVIEWED_SHA} -> ${CURRENT_SHA} since the review; leaving labels alone, so the verdict is not applied to a commit nobody reviewed"
             echo "::notice::if PR #${PR_NUMBER} already carries '${DONE_LABEL}', automatic re-review of ${CURRENT_SHA} is suppressed; re-add '${REVIEW_LABEL}' to review it"
+            exit 0
+          fi
+
+          # The opt-out can arrive while the review runs. The review cannot be
+          # recalled, but its verdict is not applied to a PR that asked to be
+          # left alone. Same residual as the freshness check above: a label
+          # added between this read and the calls below is not seen.
+          if ! LABELS_JSON=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/labels?per_page=100" 2>&1); then
+            echo "::warning::could not re-read the labels of PR #${PR_NUMBER} (${LABELS_JSON}); leaving labels alone"
+            exit 0
+          fi
+          OPTED_OUT=$(jq -r --arg l "$OPT_OUT_LABEL" \
+                        'if any(.[]?.name; ascii_downcase == ($l | ascii_downcase)) then "true" else "false" end' <<<"$LABELS_JSON")
+          if [ "$OPTED_OUT" != "false" ]; then
+            echo "::notice::PR #${PR_NUMBER} carries '${OPT_OUT_LABEL}'; leaving labels alone"
             exit 0
           fi
 
