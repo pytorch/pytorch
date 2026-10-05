@@ -5943,6 +5943,19 @@ def clear_torch_function_mode_stack() -> None:
         _pop_torch_function_stack()
 
 
+@contextmanager
+def temporarily_clear_torch_function_mode_stack() -> Iterator[None]:
+    """Temporarily clear and restore the torch function mode stack."""
+    stack = get_torch_function_mode_stack()
+    # Guard filtering may intentionally allow this to differ from the
+    # compile-time mode stack, so preserve the live stack without asserting.
+    clear_torch_function_mode_stack()
+    try:
+        yield
+    finally:
+        set_torch_function_mode_stack(stack)
+
+
 # call from C dynamo in order to inspect values in pdb
 def _breakpoint_for_c_dynamo(*args: Any) -> None:
     breakpoint()
