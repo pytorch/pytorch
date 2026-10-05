@@ -2288,7 +2288,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 if isinstance(a, variables.NumpyNdarrayVariable):
                     import numpy as np
 
-                    fn = variables.NumpyVariable(np.clip)
+                    fn = VariableTracker.build(tx, np.clip)
                 else:
                     fn = variables.TorchInGraphFunctionVariable(torch.clamp)
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
@@ -2298,7 +2298,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     import numpy as np
 
                     np_fn = {max: np.maximum, min: np.minimum}[self.fn]
-                    fn = variables.NumpyVariable(np_fn)
+                    fn = VariableTracker.build(tx, np_fn)
                 else:
                     torch_fn = {max: torch.maximum, min: torch.minimum}[self.fn]
                     fn = variables.TorchInGraphFunctionVariable(torch_fn)
