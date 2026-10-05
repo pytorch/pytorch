@@ -9056,6 +9056,7 @@ class TritonScheduling(SIMDScheduling):
         with (
             preserve_rng_state(),
             device_interface.device(V.graph.get_current_device_or_throw()),  # type: ignore[attr-defined]
+            triton_heuristics.disable_caching_autotuner_plugins(),
         ):
             ms = None
 
@@ -9223,6 +9224,7 @@ class TritonScheduling(SIMDScheduling):
             kernels.sort(key=lambda k: k.persistent_reduction)
         return kernels
 
+    @triton_heuristics.disable_caching_autotuner_plugins()
     def benchmark_combo_kernel(self, node_list, node_benchmark_results):
         """
         Benchmark combo kernel partitions and return total execution time.
