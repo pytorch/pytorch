@@ -273,10 +273,11 @@ class TestHigherOrderOperatorPickle(TestCase):
         options = self.Options(ops_filter=None)
         pickle_data = self._OpPickleData.pickle(cond_op, options)
 
-        from torch.fx._graph_pickler import _HigherOrderOperatorPickleData
+        from torch.fx._graph_pickler import _OpFunctionPickleData
 
-        self.assertIsInstance(pickle_data, _HigherOrderOperatorPickleData)
-        self.assertEqual(pickle_data.name, "cond")
+        self.assertIsInstance(pickle_data, _OpFunctionPickleData)
+        self.assertEqual(pickle_data.root, "torch")
+        self.assertEqual(pickle_data.name, "ops.higher_order.cond")
 
     def test_higher_order_operator_unpickle(self):
         """
@@ -285,13 +286,10 @@ class TestHigherOrderOperatorPickle(TestCase):
         """
         from torch._higher_order_ops.cond import cond_op
         from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx._graph_pickler import (
-            _HigherOrderOperatorPickleData,
-            _UnpickleState,
-        )
+        from torch.fx._graph_pickler import _UnpickleState
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-        pickle_data = _HigherOrderOperatorPickleData("cond")
+        pickle_data = self._OpPickleData.pickle(cond_op, self.Options(ops_filter=None))
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
         unpickle_state = _UnpickleState(fake_mode)
         unpickled_op = pickle_data.unpickle(unpickle_state)
@@ -299,23 +297,21 @@ class TestHigherOrderOperatorPickle(TestCase):
 
     def test_higher_order_operator_not_found_error(self):
         """
-        Test that unpickling a non-existent HigherOrderOperator raises
-        a helpful error message.
+        Test that unpickling a missing HOP target reports its name.
         """
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx._graph_pickler import (
-            _HigherOrderOperatorPickleData,
+            _OpFunctionPickleData,
             _UnpickleState,
         )
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-        pickle_data = _HigherOrderOperatorPickleData("non_existent_op")
+        pickle_data = _OpFunctionPickleData("torch", "ops.higher_order.non_existent_op")
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
         unpickle_state = _UnpickleState(fake_mode)
-        with self.assertRaises(RuntimeError) as cm:
+        with self.assertRaises(AttributeError) as cm:
             pickle_data.unpickle(unpickle_state)
         self.assertIn("non_existent_op", str(cm.exception))
-        self.assertIn("not found", str(cm.exception))
 
 
 @unittest.skipUnless(HAS_DILL, "dill not available")
