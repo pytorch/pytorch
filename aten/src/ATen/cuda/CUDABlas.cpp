@@ -832,13 +832,23 @@ void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Hal
 template<>
 void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, float))
 {
-  if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
+  auto preferred = at::globalContext().blasPreferredBackend();
+#ifdef USE_ROCM
+  // rocBLAS produces inaccurate results for batched bf16 GEMMs with n == 1 and
+  // fp32 accumulate/output on gfx90a. hipBLASLt is correct for this
+  // shape, so force it even when Cublas is preferred. Scoped to gfx90a only.
+  if (preferred == BlasBackend::Cublas && n == 1 &&
+      at::detail::getCUDAHooks().isGPUArch({"gfx90a"})) {
+    preferred = BlasBackend::Cublaslt;
+  }
+#endif
+  if (preferred == BlasBackend::Cublaslt) {
     if (!bgemm_internal_cublaslt<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16))) {
       bgemm_internal_cublas<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
     }
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
-  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+  else if (preferred == BlasBackend::Ck) {
     TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
   }
 #endif
@@ -1889,6 +1899,7 @@ template bool gemm_and_bias(
     at::opmath_type<at::BFloat16> beta);
 
 using at::blas::ScalingType;
+using at::blas::SwizzleType;
 
 void scaled_gemm(
     char transa,
@@ -1902,12 +1913,14 @@ void scaled_gemm(
     ScalarType mat1_dtype,
     ScalarType mat1_scale_dtype,
     ScalingType mat1_scaling_type,
+    SwizzleType mat1_swizzle_type,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
     ScalarType mat2_scale_dtype,
     ScalingType mat2_scaling_type,
+    SwizzleType mat2_swizzle_type,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
@@ -2046,8 +2059,8 @@ void scaled_gemm(
     // The SCALE_MODE attrs only exist in cuBLAS 12.8+/ROCm 7.0 or in recent hipblaslt,
     // but we must invoke get_scale_mode anyways to trigger the version checks.
     // Note that AMD/ROCm follows OCP Spec 1.0, which is different from NVIDIA's implementation. See get_scale_mode() for details.
-    [[maybe_unused]] int a_scale_mode = detail::cublasLtMatmulScaleMode(mat1_scaling_type, mat1_scale_dtype, use_fast_accum);
-    [[maybe_unused]] int b_scale_mode = detail::cublasLtMatmulScaleMode(mat2_scaling_type, mat2_scale_dtype, use_fast_accum);
+    [[maybe_unused]] int a_scale_mode = detail::cublasLtMatmulScaleMode(mat1_scaling_type, mat1_swizzle_type, mat1_scale_dtype, use_fast_accum);
+    [[maybe_unused]] int b_scale_mode = detail::cublasLtMatmulScaleMode(mat2_scaling_type, mat2_swizzle_type, mat2_scale_dtype, use_fast_accum);
 #if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000 && defined(HIPBLASLT_OUTER_VEC))
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, b_scale_mode);

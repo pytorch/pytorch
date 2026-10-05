@@ -1,20 +1,29 @@
 """RMSNorm kernel entry points shared by JIT compilation and AOT export."""
 
+from typing import Any, Literal, TYPE_CHECKING
+
 import cuda.bindings.driver as cuda  # pyrefly: ignore[missing-import]
+
 import cutlass
 import cutlass.cute as cute
 from cutlass import Float32, Int32
 
 import torch
+from torch._native.cutedsl import launch
+from torch._native.cutedsl.dtypes import torch2cute
+from torch._native.cutedsl.reduce import reduce_rows
 from torch._native.instrumentation import instrumented_cutedsl_cache
+from torch._native.utils.tensor import row_alignment
 from torch._vendor.quack.rmsnorm import RMSNorm, RMSNormBackward
 from torch._vendor.quack.rmsnorm_config import RmsNormBwdConfig, RmsNormFwdConfig
 
-from .rmsnorm_launch import NORMALIZED_SIZES
+
+if TYPE_CHECKING:
+    from tvm_ffi import Function  # pyrefly: ignore[missing-import]
 
 
 class RmsNormForward:
-    def __init__(self, dtype, n):
+    def __init__(self, dtype: type[cutlass.Numeric], n: int) -> None:
         self.n = n
         self.dtype = dtype
 
@@ -28,7 +37,7 @@ class RmsNormForward:
         rows: Int32,
         eps: Float32,
         stream: cuda.CUstream,
-    ):
+    ) -> None:
         stride = cute.assume(cutlass.Int64(self.n), divby=self.n)
         layout = cute.make_layout((rows, self.n), stride=(stride, 1))
         x = cute.make_tensor(mX.iterator, layout)
@@ -46,10 +55,17 @@ class RmsNormForward:
 
 
 class RmsNormBackward:
-    def __init__(self, dtype, n, compute_dw):
+    def __init__(
+        self,
+        dtype: type[cutlass.Numeric],
+        n: int,
+        compute_dw: bool,
+        dout_dtype: type[cutlass.Numeric],
+    ) -> None:
         self.n = n
         self.dtype = dtype
         self.compute_dw = compute_dw
+        self.dout_dtype = dout_dtype
 
     @cute.jit
     def __call__(
@@ -64,7 +80,7 @@ class RmsNormBackward:
         rows: Int32,
         blocks: Int32,
         stream: cuda.CUstream,
-    ):
+    ) -> None:
         stride = cute.assume(cutlass.Int64(self.n), divby=self.n)
         layout = cute.make_layout((rows, self.n), stride=(stride, 1))
         x = cute.make_tensor(mX.iterator, layout)
@@ -81,97 +97,86 @@ class RmsNormBackward:
         norm = RMSNormBackward(
             self.dtype,
             self.n,
-            dout_dtype=self.dtype,
+            dout_dtype=self.dout_dtype,
             num_acc=int(self.compute_dw),
             config=RmsNormBwdConfig.from_analytical_heuristic(
                 self.n,
                 self.dtype.width,
-                self.dtype.width,
+                self.dout_dtype.width,
                 arch_major=arch.major,
                 num_acc=int(self.compute_dw),
             ),
         )
         norm(x, mW, dout, None, rstd, None, dx, partial, None, None, blocks, stream)
         if cutlass.const_expr(self.compute_dw):
-            self.weight_grad(partial, mdW).launch(
-                grid=[self.n // 32, 1, 1], block=[128, 1, 1], stream=stream
+            reduce_rows(partial, mdW, 32, 128).launch(
+                grid=[cute.ceil_div(self.n, 32), 1, 1],
+                block=[128, 1, 1],
+                stream=stream,
             )
 
-    @cute.kernel
-    def weight_grad(self, partial: cute.Tensor, out: cute.Tensor):
-        tidx, _, _ = cute.arch.thread_idx()
-        bidx, _, _ = cute.arch.block_idx()
-        lane, warp = tidx % 32, tidx // 32
-        col = bidx * 32 + lane
-        acc = Float32(0)
-        for row in cutlass.range(warp, partial.shape[0], 4):
-            acc += partial[row, col]
-        smem = cutlass.utils.SmemAllocator()
-        sums = smem.allocate_tensor(Float32, cute.make_layout((4, 32), stride=(32, 1)))
-        sums[warp, lane] = acc
-        cute.arch.barrier()
-        if warp == 0:
-            for i in cutlass.range_constexpr(1, 4):
-                acc += sums[i, lane]
-            out[col] = out.element_type(acc)
 
+def kernel_spec(
+    direction: Literal["forward", "backward"],
+    dtype: str,
+    n: int,
+    has_weight: bool,
+    compute_dw: bool = False,
+    *,
+    jit: bool = False,
+    dout_dtype: str | None = None,
+) -> dict[str, Any]:
+    element_type = torch2cute[getattr(torch, dtype)]
 
-def kernel_spec(direction, dtype, n, has_weight, compute_dw=False, *, jit=False):
-    if n not in NORMALIZED_SIZES:
-        raise ValueError(f"unsupported shared RMSNorm width: {n}")
-    dtype_name = dtype
-    dtype = {
-        "float16": cutlass.Float16,
-        "bfloat16": cutlass.BFloat16,
-        "float32": cutlass.Float32,
-    }[dtype]
+    def tensor(
+        element_type: type[cutlass.Numeric],
+        shape: tuple[int | cute.SymInt, ...],
+        stride_order: tuple[int, ...] | None = None,
+    ) -> cute.Tensor:
+        return launch.fake_compact(
+            element_type,
+            shape,
+            stride_order=stride_order,
+            align=row_alignment(n, element_type.width // 8),
+        )
+
     # AOT needs only pointers. JIT descriptors also express the real tensor
     # ranks for TVM-FFI validation; both entry points construct layouts from rows.
-    shape = (cute.sym_int(), n) if jit else (1,)
-    x = cute.runtime.make_fake_compact_tensor(
-        dtype, shape, stride_order=(1, 0) if jit else None, assumed_align=16
-    )
-    weight = (
-        cute.runtime.make_fake_compact_tensor(dtype, (n,), assumed_align=16)
-        if has_weight
-        else None
-    )
-    out = cute.runtime.make_fake_compact_tensor(
-        dtype, shape, stride_order=(1, 0) if jit else None, assumed_align=16
-    )
-    rstd = cute.runtime.make_fake_compact_tensor(
+    shape = (launch.sym(), n) if jit else (1,)
+    stride_order = (1, 0) if jit else None
+    x = tensor(element_type, shape, stride_order)
+    weight = tensor(element_type, (n,)) if has_weight else None
+    out = tensor(element_type, shape, stride_order)
+    rstd = launch.fake_compact(
         Float32,
-        (cute.sym_int(),) if jit else (1,),
-        assumed_align=4,
+        (launch.sym(),) if jit else (1,),
+        align=4,
     )
     tensor_args = [{"name": "mX", "read_only": True}]
     if has_weight:
         tensor_args.append({"name": "mW", "read_only": True})
-    prefix = f"rmsnorm_{direction}_{dtype_name}_n{n}_w{int(has_weight)}"
+    prefix = f"rmsnorm_{direction}_{dtype}_n{n}_w{int(has_weight)}"
     scalar_args = [{"name": "rows", "ctype": "int32_t"}]
     if direction == "forward":
-        fn = RmsNormForward(dtype, n)
+        fn = RmsNormForward(element_type, n)
         fake_args = [x, weight, out, rstd, Int32(0), Float32(0)]
         tensor_args += [{"name": "mO"}, {"name": "mRstd"}]
         scalar_args.append({"name": "eps", "ctype": "float"})
     else:
+        dout_element_type = (
+            element_type
+            if dout_dtype is None
+            else torch2cute[getattr(torch, dout_dtype)]
+        )
+        dout = tensor(dout_element_type, shape, stride_order)
         partial = (
-            cute.runtime.make_fake_compact_tensor(
-                Float32,
-                (cute.sym_int(), n) if jit else (1,),
-                stride_order=(1, 0) if jit else None,
-                assumed_align=16,
-            )
+            tensor(Float32, (launch.sym(), n) if jit else (1,), stride_order)
             if compute_dw
             else None
         )
-        dw = (
-            cute.runtime.make_fake_compact_tensor(dtype, (n,), assumed_align=16)
-            if compute_dw
-            else None
-        )
-        fn = RmsNormBackward(dtype, n, compute_dw)
-        fake_args = [x, weight, x, rstd, out, partial, dw, Int32(0), Int32(0)]
+        dw = tensor(element_type, (n,)) if compute_dw else None
+        fn = RmsNormBackward(element_type, n, compute_dw, dout_element_type)
+        fake_args = [x, weight, dout, rstd, out, partial, dw, Int32(0), Int32(0)]
         tensor_args += [
             {"name": "mdO", "read_only": True},
             {"name": "mRstd", "read_only": True},
@@ -181,6 +186,8 @@ def kernel_spec(direction, dtype, n, has_weight, compute_dw=False, *, jit=False)
             tensor_args += [{"name": "mdWPartial"}, {"name": "mdW"}]
         scalar_args.append({"name": "blocks", "ctype": "int32_t"})
         prefix += f"_dw{int(compute_dw)}"
+        if dout_element_type != element_type:
+            prefix += f"_dout{dout_element_type.__name__}"
     return {
         "kind": "cutedsl",
         "prefix": prefix,
@@ -191,25 +198,35 @@ def kernel_spec(direction, dtype, n, has_weight, compute_dw=False, *, jit=False)
     }
 
 
-@instrumented_cutedsl_cache("aten::_fused_rms_norm")
-def compile_rmsnorm_forward(dtype, n, has_weight, arch):
-    spec = kernel_spec("forward", dtype, n, has_weight, jit=True)
-    return cute.compile(
+@instrumented_cutedsl_cache(
+    lambda direction, *args, **kwargs: (
+        "aten::_fused_rms_norm"
+        if direction == "forward"
+        else "aten::_fused_rms_norm_backward"
+    )
+)
+def compile_rmsnorm(
+    direction: Literal["forward", "backward"],
+    dtype: torch.dtype,
+    n: int,
+    has_weight: bool,
+    arch: tuple[int, int],
+    compute_dw: bool = False,
+    dout_dtype: torch.dtype | None = None,
+) -> "Function":
+    spec = kernel_spec(
+        direction,
+        str(dtype).removeprefix("torch."),
+        n,
+        has_weight,
+        compute_dw,
+        jit=True,
+        dout_dtype=(
+            str(dout_dtype).removeprefix("torch.") if dout_dtype is not None else None
+        ),
+    )
+    return launch.compile_kernel(
         spec["fn"],
         *spec["fake_args"],
-        options=f"--enable-tvm-ffi --gpu-arch=sm_{arch[0]}{arch[1]}",
+        options=f"--gpu-arch=sm_{arch[0]}{arch[1]}",
     )
-
-
-@instrumented_cutedsl_cache("aten::_fused_rms_norm_backward")
-def compile_rmsnorm_backward(dtype, n, has_weight, compute_dw, arch):
-    spec = kernel_spec("backward", dtype, n, has_weight, compute_dw, jit=True)
-    return cute.compile(
-        spec["fn"],
-        *spec["fake_args"],
-        options=f"--enable-tvm-ffi --gpu-arch=sm_{arch[0]}{arch[1]}",
-    )
-
-
-def stream(device_index):
-    return cuda.CUstream(torch._C._cuda_getCurrentRawStream(device_index))
