@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import inspect
+from typing import TYPE_CHECKING
+
 import torch
 from torch.fx import Graph, Node
 
-from .loop_body import LoopBody
+from .ops_handler import OpsHandler
+
+
+if TYPE_CHECKING:
+    from .loop_body import LoopBody
+
+
+_TO_DTYPE_SIGNATURE = inspect.signature(OpsHandler.to_dtype)
 
 
 def eliminate_redundant_lowp_round_trips(loop_body: LoopBody) -> bool:
@@ -41,20 +51,10 @@ def eliminate_redundant_lowp_round_trips(loop_body: LoopBody) -> bool:
         """
         if node.op != "call_method" or node.target != "to_dtype":
             return None
-        if not (3 <= len(node.args) <= 5):
-            return None
 
-        # (value, dtype, src_dtype=None, use_compute_types=True)
-        value = node.args[1]
-        dtype = node.args[2]
-        src_dtype = (
-            node.args[3] if len(node.args) >= 4 else node.kwargs.get("src_dtype")
-        )
-        use_compute_types = (
-            node.args[4]
-            if len(node.args) == 5
-            else node.kwargs.get("use_compute_types", True)
-        )
+        bound = _TO_DTYPE_SIGNATURE.bind(*node.args, **node.kwargs)
+        bound.apply_defaults()
+        _, value, dtype, src_dtype, use_compute_types = bound.arguments.values()
         # Repeated emulation casts omit src_dtype, for example:
         #   to_dtype(value, torch.bfloat16, use_compute_types=False)
         # The first downcast can be the real conversion that produced the
@@ -63,7 +63,6 @@ def eliminate_redundant_lowp_round_trips(loop_body: LoopBody) -> bool:
         #            use_compute_types=False)
         if (
             not isinstance(value, Node)
-            or not isinstance(dtype, torch.dtype)
             or dtype not in lowp_dtypes
             or (src_dtype is not None and not allow_src_dtype)
             or type(use_compute_types) is not bool
@@ -86,7 +85,7 @@ def eliminate_redundant_lowp_round_trips(loop_body: LoopBody) -> bool:
         storage and compute representations.
         """
         erased = 0
-        for up2_node in list(graph.nodes):
+        for up2_node in graph.find_nodes(op="call_method", target="to_dtype"):
             if (up2 := get_to_dtype(up2_node)) is None:
                 continue
             down2_node, dtype, use_compute_types = up2
@@ -119,13 +118,10 @@ def eliminate_redundant_lowp_round_trips(loop_body: LoopBody) -> bool:
             if not down2_node.users:
                 graph.erase_node(down2_node)
                 erased += 1
-
-        if erased and graph.owning_module is None:
-            # Check that erased nodes are no longer referenced. Debug LoopBody
-            # graphs contain function-valued call_module targets that this FX
-            # check does not understand, so skip it for those graphs.
-            graph.lint()
         return erased
+
+    if loop_body.op_counts["to_dtype"] < 4:
+        return False
 
     erased = sum(
         eliminate_from_graph(block.graph)
@@ -134,14 +130,6 @@ def eliminate_redundant_lowp_round_trips(loop_body: LoopBody) -> bool:
     if not erased:
         return False
 
-    # LoopBody copies intentionally share their FX graphs and op_counts counter.
-    # Update the counter in place so scheduler cost checks see the rewrite.
+    # op_counts was filled in while tracing, so keep it in sync with the graphs.
     loop_body.op_counts["to_dtype"] -= erased
-    if loop_body.op_counts["to_dtype"] == 0:
-        del loop_body.op_counts["to_dtype"]
-
-    # These cache_on_self analyses contain FX nodes and graph-derived bounds.
-    # Clear them so their next users recompute from the rewritten graphs.
-    LoopBody.get_nodes.clear_cache(loop_body)
-    LoopBody.bounds.clear_cache(loop_body)
     return True

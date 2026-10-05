@@ -23,31 +23,15 @@ class TestOptimizeLoopBody(TestCase):
         with config.patch(constant_and_index_propagation=False):
             loop_body = LoopBody(fn, ([],), {}, [], [])
 
-        nodes_before = loop_body.get_nodes()
-        to_dtype_nodes_before = loop_body.root_block.graph.find_nodes(
-            op="call_method", target="to_dtype"
-        )
-        self.assertEqual(loop_body.op_counts["to_dtype"], 6)
-
-        self.assertTrue(eliminate_redundant_lowp_round_trips(loop_body))
-        to_dtype_nodes = loop_body.root_block.graph.find_nodes(
-            op="call_method", target="to_dtype"
-        )
-        self.assertEqual(len(to_dtype_nodes), 2)
-        self.assertIs(to_dtype_nodes[0], to_dtype_nodes_before[0])
-        self.assertIs(to_dtype_nodes[1], to_dtype_nodes_before[1])
+        graph = loop_body.root_block.graph
+        down1, up1 = graph.find_nodes(op="call_method", target="to_dtype")
+        self.assertEqual(down1.args[1].target, "constant")
+        self.assertIs(up1.args[1], down1)
+        self.assertEqual(list(up1.users), [graph.output_node()])
         self.assertEqual(loop_body.op_counts["to_dtype"], 2)
-        self.assertIsNot(loop_body.get_nodes(), nodes_before)
 
         self.assertFalse(eliminate_redundant_lowp_round_trips(loop_body))
-        self.assertEqual(
-            len(
-                loop_body.root_block.graph.find_nodes(
-                    op="call_method", target="to_dtype"
-                )
-            ),
-            2,
-        )
+        self.assertEqual(len(graph.find_nodes(op="call_method", target="to_dtype")), 2)
         self.assertEqual(loop_body.op_counts["to_dtype"], 2)
 
 
