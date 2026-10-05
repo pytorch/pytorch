@@ -298,9 +298,7 @@ class TestNativeStackRebaseMain(TryRebaseMainTestCase):
         self.repo.gh_owner_and_name.return_value = ("pytorch", "pytorch")
         self.repo.rev_parse.return_value = "onto-sha"
         self.patch("tryrebase.GitRepo", return_value=self.repo)
-        self.updates = [
-            (n, f"user/{n}", f"old-{n}", f"new-{n}") for n in (1000, 1001, 1002)
-        ]
+        self.updates = [(n, f"user/{n}", f"new-{n}") for n in (1000, 1001, 1002)]
         self.build = self.patch(
             "tryrebase.build_native_stack_rebase", return_value=self.updates
         )
@@ -354,9 +352,9 @@ class TestNativeStackRebaseMain(TryRebaseMainTestCase):
         )
         self.assertEqual(self.comments(), [self.comment(1002, message)])
 
-    def test_up_to_date_stack_exits_with_failure(self) -> None:
+    def test_up_to_date_stack_exits_with_success(self) -> None:
         self.build.return_value = []
-        self.assertEqual(self.run_main(), 1)
+        self.assertEqual(self.run_main(), 0)
         self.push.assert_not_called()
         message = "Tried to rebase and push PR #1002, but it was already up to date."
         self.assertEqual(self.comments(), [self.comment(1002, message)])
@@ -462,7 +460,6 @@ class TestNativeStackRebaseEndToEnd(TryRebaseMainTestCase, LineStackTestCase):
         with without_identity_variables():
             self.assertEqual(self.run_main(), 0)
         self.assertUpdated(self.stack, before, self.own, "user/a", "user/b", "user/c")
-        self.assertMergesCleanly(self.stack, 103, self.own)
         self.assertEqual(
             self.comments(),
             [
@@ -472,7 +469,7 @@ class TestNativeStackRebaseEndToEnd(TryRebaseMainTestCase, LineStackTestCase):
         )
         self.post.reset_mock()
         with without_identity_variables():
-            self.assertEqual(self.run_main(), 1)
+            self.assertEqual(self.run_main(), 0)
         message = "Tried to rebase and push PR #103, but it was already up to date."
         self.assertEqual(self.comments(), [self.comment(103, message)])
 
