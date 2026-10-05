@@ -85,7 +85,6 @@ from ..utils import (
     specialize_symnode,
     str_methods,
     tensortype_to_dtype,
-    unpack_and_apply_fn,
     unpack_iterable,
 )
 from .base import (
@@ -95,7 +94,6 @@ from .base import (
     Method,
     NO_SUCH_SUBOBJ,
     readonly_setter,
-    type_name_no_user_code,
     unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
@@ -3550,20 +3548,21 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     @staticmethod
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslatorBase",
-        user_cls: type | VariableTracker,
+        user_cls: type,
         /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if isinstance(user_cls, VariableTracker):
-            user_cls_vt = user_cls
-            cls = user_cls.get_real_python_backed_value()
-            if not isinstance(cls, type):
-                raise AssertionError(f"expected a type receiver, got {type(cls)}")
-            user_cls = cls
-        else:
-            user_cls_vt = None
-        user_cls_name = type_name_no_user_code(user_cls)
+        if user_cls not in {dict, OrderedDict, defaultdict}:
+            unimplemented(
+                gb_type="Unsupported dict type for fromkeys()",
+                context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
+                explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
+                f"{user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
+                hints=[
+                    f"Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict.",
+                ],
+            )
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
             if (
@@ -3574,7 +3573,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             ):
                 raise_args_mismatch(
                     tx,
-                    f"{user_cls_name}.fromkeys",
+                    f"{user_cls.__name__}.fromkeys",
                     "1 args and 1 kwargs (`value`)",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
@@ -3582,7 +3581,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if len(args) == 0:
             raise_args_mismatch(
                 tx,
-                f"{user_cls_name}.fromkeys",
+                f"{user_cls.__name__}.fromkeys",
                 "at least 1 args",
                 f"{len(args)} args",
             )
@@ -3591,48 +3590,12 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if len(args) != 2:
             raise_args_mismatch(
                 tx,
-                f"{user_cls_name}.fromkeys",
+                f"{user_cls.__name__}.fromkeys",
                 "2 args",
                 f"{len(args)} args",
             )
 
         arg, value = args
-
-        if user_cls not in (dict, OrderedDict, defaultdict):
-            if not issubclass(user_cls, dict):
-                raise AssertionError(f"expected a dict subclass, got {user_cls}")
-            if user_cls_vt is None or type(user_cls) is not type:
-                unimplemented(
-                    gb_type="Unsupported dict subclass fromkeys() construction",
-                    context=f"{user_cls_name}.fromkeys(): {args} {kwargs}",
-                    explanation=(
-                        f"Dynamo cannot safely construct {user_cls_name} because its "
-                        "class or metaclass cannot be reconstructed without running "
-                        "unmodeled user code."
-                    ),
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-
-            result = user_cls_vt.call_function(tx, [], {})
-            from .user_defined import UserDefinedDictVariable
-
-            if not isinstance(result, UserDefinedDictVariable):
-                unimplemented(
-                    gb_type="Unsupported dict subclass fromkeys() result",
-                    context=f"{user_cls_name}.fromkeys(): {args} {kwargs}",
-                    explanation=(
-                        f"Dynamo expected constructing {user_cls_name} to produce "
-                        "an instance of that dict subclass."
-                    ),
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-
-            unpack_and_apply_fn(
-                tx,
-                arg,
-                lambda key: result.mp_ass_subscript_impl(tx, key, value),
-            )
-            return result
 
         def _make_result(
             items: dict[VariableTracker, VariableTracker],
@@ -3664,14 +3627,19 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # Reuse the operand's existing HashableTracker keys instead of
         # re-wrapping (and thus re-hashing) the underlying VTs, mirroring
         # CPython's do-not-rehash-dict-keys behavior when building a dict from
-        # an existing exact set/frozenset/dict.
-        if user_cls is dict and type(arg) in (
-            variables.SetVariable,
-            variables.FrozensetVariable,
-            ConstDictVariable,
+        # an existing set/frozenset/dict.
+        if isinstance(
+            arg,
+            (
+                variables.SetVariable,
+                variables.FrozensetVariable,
+                variables.DictKeySetVariable,
+                variables.OrderedSetVariable,
+                ConstDictVariable,
+            ),
         ):
             # HashableTracker keys are accepted by ConstDictVariable.__init__.
-            return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[union-attr, arg-type]
+            return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]
         if isinstance(arg, dict):
             arg_list = [VariableTracker.build(tx, k) for k in arg]
             return _make_result(dict.fromkeys(arg_list, value))
