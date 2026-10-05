@@ -55,10 +55,10 @@ class TeamManager {
   nvshmem_team_t get_team(
       const std::string& group_name,
       const std::vector<int>& global_ranks) {
-    auto [team_pool, pool_updated] =
-        group_to_team_pool(group_name, global_ranks, 1);
+    auto [group_state, pool_updated] =
+        get_group_state(group_name, global_ranks, 1);
     // Return the first available team
-    return team_pool[0];
+    return group_state.team_pool[0];
   }
 
   // Get n teams for a group.
@@ -72,34 +72,30 @@ class TeamManager {
     // A device guard is required for malloc and memcpy below
     c10::cuda::CUDAGuard guard(device_);
     // Get the team pool with the requested number of teams
-    auto [team_pool, pool_updated] =
-        group_to_team_pool(group_name, global_ranks, need_n);
+    auto [group_state, pool_updated] =
+        get_group_state(group_name, global_ranks, need_n);
+    auto& team_pool = group_state.team_pool;
     // Check if the pool already exists in device memory
-    nvshmem_team_t* team_pool_dev = nullptr;
     constexpr auto pool_bytes = sizeof(nvshmem_team_t) * MAX_N_TEAMS;
-    auto it = team_pool_devptrs_.find(group_name);
-    if (it == team_pool_devptrs_.end()) {
+    if (group_state.team_pool_dev == nullptr) {
       // If not, allocate a new pool in device memory
-      team_pool_dev = reinterpret_cast<nvshmem_team_t*>(
+      group_state.team_pool_dev = reinterpret_cast<nvshmem_team_t*>(
           c10::cuda::CUDACachingAllocator::raw_alloc(pool_bytes));
-      team_pool_devptrs_[group_name] = team_pool_dev;
       // Rendezvous may already have populated or reused the host pool.
       pool_updated = true;
-    } else {
-      team_pool_dev = it->second;
     }
     // Update the pool in device memory if host side pool is updated
     if (pool_updated) {
       TORCH_INTERNAL_ASSERT(team_pool.size() == MAX_N_TEAMS);
       auto stream = at::cuda::getCurrentCUDAStream();
       C10_CUDA_CHECK(cudaMemcpyAsync(
-          team_pool_dev,
+          group_state.team_pool_dev,
           team_pool.data(),
           pool_bytes,
           cudaMemcpyHostToDevice,
           stream));
     }
-    return std::make_pair(std::cref(team_pool), team_pool_dev);
+    return std::make_pair(std::cref(team_pool), group_state.team_pool_dev);
   }
 
   // Retire a group's team pool for exclusive reuse by a future process group
@@ -107,31 +103,24 @@ class TeamManager {
   // group destruction does not provide the ordering guarantees needed to call
   // it safely here.
   void release_group(const std::string& group_name) {
-    auto team_it = group_name_to_team_pool_.find(group_name);
-    if (team_it == group_name_to_team_pool_.end()) {
+    auto group_it = live_groups_.find(group_name);
+    if (group_it == live_groups_.end()) {
       return;
     }
+    auto& group_state = group_it->second;
 
     c10::cuda::CUDAGuard guard(device_);
     C10_CUDA_CHECK(cudaDeviceSynchronize());
 
-    auto dev_it = team_pool_devptrs_.find(group_name);
-    if (dev_it != team_pool_devptrs_.end()) {
-      c10::cuda::CUDACachingAllocator::raw_delete(dev_it->second);
-      team_pool_devptrs_.erase(dev_it);
+    if (group_state.team_pool_dev != nullptr) {
+      c10::cuda::CUDACachingAllocator::raw_delete(group_state.team_pool_dev);
     }
 
-    auto ranks_it = group_name_to_global_ranks_.find(group_name);
-    auto pool_id_it = group_name_to_pool_id_.find(group_name);
-    TORCH_INTERNAL_ASSERT(ranks_it != group_name_to_global_ranks_.end());
-    TORCH_INTERNAL_ASSERT(pool_id_it != group_name_to_pool_id_.end());
-    auto& membership = membership_state(ranks_it->second);
+    auto& membership = membership_state(group_state.global_ranks);
     auto [_, inserted] = membership.pending_pools.emplace(
-        pool_id_it->second, std::move(team_it->second));
+        group_state.pool_id, std::move(group_state.team_pool));
     TORCH_INTERNAL_ASSERT(inserted);
-    group_name_to_pool_id_.erase(pool_id_it);
-    group_name_to_global_ranks_.erase(ranks_it);
-    group_name_to_team_pool_.erase(team_it);
+    live_groups_.erase(group_it);
   }
 
   ~TeamManager() noexcept {
@@ -145,8 +134,11 @@ class TeamManager {
       // block until all preceding CUDA operations on the device have completed
       // before freeing the memory. Thus we don't need to worry about freeing
       // the memory before CUDA kernels complete.
-      for (auto& [_, team_pool_dev] : team_pool_devptrs_) {
-        c10::cuda::CUDACachingAllocator::raw_delete(team_pool_dev);
+      for (auto& [_, group_state] : live_groups_) {
+        if (group_state.team_pool_dev != nullptr) {
+          c10::cuda::CUDACachingAllocator::raw_delete(
+              group_state.team_pool_dev);
+        }
       }
     } catch (...) {
       // Ignore the error
@@ -162,6 +154,16 @@ class TeamManager {
     std::vector<int> global_ranks;
     uint64_t next_pool_id{0};
     std::map<uint64_t, TeamPool> pending_pools;
+  };
+
+  struct LiveGroupState {
+    explicit LiveGroupState(const std::vector<int>& ranks)
+        : team_pool(MAX_N_TEAMS, NVSHMEM_TEAM_INVALID), global_ranks(ranks) {}
+
+    TeamPool team_pool;
+    std::vector<int> global_ranks;
+    uint64_t pool_id{0};
+    nvshmem_team_t* team_pool_dev{nullptr};
   };
 
   MembershipState& membership_state(const std::vector<int>& global_ranks) {
@@ -210,12 +212,9 @@ class TeamManager {
     }
   }
 
-  // Get the team pool for a group. If the pool doesn't exist, create it. If the
-  // pool exists but is not large enough, create more teams.
-  // The first element of the returned pair is the team pool on host side.
-  // The second element of the returned pair is a boolean indicating if the pool
-  // is updated.
-  std::pair<const TeamPool&, bool> group_to_team_pool(
+  // Get the state for a group, creating its team pool if needed. The second
+  // element indicates whether the host team pool was updated.
+  std::pair<LiveGroupState&, bool> get_group_state(
       const std::string& group_name,
       const std::vector<int>& global_ranks,
       const int need_n) {
@@ -225,25 +224,21 @@ class TeamManager {
 
     // Insert a new team pool if not exists. At this already-collective
     // boundary, first agree on a pool that every rank has retired.
-    auto [it, inserted] = group_name_to_team_pool_.emplace(
-        group_name, TeamPool(MAX_N_TEAMS, NVSHMEM_TEAM_INVALID));
+    auto [it, inserted] = live_groups_.try_emplace(group_name, global_ranks);
+    auto& group_state = it->second;
     if (inserted) {
       auto& membership = membership_state(global_ranks);
       auto reusable = take_reusable_team_pool(group_name, membership);
-      uint64_t pool_id;
       if (reusable.has_value()) {
-        pool_id = reusable->first;
-        it->second = std::move(reusable->second);
+        group_state.pool_id = reusable->first;
+        group_state.team_pool = std::move(reusable->second);
       } else {
-        pool_id = membership.next_pool_id++;
+        group_state.pool_id = membership.next_pool_id++;
       }
-      group_name_to_global_ranks_.emplace(group_name, global_ranks);
-      group_name_to_pool_id_.emplace(group_name, pool_id);
     } else {
-      TORCH_INTERNAL_ASSERT(
-          group_name_to_global_ranks_.at(group_name) == global_ranks);
+      TORCH_INTERNAL_ASSERT(group_state.global_ranks == global_ranks);
     }
-    auto& team_pool = it->second;
+    auto& team_pool = group_state.team_pool;
     bool pool_updated = inserted;
 
     // Create new teams if what's requested is more than what we have
@@ -273,7 +268,7 @@ class TeamManager {
       team_pool[i] = team;
       pool_updated = true;
     }
-    return std::make_pair(std::cref(team_pool), pool_updated);
+    return std::pair<LiveGroupState&, bool>(group_state, pool_updated);
   }
 
  private:
@@ -282,15 +277,10 @@ class TeamManager {
   static State& state();
 
   const c10::Device device_;
-  // A map from group name to team pool for that group.
-  std::unordered_map<std::string, TeamPool> group_name_to_team_pool_;
-  // Membership and pool identity of each live group.
-  std::unordered_map<std::string, std::vector<int>> group_name_to_global_ranks_;
-  std::unordered_map<std::string, uint64_t> group_name_to_pool_id_;
+  // State owned by each live group.
+  std::unordered_map<std::string, LiveGroupState> live_groups_;
   // Per-membership retired pools and their rank-comparable identities.
   std::vector<MembershipState> membership_states_;
-  // A map from group name to team pool array in device memory.
-  std::unordered_map<std::string, nvshmem_team_t*> team_pool_devptrs_;
 };
 
 struct TeamManager::State {
