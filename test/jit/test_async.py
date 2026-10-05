@@ -451,6 +451,25 @@ class TestAsync(JitTestCase):
             traced.graph, kind="aten::add", num_kind_nodes=2
         )
 
+    def test_export_opnames_inlines_fork_wait(self):
+        class Mod(nn.Module):
+            def compute(self, x: Tensor) -> Tensor:
+                return torch.relu(x)
+
+            def forward(self, x: Tensor) -> Tensor:
+                future = torch.jit.fork(self.compute, x)
+                return torch.jit.wait(future)
+
+        scripted = torch.jit.script(Mod())
+
+        self.assertEqual(torch.jit.export_opnames(scripted), ["aten::relu"])
+        self.assertGraphContainsExactly(
+            scripted.graph, kind="prim::fork", num_kind_nodes=1
+        )
+        self.assertGraphContainsExactly(
+            scripted.graph, kind="aten::wait", num_kind_nodes=1
+        )
+
     def test_trace_fork_wait_list_modulecalls(self):
         def add_one(input):
             return input + torch.ones(input.size())
