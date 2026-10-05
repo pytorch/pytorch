@@ -52,6 +52,7 @@
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argsort.h>
+#include <ATen/ops/as_strided_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
@@ -1721,6 +1722,30 @@ static void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const T
 // optimization, it likely depends on the characteristics of the CPU, MKL will be different from non-MKL etc.,
 // but this seems to be a first starting point.
 
+// Dispatch-free equivalent of `t.select(0, index)` (`t` must have dim >= 1).
+static inline Tensor select_batch_dim0(const Tensor& t, size_t index) {
+  const auto sizes = t.sizes();
+  const auto strides = t.strides();
+  const auto signed_index = static_cast<int64_t>(index);
+  return at::native::as_strided_tensorimpl(
+      t,
+      sizes.slice(1),
+      strides.slice(1),
+      t.storage_offset() + signed_index * strides[0]);
+}
+
+// Repoint a dim-0 batch view (from select_batch_dim0) at batch `index` by
+// updating only its storage offset; sizes/strides are identical across batch
+// elements. `index` is in [0, bs) by construction, so no bounds check is needed.
+static inline void rebind_batch_dim0(
+    const Tensor& view,
+    const Tensor& base,
+    size_t index) {
+  const auto signed_index = static_cast<int64_t>(index);
+  view.unsafeGetTensorImpl()->set_storage_offset(
+      base.storage_offset() + signed_index * base.strides()[0]);
+}
+
 static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
@@ -1817,28 +1842,42 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
       if (enable_multithreaded_bmm) {
         auto bmm_out_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
+          auto r = select_batch_dim0(self_or_result, 0);
+          auto m1v = select_batch_dim0(batch1, 0);
+          auto m2v = select_batch_dim0(batch2, 0);
           for (const auto b : c10::irange(start, end)) {
-            auto r = self_or_result.select(0, b);
-            addmm_impl_cpu_(
-                r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+            rebind_batch_dim0(r, self_or_result, b);
+            rebind_batch_dim0(m1v, batch1, b);
+            rebind_batch_dim0(m2v, batch2, b);
+            addmm_impl_cpu_(r, r, m1v, m2v, 0, 1);
           }
         };
         // Materialize if COW, since we cannot do so during parallel_for
         self_or_result.mutable_data_ptr();
         at::parallel_for(0, bs, 1, bmm_out_fn);
       } else {
+        auto r = select_batch_dim0(self_or_result, 0);
+        auto m1v = select_batch_dim0(batch1, 0);
+        auto m2v = select_batch_dim0(batch2, 0);
         for (const auto b : c10::irange(bs)) {
-          auto r = self_or_result.select(0, b);
-          addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+          rebind_batch_dim0(r, self_or_result, b);
+          rebind_batch_dim0(m1v, batch1, b);
+          rebind_batch_dim0(m2v, batch2, b);
+          addmm_impl_cpu_(r, r, m1v, m2v, 0, 1);
         }
       }
     } else {
       if (enable_multithreaded_bmm) {
         auto bmm_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
+          auto r = select_batch_dim0(self_or_result, 0);
+          auto m1v = select_batch_dim0(batch1, 0);
+          auto m2v = select_batch_dim0(batch2, 0);
           for (const auto b : c10::irange(start, end)) {
-            self_or_result.select(0, b).addmm_(
-                batch1.select(0, b), batch2.select(0, b), beta, alpha);
+            rebind_batch_dim0(r, self_or_result, b);
+            rebind_batch_dim0(m1v, batch1, b);
+            rebind_batch_dim0(m2v, batch2, b);
+            r.addmm_(m1v, m2v, beta, alpha);
           }
         };
         // Materialize if COW, since we cannot do so during parallel_for
@@ -1846,8 +1885,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
         at::parallel_for(0, bs, 1, bmm_fn);
       } else {
         for (const auto b : c10::irange(bs)) {
-          self_or_result.select(0, b).addmm_(
-              batch1.select(0, b), batch2.select(0, b), beta, alpha);
+          select_batch_dim0(self_or_result, b).addmm_(
+              select_batch_dim0(batch1, b), select_batch_dim0(batch2, b), beta, alpha);
         }
       }
     }

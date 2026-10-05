@@ -41,6 +41,7 @@ from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _get_placeholder_expr,
+    free_symbols,
     free_unbacked_symbols,
     has_free_symbols,
     resolve_unbacked_bindings,
@@ -74,7 +75,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .fx_utils import count_flops_fx
+from .fx_utils import count_flops_fx, get_mutated_storages
 from .ir import (
     assign_origin_node,
     Constant,
@@ -99,6 +100,7 @@ from .lowering import (
     lowerings,
     make_fallback,
     maybe_layout_constraints,
+    mutate_to,
     needs_realized_inputs,
     require_contiguous,
     tag_to_layout_constraint,
@@ -463,6 +465,8 @@ class GraphLowering(torch.fx.Interpreter):
             sympy.Symbol, tuple[str, Literal["size", "stride"], int]
         ] = {}
         self.partition_maps: list[GraphPartitionMap] | None = None
+        # Whether graph partitioning left any partition outside a CUDA Graph.
+        self.has_uncaptured_partition = False
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
@@ -518,6 +522,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_buffers: OrderedSet[str] = OrderedSet()
         self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
         self.mutated_buffers: OrderedSet[str] = OrderedSet()
+        # Fake storages some node writes in place. A buffer over such storage
+        # must not be computed straight into another buffer (see ConcatKernel).
+        self.mutated_storages: OrderedSet[int] = get_mutated_storages(gm)
         self.sdpa_constraint_cache: dict[tuple, ir.IRNode] = {}
         # Buffers that are neither recycled nor freed. Aliasing kernels rely on
         # the second half: some have no output variable to free at all.
@@ -1883,7 +1890,7 @@ class GraphLowering(torch.fx.Interpreter):
                 if already_reflected(old_arg, new_arg):
                     continue
 
-                self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
+                mutate_to(old_arg, new_arg, share_value=True)
             return
 
         if not isinstance(fx_node.target, torch._ops.OpOverload):
@@ -1897,8 +1904,12 @@ class GraphLowering(torch.fx.Interpreter):
             if old_arg is new_arg:
                 return
             if schema_arg.alias_info is not None and schema_arg.alias_info.is_write:
-                # The lowering for copy_ is smart enough to "replace" old_arg with
-                # new_arg in all future uses so a copy_ kernel never gets emitted.
+                # new_arg is the copy made for the layout constraint, which
+                # nothing else reads, so an old_arg that is not realized can
+                # take its buffer and no copy kernel is emitted. A realized
+                # old_arg may be read by name already: new_arg is copied into
+                # it in place. new_arg has old_arg's dtype, device and size, so
+                # the conversions of the copy_ lowering are not needed.
                 # old_arg, new_arg may be immutable_list
                 if isinstance(old_arg, ir.IRNode):
                     old_arg = (old_arg,)  # type: ignore[assignment]
@@ -1907,9 +1918,7 @@ class GraphLowering(torch.fx.Interpreter):
                 for old_arg_item, new_arg_item in zip(old_arg, new_arg):  # type: ignore[call-overload]
                     if already_reflected(old_arg_item, new_arg_item):
                         continue
-                    self.call_function(
-                        torch.ops.aten.copy_.default, (old_arg_item, new_arg_item), {}
-                    )
+                    mutate_to(old_arg_item, new_arg_item, share_value=True)
 
         schema = fx_node.target._schema
         for idx, (old_arg, new_arg) in enumerate(zip(old_args, new_args)):
@@ -2382,6 +2391,9 @@ class GraphLowering(torch.fx.Interpreter):
     def create_deferred_runtime_asserts(
         self, n: torch.fx.Node, new_unbacked_defs: OrderedSet[sympy.Symbol]
     ) -> None:
+        """
+        Register wrapper-level runtime asserts after their symbolic inputs are bound.
+        """
         if config.do_not_emit_runtime_assertions:
             return
         # [NOTE] Codegen runtime asserts in Inductor
@@ -2420,14 +2432,21 @@ class GraphLowering(torch.fx.Interpreter):
             self.register_buffer(assert_op, set_name=True)
             self.register_operation(assert_op)
 
-        if (
-            full_aoti_runtime_assert()
-            and n.target is torch.ops.aten._assert_scalar.default
-            and self.aot_mode
-        ):
+        codegen_input_assert = False
+        assert_expr: Any = None
+        if n.target is torch.ops.aten._assert_scalar.default:
             node_args, _ = self.fetch_args_kwargs_from_env(n)
-            if node_args[0] != True:  # noqa: E712
-                make_assert(node_args[0], f"{node_args[0]} to be True")
+            assert_expr = node_args[0]
+            # has_free_symbols() ignores Boolean expressions such as sympy.And,
+            # so inspect the free symbols directly.
+            codegen_input_assert = (full_aoti_runtime_assert() and self.aot_mode) or (
+                bool(free_symbols(assert_expr))
+                and not bool(free_unbacked_symbols(assert_expr))
+            )
+
+        if codegen_input_assert:
+            if assert_expr != True:  # noqa: E712
+                make_assert(assert_expr, f"{assert_expr} to be True")
         else:
             # bound_unbacked_symbols tracks the symbols that are created so far,
             # we use it to make sure that runtime assertions are added after all
@@ -3245,6 +3264,7 @@ class SubgraphLowering(GraphLowering):
         while isinstance(root, SubgraphLowering):
             root = root.parent
         root.constants[name] = data
+        root.allocated_constant_name[name] = self.allocated_constant_name[name]
         return name
 
     def init_wrapper_code(
