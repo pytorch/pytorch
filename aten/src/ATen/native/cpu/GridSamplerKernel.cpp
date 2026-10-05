@@ -576,15 +576,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     for (const auto c : c10::irange(C)) {
       auto inp_slice_C_ptr = inp_slice[c].data();
 
-      // mask_gather zeros out the mask, so we need to make copies
-      Vec nw_mask_copy = nw_mask;
-      Vec ne_mask_copy = ne_mask;
-      Vec sw_mask_copy = sw_mask;
-      Vec se_mask_copy = se_mask;
-      auto nw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_nw_offset, nw_mask_copy);
-      auto ne_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_ne_offset, ne_mask_copy);
-      auto sw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_sw_offset, sw_mask_copy);
-      auto se_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_se_offset, se_mask_copy);
+      auto nw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_nw_offset, nw_mask);
+      auto ne_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_ne_offset, ne_mask);
+      auto sw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_sw_offset, sw_mask);
+      auto se_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_se_offset, se_mask);
 
       auto interpolated = (nw_val * nw) + (ne_val * ne) + (sw_val * sw) + (se_val * se);
       interpolated.store(out_slice[c].data() + offset, len);
@@ -677,15 +672,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
         mask_scatter_add(gInp_corner_arr, gInp_slice_C_ptr, i_gInp_se_offset_arr, i_se_mask_arr, len);
       }
 
-      // mask_gather zeros out the mask, so we need to make copies
-      Vec nw_mask_copy = nw_mask;
-      Vec ne_mask_copy = ne_mask;
-      Vec sw_mask_copy = sw_mask;
-      Vec se_mask_copy = se_mask;
-      auto nw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_nw_offset, nw_mask_copy);
-      auto ne_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_ne_offset, ne_mask_copy);
-      auto sw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_sw_offset, sw_mask_copy);
-      auto se_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_se_offset, se_mask_copy);
+      auto nw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_nw_offset, nw_mask);
+      auto ne_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_ne_offset, ne_mask);
+      auto sw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_sw_offset, sw_mask);
+      auto se_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_se_offset, se_mask);
 
       gx = gx + ((ne_val - nw_val) * s + (se_val - sw_val) * n) * gOut;
       gy = gy + ((sw_val - nw_val) * e + (se_val - ne_val) * w) * gOut;
@@ -758,9 +748,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c, out_ptr += out_sC, inp_slice_ptr += inp_sC) {
-      // mask_gather zeros out the mask, so we need to make a copy
-      auto mask_copy = mask;
-      auto inp_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_ptr, i_offset, mask_copy);
+      auto inp_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_ptr, i_offset, mask);
       inp_val.store(static_cast<void*>(out_ptr), len);
     }
   }
