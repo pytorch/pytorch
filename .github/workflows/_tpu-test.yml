@@ -304,17 +304,8 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
-          WORKSPACE_ORIGINAL_OWNER_ID=$(docker exec -t "${container_name}" stat -c '%u:%g' /var/lib/jenkins/workspace | tr -d '\r')
-          echo "WORKSPACE_ORIGINAL_OWNER_ID=${WORKSPACE_ORIGINAL_OWNER_ID}" >> "$GITHUB_ENV"
 
           docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && (if [ -f .ci/docker/common/install_torch_tpu.sh ]; then bash .ci/docker/common/install_torch_tpu.sh; fi) && ${TEST_COMMAND}"
-
-      - name: Restore workspace owner
-        if: always() && env.WORKSPACE_ORIGINAL_OWNER_ID
-        shell: bash
-        run: |
-          docker exec -t "${DOCKER_CONTAINER_ID}" sh -c \
-            'sudo chown -R '"${WORKSPACE_ORIGINAL_OWNER_ID}"' /var/lib/jenkins/workspace'
 
       - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload
