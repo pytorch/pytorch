@@ -31,6 +31,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    AllGatherInputFn,
     AllGatherOutputFn,
     PrepareReduceScatterInputsFn,
 )
