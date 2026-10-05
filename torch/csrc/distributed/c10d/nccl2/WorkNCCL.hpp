@@ -22,6 +22,7 @@
 #include <cuda_runtime.h>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 
 namespace c10d::nccl2 {
 
@@ -112,7 +113,10 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
-  void recordStart(std::string_view coll_name);
+  void recordStart(
+      std::string_view coll_name,
+      int64_t numel_in = 0,
+      int64_t numel_out = 0);
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -159,6 +163,8 @@ class WorkNCCL : public c10d::Work {
     uint64_t seq{0};
     // Set by recordStart(), whose callers pass string literals.
     std::string_view opType;
+    int64_t numelIn{0};
+    int64_t numelOut{0};
     std::shared_ptr<Events> events;
     std::mutex durationMutex;
     std::shared_ptr<Events> durationStartEvents;
@@ -199,6 +205,8 @@ class WorkNCCLQueue {
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);
+  // Snapshot of the last enqueued, started and completed work.
+  ::c10d::ProcessGroupStatus status();
 
  private:
   // completed collects the states retired as COMPLETED, so the caller can push
@@ -209,6 +217,8 @@ class WorkNCCLQueue {
       stream_work_queues_;
   std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
       completedInputTensors_;
+  // Guarded by work_queues_mutex_.
+  ::c10d::ProcessGroupStatus status_{};
   std::mutex work_queues_mutex_;
 };
 

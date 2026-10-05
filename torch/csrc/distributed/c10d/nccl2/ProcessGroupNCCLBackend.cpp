@@ -24,6 +24,8 @@ namespace c10d::nccl2 {
 
 namespace {
 
+std::atomic<size_t> nextLocalId{0};
+
 #if defined(USE_ROCM)
 struct NcclAllocatorSegmentRegistry {
   std::mutex mutex;
@@ -122,6 +124,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true),
           getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false),
           kDefaultMaxEventPoolSize)),
+      local_id_(nextLocalId.fetch_add(1)),
       async_error_handling_(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
           ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
           ::c10d::SkipCleanUp))),

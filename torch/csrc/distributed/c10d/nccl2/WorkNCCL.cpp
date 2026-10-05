@@ -185,8 +185,13 @@ void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
   }
 }
 
-void WorkNCCL::recordStart(std::string_view coll_name) {
+void WorkNCCL::recordStart(
+    std::string_view coll_name,
+    int64_t numel_in,
+    int64_t numel_out) {
   state_->opType = coll_name;
+  state_->numelIn = numel_in;
+  state_->numelOut = numel_out;
   recordFunctionStart(coll_name);
   state_->events->start->record(state_->stream);
 }
