@@ -13,6 +13,18 @@ example `test_type_info`, `distributed.test_c10d_nccl`, or `cpp.test_api`.
 There is no launcher-level folder. Each process, including each `--subprocess`
 child, gets a separate file.
 
+## Upload
+
+At job end, `.github/actions/upload-test-artifacts` zips the folder into
+`test-run-reports-<file suffix>.zip`, with entries under `test/test-run-reports/`,
+and uploads it to
+`s3://gha-artifacts/<org>/<repo>/<run id>/<run attempt>/artifact/`. It is kept
+apart from the junit zips, and the in-run uploader leaves it out, so only the
+final copy is uploaded. When S3 is skipped (ROCm) or this upload fails, the
+action uploads the GitHub artifact
+`test-run-reports-runattempt<N>-<file suffix>.zip`, which
+`tools/stats/upload_artifacts.py` copies to the same S3 key.
+
 ## Schema version 0.1
 
 Every listed field is present and key order is stable. `properties` objects are
