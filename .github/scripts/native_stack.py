@@ -163,6 +163,16 @@ def _landing_candidates(
     return _log(repo, rev, *options, "-E", grep)
 
 
+def _newest_landing(repo: GitRepo, pr_url: str, rev: str) -> str | None:
+    """Newest commit of `rev` that lands `pr_url`, reverted or not."""
+    # Quoted lines are rare, so the newest candidate is nearly always the landing
+    candidates = _landing_candidates(repo, pr_url, rev, "-1")
+    if candidates and _own_trailers(candidates[0][1])[0] != pr_url:
+        candidates = _landing_candidates(repo, pr_url, rev)
+    landings = (sha for sha, msg in candidates if _own_trailers(msg)[0] == pr_url)
+    return next(landings, None)
+
+
 def _revert_of(repo: GitRepo, sha: str, rev: str) -> tuple[str, str] | None:
     """Newest commit of `rev` that reverts commit `sha`, as _log returns it: the merge
     bot's reverts and plain `git revert`s name it in a `This reverts commit <sha>.`
@@ -181,6 +191,41 @@ def _reverted(repo: GitRepo, sha: str, ref: str) -> bool:
         sha = revert[0]
         reverts += 1
     return reverts % 2 == 1
+
+
+def find_stack_dependents(
+    repo: GitRepo, org: str, project: str, pr_num: int, ref: str
+) -> tuple[str | None, list[tuple[str, int]]]:
+    """The newest commit on `ref` that lands PR `pr_num` (see _own_trailers), and the
+    landings of the PRs stacked on it, each with its PR number: the commits after the
+    PR's first landing whose own `Stack dependencies` line lists it and that are the
+    newest landing of their PR. Landings that `ref` reverts (see _reverted) do not
+    count, and (None, []) means that the PR is not landed. The dependents come
+    highest in the stack (longest `Stack dependencies` line) first, then newest
+    first."""
+    pr_url = _pr_url(org, project, pr_num)
+    candidates = _landing_candidates(repo, pr_url, ref)
+    landings = [sha for sha, msg in candidates if _own_trailers(msg)[0] == pr_url]
+    if not landings or _reverted(repo, landings[0], ref):
+        return None, []
+    # Start at the first landing: if the PR was reverted alone and relanded, the
+    # PRs that landed on top of it before that are still on `ref` and need it
+    grep = f"--grep=^{STACK_DEPENDENCIES}(#[0-9]+, )*#{pr_num}(, #[0-9]+)*$"
+    rc: list[tuple[int, str, int]] = []
+    for sha, message in _log(repo, f"{landings[-1]}..{ref}", "-E", grep):
+        url, deps = _own_trailers(message)
+        number = re.fullmatch(r".+/([0-9]+)", url)
+        if (
+            number
+            and url == _pr_url(org, project, int(number[1]))
+            and pr_num in deps
+            and _newest_landing(repo, url, ref) == sha
+            and not _reverted(repo, sha, ref)
+        ):
+            rc.append((len(deps), sha, int(number[1])))
+    # Top of the stack down: a PR relanded after a revert is newer than those above it
+    rc.sort(key=lambda dependent: -dependent[0])
+    return landings[0], [(sha, number) for _, sha, number in rc]
 
 
 def _is_ancestor(repo: GitRepo, ancestor: str, descendant: str) -> bool:
