@@ -1050,6 +1050,10 @@ kernel void upsample_bicubic2d_backward(
       constant UpsampleParams<4> & params [[buffer(2)]],                 \
       uint thread_index [[thread_position_in_grid]])
 
+#define INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(NAME, FUNCTOR, DTYPE)          \
+  INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD_SERIAL(NAME, FUNCTOR, DTYPE, false); \
+  INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD_SERIAL(NAME, FUNCTOR, DTYPE, true)
+
 #define INSTANTIATE_UPSAMPLE_GATHER_BACKWARD_IDX(            \
     NAME, SOURCE, DTYPE, IDX, SUFFIX)                        \
   template [[host_name("upsample_" #NAME "_backward_" #DTYPE \
@@ -1064,17 +1068,6 @@ kernel void upsample_bicubic2d_backward(
 #define INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(NAME, SOURCE, DTYPE)          \
   INSTANTIATE_UPSAMPLE_GATHER_BACKWARD_IDX(NAME, SOURCE, DTYPE, int, u32); \
   INSTANTIATE_UPSAMPLE_GATHER_BACKWARD_IDX(NAME, SOURCE, DTYPE, long, u64)
-
-#define INSTANTIATE_UPSAMPLE_2D_BACKWARD(NAME, DTYPE)                       \
-  template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
-      upsample_##NAME##_backward<DTYPE>(                                    \
-          device AtomicType_t<DTYPE> * gradInputData [[buffer(0)]],         \
-          constant DTYPE * gradOutputData [[buffer(1)]],                    \
-          constant UpsampleParams<4> & params [[buffer(2)]],                \
-
-#define INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(NAME, FUNCTOR, DTYPE)          \
-  INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD_SERIAL(NAME, FUNCTOR, DTYPE, false); \
-  INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD_SERIAL(NAME, FUNCTOR, DTYPE, true)
 
 #define INSTANTIATE_UPSAMPLE_2D_BACKWARD_SERIAL(NAME, DTYPE, SERIAL)     \
   template[[host_name(                                                   \
