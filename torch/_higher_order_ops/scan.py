@@ -35,6 +35,7 @@ from torch._higher_order_ops.utils import (
     HopInstance,
     mask_list,
     materialize_as_graph,
+    parse_comma_separated_indices,
     reenter_make_fx,
     split_into_chunks,
     unique_graph_id,
@@ -374,11 +375,7 @@ class ScanOp(HigherOrderOperator):
         #   If xs-like in-place updates are required, pass the buffer via
         #   additional_inputs and index into it inside combine_fn.
         outputs = get_graph_output_example_values(combine_gm)
-        mutated_set = (
-            {int(i) for i in mutated_arg_indices.split(",") if i}
-            if mutated_arg_indices
-            else set()
-        )
+        mutated_set = parse_comma_separated_indices(mutated_arg_indices)
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("combine_fn", combine_gm)

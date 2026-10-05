@@ -1142,6 +1142,10 @@ def validate_subgraph_args_types(lifted_args: tuple[Any, ...] | list[Any]):
         )
 
 
+def parse_comma_separated_indices(indices: str) -> set[int]:
+    return {int(index) for index in indices.split(",") if index}
+
+
 # TODO: Return a more detailed information as to which node
 # causes a mutation or an alias. This may requires a per operator tensor version checking
 def check_input_alias_and_mutation(
