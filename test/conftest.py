@@ -117,6 +117,15 @@ def pytest_addoption(parser: Parser) -> None:
         "without it are unaffected. Layered on top of `-m multigpu` so a "
         "larger-runner config can run just the >2-GPU distributed tests.",
     )
+    parser.addoption(
+        "--selection-counts-file",
+        action="store",
+        default=None,
+        dest="selection_counts_file",
+        metavar="path",
+        help="With --collect-only, write a JSON map from each cleanly collected "
+        "test file to [selected items, selected items marked serial].",
+    )
     shard_addoptions(parser)
 
 
@@ -183,6 +192,11 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(
             MultiGpuMinFilterPlugin(config.getoption("multigpu_min_gpus")),
             "multigpu_min_filter_plugin",
+        )
+    if config.getoption("selection_counts_file"):
+        config.pluginmanager.register(
+            SelectionCountPlugin(config.getoption("selection_counts_file")),
+            "selection_count_plugin",
         )
 
 
@@ -479,6 +493,53 @@ class MultiGpuMinFilterPlugin:
         if count_file:
             with open(count_file, "a") as fp:
                 fp.write(f"{selected}\n")
+
+
+class SelectionCountPlugin:
+    """Counts the items each file would run, so run_test.py can collect every
+    file in one process and skip invocations that would select nothing. Files
+    whose collection fails, is skipped or exits are left out of the output so
+    they always run."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.clean: set[str] = set()
+        self.unclean: set[str] = set()
+
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_make_collect_report(self, collector: Any):
+        # Each file normally runs in its own process, so undo env changes made
+        # at import (and keep going if a module calls sys.exit at import).
+        env = dict(os.environ)
+        outcome = yield
+        os.environ.clear()
+        os.environ.update(env)
+        path = str(collector.path)
+        if outcome.excinfo is not None:
+            self.unclean.add(path)
+            outcome.force_result(
+                pytest.CollectReport(
+                    collector.nodeid, "failed", repr(outcome.excinfo[1]), []
+                )
+            )
+        elif not outcome.get_result().passed:
+            self.unclean.add(path)
+        elif isinstance(collector, Module):
+            self.clean.add(path)
+
+    @pytest.hookimpl(hookwrapper=True)
+    def pytest_collection_modifyitems(self, items: list[Any]):
+        yield
+        counts = {path: [0, 0] for path in self.clean - self.unclean}
+        for item in items:
+            count = counts.get(str(item.path))
+            if count is None:
+                continue
+            count[0] += 1
+            if item.get_closest_marker("serial") is not None:
+                count[1] += 1
+        with open(self.path, "w") as f:
+            json.dump(counts, f)
 
 
 class StepcurrentPlugin:
