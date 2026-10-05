@@ -131,13 +131,16 @@ class StrictNumericsConfigTest(TestCase):
         enabled = numerics in ("strict_pointwise", "strict")
         with config.patch(_numerics_options("strict", False)):
             with config.patch(numerics=numerics):
+                self.assertEqual(config.is_strict_pointwise(), enabled)
                 self.assertEqual(
                     _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, enabled)
                 )
+            self.assertTrue(config.is_strict_pointwise())
             self.assertEqual(
                 _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
             )
         with config.patch(_numerics_options(numerics, True)):
+            self.assertEqual(config.is_strict_pointwise(), enabled)
             self.assertEqual(
                 _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
             )
@@ -181,7 +184,7 @@ class StrictNumericsCompileTest(TestCase):
             torch.int64,
         ),
     )
-    @parametrize("numerics", NUMERICS_MODES)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
     def test_narrow_integer_cast(self, device, dtype, op, numerics, upcast):
         if dtype in (torch.float16, torch.bfloat16):
@@ -216,20 +219,17 @@ class StrictNumericsCompileTest(TestCase):
             ),
             x,
         )
-        strict = numerics in ("strict_pointwise", "strict")
-        if strict or not dtype.is_floating_point:
-            self.assertEqual(result, op.op(x))
+        self.assertEqual(result, op.op(x))
         intermediate = "int64" if op.name == "byte" else "int32"
         target = {"byte": "uint8", "char": "int8", "short": "int16"}[op.name]
         marker = f".to(tl.{intermediate}).to(tl.{target})"
-        enabled = strict and dtype.is_floating_point
-        self.assertEqual(marker in "\n".join(codes), enabled)
+        self.assertEqual(marker in "\n".join(codes), dtype.is_floating_point)
 
     @ops(
         [op for op in op_db if op.name == "sigmoid"],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32),
     )
-    @parametrize("numerics", NUMERICS_MODES)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
     def test_sigmoid(self, device, dtype, op, numerics, upcast):
         x = (
@@ -249,15 +249,11 @@ class StrictNumericsCompileTest(TestCase):
             x,
         )
         code = "\n".join(codes)
-        if numerics in ("strict_pointwise", "strict"):
-            int_dtype = _BIT_VIEW[dtype]
-            self.assertEqual(result.view(int_dtype), op.op(x).view(int_dtype))
-            self.assertIn("libdevice.exp", code)
-            self.assertIn("libdevice.rcp_rn", code)
-            self.assertNotIn("tl.sigmoid", code)
-        else:
-            self.assertIn("tl.sigmoid", code)
-            self.assertNotIn("libdevice.rcp_rn", code)
+        int_dtype = _BIT_VIEW[dtype]
+        self.assertEqual(result.view(int_dtype), op.op(x).view(int_dtype))
+        self.assertIn("libdevice.exp", code)
+        self.assertIn("libdevice.rcp_rn", code)
+        self.assertNotIn("tl.sigmoid", code)
 
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):

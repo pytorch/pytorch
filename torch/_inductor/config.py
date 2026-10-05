@@ -1174,6 +1174,10 @@ numerics: Literal["default", "strict_pointwise", "strict_reduction", "strict"] =
 )
 
 
+def is_strict_pointwise() -> bool:
+    return torch._inductor.config.numerics in ("strict_pointwise", "strict")
+
+
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
 # It's a much bigger problem when we compile a dynamic shape kernel with
