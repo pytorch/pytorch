@@ -6426,7 +6426,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.post_loop_combine,
                     cast(CSEVariable, result_var),
                     accumulator,
-                    None,
+                    torch.bool if src_dtype == torch.bool else None,
                 )
 
         if self.cooperative_reduction:
