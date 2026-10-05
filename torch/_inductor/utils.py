@@ -3166,14 +3166,6 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 _IntLike: TypeAlias = int | sympy.Expr
 
 
-def decompose_k_hip_arch_enabled(arch: str) -> bool:
-    """False for RDNA3. Other gfx names may autotune decompose_k."""
-    base = arch.split(":", 1)[0]
-    if not base.startswith("gfx"):
-        return False
-    return not base.startswith("gfx11")
-
-
 def decompose_k_supported_on_device() -> bool:
     """CUDA is on. HIP is off for RDNA3."""
     if torch.version.hip is None:
