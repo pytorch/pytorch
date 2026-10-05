@@ -458,6 +458,8 @@ exclude_patterns=[
     '**/*.ps1',
     '**/*.ptl',
     'fb/**',
+    # An earlier PR revision used a directory symlink here; lint the files below it.
+    '.agents/skills',
     '**/fb/**',
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
@@ -821,6 +823,8 @@ exclude_patterns = [
     '**/gradlew',
     'fb/**',
     '**/fb/**',
+    # An earlier PR revision used a directory symlink here; lint the files below it.
+    '.agents/skills',
 ]
 command = [
     'python3',
