@@ -1417,6 +1417,29 @@ class TestSortAndSelectCUDA(TestCase):
                 self.assertEqual(top1, top2)
                 self.assertEqual(idx1, idx2)
 
+    @dtypes(torch.bfloat16, torch.float16, torch.float32)
+    def test_topk_deterministic_ties(self, device, dtype):
+        # Single-block topk on ROCm once ordered tied values by warp arrival (#196177).
+        for cols in (257, 1024):
+            x = torch.randint(0, 4, (256, cols), device=device).to(dtype)
+            x_cpu = x.cpu()
+            for k, largest, sorted_ in product((8, 300), (True, False), (True, False)):
+                if k > cols:
+                    continue
+                msg = f"{cols=} {k=} {largest=} {sorted_=}"
+                _, idx = torch.topk(x, k, largest=largest, sorted=sorted_)
+                for _ in range(10):
+                    rerun = torch.topk(x, k, largest=largest, sorted=sorted_)[1]
+                    self.assertEqual(rerun, idx, msg=msg)
+                if not sorted_:
+                    # Unsorted output is in gather order: indices strictly past the k-th value in
+                    # ascending order, then the lowest indices equal to it.
+                    kth = x_cpu.topk(k, largest=largest).values[:, -1:]
+                    past = x_cpu > kth if largest else x_cpu < kth
+                    rank = torch.where(past, 0, torch.where(x_cpu == kth, 1, 2))
+                    expected = rank.sort(stable=True).indices[:, :k]
+                    self.assertEqual(idx.cpu(), expected, msg=msg)
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @slowTest
     @largeTensorTest("170GB", "cpu")
