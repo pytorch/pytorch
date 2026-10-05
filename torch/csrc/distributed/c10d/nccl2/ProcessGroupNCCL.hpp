@@ -404,7 +404,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void abortNcclComm();
   // Applies the cleanup/process-teardown action selected by
   // TORCH_NCCL_ASYNC_ERROR_HANDLING. Reconfigurable communicators are revoked
-  // instead, independent of the selected mode.
+  // instead, and under blocking wait the communicator is aborted without
+  // terminating the process, independent of the selected mode.
   void handleWatchdogFailure(const std::string& reason);
   // Blocking wait has no watchdog, so the waiting thread tears down a failed
   // communicator before surfacing the exception.

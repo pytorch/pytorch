@@ -654,6 +654,17 @@ void ProcessGroupNCCL::handleWatchdogFailure(const std::string& reason) {
     return;
   }
 
+  // Like stock ProcessGroupNCCL, the caller gets an exception, not ::abort().
+  // handleBlockingWaitFailure() may already have aborted the communicator, and
+  // a concurrent reconfigure() may have replaced it with a healthy one.
+  if (blocking_wait_) {
+    std::lock_guard reconfigureLock(reconfigure_mutex_);
+    if (comm_state_ != CommState::NORMAL && nccl_comm_) {
+      abortNcclComm();
+    }
+    return;
+  }
+
   if (SHOULD_CLEAN_UP(async_error_handling_)) {
     if (timeout_thread_.joinable() &&
         std::this_thread::get_id() == timeout_thread_.get_id()) {

@@ -251,6 +251,11 @@ void ProcessGroupNCCL::checkWorkQueue() {
   // the hooks are for (capture debug info about the failure, e.g.
   // c10d::FlightRecorderHook writes its trace) and callers must tolerate being
   // called more than once per failure, since the teardown paths still fire.
+  // Under blocking wait the process survives and the failed work stays at the
+  // queue head, so run them only on the first failure.
+  if (blocking_wait_ && comm_state_ != CommState::NORMAL) {
+    return;
+  }
   switch (status) {
     case WorkNCCL::WorkStatus::TIMEDOUT:
       comm_state_ = CommState::TIMEOUT;
@@ -374,16 +379,18 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
   if (comm_state_ == CommState::TIMEOUT) {
     if (options_c10d_->enable_reconfigure) {
       revokeNcclComm();
-      TORCH_CHECK(false, "NCCL operation timed out");
+      C10_THROW_ERROR(DistBackendError, "NCCL operation timed out");
     } else {
       handleWatchdogFailure("timeout - collective operation timed out");
-      TORCH_CHECK(false, "NCCL operation timed out");
+      C10_THROW_ERROR(DistBackendError, "NCCL operation timed out");
     }
   } else if (comm_state_ == CommState::ERROR) {
     // CleanUpOnly may have already removed the communicator on the watchdog
     // thread, so a later collective cannot query the original NCCL error.
-    TORCH_CHECK(
-        nccl_comm_, "NCCL communicator was aborted after a previous error");
+    TORCH_CHECK_WITH(
+        DistBackendError,
+        nccl_comm_,
+        "NCCL communicator was aborted after a previous error");
     ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
