@@ -111,7 +111,15 @@ class Comm(ABC):
 class AllGather(Comm):
     """
     Interface for all_gather comm primitive
+
+    Set ``reuses_output_storage`` if ``allocate`` returns storage that persists
+    across all-gathers, e.g. registered memory. FSDP then preserves its version
+    counters, may adopt views into it returned by the all-gather output
+    function, and requires one instance per parameter group.
     """
+
+    reuses_output_storage: bool = False
+    _owner: object | None = None
 
     @abstractmethod
     def __call__(
@@ -121,6 +129,25 @@ class AllGather(Comm):
         group: dist.ProcessGroup,
         async_op: bool = False,
     ) -> dist.Work | None: ...
+
+    def release_output(self) -> None:
+        """Release this group's output storage on the current stream.
+
+        Called after reshard, after waiting for a discarded all-gather, and
+        after a failed all-gather setup. Must be idempotent. Parameters may
+        keep viewing adopted storage, so a backend sharing it with other groups
+        must order reuse after all consumers and restore the same regions
+        before this group's next all-gather.
+        """
+
+    def _bind_owner(self, owner: object) -> None:
+        if self._owner is None:
+            self._owner = owner
+        elif self._owner is not owner:
+            raise ValueError(
+                "An all-gather comm that reuses output storage cannot be shared "
+                "across FSDP parameter groups; create one instance per group"
+            )
 
 
 class ReduceScatter(Comm):
