@@ -3167,12 +3167,7 @@ _IntLike: TypeAlias = int | sympy.Expr
 
 
 def decompose_k_hip_arch_enabled(arch: str) -> bool:
-    """Whether this HIP gfx name may autotune decompose_k.
-
-    RDNA3 stays off, the same family as ``using_rocm_rdna3``: every ``gfx11*``
-    name (gfx1100 through gfx1151), including a feature suffix. gfx12xx and
-    every other ``gfx*`` name are enabled.
-    """
+    """False for RDNA3. Other gfx names may autotune decompose_k."""
     base = arch.split(":", 1)[0]
     if not base.startswith("gfx"):
         return False
@@ -3180,11 +3175,7 @@ def decompose_k_hip_arch_enabled(arch: str) -> bool:
 
 
 def decompose_k_supported_on_device() -> bool:
-    """CUDA may autotune decompose_k. HIP may on every arch except RDNA3.
-
-    ``using_rocm_rdna3`` is the device check. ``TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS=0``
-    still disables decompose_k on every device, inside ``use_decompose_k_choice``.
-    """
+    """CUDA is on. HIP is off for RDNA3."""
     if torch.version.hip is None:
         return True
     if not rocm_gfx_arch():

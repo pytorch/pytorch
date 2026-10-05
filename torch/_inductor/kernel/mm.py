@@ -661,10 +661,9 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         if use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
-        # On CUDA, once decompose_k is eligible at twice the usual K/M and K/N
-        # threshold, Triton mm leaves the default search. The exhaustive search
-        # still includes it. On HIP, Triton mm stays in the search: on gfx950
-        # it still wins that band, and dropping it regresses the winner.
+        # CUDA drops Triton mm from the default search once decompose_k applies
+        # at twice the usual threshold. The exhaustive search still includes it.
+        # HIP keeps Triton mm.
         keep_triton_mm = (
             torch.version.hip is not None
             or inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE"

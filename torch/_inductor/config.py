@@ -2445,7 +2445,7 @@ class triton:
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
     # Number of K splits to autotune for decompose_k. 0 disables it.
-    # On HIP, RDNA3 (gfx11xx, via using_rocm_rdna3) stays off. gfx12xx is on.
+    # On HIP, RDNA3 stays off.
     num_decompose_k_splits = int(
         os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
     )
