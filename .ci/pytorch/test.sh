@@ -404,6 +404,8 @@ if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx512
+  # valgrind cannot decode AVX-512 instructions
+  export VALGRIND=OFF
 fi
 
 test_tsan() {
@@ -1324,7 +1326,7 @@ version = importlib.metadata.version("flydsl")
 print(f"FlyDSL {version} runtime available on {arch}")
 PY
   )
-  python test/run_test.py --include inductor/test_flydsl_template.py --verbose
+  python test/run_test.py --include inductor/test_flydsl_template.py inductor/test_flydsl_grouped_scheduler.py --verbose
   assert_git_not_dirty
 }
 
@@ -2633,7 +2635,7 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
       if [[ "${BUILD_ENVIRONMENT}" == *cuda12.8* ]]; then
         BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"
       elif [[ "${BUILD_ENVIRONMENT}" == *cuda13* ]]; then
-        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu130"
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu132"
       elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
         # Keep in sync with the ROCm version in the benchmarks docker image
         BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm7.2"
