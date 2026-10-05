@@ -18,6 +18,7 @@
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/method.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -375,6 +376,9 @@ mobile::Module jitModuleToMobile(
 
   for (const auto& func :
        inlineFunctions(methods_to_export, options.incl_interface_call)) {
+    if (options.inline_fork_wait) {
+      InlineForkWait(func->graph());
+    }
     auto mobile_code = compileGraphToMobileCode(
         func->name(), func->graph(), options, debug_info_recorder);
     const auto& schema = func->getSchema();

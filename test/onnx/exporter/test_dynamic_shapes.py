@@ -11,6 +11,7 @@ import onnx
 import torch
 from torch.onnx._internal.exporter import _dynamic_shapes
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils import _pytree
 
 
@@ -57,6 +58,8 @@ class SingnatureOnlyLlamaModel(torch.nn.Module):
 
 @common_utils.instantiate_parametrized_tests
 class TestDynamicShapes(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @common_utils.parametrize(
         "dynamic_shapes, input_names, expected_dynamic_axes",
         [

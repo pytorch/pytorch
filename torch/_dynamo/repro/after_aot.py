@@ -841,7 +841,9 @@ if "__compile_source__" in globals():
                     f"    _output_size = reader.args[{output_size_idx}]"
                 )
                 writer._lines.append(
-                    "    if isinstance(_repeats, torch.Tensor) and _repeats.dtype == torch.int64:"
+                    "    if isinstance(_repeats, torch.Tensor) and "
+                    "_repeats.dtype in (torch.int32, torch.int64) and "
+                    "_repeats.numel() > 0:"
                 )
                 writer._lines.append("        _n = _repeats.numel()")
                 writer._lines.append("        _repeats.fill_(_output_size // _n)")
