@@ -2755,6 +2755,40 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             actual = torch.compile(fn, backend="eager", fullgraph=True)(dst)
             self.assertEqual(actual, expected)
 
+    def test_non_out_mutating_kwarg_non_contiguous(self):
+        namespace = "test_dynamo_non_out_mutating_kwarg"
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            torch.library.define(
+                f"{namespace}::fill_",
+                "(Tensor x, *, Tensor(a!) buf) -> ()",
+                lib=lib,
+            )
+
+            def fill_impl(x, *, buf):
+                buf.add_(x.sum())
+
+            torch.library.impl(
+                f"{namespace}::fill_",
+                "CompositeExplicitAutograd",
+                fill_impl,
+                lib=lib,
+            )
+            torch.library.register_fake(
+                f"{namespace}::fill_", lambda x, *, buf: None, lib=lib
+            )
+            op = getattr(torch.ops, namespace).fill_
+
+            def fn(x, buf):
+                op(x, buf=buf)
+                return buf + 1
+
+            buf = torch.zeros(4, 4)[:, ::2]
+            result = torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(3), buf
+            )
+            self.assertEqual(buf, torch.full_like(buf, 3))
+            self.assertEqual(result, torch.full_like(buf, 4))
+
     def test_slice_into_list_mutable(self):
         class Mod(torch.nn.Module):
             def forward(self, listy):
