@@ -130,8 +130,8 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" }
+          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi350.1" }
         ]}
     secrets: inherit
 
@@ -188,7 +188,7 @@ jobs:
             H100)   echo "runner=mt-l-x86iamx-22-225-h100" >> "$GITHUB_OUTPUT" ;;
             A100)   echo "runner=mt-l-x86iavx512-11-125-a100" >> "$GITHUB_OUTPUT" ;;
             B200)   echo "runner=linux.dgx.b200" >> "$GITHUB_OUTPUT" ;;
-            MI300X) echo "runner=linux.rocm.gpu.gfx950.1" >> "$GITHUB_OUTPUT" ;;
+            MI300X) echo "runner=linux.rocm.gpu.mi350.1" >> "$GITHUB_OUTPUT" ;;
           esac
 
       - name: Download PR and baseline results from S3
