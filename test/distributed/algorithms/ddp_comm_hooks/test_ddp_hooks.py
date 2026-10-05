@@ -34,8 +34,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     print("Multiprocessing spawn is not compatible with dev/dbg asan", file=sys.stderr)
     sys.exit(0)
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = dist.get_default_backend_for_device(device_type)
 
 class Task(nn.Module):
     def __init__(self) -> None:

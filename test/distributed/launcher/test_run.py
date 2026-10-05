@@ -34,7 +34,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocmVersionInRange,
-    TEST_MULTIACCELERATOR,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -690,16 +689,16 @@ class ElasticLaunchTest(TestCase):
 
 
 class ElasticLaunchVirtualRankTest(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
-    @skipIf(not TEST_MULTIACCELERATOR, "requires GPU")
-    # ElasticLaunchTest is a plain TestCase, but this test launches
-    # `torchrun --nproc-per-node=2` which needs 2 GPUs. That process spawning
-    # happens via torchrun, not MultiProcessTestCase, so the conftest heuristic
-    # (see test/conftest.py) can't detect it; mark it multigpu explicitly.
+    # ElasticLaunchVirtualRankTest uses instantiate_device_type_tests(only_for=("cuda", "xpu")),
+    # but this test launches `torchrun --nproc-per-node=2` which needs 2 GPUs.
+    # That process spawning happens via torchrun, not MultiProcessTestCase, so
+    # the conftest heuristic (see test/conftest.py) can't detect it; mark it
+    # multigpu explicitly.
     @pytest.mark.multigpu
     @skipIfRocmVersionInRange([7, 14], [10, 2], "rocprofiler-sdk visibility conflict")
     def test_virtual_local_rank(self, device):
@@ -791,9 +790,7 @@ class ElasticLaunchVirtualRankTest(TestCase):
 
 
 instantiate_device_type_tests(
-    ElasticLaunchVirtualRankTest,
-    globals(),
-    only_for="cuda",
+    ElasticLaunchVirtualRankTest, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
 if __name__ == "__main__":
