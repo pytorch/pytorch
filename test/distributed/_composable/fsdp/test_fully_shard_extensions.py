@@ -631,6 +631,55 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         local_weight.fsdp_post_all_gather = post_fn.__get__(local_weight)
 
     @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_single_rank_payloads(self):
+        # A size-1 shard mesh skips the all-gather, so FSDP copies each payload
+        # directly, including byte views into typed cached outputs
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+        byte_payloads = False
+        test = self
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            payloads = (local_tensor, (local_tensor + 1).to(torch.bfloat16))
+            if byte_payloads:
+                payloads = tuple(t.view(torch.uint8) for t in payloads)
+            return payloads, outer_size
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            # Typed outputs take the trailing dims of the byte payloads
+            weight, auxiliary = (t.view(metadata) for t in all_gather_outputs)
+            test.assertEqual(auxiliary, (weight + 1).to(torch.bfloat16))
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(weight)
+                return
+            return weight, (weight,)
+
+        model = nn.Linear(16, 8, bias=False, device=device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=mesh)
+        self._patch_all_gather_extension(
+            model, fsdp_pre_all_gather, fsdp_post_all_gather
+        )
+        inp = torch.randn((2, 16), device=device_type)
+        for iteration in range(2):
+            byte_payloads = iteration == 1
+            output = model(inp)
+            ref_output = ref_model(inp)
+            self.assertEqual(output, ref_output)
+            output.sum().backward()
+            ref_output.sum().backward()
+            check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_zero_size_trailing_dim(self):
         test = self
 
