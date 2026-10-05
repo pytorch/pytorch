@@ -23,6 +23,7 @@ import pickle
 import textwrap
 import subprocess
 import weakref
+import os
 import sys
 import copyreg
 from torch import inf, nan
@@ -10083,14 +10084,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         torch.backends.quantized.engine = original_qe
 
     def test_terminate_handler_on_crash(self):
-        cmd = [sys.executable, '-c', "import os; os.environ[\"TORCH_CUSTOM_TERMINATE\"] ='1'; \
-               import torch; import torch._C; torch._C._abort()"]
+        script = "import os; os.environ['TORCH_CUSTOM_TERMINATE'] = '1'; import torch; torch._C._abort()"
+        # Run from test/ so the -c child cannot import the source tree's torch/ from
+        # cwd; merge stderr so a child that dies before the abort is self-explanatory.
+        test_dir = os.path.dirname(os.path.realpath(__file__))
         with self.assertRaises(subprocess.CalledProcessError) as cm:
-            subprocess.check_output(cmd, shell=False)
+            subprocess.check_output([sys.executable, "-c", script], stderr=subprocess.STDOUT, cwd=test_dir)
         e = cm.exception
         output = e.stdout.decode("utf-8")
         self.assertNotEqual(e.returncode, 0)
-        self.assertNotEqual(output, None)
         self.assertIn('Unhandled exception caught in c10/util/AbortHandler.h', output)
 
     # FIXME: port to a distributed test suite
