@@ -85,6 +85,7 @@ from ..utils import (
     _is_tensorify_enabled,
     check_positional,
     check_unspec_or_constant_args,
+    fqn,
     guard_if_dyn,
     has_torch_function,
     hashable,
@@ -949,6 +950,11 @@ class AllowInGraphKind(enum.Enum):
     LEAF_FUNCTION = "leaf_function"
 
 
+_CONSTANT_FN_METADATA_ATTRS = frozenset(
+    {"__name__", "__qualname__", "__module__", "__doc__"}
+)
+
+
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
@@ -1000,6 +1006,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     f"Expected first argument to be callable, got {type(fns[0])}"
                 )
             return _register
+
+        def as_python_device(device: VariableTracker, /) -> Any:
+            """Preserve CooR's indexless device when unwrapping device arguments."""
+            from .tensor import CurrentDeviceVariable
+
+            if isinstance(device, CurrentDeviceVariable):
+                return device.value
+            return device.as_python_constant()
 
         from torch.backends.cuda import SDPAParams
 
@@ -1263,6 +1277,30 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     VariableTracker.build(tx, polyfills.radians),
                     list(args),
                     kwargs,
+                )
+
+        if hasattr(math, "sumprod"):  # Python 3.12+
+
+            @register(math.sumprod)
+            def handle_sumprod(
+                self,
+                tx: "InstructionTranslatorBase",
+                *args: VariableTracker,
+                **kwargs: VariableTracker,
+            ) -> VariableTracker | None:
+                no_keywords(tx, "math.sumprod", kwargs)
+                check_positional(tx, "sumprod", len(args), 2, 2)
+                if check_unspec_or_constant_args(args, kwargs):
+                    return None
+                # Lists/tuples with any non-constant element use plain accumulation
+                # for the whole call. Other iterables are materialized first so
+                # lists of constants still fold with CPython's float path.
+                if all(isinstance(a, (ListVariable, TupleVariable)) for a in args):
+                    fn = polyfills.sumprod_generic
+                else:
+                    fn = polyfills.sumprod
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, fn), list(args), {}
                 )
 
         if hasattr(math, "fma"):  # Python 3.13+
@@ -2822,9 +2860,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = kwargs["device"].as_python_constant()
+                    device = as_python_device(kwargs["device"])
                 elif args:
-                    device = args[0].as_python_constant()
+                    device = as_python_device(args[0])
                 else:
                     device = None
                 module = torch.get_device_module(device)
@@ -2875,9 +2913,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = torch.device(kwargs["device"].as_python_constant())
+                    device = torch.device(as_python_device(kwargs["device"]))
                 elif args:
-                    device = torch.device(args[0].as_python_constant())
+                    device = torch.device(as_python_device(args[0]))
                 else:
                     device = None
 
@@ -2890,6 +2928,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         stream_var.proxy,
                         stream_var.value,
                         stream_var.user_object_index,
+                        current_device=stream_var.current_device,
                         source=stream_var.source,
                     )
                 return stream_var
@@ -2926,9 +2965,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             device = None
             if kwargs and "device" in kwargs:
-                device = torch.device(kwargs["device"].as_python_constant())
+                device = torch.device(as_python_device(kwargs["device"]))
             elif args:
-                device = torch.device(args[0].as_python_constant())
+                device = torch.device(as_python_device(args[0]))
 
             if device is None:
                 device_type = _synchronize_fn_to_device_type.get(self.value)
@@ -3353,9 +3392,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .constant import ConstantVariable
             from .dicts import ConstDictVariable
             from .lists import BaseListVariable
-            from .tensor import TensorVariable
+            from .tensor import _contains_graph_intermediate, TensorVariable
 
             if not config.trace_autograd_ops:
+                inputs = args[1] if len(args) >= 2 else kwargs.get("inputs")
+                skip_frame = (
+                    _contains_graph_intermediate(inputs)
+                    or tx.has_live_graph_intermediate()
+                )
+                # AOTAutograd does not preserve relationships between outputs of
+                # a compiled prefix. Skip this invocation if eager grad targets an
+                # intermediate or another differentiable intermediate stays live.
                 unimplemented(
                     gb_type="using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
                     context=f"trace_autograd_ops={config.trace_autograd_ops}",
@@ -3366,6 +3413,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     hints=[
                         "Change `torch._dynamo.config.trace_autograd_ops` to `True`.",
                     ],
+                    skip_frame=skip_frame,
+                    preserve_skip_frame_after_inline=skip_frame,
+                    apply_to_code=not skip_frame,
                 )
 
             # Graph break if we detected on a previous attempt that autograd.grad
@@ -3570,13 +3620,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         f"Expected BaseListVariable from autograd.grad with dict inputs, "
                         f"got {type(result)}"
                     )
-                items: dict[VariableTracker, VariableTracker] = dict(
-                    zip(
-                        inputs_var.items.keys(),
-                        result.items,
-                        strict=True,
-                    )
-                )
+                keys: list[VariableTracker] = [k.vt for k in inputs_var.items]
+                items = dict(zip(keys, result.items, strict=True))
                 return ConstDictVariable(items)
             return result
 
@@ -3678,6 +3723,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
             return TorchInGraphFunctionVariable(member, source=source)
+        # Function metadata (__name__, __module__, __qualname__, ...) is
+        # immutable on builtins and descriptors, so it can be constant folded.
+        if name in _CONSTANT_FN_METADATA_ATTRS and ConstantVariable.is_literal(member):
+            return ConstantVariable.create(member)
         return variables.GetAttrVariable(self, name, source=source)
 
     def call_function(
@@ -3697,6 +3746,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
+
+        if self.can_constant_fold_through():
+            from .tensor import CurrentDeviceVariable
+
+            if any(
+                isinstance(a, CurrentDeviceVariable) for a in (*args, *kwargs.values())
+            ):
+                # Under CooR the current device's index is only known at runtime, so
+                # there is no constant to fold to. Breaking is correct rather than
+                # merely conservative: get_device_properties mixes rank-invariant
+                # hardware facts with per-card identity (uuid, pci_bus_id), so the
+                # compiling rank's answer is not right for every rank. The eager
+                # fallback reads the running rank's.
+                unimplemented(
+                    gb_type="Constant fold with a rank-relative device",
+                    context=fqn(self.value),
+                    explanation=(
+                        f"`{fqn(self.value)}` was called with the current device, "
+                        "whose index is only known at runtime under "
+                        "compile_on_one_rank, so the result cannot be folded into "
+                        "the graph."
+                    ),
+                    hints=[
+                        "This graph break is expected under compile_on_one_rank.",
+                        "The resumed eager call observes the running rank's device.",
+                        "Pass an explicit device if the value is the same on every rank.",
+                    ],
+                )
 
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
