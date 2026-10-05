@@ -721,6 +721,7 @@ class EpiMod:
         max_swizzle_size: int = 8,
         tile_count_semaphore=None,
         cu_seqlens_m=None,
+        cu_seqlens_k=None,
         A_idx=None,
         rounding_mode: int = RoundingMode.RN,
         epi_key_overrides=None,  # {op_name: key} when the caller owns the key rule (scalar modes)
@@ -759,6 +760,27 @@ class EpiMod:
         _launch=True,  # False: resolve/compile only (EpiMod.plan) — no kernel launch
     ) -> GemmEpiPlan:
         varlen_m = cu_seqlens_m is not None
+        varlen_k = cu_seqlens_k is not None
+        if varlen_m and varlen_k:
+            raise ValueError("cu_seqlens_m and cu_seqlens_k are mutually exclusive")
+        if varlen_k:
+            if b_kn:
+                raise ValueError("varlen_k requires B in (n, total_k) layout and b_kn=False")
+            if (
+                A_idx is not None
+                or use_tma_gather
+                or SFA is not None
+                or SFB is not None
+                or concat_layout
+                or transform_a is not None
+                or ag_args is not None
+                or swap_ab
+                or split_k != 1
+                or add_to_output
+            ):
+                raise ValueError("varlen_k supports plain GEMM without gather/scales/swap/split-K")
+            if self.mode != "element" or self.sinks or self.prepass is not None:
+                raise ValueError("varlen_k supports element-mode epilogues without reductions")
         gather_A = A_idx is not None
         blockscaled = SFA is not None
         concat_key = tuple(sorted(concat_layout)) if concat_layout else ()
@@ -858,6 +880,7 @@ class EpiMod:
             max_swizzle_size,
             A.device,
             tensor_key(cu_seqlens_m),
+            tensor_key(cu_seqlens_k),
             gather_A,
             rounding_mode,
             b_kn,
@@ -907,6 +930,7 @@ class EpiMod:
                     ag_args=ag_args,
                     tile_count_semaphore=tile_count_semaphore,
                     cu_seqlens_m=cu_seqlens_m,
+                    cu_seqlens_k=cu_seqlens_k,
                     A_idx=A_idx,
                     SFA=SFA,
                     SFB=SFB,
@@ -920,6 +944,22 @@ class EpiMod:
                 raise ValueError("blockscaled GEMM does not support concat_layout")
             if tile_K is not None:
                 raise ValueError("blockscaled GEMM derives tile_K from the MMA instruction")
+        if varlen_k:
+            if not persistent:
+                raise ValueError("varlen_k requires persistent=True")
+            if A.dtype not in (torch.bfloat16, torch.float16) or B.dtype != A.dtype:
+                raise ValueError("varlen_k requires matching BF16/FP16 operands")
+            if (
+                A.ndim != 2 or B.ndim != 2 or A.shape[-1] != B.shape[-1]
+                or A.stride(-2) != 1 or B.stride(-2) != 1
+            ):
+                raise ValueError("varlen_k requires m-major A (m, total_k), n-major B (n, total_k)")
+            if (
+                cu_seqlens_k.ndim != 1 or cu_seqlens_k.numel() < 1
+                or cu_seqlens_k.dtype != torch.int32 or cu_seqlens_k.stride(0) != 1
+                or cu_seqlens_k.device != A.device or B.device != A.device
+            ):
+                raise ValueError("cu_seqlens_k must be a contiguous int32 prefix on the operand device")
         if varlen_m:
             if not persistent:
                 raise ValueError("varlen_m requires persistent=True")
@@ -983,6 +1023,8 @@ class EpiMod:
         # stays caller-oriented (swap-at-trace transposes those at trace).
         m_i, n_i = (n_gemm, m) if (swap_ab or owned_fmt is not None) else (m, n_gemm)
         batch = B.shape[0] if B.ndim == 3 else None
+        if varlen_k:
+            batch = cu_seqlens_k.shape[0] - 1
         base_shape = _tile_shape(batch, m, n_gemm, varlen_m)
         if packed_c:
             if C.stride(-1) == 1 or varlen_m:
@@ -1023,6 +1065,8 @@ class EpiMod:
                 if paired_acc
                 else n_gemm
             )
+            if varlen_k and out_n != n_gemm:
+                raise ValueError("varlen_k does not support output contraction")
             if aux.dtype == torch.float4_e2m1fn_x2:
                 out_n //= 2  # fp4 values are stored packed, two per byte
             _require_shape(out_name, aux, _tile_shape(batch, m, out_n, varlen_m))
@@ -1069,7 +1113,7 @@ class EpiMod:
             if varlen_m and kind == "tile":
                 raise ValueError(f"operand '{name}': TileLoad does not support varlen_m yet")
             visit_kind = _pinned_visit_kind(pins[name]) if kind == "pinned" else kind
-            batch_l = B.shape[0] if B.ndim == 3 else 1
+            batch_l = batch if batch is not None else 1
             # Pinned ops own their host schema (host_arg_key validates the
             # value); the built-in shape rules only apply to inferred kinds.
             if kind == "pinned":
@@ -1247,6 +1291,7 @@ class EpiMod:
             is_dynamic_persistent=is_dynamic_persistent,
             max_swizzle_size=max_swizzle_size,
             varlen_m=varlen_m,
+            varlen_k=varlen_k,
             gather_A=gather_A,
             # slot-A relabels via a_transposed (swap_ab); owned transforms
             # pass B (= caller A activations) natively (n, k)
@@ -1279,6 +1324,7 @@ class EpiMod:
                 ag_args=ag_args,
                 tile_count_semaphore=tile_count_semaphore,
                 cu_seqlens_m=cu_seqlens_m,
+                cu_seqlens_k=cu_seqlens_k,
                 A_idx=A_idx,
                 SFA=SFA,
                 SFB=SFB,
@@ -1293,7 +1339,9 @@ class EpiMod:
     # decisions). B is (k, n) logical at this surface — the torch convention —
     # with the physical layout free.
 
-    def _lead_shape(self, A, cu_seqlens_m, A_idx):
+    def _lead_shape(self, A, cu_seqlens_m, A_idx, cu_seqlens_k=None):
+        if cu_seqlens_k is not None:
+            return (cu_seqlens_k.shape[0] - 1, A.shape[-2])
         if cu_seqlens_m is not None:
             return ((A_idx.shape[0] if A_idx is not None else A.shape[0]),)
         return tuple(A.shape[:-1])
@@ -1310,14 +1358,15 @@ class EpiMod:
         return default_config(A.device)
 
     def _alloc_outputs(
-        self, out, A, B, C, store_d, out_dtype, cu_seqlens_m, A_idx, n_override=None
+        self, out, A, B, C, store_d, out_dtype, cu_seqlens_m, A_idx,
+        n_override=None, cu_seqlens_k=None,
     ):
         """Fill in the outputs the caller left out; out= buffers win."""
         import torch
 
         out = dict(out) if out else {}
         n = B.shape[-1] if n_override is None else n_override
-        lead = self._lead_shape(A, cu_seqlens_m, A_idx)
+        lead = self._lead_shape(A, cu_seqlens_m, A_idx, cu_seqlens_k)
         dt = out_dtype if out_dtype is not None else A.dtype
         if store_d and out.get("D") is None:
             if self.mode == "packed_cd_b16x2":
@@ -1386,6 +1435,8 @@ class EpiMod:
         import torch
 
         A, C, D = ctx["A"], ctx.get("C"), ctx.get("D")
+        if ctx.get("cu_seqlens_k") is not None and config.split_k not in (None, 1):
+            raise ValueError("varlen_k does not support split-K")
         dyn = dynamic_scheduler or config.is_dynamic_persistent
         epi_args = dict(ctx["operands"])
         for name in self.outputs:
@@ -1424,6 +1475,7 @@ class EpiMod:
             max_swizzle_size=config.max_swizzle_size,
             tile_count_semaphore=semaphore,
             cu_seqlens_m=ctx.get("cu_seqlens_m"),
+            cu_seqlens_k=ctx.get("cu_seqlens_k"),
             A_idx=ctx.get("A_idx"),
             SFA=ctx.get("SFA"),
             SFB=ctx.get("SFB"),
@@ -1455,6 +1507,7 @@ class EpiMod:
         tuned=True,
         dynamic_scheduler=False,
         cu_seqlens_m=None,
+        cu_seqlens_k=None,
         A_idx=None,
         SFA=None,
         SFB=None,
@@ -1495,6 +1548,11 @@ class EpiMod:
         because they are already below torch.compile."""
         import torch
 
+        if cu_seqlens_k is not None:
+            if cu_seqlens_m is not None:
+                raise ValueError("cu_seqlens_m and cu_seqlens_k are mutually exclusive")
+            if tuned or compile_dispatch:
+                raise NotImplementedError("varlen_k requires tuned=False and compile_dispatch=False")
         if config is not None and type(config) is not GemmConfig:
             raise TypeError("config must be an exact GemmConfig or None")
 
@@ -1604,6 +1662,7 @@ class EpiMod:
                 tuned,
                 dynamic_scheduler,
                 tensor_key(cu_seqlens_m),
+                tensor_key(cu_seqlens_k),
                 tensor_key(A_idx),
                 tensor_key(SFA),
                 tensor_key(SFB),
@@ -1643,6 +1702,7 @@ class EpiMod:
                     epi_values,
                     tile_count_semaphore=sem,
                     cu_seqlens_m=cu_seqlens_m,
+                    cu_seqlens_k=cu_seqlens_k,
                     A_idx=A_idx,
                     SFA=SFA,
                     SFB=SFB,
@@ -1655,15 +1715,16 @@ class EpiMod:
         from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn
 
         varlen_m = cu_seqlens_m is not None
-        b_kn = mod_b_kn(A.device, concat_layout)
+        b_kn = cu_seqlens_k is None and mod_b_kn(A.device, concat_layout)
         B_d = B if (b_kn or owned_fmt is not None) else B.mT
         n_override = transform_a.padded_n(B) if transform_a is not None else None
         provided_out = frozenset(k for k, v in (out or {}).items() if v is not None)
         out = self._alloc_outputs(
-            out, A, B, C, store_d, out_dtype, cu_seqlens_m, A_idx, n_override=n_override
+            out, A, B, C, store_d, out_dtype, cu_seqlens_m, A_idx, n_override=n_override,
+            cu_seqlens_k=cu_seqlens_k,
         )
         D = out.get("D") if store_d else None
-        lead = self._lead_shape(A, cu_seqlens_m, A_idx)
+        lead = self._lead_shape(A, cu_seqlens_m, A_idx, cu_seqlens_k)
         n = B.shape[-1] if n_override is None else n_override
         use_tuner = (
             tuned
@@ -1740,6 +1801,7 @@ class EpiMod:
                 lead=lead,
                 b_kn=b_kn,
                 cu_seqlens_m=cu_seqlens_m,
+                cu_seqlens_k=cu_seqlens_k,
                 A_idx=A_idx,
                 SFA=SFA,
                 SFB=SFB,
@@ -1772,6 +1834,7 @@ class EpiMod:
                     B=B_d,
                     b_kn=b_kn,
                     cu_seqlens_m=cu_seqlens_m,
+                    cu_seqlens_k=cu_seqlens_k,
                     A_idx=A_idx,
                     SFA=SFA,
                     concat_layout=concat_layout,
@@ -1838,6 +1901,7 @@ class EpiMod:
         #               the tuned config) — plan() never launches.
         dynamic_scheduler=False,
         cu_seqlens_m=None,
+        cu_seqlens_k=None,
         A_idx=None,
         SFA=None,
         SFB=None,
@@ -1856,7 +1920,7 @@ class EpiMod:
         reduce scratch is allocated here and attached to the plan (pass fresh
         ``scratch=`` to run() for concurrent streams)."""
         varlen_m = cu_seqlens_m is not None
-        b_kn = get_device_capacity(A.device)[0] >= 9
+        b_kn = cu_seqlens_k is None and get_device_capacity(A.device)[0] >= 9
         B_d = B if b_kn else B.mT
         if transform_a is not None:
             from torch._vendor.quack.operand_transform.host import as_transform_mod
@@ -1891,9 +1955,10 @@ class EpiMod:
             out=out,
             operands=dict(operands),
             n=n,
-            lead=self._lead_shape(A, cu_seqlens_m, A_idx),
+            lead=self._lead_shape(A, cu_seqlens_m, A_idx, cu_seqlens_k),
             b_kn=b_kn,
             cu_seqlens_m=cu_seqlens_m,
+            cu_seqlens_k=cu_seqlens_k,
             A_idx=A_idx,
             SFA=SFA,
             SFB=SFB,
@@ -2051,6 +2116,7 @@ class EpiPlan:
         scratch=None,
         tile_count_semaphore=None,
         cu_seqlens_m=None,
+        cu_seqlens_k=None,
         A_idx=None,
         SFA=None,
         SFB=None,
@@ -2074,6 +2140,7 @@ class EpiPlan:
             epi_values,
             tile_count_semaphore=tile_count_semaphore,
             cu_seqlens_m=cu_seqlens_m,
+            cu_seqlens_k=cu_seqlens_k,
             A_idx=A_idx,
             SFA=SFA,
             SFB=SFB,
