@@ -5,7 +5,6 @@ from contextlib import contextmanager
 import torch
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.auto_functionalize import auto_functionalized_v2_dense
-from torch._higher_order_ops.while_loop import validate_while_loop_mutated_arg_indices
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -326,32 +325,29 @@ def while_loop_node(
     """Capture a CUDA graph WHILE node.
 
     ``mutated_arg_indices`` is a comma-separated list of indices into
-    ``tree_leaves(carried_inputs) + tree_leaves(additional_inputs)``. Mutation
-    of carried inputs is disallowed by ``torch.while_loop``; only indices in
-    the flattened additional inputs are supported.
+    ``tree_leaves(carried_inputs) + tree_leaves(additional_inputs)``. It is
+    accepted for HOP dispatch compatibility but is not used here: WhileLoopOp
+    validates the annotation, and additional inputs are passed by reference.
+    Condition mutations apply to the incoming carries on the first evaluation,
+    and to the loop-local carries after each body execution.
     """
     flat_carried_inputs, carried_spec = pytree.tree_flatten(carried_inputs)
     if not all(isinstance(inp, torch.Tensor) for inp in flat_carried_inputs):
         raise RuntimeError(
             "CUDA graph while_loop conditional nodes only support tensor carried_inputs"
         )
-    flat_additional_inputs = pytree.tree_leaves(additional_inputs)
-    validate_while_loop_mutated_arg_indices(
-        mutated_arg_indices,
-        flat_carried_inputs,
-        flat_additional_inputs,
-    )
+    # Preserve first-condition mutations of the original inputs, even when the
+    # loop executes zero times. Later carries must not overwrite those inputs.
+    pred = cond_fn(*carried_inputs, *additional_inputs)
+    if not _is_boolean_scalar_cuda_tensor(pred):
+        raise RuntimeError(
+            f"cond_fn must return a boolean scalar CUDA tensor but got {pred}"
+        )
 
     loop_carried = pytree.tree_map_only(
         torch.Tensor, lambda inp: inp.clone(), carried_inputs
     )
     flat_loop_carried = pytree.tree_leaves(loop_carried)
-
-    pred = cond_fn(*loop_carried, *additional_inputs)
-    if not _is_boolean_scalar_cuda_tensor(pred):
-        raise RuntimeError(
-            f"cond_fn must return a boolean scalar CUDA tensor but got {pred}"
-        )
 
     with _while_body(pred) as current_cuda_graph:
         body_out = body_fn(*loop_carried, *additional_inputs)

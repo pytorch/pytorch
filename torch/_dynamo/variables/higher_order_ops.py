@@ -953,25 +953,6 @@ def _call_while_loop(
     cond_mutated_inputs = set(getattr(cond_graph, "_dynamo_mutated_input_indices", ()))
     body_mutated_inputs = set(getattr(body_graph, "_dynamo_mutated_input_indices", ()))
 
-    mutated_carried_inputs = sorted(
-        index
-        for index in cond_mutated_inputs | body_mutated_inputs
-        if index < len(operands_seq)
-    )
-    if mutated_carried_inputs:
-        unimplemented(
-            gb_type="torch.while_loop: carried input mutation",
-            context=f"carried_inputs={mutated_carried_inputs}",
-            explanation=(
-                "torch.while_loop's cond_fn and body_fn must not mutate "
-                "carried_inputs in-place. Return updated carried values from "
-                "body_fn, cloning them before any in-place mutation."
-            ),
-            hints=[
-                *graph_break_hints.USER_ERROR,
-            ],
-        )
-
     mutated_input_storages = subgraph_mutated_input_storages(
         cond_graph, cond_mutated_inputs
     ) | subgraph_mutated_input_storages(body_graph, body_mutated_inputs)
