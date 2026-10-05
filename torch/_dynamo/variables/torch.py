@@ -3917,11 +3917,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 )
 
         if selected_overload is not None:
-            out_arg_names.extend(
-                name
-                for name in self._get_mutating_kwarg_names(selected_overload)
-                if name in kwargs
-            )
+            if torch._library.utils.is_out(selected_overload):
+                out_arg_names.extend(
+                    name
+                    for name in self._get_mutating_kwarg_names(selected_overload)
+                    if name in kwargs
+                )
         elif (
             not isinstance(self.value, torch._ops.OpOverloadPacket) and "out" in kwargs
         ):
