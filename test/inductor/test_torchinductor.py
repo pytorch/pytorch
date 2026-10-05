@@ -118,7 +118,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     isRocmArchAnyOf,
-    MACOS_VERSION,
     MI200_ARCH,
     NAVI3_ARCH,
     NAVI_ARCH,
@@ -232,9 +231,6 @@ requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
 )
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
-skip_if_x86_mac = functools.partial(
-    unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
-)
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libtest = torch.library.Library("test", "FRAGMENT")  # noqa: SCOPED_LIBRARY
@@ -263,7 +259,7 @@ test_int_dtypes = [
     torch.int64,
 ]
 
-if SM80OrLater or MACOS_VERSION >= 14.0 or GPU_TYPE == "xpu":
+if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE == "xpu":
     test_dtypes.append(torch.bfloat16)
 
 
@@ -2573,7 +2569,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
 
-    @skip_if_x86_mac()
     def test_reduction2(self):
         def fn(a):
             # FIXME: a.argmax
@@ -2581,7 +2576,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("inf")),))
 
-    @skip_if_x86_mac()
     def test_reduction3(self):
         def fn(a):
             # FIXME: a.argmin
@@ -10439,7 +10433,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
-    @skip_if_x86_mac()
     def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
@@ -12034,6 +12027,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
+
+        # SM90+ CUDA accumulates with BF16 atomics, which round after every update.
+        if self.device == "cuda" and (
+            torch.version.hip or torch.cuda.get_device_capability() < (9, 0)
+        ):
+
+            def bf16_fn(x):
+                idx = torch.zeros(1000, device=x.device, dtype=torch.int64)
+                vals = torch.ones(1000, device=x.device, dtype=x.dtype)
+                x.index_put_((idx,), vals, accumulate=True)
+                return x
+
+            self.common(bf16_fn, (torch.zeros(1, dtype=torch.bfloat16),))
 
     @skipCPUIf(True, "requires Triton atomic_or on tl.int1")
     @skip_if_pallas
@@ -20544,6 +20550,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    def test_masked_cse_recomputed_load(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199642
+        # When an input load is first emitted inside ops.masked (via F.pad),
+        # then loaded unmasked into the kernel-level CSE cache, and subsequently
+        # loaded again inside ops.masked, the second ops.masked block has an
+        # empty scoped_body and returns the outer CSE variable directly.
+        def fn(x, y, table):
+            padded_x = torch.nn.functional.pad(x, (1, 1, 1, 1))
+            padded_y = torch.nn.functional.pad(y, (1, 1, 1, 1))
+            m = (padded_x**2 + padded_y**2)[..., 1:-1, 1:-1]
+            i = ((x + y) * 3).round()
+            idx1 = (i % 8).long()
+            idx2 = ((i + 4) % 8).long()
+            return (m > table.gather(1, idx1)) & (m > table.gather(1, idx2))
+
+        x, y = torch.randn(2, 1, 1, 64, 80, device=self.device).unbind(0)
+        table = torch.rand(1, 8, 64, 80, device=self.device) * 4
+        self.common(fn, (x, y, table), check_lowp=False)
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -22623,11 +22648,11 @@ if RUN_GPU:
             output = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
 
             result, code = run_and_get_code(torch.compile(fn), output, indices, values)
-            if output.device.type == "xpu":
-                # xpu fallback bf16 atomic add for better performance
+            if output.device.type == "xpu" or torch.version.hip:
+                # xpu and ROCm fall back for bf16 atomic add
                 self.assertFalse(
                     "tl.atomic_add" in code[0],
-                    "bf16 should not generate tl.atomic_add on xpu",
+                    "bf16 should not generate tl.atomic_add on xpu or ROCm",
                 )
             else:
                 self.assertTrue(
