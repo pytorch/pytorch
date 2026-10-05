@@ -48,6 +48,7 @@ jobs:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-noble-rocm-preview-py3.12-mi350
+      build-additional-packages: "torchcomms spmd_types"
       docker-image-name: ci-image:pytorch-linux-noble-rocm-preview-py3.12
       test-matrix: |
         { include: [

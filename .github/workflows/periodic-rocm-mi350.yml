@@ -53,6 +53,7 @@ jobs:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-noble-rocm-py3.11-mi350
+      build-additional-packages: "torchcomms spmd_types"
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
       # distributed_4gpu selects only the >2-GPU distributed tests, so it must
       # run on the gfx950.4 (4-GPU) runner labels.

@@ -39,6 +39,7 @@ jobs:
     needs: get-label-type
     with:
       build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm86
+      build-additional-packages: "torchcomms spmd_types"
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.6'

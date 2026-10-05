@@ -49,6 +49,7 @@ jobs:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-noble-rocm-py3.11-mi350
+      build-additional-packages: "torchcomms spmd_types"
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
       # The amd-sandbox experiment routes the mi350 test shards onto the
       # amd-sandbox- prefixed runner scale sets via the dedicated
