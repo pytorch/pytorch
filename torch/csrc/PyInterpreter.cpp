@@ -1437,9 +1437,17 @@ void ConcretePyInterpreterVTable::propagate_real_tensors(
   auto num_returns = op.schema().returns().size();
   TORCH_INTERNAL_ASSERT(stack->size() >= num_returns);
   auto returns_begin = stack->size() - num_returns;
-  py::list py_fake_out;
-  for (const auto i : c10::irange(num_returns)) {
-    py_fake_out.append(torch::jit::toPyObject((*stack)[returns_begin + i]));
+  // Pass the outputs the way a Python op returns them: None, the single value,
+  // or a tuple.
+  py::object py_fake_out = py::none();
+  if (num_returns == 1) {
+    py_fake_out = torch::jit::toPyObject((*stack)[returns_begin]);
+  } else if (num_returns > 1) {
+    py::tuple outs(num_returns);
+    for (const auto i : c10::irange(num_returns)) {
+      outs[i] = torch::jit::toPyObject((*stack)[returns_begin + i]);
+    }
+    py_fake_out = std::move(outs);
   }
   py::object result = py::module::import("torch._subclasses.fake_tensor")
                           .attr("propagate_real_tensors")(
@@ -1447,10 +1455,8 @@ void ConcretePyInterpreterVTable::propagate_real_tensors(
                               getTorchApiFunction(op),
                               py::handle(real),
                               py_fake_out);
-  if (!result.is_none()) {
-    stack->resize(returns_begin);
-    pushPyOutToStack(op, stack, std::move(result), "propagate_real_tensors");
-  }
+  stack->resize(returns_begin);
+  pushPyOutToStack(op, stack, std::move(result), "propagate_real_tensors");
 }
 
 PyInterpreterHolder self_interpreter;
