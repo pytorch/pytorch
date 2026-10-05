@@ -51,16 +51,12 @@ class TestSortAndSelect(TestCase):
 class TestSortAndSelectDevice(TestCase):
     def test_sort_complex_unsupported(self, device):
         x = torch.tensor([1.0 + 1j, 2.0 + 0j], device=device)
-        with self.assertRaisesRegex(
-            TypeError, "Sort does not support complex dtypes"
-        ):
+        with self.assertRaisesRegex(TypeError, "Sort does not support complex dtypes"):
             torch.sort(x)
 
     def test_topk_complex_unsupported(self, device):
         x = torch.tensor([1.0 + 1j, 2.0 + 0j], device=device)
-        with self.assertRaisesRegex(
-            TypeError, "topk does not support complex dtypes"
-        ):
+        with self.assertRaisesRegex(TypeError, "topk does not support complex dtypes"):
             torch.topk(x, 1)
 
     def test_topk_bool_unsupported(self, device):
