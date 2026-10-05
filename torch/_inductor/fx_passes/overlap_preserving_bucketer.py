@@ -695,7 +695,7 @@ class OverlapPreservingBucketer:
         return True
 
     def remove_from_event(self, node: fx.Node) -> tuple[PGEvent | None, PGEvent | None]:
-        """Remove node from timeline and return (prev_event, next_event)."""
+        """Remove node's possibly shared event and return its timeline neighbors."""
         event = self.node_to_event[node]
         if event.is_compute:
             raise AssertionError("Cannot remove compute events from timeline")
@@ -704,9 +704,9 @@ class OverlapPreservingBucketer:
 
         # Remove augmented graph dependency
         if prev_event:
-            self.aug_graph.remove_extra_dep(n=node, dep=prev_event.node)
+            self.aug_graph.remove_extra_dep(n=event.node, dep=prev_event.node)
         if next_event:
-            self.aug_graph.remove_extra_dep(n=next_event.node, dep=node)
+            self.aug_graph.remove_extra_dep(n=next_event.node, dep=event.node)
 
         # Add bypass dependency
         if prev_event and next_event:
@@ -720,15 +720,15 @@ class OverlapPreservingBucketer:
         prev_event: PGEvent | None,
         next_event: PGEvent | None,
     ) -> None:
-        """Restore node to timeline after failed merge attempt."""
+        """Restore node's possibly shared event after a failed merge attempt."""
         event = self.node_to_event[node]
 
         # Reinsert into linked list
         event.insert_between(prev_event, next_event)
         if prev_event:
-            self.aug_graph.add_extra_dep(n=node, dep=prev_event.node)
+            self.aug_graph.add_extra_dep(n=event.node, dep=prev_event.node)
         if next_event:
-            self.aug_graph.add_extra_dep(n=next_event.node, dep=node)
+            self.aug_graph.add_extra_dep(n=next_event.node, dep=event.node)
 
         # Remove bypass dependency
         if prev_event and next_event:

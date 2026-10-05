@@ -45,6 +45,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.select_algorithm import TritonTemplate
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import (
+    get_code,
     IndentedBuffer,
     is_big_gpu,
     maybe_aoti_standalone_config,
@@ -96,7 +97,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
-    MACOS_VERSION,
     NAVI_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
@@ -636,6 +636,76 @@ class AOTInductorTestsTemplate:
         with config.patch({"always_keep_tensor_constants": True}):
             self.check_model(Model().to(self.device), example_inputs)
 
+    @unittest.skipIf(
+        not HAS_GPU or GPU_TYPE != "cuda" or TEST_WITH_ROCM,
+        "Pinned async constant copy is CUDA-only",
+    )
+    @patch.dict(
+        os.environ,
+        {
+            "AOTI_COPY_USE_PINNED_ASYNC": "1",
+            "AOTI_COPY_STAGE_BUFFER_BYTES": "4194304",
+            "AOTI_COPY_STAGE_CPU_THREADS": "2",
+            "AOTI_LOG_LOADING": "1",
+        },
+    )
+    def test_constants_pinned_async_parallel_copy_tasks(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                # The two 1 MiB weights are separate tasks; the larger weight
+                # crosses a 4 MiB staging boundary and is split further.
+                self.small1 = torch.nn.Linear(512, 512, bias=False)
+                self.small2 = torch.nn.Linear(512, 512, bias=False)
+                self.linear = torch.nn.Linear(1025, 1025)
+
+            def forward(self, x, small):
+                return self.linear(x), self.small1(small) + self.small2(small)
+
+        example_inputs = (
+            torch.randn(2, 1025, device=self.device),
+            torch.randn(2, 512, device=self.device),
+        )
+        model = Model().to(self.device)
+        with config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.force_mmap_weights": True,
+            }
+        ):
+            package_path = AOTIRunnerUtil.compile(model, example_inputs)
+
+        original_stderr_fd = os.dup(2)
+        with tempfile.TemporaryFile(mode="w+") as captured_stderr:
+            try:
+                os.dup2(captured_stderr.fileno(), 2)
+                optimized = torch._inductor.aoti_load_package(package_path)
+            finally:
+                os.dup2(original_stderr_fd, 2)
+                os.close(original_stderr_fd)
+            captured_stderr.seek(0)
+            loading_log = captured_stderr.read()
+
+        self.assertIn("copy_tasks=1 cpu_copy_threads=2", loading_log)
+        self.assertRegex(
+            loading_log, r"completed \d+ bytes in 2 H2D submissions using 2"
+        )
+        parallel_tasks = re.search(
+            r"(\d+) staging window\(s\) copied in parallel as (\d+) task\(s\)",
+            loading_log,
+        )
+        self.assertIsNotNone(parallel_tasks)
+        parallel_windows = int(parallel_tasks.group(1))
+        task_count = int(parallel_tasks.group(2))
+        # The large weight fills a window and exceeds the 2 MiB parallel-copy
+        # threshold regardless of constant emission order.
+        self.assertGreaterEqual(parallel_windows, 1)
+        self.assertGreater(task_count, parallel_windows)
+        self.assertEqual(optimized(*example_inputs), model(*example_inputs))
+
     def test_output_path_1(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -713,6 +783,39 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
+
+    def test_constant_folding_lite_mode(self):
+        # Both the constant-folding graph and the main graph call ops through
+        # the proxy executor, which indexes into one serialized node list.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w = torch.transpose(self.w_pre, 0, 1).relu() + self.b
+                return torch.matmul(x, w)
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch(
+            {
+                **torch._inductor.lite_mode_options,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            self.check_model(model, example_inputs)
+        # Only ops without a C shim use the proxy executor, so check the const
+        # graph still makes a proxy call, and that the main graph's calls don't
+        # reuse its index.
+        call0 = "aoti_torch_proxy_executor_call_function(proxy_executor, 0,"
+        FileCheck().check("::_const_run_impl(").check(call0).check(
+            "::run_impl("
+        ).check_not(call0).run(code)
 
     def test_const_graph_no_autotune_at_compile_time(self):
         class Model(torch.nn.Module):
@@ -1069,10 +1172,6 @@ class AOTInductorTestsTemplate:
             ep, inductor_configs={"aot_inductor.use_runtime_constant_folding": True}
         )
 
-    @unittest.skipIf(
-        TEST_MPS and MACOS_VERSION < 14.0,
-        "Compilation error",
-    )
     def test_aot_inductor_consts_cpp_build(self):
         class Model(torch.nn.Module):
             def __init__(self, device) -> None:
@@ -1565,10 +1664,6 @@ class AOTInductorTestsTemplate:
             inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
             self.check_model(M(), inp)
 
-    @unittest.skipIf(
-        TEST_MPS and MACOS_VERSION < 14.0,
-        "MPS BFloat16 is only supported on MacOS 14+",
-    )
     def test_empty_cat_dtype_promotion(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -2388,6 +2483,28 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @skipIfNoFBGEMM
+    def test_quanatized_int8_linear_lite_mode(self):
+        # Lite mode skips the decomposition of wrapped_quantized_linear, and
+        # only the ops it decomposes into have C shims.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+                self.bias = torch.randn(10, device=device)
+                self.scale = torch.tensor(0.1)
+                self.zero_point = torch.tensor(0)
+
+            def forward(self, x):
+                s, z = self.scale, self.zero_point
+                return torch.ops._quantized.wrapped_quantized_linear(
+                    x, s, z, self.weight, s, z, self.bias, s, z, 10
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model(Model(self.device), example_inputs)
+
     def test_zero_grid_with_unbacked_symbols(self):
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -2620,10 +2737,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
-    @unittest.skipIf(
-        TEST_MPS and MACOS_VERSION < 14.0,
-        "bfloat16 is only supported on MacOS 14+",
-    )
     def test_size_with_unbacked_add_expr(self):
         # Tests AOTI autotuning to make sure the correct input tensor sizes
         # are generated for sizes that include an expr such as s0 + u0.
@@ -2983,6 +3096,20 @@ class AOTInductorTestsTemplate:
             prepend_predicates(inputs, num_predicates=3),
             dynamic_shapes=dynamic_shapes,
         )
+
+    def test_cond_nested_lite_mode(self):
+        # With all ops falling back, the nested subgraphs keep tensor constants,
+        # which the model constructor looks up on the root graph.
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model_with_multiple_inputs(
+                CondModels.Nested(),
+                prepend_predicates(inputs, num_predicates=3),
+            )
 
     def test_cond_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
@@ -3483,6 +3610,20 @@ class AOTInductorTestsTemplate:
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
+
+    def test_symint_in_tensor_arg_lite_mode(self):
+        # The int64 add has no C-shim-compatible scalar ABI, so the fallback goes
+        # through the proxy executor, which cannot take the SymInt as a tensor.
+        class Model(torch.nn.Module):
+            def forward(self, c, b):
+                return c + torch.nonzero(b).size(0)
+
+        inputs = (
+            torch.tensor(3, device=self.device),
+            torch.tensor([0, 1, 1, 0], device=self.device),
+        )
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model(Model(), inputs)
 
     @common_utils.parametrize("dynamic", [False, True])
     def test_while_loop_with_conv(self, dynamic):
@@ -4196,6 +4337,24 @@ class AOTInductorTestsTemplate:
 
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
+
+    def test_return_view_constant_lite_mode(self):
+        # The transpose falls back to ATen, so the output aliases the constant
+        # through an ExternKernel rather than an IR view.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(5, 5, device=device)
+
+            def forward(self, x):
+                return (x, torch.transpose(self.cst, 0, 1))
+
+        x = torch.randn(5, device=self.device)
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model(Model(self.device), (x,))
+            # check_model only notices a missing clone if the freed constant's
+            # memory gets overwritten.
+            self.code_check_count(Model(self.device), (x,), "aoti_torch_clone(", 1)
 
     def test_profile_benchmark_harness(self):
         batch_size = 32
@@ -6437,10 +6596,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @unittest.skipIf(
-        TEST_MPS and MACOS_VERSION < 14.0,
-        "FFT operations are only supported on MacOS 14+",
-    )
     def test_fft_c2c(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -6727,6 +6882,56 @@ class AOTInductorTestsTemplate:
                 ).run(code)
 
             self.check_model(Model(N, K, self.device), example_inputs)
+
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler_proxy_executor(self, enable_kernel_profile):
+        """Test RAIIAtenRecordFunctionHandle profiling for AOT ProxyExecutor path.
+
+        Custom ops are not in the c-shim so they go through FallbackKernel ->
+        proxy_executor in AOT mode. This verifies profiling is emitted around
+        aoti_torch_proxy_executor_call_function.
+        """
+
+        if sys.platform not in ["linux", "win32"]:
+            raise unittest.SkipTest(
+                "enable_kernel_profile only supported on linux and win32"
+            )
+
+        with torch.library._scoped_library("proftest", "FRAGMENT") as lib:
+            torch.library.define(
+                "proftest::add_one",
+                "(Tensor a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "proftest::add_one", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("proftest::add_one", lib=lib)
+            def add_one_impl(a: torch.Tensor) -> torch.Tensor:
+                return a + 1
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.proftest.add_one(x)
+
+            example_inputs = (torch.randn(4, 4, device=self.device),)
+            with config.patch({"cpp.enable_kernel_profile": enable_kernel_profile}):
+                _, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, Model(), example_inputs
+                )
+                FileCheck().check("aoti_torch_proxy_executor_call_function").run(code)
+                if enable_kernel_profile:
+                    # Anchored on the handle's own name and ordered against the
+                    # call, so an unrelated record elsewhere cannot satisfy it.
+                    FileCheck().check(
+                        "RAIIAtenRecordFunctionHandle record_proftest_add_one_default_("
+                    ).check("aoti_torch_proxy_executor_call_function").run(code)
+                else:
+                    FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+
+                self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(
         config.triton.native_matmul, "different kernel name when native matmul"
@@ -8157,6 +8362,33 @@ class AOTInductorTestsTemplate:
             )
         FileCheck().check_not(INFERRED_BOUND).run(code)
 
+    def test_unbacked_relation_assert_lite_mode(self):
+        # Lite mode retraces the graph (selective_decompose), re-allocating the
+        # unbacked symbols the deferred assert is keyed on.
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                shorter = torch.nonzero(a).size(0)
+                longer = torch.nonzero(b).size(0)
+                torch._check(shorter <= longer)
+                return a.new_ones([shorter]), b.new_ones([longer])
+
+        def mask(*bits):
+            return torch.tensor(bits, dtype=torch.float, device=self.device)
+
+        model = Model()
+        example_inputs = (mask(1, 1, 0, 0), mask(1, 1, 1, 0))
+        with config.patch(torch._inductor.lite_mode_options):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_regex(r"Expected u\d+ <= u\d+").run(code)
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        self.assertEqual(compiled(*example_inputs), model(*example_inputs))
+        # Same sizes as the example, so only the relational assert can catch it.
+        # Don't match the message: the fbcode runner doesn't surface it.
+        with self.assertRaisesRegex(Exception, ""):
+            compiled(mask(1, 1, 1, 0), mask(1, 0, 0, 0))
+
     def test_multi_input_nonzero_slice_shared_dim(self):
         # Regression: when multiple inputs share a dynamic batch dim and are
         # sliced with the same nonzero result, the generated C++ guard code
@@ -9393,10 +9625,6 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
-    @unittest.skipIf(
-        TEST_MPS and MACOS_VERSION < 14.0,
-        "FFT operations are only supported on MacOS 14+",
-    )
     def test_stft(self):
         N_FFT = 400
         HOP_LENGTH = 160
@@ -10448,6 +10676,30 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
     @requires_gpu
+    def test_mixed_device_constant_view(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("cpu_w", torch.arange(64.0).view(32, 2))
+                self.register_buffer(
+                    "gpu_w", torch.arange(64.0, device=GPU_TYPE).view(32, 2)
+                )
+
+            def forward(self, x):
+                return (
+                    self.cpu_w.t().to(x.device) + x,
+                    self.cpu_w[1:].to(x.device),
+                    self.gpu_w.t().to("cpu"),
+                    self.gpu_w[1:].to("cpu"),
+                )
+
+        example_inputs = (torch.randn(2, 32, device=self.device),)
+        self.check_model(Model(), example_inputs, move_model_to_device=False)
+
+    @requires_gpu
     def test_mixed_device_zero_size_constant(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Mixed-device test requires GPU")
@@ -11134,6 +11386,7 @@ GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
+    "test_quanatized_int8_linear_lite_mode": fail_gpu(("cuda", "xpu")),
     "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
     # This test forces lazy dual-wrapper mode; torch.cond support for that
     # mode is covered by AOTInductorTestDualWrapper skips below.
@@ -11453,6 +11706,183 @@ class TestCheckUpperboundConfig(TestCase):
                 0,
                 exactly=True,
             ).run(code)
+
+
+class TestCppWrapperFallbackProfiling(TestCase):
+    """Test RAIIAtenRecordFunctionHandle profiling for kernel paths that the
+    device-parametrized AOTInductorTestsTemplate does not reach.
+
+    The two dispatcher fallbacks only arise in cpp_wrapper mode WITHOUT AOT
+    (torch.compile with config.cpp_wrapper=True), so they are driven through
+    get_code, which generates code without compiling or running it (avoids ASAN
+    issues). The non-Triton GPU template path is AOT-only and needs a GPU, so it
+    goes through AOTIRunnerUtil rather than being parametrized over devices.
+    """
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler_nopython_dispatcher(self, enable_kernel_profile):
+        """Test profiling for non-AOT nopython dispatcher path.
+
+        Custom ops with simple types (Tensor -> Tensor) go through
+        aoti_torch_call_dispatcher in non-AOT cpp_wrapper mode because they
+        are StableIValue-compatible and not in the c-shim.
+        """
+        with torch.library._scoped_library("proftest", "FRAGMENT") as lib:
+            torch.library.define(
+                "proftest::nopython_add",
+                "(Tensor a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "proftest::nopython_add", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("proftest::nopython_add", lib=lib)
+            def nopython_add_impl(a: torch.Tensor) -> torch.Tensor:
+                return a + 1
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.proftest.nopython_add(x)
+
+            example_inputs = (torch.randn(4, 4),)
+            with config.patch(
+                {
+                    "cpp_wrapper": True,
+                    "cpp.enable_kernel_profile": enable_kernel_profile,
+                }
+            ):
+                compiled = torch.compile(Model())
+                codes = get_code(compiled, *example_inputs)
+                code = codes[0]
+                FileCheck().check("aoti_torch_call_dispatcher").run(code)
+                if enable_kernel_profile:
+                    FileCheck().check(
+                        "RAIIAtenRecordFunctionHandle record_proftest_nopython_add_default_("
+                    ).check("aoti_torch_call_dispatcher").run(code)
+                else:
+                    FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler_python_fallback(self, enable_kernel_profile):
+        """Test profiling for non-AOT Python fallback path.
+
+        Custom ops whose return type is not boxed-dispatch compatible (only
+        Tensor, Tensor? and () are) go through PyObject_CallObject in non-AOT
+        cpp_wrapper mode. A Tensor[] return is the cheapest such schema; a
+        Tensor[] argument is boxed-compatible and would not reach this path.
+        """
+        with torch.library._scoped_library("proftest", "FRAGMENT") as lib:
+            torch.library.define(
+                "proftest::python_cat",
+                "(Tensor[] tensors, int dim=0) -> Tensor[]",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            # CompositeExplicitAutograd also covers Meta, so it supplies the
+            # shape propagation that tracing needs. A separate Python fake impl
+            # would additionally require a C++ m.set_python_module companion.
+            @torch.library.impl(
+                "proftest::python_cat", "CompositeExplicitAutograd", lib=lib
+            )
+            def python_cat_impl(
+                tensors: list[torch.Tensor], dim: int = 0
+            ) -> list[torch.Tensor]:
+                return [torch.cat(tensors, dim=dim)]
+
+            class Model(torch.nn.Module):
+                def forward(self, x, y):
+                    return torch.ops.proftest.python_cat([x, y])[0]
+
+            example_inputs = (torch.randn(4, 4), torch.randn(4, 4))
+            with config.patch(
+                {
+                    "cpp_wrapper": True,
+                    "cpp.enable_kernel_profile": enable_kernel_profile,
+                }
+            ):
+                compiled = torch.compile(Model())
+                codes = get_code(compiled, *example_inputs)
+                code = codes[0]
+                FileCheck().check("PyObject_CallObject").run(code)
+                if enable_kernel_profile:
+                    # The record precedes the GIL acquisition, so the event
+                    # covers waiting for the GIL rather than starting after it.
+                    FileCheck().check(
+                        "RAIIAtenRecordFunctionHandle record_proftest_python_cat_default_("
+                    ).check("py::gil_scoped_acquire_simple").check(
+                        "PyObject_CallObject"
+                    ).run(code)
+                else:
+                    FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    @common_utils.parametrize("enable_kernel_profile", (True, False))
+    def test_aoti_profiler_gpu_non_triton(self, enable_kernel_profile):
+        """Test profiling for GPU non-Triton kernel call path (CUTLASS/ROCm templates).
+
+        Non-Triton GPU kernels use kernels.{name}() direct calls. This path requires
+        max_autotune with CUTLASS backend availability (SM90+).
+        """
+        # Dense mm only uses CUTLASS 3.x kernels, which need SM90+; on SM80 the
+        # CUTLASS backend has no choices and autotuning raises NoValidChoicesError.
+        if not SM90OrLater:
+            raise unittest.SkipTest("CUTLASS mm templates require SM90+")
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
+
+        if not try_import_cutlass():
+            raise unittest.SkipTest("CUTLASS lib not available")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(64, 64, device=device, dtype=torch.float16)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight)
+
+        model = Model(GPU_TYPE)
+        example_inputs = (torch.randn(2, 64, device=GPU_TYPE, dtype=torch.float16),)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cpp.enable_kernel_profile": enable_kernel_profile,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            # Non-Triton kernels use direct kernels.{name}() calls. Assert one
+            # was selected rather than branching on it: autotuning silently
+            # falling back would otherwise leave this test checking nothing.
+            kernel_call = re.search(r"kernels\.(\w+)\(", code)
+            if kernel_call is None:
+                raise AssertionError("autotuning selected no non-Triton kernel")
+            name = kernel_call.group(1)
+            if enable_kernel_profile:
+                FileCheck().check(
+                    f"RAIIAtenRecordFunctionHandle record_{name}_("
+                ).check(f"kernels.{name}(").run(code)
+            else:
+                FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
+
+
+common_utils.instantiate_parametrized_tests(TestCppWrapperFallbackProfiling)
 
 
 if __name__ == "__main__":
