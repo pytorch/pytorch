@@ -43,6 +43,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
 )
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
+    DefaultAllGatherLayout,
     reduce_scatter_input_fn_with_native_copy,
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
@@ -88,7 +89,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
 native_copy_fns = (
-    all_gather_output_fn_with_native_copy,
+    DefaultAllGatherLayout(all_gather_output_fn_with_native_copy),
     reduce_scatter_input_fn_with_native_copy,
 )
 
@@ -492,7 +493,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         lin_shapes: list[tuple[int, int]],
         use_shard_placement_fn: bool,
         bias: bool = True,
-        copy_fns: tuple[Callable | None, Callable | None] = (None, None),
+        copy_fns: tuple[DefaultAllGatherLayout | None, Callable | None] = (None, None),
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
@@ -509,7 +510,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
-        model.set_all_gather_output_fn(copy_fns[0])
+        model.set_all_gather_layout(copy_fns[0])
         model.set_reduce_scatter_input_fn(copy_fns[1])
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
@@ -3358,18 +3359,18 @@ class TestFullyShardInference(FSDPTest):
         return 2
 
     def test_inference(self):
-        copy_fns = [None, all_gather_output_fn_with_native_copy]
+        layouts = [None, DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)]
         self.run_subtests(
-            {"all_gather_output_fn": copy_fns},
+            {"all_gather_layout": layouts},
             self._test_inference,
         )
 
-    def _test_inference(self, all_gather_output_fn: Callable | None):
+    def _test_inference(self, all_gather_layout: DefaultAllGatherLayout | None):
         torch.manual_seed(42)
         model = nn.Linear(8, 4, bias=False, device=device_type)
         ref_model = copy.deepcopy(model)
         fully_shard(model, shard_placement_fn=lambda _: Shard(1))
-        model.set_all_gather_output_fn(all_gather_output_fn)
+        model.set_all_gather_layout(all_gather_layout)
         with torch.inference_mode():
             inp = torch.ones((2, 8), device=device_type)
             self.assertEqual(model(inp), ref_model(inp))
