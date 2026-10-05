@@ -1,9 +1,11 @@
-"""GitHub-native PR stacks for the merge bot: reading and validating them, and
-finding what landed."""
+"""GitHub-native PR stacks for the merge bot: reading and validating them, finding
+what landed, and building the commits that rebase them."""
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary
@@ -20,7 +22,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       stack {
-        number
         baseRefName
         entries(first: 100) {
           totalCount
@@ -32,7 +33,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
             pullRequest {
               number
               closed
-              isCrossRepository
               headRefName
               headRefOid
               baseRefName
@@ -47,8 +47,11 @@ query ($owner: String!, $name: String!, $number: Int!) {
 
 RE_GHSTACK_HEAD_REF = re.compile(r"^gh/[^/]+/[0-9]+/head$")
 PULL_REQUEST_RESOLVED = "Pull Request resolved: "
+STACK_DEPENDENCIES = "Stack dependencies: "
 PR_UPDATED_ERROR = "PR #{} was updated while preparing the merge, please try again"
-REBASE_HINT = "Rebase the stack onto main and try again."
+REBASE_HINT = (
+    "Rebase the stack onto main with `@pytorchbot rebase -b main` and try again."
+)
 
 
 class NativeStackError(RuntimeError):
@@ -60,7 +63,6 @@ class StackEntry:
     position: int
     number: int
     closed: bool
-    is_cross_repository: bool
     head_ref: str
     head_oid: str
     base_ref: str
@@ -68,7 +70,6 @@ class StackEntry:
 
 @dataclass(frozen=True)
 class NativeStack:
-    number: int
     base_ref: str
     entries: tuple[StackEntry, ...]
 
@@ -98,7 +99,6 @@ def get_native_stack(org: str, project: str, pr_num: int) -> NativeStack | None:
             position=node["position"],
             number=node["pullRequest"]["number"],
             closed=node["pullRequest"]["closed"],
-            is_cross_repository=node["pullRequest"]["isCrossRepository"],
             head_ref=node["pullRequest"]["headRefName"],
             head_oid=node["pullRequest"]["headRefOid"],
             base_ref=node["pullRequest"]["baseRefName"],
@@ -106,7 +106,13 @@ def get_native_stack(org: str, project: str, pr_num: int) -> NativeStack | None:
         for node in nodes
     ]
     entries.sort(key=lambda entry: entry.position)
-    return NativeStack(stack["number"], stack["baseRefName"], tuple(entries))
+    return NativeStack(stack["baseRefName"], tuple(entries))
+
+
+def stack_dependencies_line(numbers: list[int]) -> str:
+    """The `Stack dependencies` line of the landed commit of a stacked PR, which names
+    the PRs below it, bottom first."""
+    return STACK_DEPENDENCIES + ", ".join(f"#{num}" for num in numbers)
 
 
 def _pr_url(org: str, project: str, number: int) -> str:
@@ -130,14 +136,22 @@ def _log(repo: GitRepo, rev: str, *options: str) -> list[tuple[str, str]]:
     return commits
 
 
-def _own_pr_url(message: str) -> str:
-    """The URL of the last `Pull Request resolved` line of `message` ("" if none). A
-    commit lands the PR of that URL: the merge bot appends this line to the PR's
-    body, which may quote other commits' lines. Only LF ends a line, as for `git log
-    --grep`: the Co-authored-by lines after the bot's lines hold author names, which
-    may contain other line separators."""
-    resolved = [x for x in message.split("\n") if x.startswith(PULL_REQUEST_RESOLVED)]
-    return resolved[-1].removeprefix(PULL_REQUEST_RESOLVED) if resolved else ""
+def _own_trailers(message: str) -> tuple[str, list[int]]:
+    """The URL of the last `Pull Request resolved` line of `message` ("" if none) and
+    the PRs, bottom first, that the `Stack dependencies` line after it names. A
+    commit lands the PR of that URL: the merge bot appends that URL's line to the
+    PR's body, which may quote other commits' lines. Only LF ends a line, as for `git
+    log --grep`: the Co-authored-by lines after the bot's lines hold author names,
+    which may contain other line separators."""
+    lines = message.split("\n")
+    resolved = [i for i, x in enumerate(lines) if x.startswith(PULL_REQUEST_RESOLVED)]
+    if not resolved:
+        return "", []
+    url = lines[resolved[-1]].removeprefix(PULL_REQUEST_RESOLVED)
+    for line in lines[resolved[-1] + 1 :]:
+        if re.fullmatch(rf"{STACK_DEPENDENCIES}#[0-9]+(, #[0-9]+)*", line):
+            return url, [int(num) for num in re.findall(r"[0-9]+", line)]
+    return url, []
 
 
 def _landing_candidates(
@@ -153,9 +167,9 @@ def _newest_landing(repo: GitRepo, pr_url: str, rev: str) -> str | None:
     """Newest commit of `rev` that lands `pr_url`, reverted or not."""
     # Quoted lines are rare, so the newest candidate is nearly always the landing
     candidates = _landing_candidates(repo, pr_url, rev, "-1")
-    if candidates and _own_pr_url(candidates[0][1]) != pr_url:
+    if candidates and _own_trailers(candidates[0][1])[0] != pr_url:
         candidates = _landing_candidates(repo, pr_url, rev)
-    landings = (sha for sha, msg in candidates if _own_pr_url(msg) == pr_url)
+    landings = (sha for sha, msg in candidates if _own_trailers(msg)[0] == pr_url)
     return next(landings, None)
 
 
@@ -168,13 +182,50 @@ def _revert_of(repo: GitRepo, sha: str, rev: str) -> tuple[str, str] | None:
     return reverts[0] if reverts else None
 
 
-def find_landed_commit(repo: GitRepo, pr_url: str, ref: str) -> str | None:
-    """Newest commit on `ref` that lands `pr_url` (see _own_pr_url), or None if
-    there is none or a later commit reverted it."""
-    landing = _newest_landing(repo, pr_url, ref)
-    if landing is None or _revert_of(repo, landing, f"{landing}..{ref}") is not None:
-        return None
-    return landing
+def _reverted(repo: GitRepo, sha: str, ref: str) -> bool:
+    """Whether `ref` reverts commit `sha`, counting reverts of reverts: it does if
+    the chain of reverts after `sha`, each reverting the one before, is of odd
+    length."""
+    reverts = 0
+    while (revert := _revert_of(repo, sha, f"{sha}..{ref}")) is not None:
+        sha = revert[0]
+        reverts += 1
+    return reverts % 2 == 1
+
+
+def find_stack_dependents(
+    repo: GitRepo, org: str, project: str, pr_num: int, ref: str
+) -> tuple[str | None, list[tuple[str, int]]]:
+    """The newest commit on `ref` that lands PR `pr_num` (see _own_trailers), and the
+    landings of the PRs stacked on it, each with its PR number: the commits after the
+    PR's first landing whose own `Stack dependencies` line lists it and that are the
+    newest landing of their PR. Landings that `ref` reverts (see _reverted) do not
+    count, and (None, []) means that the PR is not landed. The dependents come
+    highest in the stack (longest `Stack dependencies` line) first, then newest
+    first."""
+    pr_url = _pr_url(org, project, pr_num)
+    candidates = _landing_candidates(repo, pr_url, ref)
+    landings = [sha for sha, msg in candidates if _own_trailers(msg)[0] == pr_url]
+    if not landings or _reverted(repo, landings[0], ref):
+        return None, []
+    # Start at the first landing: if the PR was reverted alone and relanded, the
+    # PRs that landed on top of it before that are still on `ref` and need it
+    grep = f"--grep=^{STACK_DEPENDENCIES}(#[0-9]+, )*#{pr_num}(, #[0-9]+)*$"
+    rc: list[tuple[int, str, int]] = []
+    for sha, message in _log(repo, f"{landings[-1]}..{ref}", "-E", grep):
+        url, deps = _own_trailers(message)
+        number = re.fullmatch(r".+/([0-9]+)", url)
+        if (
+            number
+            and url == _pr_url(org, project, int(number[1]))
+            and pr_num in deps
+            and _newest_landing(repo, url, ref) == sha
+            and not _reverted(repo, sha, ref)
+        ):
+            rc.append((len(deps), sha, int(number[1])))
+    # Top of the stack down: a PR relanded after a revert is newer than those above it
+    rc.sort(key=lambda dependent: -dependent[0])
+    return landings[0], [(sha, number) for _, sha, number in rc]
 
 
 def _is_ancestor(repo: GitRepo, ancestor: str, descendant: str) -> bool:
@@ -185,9 +236,9 @@ def _stack_entries(
     stack: NativeStack, target: int
 ) -> tuple[tuple[StackEntry, ...], int]:
     """The entries of `stack` up to PR `target` and the index of the lowest open one,
-    checked to be a chain of same-repository PRs on the stack's trunk with no closed
-    PR above an open one and no ghstack PR. Even a landed ghstack PR is refused: its
-    revert takes the ghstack path, which would leave the PRs landed above it."""
+    checked to be a chain of PRs on the stack's trunk with no closed PR above an open
+    one and no ghstack PR. Even a landed ghstack PR is refused: its revert takes the
+    ghstack path, which would leave the PRs landed above it."""
     numbers = [entry.number for entry in stack.entries]
     if target not in numbers:
         raise NativeStackError(f"PR #{target} is not in the stack")
@@ -195,11 +246,6 @@ def _stack_entries(
     if entries[-1].closed:
         raise NativeStackError(f"PR #{target} is closed")
     for idx, entry in enumerate(entries):
-        if entry.is_cross_repository:
-            raise NativeStackError(
-                f"PR #{entry.number} is from a fork, but the bot only supports stacks "
-                "of PRs from this repository"
-            )
         if RE_GHSTACK_HEAD_REF.match(entry.head_ref):
             raise NativeStackError(
                 f"PR #{entry.number} is a ghstack PR, and the bot does not support "
@@ -248,9 +294,10 @@ _trunk_landings_read: WeakKeyDictionary[GitRepo, dict[str, tuple[str, list[str]]
 
 
 def _trunk_landings(repo: GitRepo, pr_url: str, trunk: str) -> list[str]:
-    """Every commit of `trunk` that lands `pr_url`, reverted or not, newest first. A
-    trunk only moves forward, so only the first call for a PR in `repo` reads the
-    whole history, and later calls read the commits added since."""
+    """Every commit of `trunk` that lands `pr_url`, reverted or not, newest first. The
+    first call for a PR in `repo` reads the whole history, and later calls only the
+    commits added since, unless `trunk` was rewritten and lost the commit that the
+    last call read up to."""
     tip = repo.rev_parse(trunk)
     read = _trunk_landings_read.setdefault(repo, {})
     rev = tip
@@ -259,17 +306,18 @@ def _trunk_landings(repo: GitRepo, pr_url: str, trunk: str) -> list[str]:
         start, landings = read[pr_url]
         rev = f"{start}..{tip}"
     candidates = _landing_candidates(repo, pr_url, rev)
-    new = [sha for sha, msg in candidates if _own_pr_url(msg) == pr_url]
+    new = [sha for sha, msg in candidates if _own_trailers(msg)[0] == pr_url]
     read[pr_url] = (tip, new + landings)
     return new + landings
 
 
 def _landed_in(repo: GitRepo, pr_url: str, rev: str, trunk: str) -> str | None:
-    """find_landed_commit(repo, pr_url, rev) for a `rev` whose landings of the PR
-    are commits of `trunk`, read through _trunk_landings."""
+    """The newest commit of `rev` that lands `pr_url` (see _own_trailers), or None
+    if there is none or `rev` reverts it (see _reverted). The landings are read
+    through _trunk_landings, so those of `rev` must be commits of `trunk`."""
     landings = _trunk_landings(repo, pr_url, trunk)
     landing = next((sha for sha in landings if _is_ancestor(repo, sha, rev)), None)
-    if landing is None or _revert_of(repo, landing, f"{landing}..{rev}") is not None:
+    if landing is None or _reverted(repo, landing, rev):
         return None
     return landing
 
@@ -393,4 +441,282 @@ def get_native_stack_landing_prs(
             repo, org, project, entry.number, lower, entry.base_ref, trunk
         )
         rc.append((entry, lower))
+    return rc
+
+
+def _git(
+    repo: GitRepo,
+    *args: str,
+    stdin: str = "",
+    env: dict[str, str] | None = None,
+    ok_codes: tuple[int, ...] = (0,),
+) -> subprocess.CompletedProcess[str]:
+    """GitRepo._run_git with stdin, extra environment and accepted exit codes. It
+    runs in bytes mode, as text mode would turn each carriage return of the output
+    into a newline."""
+    cmd = ["git", "-C", repo.repo_dir, *args]
+    if repo.debug:
+        print(f"+ {' '.join(cmd)}")
+    run = subprocess.run(
+        cmd,
+        input=stdin.encode(),
+        capture_output=True,
+        env=None if env is None else {**os.environ, **env},
+    )
+    stdout, stderr = run.stdout.decode(), run.stderr.decode()
+    proc = subprocess.CompletedProcess(cmd, run.returncode, stdout, stderr)
+    if proc.returncode not in ok_codes:
+        print(f"stdout: \n{proc.stdout}")
+        print(f"stderr: \n{proc.stderr}")
+        raise RuntimeError(
+            f"Command `{' '.join(cmd)}` returned non-zero exit code "
+            f"{proc.returncode}\n```\n{proc.stdout}{proc.stderr}```"
+        )
+    return proc
+
+
+def _merge_tree(
+    repo: GitRepo, ours: str, theirs: str, conflict: str, merge_base: str | None = None
+) -> str:
+    """The tree of merging `theirs` into `ours`, or NativeStackError(`conflict`)."""
+    base = [] if merge_base is None else [f"--merge-base={merge_base}"]
+    args = ("merge-tree", "--write-tree", *base, ours, theirs)
+    merge = _git(repo, *args, ok_codes=(0, 1))
+    if merge.returncode == 1:
+        raise NativeStackError(conflict)
+    return merge.stdout.split("\n", 1)[0]
+
+
+def _commit(repo: GitRepo, tree: str, parents: list[str], message: str) -> str:
+    """Commit `tree` on `parents` with the author of the first parent and the
+    repository's identity as the committer: the authors of a PR's commits are the
+    co-authors of its landed commit, so the bot must not author any."""
+    identity = repo._run_git("log", "-1", "--format=%an%x00%ae", parents[0])
+    name, email = identity.removesuffix("\n").split("\0")
+    env = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email}
+    args = [arg for parent in parents for arg in ("-p", parent)]
+    return _git(repo, "commit-tree", tree, *args, stdin=message, env=env).stdout.strip()
+
+
+def _merge_into(
+    repo: GitRepo,
+    number: int,
+    branch: str,
+    tip: str,
+    base: str,
+    base_name: str,
+    tree: str | None = None,
+) -> str:
+    """A commit merging `base` into `tip`, the tip of PR `number`'s branch, with
+    `tree` if given."""
+    if tree is None:
+        conflict = (
+            f"Merging {base_name} into {branch} (PR #{number}) has conflicts; merge "
+            "it locally and push the result"
+        )
+        tree = _merge_tree(repo, tip, base, conflict)
+    return _commit(repo, tree, [tip, base], f"Merge {base_name} into {branch}\n")
+
+
+def _reapply_reverted(
+    repo: GitRepo,
+    number: int,
+    url: str,
+    tip: str,
+    base: str,
+    merged: str,
+    trunk: str,
+) -> str:
+    """`merged`, the merge of `base` into `tip`, plus a commit that reapplies PR
+    `number`'s landing in `tip` (see _landed_in) if the merge brought in a revert of
+    it: the merge then took the PR's own changes out of its branch. Only the
+    landing's own changes come back, even if the revert also reverted other
+    commits."""
+    landing = _landed_in(repo, url, tip, trunk)
+    found = None if landing is None else _revert_of(repo, landing, f"{tip}..{base}")
+    if landing is None or found is None:
+        return merged
+    revert, message = found
+    conflict = (
+        f"Reapplying PR #{number} on its branch after its revert has conflicts; "
+        "update the branch locally, keeping the PR's changes, and push the result"
+    )
+    tree = _merge_tree(repo, merged, landing, conflict, merge_base=f"{landing}^")
+    if tree == repo.rev_parse(f"{merged}^{{tree}}"):
+        return merged
+    title = message.split("\n", 1)[0].removeprefix('Revert "').removesuffix('"')
+    reapply = f'Reapply "{title}"\n\nThis reverts commit {revert}.\n'
+    return _commit(repo, tree, [merged], reapply)
+
+
+def _update_landed_branch(
+    repo: GitRepo,
+    number: int,
+    url: str,
+    branch: str,
+    tip: str,
+    onto: str,
+    onto_name: str,
+    trunk: str,
+) -> str:
+    """The tip of the branch of landed PR `number` once `onto` is merged into it.
+    If `onto` has the PR's landed changes, the merge takes `onto`'s tree, which also
+    skips conflicts with later changes to the same lines; otherwise (`onto` lags
+    behind the landing) it is a real merge, which keeps the PR's changes."""
+    if _is_ancestor(repo, onto, tip):
+        return tip
+    tree = None
+    if _landed_in(repo, url, onto, trunk) is not None:
+        tree = repo.rev_parse(f"{onto}^{{tree}}")
+    return _merge_into(repo, number, branch, tip, onto, onto_name, tree)
+
+
+def _update_branches(
+    repo: GitRepo,
+    org: str,
+    project: str,
+    trunk: str,
+    base: str,
+    base_name: str,
+    branches: list[tuple[int, str, str]],
+) -> list[tuple[int, str, str]]:
+    """Merge `base` into the first of `branches` (PR number, branch, tip; bottom
+    first), the result into the next one and so on, and return the PR number, branch
+    and new tip of each branch that changed."""
+    rc: list[tuple[int, str, str]] = []
+    for number, branch, tip in branches:
+        new = tip
+        if not _is_ancestor(repo, base, tip):
+            merged = _merge_into(repo, number, branch, tip, base, base_name)
+            url = _pr_url(org, project, number)
+            new = _reapply_reverted(repo, number, url, tip, base, merged, trunk)
+            rc.append((number, branch, new))
+        base, base_name = new, branch
+    return rc
+
+
+def build_native_stack_rebase(
+    repo: GitRepo,
+    org: str,
+    project: str,
+    stack: NativeStack,
+    target: int,
+    default_branch: str,
+    onto: str,
+) -> list[tuple[int, str, str]]:
+    """Merge branch `onto` into the branches of `stack` bottom-up, from the lowest
+    open PR to PR `target`, without touching the worktree or the index. The branch of
+    the landed PR right below the lowest open one gets `onto` first, so each open PR
+    still shows only its own changes. Returns the PR number, branch and new commit of
+    each branch to fast-forward, bottom first."""
+    if stack.base_ref != default_branch:
+        raise NativeStackError(
+            f"PR #{target} is in a stack based on {stack.base_ref}, but only stacks "
+            f"based on {default_branch} can be rebased"
+        )
+    entries, first_open = _stack_entries(stack, target)
+    below = entries[first_open - 1] if first_open else None
+    # The open PRs to rebase, plus the closed PR whose branch the lowest is based on
+    updated = entries[max(first_open - 1, 0) :]
+    for entry in updated:
+        if entry.head_ref in (default_branch, onto):
+            raise NativeStackError(
+                f"PR #{entry.number} is opened from {entry.head_ref}, so rebasing it "
+                f"would push to {entry.head_ref}"
+            )
+
+    tracking = f"refs/remotes/{repo.remote}"
+    trunk = f"{tracking}/{default_branch}"
+    opened = [entry for entry in stack.entries[first_open:] if not entry.closed]
+    names = [entry.head_ref for entry in updated]
+    branches = list(dict.fromkeys([default_branch, onto, *names]))
+    refspecs = [f"+refs/heads/{b}:{tracking}/{b}" for b in branches]
+    shas = [entry.head_oid for entry in opened]
+    if below is not None:
+        shas.append(below.head_oid)
+    try:
+        repo._run_git("fetch", repo.remote, *refspecs, *shas)
+    except RuntimeError as e:
+        raise NativeStackError(
+            f"Could not fetch {', '.join(branches)} and the open PRs of the stack: {e}"
+        ) from e
+    _check_landed(repo, org, project, entries, trunk, default_branch)
+    onto_sha = repo.rev_parse(f"{tracking}/{onto}")
+    # Such an `onto` (a lagging viable/strict) would take the PR's changes out of
+    # the stack, or bring an older version of them in
+    for entry in updated:
+        url = _pr_url(org, project, entry.number)
+        landing = _landed_in(repo, url, onto_sha, trunk)
+        if landing is not None and landing != _landed_in(repo, url, trunk, trunk):
+            raise NativeStackError(
+                f"{onto} is behind {default_branch} for PR #{entry.number}: it still "
+                f"has the PR's landing {landing}, which {default_branch} reverted or "
+                "replaced since. " + REBASE_HINT
+            )
+    tips = {e.number: repo.rev_parse(f"{tracking}/{e.head_ref}") for e in updated}
+    # Merging `onto` into the stack would also merge such a PR into the branches
+    # below it
+    heads = [(e.number, e.head_oid) for e in opened]
+    heads += [(e.number, tips[e.number]) for e in entries[first_open:]]
+    for number, head in heads:
+        if _is_ancestor(repo, head, onto_sha):
+            raise NativeStackError(
+                f"The head of PR #{number} is already in {onto}, so it has nothing "
+                "to rebase; close the PR if it landed"
+            )
+
+    rc: list[tuple[int, str, str]] = []
+    base, base_name = onto_sha, onto
+    if below is not None:
+        tip = tips[below.number]
+        _check_closed_branch(
+            repo, below.number, below.head_oid, tip, trunk, default_branch
+        )
+        url = _pr_url(org, project, below.number)
+        base = _update_landed_branch(
+            repo, below.number, url, below.head_ref, tip, onto_sha, onto, trunk
+        )
+        base_name = below.head_ref
+        if base != tip:
+            rc.append((below.number, below.head_ref, base))
+    rebased = [(e.number, e.head_ref, tips[e.number]) for e in entries[first_open:]]
+    return rc + _update_branches(repo, org, project, trunk, base, base_name, rebased)
+
+
+def push_branches(
+    repo: GitRepo, updates: list[tuple[int, str, str]], dry_run: bool = False
+) -> None:
+    """Fast-forward the branches of `updates`, as build_native_stack_rebase returns
+    them, all at once or not at all."""
+    # A push without refspecs would push the current branch (push.default)
+    if not updates:
+        return
+    refspecs = [f"{new}:refs/heads/{branch}" for _, branch, new in updates]
+    dry = ["--dry-run"] if dry_run else []
+    repo._run_git("push", *dry, "--atomic", repo.remote, *refspecs)
+
+
+def branch_update_comments(
+    stack: NativeStack,
+    updates: list[tuple[int, str, str]],
+    onto: str,
+    pr_num: int,
+    cause: str,
+) -> list[tuple[int, str]]:
+    """The PR number and comment for each open PR of `stack` whose branch `updates`,
+    as build_native_stack_rebase returns them, fast-forwards once `onto` is merged
+    into it because PR `pr_num` was `cause`."""
+    closed = {entry.number for entry in stack.entries if entry.closed}
+    rc: list[tuple[int, str]] = []
+    for number, branch, _ in updates:
+        if number in closed:
+            continue
+        msg = f"Merged `{onto}` into `{branch}`"
+        if number != pr_num:
+            msg += f" because #{pr_num} was {cause}"
+        msg += (
+            ", please pull locally before adding more changes (for example, via "
+            f"`git checkout {branch} && git pull --rebase`)"
+        )
+        rc.append((number, msg))
     return rc
