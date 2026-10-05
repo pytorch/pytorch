@@ -599,7 +599,8 @@ use a green-context stream separately when compute localization is also desired.
 
 ```python
 allocator = torch.cuda.LocalizedAllocator(locality_domain_id=0, device="cuda:0")
-pool = torch.cuda.MemPool(allocator=allocator.allocator())
+with torch.cuda.device(allocator.device_id):
+    pool = torch.cuda.MemPool(allocator=allocator.allocator())
 with torch.cuda.use_mem_pool(pool, device="cuda:0"):
     # x is allocated on locality domain 0
     # the randn kernel runs non-localized
