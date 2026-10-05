@@ -38,6 +38,22 @@ from torch.testing._internal.common_utils import (
 )
 
 
+def _param_comms_args(prof) -> list[dict]:
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        trace_path = f.name
+    try:
+        prof.export_chrome_trace(trace_path)
+        with open(trace_path) as f:
+            trace = json.load(f)
+    finally:
+        os.unlink(trace_path)
+    return [
+        ev.get("args", {})
+        for ev in trace.get("traceEvents", [])
+        if ev.get("name") == "record_param_comms"
+    ]
+
+
 class ProcessGroupNCCL2GraphCleanupTest(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
@@ -440,6 +456,25 @@ class ProcessGroupNCCL2ShrinkTest(_ProcessGroupNCCL2OptionsTest):
         self.assertEqual(shrunk.size(), 1)
         dist.all_reduce(tensor, group=shrunk)
         self.assertEqual(tensor, torch.ones_like(tensor))
+        dist.destroy_process_group(shrunk)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for communicator shrink")
+    @skip_if_lt_x_gpu(2)
+    def test_shrink_child_global_ranks(self) -> None:
+        # shrink() children used to inherit the parent's rank map, so profiler
+        # ranks and Dst/Src described the parent.
+        group = dist.new_group(device_id=self.device)
+        dist.barrier(group=group)
+        if self.rank == 0:
+            dist.destroy_process_group(group)
+            return
+
+        shrunk = dist.shrink_group([0], group=group)
+        self.assertEqual(
+            shrunk._get_backend(self.device).options.global_ranks_in_group,
+            list(range(1, self.world_size)),
+        )
         dist.destroy_process_group(shrunk)
 
 
@@ -1115,6 +1150,36 @@ class ProcessGroupNCCLLazyTest(ProcessGroupNCCL2Test):
         expected = 1 if nxt == prev else 2
         self.assertGreaterEqual(backend._num_active_channels(), expected)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_pair_send_recv_ranks(self) -> None:
+        # Pair sub-PGs used to have no rank map, so Dst/Src were pair ranks.
+        send_t = torch.full((4,), float(self.rank), device=self.device)
+        recv_t = torch.empty((4,), device=self.device)
+        nxt = (self.rank + 1) % self.world_size
+        prev = (self.rank - 1) % self.world_size
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU], record_shapes=True
+        ) as prof:
+            if self.rank % 2 == 0:
+                dist.send(send_t, nxt)
+                dist.recv(recv_t, prev)
+            else:
+                dist.recv(recv_t, prev)
+                dist.send(send_t, nxt)
+            torch.cuda.synchronize()
+
+        events = {
+            args["Collective name"]: args
+            for args in _param_comms_args(prof)
+            if args.get("Collective name") in ("send", "recv")
+        }
+        self.assertEqual(events["send"]["Dst Rank"], nxt)
+        self.assertEqual(events["recv"]["Src Rank"], prev)
+        self.assertEqual(
+            events["send"]["Process Group Ranks"], str(sorted([self.rank, nxt]))
+        )
+
 
 class ProcessGroupNCCLLazyNonblockingTest(ProcessGroupNCCL2NonblockingTest):
     @classmethod
@@ -1272,18 +1337,8 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
                         dist.all_reduce(t, group=group)
                 torch.cuda.synchronize()
 
-            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-                trace_path = f.name
-            try:
-                prof.export_chrome_trace(trace_path)
-                with open(trace_path) as f:
-                    trace = json.load(f)
-            finally:
-                os.unlink(trace_path)
-
             recorded: dict[str, set[int]] = {}
-            for ev in trace.get("traceEvents", []):
-                args = ev.get("args", {})
+            for args in _param_comms_args(prof):
                 if "Process Group Name" in args and "Seq" in args:
                     recorded.setdefault(args["Process Group Name"], set()).add(
                         args["Seq"]
@@ -1394,6 +1449,120 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
             torch.cuda.synchronize()
         events = [e for e in prof.function_events if e.name == "nccl:all_reduce"]
         self.assertEqual([e.input_shapes for e in events], [[]])
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_records_group_metadata(self) -> None:
+        # record_param_comms used to carry (name, "") as the PG name tuple and
+        # -1 global rank start/stride, so traces had no "Process Group
+        # Description" and empty "Process Group Ranks" (stock records the PG
+        # uid/desc and start/stride).
+        pg = dist.distributed_c10d._get_default_group()
+        single = dist.split_group(
+            split_ranks=[[r] for r in range(self.world_size)], group_desc="single"
+        )
+        t = torch.ones(4, device=self.device)
+        try:
+            dist.all_reduce(t)
+            dist.all_reduce(t, group=single)
+            torch.cuda.synchronize()
+
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU],
+                record_shapes=True,
+            ) as prof:
+                dist.all_reduce(t)
+                dist.all_reduce(t, group=single)
+                torch.cuda.synchronize()
+
+            events = {
+                args["Process Group Name"]: args
+                for args in _param_comms_args(prof)
+                if args.get("Collective name") == "allreduce"
+            }
+            world = events[pg.group_name]
+            self.assertEqual(world["Process Group Description"], "default_pg")
+            self.assertEqual(
+                world["Process Group Ranks"], str(list(range(self.world_size)))
+            )
+            self.assertEqual(world["Global rank start"], 0)
+            self.assertEqual(world["Global rank stride"], 1)
+
+            # A one-rank group has stride 0, so stock records no ranks.
+            mine = events[single.group_name]
+            self.assertEqual(mine["Process Group Description"], "single")
+            self.assertEqual(mine["Process Group Ranks"], "[]")
+            self.assertEqual(mine["Global rank start"], self.rank)
+            self.assertNotIn("Global rank stride", mine)
+        finally:
+            dist.destroy_process_group(single)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_records_one_wait_per_wait_call(self) -> None:
+        # "wait" used to be recorded in synchronize() and skipped for completed
+        # work; stock records it once per wait() call.
+        t = torch.ones(4, device=self.device)
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU]
+        ) as prof:
+            work = dist.all_reduce(t, async_op=True)
+            torch.cuda.synchronize()
+            work.wait()
+            dist.all_reduce(t, async_op=True).get_future().wait()
+            torch.cuda.synchronize()
+
+        waits = [
+            args
+            for args in _param_comms_args(prof)
+            if args.get("Collective name") == "wait"
+        ]
+        self.assertEqual(len(waits), 1)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_records_no_internal_wait(self) -> None:
+        # synchronize() and the aliased-output all_gather's internal wait used
+        # to record "wait"; stock records it only for user wait() calls.
+        t = torch.ones(4, device=self.device)
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU]
+        ) as prof:
+            dist.all_reduce(t, async_op=True).synchronize()
+            out = torch.empty_like(t)
+            dist.all_gather([out] * self.world_size, t, async_op=True).synchronize()
+            torch.cuda.synchronize()
+
+        names = [args.get("Collective name") for args in _param_comms_args(prof)]
+        self.assertIn("_allgather_base", names)
+        self.assertNotIn("wait", names)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_profiler_records_all_to_allv_split_sizes(self) -> None:
+        # Both all_to_all_single paths used to record [numel] as the split
+        # sizes; stock records [] for an equal split, else the splits.
+        in_splits = [self.rank + 1] * self.world_size
+        out_splits = list(range(1, self.world_size + 1))
+        equal = torch.ones(self.world_size, device=self.device)
+        uneven_in = torch.ones(sum(in_splits), device=self.device)
+        uneven_out = torch.empty(sum(out_splits), device=self.device)
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU], record_shapes=True
+        ) as prof:
+            dist.all_to_all_single(torch.empty_like(equal), equal)
+            dist.all_to_all_single(uneven_out, uneven_in, out_splits, in_splits)
+            torch.cuda.synchronize()
+
+        splits = [
+            (args["In split size"], args["Out split size"])
+            for args in _param_comms_args(prof)
+            if args.get("Collective name") == "all_to_allv"
+        ]
+        self.assertEqual(splits, [("[]", "[]"), (str(in_splits), str(out_splits))])
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

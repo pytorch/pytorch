@@ -52,10 +52,10 @@ class LazyBackend : public Backend {
 
  public:
   // Builds the 2-rank sibling backend for a peer. The pair rank is 0 for the
-  // lower-numbered global rank and 1 for the higher; pair_name is unique per
-  // allocation for the same pair.
-  using PairFactory = std::function<
-      c10::intrusive_ptr<T>(int pair_rank, const std::string& pair_name)>;
+  // lower-numbered global rank and 1 for the higher; peer is the other rank in
+  // this group; pair_name is unique per allocation for the same pair.
+  using PairFactory = std::function<c10::intrusive_ptr<
+      T>(int pair_rank, int peer, const std::string& pair_name)>;
 
   LazyBackend(
       int rank,
@@ -431,7 +431,7 @@ class LazyBackend : public Backend {
         nextPairAttempt(lo, hi));
 
     const int pair_rank = (getRank() < peer) ? 0 : 1;
-    auto sub = pair_factory_(pair_rank, pair_name);
+    auto sub = pair_factory_(pair_rank, peer, pair_name);
     TORCH_CHECK(sub, "LazyBackend: pair factory returned null for peer ", peer);
     if (getBoundDeviceId().has_value()) {
       sub->setBoundDeviceId(getBoundDeviceId());
