@@ -438,7 +438,9 @@ class ConstDictVariable(VariableTracker):
 
     def maybe_getitem_const(self, arg: VariableTracker) -> VariableTracker | None:
         key = HashableTracker(arg)
-        return self.items.get(key)
+        if key not in self.items:
+            return None
+        return self.items[key]
 
     def realize_key_vt(self, arg: VariableTracker) -> None:
         # Realize the LazyVT on a particular index
@@ -618,10 +620,7 @@ class ConstDictVariable(VariableTracker):
         if not self.is_mutable():
             return None
         check_positional(tx, "pop", len(args), 1, 2)
-        value = None
-        if not (isinstance(self, DunderDictVariable) and args[0] not in self):
-            value = self.items.pop(HashableTracker(args[0]), None)
-        if value is None:
+        if args[0] not in self:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, args)
             if len(args) == 1:
@@ -630,7 +629,7 @@ class ConstDictVariable(VariableTracker):
             return args[1]
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
-        return value
+        return self.items.pop(HashableTracker(args[0]))
 
     def dict_popitem(
         self,

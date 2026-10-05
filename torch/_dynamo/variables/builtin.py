@@ -32,7 +32,7 @@ import operator
 import sys
 import types
 import typing
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NoReturn, TYPE_CHECKING
 
@@ -103,7 +103,6 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
-    OrderedDictVariable,
 )
 from .hashable import is_hashable
 from .lists import (
@@ -3575,7 +3574,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if user_cls not in {dict, OrderedDict, defaultdict}:
+        if user_cls not in {dict, defaultdict}:
             unimplemented(
                 gb_type="Unsupported dict type for fromkeys()",
                 context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
@@ -3586,20 +3585,14 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 ],
             )
         if kwargs:
-            # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
-            if (
-                user_cls is not OrderedDict
-                or len(args) != 1
-                or len(kwargs) != 1
-                or "value" not in kwargs
-            ):
-                raise_args_mismatch(
-                    tx,
-                    f"{user_cls.__name__}.fromkeys",
-                    "1 args and 1 kwargs (`value`)",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            args = (*args, kwargs.pop("value"))
+            # dict.fromkeys is positional-only; OrderedDict.fromkeys goes
+            # through polyfills.dict_fromkeys instead.
+            raise_args_mismatch(
+                tx,
+                f"{user_cls.__name__}.fromkeys",
+                "0 kwargs",
+                f"{len(kwargs)} kwargs",
+            )
         if len(args) == 0:
             raise_args_mismatch(
                 tx,
@@ -3622,9 +3615,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         def _make_result(
             items: dict[VariableTracker, VariableTracker],
         ) -> VariableTracker:
-            if user_cls is OrderedDict:
-                return OrderedDictVariable(items, mutation_type=ValueMutationNew())
-            elif user_cls is defaultdict:
+            if user_cls is defaultdict:
                 from .builder import SourcelessBuilder
                 from .user_defined import DefaultDictVariable
 

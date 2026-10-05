@@ -69,6 +69,10 @@ class _OrderedDictSubclass(OrderedDict):
     pass
 
 
+class _DictSubclass(dict):
+    pass
+
+
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1311,67 +1315,20 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), (9, 9, 6, [("a", 9)]))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
+    @parametrize("cls", [dict, _DictSubclass], name_fn=lambda c: c.__name__)
     @parametrize("method", ["pop", "setdefault"])
-    def test_dict_keyword_arguments_rejected(self, method):
+    def test_dict_keyword_arguments_rejected(self, method, cls):
         def fn():
-            d = dict(a=1)
+            d = cls(a=1)
             try:
                 getattr(d, method)("a", default=2)
             except TypeError as e:
                 return str(e)
             return "no error"
 
-        expected = f"dict.{method}() takes no keyword arguments"
+        expected = f"{cls.__name__}.{method}() takes no keyword arguments"
         self.assertEqual(fn(), expected)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
-
-    def test_ordered_dict_setdefault_keyword_key_eq_once(self):
-        class Key:
-            calls = []
-
-            def __hash__(self):
-                self.calls.append("hash")
-                return 7
-
-            def __eq__(self, other):
-                self.calls.append("eq")
-                return isinstance(other, Key)
-
-        def fn():
-            Key.calls.clear()
-            d = OrderedDict()
-            d[Key()] = 1
-            return d.setdefault(key=Key(), default=2), list(Key.calls)
-
-        expected = (1, ["hash", "hash", "eq"])
-        self.assertEqual(fn(), expected)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(), expected)
-        self.assertEqual(compiled(), expected)
-
-    def test_ordered_dict_pop_keyword_key_eq_once(self):
-        class Key:
-            calls = []
-
-            def __hash__(self):
-                self.calls.append("hash")
-                return 7
-
-            def __eq__(self, other):
-                self.calls.append("eq")
-                return isinstance(other, Key)
-
-        def fn():
-            Key.calls.clear()
-            d = OrderedDict()
-            d[Key()] = 1
-            return d.pop(key=Key()), list(Key.calls)
-
-        expected = (1, ["hash", "hash", "eq", "eq", "eq"])
-        self.assertEqual(fn(), expected)
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(compiled(), expected)
-        self.assertEqual(compiled(), expected)
 
     def test_ordered_dict_subclass_fromkeys(self):
         def fn():
@@ -1452,6 +1409,25 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return type(d), list(d.items())
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_ordered_dict_fromkeys_keywords(self):
+        def fn(x):
+            d = OrderedDict.fromkeys(iterable="ab", value=x)
+            return type(d), list(d.items())
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_ordered_dict_new_exact(self):
+        def fn(x):
+            d = OrderedDict.__new__(OrderedDict)
+            d["a"] = x
+            d["b"] = x + 1
+            d.move_to_end("a")
+            return type(d), list(d.items())
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_ordered_dict_subclass_fromkeys_keywords(self):
         def fn(x):

@@ -1151,10 +1151,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
-        ):
+        elif self.value is collections.defaultdict and name == "fromkeys":
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
@@ -1164,8 +1161,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and inspect.getattr_static(self.value, "fromkeys")
             is collections.OrderedDict.__dict__["fromkeys"]
         ):
-            # The polyfill builds the result with cls(); a metaclass __call__
-            # would not run there, so the result would silently miss its effects.
+            # The polyfill builds the result with cls(), and calling a class
+            # skips a metaclass __call__ under Dynamo (plain Sub() has the same
+            # problem in call_function), so the result would miss its effects.
             if type(self.value).__call__ is not type.__call__:
                 unimplemented(
                     gb_type="OrderedDict subclass fromkeys with metaclass __call__",
@@ -1174,7 +1172,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
             return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.odict_fromkeys),
+                VariableTracker.build(tx, polyfills.dict_fromkeys),
                 [self, *args],
                 kwargs,
             )
