@@ -198,15 +198,15 @@ def _make_wrapper(
     dsl: str,
     key_fn: Callable[..., str] | None,
     sample: Callable[[], tuple[int | None, int | None]],
+    compiled_hint: bool | None = None,
 ) -> Callable[..., R]:
-    """Shared instrumentation core for both DSL entry points.
-
-    ``sample()`` returns a ``(hits, misses)`` snapshot of the relevant cache;
-    a ``misses`` increase across the call means a real compile fired. Timing,
-    error handling, classification, and emission are identical across DSLs --
-    only ``sample`` (and the reported ``dsl``) differ.
+    """Instrument either DSL entry point. sample() returns cache hits and misses;
+    an increased miss count means compilation. compiled_hint overrides inference for
+    external memos whose miss-only closure has no cache_info.
     """
 
+    # Coverage identifies this code object on cute.compile's stack, independent of whether
+    # instrumentation wraps the compile function or a cached_plan helper.
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> R:
         # Fast path: do nothing extra unless a sink is listening. This runs on
@@ -226,11 +226,13 @@ def _make_wrapper(
         finally:
             wall_ms = (time.perf_counter() - start) * 1e3
             hits_after, misses_after = sample()
-            compiled = (
-                not outcome_is_error
-                and misses_before is not None
+            inferred = (
+                misses_before is not None
                 and misses_after is not None
                 and misses_after > misses_before
+            )
+            compiled = not outcome_is_error and (
+                inferred if compiled_hint is None else compiled_hint
             )
             if outcome_is_error:
                 outcome = "error"
@@ -289,28 +291,24 @@ def _instrument_cached_compile(
     dsl: str,
     *,
     key_fn: Callable[..., str] | None = None,
+    compiled: bool | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
-    """Shared implementation behind the per-DSL compile instrumentation.
+    """Implement per-DSL compile instrumentation.
 
     Args:
-        op: Operator symbol being compiled for, e.g. ``"aten::topk"``. May
-            instead be a callable receiving the wrapped function's arguments
-            and returning the label per call; if that callable raises, the
-            label falls back to ``"<op-label-error>"`` without changing the
-            wrapped function's result or exception.
+        op: Operator symbol, or a callable deriving one from each call. Label
+            errors use ``"<op-label-error>"`` without affecting the wrapped call.
         dsl: DSL name reported in the event, e.g. ``"cutedsl"``.
-        key_fn: Optional callable with the wrapped function's signature
-            returning a short string describing the compile key for logs.
-            Defaults to a repr of the args/kwargs.
+        key_fn: Optional callable describing the compile key; defaults to repr.
+        compiled: Explicit outcome for external, miss-only memos whose closure
+            exposes no cache counters.
 
-    Returns a decorator. The decorated function behaves identically to the
-    original (same return value, same caching); it only adds a log line and
-    a tlparse artifact per call. Errors raised by the wrapped compile are
-    timed, reported with ``outcome="error"``, and re-raised unchanged.
+    Returns a behavior-preserving decorator that logs and emits a tlparse artifact.
+    Compile errors are timed, reported as errors, and re-raised unchanged.
     """
 
     def decorator(fn: Callable[..., R]) -> Callable[..., R]:
-        wrapper = _make_wrapper(fn, op, dsl, key_fn, _cache_info_sampler(fn))
+        wrapper = _make_wrapper(fn, op, dsl, key_fn, _cache_info_sampler(fn), compiled)
         # Forward jit_cache's bespoke attributes (functools.wraps doesn't copy
         # them) so the instrumented function stays a drop-in for callers that
         # introspect the cache.
@@ -326,6 +324,7 @@ def instrument_cutedsl_compile(
     op: str | Callable[..., str],
     *,
     key_fn: Callable[..., str] | None = None,
+    compiled: bool | None = None,
 ) -> Callable[[Callable[..., R]], Callable[..., R]]:
     """Instrument a CuTeDSL (``@jit_cache``-decorated) compile function.
 
@@ -333,7 +332,7 @@ def instrument_cutedsl_compile(
     returned decorator guarantees.
     """
 
-    return _instrument_cached_compile(op, "cutedsl", key_fn=key_fn)
+    return _instrument_cached_compile(op, "cutedsl", key_fn=key_fn, compiled=compiled)
 
 
 def instrument_flydsl_compile(
