@@ -152,6 +152,11 @@ class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
                 )
                 self.assertFalse(can_auto_functionalize(torch.ops.mylib.a))
 
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("a(Tensor(a!) x) -> None")
+            lib.impl("a", lambda x: None, "Functionalize")
+            self.assertFalse(can_auto_functionalize(torch.ops.mylib.a.default))
+
     @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
     def test_auto_functionalize_old(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
