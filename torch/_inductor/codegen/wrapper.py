@@ -4289,6 +4289,7 @@ class PythonWrapperCodegen(CodeGen):
         src_code: str,
         device_type: str,
         metadata: str | None = None,
+        optional: bool = False,
     ) -> None:
         """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
 
@@ -4299,7 +4300,9 @@ class PythonWrapperCodegen(CodeGen):
         if not self.defines_triton_kernels_as_code():
             self.define_kernel(
                 kernel_name,
-                self.async_compile_triton_body(subs_name, src_code, device_type),
+                self.async_compile_triton_body(
+                    subs_name, src_code, device_type, optional=optional
+                ),
                 metadata,
             )
             return
@@ -4311,12 +4314,15 @@ class PythonWrapperCodegen(CodeGen):
         kernel_key = get_hash(src_code.strip())
         kernel_file = f"{kernel_key}.py"
         if async_compile.AsyncCompile.use_process_pool():
-            async_compile.AsyncCompile().triton(subs_name, src_code)
+            async_compile.AsyncCompile().triton(
+                subs_name, src_code, optional=optional
+            )
         autotune_body = (
             self.async_compile_triton_body(
                 subs_name,
                 _escape_triton_kernel_source_for_wrapper(src_code),
                 device_type,
+                optional=optional,
             )
             if config.triton.autotune_at_compile_time
             else None
@@ -4367,12 +4373,18 @@ class PythonWrapperCodegen(CodeGen):
 
     @staticmethod
     def async_compile_triton_body(
-        subs_name: str, src_code: str, device_type: str
+        subs_name: str,
+        src_code: str,
+        device_type: str,
+        optional: bool = False,
     ) -> str:
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
         compile_wrapper.splice(src_code, strip=True)
-        compile_wrapper.writeline(f"''', device_str='{device_type}')")
+        optional_arg = ", optional=True" if optional else ""
+        compile_wrapper.writeline(
+            f"''', device_str='{device_type}'{optional_arg})"
+        )
         return compile_wrapper.getvalue()
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
