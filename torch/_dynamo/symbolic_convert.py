@@ -5738,7 +5738,7 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 11):
             push_types |= CO_GENERATOR
         if f_code.co_flags & (push_types):
-            self.push(BuiltinVariable(None))
+            self.push(VariableTracker.build(self, None))
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
