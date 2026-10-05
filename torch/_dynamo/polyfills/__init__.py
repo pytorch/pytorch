@@ -109,6 +109,55 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
+def _sumprod_pairs(p: Iterable[Any], q: Iterable[Any]) -> Iterator[tuple[Any, Any]]:
+    # Advance p and q in lockstep like CPython's math_sumprod_impl.
+    p_it = iter(p)
+    q_it = iter(q)
+    while True:
+        try:
+            p_i = next(p_it)
+        except StopIteration:
+            try:
+                next(q_it)
+            except StopIteration:
+                return
+            raise ValueError("Inputs are not the same length") from None
+        try:
+            q_i = next(q_it)
+        except StopIteration:
+            raise ValueError("Inputs are not the same length") from None
+        yield p_i, q_i
+
+
+def sumprod(p: Iterable[Any], q: Iterable[Any], /) -> Any:
+    # Materialize arbitrary iterables and call math.sumprod again on the lists.
+    # Lists of constants are constant-folded, which keeps CPython's
+    # extended-precision float accumulation; anything else goes to
+    # sumprod_generic.
+    import math
+
+    # Narrows math for mypy on <3.12 stubs; the handler only dispatches here on 3.12+.
+    if not hasattr(math, "sumprod"):
+        raise NotImplementedError("math.sumprod requires Python 3.12+")
+    ps: list[Any] = []
+    qs: list[Any] = []
+    for p_i, q_i in _sumprod_pairs(p, q):
+        ps.append(p_i)
+        qs.append(q_i)
+    return math.sumprod(ps, qs)
+
+
+def sumprod_generic(p: Iterable[Any], q: Iterable[Any], /) -> Any:
+    # Generic path of CPython's math_sumprod_impl, without the float fast path.
+    # Used for any list containing a non-constant element, so float constants
+    # in that list are accumulated plainly too, like the sum polyfill in
+    # polyfills/builtins.py.
+    total = 0
+    for p_i, q_i in _sumprod_pairs(p, q):
+        total = total + p_i * q_i
+    return total
+
+
 def infer_size(a: Sequence[Any], b: Sequence[Any]) -> torch.Size:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -424,7 +473,11 @@ def instantiate_user_defined_class_object(
     # for classes with custom __instancecheck__ (e.g. torch.ByteStorage).
     # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
     if issubclass(type(obj), cls):
-        obj.__init__(*args, **kwargs)
+        init_result = obj.__init__(*args, **kwargs)
+        if init_result is not None:
+            raise TypeError(
+                f"__init__() should return None, not {type(init_result).__name__!r}"
+            )
     return obj
 
 
