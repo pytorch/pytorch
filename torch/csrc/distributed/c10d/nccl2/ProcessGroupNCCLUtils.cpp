@@ -374,10 +374,10 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
   if (comm_state_ == CommState::TIMEOUT) {
     if (options_c10d_->enable_reconfigure) {
       revokeNcclComm();
-      TORCH_CHECK(false, "NCCL operation timed out");
+      C10_THROW_ERROR(DistBackendError, timeoutMessage());
     } else {
       handleWatchdogFailure("timeout - collective operation timed out");
-      TORCH_CHECK(false, "NCCL operation timed out");
+      C10_THROW_ERROR(DistBackendError, timeoutMessage());
     }
   } else if (comm_state_ == CommState::ERROR) {
     // CleanUpOnly may have already removed the communicator on the watchdog

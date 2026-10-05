@@ -429,6 +429,14 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::atomic<CommState> comm_state_{CommState::NORMAL};
   std::atomic<bool> revoked_{false};
 
+  // Matches ::c10d::ProcessGroupNCCL::logPrefix() so tooling that parses the
+  // legacy watchdog messages keeps working.
+  std::string logPrefix() const;
+  // The first watchdog timeout of the current communicator generation; later
+  // timeouts and follow-on errors report it instead of a generic message.
+  void recordTimeoutMessage(const std::string& message);
+  std::string timeoutMessage() const;
+
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
   c10::intrusive_ptr<WorkNCCL> createWork(
       cudaStream_t stream,
@@ -670,6 +678,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   const bool blocking_wait_;
 
   c10::intrusive_ptr<Options> options_c10d_;
+  const size_t local_id_;
+
+  mutable std::mutex timeout_message_mutex_;
+  std::string timeout_message_;
 
   std::mutex ephemeral_timeout_mutex_;
   std::chrono::milliseconds ephemeral_timeout_active_{0};

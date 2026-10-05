@@ -38,6 +38,14 @@ from torch.testing._internal.common_utils import (
 )
 
 
+# Legacy ProcessGroupNCCL's watchdog timeout signature, parsed by triage tools.
+TIMEOUT_MESSAGE = (
+    r"\[PG ID \d+ PG GUID .* Rank \d+\] "
+    r"Watchdog caught collective operation timeout: WorkNCCL\(SeqNum=\d+, "
+    r"OpType=\w+,.*Timeout\(ms\)=\d+\) ran for \d+ milliseconds before timing out"
+)
+
+
 class ProcessGroupNCCL2GraphCleanupTest(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
@@ -705,9 +713,13 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
                 time.sleep(0.5)
             self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
             # The next collective on the timed-out group raises rather than
-            # silently proceeding on a dead communicator.
-            with self.assertRaises(RuntimeError):
+            # silently proceeding on a dead communicator, and reports the
+            # collective that timed out.
+            with self.assertRaisesRegex(dist.DistBackendError, TIMEOUT_MESSAGE) as cm:
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+            self.assertIn(
+                "OpType=ALLREDUCE, NumelIn=1024, NumelOut=1024", str(cm.exception)
+            )
 
         self._wait_for_rank_zero(pg)
         dist.destroy_process_group(pg)
@@ -731,7 +743,7 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
             while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
                 time.sleep(0.5)
             self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(dist.DistBackendError, TIMEOUT_MESSAGE):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
 
         self._wait_for_rank_zero(pg)
@@ -756,7 +768,7 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
             work = dist.all_reduce(
                 torch.ones(1024, device=self.device), group=pg, async_op=True
             )
-            with self.assertRaisesRegex(RuntimeError, "timed out"):
+            with self.assertRaisesRegex(dist.DistBackendError, TIMEOUT_MESSAGE):
                 work.wait()
 
         self._wait_for_rank_zero(pg)
