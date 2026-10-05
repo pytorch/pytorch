@@ -19,6 +19,7 @@ from torch._inductor.heuristics.template.triton import (
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
     GemmConfig,
+    TMATemplateConfigMixin,
 )
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.kernel.mm import (
@@ -28,6 +29,7 @@ from torch._inductor.kernel.mm import (
     scaled_mm_device_tma_main_loop_scaling_template,
 )
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
+from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
@@ -933,11 +935,14 @@ class TestBlackwellTMALoadFusion(TestCase):
         template autoWS, only the (DATA_PARTITION_FACTOR, TWO_CTAS) = autows
         variants of them. Fused epilogue benchmarks report fused_ms, so by
         default every fusion the gates allow is kept."""
-        key = ("triton::blackwell_ws_persistent_tma", "cuda", "mm")
-        heuristic = get_template_heuristic(*key)
+        keys = [
+            ("triton::blackwell_ws_persistent_tma", "cuda", op)
+            for op in ("mm", "addmm")
+        ]
+        heuristics = [get_template_heuristic(*key) for key in keys]
         # Template autoWS builds its configs from blackwell_persistent_mm_configs.
-        orig = heuristic.mm_configs, heuristic.blackwell_persistent_mm_configs
-        heuristic.mm_configs = heuristic.blackwell_persistent_mm_configs = [
+        orig = [(h.mm_configs, h.blackwell_persistent_mm_configs) for h in heuristics]
+        configs = [
             test_config,
             # Epilogues are only benchmarked, and so reductions only fused,
             # when autotuning has more than one choice. This twin hosts the
@@ -945,6 +950,10 @@ class TestBlackwellTMALoadFusion(TestCase):
             dataclasses.replace(test_config, num_stages=test_config.num_stages - 1),
             *extra_configs,
         ]
+        for heuristic in heuristics:
+            heuristic.mm_configs = heuristic.blackwell_persistent_mm_configs = configs
+        # The addmm heuristic inherits _generate_autows_configs from mm's.
+        heuristic = heuristics[0]
         generate_autows_configs = type(heuristic)._generate_autows_configs
 
         def autows_configs(self):
@@ -975,11 +984,9 @@ class TestBlackwellTMALoadFusion(TestCase):
             ):
                 return run_and_get_code(torch.compile(fn, dynamic=dynamic), *args)
         finally:
-            if key in _HEURISTIC_CACHE:
-                (
-                    _HEURISTIC_CACHE[key].mm_configs,
-                    _HEURISTIC_CACHE[key].blackwell_persistent_mm_configs,
-                ) = orig
+            for key, configs in zip(keys, orig):
+                if (cached := _HEURISTIC_CACHE.get(key)) is not None:
+                    cached.mm_configs, cached.blackwell_persistent_mm_configs = configs
 
     @staticmethod
     def _poison_outputs():
@@ -1079,6 +1086,45 @@ class TestBlackwellTMALoadFusion(TestCase):
             128,
             BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
             dtype=torch.float16,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self._assert_row_fused(kernels, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_row_reduction_epilogue_fusion_randn(self):
+        fn = self.ROW_OPS["sum"]
+        a = torch.randn(1024, 512, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(512, 128, device=GPU_TYPE, dtype=torch.bfloat16)
+        with self._poison_outputs():
+            actual, code = self._run_with_mm_config(
+                fn,
+                (a, b),
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                **{"triton.template_reduction_epilogue": True},
+            )
+        torch.testing.assert_close(actual, fn(a, b), atol=1e-3, rtol=1e-5)
+        self._assert_row_fused(re.findall(r"def (triton_\w+)\(", code[0]), code[0])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_addmm_row_reduction_epilogue_fusion(self):
+        M, K, N = 1024, 512, 128
+        bias = torch.randint(-1, 2, (N,), device=GPU_TYPE).to(torch.bfloat16)
+
+        def fn(a, b):
+            return torch.addmm(bias, a, b).float().sum(-1)
+
+        kernels, code = self._run_reduction(
+            fn,
+            M,
+            K,
+            N,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
             **{"triton.template_reduction_epilogue": True},
         )
         self._assert_row_fused(kernels, code)
@@ -1820,6 +1866,41 @@ class TestBlackwellAutoWSConfigs(TestCase):
                                 heuristic.blackwell_persistent_mm_configs
                                 + heuristic.blackwell_persistent_addmm_configs,
                             )
+
+    @parametrize("global_meta_ws", (False, True))
+    def test_global_meta_ws_disables_flatten(self, global_meta_ws):
+        # Triton's Meta WS knob rewrites every WS kernel, so configs with
+        # use_meta_ws=False must not be flattened either.
+        mat1, mat2 = mock.Mock(), mock.Mock()
+        mat2.get_dtype.return_value = torch.bfloat16
+        kernel_inputs = MMKernelInputs([mat1, mat2], mat1_idx=0, mat2_idx=1)
+        base = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "num_stages": 3,
+            "num_warps": 4,
+            "WARP_SPECIALIZE": True,
+            "FLATTEN": True,
+            "USE_META_WS": False,
+        }
+        with (
+            mock.patch.dict(BaseHeuristicSingleton._instances, clear=True),
+            mock.patch(
+                "torch._inductor.heuristics.template.triton.USE_META_WS",
+                global_meta_ws,
+            ),
+            mock.patch.object(
+                TMATemplateConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter([base]),
+            ),
+        ):
+            heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
+            configs = list(heuristic._get_template_configs_impl(kernel_inputs, "mm"))
+        self.assertEqual(len(configs), 1)
+        self.assertTrue(configs[0]["WARP_SPECIALIZE"])
+        self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
 
     def test_autows_default_configs_are_subset_of_exhaustive(self):
         with mock.patch.dict(BaseHeuristicSingleton._instances, clear=True):
