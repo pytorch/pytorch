@@ -6634,6 +6634,13 @@
     CUDA: _philox_uniform_cuda_
   autogen: _philox_uniform, _philox_uniform.out
 
+- func: _philox_uniform_.Tensor(Tensor(a!) self, Tensor key, Tensor low, Tensor high) -> Tensor(a!)
+  variants: function, method
+  dispatch:
+    CPU: _philox_uniform_tensor_cpu_
+    CUDA: _philox_uniform_tensor_cuda_
+  autogen: _philox_uniform.Tensor, _philox_uniform.Tensor_out
+
 - func: _philox_randint_(Tensor(a!) self, Tensor key, int? low=None, int? high=None) -> Tensor(a!)
   variants: function, method
   dispatch:
