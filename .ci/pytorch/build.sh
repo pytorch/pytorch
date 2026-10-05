@@ -402,12 +402,13 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     install_torchao
   fi
 
+  # Test shards build these without torch's CMAKE_BUILD_TYPE (e.g. RelWithAssert).
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]]; then
-    install_torchcomms
+    (unset CMAKE_BUILD_TYPE; install_torchcomms)
   fi
 
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *spmd_types* ]]; then
-    install_spmd_types
+    (unset CMAKE_BUILD_TYPE; install_spmd_types)
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
