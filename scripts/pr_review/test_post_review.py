@@ -11,6 +11,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -159,7 +160,7 @@ class TestWhatIsPosted(unittest.TestCase):
             gh,
             row(
                 findings=[
-                    {"path": path, "line": 1, "severity": "minor", "message": "m"}
+                    {"path": path, "line": 1, "severity": "major", "message": "m"}
                 ]
             ),
         )
@@ -173,7 +174,97 @@ class TestWhatIsPosted(unittest.TestCase):
         first, second = gh.posted()
         self.assertIn("comments", first)
         self.assertNotIn("comments", second)
-        self.assertIn("`torch/x.py` line 3 (Major): Off by one.", second["body"])
+        self.assertIn(
+            f"\nhttps://github.com/o/r/blob/{SHA}/torch/x.py#L3\n\n"
+            "**Major**\n> Off by one.\n",
+            second["body"],
+        )
+
+    def test_non_blocking_findings_fold_into_a_collapsed_section(self):
+        findings = [
+            {"path": "a.py", "line": 3, "severity": "major", "message": "Bug."},
+            {"path": "b.py", "line": 7, "severity": "minor", "message": "Nit."},
+            {"path": "c.py", "line": 9, "severity": "info", "message": "Note."},
+        ]
+        gh = FakeGitHub()
+        go(gh, row(findings=findings))
+        (body,) = gh.posted()
+        self.assertEqual([c["path"] for c in body["comments"]], ["a.py"])
+        text = body["body"]
+        self.assertIn("1 blocking finding(s) are attached", text)
+        details = text.split("<details>\n", 1)[1].split("</details>", 1)[0]
+        self.assertTrue(
+            details.startswith("<summary>2 non-blocking finding(s)</summary>\n\n")
+        )
+        # Each permalink stands alone on its line, which is what makes GitHub
+        # render the code it points at.
+        self.assertIn(
+            f"\nhttps://github.com/o/r/blob/{SHA}/b.py#L7\n\n**Minor**\n> Nit.\n",
+            details,
+        )
+        self.assertIn(
+            f"\nhttps://github.com/o/r/blob/{SHA}/c.py#L9\n\n**Info**\n> Note.\n",
+            details,
+        )
+        self.assertNotIn("a.py", details)
+
+    def test_only_non_blocking_findings_post_one_review_without_comments(self):
+        minor = {"path": "b.py", "line": 7, "severity": "minor", "message": "Nit."}
+        gh = FakeGitHub()
+        go(gh, row(verdict="ready_for_human_review", findings=[minor]))
+        (body,) = gh.posted()
+        self.assertNotIn("comments", body)
+        self.assertIn("<summary>1 non-blocking finding(s)</summary>", body["body"])
+
+    def test_changes_requested_on_minor_findings_alone_keeps_them_inline(self):
+        minor = {"path": "b.py", "line": 7, "severity": "minor", "message": "Nit."}
+        gh = FakeGitHub()
+        go(gh, row(findings=[minor]))
+        (body,) = gh.posted()
+        self.assertEqual(body["event"], "REQUEST_CHANGES")
+        self.assertEqual([c["path"] for c in body["comments"]], ["b.py"])
+        self.assertNotIn("non-blocking", body["body"])
+
+    def test_an_unclosed_fence_cannot_swallow_what_follows(self):
+        fence = "x" + chr(10) + "```" + chr(10) + "y"
+        findings = [
+            {"path": "a.py", "line": 1, "severity": "minor", "message": fence},
+            {"path": "b.py", "line": 2, "severity": "info", "message": "after"},
+        ]
+        gh = FakeGitHub()
+        go(gh, row(verdict="ready_for_human_review", summary="s", findings=findings))
+        text = gh.posted()[0]["body"]
+        self.assertIn("> x\n> ```\n> y\n\n", text)
+        # Everything after the quote is outside it: the next permalink still
+        # starts its own line, and the section still closes.
+        self.assertIn(f"\nhttps://github.com/o/r/blob/{SHA}/b.py#L2\n", text)
+        self.assertIn("\n</details>\n", text)
+
+    def test_an_oversized_body_drops_findings_and_says_so(self):
+        long = ("word " * 119 + "x")[:600]
+        findings = [
+            {"path": f"p{i}.py", "line": 1, "severity": "minor", "message": long}
+            for i in range(25)
+        ]
+        with mock.patch("post_review.MAX_BODY", 5000):
+            gh = FakeGitHub()
+            go(gh, row(verdict="ready_for_human_review", findings=findings))
+        text = gh.posted()[0]["body"]
+        self.assertLessEqual(len(text), 5000)
+        shown = text.count("https://github.com/o/r/blob/")
+        self.assertGreater(shown, 0)
+        self.assertIn(f"{25 - shown} more finding(s) did not fit", text)
+        self.assertIn(f"<summary>{shown} non-blocking finding(s)</summary>", text)
+
+    def test_permalink_path_is_percent_encoded(self):
+        path = neutralize_path("docs/a b/@x#1.md")
+        minor = {"path": path, "line": 2, "severity": "minor", "message": "m"}
+        gh = FakeGitHub()
+        go(gh, row(verdict="ready_for_human_review", findings=[minor]))
+        self.assertIn(
+            f"\nhttps://github.com/o/r/blob/{SHA}/docs/a%20b/%40x%231.md#L2\n",
+            gh.posted()[0]["body"],
+        )
 
     def test_a_ready_verdict_is_a_comment_never_an_approval(self):
         gh = FakeGitHub()
@@ -210,7 +301,7 @@ class TestWhatIsPosted(unittest.TestCase):
             "severity": "major",
             "message": "see @someone",
         }
-        good = {"path": "y.py", "line": 2, "severity": "info", "message": "ok"}
+        good = {"path": "y.py", "line": 2, "severity": "major", "message": "ok"}
         gh = FakeGitHub()
         go(gh, row(findings=[bad, good]))
         self.assertEqual([c["path"] for c in gh.posted()[0]["comments"]], ["y.py"])

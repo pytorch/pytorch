@@ -39,6 +39,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -161,31 +162,130 @@ def comment_body(finding: dict) -> str:
     return defuse_bot_commands(f"**{label}** (automated review): {finding['message']}")
 
 
+def blocking_findings(verdict: str, findings: list[dict]) -> list[dict]:
+    """The findings that hold the PR back, posted inline; the rest are folded.
+
+    Normally the `major` ones. A `changes_requested` verdict with no major
+    finding is resting on its minor ones, so then every finding blocks, rather
+    than requesting changes while calling all of them non-blocking.
+    """
+    major = [f for f in findings if f["severity"] == "major"]
+    if verdict == "changes_requested" and not major:
+        return list(findings)
+    return major
+
+
+def quoted(text: str) -> list[str]:
+    """`text` as a blockquote, which contains whatever markdown it holds.
+
+    Messages keep their markdown structure, and an unclosed code fence in one
+    would otherwise swallow every finding, link and tag after it. A fence or
+    heading inside a blockquote ends where the quote ends.
+    """
+    return [f"> {line}" if line else ">" for line in text.split("\n")]
+
+
+def permalink(repo: str, sha: str, finding: dict) -> str:
+    """A blob link to the finding's line, built on the POSTING repo.
+
+    Alone on its own line, GitHub renders it as the code it points at; it does
+    so only when the link's repo is the one the comment is posted in. Every
+    character outside `/` is percent-encoded, which also keeps `@` out of it.
+    """
+    path = urllib.parse.quote(unescape_path(finding["path"]), safe="/")
+    return f"https://github.com/{repo}/blob/{sha}/{path}#L{finding['line']}"
+
+
+def finding_block(repo: str, sha: str, finding: dict) -> list[str]:
+    label = _SEVERITY_LABEL[finding["severity"]]
+    return [
+        permalink(repo, sha, finding),
+        "",
+        f"**{label}**",
+        *quoted(finding["message"]),
+        "",
+    ]
+
+
+# GitHub refuses a review body over 65536 characters, and the sanitizer's caps
+# do not bound this one: percent-encoding and quote prefixes expand the text.
+MAX_BODY = 60_000
+
+
 def review_body(
-    verdict: str, summary: str, findings: list[dict], sha: str, inline: bool
+    verdict: str, summary: str, findings: list[dict], sha: str, repo: str, inline: bool
+) -> str:
+    """The review body: verdict, summary, and every finding not posted inline.
+
+    Blocking findings are inline comments when GitHub accepts them; the rest
+    are folded into one collapsed section, each led by a permalink so it still
+    shows its code. `<summary>` text is plain: GitHub renders no markdown there.
+    A body over MAX_BODY drops findings from the end, folded ones first, and
+    says how many; the Dr.CI comment still lists them all.
+    """
+    blocking = blocking_findings(verdict, findings)
+    in_body = [] if inline else blocking
+    folded = [f for f in findings if f not in blocking]
+    keep_body, keep_folded = len(in_body), len(folded)
+    while True:
+        body = _compose(
+            verdict,
+            summary,
+            sha,
+            repo,
+            blocking,
+            inline,
+            in_body[:keep_body],
+            folded[:keep_folded],
+            len(in_body) - keep_body + len(folded) - keep_folded,
+        )
+        if len(body) <= MAX_BODY or keep_body + keep_folded == 0:
+            return body
+        if keep_folded:
+            keep_folded -= 1
+        else:
+            keep_body -= 1
+
+
+def _compose(
+    verdict, summary, sha, repo, blocking, inline, in_body, folded, omitted
 ) -> str:
     lines = [
         MARKER,
         f"**Automated review** of {sha[:12]}: {_VERDICT_LINE[verdict]}.",
         "",
-        summary,
+        *quoted(summary),
+        "",
     ]
-    if findings and inline:
-        lines += ["", f"{len(findings)} finding(s) are attached to the code below."]
-    elif findings:
-        lines += [""]
-        for f in findings:
-            label = _SEVERITY_LABEL[f["severity"]]
-            path = unescape_path(f["path"])
-            lines.append(f"- `{path}` line {f['line']} ({label}): {f['message']}")
+    if blocking and inline:
+        lines += [
+            f"{len(blocking)} blocking finding(s) are attached to the code below.",
+            "",
+        ]
+    for f in in_body:
+        lines += finding_block(repo, sha, f)
+    if folded:
+        lines += [
+            "<details>",
+            f"<summary>{len(folded)} non-blocking finding(s)</summary>",
+            "",
+        ]
+        for f in folded:
+            lines += finding_block(repo, sha, f)
+        lines += ["</details>", ""]
+    if omitted:
+        lines += [
+            f"{omitted} more finding(s) did not fit in this review; the Dr.CI "
+            "comment lists them.",
+            "",
+        ]
     if verdict == "changes_requested":
         lines += [
-            "",
             "Please address the findings and push; a new commit normally gets "
             "a fresh automated review.",
+            "",
         ]
     lines += [
-        "",
         "This review is AI-generated and advisory. Each new automated review "
         "replaces the previous one.",
     ]
@@ -193,7 +293,7 @@ def review_body(
 
 
 def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
-    """Create the review with inline comments, or with findings in the body.
+    """Create the review: blocking findings inline, the rest folded in the body.
 
     A `changes_requested` verdict is a REQUEST_CHANGES review, so the PR shows
     it the way it shows a human's; anything else is a COMMENT. Never APPROVE: a
@@ -201,24 +301,25 @@ def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
 
     GitHub refuses the WHOLE review (422) if any comment's line is not in its
     diff. The sanitizer anchored every finding to our own diff, which should
-    match, but a refusal must cost the anchoring, not the review. If a
-    REQUEST_CHANGES review is refused outright (the token cannot request changes
-    on this PR), it is posted as a COMMENT rather than not at all.
+    match, but a refusal must cost the anchoring, not the review: the blocking
+    findings then move into the body too. If a REQUEST_CHANGES review is
+    refused outright (the token cannot request changes on this PR), it is
+    posted as a COMMENT rather than not at all.
     """
     path = f"/repos/{gh.repo}/pulls/{pr}/reviews"
     event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
     base = {"commit_id": sha, "event": event}
-    if findings:
-        comments = [
-            {
-                "path": unescape_path(f["path"]),
-                "line": f["line"],
-                "side": "RIGHT",
-                "body": comment_body(f),
-            }
-            for f in findings
-        ]
-        body = review_body(verdict, summary, findings, sha, inline=True)
+    comments = [
+        {
+            "path": unescape_path(f["path"]),
+            "line": f["line"],
+            "side": "RIGHT",
+            "body": comment_body(f),
+        }
+        for f in blocking_findings(verdict, findings)
+    ]
+    if comments:
+        body = review_body(verdict, summary, findings, sha, gh.repo, inline=True)
         try:
             return gh.request(
                 "POST", path, {**base, "body": body, "comments": comments}
@@ -229,7 +330,7 @@ def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
             warn(
                 f"GitHub refused the inline comments ({exc}); posting them in the body"
             )
-    body = review_body(verdict, summary, findings, sha, inline=False)
+    body = review_body(verdict, summary, findings, sha, gh.repo, inline=False)
     try:
         return gh.request("POST", path, {**base, "body": body})
     except GitHubError as exc:
