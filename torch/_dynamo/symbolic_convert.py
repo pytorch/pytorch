@@ -2293,7 +2293,7 @@ class InstructionTranslatorBase(
         if val.source_location is None:
             inst = self.current_instruction
             if inst.positions is not None and inst.positions.lineno is not None:
-                val.set_source_location(
+                val = val.with_source_location(
                     SourceLocation(
                         filename=self.f_code.co_filename,
                         lineno=inst.positions.lineno,
@@ -2303,7 +2303,7 @@ class InstructionTranslatorBase(
                     )
                 )
             elif inst.starts_line is not None:
-                val.set_source_location(
+                val = val.with_source_location(
                     SourceLocation(
                         filename=self.f_code.co_filename,
                         lineno=inst.starts_line,
