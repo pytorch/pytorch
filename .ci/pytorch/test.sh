@@ -485,7 +485,9 @@ test_python_smoke_b200() {
   (
     if [[ "$BUILD_ENVIRONMENT" == *cuda13.4* ]]; then
       pip install 'cuda-bindings>=13.4,<14'
-      if [[ "$(python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')" -lt 13040 ]]; then
+      local driver_version
+      driver_version=$(cd test && python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')
+      if [[ "$driver_version" -lt 13040 ]]; then
         local compat_dir compat_package compat_sha256
         compat_dir=$(mktemp -d)
         trap 'rm -rf "$compat_dir"' EXIT
@@ -496,7 +498,7 @@ test_python_smoke_b200() {
         dpkg-deb --extract "$compat_dir/$compat_package" "$compat_dir"
         export LD_LIBRARY_PATH="$compat_dir/usr/local/cuda-13.4/compat${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
       fi
-      python - <<'PY'
+      (cd test && python - <<'PY'
 import torch
 from torch.cuda import green_contexts
 
@@ -506,6 +508,7 @@ green_contexts._ensure_locality_supported()
 if not green_contexts.is_localization_supported():
     raise RuntimeError("B200 CUDA 13.4 smoke tests require locality-domain support")
 PY
+      )
     fi
     time python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   )
