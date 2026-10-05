@@ -5029,7 +5029,23 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
     ) -> BoundBuiltinMethodVariable:
         # classmethod_get binds the C method to the class (ignoring obj),
         # producing a builtin_function_or_method via PyCMethod_New.
+        # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
+        owner_value = owner.as_python_constant()
+        if not isinstance(owner_value, type):
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' for type "
+                f"'{self.descriptor.__objclass__.__name__}' needs a type, not a "
+                f"'{type(owner_value).__name__}' as arg 2",
+            )
+        if not issubclass(owner_value, self.descriptor.__objclass__):
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' requires a subtype of "
+                f"'{self.descriptor.__objclass__.__name__}' but received "
+                f"'{owner_value.__name__}'",
+            )
         return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
 
 
