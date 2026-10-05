@@ -6397,8 +6397,8 @@ print("OK")
 @unittest.skipIf(TEST_CUDAMALLOCASYNC, "not using the native caching allocator")
 class TestExpandableSegmentBase(TestCase):
     """Each snapshot entry reports the base of the reservation it lives in, which
-    is what a later process asks for to get the same addresses back. See Note
-    [Expandable Segment Reserved Address].
+    is what a later process asks for to get the same addresses back.
+    See Note [Expandable Segment Reserved Address].
     """
 
     def test_runs_in_one_segment_share_a_base(self):
@@ -6503,20 +6503,72 @@ print(json.dumps({
     def test_restore_fails_loudly_when_the_address_is_taken(self):
         # cuMemAddressReserve reports success while placing the reservation
         # somewhere else, so restoring onto an address this process already holds
-        # has to raise rather than hand back the wrong memory.
+        # has to raise rather than hand back the wrong memory -- and free the
+        # stray reservation, which a restore at that address then gets.
         script = """
-import json, torch
+import json, re, torch
 t = torch.empty(1 << 22, device="cuda")
 torch.cuda.synchronize()
 seg = dict(next(s for s in torch.cuda.memory_snapshot() if s["is_expandable"]))
 pool = torch.cuda.MemPool()
 try:
     torch.cuda.memory._restore_expandable_segments([seg], pool.id)
-    print(json.dumps("no error"))
+    print(json.dumps(["no error"]))
 except RuntimeError as e:
-    print(json.dumps(str(e)))
+    placed = int(re.search(r"placed the reservation at (\\d+)", str(e)).group(1))
+    delta = placed - seg["expandable_segment_base"]
+    moved = {**seg, "address": seg["address"] + delta, "expandable_segment_base": placed}
+    torch.cuda.memory._restore_expandable_segments([moved], pool.id)
+    print(json.dumps([str(e), "restored at the stray address"]))
 """
-        self.assertIn("could not reserve", self._run(script))
+        out = self._run(script)
+        self.assertIn("could not reserve", out[0])
+        self.assertEqual(out[1:], ["restored at the stray address"])
+
+    def test_restore_retries_after_running_out_of_memory(self):
+        # A restore that cannot map its first range must give the address back,
+        # so the same restore succeeds once memory is freed. Unmapped physical
+        # allocations use up the memory without taking any address space.
+        script = """
+import json, sys, torch
+from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+spec = json.load(open(sys.argv[1]))
+# Allocating once runs the fabric-handle probe, which needs free memory and caches
+# its answer; empty_cache then gives the address back.
+torch.empty(1, device="cuda")
+torch.cuda.empty_cache()
+prop = drv.CUmemAllocationProp()
+prop.type = drv.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
+prop.location.type = drv.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
+prop.location.id = torch.cuda.current_device()
+granularity = _check_cuda_bindings(drv.cuMemGetAllocationGranularity(
+    prop, drv.CUmemAllocationGranularity_flags.CU_MEM_ALLOC_GRANULARITY_MINIMUM))
+hog = []
+for size in (1 << 30, granularity):
+    while (r := drv.cuMemCreate(size, prop, 0))[0] == drv.CUresult.CUDA_SUCCESS:
+        hog.append(r[1])
+pool = torch.cuda.MemPool()
+try:
+    torch.cuda.memory._restore_expandable_segments(spec["segments"], pool.id)
+    first = "no error"
+except torch.OutOfMemoryError:
+    first = "out of memory"
+for h in hog:
+    _check_cuda_bindings(drv.cuMemRelease(h))
+torch.cuda.memory._restore_expandable_segments(spec["segments"], pool.id)
+print(json.dumps([first, torch.cuda.memory_snapshot(include_traces=False)]))
+"""
+        saved = self._run(self._SAVE)
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump(saved, f)
+            f.flush()
+            first, restored = self._run(script, f.name)
+        self.assertEqual(first, "out of memory")
+
+        def runs(segments):
+            return sorted((s["address"], s["total_size"]) for s in segments)
+
+        self.assertEqual(runs(restored), runs(saved["segments"]))
 
     def test_restores_the_saved_reservation_settings(self):
         # Reserve settings can shrink a reservation below 1 1/8 of device memory,
