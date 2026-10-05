@@ -43,6 +43,33 @@ void checkSameDtype(
   }
 }
 
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+// A communicator listed for dumpNcclComms(). unlistComm() clears live under
+// mutex before the communicator is aborted, revoked or destroyed, and a dump
+// holds mutex, so the communicator cannot be freed mid-dump.
+struct LiveComm {
+  std::mutex mutex;
+  bool live{true};
+  ncclComm_t comm;
+  std::string name;
+};
+
+// Live communicators, keyed by owning backend. Added in publishComm() and
+// dropped in unlistComm().
+std::mutex& liveCommsMutex() {
+  static std::mutex m;
+  return m;
+}
+
+using LiveComms =
+    std::unordered_map<const ProcessGroupNCCL*, std::shared_ptr<LiveComm>>;
+
+LiveComms& liveComms() {
+  static LiveComms comms;
+  return comms;
+}
+#endif
+
 } // namespace
 
 ncclConfig_t cloneNcclConfig(const ncclConfig_t& config) {
@@ -90,7 +117,8 @@ void waitForNcclChildComm(
     ncclResult_t status,
     bool expect_child,
     std::chrono::milliseconds timeout,
-    std::string_view operation) {
+    std::string_view operation,
+    const std::function<void()>& before_parent_abort) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   const auto remaining = [&] {
     const auto now = std::chrono::steady_clock::now();
@@ -143,6 +171,9 @@ void waitForNcclChildComm(
       }
     };
     if (status == ncclSuccess || status == ncclInProgress) {
+      if (before_parent_abort) {
+        before_parent_abort();
+      }
       abortComm(parent_comm, "Failed to abort parent NCCL communicator");
     }
     if (*child_comm != nullptr) {
@@ -391,9 +422,11 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
         splitStatus,
         newRank != -1,
         ncclOpts->timeout,
-        "NCCL split failed");
+        "NCCL split failed",
+        [this] { unlistComm(); });
   } catch (...) {
     comm_state_ = CommState::ERROR;
+    unlistComm();
     nccl_comm_ = nullptr;
     throw;
   }
@@ -718,12 +751,70 @@ int64_t ProcessGroupNCCL::getCommPtr() const {
 void ProcessGroupNCCL::publishComm() {
   ::c10d::publishNCCLComm(
       getGroupUid(), reinterpret_cast<void*>(nccl_comm_), device_);
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+  auto entry = std::make_shared<LiveComm>();
+  entry->comm = nccl_comm_;
+  entry->name = getGroupUid();
+  std::lock_guard<std::mutex> lock(liveCommsMutex());
+  liveComms()[this] = std::move(entry);
+#endif
 }
 
 void ProcessGroupNCCL::retireComm() {
   ::c10d::retireNCCLComm(
       getGroupUid(), reinterpret_cast<void*>(nccl_comm_), device_);
+  unlistComm();
 }
+
+void ProcessGroupNCCL::unlistComm() {
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+  std::shared_ptr<LiveComm> entry;
+  {
+    std::lock_guard<std::mutex> lock(liveCommsMutex());
+    auto it = liveComms().find(this);
+    if (it == liveComms().end()) {
+      return;
+    }
+    entry = std::move(it->second);
+    liveComms().erase(it);
+  }
+  // Waits for an in-flight dump of this communicator.
+  std::lock_guard<std::mutex> lock(entry->mutex);
+  entry->live = false;
+#endif
+}
+
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
+dumpNcclComms() {
+  // Snapshot under the registry lock and dump outside it, as a dump might
+  // hang. Skip communicators being torn down or dumped by another thread.
+  std::vector<std::shared_ptr<LiveComm>> entries;
+  {
+    std::lock_guard<std::mutex> lock(liveCommsMutex());
+    for (const auto& [_, entry] : liveComms()) {
+      entries.push_back(entry);
+    }
+  }
+  std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
+      dumps;
+  for (const auto& entry : entries) {
+    std::unique_lock<std::mutex> lock(entry->mutex, std::try_to_lock);
+    if (!lock.owns_lock() || !entry->live) {
+      continue;
+    }
+    std::unordered_map<std::string, std::string> dump;
+    const ncclResult_t result = ::ncclCommDump(entry->comm, dump);
+    if (result != ncclSuccess) {
+      TC_LOG(ERROR) << "ncclCommDump failed for group " << entry->name << ": "
+                    << ncclGetErrorString(result);
+      continue;
+    }
+    dumps[entry->name] = std::move(dump);
+  }
+  return dumps;
+}
+#endif
 
 // Point-to-Point Operations
 c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
