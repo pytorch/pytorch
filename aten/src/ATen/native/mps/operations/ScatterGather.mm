@@ -212,8 +212,6 @@ static void scatter_reduce_metal(const Tensor& self,
   // intrinsic is only available at runtime on macOS 15+.
   const bool needs_signbit_xor = self.scalar_type() == ScalarType::Long && (op == "amin" || op == "amax");
   if (needs_signbit_xor) {
-    TORCH_CHECK(is_macos_at_least(MacOSVersion::MACOS_15_0),
-                "scatter_reduce(amin/amax) on int64 requires macOS 15 or newer");
     TORCH_CHECK(self.is_contiguous(), "scatter_reduce(amin/amax) on int64 currently requires contiguous self");
   }
 
@@ -227,8 +225,11 @@ static void scatter_reduce_metal(const Tensor& self,
       if (use_dense) {
         const int64_t inner_size = dense_inner_size(self, dim);
         const int64_t index_dim_size = index.size(dim);
-        auto pso = lib.getPipelineStateForFunc(
-            fmt::format("scatter_{}_dense_{}_{}", op, scalarToMetalTypeString(self), scalarToMetalTypeString(index)));
+        auto pso = lib.getPipelineStateForFunc(fmt::format("scatter_{}_dense_{}_{}{}",
+                                                           op,
+                                                           scalarToMetalTypeString(self),
+                                                           scalarToMetalTypeString(index),
+                                                           serial ? "_serial" : ""));
         [encoder setComputePipelineState:pso];
         dispatch_chunked(encoder, pso, dispatch_total, [&](int64_t tid_offset) {
           mtl_setArgs(encoder,
@@ -239,14 +240,16 @@ static void scatter_reduce_metal(const Tensor& self,
                       index_dim_size,
                       output_dim_size,
                       tid_offset,
-                      stream->getErrorBuffer(),
-                      serial);
+                      stream->getErrorBuffer());
         });
       } else {
         auto sizes = index.sizes();
         c10::metal::vec3<uint32_t> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
-        auto pso = lib.getPipelineStateForFunc(
-            fmt::format("scatter_{}_strided_{}_{}", op, scalarToMetalTypeString(self), scalarToMetalTypeString(index)));
+        auto pso = lib.getPipelineStateForFunc(fmt::format("scatter_{}_strided_{}_{}{}",
+                                                           op,
+                                                           scalarToMetalTypeString(self),
+                                                           scalarToMetalTypeString(index),
+                                                           serial ? "_serial" : ""));
         [encoder setComputePipelineState:pso];
         dispatch_chunked(encoder, pso, dispatch_total, [&](int64_t tid_offset) {
           mtl_setArgs(encoder,
@@ -260,8 +263,7 @@ static void scatter_reduce_metal(const Tensor& self,
                       ndim_dim,
                       output_dim_size,
                       tid_offset,
-                      stream->getErrorBuffer(),
-                      serial);
+                      stream->getErrorBuffer());
         });
       }
       if (needs_signbit_xor) {

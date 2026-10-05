@@ -903,11 +903,14 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
-          "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
+      auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format("index_reduce_{}_{}_{}{}",
+                                                                         reduce,
+                                                                         mps::scalarToMetalTypeString(result),
+                                                                         mps::scalarToMetalTypeString(index),
+                                                                         serial ? "_serial" : ""));
       getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
-      mps::mtl_setArgs(compute_encoder, result, index, source, params, serial);
+      mps::mtl_setArgs(compute_encoder, result, index, source, params);
       mps::mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
       getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }

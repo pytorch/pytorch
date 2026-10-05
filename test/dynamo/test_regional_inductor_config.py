@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfTorchDynamo,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, IS_BIG_GPU
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -86,7 +87,12 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
                 lambda: torch.compile(fn, backend="inductor", fullgraph=True)(*inputs)
             )
 
-        self.assertEqual(result, expected)
+        # Triton GEMM and hipBLAS sum fp32 products in different orders; both are
+        # equally close to fp64, but differ by up to ~4e-4 relative on ROCm.
+        if TEST_WITH_ROCM:
+            self.assertEqual(result, expected, atol=1e-5, rtol=1e-3)
+        else:
+            self.assertEqual(result, expected)
         self.assertEqual(len(codes), 2)
         fw_code, bw_code = codes
         regions_and_settings = (

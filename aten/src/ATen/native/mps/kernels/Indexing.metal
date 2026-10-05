@@ -298,13 +298,12 @@ struct IndexReduceOp {
   }
 };
 
-template <typename T, typename IT, T (*ReduceOp)(T, T)>
+template <typename T, typename IT, T (*ReduceOp)(T, T), bool serial>
 kernel void index_reduce(
     device AtomicType_t<T>* self [[buffer(0)]],
     device IT* index [[buffer(1)]],
     device T* source [[buffer(2)]],
     constant IndexReduceParams<>& params [[buffer(3)]],
-    constant bool& serial [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   uint32_t tid_ = tid;
   long source_offset = 0;
@@ -347,15 +346,19 @@ kernel void index_reduce(
   }
 }
 
-#define REGISTER_INDEX_REDUCE_OP(ReduceOp, T, IT)                  \
-  template [[host_name("index_reduce_" #ReduceOp "_" #T "_" #IT)]] \
-  kernel void index_reduce<T, IT, IndexReduceOp::ReduceOp<T>>(     \
-      device AtomicType_t<T> * self [[buffer(0)]],                 \
-      device IT * index [[buffer(1)]],                             \
-      device T * source [[buffer(2)]],                             \
-      constant IndexReduceParams<> & params [[buffer(3)]],         \
-      constant bool& serial [[buffer(4)]],                         \
+#define REGISTER_INDEX_REDUCE_OP_SERIAL(ReduceOp, T, IT, SERIAL)             \
+  template[[host_name("index_reduce_" #ReduceOp "_" #T                       \
+                      "_" #IT C10_METAL_SERIAL_SUFFIX(SERIAL))]] kernel void \
+  index_reduce<T, IT, IndexReduceOp::ReduceOp<T>, SERIAL>(                   \
+      device AtomicType_t<T> * self [[buffer(0)]],                           \
+      device IT * index [[buffer(1)]],                                       \
+      device T * source [[buffer(2)]],                                       \
+      constant IndexReduceParams<> & params [[buffer(3)]],                   \
       uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_INDEX_REDUCE_OP(ReduceOp, T, IT)          \
+  REGISTER_INDEX_REDUCE_OP_SERIAL(ReduceOp, T, IT, false); \
+  REGISTER_INDEX_REDUCE_OP_SERIAL(ReduceOp, T, IT, true);
 
 #define REGISTER_INDEX_REDUCE_OP_ALL_REDUCE_TYPES(T, IT) \
   REGISTER_INDEX_REDUCE_OP(amax, T, IT);                 \

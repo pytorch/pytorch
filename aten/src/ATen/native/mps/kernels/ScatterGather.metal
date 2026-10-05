@@ -222,7 +222,7 @@ kernel void scatter_signbit_xor_long(
 
 // Dense atomic scatter for one of {add, prod, amin, amax}. Shape requirements
 // match scatter_set_dense.
-template <typename T, typename index_t, ScatterReduceOp Op>
+template <typename T, typename index_t, ScatterReduceOp Op, bool serial>
 kernel void scatter_reduce_dense(
     device T* output [[buffer(0)]],
     constant T* src [[buffer(1)]],
@@ -232,7 +232,6 @@ kernel void scatter_reduce_dense(
     constant long& output_dim_size [[buffer(5)]],
     constant long& tid_offset [[buffer(6)]],
     device ErrorMessages* error_buf [[buffer(7)]],
-    constant bool& serial [[buffer(8)]],
     uint thread_index [[thread_position_in_grid]]) {
   const long tid = long(thread_index) + tid_offset;
   const long dim_count = serial ? index_dim_size : 1;
@@ -261,7 +260,7 @@ kernel void scatter_reduce_dense(
 }
 
 // Strided atomic scatter. Generic for non-contiguous output/src/index.
-template <typename T, typename index_t, ScatterReduceOp Op>
+template <typename T, typename index_t, ScatterReduceOp Op, bool serial>
 kernel void scatter_reduce_strided(
     device T* output [[buffer(0)]],
     constant T* src [[buffer(1)]],
@@ -274,7 +273,6 @@ kernel void scatter_reduce_strided(
     constant long& dim_size [[buffer(8)]],
     constant long& tid_offset [[buffer(9)]],
     device ErrorMessages* error_buf [[buffer(10)]],
-    constant bool& serial [[buffer(11)]],
     uint thread_index [[thread_position_in_grid]]) {
   const uint ndim = ndim_dim.x;
   const uint dim = ndim_dim.y;
@@ -405,36 +403,41 @@ kernel void gather_strided(
   output[out_offs] = input[input_offs];
 }
 
-#define REGISTER_SCATTER_REDUCE_VARIANT(DTYPE, IDXTYPE, OP, OP_ENUM)          \
-  template                                                                    \
-      [[host_name("scatter_" #OP "_dense_" #DTYPE "_" #IDXTYPE)]] kernel void \
-      scatter_reduce_dense<DTYPE, IDXTYPE, ScatterReduceOp::OP_ENUM>(         \
-          device DTYPE * output [[buffer(0)]],                                \
-          constant DTYPE * src [[buffer(1)]],                                 \
-          constant IDXTYPE * index [[buffer(2)]],                             \
-          constant long& inner_size [[buffer(3)]],                            \
-          constant long& index_dim_size [[buffer(4)]],                        \
-          constant long& output_dim_size [[buffer(5)]],                       \
-          constant long& tid_offset [[buffer(6)]],                            \
-          device ErrorMessages* error_buf [[buffer(7)]],                      \
-          constant bool& serial [[buffer(8)]],                                \
-          uint thread_index [[thread_position_in_grid]]);                     \
-  template [[host_name("scatter_" #OP "_strided_" #DTYPE                      \
-                       "_" #IDXTYPE)]] kernel void                            \
-  scatter_reduce_strided<DTYPE, IDXTYPE, ScatterReduceOp::OP_ENUM>(           \
-      device DTYPE * output [[buffer(0)]],                                    \
-      constant DTYPE * src [[buffer(1)]],                                     \
-      constant IDXTYPE * index [[buffer(2)]],                                 \
-      constant long* index_sizes [[buffer(3)]],                               \
-      constant long* output_strides [[buffer(4)]],                            \
-      constant long* src_strides [[buffer(5)]],                               \
-      constant long* index_strides [[buffer(6)]],                             \
-      constant uint3& ndim_dim [[buffer(7)]],                                 \
-      constant long& dim_size [[buffer(8)]],                                  \
-      constant long& tid_offset [[buffer(9)]],                                \
-      device ErrorMessages* error_buf [[buffer(10)]],                         \
-      constant bool& serial [[buffer(11)]],                                   \
+#define REGISTER_SCATTER_REDUCE_VARIANT_SERIAL(                              \
+    DTYPE, IDXTYPE, OP, OP_ENUM, SERIAL)                                     \
+  template[                                                                  \
+      [host_name("scatter_" #OP "_dense_" #DTYPE                             \
+                 "_" #IDXTYPE C10_METAL_SERIAL_SUFFIX(SERIAL))]] kernel void \
+  scatter_reduce_dense<DTYPE, IDXTYPE, ScatterReduceOp::OP_ENUM, SERIAL>(    \
+      device DTYPE * output [[buffer(0)]],                                   \
+      constant DTYPE * src [[buffer(1)]],                                    \
+      constant IDXTYPE * index [[buffer(2)]],                                \
+      constant long& inner_size [[buffer(3)]],                               \
+      constant long& index_dim_size [[buffer(4)]],                           \
+      constant long& output_dim_size [[buffer(5)]],                          \
+      constant long& tid_offset [[buffer(6)]],                               \
+      device ErrorMessages* error_buf [[buffer(7)]],                         \
+      uint thread_index [[thread_position_in_grid]]);                        \
+  template[                                                                  \
+      [host_name("scatter_" #OP "_strided_" #DTYPE                           \
+                 "_" #IDXTYPE C10_METAL_SERIAL_SUFFIX(SERIAL))]] kernel void \
+  scatter_reduce_strided<DTYPE, IDXTYPE, ScatterReduceOp::OP_ENUM, SERIAL>(  \
+      device DTYPE * output [[buffer(0)]],                                   \
+      constant DTYPE * src [[buffer(1)]],                                    \
+      constant IDXTYPE * index [[buffer(2)]],                                \
+      constant long* index_sizes [[buffer(3)]],                              \
+      constant long* output_strides [[buffer(4)]],                           \
+      constant long* src_strides [[buffer(5)]],                              \
+      constant long* index_strides [[buffer(6)]],                            \
+      constant uint3& ndim_dim [[buffer(7)]],                                \
+      constant long& dim_size [[buffer(8)]],                                 \
+      constant long& tid_offset [[buffer(9)]],                               \
+      device ErrorMessages* error_buf [[buffer(10)]],                        \
       uint thread_index [[thread_position_in_grid]])
+
+#define REGISTER_SCATTER_REDUCE_VARIANT(DTYPE, IDXTYPE, OP, OP_ENUM)          \
+  REGISTER_SCATTER_REDUCE_VARIANT_SERIAL(DTYPE, IDXTYPE, OP, OP_ENUM, false); \
+  REGISTER_SCATTER_REDUCE_VARIANT_SERIAL(DTYPE, IDXTYPE, OP, OP_ENUM, true)
 
 #define REGISTER_SCATTER_SET_OP(DTYPE, IDXTYPE)                                \
   template [[host_name("scatter_set_" #DTYPE "_" #IDXTYPE)]] kernel void       \

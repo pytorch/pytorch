@@ -660,7 +660,7 @@ class RedistributeTest(DTensorContinuousTestBase):
         # to unshard on the last mesh dim. With batch=1 on the first dimension,
         # the all_gather should use a pure view operation.
         self._test_all_gather_optimization(
-            global_shape=(1, 8192, 6144),
+            global_shape=(1, 32, 24),
             placements_src=[Shard(1), Shard(1)],
             placements_dst=[Shard(1), Replicate()],
             should_use_view=True,
@@ -675,7 +675,7 @@ class RedistributeTest(DTensorContinuousTestBase):
         # Even though batch=1 on first dimension, gather_dim will be 2 (not 1),
         # so we can't use the view optimization.
         self._test_all_gather_optimization(
-            global_shape=(1, 8192, 6144),
+            global_shape=(1, 32, 24),
             placements_src=[Shard(2), Shard(2)],
             placements_dst=[Shard(2), Replicate()],
             should_use_view=False,
@@ -690,7 +690,7 @@ class RedistributeTest(DTensorContinuousTestBase):
         # This should fall back to split+cat since the view optimization
         # doesn't apply when batch > 1.
         self._test_all_gather_optimization(
-            global_shape=(4, 8192, 6144),
+            global_shape=(4, 32, 24),
             placements_src=[Shard(1), Shard(1)],
             placements_dst=[Shard(1), Replicate()],
             should_use_view=False,
