@@ -2,7 +2,7 @@
 import dataclasses
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import override
 
 import sympy
@@ -122,8 +122,9 @@ class FlexGemmEpilogueConfig:
         blockscaled_format: Shared QuACK A/B block-scaled format.
         quack_config: Exact QuACK GemmConfig fields pinned for this choice;
             None only before lowering has selected the candidates.
-        cu_seqlens_index: Template input index of the varlen-M ``[0, *offs]``
-            boundaries for grouped_mm, or None for dense GEMMs.
+        cu_seqlens_index: Template input index of the ``[0, *offs]`` boundaries
+            for grouped_mm, or None for dense GEMMs.
+        cu_seqlens_kind: Dimension segmented by grouped_mm boundaries.
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
@@ -138,6 +139,7 @@ class FlexGemmEpilogueConfig:
     blockscaled_format: str | None
     quack_config: QuackConfigKey | None
     cu_seqlens_index: int | None
+    cu_seqlens_kind: Literal["m", "k"]
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
     aux_out_indices: tuple[int, ...]
@@ -172,7 +174,7 @@ class FlexGemmEpilogueConfig:
             if self.local_reduce is None
             else self.local_reduce.runtime_plan(resolve, self.epilogue_name),
             self.output_contraction,
-            varlen_m=self.cu_seqlens_index is not None,
+            varlen_m=self.cu_seqlens_index is not None and self.cu_seqlens_kind == "m",
         )
 
 
@@ -333,7 +335,9 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
                 f"blockscaled_format={config.blockscaled_format!r}"
             )
         if config.cu_seqlens_index is not None:
-            kwargs.append(f", cu_seqlens_m={input_args[config.cu_seqlens_index]}")
+            kwargs.append(
+                f", cu_seqlens_{config.cu_seqlens_kind}={input_args[config.cu_seqlens_index]}"
+            )
         if epilogue_args:
             kwargs.append(
                 f", epilogue_args=({', '.join(epilogue_args)},), "
