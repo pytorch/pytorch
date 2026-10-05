@@ -219,6 +219,9 @@ static CacheEntry* lookup_in_list(
         backend_match(cache_entry.backend.ptr(), backend);
 
     if (valid) {
+      // Lambda guards run Python code, so a GC finalizer can invalidate this
+      // very entry mid-evaluation and free the guard tree being walked.
+      py::object guard_manager_keepalive = cache_entry.guard_manager;
       try {
         if (is_skip_guard_eval_unsafe) {
           valid = cache_entry_has_no_guards(
