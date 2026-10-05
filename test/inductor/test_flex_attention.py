@@ -7603,6 +7603,7 @@ class GraphModule(torch.nn.Module):
     @supported_platform
     @skip_on_cuda
     @skip_on_xpu
+    @skip_on_mps  # asserts on the CPU C++ template's generated code
     @common_utils.parametrize("qkv_source", ["input", "bshd_buffer", "linear"])
     @common_utils.parametrize("q_len", [1, 256])
     def test_cpu_flex_template_choice_qkv_views(self, device, qkv_source, q_len):
