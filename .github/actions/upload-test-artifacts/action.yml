@@ -78,6 +78,28 @@ runs:
             test/test-reports/tlparse_output "tlparse-${FILE_SUFFIX}.zip" '**/*'
         fi
 
+    # Its own step, so a failure here can't stop the zips above from uploading.
+    - name: Zip test run reports for upload
+      if: runner.os != 'Windows'
+      continue-on-error: true
+      shell: bash
+      env:
+        FILE_SUFFIX: ${{ inputs.file-suffix }}
+      run: |
+        rm -f test-run-reports-*.zip
+        if [ -d test/test-run-reports ]; then
+          uv run --no-project python - <<'EOF'
+        import os
+        import zipfile
+        from pathlib import Path
+
+        name = f"test-run-reports-{os.environ['FILE_SUFFIX']}.zip"
+        with zipfile.ZipFile(name, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in Path("test/test-run-reports").glob("**/*.jsonl"):
+                z.write(f)
+        EOF
+        fi
+
     # Windows zip
     - name: Zip JSONs for upload
       if: runner.os == 'Windows'
@@ -96,6 +118,18 @@ runs:
       run: |
         # -ir => recursive include all files in pattern
         7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\test-reports\*.xml' -ir'!test\test-reports\*.csv'
+
+    - name: Zip test run reports for upload
+      if: runner.os == 'Windows'
+      continue-on-error: true
+      shell: powershell
+      env:
+        FILE_SUFFIX: ${{ inputs.file-suffix }}
+      run: |
+        # -ir => recursive include all files in pattern
+        if (Test-Path test\test-run-reports) {
+          7z a "test-run-reports-$Env:FILE_SUFFIX.zip" -ir'!test\test-run-reports\*.jsonl'
+        }
 
     - name: Zip usage log for upload
       if: runner.os == 'Windows'
@@ -135,6 +169,19 @@ runs:
         retention-days: 14
         if-no-files-found: warn
         path: test-reports-*.zip
+
+    - name: Store Test Run Reports on S3
+      id: s3-upload-run-reports
+      if: ${{ inputs.skip-s3 != 'true' }}
+      uses: seemethere/upload-artifact-s3@v5
+      continue-on-error: true
+      with:
+        s3-bucket: ${{ inputs.s3-bucket }}
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+        retention-days: 14
+        if-no-files-found: ignore
+        path: test-run-reports-*.zip
 
     - name: Store Usage Logs on S3
       id: s3-upload-logs
@@ -233,6 +280,21 @@ runs:
         path: |
           test/**/*.xml
           test/**/*.csv
+
+    # Falls back on its own, not through check-s3: a failed upload of this zip
+    # must not move the junit zips off S3.
+    - name: Store Test Run Reports on Github (fallback)
+      uses: actions/upload-artifact@v4
+      if: inputs.skip-s3 == 'true' || steps.s3-upload-run-reports.outcome == 'failure'
+      continue-on-error: true
+      with:
+        # Add the run attempt, see [Artifact run attempt]
+        name: test-run-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
+        retention-days: 14
+        if-no-files-found: ignore
+        # upload-artifact roots the artifact at the path before the first wildcard,
+        # so a leading one keeps the test/test-run-reports/ prefix the S3 zip has.
+        path: test*/test-run-reports/**/*.jsonl
 
     - name: Store Usage Logs on Github (fallback)
       uses: actions/upload-artifact@v4
