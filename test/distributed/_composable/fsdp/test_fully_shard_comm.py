@@ -28,6 +28,8 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_all_gather_input_fn,
+    _default_all_gather_output_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
     DefaultAllGather,
@@ -2490,6 +2492,219 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
                 "record_stream must not be called when the backend does not advertise "
                 "_needs_record_stream_on_free",
             )
+
+
+class _ParamContiguousWork(dist.Work):
+    def __init__(self, works, inputs, outputs):
+        super().__init__()
+        self.works = works
+        self.tensors = (inputs, outputs)
+
+    def wait(self, timeout=None):
+        for work in self.works:
+            work.wait()
+        return True
+
+
+class _ParamContiguousAllGather(DefaultAllGather):
+    """Gathers each payload contiguously into persistent storage that FSDP
+    parameters view, like a backend with registered output buffers."""
+
+    reuses_output_storage = True
+
+    def __init__(self, mode):
+        # "fallback" alternates the custom and rank-major layouts
+        self.mode = mode
+        self.alternate_layouts = mode == "fallback"
+        self.splits = []
+        self.output = self.last_use = None
+        self.output_active = False
+        self.observed_layouts = set()
+        self.async_calls = 0
+
+    def install(self, module):
+        module.set_custom_all_gather(self)
+        module.set_all_gather_input_fn(self.input_fn, recurse=False)
+        module.set_all_gather_output_fn(self.output_fn, recurse=False)
+
+    def allocate(self, size, *, dtype, device):
+        self.output_active = True
+        if self.last_use is not None:
+            torch.get_device_module(device).current_stream().wait_event(self.last_use)
+        if self.output is None or self.output.numel() != torch.Size(size).numel():
+            self.output = torch.empty(size, dtype=dtype, device=device)
+        return self.output
+
+    def input_fn(self, inputs, output, split_sizes, outer_sizes, rank):
+        enabled = (
+            self.mode != "rank_major"
+            and output.dtype != torch.uint8
+            and all(outer_size == 1 for outer_size in outer_sizes)
+        )
+        if self.alternate_layouts:
+            self.mode = "rank_major" if enabled else "custom"
+        self.splits = split_sizes if enabled else []
+        if not enabled:
+            return _default_all_gather_input_fn(
+                inputs, output, split_sizes, outer_sizes, rank
+            )
+        packed = torch.empty(sum(split_sizes), dtype=output.dtype, device=output.device)
+        torch._foreach_copy_(packed.split(split_sizes), inputs)
+        return packed, output
+
+    def __call__(self, output_tensor, input_tensor, group, async_op=False):
+        splits = self.splits
+        self.observed_layouts.add("custom" if splits else "rank_major")
+        self.async_calls += int(async_op)
+        inputs = input_tensor.split(splits) if splits else [input_tensor]
+        outputs = output_tensor.split([t.numel() * group.size() for t in inputs])
+        works = [
+            super().__call__(output, input, group, async_op)
+            for output, input in zip(outputs, inputs)
+        ]
+        return _ParamContiguousWork(works, inputs, outputs) if async_op else None
+
+    def output_fn(self, output, outputs, split_sizes, outer_sizes, world_size):
+        if not self.splits:
+            if any(
+                t.untyped_storage().data_ptr() == output.untyped_storage().data_ptr()
+                for t in outputs
+            ):
+                # Rank-major data landed in storage that the outputs view
+                output = output.clone()
+            return _default_all_gather_output_fn(
+                output, outputs, split_sizes, outer_sizes, world_size
+            )
+        views, offset = [], 0
+        for split_size in split_sizes:
+            # Parameters share the storage but keep their own version counters
+            views.append(output.narrow(0, offset, split_size * world_size).data)
+            offset += split_size * world_size
+        return views
+
+    def release_output(self):
+        self.output_active = False
+        if self.output is not None:
+            stream = torch.get_device_module(self.output.device).current_stream()
+            self.last_use = stream.record_event()
+
+
+class TestFullyShardParamContiguousAllGather(FSDPTest):
+    @property
+    def world_size(self):
+        return 4
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("async_op", [False, True])
+    @parametrize("reshard", [True, 2])
+    def test_unused_backward_prefetch_release(self, device, async_op, reshard):
+        model = DoubleLinear(8).to(device)
+        for block in (model.lin1, model.lin2):
+            fully_shard(block, reshard_after_forward=reshard)
+        fully_shard(model)
+        model._set_unshard_async_op(async_op)
+        comm = _ParamContiguousAllGather("custom")
+        comm.install(model.lin1)
+        group = model.lin1._get_fsdp_state()._fsdp_param_group
+        release_output = comm.release_output
+
+        def release():
+            self.assertIsNone(group._all_gather_result)
+            release_output()
+
+        for step in range(2):
+            model.set_is_last_backward(step == 1)
+            loss = model(torch.randn(2, 8, device=device))[1].sum()
+            with unittest.mock.patch.object(
+                comm, "release_output", side_effect=release
+            ):
+                loss.backward()
+            pending = reshard is True and step == 0
+            self.assertEqual(group._all_gather_result is not None, pending)
+            self.assertEqual(comm.output_active, pending)
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize(
+        "mode,reshard,async_op,mixed,compiled",
+        [
+            *itertools.product(
+                ["custom", "rank_major", "fallback"],
+                [True, False, 2],
+                [False, True],
+                [False, True],
+                [False],
+            ),
+            ("custom", True, False, True, True),
+        ],
+    )
+    def test_param_contiguous_training(
+        self, device, mode, reshard, async_op, mixed, compiled
+    ):
+        torch.manual_seed(312)
+        native = nn.Sequential(*[MLP(16) for _ in range(3)]).to(device)
+        candidate = copy.deepcopy(native)
+        models = (native, candidate)
+        policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16 if mixed else None)
+        for model in models:
+            for block in model:
+                fully_shard(block, mp_policy=policy, reshard_after_forward=reshard)
+            fully_shard(model, mp_policy=policy, reshard_after_forward=False)
+            model._set_unshard_async_op(async_op)
+        comms = [_ParamContiguousAllGather(mode) for _ in candidate]
+        for block, comm in zip(candidate, comms):
+            comm.install(block)
+        with self.assertRaisesRegex(ValueError, "cannot be shared"):
+            candidate[-1].set_custom_all_gather(comms[0])
+        run_candidate = (
+            torch.compile(candidate, backend="aot_eager") if compiled else candidate
+        )
+        optimizers = [torch.optim.SGD(model.parameters(), lr=0.01) for model in models]
+        # A normal step followed by two accumulating microbatches
+        schedule = ((True, True), (True, False), (False, True))
+        for step, (clear_grad, sync) in enumerate(schedule):
+            torch.manual_seed(1234 + self.rank + step)
+            inp = torch.randn(4, 16, device=device)
+            losses = []
+            for model, optimizer in zip((native, run_candidate), optimizers):
+                if clear_grad:
+                    optimizer.zero_grad(set_to_none=True)
+                model.set_requires_gradient_sync(sync)
+                model.set_reshard_after_backward(sync)
+                loss = model(inp).float().square().sum()
+                loss.backward()
+                losses.append(loss.detach())
+            self.assertEqual(losses[0], losses[1])
+            self.assertEqual(
+                [comm.output_active for comm in comms], [not sync] * len(comms)
+            )
+            if sync:
+                for optimizer in optimizers:
+                    optimizer.step()
+                for p, q in zip(native.parameters(), candidate.parameters()):
+                    self.assertEqual(p.to_local(), q.to_local())
+                    self.assertEqual(p.grad.to_local(), q.grad.to_local())
+        # Post-forward all-gathers also use the custom layout, whose views alias
+        # the adopted storage, so FSDP neither adopts nor copies them
+        expected_layouts = {"rank_major" if mode == "rank_major" else "custom"}
+        if mode == "fallback":
+            expected_layouts.add("rank_major")
+        owned = mode != "rank_major"
+        for block, comm in zip(candidate, comms):
+            self.assertEqual(comm.observed_layouts, expected_layouts)
+            self.assertEqual(comm.async_calls > 0, async_op)
+            for param in block._get_fsdp_state()._fsdp_param_group.fsdp_params:
+                self.assertEqual(param._keep_all_gather_output_storage, owned)
+                if owned:
+                    storage = param.all_gather_outputs[0].untyped_storage()
+                    self.assertEqual(storage.data_ptr(), comm.output.data_ptr())
+            if owned:
+                with self.assertRaisesRegex(ValueError, "Cannot replace.*all-gather"):
+                    block.set_custom_all_gather(DefaultAllGather())
+
+
+instantiate_device_type_tests(
+    TestFullyShardParamContiguousAllGather, globals(), only_for=("cuda", "xpu")
+)
 
 
 if __name__ == "__main__":

@@ -20,8 +20,10 @@ from ._fsdp_api import (
     ReduceScatter,
 )
 from ._fsdp_collectives import (
+    _default_all_gather_input_fn,
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    AllGatherInputFn,
     AllGatherOutputFn,
     PrepareReduceScatterInputsFn,
 )
@@ -738,6 +740,11 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
+        A comm that reuses its output storage (see ``AllGather``) needs one
+        instance per FSDP module and cannot be replaced while an all-gather is
+        pending, while parameters are unsharded, or once parameters view its
+        output storage.
+
         Args:
             comm (AllGather): Custom all-gather communication.
         """
@@ -749,6 +756,25 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
+            if (
+                comm is not fsdp_param_group._all_gather_comm
+                and fsdp_param_group._all_gather_comm.reuses_output_storage
+                and (
+                    fsdp_param_group._all_gather_result is not None
+                    or fsdp_param_group.is_unsharded
+                    or any(
+                        fsdp_param._keep_all_gather_output_storage
+                        for fsdp_param in fsdp_param_group.fsdp_params
+                    )
+                )
+            ):
+                raise ValueError(
+                    "Cannot replace an all-gather comm that reuses output storage "
+                    "with pending work, unsharded parameters, or parameters "
+                    "viewing its storage; install it before the first unshard"
+                )
+            if comm.reuses_output_storage:
+                comm._bind_owner(fsdp_param_group)
             fsdp_param_group._all_gather_comm = comm
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
@@ -859,20 +885,58 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
-    def set_all_gather_output_fn(
-        self, fn: AllGatherOutputFn | None, /, *, recurse: bool = True
+    def set_all_gather_input_fn(
+        self, fn: AllGatherInputFn | None, /, *, recurse: bool = True
     ) -> None:
-        r"""Set the function that copies a parameter group's all-gather outputs.
+        r"""Set the function that packs a parameter group's all-gather input.
 
         .. warning::
             This API is experimental. The callback signature and supported FSDP
             internals may change without backward compatibility.
 
         The function is called as
-        ``fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size)``.
-        ``all_gather_output`` is the flat rank-major collective buffer, and
-        ``outputs`` are the preallocated all-gather outputs of the parameter
-        group, viewed as ``uint8`` if the buffer is, in which case
+        ``all_gather_input, all_gather_output = fn(all_gather_inputs,
+        all_gather_output, split_sizes, outer_sizes, rank)`` on the all-gather
+        copy-in stream after ``AllGather.allocate`` returns
+        ``all_gather_output``. ``all_gather_inputs`` are this rank's flattened
+        payloads, viewed as ``uint8`` if the buffer is, in which case
+        ``split_sizes`` count bytes, and ``outer_sizes`` are as for
+        :meth:`set_all_gather_output_fn`. The function returns the collective
+        input and buffer for the ``AllGather`` to fill. The default packs into
+        this rank's slot of the rank-major buffer. A backend selecting another
+        buffer layout pairs this with a custom ``AllGather`` that produces it
+        and an all-gather output function that reads it. It is not called when
+        the group has a single rank.
+
+        Args:
+            fn (Optional[Callable]): Packing function, or ``None`` to restore
+                the default.
+            recurse (bool): Whether to also set the function for all nested FSDP
+                modules. Defaults to ``True``.
+        """
+        fn = _default_all_gather_input_fn if fn is None else fn
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group._all_gather_input_fn = fn
+
+    def set_all_gather_output_fn(
+        self, fn: AllGatherOutputFn | None, /, *, recurse: bool = True
+    ) -> None:
+        r"""Set the function that produces a parameter group's all-gather outputs.
+
+        .. warning::
+            This API is experimental. The callback signature and supported FSDP
+            internals may change without backward compatibility.
+
+        The function is called as ``views = fn(all_gather_output, outputs,
+        split_sizes, outer_sizes, world_size)``. ``all_gather_output`` is the
+        flat collective buffer, rank-major unless the all-gather input function
+        selected another layout, and ``outputs`` are the all-gather outputs of
+        the parameter group, viewed as ``uint8`` if the buffer is, in which case
         ``split_sizes`` count bytes. For each output, ``split_sizes`` gives its
         per-rank element count in the buffer and ``outer_sizes`` gives the
         product of its dimensions before the concatenation dimension. Each
@@ -880,10 +944,20 @@ class FSDPModule:
         tensor returned by ``fsdp_pre_all_gather`` may be smaller than its
         cached output, which then has more than ``split_sizes[i] * world_size``
         elements.
-        The function runs on the current stream after the collective completes
-        and must only write to ``outputs``. It is not called when the all-gather
-        buffer is empty or the group has a single rank, since FSDP then copies
-        the inputs directly.
+
+        The function either writes into ``outputs`` and returns ``None``, or
+        returns one tensor per output with that output's shape and dtype, e.g.
+        views into ``all_gather_output``. If the ``AllGather`` reuses its output
+        storage and every payload of the group has outer size 1, the buffer's
+        dtype, and no all-gather extension, FSDP adopts contiguous returned
+        tensors as the outputs on each parameter's first all-gather, so the
+        parameters view the backend's storage without a copy. Otherwise FSDP
+        copies returned tensors into ``outputs`` unless they already alias
+        them. Adopted outputs may alias ``all_gather_output``, so the function
+        must not read data from storage it writes.
+        The function runs on the current stream after the collective
+        completes. It is not called when the all-gather buffer is empty or the
+        group has a single rank, since FSDP then copies the inputs directly.
         See :mod:`torch.distributed.fsdp.experimental` for a native
         implementation.
 
