@@ -24,7 +24,7 @@ from schemas import (
     LLMResult,
     OwnershipResult,
 )
-from step_summary import summary_prose
+from step_summary import print_log_json, summary_prose
 
 
 def load_action_execution(path: Path) -> tuple[LLMResult, dict[str, Any]]:
@@ -68,9 +68,7 @@ def write_json(*, path: Path, value: Any) -> None:
 def log_analysis_record(record: dict[str, Any]) -> None:
     """Print LLM reasoning safely without allowing workflow commands."""
 
-    for line in json.dumps(record, indent=2, sort_keys=True).splitlines():
-        safe_line = line.replace("::", r"\u003a\u003a").replace("##[", r"\u0023\u0023[")
-        print(f"Auto PR Triage result | {safe_line}")
+    print_log_json(prefix="Auto PR Triage result", value=record)
 
 
 def is_excerpt_of_patch(*, excerpt_lines: list[str], patch_lines: list[str]) -> bool:

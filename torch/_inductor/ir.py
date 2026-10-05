@@ -4132,6 +4132,17 @@ class View(GenericView):
 
             raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
 
+        def check_equals_or_raise(a: Expr, b: Expr) -> None:
+            if V.graph.sizevars.statically_known_equals(a, b):
+                return
+            # For unbacked symbols check_equals() adds a runtime assert instead
+            # of raising. That is only safe when both stacks are empty: every
+            # other size has been matched, and for a valid reshape the total
+            # sizes must match, so a == b must hold.
+            if stack_old or stack_new:
+                raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
+            V.graph.sizevars.check_equals(a, b)
+
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -4170,7 +4181,7 @@ class View(GenericView):
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
+                check_equals_or_raise(size_new, size_old)
             elif compare_sizes(size_new, size_old) > 0:
                 divisor = sympy.S.One
                 modulus = size_old
@@ -4181,7 +4192,7 @@ class View(GenericView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                V.graph.sizevars.check_equals(size_new, size_old)
+                check_equals_or_raise(size_new, size_old)
             else:
                 raise AssertionError
 
@@ -4263,8 +4274,9 @@ class ReinterpretView(BaseView):
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
             name = self.get_name()
-            if name in V.graph.constants:
-                name = V.graph.constant_name(name, ConstantBuffer.override_device)
+            device = ConstantBuffer.override_device
+            if device is not None and name in V.graph.constants:
+                name = V.graph.constant_name(name, device)
             tmp_loader = ops.load(name, indexer(index))
             if self.layout.dtype != self.data.dtype:
                 return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
@@ -6795,6 +6807,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         supports_epilogue_fusion: bool = False,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
+        output_scale_node: Buffer | None = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6812,10 +6825,27 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         # When set, the last entry of `inputs` is an addmm bias consumed as a
         # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
         self.bias_node = bias_node
+        # Native scaled-GEMM alpha is kept as a TemplateBuffer input so the
+        # scheduler tracks the dependency, then separated from GEMM operands
+        # when rendering the runtime call.
+        self.output_scale_node = output_scale_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
+        kernel_impl = getattr(kernel, "impl", None)
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
             "min_cc": kernel.designed_for_min_cc,
+            "supports_output_scale": getattr(kernel, "supports_output_scale", False),
+            "use_prefetch": getattr(
+                kernel_impl,
+                "use_prefetch",
+                getattr(kernel.metadata.design, "use_prefetch", False),
+            ),
+            "use_pdl": getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(kernel.metadata.design, "use_pdl", False),
+            ),
+            "output_dtype": layout.dtype,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
@@ -6855,6 +6885,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
                 inp = inp.data
             input_nodes.append(inp)
 
+        output_scale_node = None
+        if self.output_scale_node is not None:
+            output_scale_node = input_nodes[-1]
+            input_nodes = input_nodes[:-1]
+
         # For a baked addmm bias, the bias is the last input and is consumed by
         # the epilogue, not as a GEMM operand.
         bias_node = None
@@ -6880,12 +6915,22 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
+            output_scale_node=output_scale_node,
         )
 
         def render():
             return render_kernel.render()
 
         return render_kernel, render
+
+    def gemm_inputs(self) -> Sequence[IRNode]:
+        inputs = cast(Sequence[IRNode], self.inputs)
+        num_auxiliary_inputs = int(self.bias_node is not None) + int(
+            self.output_scale_node is not None
+        )
+        if num_auxiliary_inputs:
+            return inputs[:-num_auxiliary_inputs]
+        return inputs
 
 
 def is_node_sequence(
@@ -9638,6 +9683,19 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
+# The _quantized ops with a hand-written C shim (see shim.h). Other _quantized
+# ops, e.g. wrapped_quantized_linear left undecomposed in lite mode, use the
+# proxy executor.
+_QUANTIZED_OPS_WITH_C_SHIM = OrderedSet(
+    [
+        "_quantized._wrapped_linear_prepack.default",
+        "_quantized._wrapped_quantized_linear_prepacked.default",
+        "_quantized.wrapped_fbgemm_linear_fp16_weight.default",
+        "_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16.default",
+    ]
+)
+
+
 class FallbackKernel(ExternKernelAlloc):
     """
     A class that represents a fallback kernel for handling operators that are not
@@ -9681,8 +9739,6 @@ class FallbackKernel(ExternKernelAlloc):
 
         # args that are aliased
         self.alias_names: list[str] = []
-        # args that are mutated AND returned from the op
-        self.mutation_names: list[str] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             # We assume here that HOPs with FallbackKernel are functional.
@@ -9712,10 +9768,16 @@ class FallbackKernel(ExternKernelAlloc):
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
-            self.mutation_names.append(tensor_args[0].get_name())
-            # Record aliasing relationship so memory planning doesn't wrongly
-            # reuse its storage.
-            self.alias_names.append(tensor_args[0].get_name())
+            # The returned tensor aliases arg0; it is not a rename of it.
+            # Track the write separately via a MutationOutput.
+            arg = tensor_args[0]
+            mutation_output = MutationOutput(
+                NoneLayout(device=arg.get_device()), arg, self
+            )
+            self.mutation_outputs.append(mutation_output)
+            # Include the sibling mutation version so compute_dependencies merges
+            # its reader list with those of arg0 and the returned alias.
+            self.alias_names.extend((arg.get_name(), mutation_output.get_name()))
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
@@ -9924,11 +9986,6 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             return self.alias_names
 
-    def get_mutation_names(self) -> Sequence[str]:
-        if len(self.mutation_names) > 1:
-            raise AssertionError("Expected len(self.mutation_names) <= 1")
-        return self.mutation_names
-
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
         """
         ProxyExecutor Design Note
@@ -10096,6 +10153,9 @@ class FallbackKernel(ExternKernelAlloc):
             # Internal Quantized Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
                 raise AssertionError(type(kernel))
+            self.use_runtime_dispatch = (
+                V.graph.cpp_wrapper and str(kernel) not in _QUANTIZED_OPS_WITH_C_SHIM
+            )
         elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
             # If the op is in custom_ops_to_c_shims, generate direct function call
@@ -10226,7 +10286,7 @@ class FallbackKernel(ExternKernelAlloc):
 
             return str(kernel) not in inductor_fallback_ops
         if kernel.namespace == "_quantized":
-            return False
+            return str(kernel) not in _QUANTIZED_OPS_WITH_C_SHIM
         return kernel not in config.aot_inductor.custom_ops_to_c_shims
 
     @staticmethod
@@ -10362,13 +10422,23 @@ class FallbackKernel(ExternKernelAlloc):
 
         def maybe_wrap(value: Any, arg_info: torch._C.Argument) -> Any:
             # bool is a subclass of int; SymInt/SymFloat/SymBool are not int/float/complex.
-            if not isinstance(value, (int, float, complex)):
+            if not isinstance(value, (int, float, complex, sympy.Expr)):
                 return value
             if not is_tensor_slot(arg_info):
                 return value
             alias = arg_info.alias_info
             if alias is not None and alias.is_write:
                 return value
+            if isinstance(value, sympy.Expr):
+                # A symbolic scalar is only known at runtime, so build the 0-d tensor
+                # at runtime; the proxy executor passes a SymInt in a Scalar slot.
+                dtype = scalar_dtype(0 if value.is_integer else 0.0)
+                return pytree.tree_map(
+                    lambda x: x.wrap_for_lowering() if isinstance(x, IRNode) else x,
+                    cls.create(
+                        aten.scalar_tensor.default, value, dtype=dtype, device=device
+                    ),
+                )
             with torch.utils._python_dispatch._disable_current_modes():
                 const = torch.tensor(value, dtype=scalar_dtype(value), device=device)
             materialized.append(True)
