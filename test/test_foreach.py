@@ -1711,6 +1711,19 @@ class TestForeachDevice(TestCase):
         ref_out = torch.empty_like(self_tensor).copy_(src_tensor)
         self.assertEqual(self_tensor, ref_out)
 
+    @onlyAccelerator
+    @skipXPU
+    @dtypes(torch.uint16, torch.uint32, torch.uint64)
+    def test_foreach_copy_barebones_unsigned(self, device, dtype):
+        # The fused kernel doesn't instantiate these, so they take the slow path.
+        dtype_pairs = ((dtype, dtype), (dtype, torch.int64), (torch.float32, dtype))
+        for dst_dtype, src_dtype in dtype_pairs:
+            src = [torch.arange(n, device=device).to(src_dtype) for n in (3, 5)]
+            dst = [torch.zeros(n, device=device, dtype=dst_dtype) for n in (3, 5)]
+            ref = [torch.empty_like(d).copy_(s) for d, s in zip(dst, src)]
+            torch._foreach_copy_(dst, src)
+            self.assertEqual(dst, ref)
+
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_different_device_inputs(self, device, dtype, op):
