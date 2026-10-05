@@ -5804,7 +5804,8 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
     @dtypes(torch.float64)
-    def test_householder_product_nested_jvp(self, device, dtype):
+    @parametrize("t_value", [-0.7, 0.0, 0.7, 1.0, 2.0])
+    def test_householder_product_nested_jvp(self, device, dtype, t_value):
         def householder(t):
             a = torch.stack((torch.ones_like(t), t)).reshape(2, 1)
             tau = (2 / (1 + t * t)).reshape(1)
@@ -5823,7 +5824,7 @@ class TestLinalg(TestCase):
                 first_derivative, (t,), (torch.ones_like(t),)
             )[1]
 
-        t = torch.tensor(0.7, device=device, dtype=dtype)
+        t = torch.tensor(t_value, device=device, dtype=dtype)
         self.assertEqual(
             second_derivative(householder, t),
             second_derivative(reference, t),
