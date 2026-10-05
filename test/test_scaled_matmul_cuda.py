@@ -1117,6 +1117,18 @@ class TestFP8Matmul(TestCase):
     @parametrize("use_out", [False, True])
     @skipIfNoCuteDSL
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
+        self._run_scaled_grouped_mm_2d_3d(G, M, N, K, format, use_out, device, compare_cpp=True)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @skipIfNoCuteDSL
+    def test_scaled_grouped_mm_2d_3d_n64_tiles(self, format, device):
+        # Jagged groups averaging 64 rows select a 64-wide N tile, with some
+        # groups spanning several N tiles.
+        self._run_scaled_grouped_mm_2d_3d(16, 1024, 8192, 4096, format, False, device, compare_cpp=False)
+
+    def _run_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device, compare_cpp):
         from torch._native import registry
 
         if "_scaled_grouped_mm_v2" not in registry.get_dsl_operations("cutedsl"):
@@ -1251,11 +1263,12 @@ class TestFP8Matmul(TestCase):
             wq.transpose(-2, -1),
             **kwargs
         )
-        y_cpp = scaled_grouped_mm_cpp_wrap(
-            xq,
-            wq.transpose(-2, -1),
-            **{k: v for k, v in kwargs.items() if k != "out"}
-        )
+        if compare_cpp:
+            y_cpp = scaled_grouped_mm_cpp_wrap(
+                xq,
+                wq.transpose(-2, -1),
+                **{k: v for k, v in kwargs.items() if k != "out"}
+            )
 
         if use_out:
             self.assertEqual(y_lp.data_ptr(), kwargs["out"].data_ptr())
@@ -1272,7 +1285,8 @@ class TestFP8Matmul(TestCase):
 
         # Assert outputs are close.
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
-        torch.testing.assert_close(y_cpp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
+        if compare_cpp:
+            torch.testing.assert_close(y_cpp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])

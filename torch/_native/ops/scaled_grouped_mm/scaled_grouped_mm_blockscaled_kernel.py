@@ -79,16 +79,13 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
             cached_problem_shape_1,
         )
 
-    def delinearize_z(self, cta_tile_coord, problem_shape_mnkl):
+    def delinearize_z(self, cta_tile_coord, problem_shape_mnkl, swizzle_m_clusters):
         linear_idx = cta_tile_coord[2]
         _found, group_idx, problem_mnkl = self._group_search_and_load_problem_shape(
             linear_idx,
             problem_shape_mnkl,
             self.search_state.start_group_idx,
             self.search_state.tile_count_prev_group,
-        )
-        cluster_tile_idx_in_current_group = (
-            linear_idx - self.search_state.tile_count_prev_group
         )
         cluster_count_m, cluster_count_n, cluster_count_k = cute.ceil_div(
             (problem_mnkl[0], problem_mnkl[1], problem_mnkl[2]),
@@ -97,6 +94,20 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
                 self.cluster_tile_shape_mnk[1],
                 self.cluster_tile_shape_mnk[2],
             ),
+        )
+        # Walk M-panels of swizzle_m_clusters rows, N-major across each panel, so
+        # concurrently running clusters share A and B tiles in L2.
+        idx_in_group = linear_idx - self.search_state.tile_count_prev_group
+        panel_span = swizzle_m_clusters * cluster_count_n
+        panel_idx = idx_in_group // panel_span
+        idx_in_panel = idx_in_group - panel_idx * panel_span
+        panel_m = cutlass.min(
+            swizzle_m_clusters, cluster_count_m - panel_idx * swizzle_m_clusters
+        )
+        cluster_idx_m = panel_idx * swizzle_m_clusters + idx_in_panel % panel_m
+        cluster_idx_n = idx_in_panel // panel_m
+        cluster_tile_idx_in_current_group = (
+            cluster_idx_n * cluster_count_m + cluster_idx_m
         )
         cta_tile_idx_m, cta_tile_idx_n = self._compute_cta_tile_coord(
             cluster_tile_idx_in_current_group,
@@ -136,6 +147,8 @@ class Sm100GroupedBlockScaledGemmKernel:
     ACCUM_REG_REQUIREMENT = 168
     # CLC dispatch swizzle; currently mostly inert because work is along L.
     CLC_SWIZZLE_SIZE = 1
+    # Height, in clusters, of the M-panels non-uniform groups are walked in.
+    L2_SWIZZLE_M_CLUSTERS = 8
 
     def __init__(
         self,
@@ -200,11 +213,6 @@ class Sm100GroupedBlockScaledGemmKernel:
         self.tensormap_ab_init_barrier = pipeline.NamedBarrier(
             barrier_id=3,
             num_threads=32 * 2,  # MMA + mainload
-        )
-        # Non-uniform metadata handoff.
-        self.tile_metadata_ready_barrier = pipeline.NamedBarrier(
-            barrier_id=4,
-            num_threads=32 * (2 + len(self.epilog_warp_id)),
         )
         self.smem_capacity = utils.get_smem_capacity_in_bytes("sm_100")
 
@@ -288,6 +296,8 @@ class Sm100GroupedBlockScaledGemmKernel:
 
         # Single-stage CLC: issue, wait, consume.
         self.num_clc_stage = 1
+        # Lets the mainload warp publish tile i+1 while the epilogue drains tile i.
+        self.num_tile_meta_stage = 2
 
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
             tiled_mma,
@@ -560,7 +570,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             # CLC response: (m_idx, n_idx, l_idx, valid).
             clc_mbar_ptr: cute.struct.MemRange[cutlass.Int64, self.num_clc_stage * 2]
             clc_response: cute.struct.MemRange[cutlass.Int32, self.num_clc_stage * 4]
-            # Non-uniform group metadata:
+            # Non-uniform group metadata, per stage:
             #   [0] group_idx
             #   [1] cta_tile_idx_m
             #   [2] cta_tile_idx_n
@@ -568,7 +578,10 @@ class Sm100GroupedBlockScaledGemmKernel:
             #   [4] problem_shape_m
             #   [5] problem_shape_n
             #   [6] problem_shape_k
-            tile_meta: cute.struct.MemRange[cutlass.Int32, 7]
+            tile_meta: cute.struct.MemRange[cutlass.Int32, 7 * self.num_tile_meta_stage]
+            tile_meta_mbar_ptr: cute.struct.MemRange[
+                cutlass.Int64, self.num_tile_meta_stage * 2
+            ]
             # (EPI_TILE_M, EPI_TILE_N, STAGE)
             sC: cute.struct.Align[
                 cute.struct.MemRange[
@@ -761,6 +774,16 @@ class Sm100GroupedBlockScaledGemmKernel:
             cta_layout_vmnk=cluster_layout_vmnk,
         )
 
+        tile_meta_pipeline = pipeline.PipelineAsync.create(
+            barrier_storage=storage.tile_meta_mbar_ptr.data_ptr(),
+            num_stages=self.num_tile_meta_stage,
+            producer_group=pipeline.CooperativeGroup(pipeline.Agent.Thread, 32),
+            consumer_group=pipeline.CooperativeGroup(
+                pipeline.Agent.Thread, 32 * (1 + len(self.epilog_warp_id))
+            ),
+            defer_sync=True,
+        )
+
         if use_2cta_instrs:
             if warp_idx == self.scheduler_warp_id:
                 num_tmem_dealloc_threads = 32
@@ -821,7 +844,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         # (bN, bK, RestN, RestK, RestL)
         gSFB_nkl = cute.local_tile(
             mSFB_nkl,
-            cute.slice_(self.mma_tiler, (0, None, None)),
+            cute.slice_(self.mma_tiler_sfb, (0, None, None)),
             (None, None, None),
         )
         # (bM, bN, RestM, RestN, RestL)
@@ -938,7 +961,8 @@ class Sm100GroupedBlockScaledGemmKernel:
         clc_mbar_ptr = storage.clc_mbar_ptr.data_ptr()
         # Non-uniform path metadata handoff.
         tile_meta_smem = cute.make_tensor(
-            storage.tile_meta.data_ptr(), cute.make_layout(7)
+            storage.tile_meta.data_ptr(),
+            cute.make_layout((7, self.num_tile_meta_stage), stride=(1, 7)),
         )
         num_clc_consumer_warps_per_cta = len(
             (
@@ -1016,6 +1040,9 @@ class Sm100GroupedBlockScaledGemmKernel:
             ab_producer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Producer, self.num_ab_stage
             )
+            tile_meta_producer_state = pipeline.make_pipeline_state(
+                pipeline.PipelineUserType.Producer, self.num_tile_meta_stage
+            )
 
             # Kernel-wide descriptor pointers.
             tma_desc_a = tensormap_manager.get_tensormap_ptr(
@@ -1041,7 +1068,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                     )
                 else:
                     grouped_gemm_cta_tile_info = group_gemm_ts_helper.delinearize_z(
-                        cur_tile_coord, problem_sizes_mnkl
+                        cur_tile_coord, problem_sizes_mnkl, self.L2_SWIZZLE_M_CLUSTERS
                     )
                 cur_k_tile_cnt = grouped_gemm_cta_tile_info.cta_tile_count_k
                 cur_group_idx = grouped_gemm_cta_tile_info.group_idx
@@ -1050,15 +1077,18 @@ class Sm100GroupedBlockScaledGemmKernel:
                     self.tensormap_ab_init_barrier.arrive_and_wait()
                     tensormap_init_done = True
                 if cutlass.const_expr(not self.uniform_mn_groups):
+                    tile_meta_pipeline.producer_acquire(tile_meta_producer_state)
+                    meta = tile_meta_smem[(None, tile_meta_producer_state.index)]
                     with cute.arch.elect_one():
-                        tile_meta_smem[0] = cur_group_idx
-                        tile_meta_smem[1] = grouped_gemm_cta_tile_info.cta_tile_idx_m
-                        tile_meta_smem[2] = grouped_gemm_cta_tile_info.cta_tile_idx_n
-                        tile_meta_smem[3] = cur_k_tile_cnt
-                        tile_meta_smem[4] = grouped_gemm_cta_tile_info.problem_shape_m
-                        tile_meta_smem[5] = grouped_gemm_cta_tile_info.problem_shape_n
-                        tile_meta_smem[6] = grouped_gemm_cta_tile_info.problem_shape_k
-                    self.tile_metadata_ready_barrier.arrive_and_wait()
+                        meta[0] = cur_group_idx
+                        meta[1] = grouped_gemm_cta_tile_info.cta_tile_idx_m
+                        meta[2] = grouped_gemm_cta_tile_info.cta_tile_idx_n
+                        meta[3] = cur_k_tile_cnt
+                        meta[4] = grouped_gemm_cta_tile_info.problem_shape_m
+                        meta[5] = grouped_gemm_cta_tile_info.problem_shape_n
+                        meta[6] = grouped_gemm_cta_tile_info.problem_shape_k
+                    tile_meta_pipeline.producer_commit(tile_meta_producer_state)
+                    tile_meta_producer_state.advance()
                 is_group_changed = cur_group_idx != last_group_idx
                 if is_group_changed:
                     problem_shape_mnk = (
@@ -1142,10 +1172,12 @@ class Sm100GroupedBlockScaledGemmKernel:
                 tAgSFA_slice = tAgSFA[
                     (None, mma_tile_coord_mnl[0], None, mma_tile_coord_mnl[2])
                 ]
+                # A 128-wide SFB block covers two 64-wide N tiles.
+                sfb_tile_n = mma_tile_coord_mnl[1]
+                if cutlass.const_expr(self.cta_tile_shape_mnk[1] == 64):
+                    sfb_tile_n = mma_tile_coord_mnl[1] // 2
                 # ((atom_v, rest_v), RestK)
-                tBgSFB_slice = tBgSFB[
-                    (None, mma_tile_coord_mnl[1], None, mma_tile_coord_mnl[2])
-                ]
+                tBgSFB_slice = tBgSFB[(None, sfb_tile_n, None, mma_tile_coord_mnl[2])]
 
                 ab_producer_state.reset_count()
                 peek_ab_empty_status = cutlass.Boolean(1)
@@ -1220,6 +1252,8 @@ class Sm100GroupedBlockScaledGemmKernel:
                 self.tensormap_ab_init_barrier.arrive_and_wait()
 
             ab_pipeline.producer_tail(ab_producer_state)
+            if cutlass.const_expr(not self.uniform_mn_groups):
+                tile_meta_pipeline.producer_tail(tile_meta_producer_state)
 
         if warp_idx == self.mma_warp_id:
             cute.arch.setmaxregister_decrease(self.GENERIC_REG_REQUIREMENT)
@@ -1294,6 +1328,9 @@ class Sm100GroupedBlockScaledGemmKernel:
             acc_producer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Producer, self.num_acc_stage
             )
+            tile_meta_consumer_state = pipeline.make_pipeline_state(
+                pipeline.PipelineUserType.Consumer, self.num_tile_meta_stage
+            )
             while work_tile.is_valid_tile:
                 if cutlass.const_expr(self.uniform_mn_groups):
                     grouped_gemm_cta_tile_info = (
@@ -1302,9 +1339,28 @@ class Sm100GroupedBlockScaledGemmKernel:
                         )
                     )
                     cur_k_tile_cnt = grouped_gemm_cta_tile_info.cta_tile_count_k
+                    cta_tile_idx_n = grouped_gemm_cta_tile_info.cta_tile_idx_n
                 else:
-                    self.tile_metadata_ready_barrier.arrive_and_wait()
-                    cur_k_tile_cnt = tile_meta_smem[3]
+                    tile_meta_pipeline.consumer_wait(tile_meta_consumer_state)
+                    meta = tile_meta_smem[(None, tile_meta_consumer_state.index)]
+                    cur_k_tile_cnt = meta[3]
+                    cta_tile_idx_n = meta[2]
+                    cute.arch.fence_acq_rel_cta()
+                    tile_meta_pipeline.consumer_release(tile_meta_consumer_state)
+                    tile_meta_consumer_state.advance()
+
+                # Odd 64-wide N tiles use the second half of the 128-wide SFB block.
+                tCtSFB_mma = tCtSFB
+                if cutlass.const_expr(self.cta_tile_shape_mnk[1] == 64):
+                    sfb_col_offset = cutlass.Int32((cta_tile_idx_n % 2) * 2)
+                    sfb_tmem_ptr_mma = cute.recast_ptr(
+                        acc_tmem_ptr
+                        + tcgen05.find_tmem_tensor_col_offset(tCtAcc_base)
+                        + tcgen05.find_tmem_tensor_col_offset(tCtSFA)
+                        + sfb_col_offset,
+                        dtype=self.sf_dtype,
+                    )
+                    tCtSFB_mma = cute.make_tensor(sfb_tmem_ptr_mma, tCtSFB_layout)
 
                 # (MMA, MMA_M, MMA_N)
                 tCtAcc = tCtAcc_base[(None, None, None, acc_producer_state.index)]
@@ -1363,7 +1419,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                             )
                             tiled_mma.set(
                                 tcgen05.Field.SFB,
-                                tCtSFB[sf_kblock_coord].iterator,
+                                tCtSFB_mma[sf_kblock_coord].iterator,
                             )
 
                             cute.gemm(
@@ -1451,6 +1507,9 @@ class Sm100GroupedBlockScaledGemmKernel:
             acc_consumer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Consumer, self.num_acc_stage
             )
+            tile_meta_consumer_state = pipeline.make_pipeline_state(
+                pipeline.PipelineUserType.Consumer, self.num_tile_meta_stage
+            )
 
             c_producer_group = pipeline.CooperativeGroup(
                 pipeline.Agent.Thread,
@@ -1482,14 +1541,17 @@ class Sm100GroupedBlockScaledGemmKernel:
                     problem_shape_n = grouped_gemm_cta_tile_info.problem_shape_n
                     problem_shape_k = grouped_gemm_cta_tile_info.problem_shape_k
                 else:
-                    # tile_meta is single-buffered.
-                    self.tile_metadata_ready_barrier.arrive_and_wait()
-                    cur_group_idx = tile_meta_smem[0]
-                    cta_tile_idx_m = tile_meta_smem[1]
-                    cta_tile_idx_n = tile_meta_smem[2]
-                    problem_shape_m = tile_meta_smem[4]
-                    problem_shape_n = tile_meta_smem[5]
-                    problem_shape_k = tile_meta_smem[6]
+                    tile_meta_pipeline.consumer_wait(tile_meta_consumer_state)
+                    meta = tile_meta_smem[(None, tile_meta_consumer_state.index)]
+                    cur_group_idx = meta[0]
+                    cta_tile_idx_m = meta[1]
+                    cta_tile_idx_n = meta[2]
+                    problem_shape_m = meta[4]
+                    problem_shape_n = meta[5]
+                    problem_shape_k = meta[6]
+                    cute.arch.fence_acq_rel_cta()
+                    tile_meta_pipeline.consumer_release(tile_meta_consumer_state)
+                    tile_meta_consumer_state.advance()
                 is_group_changed = cur_group_idx != last_group_idx
                 if is_group_changed and warp_idx == self.epilog_warp_id[0]:
                     # Inline C tensormap update.

@@ -40,6 +40,14 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 - [ ] **Appropriate complexity** - Solutions are as simple as possible for the current requirements
 - [ ] **Documentation shows correct patterns only** - Docs and markdown files should show the right way to do things directly, not anti-patterns followed by corrections. Code examples must have correct indentation, names, and syntax
 
+### Warnings and Logging
+
+Applies to every new `warnings.warn`, `TORCH_WARN*`, and logger `.warning()`/`.error()` call. Deprecation warnings are covered by the deprecation items under PyTorch Infrastructure.
+
+- [ ] **Actionable** - A warning must be something the user can and should act on. The message says what happened, its consequence, and how to fix or silence it. Expected environment variation, internal fallbacks, and missing optional information are not warnings; if ignoring it is the only possible response, drop it
+- [ ] **Right mechanism** - PyTorch is a library: outside the PT2 stack (`torch._dynamo`, `torch._inductor`, `torch.export`, ...) it does not use logging, so user-facing messages go through `warnings.warn` (with a specific category) or `TORCH_WARN*`, and non-actionable messages are removed rather than logged. Within PT2, use `torch._logging`: a module logger registered in `torch._logging._registrations` (so it is controlled by `TORCH_LOGS`), `getArtifactLogger` for artifacts, `warning_once` for repeated warnings, and `trace_structured` for anything that should show up in `tlparse`. Use `log.warning` for actionable messages and `log.debug`/`log.info` for diagnostics. `.error()` is limited to cases where execution cannot continue, not conditions it recovers from
+- [ ] **No spam** - Flag any warning that can fire repeatedly in a real workload: per call, per op, per iteration, per compile. Anything reachable from a hot path or loop must be deduplicated (`TORCH_WARN_ONCE`, `warning_once`, a module-level flag)
+
 ### Initialization and Module Design
 
 - [ ] **No fragile init ordering** - If multiple imports/calls must happen in a specific undocumented order, flag the design. Dependencies should be explicit or combined into a single entry point

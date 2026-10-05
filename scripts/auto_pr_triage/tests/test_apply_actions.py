@@ -479,7 +479,7 @@ class ApplyMainTest(unittest.TestCase):
         )
         for artifact in ARTIFACTS:
             self.assertEqual(workflow.count(f"/{artifact}"), 2, artifact)
-        self.assertEqual(action.count("continue-on-error: true"), 2)
+        self.assertEqual(action.count("continue-on-error: true"), 3)
         self.assertIn("always() &&", action)
 
     def test_workflow_admits_label_events_and_first_ready_event(self) -> None:
