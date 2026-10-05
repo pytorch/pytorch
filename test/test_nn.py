@@ -17212,6 +17212,32 @@ if __name__ == '__main__':
         self.assertTrue(has_device_side_assert(stderr),
                         lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
 
+    @parametrize_test("target_value", [-1_000_000_000_000, 4])
+    def test_multilabel_margin_loss_out_of_bounds_target(self, device, target_value):
+        # Test for issue #191567
+        # Run in a different process to prevent the device-side assert from affecting other tests
+        stderr = TestCase.runWithPytorchAPIUsageStderr(f"""\
+#!/usr/bin/env python3
+
+import torch
+import torch.nn.functional as F
+from torch.testing._internal.common_utils import (run_tests, TestCase)
+
+class TestThatContainsCUDAAssert(TestCase):
+    def test_multilabel_margin_loss_out_of_bounds_target(self):
+        device = '{str(device)}'
+        input = torch.zeros(4, device=device)
+        target = torch.tensor([{target_value}, -1, -1, -1], device=device)
+        F.multilabel_margin_loss(input, target, reduction="none")
+        torch.accelerator.synchronize()
+
+
+if __name__ == '__main__':
+    run_tests()
+        """)
+        self.assertTrue(has_device_side_assert(stderr),
+                        lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
+
     @parametrize_test("op,normalized_shape,has_weight", [
         subtest(("layer_norm", [64], False), name="layer_norm_1d_no_weight"),
         subtest(("layer_norm", [8, 16], True), name="layer_norm_multidim"),
