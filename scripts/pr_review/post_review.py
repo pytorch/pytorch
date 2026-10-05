@@ -175,14 +175,28 @@ def blocking_findings(verdict: str, findings: list[dict]) -> list[dict]:
     return major
 
 
-def quoted(text: str) -> list[str]:
-    """`text` as a blockquote, which contains whatever markdown it holds.
+_FENCE_RUN = re.compile(r"`{3,}|~{3,}")
 
-    Messages keep their markdown structure, and an unclosed code fence in one
-    would otherwise swallow every finding, link and tag after it. A fence or
-    heading inside a blockquote ends where the quote ends.
+
+def contained(text: str) -> list[str]:
+    """`text` as lines, with every possible code-fence run escaped.
+
+    The sanitizer has already removed links, images, HTML, mentions and issue
+    references, so what a message can still carry is markdown STRUCTURE. Nearly
+    all of it ends at the blank line after the message: a heading, list, table,
+    setext underline or quote cannot reach the next finding. A fenced code block
+    is the one construct that runs on until it is closed, and an open one would
+    turn every later finding, link and `</details>` into code.
+
+    Escaping, not balancing: whether a run opens or closes a fence depends on
+    the list or quote it sits in, and a balancer that misreads a container
+    adds the very fence it meant to close. A backslash-escaped backtick or
+    tilde is never a fence character, in any container. The cost is that a
+    model's fenced block shows as literal backticks around plain text; inline
+    code still renders.
     """
-    return [f"> {line}" if line else ">" for line in text.split("\n")]
+    escaped = _FENCE_RUN.sub(lambda m: "".join("\\" + c for c in m.group()), text)
+    return escaped.split("\n")
 
 
 def permalink(repo: str, sha: str, finding: dict) -> str:
@@ -196,19 +210,22 @@ def permalink(repo: str, sha: str, finding: dict) -> str:
     return f"https://github.com/{repo}/blob/{sha}/{path}#L{finding['line']}"
 
 
-def finding_block(repo: str, sha: str, finding: dict) -> list[str]:
-    label = _SEVERITY_LABEL[finding["severity"]]
-    return [
-        permalink(repo, sha, finding),
-        "",
-        f"**{label}**",
-        *quoted(finding["message"]),
-        "",
-    ]
+def finding_blocks(repo: str, sha: str, findings: list[dict]) -> list[str]:
+    """Each finding as its code link with the message under it, rule-separated.
+
+    The blank line after the link is required: GitHub renders the code only
+    for a link alone in its paragraph.
+    """
+    lines: list[str] = []
+    for i, f in enumerate(findings):
+        if i:
+            lines += ["---", ""]
+        lines += [permalink(repo, sha, f), "", *contained(f["message"]), ""]
+    return lines
 
 
 # GitHub refuses a review body over 65536 characters, and the sanitizer's caps
-# do not bound this one: percent-encoding and quote prefixes expand the text.
+# do not bound this one: percent-encoding and the layout expand the text.
 MAX_BODY = 60_000
 
 
@@ -254,7 +271,7 @@ def _compose(
         MARKER,
         f"**Automated review** of {sha[:12]}: {_VERDICT_LINE[verdict]}.",
         "",
-        *quoted(summary),
+        *contained(summary),
         "",
     ]
     if blocking and inline:
@@ -262,16 +279,14 @@ def _compose(
             f"{len(blocking)} blocking finding(s) are attached to the code below.",
             "",
         ]
-    for f in in_body:
-        lines += finding_block(repo, sha, f)
+    lines += finding_blocks(repo, sha, in_body)
     if folded:
         lines += [
             "<details>",
             f"<summary>{len(folded)} non-blocking finding(s)</summary>",
             "",
         ]
-        for f in folded:
-            lines += finding_block(repo, sha, f)
+        lines += finding_blocks(repo, sha, folded)
         lines += ["</details>", ""]
     if omitted:
         lines += [
@@ -286,8 +301,8 @@ def _compose(
             "",
         ]
     lines += [
-        "This review is AI-generated and advisory. Each new automated review "
-        "replaces the previous one.",
+        "<sub>This review is AI-generated and advisory. Each new automated "
+        "review replaces the previous one.</sub>",
     ]
     return defuse_bot_commands("\n".join(lines))
 

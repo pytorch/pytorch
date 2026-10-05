@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F401
 from extract_verdict import neutralize, neutralize_path  # noqa: E402
 from post_review import (  # noqa: E402
+    contained,
     defuse_bot_commands,
     GitHub,
     GitHubError,
@@ -175,8 +176,7 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertIn("comments", first)
         self.assertNotIn("comments", second)
         self.assertIn(
-            f"\nhttps://github.com/o/r/blob/{SHA}/torch/x.py#L3\n\n"
-            "**Major**\n> Off by one.\n",
+            f"\nhttps://github.com/o/r/blob/{SHA}/torch/x.py#L3\n\nOff by one.\n",
             second["body"],
         )
 
@@ -199,13 +199,11 @@ class TestWhatIsPosted(unittest.TestCase):
         # Each permalink stands alone on its line, which is what makes GitHub
         # render the code it points at.
         self.assertIn(
-            f"\nhttps://github.com/o/r/blob/{SHA}/b.py#L7\n\n**Minor**\n> Nit.\n",
+            f"\nhttps://github.com/o/r/blob/{SHA}/b.py#L7\n\nNit.\n\n---\n\n"
+            f"https://github.com/o/r/blob/{SHA}/c.py#L9\n\nNote.\n",
             details,
         )
-        self.assertIn(
-            f"\nhttps://github.com/o/r/blob/{SHA}/c.py#L9\n\n**Info**\n> Note.\n",
-            details,
-        )
+        self.assertTrue(details.endswith(f"/c.py#L9\n\nNote.\n\n"), details)
         self.assertNotIn("a.py", details)
 
     def test_only_non_blocking_findings_post_one_review_without_comments(self):
@@ -234,7 +232,7 @@ class TestWhatIsPosted(unittest.TestCase):
         gh = FakeGitHub()
         go(gh, row(verdict="ready_for_human_review", summary="s", findings=findings))
         text = gh.posted()[0]["body"]
-        self.assertIn("> x\n> ```\n> y\n\n", text)
+        self.assertIn("x\n\\`\\`\\`\ny\n\n---\n", text)
         # Everything after the quote is outside it: the next permalink still
         # starts its own line, and the section still closes.
         self.assertIn(f"\nhttps://github.com/o/r/blob/{SHA}/b.py#L2\n", text)
@@ -255,6 +253,16 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertGreater(shown, 0)
         self.assertIn(f"{25 - shown} more finding(s) did not fit", text)
         self.assertIn(f"<summary>{shown} non-blocking finding(s)</summary>", text)
+
+    def test_the_footer_is_small_and_no_text_is_quoted(self):
+        minor = {"path": "b.py", "line": 7, "severity": "minor", "message": "Nit."}
+        gh = FakeGitHub()
+        go(gh, row(verdict="ready_for_human_review", summary="Fine.", findings=[minor]))
+        text = gh.posted()[0]["body"]
+        self.assertTrue(text.endswith("</sub>"))
+        self.assertIn("\n\nFine.\n\n", text)
+        self.assertFalse([ln for ln in text.splitlines() if ln.startswith(">")])
+        self.assertNotIn("**Minor**", text)
 
     def test_permalink_path_is_percent_encoded(self):
         path = neutralize_path("docs/a b/@x#1.md")
@@ -328,6 +336,25 @@ class TestNothingIsPosted(unittest.TestCase):
         gh = FakeGitHub(labels=("No Automated Review",))
         go(gh)
         self.assertEqual(gh.writes(), [])
+
+
+class TestContained(unittest.TestCase):
+    def test_every_fence_run_is_escaped_in_any_container(self):
+        for text in (
+            "a\n```py\nb",
+            "- ```python\n  x = 1\n  ```",
+            "> ~~~~\n> b",
+            "   ````\nb",
+        ):
+            out = "\n".join(contained(text))
+            self.assertIsNone(re.search(r"(?<!\\)[`~]{3}", out), out)
+
+    def test_short_runs_are_untouched(self):
+        for text in ("`code`", "``a ` b``", "~~struck~~", "plain"):
+            self.assertEqual(contained(text), text.split("\n"))
+
+    def test_an_escaped_run_keeps_its_length(self):
+        self.assertEqual(contained("````"), ["\\`\\`\\`\\`"])
 
 
 class TestStandingChangeRequestsAreWithdrawn(unittest.TestCase):
