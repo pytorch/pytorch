@@ -22,7 +22,7 @@ using vec::Vectorized;
 template <typename T>
 C10_ALWAYS_INLINE Vectorized<T> add(Vectorized<T> self, Vectorized<T> other, at::opmath_type<T> alpha) __ubsan_ignore_undefined__ {
   using opmath_t = at::opmath_type<T>;
-  if constexpr (!std::is_same_v<T, opmath_t>) {
+  if constexpr (std::is_same_v<T, at::Half> || std::is_same_v<T, at::BFloat16>) {
     Vectorized<opmath_t> vec_alpha(alpha);
     auto [self0, self1] = convert_to_float<T>(self);
     auto [other0, other1] = convert_to_float<T>(other);

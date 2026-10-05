@@ -13,6 +13,7 @@ from torchgen.api.types import (
     CType,
     NamedCType,
     scalarT,
+    opmath_t,
 )
 from torchgen.model import (
     Argument,
@@ -56,7 +57,7 @@ def dispatchstub_type(t: Type, *, binds: ArgName) -> NamedCType | None:
 
 def opmath_type(scalar_t: BaseCppType) -> BaseCppType:
     if scalar_t == api_types.scalar_t:
-        return api_types.opmath_t
+        return opmath_t
     raise NotImplementedError
 
 
@@ -100,7 +101,7 @@ def ufunc_type(t: Type, *, binds: ArgName, compute_t: CType) -> NamedCType:
         return r
 
     if t == BaseType(BaseTy.Scalar):
-        return NamedCType(binds, BaseCType(api_types.opmath_t))
+        return NamedCType(binds, BaseCType(opmath_t))
     elif t == BaseType(BaseTy.Tensor):
         return NamedCType(binds, compute_t)
     else:
