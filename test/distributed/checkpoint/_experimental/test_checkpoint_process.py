@@ -273,16 +273,7 @@ class TestCheckpointProcess(TestCase):
         # Wait for initialization
         checkpoint_process.process_creation_future.result()
 
-        # Create a Future that resolves to the state dict
-        from concurrent.futures import ThreadPoolExecutor
-
-        executor = ThreadPoolExecutor(max_workers=1)
-
-        def get_state_dict():
-            time.sleep(0.1)  # Simulate some processing time
-            return self.test_state_dict
-
-        future_state_dict = executor.submit(get_state_dict)
+        future_state_dict = Future()
 
         # Create a temporary directory for the checkpoint
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -290,6 +281,7 @@ class TestCheckpointProcess(TestCase):
 
             # Write checkpoint with Future state dict
             write_future = checkpoint_process.write(future_state_dict, checkpoint_path)
+            future_state_dict.set_result(self.test_state_dict)
 
             # Wait for completion
             write_future.result()
@@ -300,7 +292,6 @@ class TestCheckpointProcess(TestCase):
             )
             self.assertTrue(os.path.exists(expected_file))
 
-        executor.shutdown(wait=True)
         checkpoint_process.close()
 
     def test_checkpoint_write_with_kwargs(self) -> None:

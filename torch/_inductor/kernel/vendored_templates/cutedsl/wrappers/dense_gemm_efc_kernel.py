@@ -10,20 +10,14 @@ from cutlass.operators.arch import TargetSm  # noqa: TC002
 from cutlass.operators.arguments import GemmArguments
 from cutlass.operators.artifact import CompiledArtifact  # noqa: TC002
 from cutlass.operators.fusion.library import ActivationOp
-
-
-try:
-    # `nvidia-cutlass-operators>=0.2.0` have `efc` not `common_efc`
-    from cutlass.operators.providers.cutedsl.evt import efc as common_efc
-except ImportError:
-    from cutlass.operators.providers.cutedsl.evt import common_efc
-
+from cutlass.operators.providers.cutedsl.evt import efc as common_efc
 from cutlass.operators.providers.cutedsl.evt.converter import (
     _build_source_mode_map,
     EFCConverter,
     OpToCuteImpl,
     OpToCuteImplStr,
 )
+from cutlass.operators.providers.cutedsl.evt.efc.dense_gemm.sm100 import DenseGemmEFC
 from cutlass.operators.providers.cutedsl.gemm.sm100_static_persistent_efc import (
     PersistentDenseGemmEFCOperator,
 )
@@ -41,6 +35,10 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
 )
 
 from ..dense_gemm_efc import PersistentDenseGemmEFCKernel
+
+
+PersistentDenseGemmEFCKernel.JIT = DenseGemmEFC.JIT
+PersistentDenseGemmEFCKernel.Kernel = DenseGemmEFC.Kernel
 
 
 class _EfcCuteNamespace:
@@ -140,7 +138,7 @@ def _direct_cutedsl_epilogue(metadata):
                 )
             result_values = results[:-1]
             if efc_config.phase == common_efc.EFC.Phase.ThreadOperation:
-                efc_config.epilogue_context.local_reduce.store(results[-1])
+                efc_config.epilogue_context.local_reduce = results[-1]
         elif len(outputs) == 1:
             result_values = (results,)
         else:

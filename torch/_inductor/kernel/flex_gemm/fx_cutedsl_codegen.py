@@ -49,7 +49,6 @@ from torch._inductor.kernel.gemm_epilogue import (
     NormalizedReduction,
 )
 from torch._inductor.kernel.gemm_epilogue_analysis import (
-    build_output_contraction_plan,
     GemmLocalReduceAnalysis,
     GemmOutputLocalReducePlan,
     GemmOutputPlan,
@@ -62,6 +61,7 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLOpOverrides,
     lower_gemm_epilogue_fx_node,
 )
+from torch._inductor.kernel.gemm_epilogue_layout import build_output_contraction_plan
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
@@ -391,6 +391,14 @@ def flex_gemm_epilogue_arg(value: Any, env: dict[torch.fx.Node, Any]) -> Any:
 
 class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
     """Add PyTorch NaN propagation to the shared TensorSSA operation lowering."""
+
+    @staticmethod
+    def erf(x: Any) -> Any:
+        return CuteDSLOpOverrides.erf(x)
+
+    @staticmethod
+    def sigmoid(x: Any) -> Any:
+        return CuteDSLOpOverrides.sigmoid(x)
 
     @staticmethod
     def nan_propagating_minmax(a: Any, b: Any, op: str) -> Any:
