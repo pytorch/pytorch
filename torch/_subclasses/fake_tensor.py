@@ -24,7 +24,6 @@ from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._custom_class_base import CustomClassBase
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
@@ -443,6 +442,208 @@ def maybe_get_fake_dispatch_keys(x: object) -> torch.DispatchKeySet | None:
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.dispatch_keys
     return None
+
+
+def maybe_to_real_tensor(t: T, shape_env: Any) -> T | Tensor | None:
+    # Recover the real value shadowing a fake tensor / symbolic value under
+    # propagate_real_tensors. Shared by FakeTensorMode._dispatch_impl and the
+    # C++ fallback (via propagate_real_tensors).
+    if is_fake_tensor(t):
+        return maybe_get_real_tensor(t)
+    elif isinstance(t, py_sym_types):
+        if shape_env is None:
+            raise AssertionError("shape_env must not be None for symbolic types")
+        return t.node.pytype(
+            t.node.expr.xreplace(shape_env.backed_var_to_val).xreplace(
+                shape_env.real_tensor_prop_unbacked_vals
+            )
+        )
+    elif isinstance(t, FakeScriptObject):
+        return t.real_obj
+    else:
+        return t
+
+
+def propagate_real_tensor(t: object, real_t: object, shape_env: Any) -> None:
+    # Stamp `real_t` onto fake tensor `t` (recursing through sizes/strides/
+    # storage_offset) and record unbacked-symbol -> real-value hints in the
+    # ShapeEnv. Shared by FakeTensorMode._dispatch_impl and the C++ fallback.
+    import sympy
+
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    if is_fake_tensor(t):
+        # NB: unconditionally overwrite
+        log.debug("maybe_propagate_real_tensors %s -> %s", id(t), id(real_t))
+        maybe_set_real_tensor(t, real_t)  # type: ignore[arg-type]
+        for s, real_s in zip(t.size(), real_t.size()):  # type: ignore[attr-defined]
+            propagate_real_tensor(s, real_s, shape_env)
+        if t.layout == torch.strided:  # type: ignore[attr-defined]
+            for s, real_s in zip(t.stride(), real_t.stride()):  # type: ignore[attr-defined]
+                propagate_real_tensor(s, real_s, shape_env)
+            propagate_real_tensor(
+                t.storage_offset(),  # type: ignore[attr-defined]
+                real_t.storage_offset(),  # type: ignore[attr-defined]
+                shape_env,
+            )
+    elif isinstance(t, py_sym_types) and free_unbacked_symbols(t):
+        if isinstance(t.node.expr, sympy.Symbol):
+            if shape_env is None:
+                raise AssertionError("shape_env must not be None for symbolic Symbol")
+            shape_env.set_real_tensor_prop_unbacked_vals(t.node.expr, real_t)
+        elif (
+            isinstance(s := t.node.expr, sympy.Eq)
+            and isinstance(s.lhs, sympy.Symbol)
+            and s.rhs == 1
+        ):
+            if shape_env is None:
+                raise AssertionError("shape_env must not be None for symbolic Eq")
+            shape_env.set_real_tensor_prop_unbacked_vals(s, real_t)
+
+
+@dataclass(frozen=True)
+class RealOpResult:
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+    real_args: tuple[Any, ...]
+    real_kwargs: dict[str, Any]
+    real_out: object
+
+
+def run_real_op(
+    fake_mode: Any,
+    func: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> RealOpResult | None:
+    """Under propagate_real_tensors, run `func` on the real tensors behind its
+    fake args before any fake kernel runs. Returns None if a fake arg has no
+    real tensor, an unbacked symbol has no real value yet, or the real op
+    raises ZeroDivisionError.
+    """
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    shape_env = fake_mode.shape_env
+    flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+    flat_arg_fake_tensors = [a for a in flat_args if is_fake_tensor(a)]
+    if not all(
+        maybe_get_real_tensor(e) is not None for e in flat_arg_fake_tensors
+    ) or any(
+        (
+            isinstance(a, py_sym_types)
+            and (syms := free_unbacked_symbols(a))
+            and shape_env is not None
+            and any(s not in shape_env.real_tensor_prop_unbacked_vals for s in syms)
+        )
+        for a in flat_args
+    ):
+        # This can happen occasionally legitimately, specifically when you
+        # are inside the meta of a data dependent operation and you create
+        # a tensor on an unbacked SymInt; at this point in time we don't
+        # know what the unbacked SymInt is, but we will know later.
+        # However, if there's a bug in the condition above, this condition
+        # will also trigger.
+        log.debug(
+            "SKIPPED propagate_real_tensors %s(%s, %s) %s",
+            func,
+            flat_arg_fake_tensors,
+            flat_args,
+            shape_env.real_tensor_prop_unbacked_vals if shape_env else None,
+        )
+        return None
+
+    log.debug("propagate_real_tensors %s", func)
+    real_flat_args = [maybe_to_real_tensor(a, shape_env) for a in flat_args]
+    real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
+
+    missing = object()
+    real_out = missing
+    with unset_fake_temporarily():
+        is_builtin = library_utils.is_builtin(func)
+        if not is_builtin:
+            mutation_checker = library_utils.MutationChecker(
+                func, real_flat_args, args_spec
+            )
+        try:
+            real_out = func(*real_args, **real_kwargs)
+        except ZeroDivisionError as exc:
+            # we shouldn't broadly catch all errors here;
+            # some come from real-kernel mutation/aliasing checks we want to run.
+            # add more exception types as needed.
+            log.debug(
+                "real-tensor fallback failed for %s: %s; silently ignoring",
+                func,
+                exc,
+            )
+        if not is_builtin:
+            mutation_checker.check()  # type: ignore[possibly-undefined]
+            library_utils.check_aliasing_constraint(func._name, flat_args, real_out)
+    if real_out is missing:
+        return None
+    return RealOpResult(args, kwargs, real_args, real_kwargs, real_out)
+
+
+def propagate_real_tensors(
+    fake_mode: Any, func: Any, real: RealOpResult, fake_out: T
+) -> T:
+    """Cross-check the fake kernel's outputs against the real outputs from
+    run_real_op, attach the reals to the fake outputs and record real values
+    for their unbacked symbols.
+    """
+    from torch.fx.experimental.symbolic_shapes import compute_unbacked_bindings
+
+    log.debug("maybe_propagate_real_tensors %s", func)
+    shape_env = fake_mode.shape_env
+    real_out = real.real_out
+
+    # cross check fake/real outputs, and optionally override fake kernel mismatches
+    inferred_out = fake_mode._maybe_infer_fake_kernel_from_pytree_out(
+        func,
+        (real.args, real.kwargs),
+        (real.real_args, real.real_kwargs),
+        fake_out,
+        real_out,
+    )
+    if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+        # this can override the output only when the flag is True
+        fake_out = inferred_out
+
+    def go(t: object, real_t: Tensor) -> None:
+        propagate_real_tensor(t, real_t, shape_env)
+
+    # populate real_tensor_prop_unbacked_vals
+    if (
+        not isinstance(fake_out, Tensor)
+        and not isinstance(real_out, Tensor)
+        and type(fake_out) is not type(real_out)
+    ):
+        # This can happen when decompositions have different return types,
+        # e.g. namedtuple vs. tuple vs. list.
+        tree_map_(
+            go,
+            tuple(pytree.tree_flatten(fake_out)),
+            tuple(pytree.tree_flatten(real_out)),
+        )
+    else:
+        tree_map_(go, fake_out, real_out)
+
+    # If a data-dependent op is used in a decomposition, we
+    # may need to get the unbacked settings "early"
+    # TODO: Is this really needed?
+    compute_unbacked_bindings(shape_env, fake_out, peek=True)
+    return fake_out
+
+
+def can_infer_fake_from_real_out(fake_mode: Any, func: Any) -> bool:
+    # Inferring a fake kernel from the real output only applies to custom ops,
+    # and needs a ShapeEnv for the output sizes.
+    return not library_utils.is_builtin(func) and fake_mode.shape_env is not None
+
+
+def infer_fake_from_real_out(fake_mode: Any, func: Any, real: RealOpResult) -> Any:
+    fake_out = inferred_fake_kernel_from_real_out(fake_mode, func, real.real_out)
+    dtrace_structured("missing_fake_kernel", metadata_fn=lambda: {"op": str(func)})
+    return fake_out
 
 
 @functools.cache
@@ -3018,174 +3219,16 @@ class FakeTensorMode(TorchDispatchMode):
 
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        def maybe_to_real_tensor(
-            t: T,
-        ) -> T | Tensor | torch._C.ScriptObject | None:
-            if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-                return t.real_tensor
-            elif isinstance(t, py_sym_types):
-                if self.shape_env is None:
-                    raise AssertionError(
-                        "self.shape_env must not be None for symbolic types"
-                    )
-                return t.node.pytype(
-                    t.node.expr.xreplace(self.shape_env.backed_var_to_val).xreplace(
-                        self.shape_env.real_tensor_prop_unbacked_vals
-                    )
-                )
-            elif isinstance(t, FakeScriptObject):
-                return t.real_obj
-            else:
-                return t
-
-        from torch.fx.experimental.symbolic_shapes import (
-            compute_unbacked_bindings,
-            free_unbacked_symbols,
+        real = (
+            run_real_op(self, func, args, kwargs)
+            if self.propagate_real_tensors
+            else None
         )
 
-        nil = object()
-
-        real_out = nil
-        if (
-            self.propagate_real_tensors
-            and all(e.real_tensor is not None for e in flat_arg_fake_tensors)
-            and not any(
-                (
-                    isinstance(a, py_sym_types)
-                    and (syms := free_unbacked_symbols(a))
-                    and self.shape_env is not None
-                    and any(
-                        s not in self.shape_env.real_tensor_prop_unbacked_vals
-                        for s in syms
-                    )
-                )
-                for a in flat_args
-            )
-        ):
-            log.debug("propagate_real_tensors %s", func)
-            real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
-            real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
-
-            is_builtin = library_utils.is_builtin(func)
-            if not is_builtin:
-                mutation_checker = library_utils.MutationChecker(
-                    func, real_flat_args, args_spec
-                )
-
-            try:
-                real_out = func(*real_args, **real_kwargs)
-            except ZeroDivisionError as exc:
-                # we shouldn't broadly catch all errors here;
-                # some come from real-kernel mutation/aliasing checks we want to run.
-                # add more exception types as needed.
-                log.debug(
-                    "real-tensor fallback failed for %s: %s; silently ignoring",
-                    func,
-                    exc,
-                )
-
-            if not is_builtin:
-                mutation_checker.check()  # type: ignore[possibly-undefined]
-                library_utils.check_aliasing_constraint(func._name, flat_args, real_out)
-
-        elif self.propagate_real_tensors:
-            # This can happen occasionally legitimately, specifically when you
-            # are inside the meta of a data dependent operation and you create
-            # a tensor on an unbacked SymInt; at this point in time we don't
-            # know what the unbacked SymInt is, but we will know later.
-            # However, if there's a bug in the condition above, this condition
-            # will also trigger.
-            log.debug(
-                "SKIPPED propagate_real_tensors %s(%s, %s) %s",
-                func,
-                flat_arg_fake_tensors,
-                flat_args,
-                self.shape_env.real_tensor_prop_unbacked_vals
-                if self.shape_env
-                else None,
-            )
-
         def maybe_propagate_real_tensors(fake_out: T) -> T:
-            import sympy
-
-            log.debug("maybe_propagate_real_tensors %s", func)
-
-            def go(t: object, real_t: Tensor) -> None:
-                if isinstance(t, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-                    # NB: unconditionally overwrite
-                    log.debug(
-                        "maybe_propagate_real_tensors %s -> %s", id(t), id(real_t)
-                    )
-                    t.real_tensor = real_t
-                    for s, real_s in zip(t.size(), real_t.size()):
-                        go(s, real_s)  # type: ignore[arg-type]
-                    if t.layout == torch.strided:
-                        for s, real_s in zip(t.stride(), real_t.stride()):
-                            go(s, real_s)  # type: ignore[arg-type]
-                        go(t.storage_offset(), real_t.storage_offset())  # type: ignore[arg-type]
-                elif isinstance(t, py_sym_types) and free_unbacked_symbols(t):
-                    if isinstance(t.node.expr, sympy.Symbol):
-                        if self.shape_env is None:
-                            raise AssertionError(
-                                "self.shape_env must not be None for symbolic Symbol"
-                            )
-                        self.shape_env.set_real_tensor_prop_unbacked_vals(
-                            t.node.expr, real_t
-                        )
-                    elif (
-                        isinstance(s := t.node.expr, sympy.Eq)
-                        and isinstance(s.lhs, sympy.Symbol)
-                        and s.rhs == 1
-                    ):
-                        if self.shape_env is None:
-                            raise AssertionError(
-                                "self.shape_env must not be None for symbolic Eq"
-                            )
-
-                        self.shape_env.set_real_tensor_prop_unbacked_vals(s, real_t)
-
-            if real_out is not nil:
-                # cross check fake/real outputs, and optionally override fake kernel mismatches
-                if not torch._functorch.config.generate_fake_kernels_from_real_mismatches:
-                    self._maybe_infer_fake_kernel_from_pytree_out(
-                        func,
-                        (args, kwargs),
-                        (real_args, real_kwargs),
-                        fake_out,
-                        real_out,
-                    )
-                else:
-                    # this can override the output only when the flag is True
-                    fake_out = self._maybe_infer_fake_kernel_from_pytree_out(  # type: ignore[assignment]
-                        func,
-                        (args, kwargs),
-                        (real_args, real_kwargs),
-                        fake_out,
-                        real_out,
-                    )
-
-                # populate real_tensor_prop_unbacked_vals
-                if (
-                    not isinstance(fake_out, Tensor)
-                    and not isinstance(real_out, Tensor)
-                    and type(fake_out) is not type(real_out)
-                ):
-                    # This can happen when decompositions have different return types,
-                    # e.g. namedtuple vs. tuple vs. list.
-                    tree_map_(
-                        go,
-                        tuple(pytree.tree_flatten(fake_out)),
-                        tuple(pytree.tree_flatten(real_out)),
-                    )
-                else:
-                    tree_map_(go, fake_out, real_out)
-
-                # If a data-dependent op is used in a decomposition, we
-                # may need to get the unbacked settings "early"
-                # TODO: Is this really needed?
-                compute_unbacked_bindings(self.shape_env, fake_out, peek=True)
-
-            return fake_out
+            if real is None:
+                return fake_out
+            return propagate_real_tensors(self, func, real, fake_out)
 
         # Try for fastpath
         if has_symbolic_sizes:
@@ -3260,56 +3303,22 @@ class FakeTensorMode(TorchDispatchMode):
             if func in profiles.data:
                 return profiles.generic_fake_kernel(func, self, *args, **kwargs)
 
+        # Automatically infer a Fake kernel if there isn't one.
         if (
-            self.propagate_real_tensors
-            and real_out is not nil
-            and not library_utils.is_builtin(func)
-            and self.shape_env is not None
+            real is not None
+            and can_infer_fake_from_real_out(self, func)
+            and not library_utils.has_fake_kernel(func)
         ):
-            # Automatically infer a Fake kernel if there isn't one.
-            if not library_utils.has_fake_kernel(func):
-                result = inferred_fake_kernel_from_real_out(self, func, real_out)
-
-                dtrace_structured(
-                    "missing_fake_kernel",
-                    metadata_fn=lambda: {
-                        "op": str(func),
-                    },
-                )
-                return maybe_propagate_real_tensors(result)
+            fake_out = infer_fake_from_real_out(self, func, real)
+            return maybe_propagate_real_tensors(fake_out)
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        maybe_fake_impl = torch._library.simple_registry.singleton.find(
-            func.name()
-        ).fake_impl.kernel
-        if maybe_fake_impl:
-            try:
-                ctx = torch._library.fake_impl.FakeImplCtx(self, func)
-                with torch._library.fake_impl.set_ctx_getter(lambda: ctx), self:
-                    result = maybe_fake_impl(*args, **kwargs)
-                    return maybe_propagate_real_tensors(result)
-
-            except MissingOpProfile as e:
-                # If we have a fake kernel registered generated from OpProfiles
-                # but there doesn't exist a profile for the existing inputs, and we are in
-                if (
-                    self.propagate_real_tensors
-                    and real_out is not nil
-                    and not library_utils.is_builtin(func)
-                    and self.shape_env is not None
-                ):
-                    result = inferred_fake_kernel_from_real_out(self, func, real_out)
-
-                    dtrace_structured(
-                        "missing_fake_kernel",
-                        metadata_fn=lambda: {
-                            "op": str(func),
-                        },
-                    )
-                    return maybe_propagate_real_tensors(result)
-                else:
-                    raise e
+        fake_impl_out = torch._library.fake_impl.run_fake_impl(
+            self, func, args, kwargs, real
+        )
+        if fake_impl_out is not NotImplemented:
+            return maybe_propagate_real_tensors(fake_impl_out)
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
