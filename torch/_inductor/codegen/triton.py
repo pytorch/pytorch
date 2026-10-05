@@ -1340,6 +1340,14 @@ class TritonOverrides(OpOverrides):
     _LOG_2_E = math.log2(math.e)
 
     @staticmethod
+    def _strict_cuda_pointwise() -> bool:
+        return (
+            config.numerics in ("strict_pointwise", "strict")
+            and torch.version.hip is None
+            and V.graph.get_current_device_or_throw().type == "cuda"
+        )
+
+    @staticmethod
     @override
     def to_dtype(
         x,
@@ -1396,9 +1404,7 @@ class TritonOverrides(OpOverrides):
         if (
             dtype in (torch.uint8, torch.int8, torch.int16)
             and (src_dtype is None or src_dtype.is_floating_point)
-            and config.numerics in ("strict_pointwise", "strict")
-            and torch.version.hip is None
-            and V.graph.get_current_device_or_throw().type == "cuda"
+            and TritonOverrides._strict_cuda_pointwise()
         ):
             # CUDA narrows through int32; c10 routes uint8 through int64 instead.
             intermediate = "tl.int64" if dtype == torch.uint8 else "tl.int32"
@@ -2286,11 +2292,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sigmoid(x):
-        if (
-            config.numerics in ("strict_pointwise", "strict")
-            and torch.version.hip is None
-            and V.graph.get_current_device_or_throw().type == "cuda"
-        ):
+        if TritonOverrides._strict_cuda_pointwise():
             # CUDA eager uses exp and correctly rounded division at opmath precision.
             return f"libdevice.rcp_rn(1.0 + libdevice.exp(-({x})))"
         return f"tl.sigmoid({x})"
