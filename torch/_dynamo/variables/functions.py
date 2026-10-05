@@ -1331,6 +1331,33 @@ class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
         return leaf
 
 
+class FrameVariable(VariableTracker):
+    # PyFrame_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/frameobject.c#L1769
+    _cpython_type = types.FrameType
+
+    def __init__(
+        self, inline_tracer: "InliningGeneratorInstructionTranslator", **kwargs: Any
+    ) -> None:
+        super().__init__(**kwargs)
+        self.inline_tracer = inline_tracer
+
+    def python_type(self) -> type:
+        return types.FrameType
+
+    def _get_f_back(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
+        # A generator frame is linked to its caller only while it is running,
+        # and a frame that outlives its generator can keep that link.
+        if self.inline_tracer.frame_state in {
+            FrameState.FRAME_CREATED,
+            FrameState.FRAME_SUSPENDED,
+            FrameState.FRAME_SUSPENDED_YIELD_FROM,
+        }:
+            return ConstantVariable.create(None)
+        return None
+
+    tp_getset = {"f_back": GetSet(_get_f_back, readonly_setter)}
+
+
 class LocalGeneratorObjectVariable(VariableTracker):
     # PyGen_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/genobject.c#L814
     _cpython_type = types.GeneratorType
@@ -1347,6 +1374,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
         self.remaining_items: list[VariableTracker] = []
+        self.frame = FrameVariable(inline_tracer)
         inline_tracer.output.track_generator(self)
 
     def get_code(self) -> types.CodeType:
@@ -1702,11 +1730,18 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
         return throw_here()
 
+    def _gen_getframe(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/genobject.c#L734
+        if self._frame_state_finished():
+            return ConstantVariable.create(None)
+        return self.frame
+
     tp_methods = {
         "send": Method(gen_send),
         "close": Method(gen_close),
         "throw": Method(gen_throw),
     }
+    tp_getset = {"gi_frame": GetSet(_gen_getframe, readonly_setter)}
 
 
 class ContextlibContextManagerLocalGeneratorObjectVariable(
