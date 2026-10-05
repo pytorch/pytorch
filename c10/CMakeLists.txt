@@ -53,7 +53,7 @@ if(NOT BUILD_LIBTORCHLESS)
         VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
   endif()
   # If building shared library, set dllimport/dllexport proper.
-  target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
+  target_compile_definitions(c10 PRIVATE C10_BUILD_MAIN_LIB)
   # Enable hidden visibility if compiler supports it.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10 PRIVATE "-fvisibility=hidden")
