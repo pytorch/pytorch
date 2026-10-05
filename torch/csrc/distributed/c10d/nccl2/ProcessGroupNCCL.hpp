@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <list>
 #include <map>
 #include <memory>
@@ -65,6 +66,8 @@ TORCH_API void waitForNcclCompletion(
     std::chrono::milliseconds timeout,
     std::string_view operation);
 
+// On failure, aborts the child and, if the split/shrink was issued, the parent,
+// calling before_parent_abort first.
 TORCH_API void waitForNcclChildComm(
     NcclApi& nccl_api,
     ncclComm_t parent_comm,
@@ -72,7 +75,16 @@ TORCH_API void waitForNcclChildComm(
     ncclResult_t status,
     bool expect_child,
     std::chrono::milliseconds timeout,
-    std::string_view operation);
+    std::string_view operation,
+    const std::function<void()>& before_parent_abort = {});
+
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+// ncclCommDump of every live (not aborted, revoked or destroyed) communicator,
+// keyed by group name. Merged into the nccl_comm_state of the NCCL dumps.
+TORCH_API std::
+    unordered_map<std::string, std::unordered_map<std::string, std::string>>
+    dumpNcclComms();
+#endif
 
 // Custom exception class for better error handling
 class NCCLException : public std::exception {
@@ -629,6 +641,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // initNcclResources() and the comm-teardown paths, respectively.
   void publishComm();
   void retireComm();
+  // Drops nccl_comm_ from the NCCLX comm-dump registry (dumpNcclComms), waiting
+  // for an in-flight dump. Part of retireComm(); called alone before a failed
+  // split/shrink aborts nccl_comm_.
+  void unlistComm();
 
   // Member variables (port of TorchCommNCCL).
   ncclComm_t nccl_comm_{};

@@ -36,6 +36,10 @@
 #include <torch/torch.h>
 #include <optional>
 
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
+#endif
+
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
@@ -422,6 +426,7 @@ static std::
   for (auto& ncclComm : allNCCLComms) {
     ncclDumpMap[ncclComm->getUniqueHash()] = ncclComm->ncclCommDump();
   }
+  ncclDumpMap.merge(nccl2::dumpNcclComms());
   return ncclDumpMap;
 #else
   return std::unordered_map<
