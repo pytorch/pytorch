@@ -50,6 +50,9 @@ class BackendConfig:
     supports_work_result: bool = False
     supports_gather_single: bool = False
     supports_uneven_all_gather: bool = False
+    # reduce_scatter reduces logical values for channels_last tensors, even when
+    # ranks use different memory formats.
+    supports_channels_last_reduce_scatter: bool = False
     dtypes: tuple[torch.dtype, ...] = STANDARD_DTYPES
     float8_dtypes: tuple[torch.dtype, ...] = ()
     premul_sum_dtypes: tuple[torch.dtype, ...] = ()
@@ -87,6 +90,7 @@ C10D_BACKENDS = (
         supports_work_result=True,
         supports_gather_single=True,
         supports_uneven_all_gather=True,
+        supports_channels_last_reduce_scatter=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(
             torch.float16,
@@ -108,6 +112,7 @@ C10D_BACKENDS = (
         supports_work_result=True,
         supports_gather_single=True,
         supports_uneven_all_gather=True,
+        supports_channels_last_reduce_scatter=True,
         float8_dtypes=FLOAT8_DTYPES,
         premul_sum_dtypes=(
             torch.float16,
@@ -222,6 +227,9 @@ def instantiate_backend_tests(
                 "supports_work_result": backend.supports_work_result,
                 "supports_gather_single": backend.supports_gather_single,
                 "supports_uneven_all_gather": backend.supports_uneven_all_gather,
+                "supports_channels_last_reduce_scatter": (
+                    backend.supports_channels_last_reduce_scatter
+                ),
                 "dtypes": backend.dtypes,
                 "float8_dtypes": backend.float8_dtypes,
                 "premul_sum_dtypes": backend.premul_sum_dtypes,

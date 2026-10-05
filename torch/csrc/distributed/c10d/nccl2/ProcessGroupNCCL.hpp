@@ -537,6 +537,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const at::Tensor& tensor,
       bool async_op,
       std::chrono::milliseconds timeout);
+  c10::intrusive_ptr<WorkNCCL> allGatherFlat(
+      const std::vector<at::Tensor>& tensor_list,
+      const at::Tensor& tensor,
+      bool async_op,
+      std::chrono::milliseconds timeout);
   c10::intrusive_ptr<WorkNCCL> allGatherSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
@@ -544,6 +549,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       std::chrono::milliseconds timeout,
       std::string_view profiling_title = "_all_gather_base");
   c10::intrusive_ptr<WorkNCCL> reduce_scatter(
+      at::Tensor& output,
+      const std::vector<at::Tensor>& input_list,
+      const ::c10d::ReduceOp& op,
+      bool async_op,
+      std::chrono::milliseconds timeout);
+  c10::intrusive_ptr<WorkNCCL> reduceScatterFlat(
       at::Tensor& output,
       const std::vector<at::Tensor>& input_list,
       const ::c10d::ReduceOp& op,
