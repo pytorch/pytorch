@@ -194,6 +194,7 @@ def _nvgemm_source_fingerprint() -> str:
     return torch_key().hex()
 
 
+@functools.cache
 def _current_target_sm(dev_idx: int):
     """TargetSm for the current CUDA device, used to stamp disk-cached artifacts."""
     from cutlass.operators.arch import TargetSm
