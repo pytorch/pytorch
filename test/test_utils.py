@@ -713,14 +713,21 @@ class TestHipify(TestCase):
             )
 
             # Source outside the build dir reached via a symlinked directory is
-            # realpath-resolved to its true location.
+            # realpath-resolved to its true location on Windows only; POSIX keeps
+            # the abspath so includes still resolve next to the symlink.
             link_dir = os.path.join(tmp_real, "link")
             os.symlink(real_dir, link_dir)
             outside_source = os.path.join(link_dir, "kernel.cu")
-            self.assertEqual(
-                _canonicalize_hip_source(outside_source, build_dir),
-                real_source,
-            )
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", True):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    real_source,
+                )
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", False):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    os.path.abspath(outside_source),
+                )
 
     def test_hipify_processes_relative_extra_files(self):
         # A relative `extra_files` entry must still be hipified. Previously the

@@ -1513,10 +1513,12 @@ def _canonicalize_hip_source(source, build_dir):
     to sources outside ``build_dir`` still fixes the Windows ``subst`` drive /
     symlinked-path case where a source resolves to a different spelling than
     ``build_dir``. ``build_dir`` must already be resolved (``os.path.realpath``).
-    On POSIX with an already-resolved cwd this is effectively a no-op.
+    Only Windows needs this; on POSIX the abspath is returned unchanged, so a
+    file-level symlinked source keeps its generated ``.hip`` (and its quote
+    includes) next to the symlink rather than its target.
     """
     s_abs = os.path.abspath(source)
-    if s_abs.startswith(build_dir + os.sep):
+    if not IS_WINDOWS or s_abs.startswith(build_dir + os.sep):
         return s_abs
     return os.path.realpath(source)
 
@@ -2477,7 +2479,7 @@ def _jit_compile(name,
                     # Windows `subst` drive / symlinked-path case where a caller-supplied
                     # source resolves to a different spelling than `build_directory`,
                     # without relocating sources symlinked into the build directory.
-                    build_dir_real = os.path.realpath(build_directory)
+                    build_dir_real = os.path.realpath(build_directory) if IS_WINDOWS else build_directory
 
                     hipify_result = hipify_python.hipify(
                         project_directory=build_dir_real,
