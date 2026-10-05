@@ -171,6 +171,40 @@ class StrictNumericsConfigTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @ops(
+        [op for op in op_db if op.name == "sigmoid"],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32),
+    )
+    @parametrize("numerics", NUMERICS_MODES)
+    @parametrize("upcast", (False, True))
+    def test_sigmoid(self, device, dtype, op, numerics, upcast):
+        x = (
+            _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)
+            if dtype == torch.float32
+            else _exhaustive_16bit(dtype, device)
+        )
+        result, codes = run_and_get_code(
+            torch.compile(
+                op.op,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+        )
+        code = "\n".join(codes)
+        if numerics in ("strict_pointwise", "strict"):
+            int_dtype = _BIT_VIEW[dtype]
+            self.assertEqual(result.view(int_dtype), op.op(x).view(int_dtype))
+            self.assertIn("libdevice.exp", code)
+            self.assertIn("libdevice.rcp_rn", code)
+            self.assertNotIn("tl.sigmoid", code)
+        else:
+            self.assertIn("tl.sigmoid", code)
+            self.assertNotIn("libdevice.rcp_rn", code)
+
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
         x = torch.full((1024,), 11.0, device=device)
@@ -835,8 +869,6 @@ POINTWISE_XFAIL = frozenset(
         ("short", "bfloat16"),
         ("short", "float16"),
         ("short", "float32"),
-        ("sigmoid", "float16"),
-        ("sigmoid", "float32"),
         ("special_bessel_j0", "float32"),
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
