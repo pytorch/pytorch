@@ -21,7 +21,6 @@ from torch.testing._internal.common_cuda import has_device_side_assert
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
-    dtypesIfMPS,
     dtypesIfXPU,
     expectedFailureMeta,
     expectedFailureMPS,
@@ -1368,7 +1367,6 @@ torch.{device_type}.synchronize()
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
     @parametrize_test(
         "channels_last",
         [
@@ -1423,7 +1421,6 @@ torch.{device_type}.synchronize()
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
     def test_avg_pool3d_nhwc(self, device, dtype):
         def helper(
             n,
@@ -1701,7 +1698,6 @@ torch.{device_type}.synchronize()
             )
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
     @expectedFailureMPS  # test_adaptive_pooling_max_nhwc currently fails on MPS - ISSUE#
     def test_adaptive_pooling_max_nhwc(self, device, dtype):
         def helper(input_size, output_plane_size, contig):
@@ -1754,7 +1750,6 @@ torch.{device_type}.synchronize()
             helper((2, 1, 3, 3, 3), (1, 1, 1), contig)
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
     @expectedFailureMPS  # test_pooling_max_nhwc currently fails on MPS - ISSUE#
     def test_pooling_max_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride, padding, dilation, contig, device):
