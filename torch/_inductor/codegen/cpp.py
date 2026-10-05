@@ -1843,17 +1843,15 @@ class CppVecOverrides(CppOverrides):
         dtype = result.dtype
         body_code = f"{var}()"
 
-        def maskify_or_vecify(code):
-            return (
-                f"{V.kernel._get_mask_type()}::from({code})"
-                if dtype == torch.bool
-                else f"{V.kernel._get_vec_type(dtype)}({code})"
-            )
+        def maskify_or_vecify(code, is_vec=False):
+            if dtype == torch.bool:
+                if is_vec:
+                    num_vectors = V.kernel._get_num_vectors(torch.float)
+                    return f"inductor_vec_mask_cast<float,{num_vectors}>({code})"
+                return f"{V.kernel._get_mask_type()}::from({code})"
+            return code if is_vec else f"{V.kernel._get_vec_type(dtype)}({code})"
 
-        if result.is_vec:
-            body_code_vec = body_code
-        else:
-            body_code_vec = maskify_or_vecify(body_code)
+        body_code_vec = maskify_or_vecify(body_code, result.is_vec)
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
         # loading bool as VecMask<float, N>
         other_code_vec = maskify_or_vecify(other_code)
@@ -6006,7 +6004,8 @@ class CppScheduling(BaseScheduling):
                 user.node.mark_run()
 
         self.codegen_comment(node_schedule, kernel_name)
-        kernel.call_kernel(kernel_name, ctb)
+        with V.graph.wrapper_code.kernel_profile_scope(kernel_name, node_schedule):
+            kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
 
