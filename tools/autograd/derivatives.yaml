@@ -1394,6 +1394,13 @@
   std: at::zeros_symint(std.sym_sizes(), grad.options())
   result: zeros_like(mean_t)
 
+# Reparameterized gradients.
+- name: _philox_uniform.Tensor(Tensor self, Tensor key, Tensor low, Tensor high) -> Tensor
+  self: zeros_like(grad)
+  key: non_differentiable
+  low: at::sum_to(grad * (1 - at::_philox_uniform(grad, key)), low.sym_sizes())
+  high: at::sum_to(grad * at::_philox_uniform(grad, key), high.sym_sizes())
+
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   input, tau: householder_product_backward(grad, result, input, tau)
   result: householder_product_jvp(input_t, tau_t, result, input_p, tau_p)
