@@ -85,7 +85,7 @@ from torch.testing._internal.common_utils import (
     xfailIf,
     xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import clear_class_registry, JitTestCase
 
 import json
 import tempfile
@@ -5948,6 +5948,10 @@ class TestVisionTracing(JitTestCase):
         torch.fx.proxy.TracerBase.check_mutable_operations = (
             self.orig_tracer_mutable_flag
         )
+        # A torch.jit.script aborted mid-compile leaves
+        # half-defined classes behind, and every later model sharing a
+        # submodule type then fails with "Can't redefine method: forward".
+        clear_class_registry()
 
     PROXY_ITERATED = (TraceError, r"Proxy object cannot be iterated")
     INCONSISTENT_TYPE = (
