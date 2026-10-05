@@ -359,6 +359,7 @@ def while_loop_node(
     validates the annotation, and additional inputs are passed by reference.
     Condition mutations apply to the incoming carries on the first evaluation,
     and to the loop-local carries after each body execution.
+    Body mutations of carried inputs are rejected during capture.
     """
     flat_carried_inputs, carried_spec = pytree.tree_flatten(carried_inputs)
     if not all(isinstance(inp, torch.Tensor) for inp in flat_carried_inputs):
@@ -373,13 +374,24 @@ def while_loop_node(
             f"cond_fn must return a boolean scalar CUDA tensor but got {pred}"
         )
 
-    loop_carried = pytree.tree_map_only(
-        torch.Tensor, lambda inp: inp.clone(), carried_inputs
-    )
+    # Keep version counters available for the body mutation check in inference mode.
+    grad_enabled = torch.is_grad_enabled()
+    with torch.inference_mode(False), torch.set_grad_enabled(grad_enabled):
+        loop_carried = pytree.tree_map_only(
+            torch.Tensor, lambda inp: inp.clone(), carried_inputs
+        )
     flat_loop_carried = pytree.tree_leaves(loop_carried)
 
     with _while_body(pred) as current_cuda_graph:
+        versions = [inp._version for inp in flat_loop_carried]
         body_out = body_fn(*loop_carried, *additional_inputs)
+        if any(
+            inp._version != version for inp, version in zip(flat_loop_carried, versions)
+        ):
+            raise RuntimeError(
+                "torch.while_loop body_fn must not mutate carried_inputs during CUDA graph capture. "
+                "Clone carried inputs before mutating them and return the updated values."
+            )
         flat_body_out, body_out_spec = pytree.tree_flatten(body_out)
         if body_out_spec != carried_spec:
             raise RuntimeError(
