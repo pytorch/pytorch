@@ -201,9 +201,7 @@ The barrier is amortized over kGatherBatch block-strided sub-iterations per roun
 covers input indices base + u * blockDim.x + threadIdx.x, so u-major order is ascending input-index order. The
 per-warp counts of two sub-iterations are packed into one 32-bit word (16 bits each; a sub-iteration counts at
 most blockDim.x <= 1024 matches per block, so a field never carries into its neighbour) and scanned together.
-With 16 waves sharing 4 SIMDs the round is bound by vector ALU issue, so the per-element path is kept to a handful of
-vector instructions: predicates stay in wave masks, the in-warp rank uses mbcnt, load addresses are one add plus
-a clamp, and the scan outputs are moved to scalar registers before the per-field bookkeeping.
+Slices that fit one block stride take a single round per phase.
 
 Phase 1 also ballots "== k-th value" per sub-iteration and scans those counts as extra packed fields, so every
 thread learns the ascending-input-index rank of each equal element it holds and keeps up to kEqCap of them in
@@ -326,11 +324,10 @@ __device__ __forceinline__ void writeResult(T* topKSliceStart,
                                             int64_t* indicesSliceStart,
                                             IndexType topKWithinSliceStride,
                                             IndexType indicesWithinSliceStride,
-                                            IndexType outputSliceSize,
                                             IndexType writeIndex,
                                             T v,
                                             IndexType i){
-  // Bounds are checked once per round by the caller (see gatherRound).
+  // Callers bound writeIndex: phase-1 rounds check it once per round, phase 2 and the held equals clip it.
   IndexType topKOffset = writeIndex * topKWithinSliceStride; // calculate the offset to the topk value in the output slice.
   IndexType indexOffset = writeIndex * indicesWithinSliceStride; // calculate the offset to the index in the output slice.
   topKSliceStart[topKOffset] = v; // write the value to the output slice.
@@ -442,8 +439,9 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // unless kLast it also prefetches the next round's U values. Phase 1 ballots "beyond" in fields 0..U-1 and
   // "equal" in fields U..2U-1; phase 2 ballots "equal" in fields 0..U-1. kFlagOverflow (last phase-1 round of a
   // multi-round slice) publishes the per-warp held-equal overflow flag; a single U = 1 round cannot overflow.
-  auto gatherRound = [&]<int U, bool kPhase2, bool kLast, bool kFlagOverflow>(IndexType base, IndexType rowOff) {
-    static_assert(!kFlagOverflow || (!kPhase2 && kLast), "the overflow flag is published in the last phase-1 round");
+  auto gatherRound = [&]<int U, bool kPhase2, bool kLast>(IndexType base, IndexType rowOff) {
+    // The overflow flag is published in the last phase-1 round of a multi-round slice.
+    constexpr bool kFlagOverflow = !kPhase2 && kLast && U > 1;
     constexpr int F = kPhase2 ? U : 2 * U;
     T v_next[kGatherBatch];
     if constexpr (!kLast) {
@@ -513,7 +511,6 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
           indicesSliceStart,
           topKWithinSliceStride,
           indicesWithinSliceStride,
-          outputSliceSize,
           /*writeIndex=*/slot,
           /*value=*/v[u],
           /*index=*/idx);
@@ -567,7 +564,6 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
           indicesSliceStart,
           topKWithinSliceStride,
           indicesWithinSliceStride,
-          outputSliceSize,
           /*writeIndex=*/writeIndex + eqRank[e],
           /*value=*/eqVal[e],
           /*index=*/eqIdx[e]);
@@ -579,12 +575,9 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   if (inputSliceSize <= stride) {
     // Short slice: one round per phase.
     v[0] = doLdg(&inputSliceStart[min(tidOff, lastOff)]);
-    gatherRound.template operator()<1, false, true, false>(0, 0);
-    if (finishWithHeldEquals(/*mayOverflow=*/false)) {
-      return;
-    }
-    // v[0] still holds this thread's element; the re-reading phase 2 needs no load.
-    gatherRound.template operator()<1, true, true, false>(0, 0);
+    gatherRound.template operator()<1, false, true>(0, 0);
+    // A single round never overflows the held equals (kEqCap >= 1), so this always finishes the output.
+    finishWithHeldEquals(/*mayOverflow=*/false);
     return;
   }
 
@@ -604,9 +597,9 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   loadFirstRound();
   IndexType rowOff = 0;
   for (IndexType base = 0; base < lastBase; base += roundStride, rowOff += roundStep) {
-    gatherRound.template operator()<kGatherBatch, false, false, false>(base, rowOff);
+    gatherRound.template operator()<kGatherBatch, false, false>(base, rowOff);
   }
-  gatherRound.template operator()<kGatherBatch, false, true, true>(lastBase, 0);
+  gatherRound.template operator()<kGatherBatch, false, true>(lastBase, 0);
 
   // We need to fill in the rest with actual == top-K values.
   // The number that we need is outputSliceSize - writeIndex.
@@ -625,10 +618,10 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     if (writeIndex >= outputSliceSize) {
       break;
     }
-    gatherRound.template operator()<kGatherBatch, true, false, false>(base, rowOff);
+    gatherRound.template operator()<kGatherBatch, true, false>(base, rowOff);
   }
   if (writeIndex < outputSliceSize) {
-    gatherRound.template operator()<kGatherBatch, true, true, false>(lastBase, 0);
+    gatherRound.template operator()<kGatherBatch, true, true>(lastBase, 0);
   }
 }
 

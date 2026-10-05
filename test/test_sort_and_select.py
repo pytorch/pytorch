@@ -1412,13 +1412,16 @@ class TestSortAndSelectCUDA(TestCase):
     @dtypes(torch.bfloat16, torch.float16, torch.float32)
     def test_topk_deterministic_ties(self, device, dtype):
         # Single-block topk on ROCm once ordered tied values by warp arrival (#196177).
-        for cols in (257, 1024):
-            x = torch.randint(0, 4, (256, cols), device=device).to(dtype)
+        # Slices longer than the block take the multi-round gather; few values force many ties.
+        for (rows, cols), high in product(
+            ((256, 257), (256, 1024), (8, 3000), (8, 4097)), (4, 1000)
+        ):
+            x = torch.randint(0, high, (rows, cols), device=device).to(dtype)
             x_cpu = x.cpu()
             for k, largest, sorted_ in product((8, 300), (True, False), (True, False)):
                 if k > cols:
                     continue
-                msg = f"{cols=} {k=} {largest=} {sorted_=}"
+                msg = f"{rows=} {cols=} {high=} {k=} {largest=} {sorted_=}"
                 _, idx = torch.topk(x, k, largest=largest, sorted=sorted_)
                 for _ in range(10):
                     rerun = torch.topk(x, k, largest=largest, sorted=sorted_)[1]
