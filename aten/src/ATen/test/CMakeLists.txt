@@ -95,6 +95,7 @@ foreach(test_src ${ATen_CUDA_TEST_SRCS})
     continue()
   endif()
   get_filename_component(test_ext ${test_src} LAST_EXT)
+  # hipify renames every "cuda" in the stem; these names only have the prefix.
   string(REGEX REPLACE "^cuda_" "hip_" test_name ${test_name})
   string(REGEX REPLACE "^\\.cu$" ".hip" test_ext ${test_ext})
   list(APPEND ATen_HIP_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/hip/${test_name}${test_ext})
