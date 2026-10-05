@@ -748,14 +748,6 @@ class CustomMmaMultistage : public CustomMmaBase<Shape_, Policy_, Stages> {
             arch::OpMultiplyAddComplexFastF32>::value) {
       accum = plus_accum(accum, tmp_accum);
     }
-
-    if (SharedMemoryClear == SharedMemoryClearOption::kZfill) {
-      // commit and drain all pending and predicated cp.async pnz from the GEMM
-      // mainloop
-      cutlass::arch::cp_async_fence();
-      cutlass::arch::cp_async_wait<0>();
-      __syncthreads();
-    }
   }
 };
 
