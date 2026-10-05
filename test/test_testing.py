@@ -1024,6 +1024,10 @@ def test_crash():
 
 def test_after():
     pass
+
+
+def test_fail_last():
+    raise AssertionError("expected failure")
 """
 
     @classmethod
@@ -1036,7 +1040,10 @@ def test_after():
                 t0_ms = int(time.time() * 1000)
                 proc = subprocess.run(
                     [
-                        sys.executable, "-m", "pytest", "xdist_report.py", "-n", "1", "--reruns", "1",
+                        # -x (as run_test.py passes for C++ tests) stops xdist on the last
+                        # test's final failure, before its teardown report. xdist does not
+                        # count worker crashes toward it.
+                        sys.executable, "-m", "pytest", "xdist_report.py", "-n", "1", "--reruns", "1", "-x",
                         "-p", "torch.testing._internal.test_report", f"--report-dir={report_dir}",
                         "-p", "no:cacheprovider", "-q",
                     ],
@@ -1067,11 +1074,12 @@ def test_after():
 
     def test_xdist_worker_crash(self) -> None:
         proc, runs, _, _ = self._xdist_runs()
-        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        # 2: xdist reports a session stopped by -x as interrupted.
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
         crash_runs = [
             (run["case_name"], run["outcome"], run["rerun_number"])
             for run in runs
-            if run["case_name"] in ("test_before", "test_crash", "test_after")
+            if run["case_name"] in ("test_before", "test_crash", "test_after", "test_fail_last")
         ]
         # pytest-rerunfailures reschedules the crashed test once.
         self.assertEqual(
@@ -1081,6 +1089,8 @@ def test_after():
                 ("test_crash", "crashed", 0),
                 ("test_crash", "crashed", 1),
                 ("test_after", "passed", 0),
+                ("test_fail_last", "failed", 0),
+                ("test_fail_last", "failed", 1),
             ],
         )
         for run in runs:

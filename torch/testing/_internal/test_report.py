@@ -658,6 +658,11 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
+            # xdist stops at -x/--maxfail right after the failing report, so that
+            # run's teardown never arrives; its outcome is already known.
+            for nodeid, run in list(self.runs.items()):
+                if run.failed_phase:
+                    self._finish(nodeid, run)
             if self.file is not None:
                 self.file.close()
                 self.file = None
