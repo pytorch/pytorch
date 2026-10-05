@@ -21,7 +21,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::Options> cloneOptions(
   options->config = cloneNcclConfig(source->config);
   options->group_name = source->group_name;
   options->group_desc = source->group_desc;
-  options->global_ranks_in_group = source->global_ranks_in_group;
   options->enable_reconfigure = source->enable_reconfigure;
   return options;
 }
@@ -74,6 +73,21 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
       "nccl2 shrink options must be ProcessGroupNCCL2.Options");
   auto childOptions =
       cloneOptions(overrideOptions ? overrideOptions : options_c10d_);
+  // The surviving ranks keep their order (child rank = rank - excluded ranks
+  // below it). Map them to world ranks like split() does.
+  const auto& parentRanks = options_c10d_->global_ranks_in_group;
+  const bool parentSpansWorld =
+      parentRanks.size() < static_cast<size_t>(getSize());
+  std::vector<uint64_t> childRanks;
+  childRanks.reserve(getSize() - excluded.size());
+  for (int r = 0; r < getSize(); ++r) {
+    if (seen.contains(r)) {
+      continue;
+    }
+    childRanks.push_back(
+        parentSpansWorld ? static_cast<uint64_t>(r) : parentRanks[r]);
+  }
+  childOptions->global_ranks_in_group = std::move(childRanks);
 
   c10::cuda::CUDAGuard guard(device_);
   ncclComm_t childComm = nullptr;

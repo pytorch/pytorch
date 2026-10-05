@@ -43,6 +43,7 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/Batch.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WorkNCCL.hpp>
 
 namespace c10d::nccl2 {
@@ -380,6 +381,14 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   std::string_view getCommName() const {
     return name_;
   }
+  TracingGuardInfo tracingInfo() const {
+    return {
+        getGroupUid(),
+        getGroupDesc(),
+        comm_size_,
+        global_rank_start_,
+        global_rank_stride_};
+  }
   // Underlying host ncclComm_t as an opaque integer pointer.
   int64_t getCommPtr() const;
   bool collectivesTimingEnabled() const {
@@ -678,6 +687,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   bool is_high_priority_stream_{false};
   std::string name_;
+  // options_c10d_->global_ranks_in_group as recorded in profiler metadata.
+  int global_rank_start_{-1};
+  int global_rank_stride_{-1};
 
   const ::c10d::ErrorHandlingMode async_error_handling_;
   const bool blocking_wait_;

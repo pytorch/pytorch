@@ -14,14 +14,17 @@
 
 namespace c10d::nccl2 {
 
-// Snapshot of communicator metadata captured at construction time.
-// Stored by work handles to avoid calling checked comm accessors that
-// may throw after the communicator transitions to UNINITIALIZED or FINALIZED.
+// Process group metadata recorded with every record_param_comms event, matching
+// stock ProcessGroupNCCL: the PG name tuple is (uid, desc) and the global rank
+// start/stride describe the group's members in world-rank terms (see
+// getGlobalRankStartAndStride). Non-owning: views into the issuing process
+// group, which outlives the guard.
 struct TracingGuardInfo {
-  std::string commName;
-  std::string commId;
+  std::string_view pgUid;
+  std::string_view pgDesc;
   int commSize{0};
-  int rank{-1};
+  int globalRankStart{-1};
+  int globalRankStride{-1};
 };
 
 class TracingGuard {
@@ -32,8 +35,7 @@ class TracingGuard {
   // sequence number), so it has to be per-PG: a process-wide counter makes a
   // rank's numbering depend on how it interleaved its other groups' work.
   TracingGuard(
-      std::string_view comm_name,
-      int comm_size,
+      const TracingGuardInfo& info,
       std::string_view collective_name,
       int collective_rank,
       uint64_t sequence_number,
@@ -41,42 +43,37 @@ class TracingGuard {
       const std::vector<at::Tensor>& output_tensor_list = {});
 
   TracingGuard(
-      std::string_view comm_name,
-      int comm_size,
+      const TracingGuardInfo& info,
       std::string_view collective_name,
       int collective_rank,
       uint64_t sequence_number,
       const at::Tensor& input_tensor,
       const at::Tensor& output_tensor);
 
+  // Records the given split sizes rather than each tensor's numel, like stock
+  // all_to_allv: empty for an equal split, else the per-rank splits.
   TracingGuard(
       const TracingGuardInfo& info,
       std::string_view collective_name,
-      uint64_t sequence_number,
-      const std::vector<at::Tensor>& input_tensor_list = {},
-      const std::vector<at::Tensor>& output_tensor_list = {});
-
-  TracingGuard(
-      const TracingGuardInfo& info,
-      std::string_view collective_name,
+      int collective_rank,
       uint64_t sequence_number,
       const at::Tensor& input_tensor,
-      const at::Tensor& output_tensor);
+      const at::Tensor& output_tensor,
+      const std::vector<int64_t>& input_split_sizes,
+      const std::vector<int64_t>& output_split_sizes);
 
   void initializeTracingCommon(
-      std::string_view comm_name,
-      std::string_view comm_id,
-      int comm_size,
+      const TracingGuardInfo& info,
       std::string_view collective_name,
       int collective_rank,
       uint64_t sequence_number,
       const std::vector<at::Tensor>& input_tensor_list,
-      const std::vector<at::Tensor>& output_tensor_list);
+      const std::vector<at::Tensor>& output_tensor_list,
+      const std::vector<int64_t>& input_split_sizes,
+      const std::vector<int64_t>& output_split_sizes);
 
   std::shared_ptr<torch::ParamCommsDebugInfo> getDebugInfo(
-      std::string_view comm_name,
-      std::string_view comm_id,
-      int comm_size,
+      const TracingGuardInfo& info,
       std::string_view collective_name,
       int collective_rank,
       const std::vector<at::Tensor>& input_tensor_list,

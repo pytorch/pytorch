@@ -4,6 +4,8 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.hpp>
 
+#include <algorithm>
+
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 namespace c10d::nccl2 {
@@ -23,9 +25,11 @@ c10::intrusive_ptr<ProcessGroupNCCL> makePrimary(
 
 ProcessGroupNCCLLazy::PairFactory makePairFactory(
     c10::intrusive_ptr<::c10d::Store> store,
+    int rank,
+    int size,
     c10::intrusive_ptr<ProcessGroupNCCL::Options> options) {
-  return [store = std::move(store), options = std::move(options)](
-             int pair_rank, const std::string& pair_name) {
+  return [store = std::move(store), rank, size, options = std::move(options)](
+             int pair_rank, int peer, const std::string& pair_name) {
     auto pair_store =
         c10::make_intrusive<::c10d::PrefixStore>(pair_name, store);
     auto pair_options = ProcessGroupNCCL::Options::create();
@@ -33,6 +37,15 @@ ProcessGroupNCCLLazy::PairFactory makePairFactory(
     pair_options->is_high_priority_stream = options->is_high_priority_stream;
     pair_options->config = cloneNcclConfig(options->config);
     pair_options->group_name = pair_name;
+    // World ranks of the pair, indexed by pair rank (the lower group rank is
+    // pair rank 0). An empty or short map means this group spans the world.
+    const auto& ranks = options->global_ranks_in_group;
+    auto globalRank = [&](int r) {
+      return ranks.size() < static_cast<size_t>(size) ? static_cast<uint64_t>(r)
+                                                      : ranks[r];
+    };
+    pair_options->global_ranks_in_group = {
+        globalRank(std::min(rank, peer)), globalRank(std::max(rank, peer))};
     return c10::make_intrusive<ProcessGroupNCCL>(
         pair_store, pair_rank, /*size=*/2, pair_options);
   };
@@ -55,6 +68,8 @@ ProcessGroupNCCLLazy::ProcessGroupNCCLLazy(
               options ? options : ProcessGroupNCCL::Options::create()),
           makePairFactory(
               store,
+              rank,
+              size,
               options ? options : ProcessGroupNCCL::Options::create())) {}
 
 } // namespace c10d::nccl2
