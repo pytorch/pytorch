@@ -3165,21 +3165,30 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 
 _IntLike: TypeAlias = int | sympy.Expr
 
-# HIP archs where decompose_k is offered. gfx1100 hangs in test_max_autotune
-# and has no perf data for this candidate; gfx90a and gfx942 are the other
-# datacenter CDNA targets this default is scoped to.
-DECOMPOSE_K_HIP_ARCHS = frozenset({"gfx90a", "gfx942", "gfx950"})
+def decompose_k_hip_arch_enabled(arch: str) -> bool:
+    """Whether this HIP gfx name may autotune decompose_k.
+
+    RDNA3 stays off, the same family as ``using_rocm_rdna3``: every ``gfx11*``
+    name (gfx1100 through gfx1151), including a feature suffix. gfx12xx and
+    every other ``gfx*`` name are enabled.
+    """
+    base = arch.split(":", 1)[0]
+    if not base.startswith("gfx"):
+        return False
+    return not base.startswith("gfx11")
 
 
 def decompose_k_supported_on_device() -> bool:
-    """CUDA may autotune decompose_k. HIP may on gfx90a, gfx942, and gfx950.
+    """CUDA may autotune decompose_k. HIP may on every arch except RDNA3.
 
-    ``TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS=0`` still disables it on every
-    device. That check stays in ``use_decompose_k_choice``.
+    ``using_rocm_rdna3`` is the device check. ``TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS=0``
+    still disables decompose_k on every device, inside ``use_decompose_k_choice``.
     """
     if torch.version.hip is None:
         return True
-    return rocm_gfx_arch() in DECOMPOSE_K_HIP_ARCHS
+    if not rocm_gfx_arch():
+        return False
+    return not using_rocm_rdna3()
 
 
 @functools.cache
