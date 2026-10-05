@@ -120,6 +120,9 @@ class WorkNCCL : public c10d::Work {
       std::string_view coll_name,
       c10::ArrayRef<at::Tensor> inputs = {});
   void recordEnd();
+  // wait() without the profiler "wait" event, for waits the backend issues
+  // internally; stock records "wait" only for user wait() calls.
+  bool waitUntraced(std::chrono::milliseconds timeout = kNoTimeout);
 
   friend class ProcessGroupNCCL;
   friend class WorkNCCLQueue;

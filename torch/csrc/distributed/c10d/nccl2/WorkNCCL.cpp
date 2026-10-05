@@ -400,13 +400,6 @@ void WorkNCCL::synchronizeInternal() {
     return;
   }
 
-  TracingGuard tracingGuard(
-      std::string(state_->comm->getCommName()),
-      state_->comm->getSize(),
-      "wait",
-      state_->comm->getRank(),
-      state_->seq);
-
   // Make the current stream wait for the end event recorded on the work's
   // stream, ordering subsequent current-stream ops after this collective.
   auto current_stream =
@@ -433,6 +426,16 @@ void WorkNCCL::synchronizeInternal() {
 }
 
 bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
+  // Like stock, one event per wait(), even if the work already completed.
+  TracingGuard tracingGuard(
+      state_->comm->tracingInfo(),
+      "wait",
+      state_->comm->getRank(),
+      state_->seq);
+  return waitUntraced(timeout);
+}
+
+bool WorkNCCL::waitUntraced(std::chrono::milliseconds timeout) {
   synchronize();
 
   auto current_stream =
