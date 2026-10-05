@@ -17,22 +17,108 @@ from datetime import timedelta
 from unittest import mock
 
 import torch
+import torch.cuda._gpu_trace as gpu_trace
 import torch.distributed as dist
 from torch._C._distributed_c10d import ErrorType, ReconfigureOptions
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
-    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
+    parametrize,
     run_tests,
     TEST_CUDA,
     TestCase,
+)
+
+
+class ProcessGroupNCCL2GraphCleanupTest(MultiProcessTestCase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("cache_enabled,num_collectives", [(True, 512), (False, 1)])
+    def test_graph_cleanup(self, device, cache_enabled, num_collectives) -> None:
+        device = torch.device(torch.device(device).type, self.rank)
+        torch.cuda.set_device(device)
+        env = {
+            "TORCH_NCCL_CUDA_EVENT_CACHE": str(int(cache_enabled)),
+            "TORCH_NCCL_ENABLE_TIMING": "1",
+            "TORCH_NCCL_BLOCKING_WAIT": "0",
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "3",
+        }
+        with mock.patch.dict(os.environ, env):
+            dist.init_process_group(
+                "nccl2",
+                init_method=f"file://{self.file_name}",
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+            try:
+                stream = torch.cuda.Stream(device=device)
+                stream.wait_stream(torch.cuda.current_stream(device))
+                with torch.cuda.stream(stream):
+                    for _ in range(3):
+                        warmup = torch.ones(4, device=device)
+                        dist.all_reduce(warmup)
+                torch.cuda.synchronize(device)
+
+                recorded_events = set()
+                deleted_events = set()
+                torch._C._activate_gpu_trace()
+                gpu_trace.register_callback_for_event_record(
+                    lambda event, stream: recorded_events.add(event)
+                )
+                gpu_trace.register_callback_for_event_deletion(deleted_events.add)
+
+                for explicit_reset in (True, False):
+                    tensor = torch.ones(num_collectives, 4, device=device)
+                    inputs = list(tensor.unbind())
+                    stream.wait_stream(torch.cuda.current_stream(device))
+                    recorded_events.clear()
+                    graph = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(graph, stream=stream):
+                        for input_tensor in inputs:
+                            dist.all_reduce(input_tensor)
+                    captured_events = recorded_events.copy()
+                    graph.replay()
+                    torch.cuda.synchronize(device)
+                    self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+                    deleted_events.clear()
+                    if explicit_reset:
+                        graph.reset()
+                    del graph
+
+                    # Each work has two events; the default cache holds 1000.
+                    min_deleted = 2 * num_collectives - 1000 if cache_enabled else 2
+                    deadline = time.monotonic() + 30
+                    while len(captured_events & deleted_events) < min_deleted:
+                        if time.monotonic() >= deadline:
+                            self.fail("Captured CUDA events were not destroyed")
+                        time.sleep(0.05)
+
+                tensor = torch.ones(4, device=device)
+                dist.all_reduce(tensor)
+                self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+            finally:
+                dist.destroy_process_group()
+
+
+instantiate_device_type_tests(
+    ProcessGroupNCCL2GraphCleanupTest, globals(), only_for="cuda"
 )
 
 
@@ -272,6 +358,31 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
         dist.all_reduce(t)
         expected = float(sum(range(self.world_size)))
         self.assertEqual(t, torch.full((4,), expected, device=self.device))
+
+
+class ProcessGroupNCCL2CommPtrTest(_ProcessGroupNCCL2OptionsTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_comm_ptr(self) -> None:
+        # The legacy backend returns the communicator of the current device.
+        torch.cuda.set_device(self.device)
+        self._check_all_reduce()
+        backend = dist.get_backend_impl(device=self.device)
+        self.assertNotEqual(backend.comm_ptr, 0)
+        # _comm_ptr() is kept for backwards compatibility.
+        self.assertEqual(backend._comm_ptr(), backend.comm_ptr)
+
+
+class ProcessGroupNCCLLazyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+
+class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-legacy"
 
 
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
@@ -819,7 +930,6 @@ class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_large_in_place_all_gather(self) -> None:
         numel = 16 * 1024 * 1024
         output = torch.empty(
@@ -1254,6 +1364,21 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
     a torch.cuda call. Runs in a subprocess because the harness calls
     torch.cuda.set_device in setUp, which hides uninitialized-allocator bugs.
     """
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires at least 2 GPUs")
+    def test_watchdog_uses_group_device(self) -> None:
+        self._run_child(
+            """
+import time
+# Let the watchdog initialize and poll the work queue.
+time.sleep(2)
+assert torch._C._cuda_hasPrimaryContext(1)
+assert not torch._C._cuda_hasPrimaryContext(0), "watchdog created a CUDA context on GPU 0"
+""",
+            device_id='torch.device("cuda:1")',
+        )
 
     def _run_child(
         self,
