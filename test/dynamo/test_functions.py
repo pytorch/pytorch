@@ -6433,6 +6433,32 @@ class GraphModule(torch.nn.Module):
         ):
             torch.compile(dynamic_owner, backend="eager", fullgraph=True)(x)
 
+    def test_classmethod_descriptor_through_super(self):
+        class Mid(dict):
+            pass
+
+        class D(Mid):
+            @classmethod
+            def from_class(cls, value):
+                return super().fromkeys((1,), value)
+
+        def fn(x):
+            result = D.from_class(x)
+            return result[1] + 1, type(result) is D
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+        def replacement(cls, keys, value=None):
+            return {1: value + 10}
+
+        Mid.fromkeys = classmethod(replacement)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_bound_builtin_method_guard_distinguishes_equal_aliases(self):
         class Holder:
             target = (1).conjugate
@@ -6612,7 +6638,7 @@ class GraphModule(torch.nn.Module):
         )
 
     @parametrize("use_subclass", (False, True))
-    def test_bound_fromkeys_ordered_dict_input_unsupported(self, use_subclass):
+    def test_bound_fromkeys_ordered_dict_input(self, use_subclass):
         class OD(collections.OrderedDict):
             pass
 
@@ -6623,30 +6649,130 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return x + len(bound(source))
 
-        with self.assertRaisesRegex(Unsupported, "failed to call dict.fromkeys"):
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
-    def test_bound_dict_subclass_fromkeys_unsupported(self):
-        calls = []
-
-        class Meta(type):
-            @property
-            def __name__(cls):
-                calls.append("__name__")
-                return "WrongName"
-
-        class D(dict, metaclass=Meta):
+    def test_bound_dict_subclass_fromkeys(self):
+        class D(dict):
             pass
 
         bound = D.fromkeys
+
+        def fn(x):
+            return bound((1,), x)
+
+        x = torch.ones(1)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, fn(x))
+        self.assertIs(type(actual), D)
+
+    @parametrize("access", ("direct", "super"))
+    def test_dict_subclass_instance_fromkeys_unsupported(self, access):
+        calls = []
+
+        class D(dict):
+            def from_super(self, value):
+                return super().fromkeys((1,), value)
+
+        obj = D()
+
+        def fn(x):
+            calls.append("call")
+            result = obj.fromkeys((1,), x) if access == "direct" else obj.from_super(x)
+            return result[1] + 1, type(result) is D
+
+        x = torch.ones(1)
+        expected = fn(x)
+        expected_calls = calls.copy()
         calls.clear()
+        with self.assertRaisesRegex(
+            Unsupported, "classmethod descriptor on dict subclass instance"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(calls, [])
+
+        self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
+        self.assertEqual(calls, expected_calls)
+
+    def test_bound_dict_subclass_fromkeys_hooks(self):
+        calls = []
+
+        class D(dict):
+            def __new__(cls):
+                calls.append("new")
+                return super().__new__(cls)
+
+            def __init__(self):
+                calls.append("init")
+
+            def __setitem__(self, key, value):
+                calls.append(("setitem", key))
+                return super().__setitem__(key, value)
+
+        bound = D.fromkeys
+
+        def fn(x):
+            result = bound((1, 2), x)
+            return result[1] + result[2], type(result) is D
+
+        x = torch.ones(1)
+        expected = fn(x)
+        expected_calls = calls.copy()
+        calls.clear()
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+        self.assertEqual(calls, expected_calls)
+
+    @parametrize(
+        "case, error, expected_call",
+        (
+            (
+                "custom_metaclass",
+                r"Unsupported dict subclass fromkeys\(\) construction",
+                "call",
+            ),
+            (
+                "plain_dict_result",
+                r"Unsupported dict subclass fromkeys\(\) result",
+                "new",
+            ),
+        ),
+    )
+    def test_bound_dict_subclass_fromkeys_custom_metaclass(
+        self, case, error, expected_call
+    ):
+        calls = []
+
+        if case == "custom_metaclass":
+
+            class Meta(type):
+                def __call__(cls, *args, **kwargs):
+                    calls.append("call")
+                    return super().__call__(*args, **kwargs)
+
+            class D(dict, metaclass=Meta):
+                pass
+
+        else:
+
+            class D(dict):
+                def __new__(cls):
+                    calls.append("new")
+                    return {}
+
+        bound = D.fromkeys
 
         def fn(x):
             return bound((1,), x)[1]
 
-        with self.assertRaisesRegex(Unsupported, "Unsupported dict type for fromkeys"):
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        x = torch.ones(1)
+        with self.assertRaisesRegex(Unsupported, error):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
         self.assertEqual(calls, [])
+
+        self.assertEqual(torch.compile(fn, backend="eager")(x), x)
+        self.assertEqual(calls, [expected_call])
 
     @parametrize(
         "case, error",
