@@ -14,8 +14,8 @@ in the archive, each recoverable exactly:
   back out of the driver, and JIT-generated kernels (cuBLASLt's ``nvjet_*``)
   exist in no file on disk;
 * memory *layout* -- the allocator's expandable segments and the blocks inside
-  them, re-reserved at the virtual addresses they were recorded at (see Note
-  [Expandable Segment Reserved Address]);
+  them, re-reserved at the virtual addresses they were recorded at
+  (see Note [Expandable Segment Reserved Address]);
 * the graph template itself -- node parameters, launch attributes and topology --
   replayed byte-for-byte because the memory underneath it did not move.
 
