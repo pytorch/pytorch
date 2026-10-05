@@ -8731,6 +8731,39 @@ class TestNNDeviceType(NNTestCase):
             l.backward()
         self.assertTrue(len(f.getvalue()) == 0)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    @parametrize_test("reduction", ["mean", "sum"])
+    @parametrize_test("mixed_dtype", [False, True])
+    def test_mse_loss_reduced_storage(self, device, dtype, reduction, mixed_dtype):
+        input_dtype = torch.float16 if mixed_dtype else dtype
+        input = torch.randn(4, 5, 6, device=device, dtype=input_dtype)
+        target = torch.randn_like(input, dtype=dtype)
+        loss = F.mse_loss(input, target, reduction=reduction)
+
+        self.assertEqual(loss.shape, ())
+        self.assertEqual(loss.dtype, dtype)
+        # https://github.com/pytorch/pytorch/issues/198951
+        self.assertEqual(loss.untyped_storage().nbytes(), loss.element_size())
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    @parametrize_test("reduction", [subtest(1, name="mean"), subtest(2, name="sum")])
+    @parametrize_test("out_shape", [(), (0,)])
+    def test_mse_loss_reduced_out_storage(self, device, dtype, reduction, out_shape):
+        input = torch.randn(4, 5, 6, device=device, dtype=dtype)
+        target = torch.randn_like(input)
+        out = torch.empty(out_shape, device=device, dtype=dtype)
+        result = torch.ops.aten.mse_loss.out(input, target, reduction, out=out)
+
+        self.assertIs(result, out)
+        self.assertEqual(out.shape, ())
+        self.assertEqual(out.untyped_storage().nbytes(), out.element_size())
+        expected = (input - target).square()
+        self.assertEqual(out, expected.mean() if reduction == 1 else expected.sum())
+
     @onlyAccelerator
     def test_mse_loss_error(self, device):
         i = torch.randn((10, 1), device=device)
