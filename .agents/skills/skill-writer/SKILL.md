@@ -41,7 +41,7 @@ Determine where to create the Skill:
 - Experimental Skills
 - Personal productivity tools
 
-**Project Skills** (`.agents/skills/`):
+**Project Skills** (`.agents/skills/`; `.claude/skills` links here for Claude Code):
 - Team workflows and conventions
 - Project-specific expertise
 - Shared utilities (committed to git)
