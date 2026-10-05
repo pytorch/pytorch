@@ -4943,6 +4943,8 @@ Tensor triangular_solve_jvp(
   if (transpose) {
     dA_read = dA_read.mT();
   }
+  // Unlike linalg.solve, triangular_solve has no vector case. A B of shape
+  // A.shape[:-1] is one matrix broadcast over the batch.
   return std::get<0>(at::triangular_solve(
       dB - dA_read.matmul(X), A, upper, transpose, unitriangular));
 }
@@ -5059,6 +5061,8 @@ Tensor cholesky_solve_jvp(
   at::NoTF32Guard disable_tf32;
   auto dK = upper ? dU.mH().matmul(U) : dU.matmul(U.mH());
   auto dA = dK + dK.mH();
+  // Unlike linalg.solve, cholesky_solve has no vector case. A B of shape
+  // A.shape[:-1] is one matrix broadcast over the batch.
   return at::cholesky_solve(dB - dA.matmul(X), U, upper);
 }
 
