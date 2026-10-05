@@ -16,6 +16,7 @@
 #include <ATen/Context.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/WaitCounter.h>
 #include <c10/util/env.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -443,6 +444,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
 }
 
 void ProcessGroupNCCL::abort() {
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__abort);
   // User-initiated (backend.abort() / _abort_process_group()): tear the
   // communicator down and return. Never terminates the process, whatever
   // TORCH_NCCL_ASYNC_ERROR_HANDLING says -- that gate only covers failures the
@@ -450,6 +452,7 @@ void ProcessGroupNCCL::abort() {
   TC_LOG(INFO, this) << "abort() requested on rank " << rank_
                      << "; aborting the NCCL communicator";
   if (options_c10d_->enable_reconfigure) {
+    aborted_ = true;
     comm_state_ = CommState::ERROR;
     revokeNcclComm();
   } else {
@@ -460,6 +463,7 @@ void ProcessGroupNCCL::abort() {
     // again after reconfigure(). The error is still published before the
     // teardown, so work in flight reports it instead of completing.
     stopWatchdog();
+    aborted_ = true;
     comm_state_ = CommState::ERROR;
     abortNcclComm();
   }
@@ -514,6 +518,17 @@ std::unordered_map<std::string, uint64_t> ProcessGroupNCCL::getMemoryStats() {
     default:
       return ::c10d::ErrorType::SUCCESS;
   }
+}
+
+std::string ProcessGroupNCCL::commErrorReason() {
+  if (aborted_) {
+    return "communicator was aborted";
+  }
+  std::lock_guard<std::mutex> lock(comm_error_mutex_);
+  if (comm_error_reason_.empty()) {
+    return "communicator is in an error state";
+  }
+  return comm_error_reason_;
 }
 
 void ProcessGroupNCCL::finalize() {

@@ -510,6 +510,11 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   comm_state_ = CommState::NORMAL;
   shutdown_ = false;
   revoked_ = false;
+  aborted_ = false;
+  {
+    std::lock_guard<std::mutex> lock(comm_error_mutex_);
+    comm_error_reason_.clear();
+  }
 
   // Resolve the device on the first reconfigure: prefer the bound device,
   // else the caller's current CUDA device. The bootstrap's rank-based default

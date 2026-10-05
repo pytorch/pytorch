@@ -140,6 +140,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       !options_c10d_->enable_reconfigure || supportsReconfigure(),
       "nccl2 reconfigure requires NCCL 2.28 or later (RCCL 2.30.7 or later "
       "on ROCm)");
+  ::c10d::Backend::init();
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
@@ -330,6 +331,7 @@ void ProcessGroupNCCL::shutdown() {
 }
 
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
+  C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.getMemAllocator");
   // Symmetric (VMM-backed) CUDA allocator backed by ncclMemAlloc/ncclMemFree.
   // Moved here from torchcomms' TorchCommFactory allocator registration.
   static std::shared_ptr<c10::Allocator> allocator = [] {

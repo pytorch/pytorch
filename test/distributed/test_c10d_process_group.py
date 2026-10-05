@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
+import json
 import math
 import sys
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -20,7 +22,29 @@ from c10d_backend_common import (
 
 from torch._C._distributed_c10d import WorkResult
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
+from torch.testing._internal.common_utils import get_cycles_per_ms, IS_FBCODE, run_tests
+
+
+def _wait_counter_values():
+    from torch._C._distributed_c10d import _get_handler, _Request, _Response
+
+    class Request(_Request):
+        def body(self):
+            return b""
+
+        def params(self):
+            return {}
+
+    class Response(_Response):
+        def set_content(self, content, content_type):
+            self.content = content
+
+        def set_status(self, status):
+            self.status = status
+
+    resp = Response()
+    _get_handler("wait_counter_values")(Request(), resp)
+    return json.loads(resp.content)
 
 
 class AbstractProcessGroupTest(C10dBackendTestContinuous):
@@ -160,6 +184,24 @@ class AbstractProcessGroupTest(C10dBackendTestContinuous):
         future.wait()
         expected = torch.full_like(tensor, sum(range(1, self.world_size + 1)))
         self.assertEqual(tensor, expected)
+
+    def test_check_timeout_wait_counter(self):
+        if not self.has_check_timeout_wait_counter:
+            self.skipTest(f"{self.backend_name} has no checkTimeout wait counter")
+        if IS_FBCODE:
+            self.skipTest("fbcode uses its own WaitCounter backend")
+        # The first collective blocks the host while the communicator starts.
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        name = "pytorch.wait_counter.ProcessGroupNCCL__checkTimeout"
+        before = _wait_counter_values().get(name, {}).get("total_calls", 0)
+
+        # Keep the work pending so wait(timeout) has to check the timeout.
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+        work = dist.all_reduce(torch.ones(1, device=self.device), async_op=True)
+        work.wait(timedelta(seconds=60))
+
+        self.assertGreater(_wait_counter_values()[name]["total_calls"], before)
 
 
 instantiate_backend_tests(

@@ -6,6 +6,7 @@
 
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/WaitCounter.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
@@ -268,6 +269,7 @@ void ProcessGroupNCCL::checkWorkQueue() {
 
 // Retire completed work and graph states and check for timeouts.
 void ProcessGroupNCCL::timeoutWatchdog() noexcept {
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__Watchdog__run);
   TC_LOG(INFO, this) << "Timeout thread starting for rank: " << rank_;
 
   // Honor the noexcept contract: the loop issues NCCL probes (NCCL_CHECK) and
@@ -324,7 +326,20 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
             nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr),
             "failed to get async error");
         if (asyncErr != ncclSuccess && asyncErr != ncclInProgress) {
+          const std::string reason = std::string("nccl hit async error: ") +
+              ncclGetErrorString(asyncErr);
+          {
+            std::lock_guard<std::mutex> lock(comm_error_mutex_);
+            comm_error_reason_ = reason;
+          }
           comm_state_ = CommState::ERROR;
+          // Fail the oldest outstanding work now so it reports the error
+          // before handleWatchdogFailure() can terminate the process. Like
+          // checkWorkQueue(), this may drop the last reference to this comm.
+          workq_.garbageCollect();
+          if (shutdown_) {
+            break;
+          }
           // Detected here rather than through the work queue, so this needs its
           // own notification; see checkWorkQueue() for why detection and not
           // just teardown.
@@ -338,9 +353,7 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
                 << "Async error on rank " << rank_ << ": "
                 << ncclGetErrorString(asyncErr) << " (reconfigurable mode)";
           }
-          handleWatchdogFailure(
-              std::string("error - nccl hit async error: ") +
-              ncclGetErrorString(asyncErr));
+          handleWatchdogFailure("error - " + reason);
         }
       }
     }
