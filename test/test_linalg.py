@@ -3296,11 +3296,9 @@ class TestLinalg(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/196694:
         # b has the shape of L.shape[:-1], and the JVP read it as a batch of vectors
         def f(t):
-            one = torch.ones((), dtype=t.dtype, device=device)
-            zero = torch.zeros((), dtype=t.dtype, device=device)
-            L = torch.stack((2 * one, zero, t, 3 * one, 3 * one, zero, 2 * t + 1, 2 * one)).reshape(2, 2, 2)
-            b = torch.tensor([[1, 2], [-1, 3]], dtype=t.dtype, device=device)
-            w = torch.tensor([[[1, 2], [3, 4]], [[2, -1], [4, 3]]], dtype=t.dtype, device=device)
+            L = t.new_tensor([[[2, 0], [0, 3]], [[3, 0], [1, 2]]]) + t * t.new_tensor([[[0, 0], [1, 0]], [[0, 0], [2, 0]]])
+            b = t.new_tensor([[1, 2], [-1, 3]])
+            w = t.new_tensor([[[1, 2], [3, 4]], [[2, -1], [4, 3]]])
             return (torch.cholesky_solve(b, L, upper=False) * w).sum()
 
         t = torch.tensor(-7.0, dtype=dtype, device=device)
@@ -5192,9 +5190,7 @@ class TestLinalg(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/196707:
         # with unitriangular=True the JVP used the tangent of the diagonal
         def f(t):
-            a = torch.stack(
-                (t + 2, t / 4, t.new_tensor(0), 3 - t, 2 * t + 1, 1 - t / 3, t.new_tensor(0), t + 4)
-            ).reshape(2, 2, 2)
+            a = t.new_tensor([[[2, 0], [0, 3]], [[1, 1], [0, 4]]]) + t * t.new_tensor([[[1, 1 / 4], [0, -1]], [[2, -1 / 3], [0, 1]]])
             b = t.new_tensor([[[1, 2], [3, -1]], [[2, -2], [1, 4]]])
             w = t.new_tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
             x = torch.triangular_solve(b, a, upper=True, transpose=False, unitriangular=True)[0]
