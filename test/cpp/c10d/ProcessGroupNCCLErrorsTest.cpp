@@ -3,6 +3,8 @@
 #include <fstream>
 #include <thread>
 
+#include <sys/resource.h>
+
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
@@ -309,6 +311,9 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
     // watchdog logged anything.
     EXPECT_DEATH(
         {
+          // CI enables core dumps, and dumping a CUDA process takes minutes.
+          struct rlimit noCore {};
+          setrlimit(RLIMIT_CORE, &noCore);
           auto options = c10d::ProcessGroupNCCL::Options::create();
           // The watchdog holds a sliced base copy of the work, so a fixture
           // that overrides isCompleted() cannot stall it. A zero deadline is
@@ -370,6 +375,10 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   ASSERT_TRUE(
       setenv(c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING[0].c_str(), "0", 1) == 0);
   ASSERT_TRUE(setenv(c10d::TORCH_NCCL_PROPAGATE_ERROR[0].c_str(), "1", 1) == 0);
+  // The watchdog sleeps 4x this after each failed work, a minute by default.
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC[0].c_str(), "100", 1) ==
+      0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1, options);
