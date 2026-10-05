@@ -6063,6 +6063,7 @@ class TestQuantizeFx(QuantizationTestCase):
             model = MyModel()
             model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
             model(*example_inputs)
+            self.fail("Test")
             model = convert_fx(model, backend_config=backend_config)
             expected_node_occurrence = {
                 ns.call_module(torch.ao.nn.quantized.Linear) : 1,
