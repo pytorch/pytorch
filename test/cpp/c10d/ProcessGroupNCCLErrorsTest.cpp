@@ -312,7 +312,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
     EXPECT_DEATH(
         {
           // CI enables core dumps, and dumping a CUDA process takes minutes.
-          struct rlimit noCore {};
+          struct rlimit noCore{};
           setrlimit(RLIMIT_CORE, &noCore);
           auto options = c10d::ProcessGroupNCCL::Options::create();
           // The watchdog holds a sliced base copy of the work, so a fixture
