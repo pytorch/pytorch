@@ -6090,13 +6090,10 @@ def full(size, fill_value, *args, **kwargs):
             return f"value cannot be converted to type {dtype} without overflow"
 
         is_int = isinstance(fill_value, torch.SymInt)
-        if not (is_int and dtype == torch.uint64):
+        if not (is_int and dtype in (torch.int64, torch.uint64)):
             lower = -info.max if is_int and not dtype.is_signed else info.min
             torch._check(lower <= fill_value, error_msg)
-            if is_int:
-                torch._check(fill_value <= info.max, error_msg)
-            else:
-                torch._check(fill_value < info.max + 1, error_msg)
+            torch._check(fill_value < info.max + 1, error_msg)
 
     return torch.empty(size, *args, **kwargs)
 

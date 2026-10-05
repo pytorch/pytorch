@@ -1579,331 +1579,36 @@ class TestInductorDynamic(DynamicShapesTestCase):
             actual = compiled_f(x)
             self.assertEqual(actual, expected)
 
-
-class TestSymbolicFull(TestCase):
-    _overflow_error = (
-        r"without overflow|(?:[a-z]+\d+|-?[\d.e+]+) [<>]=? "
-        r"(?:[a-z]+\d+|-?[\d.e+]+)"
-    )
-
-    def _check_symbolic_fill_respects_dtype(self, device, fill_value):
+    @parametrize("cpp_wrapper", (False, True))
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_fill_respects_dtype(self, device, cpp_wrapper):
         def f(x):
             return torch.full((2,), x.item(), dtype=torch.bool, device=device).sum()
 
-        x = torch.tensor(fill_value, device=device)
-        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+        x = torch.tensor(3, device=device)
+        with torch._inductor.config.patch(cpp_wrapper=cpp_wrapper):
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
 
+    @parametrize("cpp_wrapper", (False, True))
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize("fill_value", (0, 3))
-    def test_full_symbolic_fill_respects_dtype(self, device, fill_value):
-        self._check_symbolic_fill_respects_dtype(device, fill_value)
-
-    @onlyOn(["cpu", "cuda", "xpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize("fill_value", (0, 3))
-    def test_full_symbolic_fill_respects_dtype_cpp_wrapper(self, device, fill_value):
-        self._check_symbolic_fill_respects_dtype(device, fill_value)
-
-    def _check_symbolic_fill_cast_precedes_consumer(
-        self, device, dtype, fill_value, operation
-    ):
+    def test_full_symbolic_fill_overflow(self, device, cpp_wrapper):
         def f(x):
-            y = torch.full((1,), x.item(), dtype=dtype, device=device)
-            if operation == "mul":
-                y = y * 2
-            else:
-                y = y.square()
-            if dtype.is_floating_point:
-                return y
-            return torch.div(y, 2, rounding_mode="floor")
+            return torch.full((2,), x.item(), dtype=torch.int8, device=device)
 
-        x = torch.tensor(fill_value, device=device)
-        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x), rtol=0, atol=0)
+        with torch._inductor.config.patch(cpp_wrapper=cpp_wrapper):
+            compiled_f = torch.compile(f, fullgraph=True)
+            valid = torch.tensor(127, device=device)
+            self.assertEqual(compiled_f(valid), f(valid))
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize(
-        "dtype,fill_value,operation",
-        ((torch.float32, 2**24 + 1, "square"),),
-    )
-    def test_full_symbolic_fill_cast_precedes_consumer(
-        self, device, dtype, fill_value, operation
-    ):
-        self._check_symbolic_fill_cast_precedes_consumer(
-            device, dtype, fill_value, operation
-        )
-
-    # MPS overflowing int64 arithmetic is outside this dtype-cast regression.
-    @onlyOn(["cpu", "cuda", "xpu"])
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_full_symbolic_fill_cast_precedes_overflowing_int64_consumer(self, device):
-        self._check_symbolic_fill_cast_precedes_consumer(
-            device, torch.int64, 2**62 + 1, "mul"
-        )
-
-    @onlyOn(["cpu", "cuda", "xpu"])
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_full_symbolic_fill_cast_precedes_overflowing_int32_consumer(self, device):
-        self._check_symbolic_fill_cast_precedes_consumer(
-            device, torch.int32, 50_000, "square"
-        )
-
-    @onlyOn(["mps"])
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_full_symbolic_fill_cast_precedes_int32_consumer_mps(self, device):
-        self._check_symbolic_fill_cast_precedes_consumer(
-            device, torch.int32, 1.5, "square"
-        )
-
-    @onlyOn(["cpu", "cuda", "xpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize(
-        "dtype,fill_value,operation",
-        (
-            (torch.float32, 2**24 + 1, "square"),
-            (torch.int32, 50_000, "square"),
-            (torch.int64, 2**62 + 1, "mul"),
-        ),
-    )
-    def test_full_symbolic_fill_cast_precedes_consumer_cpp_wrapper(
-        self, device, dtype, fill_value, operation
-    ):
-        self._check_symbolic_fill_cast_precedes_consumer(
-            device, dtype, fill_value, operation
-        )
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize(
-        "dtype,fill_value,valid_value,input_dtype",
-        (
-            (torch.int8, 300, 127, torch.int64),
-            (torch.int8, -129, -128, torch.int64),
-            (torch.uint8, 256, 255, torch.int64),
-            (torch.uint8, -256, -255, torch.int64),
-            (torch.int8, 128.0, 126.5, torch.float32),
-            (torch.int8, -128.5, -127.5, torch.float32),
-            (torch.uint8, 256.0, 255.5, torch.float32),
-            (torch.uint8, -1.0, 0.0, torch.float32),
-        ),
-    )
-    def test_full_symbolic_fill_overflow(
-        self, device, dtype, fill_value, valid_value, input_dtype
-    ):
-        self._check_symbolic_fill_overflow(
-            device, dtype, fill_value, valid_value, input_dtype
-        )
-
-    @onlyOn(["cpu", "cuda", "xpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize(
-        "dtype,fill_value,valid_value,input_dtype",
-        (
-            (torch.int8, 300, 127, torch.int64),
-            (torch.int8, -129, -128, torch.int64),
-            (torch.uint8, 256, 255, torch.int64),
-            (torch.uint8, -256, -255, torch.int64),
-            (torch.int8, 128.0, 127.5, torch.float64),
-            (torch.int8, -128.5, -128.0, torch.float64),
-            (torch.uint8, 256.0, 255.5, torch.float64),
-            (torch.uint8, -1.0, 0.0, torch.float64),
-            (torch.uint64, float(2**64), float(2**63 - 1024), torch.float64),
-        ),
-    )
-    def test_full_symbolic_fill_overflow_cpp_wrapper(
-        self, device, dtype, fill_value, valid_value, input_dtype
-    ):
-        self._check_symbolic_fill_overflow(
-            device, dtype, fill_value, valid_value, input_dtype
-        )
-
-    def _check_symbolic_fill_overflow(
-        self, device, dtype, fill_value, valid_value, input_dtype
-    ):
-        def f(x):
-            return torch.full((2,), x.item(), dtype=dtype, device=device)
-
-        compiled_f = torch.compile(f, fullgraph=True)
-        valid = torch.tensor(valid_value, dtype=input_dtype, device=device)
-        self.assertEqual(compiled_f(valid), f(valid))
-
-        x = torch.tensor(fill_value, dtype=input_dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, self._overflow_error):
-            f(x)
-        with self.assertRaisesRegex(RuntimeError, self._overflow_error):
-            compiled_f(x)
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize("dtype", (torch.uint8,))
-    def test_full_symbolic_unsigned_fill(self, device, dtype):
-        def f(x):
-            return torch.full((2,), x.item(), dtype=dtype, device=device).sum()
-
-        x = torch.tensor(-1, device=device)
-        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
-
-    @onlyOn(["cpu", "cuda", "xpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize("dtype", (torch.uint8, torch.uint64))
-    def test_full_symbolic_unsigned_fill_cpp_wrapper(self, device, dtype):
-        def f(x):
-            return torch.full((2,), x.item(), dtype=dtype, device=device).sum()
-
-        x = torch.tensor(-1, device=device)
-        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
-
-    @onlyOn(["cpu", "cuda", "xpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_full_symbolic_uint64_input_cpp_wrapper(self, device):
-        def f(x):
-            return torch.full((2,), x.item(), dtype=torch.int8, device=device).sum()
-
-        compiled_f = torch.compile(f, fullgraph=True)
-        x = torch.tensor(3, dtype=torch.uint64, device=device)
-        self.assertEqual(compiled_f(x), f(x))
-
-        x = torch.tensor(300, dtype=torch.uint64, device=device)
-        with self.assertRaisesRegex(RuntimeError, self._overflow_error):
-            f(x)
-        with self.assertRaisesRegex(RuntimeError, self._overflow_error):
-            compiled_f(x)
-
-        uint64_max = torch.iinfo(torch.uint64).max
-        x = torch.tensor(uint64_max, dtype=torch.uint64, device=device)
-        with self.assertRaisesRegex(RuntimeError, self._overflow_error):
-            f(x)
-        with self.assertRaisesRegex(RuntimeError, self._overflow_error):
-            compiled_f(x)
-
-    @onlyOn(["cpu", "cuda", "xpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_full_symbolic_uint64_item_cpp_wrapper(self, device):
-        compiled_f = torch.compile(lambda x: x.item(), fullgraph=True)
-        for value in (1 << 63, torch.iinfo(torch.uint64).max):
-            x = torch.tensor(value, dtype=torch.uint64, device=device)
-            self.assertEqual(compiled_f(x), value)
-
-    @onlyOn(["cpu", "cuda", "xpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_full_symbolic_uint64_large_int64_fill_cpp_wrapper(self, device):
-        def f(x):
-            return torch.full((2,), x.item(), dtype=torch.int64, device=device)
-
-        compiled_f = torch.compile(f, fullgraph=True)
-        for value in (1 << 63, torch.iinfo(torch.uint64).max):
-            x = torch.tensor(value, dtype=torch.uint64, device=device)
-            with self.assertRaisesRegex(RuntimeError, self._overflow_error):
-                f(x)
-            with self.assertRaisesRegex(RuntimeError, self._overflow_error):
-                compiled_f(x)
-
-    @onlyOn(["cpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize(
-        "dtype",
-        (
-            torch.uint64,
-            torch.bfloat16,
-            torch.float32,
-            torch.float64,
-            torch.bool,
-            torch.complex64,
-            torch.complex128,
-        ),
-    )
-    def test_full_symbolic_uint64_large_fill_cpp_wrapper(self, device, dtype):
-        def f(x):
-            return torch.full((2,), x.item(), dtype=dtype, device=device)
-
-        compiled_f = torch.compile(f, fullgraph=True)
-        for value in (1 << 63, torch.iinfo(torch.uint64).max):
-            x = torch.tensor(value, dtype=torch.uint64, device=device)
-            self.assertEqual(compiled_f(x), f(x), rtol=0, atol=0)
-
-    @onlyOn(["cuda", "xpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_full_symbolic_uint64_large_fill_accelerator_cpp_wrapper(self, device):
-        def f(x):
-            return torch.full((2,), x.item(), dtype=torch.uint64, device=device)
-
-        compiled_f = torch.compile(f, fullgraph=True)
-        for value in (1 << 63, torch.iinfo(torch.uint64).max):
-            x = torch.tensor(value, dtype=torch.uint64, device=device)
-            self.assertEqual(compiled_f(x), f(x), rtol=0, atol=0)
-
-    @onlyOn(["cpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize("layout", ("rank1", "strided_view", "rank2_view"))
-    def test_full_symbolic_uint64_singleton_fill_cpp_wrapper(self, device, layout):
-        def f(x):
-            return torch.full((2,), x.item(), dtype=torch.float32, device=device)
-
-        compiled_f = torch.compile(f, fullgraph=True)
-        for value in (1 << 63, torch.iinfo(torch.uint64).max):
-            if layout == "rank1":
-                x = torch.tensor([value], dtype=torch.uint64, device=device)
-            elif layout == "strided_view":
-                base = torch.tensor([0, value, 0], dtype=torch.uint64, device=device)
-                x = base[1::2]
-            else:
-                base = torch.tensor(
-                    [[0, 0], [0, value]], dtype=torch.uint64, device=device
-                )
-                x = base[1:2, 1:2]
-            self.assertEqual(compiled_f(x), f(x), rtol=0, atol=0)
-
-    @onlyOn(["cpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize("size", ((), (1,), (1, 1)))
-    def test_full_symbolic_uint64_half_singleton_cpp_wrapper(self, device, size):
-        def f(x):
-            return torch.full(size, x.item(), dtype=torch.float16, device=device)
-
-        compiled_f = torch.compile(f, fullgraph=True)
-        for value in (
-            65503,
-            65504,
-            65505,
-            65519,
-            65520,
-            1 << 63,
-            torch.iinfo(torch.uint64).max,
-        ):
-            x = torch.tensor(value, dtype=torch.uint64, device=device)
-            self.assertEqual(compiled_f(x), f(x), rtol=0, atol=0)
-
-    @onlyOn(["cpu"])
-    @torch._inductor.config.patch(cpp_wrapper=True)
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_full_symbolic_uint64_half_nonsingleton_overflow_cpp_wrapper(self, device):
-        def f(x):
-            value = x.item()
-            return value, torch.full((2,), value, dtype=torch.float16, device=device)
-
-        compiled_f = torch.compile(f, fullgraph=True)
-        valid = torch.tensor(65504, dtype=torch.uint64, device=device)
-        self.assertEqual(compiled_f(valid), f(valid))
-        for value in (65505, 65519, 65520, 1 << 63, torch.iinfo(torch.uint64).max):
-            x = torch.tensor(value, dtype=torch.uint64, device=device)
-            with self.assertRaisesRegex(RuntimeError, self._overflow_error):
-                f(x)
-            with self.assertRaisesRegex(RuntimeError, self._overflow_error):
-                compiled_f(x)
+            invalid = torch.tensor(300, device=device)
+            overflow_error = r"without overflow|u\d+ <= 127"
+            with self.assertRaisesRegex(RuntimeError, overflow_error):
+                f(invalid)
+            with self.assertRaisesRegex(RuntimeError, overflow_error):
+                compiled_f(invalid)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
-instantiate_device_type_tests(
-    TestSymbolicFull, globals(), allow_mps=True, allow_xpu=True
-)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

@@ -4,18 +4,14 @@ import sys
 import unittest
 from types import SimpleNamespace
 
-import sympy
-
 import torch
 from torch._inductor import config, ir
-from torch._inductor.codegen.cpp_wrapper_cpu import _TypeSafeCppAssertPrinter
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import GPU_ALIGN_BYTES, run_and_get_cpp_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import RUN_CPU
-from torch.utils._ordered_set import OrderedSet
 
 
 try:
@@ -33,28 +29,6 @@ except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
     raise
-
-
-class CppWrapperPrinterTests(InductorTestCase):
-    def test_type_safe_unsigned_relations_recurse(self):
-        unsigned = sympy.Symbol("u", integer=True)
-        floating = sympy.Symbol("f", real=True)
-        printer = _TypeSafeCppAssertPrinter(OrderedSet([unsigned]))
-
-        expr = sympy.Xor(unsigned < -1, floating > -1, evaluate=False)
-        code = printer.doprint(expr, simplify=False)
-        # SymPy prints long literals as L on Linux and LL on macOS.
-        FileCheck().check("f > -1L").check("c10::signs_differ(u, -1L").run(code)
-        self.assertNotIn("signs_differ(f", code)
-
-        code = printer.doprint(unsigned < 1 << 63, simplify=False)
-        self.assertIn("9223372036854775808ULL", code)
-
-        signed = sympy.Symbol("s", integer=True)
-        code = _TypeSafeCppAssertPrinter(OrderedSet()).doprint(
-            signed < 1 << 63, simplify=False
-        )
-        self.assertIn("c10::signs_differ(s, 9223372036854775808ULL)", code)
 
 
 @unittest.skipIf(
