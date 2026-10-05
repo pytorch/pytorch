@@ -10,6 +10,7 @@ etc.) live in their respective VT files.
 import abc
 import collections
 import enum
+import inspect
 import operator
 import sys
 import types
@@ -36,7 +37,16 @@ from ..exc import (
     UnhandledDescriptorError,
     unimplemented,
 )
-from ..source import AttrSource, Source
+from ..guards import GuardBuilder, install_guard
+from ..source import (
+    AttrSource,
+    DictGetItemSource,
+    GetItemSource,
+    Source,
+    TypeDictSource,
+    TypeMROSource,
+    TypeSource,
+)
 from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -85,17 +95,19 @@ def vt_identity_compare(
     # instances are mutable objects built during tracing, so two distinct VTs
     # (already known not to be `left is right`) are distinct Python objects.
     # A bound method is materialized afresh by every attribute access, so it
-    # behaves the same way: `obj.m is obj.m` is False in CPython.
+    # behaves the same way: `obj.m is obj.m` is False in CPython. So is a device
+    # read off a tensor: `x.device is x.device` is False there too.
     from .dicts import ConstDictVariable
+    from .exception import ExceptionVariable, TracebackVariable
     from .functions import UserMethodVariable
     from .lists import ListVariable
-    from .misc import ExceptionVariable, TracebackVariable
     from .sets import (
         DictKeySetVariable,
         FrozensetVariable,
         OrderedSetVariable,
         SetVariable,
     )
+    from .tensor import CurrentDeviceVariable
 
     if isinstance(
         left,
@@ -109,6 +121,7 @@ def vt_identity_compare(
             TracebackVariable,
             ExceptionVariable,
             UserMethodVariable,
+            CurrentDeviceVariable,
         ),
     ):
         return ConstantVariable.create(False)
@@ -462,7 +475,12 @@ def generic_repr(
             if obj_type in sentinel:
                 return ConstantVariable.create(sentinel[obj_type])
             return ConstantVariable.create(obj.repr_recursive_sentinel())
-        _repr_running.add(obj_id)
+        # UserList/UserDict.__repr__ is `repr(self.data)`; PyObject_Repr does not
+        # register it, so the inner list/dict catches the cycle.
+        repr_fn = inspect.getattr_static(obj_type, "__repr__")
+        user_reprs = (collections.UserList.__repr__, collections.UserDict.__repr__)
+        if repr_fn not in user_reprs:
+            _repr_running.add(obj_id)
         try:
             result = obj.tp_repr_impl(tx)
         finally:
@@ -1255,6 +1273,14 @@ def binary_op1(
     # "different VT subclasses sharing a python_type", so we drop the type
     # equality check.
     if v_slot is w_slot:
+        # UDOVs with inheritance may not have the same slot even when the if above is True:
+        #    class Derived(set):
+        #        ...
+        #    class Custom(set):
+        #        def __ror__(self, other):
+        #            return "reversed"
+        # Both Derived and Custom have the same slot but the former inherits it from set
+        # TODO(dynamo-team): This is a known bug in the codebase
         w_slot = None
 
     if v_slot is not None:
@@ -2187,12 +2213,79 @@ def mro_lookup(py_type: type, name: str) -> object:
     return NO_SUCH_SUBOBJ
 
 
+def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
+    """Source for ``klass.__mro__[idx]``.
+
+    Entry 0 is spelled as the class itself when it is the class, which it is for
+    every MRO CPython computes. A metaclass overriding ``mro()`` can put
+    something else there, so check rather than assume.
+    """
+    if not idx and klass.__mro__[0] is klass:
+        return klass_source
+    return GetItemSource(TypeMROSource(klass_source), idx)
+
+
+def mro_attr_source(
+    tx: "InstructionTranslatorBase",
+    klass: type,
+    klass_source: Source,
+    name: str,
+) -> "DictGetItemSource | None":
+    """Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
+
+    Reading the attribute back as ``klass_source.name`` would go through
+    ``type.__getattribute__``, where a data descriptor on the metaclass wins over
+    the class chain -- a different object than `mro_lookup` returned. Index the
+    owning class's ``__dict__`` instead.
+
+    Returns None if *name* is absent from the whole MRO; callers decide whether
+    that is an error.
+    """
+    mro = klass.__mro__
+    for idx, base in enumerate(mro):
+        if name not in base.__dict__:
+            continue
+
+        # Guard the classes we walked past, so the owner stays the owner if one
+        # of them later gains *name*. Deduplicated by (id(klass), name): the
+        # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
+        for absent_idx in range(idx):
+            absent_key = (id(mro[absent_idx]), name)
+            if absent_key in tx.output.guarded_mro_absent_keys:
+                continue
+            tx.output.guarded_mro_absent_keys.add(absent_key)
+            install_guard(
+                TypeDictSource(
+                    _mro_entry_source(klass, klass_source, absent_idx)
+                ).make_guard(partial(GuardBuilder.DICT_NOT_CONTAINS, key=name))
+            )
+
+        # Reuse the source when the same owner is reached again for the same
+        # name, even from a differently-sourced object, so it does not collect
+        # duplicate guards or an OBJECT_ALIASING guard. Keyed on the owner, not
+        # the descriptor: a descriptor shared by unrelated classes needs a
+        # source through each one.
+        cache_key = (id(base), name)
+        cached = tx.output.mro_source_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        source = DictGetItemSource(
+            TypeDictSource(_mro_entry_source(klass, klass_source, idx)), name
+        )
+        tx.output.mro_source_cache[cache_key] = source
+        return source
+
+    return None
+
+
 def _resolve_descriptor_get(
     tx: "InstructionTranslatorBase",
     type_attr: object,
     obj: VariableTracker,
     class_vt: VariableTracker,
     source: "Source | None",
+    name: str,
 ) -> "VariableTracker | None":
     """Invoke tp_descr_get on a type attribute if it's a descriptor.
 
@@ -2203,7 +2296,15 @@ def _resolve_descriptor_get(
     import types as _types
 
     if isinstance(type_attr, property):
-        prop_vt = variables.PropertyVariable(type_attr, source=source)
+        # The property object lives on the type, not the instance: anchoring it at
+        # obj.source would make PropertyVariable's fget source read the *result* of
+        # the getter and then ask an int for .fget.
+        prop_source = (
+            mro_attr_source(tx, obj.python_type(), TypeSource(obj.source), name)
+            if obj.source
+            else None
+        )
+        prop_vt = variables.PropertyVariable(type_attr, source=prop_source)
         return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MemberDescriptorType):
         md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
@@ -2216,10 +2317,14 @@ def _resolve_descriptor_get(
         tg_vt = variables.TupleGetterVariable(type_attr, source=source)
         return tg_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, staticmethod):
-        sm_vt = variables.StaticMethodVariable(type_attr, source=source)
+        sm_vt = variables.StaticMethodVariable.from_descriptor(
+            tx, type_attr, source=source
+        )
         return sm_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, classmethod):
-        cm_vt = variables.ClassMethodVariable(type_attr, source=source)
+        cm_vt = variables.ClassMethodVariable.from_descriptor(
+            tx, type_attr, name, source=source
+        )
         return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.ClassMethodDescriptorType):
         cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
@@ -2302,7 +2407,7 @@ def object_generic_getattr(
     # Step 2: Data descriptor takes priority over instance dict.
     if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
         class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source, name)
         if result is not None:
             return result
         raise _UnhandledDescriptorError(
@@ -2330,7 +2435,7 @@ def object_generic_getattr(
             return variables.CallMethodVariable(obj, name, source=source)
 
         class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source, name)
         if result is not None:
             return result
         raise _UnhandledDescriptorError(
@@ -2374,7 +2479,16 @@ def generic_getattr(
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
-            return tx.output.side_effects.load_attr(obj, name)
+            value = tx.output.side_effects.load_attr(obj, name)
+            # A pending store of a descriptor onto a class lands in cls.__dict__,
+            # so reading it back has to run tp_descr_get the way type_getattro
+            # does -- otherwise `C.h = staticmethod(f); type(C.h)` reports
+            # staticmethod instead of function.
+            if isinstance(
+                value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
+            ):
+                return value.tp_descr_get_impl(tx, obj, obj)
+            return value
         if tx.output.side_effects.has_pending_mutation_of_attr(
             obj, name, AttrMutationKind.INSTANCE_DICT
         ):
