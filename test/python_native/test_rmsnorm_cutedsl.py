@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfNoCuteDSL,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -31,6 +32,7 @@ def jit_only() -> Iterator[None]:
 _TOLERANCES = {torch.float16: 3e-3, torch.bfloat16: 3e-2, torch.float32: 2e-4}
 
 
+@skipIfTorchDynamo("host-side capability predicates need no dynamo compilation")
 @instantiate_parametrized_tests
 class TestRmsNormCapability(TestCase):
     @parametrize("kind", ["meta", "fake", "functional_fake"])
