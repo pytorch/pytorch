@@ -171,7 +171,14 @@ void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
   }
 }
 
-void WorkNCCL::recordStart(std::string_view coll_name) {
+void WorkNCCL::recordStart(
+    std::string_view coll_name,
+    OpType op_type,
+    int64_t numel_in,
+    int64_t numel_out) {
+  state_->opType = op_type;
+  state_->numelIn = numel_in;
+  state_->numelOut = numel_out;
   recordFunctionStart(coll_name);
   state_->events->start->record(state_->stream);
 }
@@ -184,7 +191,9 @@ void WorkNCCL::recordEnd() {
   }
 }
 
-bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
+bool WorkNCCL::State::setTerminalStatus(
+    WorkStatus terminal_status,
+    std::string timeout_message) {
   TORCH_INTERNAL_ASSERT(
       terminal_status == WorkStatus::COMPLETED ||
       terminal_status == WorkStatus::TIMEDOUT ||
@@ -201,10 +210,15 @@ bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
 
     if (terminal_status == WorkStatus::TIMEDOUT) {
       result = WorkResult::TIMEOUT;
-      workException = std::make_exception_ptr(C10_BUILD_ERROR(
-          DistBackendError,
-          "Watchdog caught collective operation timeout: NCCL operation "
-          "timed out"));
+      // Only a work that won the race, and only in the current communicator
+      // generation, becomes the comm's timeout message.
+      if (timeout_message.empty()) {
+        timeout_message = comm->timeoutMessage();
+      } else if (reconfigureUuid == comm->reconfigure_uuid_) {
+        comm->recordTimeoutMessage(timeout_message);
+      }
+      workException = std::make_exception_ptr(
+          C10_BUILD_ERROR(DistBackendError, timeout_message));
     } else if (terminal_status == WorkStatus::ERROR) {
       result = WorkResult::COMM_ERROR;
       workException = std::make_exception_ptr(
@@ -343,10 +357,24 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - workStartTime);
   auto work_timeout = timeout.value_or(this->timeout);
-  if (elapsed >= work_timeout) {
-    TC_LOG(ERROR, comm) << "Operation timed out after " << elapsed.count()
-                        << " ms";
-    setTerminalStatus(WorkStatus::TIMEDOUT);
+  if (elapsed < work_timeout) {
+    return status();
+  }
+  // Same text as ::c10d::ProcessGroupNCCL::WorkNCCL::checkTimeout(), which
+  // triage tooling parses.
+  auto message = fmt::format(
+      "{}Watchdog caught collective operation timeout: WorkNCCL(SeqNum={}, "
+      "OpType={}, NumelIn={}, NumelOut={}, Timeout(ms)={}) ran for {} "
+      "milliseconds before timing out.",
+      comm->logPrefix(),
+      seq,
+      opTypeToString(opType),
+      numelIn,
+      numelOut,
+      this->timeout.count(),
+      elapsed.count());
+  if (setTerminalStatus(WorkStatus::TIMEDOUT, message)) {
+    LOG(ERROR) << message;
   }
   return status();
 }

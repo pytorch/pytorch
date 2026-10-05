@@ -108,6 +108,10 @@ c10::intrusive_ptr<WorkNCCL> coalesceWorks(
   return work;
 }
 
+// Mirrors ::c10d::ProcessGroupNCCL's process_group_id for the "PG ID" field
+// of the log prefix.
+std::atomic<size_t> nextProcessGroupId{0};
+
 } // namespace
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -126,7 +130,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
           ::c10d::SkipCleanUp))),
       blocking_wait_(getCvarBool(::c10d::TORCH_NCCL_BLOCKING_WAIT, false)),
-      options_c10d_(options ? std::move(options) : Options::create()) {
+      options_c10d_(options ? std::move(options) : Options::create()),
+      local_id_(nextProcessGroupId++) {
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
 

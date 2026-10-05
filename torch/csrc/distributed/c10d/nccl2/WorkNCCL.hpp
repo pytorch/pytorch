@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -111,7 +112,12 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
-  void recordStart(std::string_view coll_name);
+  // op_type and the numels only feed the watchdog timeout message.
+  void recordStart(
+      std::string_view coll_name,
+      OpType op_type = OpType::UNKNOWN,
+      int64_t numel_in = 0,
+      int64_t numel_out = 0);
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -136,7 +142,7 @@ class WorkNCCL : public c10d::Work {
 
     WorkStatus status() const;
     std::exception_ptr exception() const;
-    bool setTerminalStatus(WorkStatus status);
+    bool setTerminalStatus(WorkStatus status, std::string timeout_message = {});
     WorkStatus checkStatus(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
     void notifyCompletion();
@@ -153,6 +159,9 @@ class WorkNCCL : public c10d::Work {
     std::atomic<bool> ephemeralTimeoutReleased{false};
     bool timingEnabled;
     uint64_t seq{0};
+    OpType opType{OpType::UNKNOWN};
+    int64_t numelIn{0};
+    int64_t numelOut{0};
     std::shared_ptr<Events> events;
     std::mutex durationMutex;
     std::shared_ptr<Events> durationStartEvents;
