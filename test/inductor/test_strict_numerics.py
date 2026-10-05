@@ -986,7 +986,6 @@ BACKWARD_XFAIL = frozenset(
         ("nn_functional_mish", "bfloat16"),
         ("nn_functional_mish", "float16"),
         ("nn_functional_mish", "float32"),
-        ("nn_functional_silu", "bfloat16"),
         ("nn_functional_silu", "float16"),
         ("nn_functional_silu", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
