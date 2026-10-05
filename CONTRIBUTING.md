@@ -1,15 +1,20 @@
 Thank you for your interest in contributing to PyTorch!
-If you're a new contributor, please first take a read through our
-[Contributing Guide](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions), specifically the [Submitting a Change](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions#submitting-a-change) section
-that walks through the process of contributing a change to PyTorch.
+If you're a new contributor, please first read the [Issue and PR Workflow](#issue-and-pr-workflow)
+section, which describes how to contribute a change to PyTorch.
+This document is the source of truth for that process, in particular how to most effectively engage with issues and PRs.
 
-The rest of this document (CONTRIBUTING.md) covers some of the more technical
+The rest of this document covers some of the more technical
 aspects of contributing to PyTorch.
 
 # Table of Contents
 
 <!-- toc -->
 
+- [Issue and PR Workflow](#issue-and-pr-workflow)
+  - [Issue lifecycle](#issue-lifecycle)
+  - [PR lifecycle](#pr-lifecycle)
+  - [Current status](#current-status)
+  - [Why was my issue or PR closed?](#why-was-my-issue-or-pr-closed)
 - [Developing PyTorch](#developing-pytorch)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
@@ -19,12 +24,11 @@ aspects of contributing to PyTorch.
   - [Building](#building)
   - [Linting](#linting)
     - [default lint](#default-lint)
+  - [Testing](#testing)
   - [Regenerating](#regenerating)
 - [Unit testing](#unit-testing)
   - [Python Unit Testing](#python-unit-testing)
   - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
-  - [Local linting](#local-linting)
-    - [Running `pyrefly`](#running-pyrefly)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
   - [Skip CI while iterating](#skip-ci-while-iterating)
@@ -33,7 +37,6 @@ aspects of contributing to PyTorch.
 - [Writing documentation](#writing-documentation)
   - [Docstring type formatting](#docstring-type-formatting)
   - [Building documentation](#building-documentation)
-    - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
   - [Previewing changes locally](#previewing-changes-locally)
   - [Previewing documentation on PRs](#previewing-documentation-on-prs)
@@ -59,17 +62,161 @@ aspects of contributing to PyTorch.
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
   - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
 - [Linting before committing](#linting-before-committing)
-- [Building PyTorch with ASAN](#building-pytorch-with-asan)
-  - [Getting `ccache` to work](#getting-ccache-to-work)
-  - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
-  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
-  - [Why no leak detection?](#why-no-leak-detection)
-- [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
   - [Which commit is used in CI?](#which-commit-is-used-in-ci)
-- [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
+
+## Issue and PR Workflow
+
+Issues are where we receive feedback and decide what should be done about it: bug reports, feature requests and design discussions all happen there.
+Once a change and design is agreed upon, pull requests are the place to discuss and verify the implementation.
+
+For clarity, PyTorch uses labels to track the state of every issue and PR, so that both contributors and maintainers can tell what the next step is and who is expected to take it.
+
+This workflow is being rolled out and not all of it is live yet, see [Current status](#current-status).
+
+### Issue lifecycle
+
+Issues are a way to report feedback or make suggestions. PyTorch uses issues to track ongoing efforts and considerations for improving the codebase. Before opening an issue, please check to see if there's already an existing issue for your topic, as it may be more effective to contribute there!
+
+```mermaid
+flowchart LR
+    new[New issue] --> ai(AI triage)
+    ai -- success --> triaged["Triaged<br/>#quot;triaged#quot; + #quot;module: *#quot; / #quot;oncall: *#quot; labels"]
+    ai -- "fails, or #quot;no automated triage#quot;" --> manual(Manual triage) --> triaged
+    triaged --> mtriage("Module-level triage<br/>any module maintainer")
+    mtriage --> full["Fully triaged<br/>#quot;needs reproduction#quot; / #quot;needs research#quot; /<br/>#quot;needs design#quot; / #quot;actionable#quot; / #quot;won't fix#quot;"]
+    full -- "remove the label to request<br/>re-evaluation" --> triaged
+    classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
+    classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
+    classDef humanproc fill:#fef3c7,stroke:#d97706,color:#000
+    class new,triaged,full state
+    class ai aiproc
+    class manual,mtriage humanproc
+```
+
+Rectangles are states. Rounded boxes are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
+
+1. **Triage**: a bot triages every new issue by module so it is seen by the right maintainers. If the bot fails or the issue has the `no automated triage` label, a maintainer will handle the triage instead. A triaged issue has the `triaged` label and one or more `module: *` or `oncall: *` labels.
+2. **Module-level triage**: a maintainer of one of the applied modules completes triage by applying one of the labels below or by closing the issue.
+
+| Label | Meaning | What you can do |
+|---|---|---|
+| `needs reproduction` | The problem has not been reproduced yet. | Reproduce the issue that was reported. A maintainer then validates it. |
+| `needs research` | We have not decided yet whether the bug is real or whether we want the feature. | Provide supporting evidence that the feature is useful or the bug is valid. A maintainer then decides whether it is worth pursuing. |
+| `needs design` | We want to fix the bug or add the feature, but how to do it is not settled. | Propose a design on the issue. A maintainer then validates it. |
+| `actionable` | The issue has enough detail for anyone to write a good PR, and the maintainer who applied the label is willing to review it. | Send a PR, see [PR lifecycle](#pr-lifecycle). |
+| `won't fix` | The report is valid, but the cost of fixing it is too high for its benefit at this time. PyTorch will not fix it or review a fix for it. | Nothing: this is a final state and further comments on the issue will not be considered. |
+
+An assigned issue is being moved forward by its assignee, who can be the maintainer themselves.
+An unassigned issue is one where we are looking for help from the community.
+
+Once you have provided what a label asks for, you can request the issue to be re-evaluated by removing the label and commenting with the reason.
+Abusing this leads to losing the ability to change labels, up to being banned.
+
+Two other labels are orthogonal to the states above:
+
+- `high priority`: regressions, hard crashes and silent correctness issues. Undocumented APIs and edge cases are not high priority by default. An issue is high priority if it is high priority for any of the modules it is labeled with.
+- `good first issue`: an `actionable` issue that is especially simple and well suited for new contributors.
+
+### PR lifecycle
+
+```mermaid
+flowchart TD
+    draft[Draft PR] -- author marks ready --> ready[Ready PR]
+    ready --> ai("AI triage<br/>CODEOWNERS, #quot;module: *#quot;, linked issue")
+    ai -- fails pre-conditions --> closed[Closed]
+    ai -- success --> triaged["Triaged PR<br/>#quot;triaged#quot;, one reviewer per module"]
+    ai -- "fails, or #quot;no automated triage#quot;" --> htriage(Manual triage) --> triaged
+    triaged --> pre(Pre-review)
+    pre -- any assigned reviewer rejects --> closed
+    pre -- needs clarification --> draft
+    pre -- every assigned reviewer accepts --> dev["In development by author<br/>#quot;in progress#quot;"]
+    dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>#quot;ready for review#quot;"]
+    auto -- changes needed --> dev
+    dev -- "#quot;no automated review#quot;" --> rfr
+    rfr --> review(Human review)
+    review -- needs significant changes --> dev
+    review -- any reviewer accepts --> accepted[Accepted]
+    ready --> gl("GreenLight<br/>merge_rules.yaml authors only") --> accepted
+    accepted -- "@pytorchbot merge" --> merged[Merged]
+    classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
+    classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
+    classDef humanproc fill:#fef3c7,stroke:#d97706,color:#000
+    class draft,ready,closed,triaged,dev,rfr,accepted,merged state
+    class ai,auto,gl aiproc
+    class htriage,pre,review humanproc
+```
+
+Rectangles are states. Rounded boxes are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
+
+| Stage | Label | Who acts next | How to move on |
+|---|---|---|---|
+| Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
+| Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet pre-conditions (detailed below) are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
+| Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review, by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
+| In progress | `in progress` | Author | Iterate until the automated review passes; `in progress` is then replaced by `ready for review`. With the `no automated review` label, this step is skipped. |
+| Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`. |
+| Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
+
+The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
+
+**Pre-conditions**:
+
+- the PR is linked to an issue labeled `actionable` OR
+- the author has write access to the repo OR
+- the author names the maintainer who pre-approved the change (see the [pre-approved PR template](.github/PULL_REQUEST_TEMPLATE/preapproved.md))
+
+The PR must follow the [AI policy](AI_POLICY.md).
+
+**Pre-review** is a quick review of the direction of the PR, to ensure it is worth the author's time to get it through automated review and finalize it.
+It is the author's responsibility to give the reviewers all the information they'd need to make a quick (<1m) decision for faster turnaround.
+It is always ok for a reviewer to reject a PR at pre-review, including on the basis that the description is not clear enough and the assessment would be too time consuming.
+If the PR requires a longer discussion, that discussion should happen on the associated issue before the PR is opened.
+
+To assess a PR:
+
+- Is the PR description clear, concise and reflective of the change?
+- Is this PR solving a problem that is important?
+- Is the approach of the PR clear and in line with the discussion on the issue and the PR description?
+- Is this PR modular and simple enough to review, or does it need a design discussion first?
+
+Based on that:
+
+- If a design discussion is needed: the PR is closed and the discussion moves to the issue.
+- If the description lacks the justification needed for a quick decision: the PR is closed or moved back to draft.
+- If only a minor clarification is needed: the PR is moved back to draft.
+
+**GreenLight**: PRs from authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml) can also be approved directly by [GreenLight](#greenlight).
+
+**Stale PRs**: PRs without any update for 60 days get the `Stale` label and are closed 30 days later. PRs labeled `high priority` or `no-stale` are exempt.
+Remove the `Stale` label (or ask a maintainer to) if the PR is still active.
+
+### Current status
+
+This workflow is being rolled out. The following parts are still in progress:
+
+| In progress | Until it lands |
+|---|---|
+| The `no automated triage` and `no automated review` labels | The labels exist, but the bots do not act on them yet. |
+| Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels, for any label, and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
+| PR triage: a bot assigns one reviewer per module and adds `triaged` | Reviewers are requested through [CODEOWNERS](CODEOWNERS) and manual reviewer assignment. |
+| Automated review | It runs on PRs labeled `in progress` and replaces that label with `ready for review` when it passes, but it does not post its findings on the PR yet. Run the [pr-review skill](.agents/skills/pr-review/SKILL.md) locally to see what it checks. A "Request changes" review does not move the PR back to `in progress` automatically yet. |
+| [GreenLight](#greenlight) | It only approves PRs for a small set of authors. |
+| Closing PRs without an actionable issue or maintainer sponsor | These PRs are labeled `missing actionable issue` today. Maintainers can add these PRs back to their usual workflow by removing this label. |
+| Bots closing issues and PRs with a comment giving the reason | Maintainers close issues and PRs that do not meet the pre-conditions manually, with a reason. The stale bot closes PRs without a comment. |
+
+### Why was my issue or PR closed?
+
+Issues and PRs should be closed with a comment giving the reason (see [Current status](#current-status)). The most common ones are:
+
+- The PR is not linked to an `actionable` issue or was not pre-approved by a maintainer. Open an issue, or comment on the existing one, and wait for a maintainer to mark it `actionable`.
+- The PR needs a design discussion. Continue it on the linked issue with a summary of the status and of the proposed approach.
+- The issue or PR does not follow the [AI policy](AI_POLICY.md).
+- The issue was marked `won't fix`.
+- The issue is a usage question. Please ask it on the [forums](https://discuss.pytorch.org) instead.
+- The PR was [stale](#pr-lifecycle) for 30 days.
 
 ## Developing PyTorch
 
@@ -175,7 +322,6 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
     ```
     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
 * If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
-* For help with any part of the contributing process, please don’t hesitate to utilize our Zoom office hours! See details [here](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
 ## Nightly Checkout & Pull
 
@@ -300,11 +446,11 @@ dependencies as well as the nightly binaries into the repo directory.
 
 Please see PyTorch's detailed [AI Policy here](AI_POLICY.md).
 
-All the details on how to contribute (with or without AI assistance) are in the [Ultimate Guide to PyTorch Contributions](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions).
+How to contribute (with or without AI assistance) is described in the [Issue and PR Workflow](#issue-and-pr-workflow) section.
 A couple reminders here though:
 
 - **You are personally responsible for what you send**: If the comments, issues or PRs you send are low quality or consistently overly verbose compared to what is expected, your contributions will not be accepted anymore. You are responsible for reviewing, ensuring the accuracy and the quality of everything you send.
-- **PRs must have an associated "actionable" Issue**: Generally, as a new contributor, you should never send a PR that doesn't have a corresponding issue with the "actionable" label. If you just opened the issue, you must wait for a maintainer to review it and mark it actionable before preparing and sending a PR for it.
+- **PRs must have an associated "actionable" Issue**: Unless you have write access to the repo, you should never send a PR that doesn't have a corresponding issue with the "actionable" label, unless a maintainer pre-approved it (see the [pre-approved PR template](.github/PULL_REQUEST_TEMPLATE/preapproved.md)). If you just opened the issue, you must wait for a maintainer to review it and mark it actionable before sending a PR for it. See the [PR lifecycle](#pr-lifecycle).
 - **New features, utility functions, or core extensions**: Create a short and to the point issue about the problem you're encountering. You should NEVER include AI-generated explanation of how to solve the problem (this will be discussed later once it's decided the feature should be implemented).
 
 ## Spin
@@ -331,7 +477,7 @@ regular pip. Build configuration comes from the environment as usual, e.g.
 
 ### Linting
 
-Spin helps with linting by making sure that lintrunner is installed correctly
+Spin helps with linting by making sure that [lintrunner](https://github.com/pytorch/pytorch/wiki/lintrunner) is installed correctly
 and by isolating the lintrunner environment from the general development
 environment using uv.
 You can pass additional arguments to lintrunner by adding them after a
@@ -348,6 +494,12 @@ separating double dash (`--`), for example `spin quicklint -- --take CLANGTIDY`.
 Since some linters take a long time to run, we categorize all linters as either
 fast or slow. In the default lint, only the fast linters are run on all files;
 the slow linters are run on the changed files only.
+
+### Testing
+
+|command||
+|-|-|
+|`test`|run tests with pytest; all arguments are forwarded, e.g. `spin test test/test_nn.py -k Linear`. `spin test --ci ARGS` forwards to `test/run_test.py`, the orchestrator CI uses, instead|
 
 ### Regenerating
 
@@ -386,7 +538,8 @@ suite with
 python test/run_test.py
 ```
 
-or run individual test suites using the command `python test/FILENAME.py`,
+(`spin test --ci ARGS` forwards `ARGS` to the same runner), or run individual
+test suites using the command `python test/FILENAME.py`,
 where `FILENAME` represents the file containing the test suite you wish
 to run.
 
@@ -416,7 +569,9 @@ python test/test_jit.py TestJit.test_Sequential
 
 We don't officially support `pytest`, but it works well with our
 `unittest` tests and offers a number of useful features for local
-developing. Install it via `pip install pytest`.
+developing. Install it via `pip install pytest` (`pip install --group dev`
+includes it). `spin test ARGS` runs `pytest ARGS` with the same interpreter
+that has torch installed, editable or not.
 
 If you want to just run tests that contain a specific substring, you can
 use the `-k` flag:
@@ -428,43 +583,6 @@ pytest test/test_nn.py -k Loss -v
 The above is an example of testing a change to all Loss functions: this
 command runs tests such as `TestNN.test_BCELoss` and
 `TestNN.test_MSELoss` and can be useful to save keystrokes.
-
-### Local linting
-
-You can run the same linting steps that are used in CI locally via `make`:
-
-```bash
-make lint
-```
-
-Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner)
-
-#### Running `pyrefly`
-
-[Pyrefly](https://pyrefly.org/) is a high-performance static type checker for Python. It provides fast type checking along with IDE features like autocomplete and instant error feedback.
-
-PyTorch uses Pyrefly for type checking across the codebase. The configuration is managed in `pyrefly.toml` at the root of the repository.
-
-**Getting Started with Pyrefly:**
-
-To run type checking on the PyTorch codebase:
-```bash
-pyrefly check
-```
-
-For more detailed error information with summaries:
-```bash
-pyrefly check --summarize-errors
-```
-
-**Learn More:**
-- [Pyrefly Configuration](https://pyrefly.org/en/docs/configuration/) - Detailed configuration options
-- [Pyrefly IDE Features](https://pyrefly.org/en/docs/IDE-features/) - Set up Pyrefly in your editor for real-time type checking
-- [Python Typing Tutorial](https://pyrefly.org/en/docs/typing-for-python-developers/) - Learn about Python type annotations
-
-See [Guide for adding type annotations to
-PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
-for PyTorch-specific guidance on how to set up `pyrefly` and tackle type annotation tasks in this codebase.
 
 ### C++ Unit Testing
 
@@ -529,33 +647,33 @@ there too if you use that option. This is separate from GitHub's `[no ci]`
 commit-message directive, which applies only to the commit that contains it.
 
 ## Merging your Change
+The labels described in the [PR lifecycle](#pr-lifecycle) and the pytorchbot comment on your PR represent the status of your PR, including what the next step is and who is expected to take it.
+
 If you know the right people or team that should approve your PR (and you have the required permissions to do so), add them to the Reviewers list.
 
-If not, leave the Reviewers section empty. Our triage squad will review your PR, add a module label, and assign it to the appropriate reviewer in a couple business days.  The reviewer will then look at your PR and respond.
+Occasionally, things might fall through the cracks (sorry!). In case your PR is waiting on its reviewers for more than a week, please don't hesitate to leave a comment on the PR mentioning them! That will get it nudged back onto peoples' radars.
 
-Occasionally, things might fall through the cracks (sorry!). In case your PR either doesn't get assigned to a reviewer or doesn't get any response from the reviewer for 4 business days, please leave comment on the PR (mentioning the reviewer if one has been assigned). That'll get it nudged back onto people's radar.
-
-If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
-
-Once your PR is approved, you can merge it in by entering a comment with the content `@pytorchmergebot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
+Once your PR is approved and CI is green, you can merge it in by entering a comment `@pytorchbot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
 ## GreenLight
 
-GreenLight is an automated reviewer for pull requests. **It is experimental and at an early stage**: we are still working out both the experience of using it and the policy it applies, so expect what is described here to be at risk of changing.
+GreenLight is an automated reviewer for pull requests. It is separate from the automated review in the [PR lifecycle](#pr-lifecycle): it only applies to authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml), and can approve their PRs without a human review.
 
-The rollout is phased. GreenLight will eventually review pull requests from every username listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml); for now it reviews a [smaller set](https://github.com/pytorch/test-infra/blob/main/greenlight/src/greenlight/review.py), which we widen as our confidence grows.
+GreenLight is undergoing a phased rollout. For now it reviews PRs from a [smaller set](https://github.com/pytorch/test-infra/issues/8945) of those authors. The next step is to enable it for every author listed in `merge_rules.yaml`.
 
-GreenLight reads the changes and decides whether they are safe to land as-is; when they are, it approves the PR, and that approval alone satisfies a merge rule. The criteria it applies are in [its review skill](https://github.com/pytorch/test-infra/tree/main/.claude/skills/greenlight-review). There is nothing to opt into; a scan picks up open PRs from eligible authors every few minutes.
+The current set is the list in the code block at the top of [pytorch/test-infra#8945](https://github.com/pytorch/test-infra/issues/8945). If you have write access to pytorch/test-infra, you can add yourself by editing the issue body: put your GitHub username as `@username` alone on a new line inside that block, and change nothing else. Every line in the block must be exactly one `@username`, a `#` comment, or blank; any other line makes GreenLight reject the whole list, and no new reviews start for anyone until the body is fixed. If you don't have write access, ask to be added in a comment on the issue and we will add you promptly.
+
+Once you are listed, there is nothing else to do: a scan picks up your open PRs every few minutes, as long as one rule in `merge_rules.yaml` names you and covers every file the PR changes. A PR that was already open when you were added may need a new push first. GreenLight reads the changes and decides whether they are safe to land as-is; when they are, it approves the PR, and that approval alone satisfies a merge rule. The criteria it applies are in [its review skill](https://github.com/pytorch/test-infra/tree/main/.claude/skills/greenlight-review).
 
 The outcome appears as a `GREEN LIGHT` section in the Dr. CI comment on your PR (pytorchbot comment), with a short explanation and a link to the job that decided it. Once a review finishes it reads `PR approved to be merged without human review` or `PR requires human review`, and while one is running, `Green Light review in progress`. A verdict reached on an earlier commit is prefixed `OUTDATED (earlier commit)`; it does not authorize landing the current head. An approval is an ordinary GitHub approving review from `pytorchgreenlight` (shown on the PR as `pytorchgreenlight[bot]`) that satisfies the `Greenlight Review Bot` rule in [`.github/merge_rules.yaml`](.github/merge_rules.yaml). It adds no label and no CI check.
 
-You still land the change yourself with `@pytorchmergebot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a ghstack merge every PR in the stack is checked, so one PR without a current approval holds up the whole stack. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchmergebot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
+You still land the change yourself with `@pytorchbot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a ghstack merge every PR in the stack is checked, so one PR without a current approval holds up the whole stack. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchbot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
 
 `PR requires human review` is not a block, but merging while it stands is refused immediately rather than waiting. Either push a commit so GreenLight reviews the new content, or get an approval from a human reviewer with merge rights for the files you touched and merge as usual.
 
 GreenLight does not review drafts, PRs with unresolved requested changes, PRs already approved by someone listed in `merge_rules.yaml`, or PRs that have not been updated in the last 24 hours, and a diff over 2000 lines is declined automatically as too large to review. It also skips PRs labeled `Stale` and does not re-scan them; pushing does not help while the label is set, so remove it to bring the PR back into scope. If a PR is reverted, GreenLight dismisses its approval and does not review that PR again, so re-landing it always needs a human approval.
 
-To propose a change to what GreenLight reviews or how it decides, open an issue in [pytorch/test-infra](https://github.com/pytorch/test-infra/issues) with the prefix on the title `[Greenlight Policy Triage]`; those are triaged on the [GreenLight Policies Reviews](https://github.com/orgs/pytorch/projects/177/views/1) board.
+To propose a change to what GreenLight reviews or how it decides, open an issue in [pytorch/test-infra](https://github.com/pytorch/test-infra/issues) with the prefix on the title `[Greenlight Policy Triage]`; those are triaged on the [GreenLight Policies Reviews](https://github.com/orgs/pytorch/projects/177/views/1) board. To report a wrong verdict on a merged PR, open its landed commit on HUD (for example, [commit 38395f3](https://hud.pytorch.org/pytorch/pytorch/commit/38395f306af10d0f565d5e14f8f55beb3cb44937)), expand the `GREEN LIGHT` section if it is collapsed, click `Report wrong verdict`, and describe what GreenLight got wrong. HUD then files an issue in pytorch/test-infra and adds it to the same board. The button only appears when you are signed in to HUD with write access to pytorch/pytorch.
 
 ## Writing documentation
 
@@ -646,26 +764,6 @@ yarn global add katex
 
 ```bash
 make html
-```
-
-#### Tips
-
-The `.rst` source files live in [docs/source](docs/source). Some of the `.rst`
-files pull in docstrings from PyTorch Python code (for example, via
-the `autofunction` or `autoclass` directives). To vastly shorten doc build times,
-it is helpful to remove the files you are not working on, only keeping the base
-`index.rst` file and the files you are editing. The Sphinx build will produce
-missing file warnings but will still complete. For example, to work on `jit.rst`:
-
-```bash
-cd docs/source
-find . -type f | grep rst | grep -v index | grep -v jit | xargs rm
-
-# Make your changes, build the docs, etc.
-
-# Don't commit the deletions!
-git add index.rst jit.rst
-...
 ```
 
 #### Building C++ Documentation
@@ -844,6 +942,11 @@ On the initial build, you can also speed things up by disabling the features you
 - `USE_CPU_VECTORIZATION=0` will disable building vectorized CPU kernel variants (AVX2, AVX512, VSX, ZVECTOR, SVE). Only the scalar DEFAULT kernels are built. Fine for correctness/dispatch work; not for CPU benchmarking.
 - `USE_COLORIZE_OUTPUT=1` will colorize compiler output for easier reading.
 - `TORCH_NATIVE_AOT=0` will disable the native-AOT stage-2 step (exporting the DSL kernels and embedding them into `libtorch_cuda`; see `tools/native_aot/build_stage2.py`, whose module docstring lists these in the order they are checked). Stage 2 already skips itself when the platform is not Linux, when the built torch does not import or was built without CUDA, when no toolchain targets this backend, when CUDA is older than 13 or cannot be determined, when the interpreter has no published DSL wheel and none is installed, when `BUILD_SHARED_LIBS=OFF` leaves a static `torch_cuda` that cannot take the version script, when nothing declares kernels, and when no supported arch is targeted -- note that with `TORCH_CUDA_ARCH_LIST` unset it exports for whatever GPU is present, so a machine with a supported GPU does not hit that last one. Once it decides it *will* export, a missing DSL wheel is a hard error rather than a skip, so this is the switch to use when you want a build without the DSL toolchain installed.
+
+  Native-AOT export for supported Hopper and Blackwell targets requires Triton at
+  build time alongside CuTeDSL. Install the pinned Triton wheel with
+  `bash scripts/install_triton_wheel.sh`. Embedded Triton kernels do not require
+  the Triton Python package at runtime.
 
 The full list of build environment variables, what each one does, and how it reaches CMake is
 documented at the top of [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
@@ -1317,117 +1420,6 @@ changed relative to the merge-base, so just run:
 Fix the code so that no errors are reported when you re-run the above check again,
 and then commit the fix.
 
-## Building PyTorch with ASAN
-
-[ASAN](https://github.com/google/sanitizers/wiki/AddressSanitizer) is very
-useful for debugging memory errors in C++. We run it in CI, but here's how to
-get the same thing to run on your local machine.
-
-First, install LLVM (our ASAN CI currently uses clang 18). The easiest way is to get [prebuilt
-binaries](https://releases.llvm.org/download.html) and extract them to a
-folder (later called `$LLVM_ROOT`).
-
-Then set up the appropriate scripts. You can put this in your `.bashrc`:
-
-```bash
-LLVM_ROOT=<wherever your llvm install is>
-PYTORCH_ROOT=<wherever your pytorch checkout is>
-
-LIBASAN_RT="$LLVM_ROOT/lib/clang/18/lib/linux/libclang_rt.asan-x86_64.so"
-build_with_asan()
-{
-  LD_PRELOAD=${LIBASAN_RT} \
-  CC="$LLVM_ROOT/bin/clang" \
-  CXX="$LLVM_ROOT/bin/clang++" \
-  LDSHARED="clang --shared" \
-  LDFLAGS="-stdlib=libstdc++" \
-  CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
-  CXX_FLAGS="-pthread" \
-  USE_CUDA=0 USE_OPENMP=0 USE_DISTRIBUTED=0 DEBUG=1 \
-  python -m pip install --no-build-isolation -v -e .
-}
-
-run_with_asan()
-{
-  LD_PRELOAD=${LIBASAN_RT} $@
-}
-
-# you can look at build-asan.sh to find the latest options the CI uses
-export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
-export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PYTORCH_ROOT/ubsan.supp
-export ASAN_SYMBOLIZER_PATH=$LLVM_ROOT/bin/llvm-symbolizer
-```
-
-Then you can use the scripts like:
-
-```
-suo-devfair ~/pytorch ❯ build_with_asan
-suo-devfair ~/pytorch ❯ run_with_asan python test/test_jit.py
-```
-
-### Getting `ccache` to work
-
-The scripts above specify the `clang` and `clang++` binaries directly, which
-bypasses `ccache`. Here's how to get `ccache` to work:
-
-1. Make sure the ccache symlinks for `clang` and `clang++` are set up (see
-   CONTRIBUTING.md)
-2. Make sure `$LLVM_ROOT/bin` is available on your `$PATH`.
-3. Change the `CC` and `CXX` variables in `build_with_asan()` to point
-   directly to `clang` and `clang++`.
-
-### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
-
-The “standard” workflow for ASAN assumes you have a standalone binary:
-
-1. Recompile your binary with `-fsanitize=address`.
-2. Run the binary, and ASAN will report whatever errors it find.
-
-Unfortunately, PyTorch is a distributed as a shared library that is loaded by
-a third-party executable (Python). It’s too much of a hassle to recompile all
-of Python every time we want to use ASAN. Luckily, the ASAN folks have a
-workaround for cases like this:
-
-1. Recompile your library with `-fsanitize=address -shared-libasan`. The
-   extra `-shared-libasan` tells the compiler to ask for the shared ASAN
-   runtime library.
-2. Use `LD_PRELOAD` to tell the dynamic linker to load the ASAN runtime
-   library before anything else.
-
-More information can be found
-[here](https://github.com/google/sanitizers/wiki/AddressSanitizerAsDso).
-
-### Why LD_PRELOAD in the build function?
-
-We need `LD_PRELOAD` because there is a cmake check that ensures that a
-simple program builds and runs. If we are building with ASAN as a shared
-library, we need to use `LD_PRELOAD` to load the runtime library, otherwise there will be
-dynamic linker errors and the check will fail.
-
-We don’t actually need either of these if we fix the cmake checks.
-
-### Why no leak detection?
-
-Python leaks a lot of memory. Possibly we could configure a suppression file,
-but we haven’t gotten around to it.
-
-## Caffe2 notes
-
-In 2018, we merged Caffe2 into the PyTorch source repository. While the
-steady state aspiration is that Caffe2 and PyTorch share code freely,
-in the meantime there will be some separation.
-
-There are a few "unusual" directories which, for historical reasons,
-are Caffe2/PyTorch specific. Here they are:
-
-- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `modules`,
-  `scripts` are Caffe2-specific. Don't put PyTorch code in them without
-  extra coordination.
-
-- `mypy*`, `requirements.txt`, `pyproject.toml`, `test`, `tools` are
-  PyTorch-specific. Don't put Caffe2 code in them without extra
-  coordination.
-
 ## CI failure tips
 
 Once you submit a PR or push a new commit to a branch that is in
@@ -1479,7 +1471,3 @@ The workflow files themselves get taken from checkpoint `C`, the merger of your
 PR and the `main` branch. But only the workflow files get taken from that merged
 checkpoint. Everything else (tests, code, etc) all get taken directly from your
 PR's commit (commit `B`). Please note, this scenario would never affect PRs authored by `ghstack` as they would not automatically ingest the updates from default branch.
-
-
-## Dev Infra Office Hours
-[Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any questions regarding developer experience, Green HUD, and CI.
