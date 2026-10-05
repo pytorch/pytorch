@@ -280,12 +280,17 @@ class StrictNumericsCompileTest(TestCase):
         self.assertNotIn("tl.sigmoid", code)
 
     @ops(
-        [op for op in op_db if op.name == "nn.functional.relu"],
+        [
+            op
+            for op in op_db
+            if op.name
+            in ("nn.functional.relu", "nn.functional.relu6", "nn.functional.hardtanh")
+        ],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
     )
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
-    def test_relu_shared_predicate(self, device, dtype, op, numerics, upcast):
+    def test_clamp_shared_predicate(self, device, dtype, op, numerics, upcast):
         if dtype in (torch.float16, torch.bfloat16):
             x = _exhaustive_16bit(dtype, device)
         elif dtype == torch.float32:
@@ -308,10 +313,23 @@ class StrictNumericsCompileTest(TestCase):
             )
             x = torch.cat((bits, bits | torch.iinfo(torch.int64).min)).view(dtype)
 
-        def fn(x):
-            return op.op(x), x < 0
+        bounds = torch.tensor([-1.0, 0.0, 1.0, 6.0], device=device, dtype=dtype)
+        x = torch.cat(
+            (
+                x,
+                bounds,
+                torch.nextafter(bounds, torch.full_like(bounds, -float("inf"))),
+                torch.nextafter(bounds, torch.full_like(bounds, float("inf"))),
+            )
+        )
 
-        (result, negative), codes = run_and_get_code(
+        x.requires_grad_()
+        lower = -1 if op.name == "nn.functional.hardtanh" else 0
+
+        def fn(x):
+            return op.op(x), x < lower
+
+        (result, below_lower), codes = run_and_get_code(
             torch.compile(
                 fn,
                 fullgraph=True,
@@ -322,11 +340,123 @@ class StrictNumericsCompileTest(TestCase):
             ),
             x,
         )
-        expected, expected_negative = fn(x)
+        expected, expected_below_lower = fn(x)
         int_dtype = _BIT_VIEW[dtype]
         self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
-        self.assertEqual(negative, expected_negative)
+        self.assertEqual(below_lower, expected_below_lower)
         self.assertIn("tl.where", "\n".join(codes))
+        expected_grad = torch.autograd.grad(expected, x, torch.ones_like(x))[0]
+        result_grad = torch.autograd.grad(result, x, torch.ones_like(x))[0]
+        self.assertEqual(result_grad.view(int_dtype), expected_grad.view(int_dtype))
+
+    @ops(
+        [op for op in op_db if op.name == "nn.functional.hardtanh"],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    @parametrize(
+        "bounds",
+        (
+            (-0.7, 0.7),
+            (-0.0, 0.0),
+            (0.0, -0.0),
+            (1e-42, 1.0),
+            (-1.0, -1e-42),
+        ),
+    )
+    def test_hardtanh_bounds(self, device, dtype, op, bounds):
+        def fn(x):
+            return op.op(x, min_val=bounds[0], max_val=bounds[1])
+
+        x = torch.tensor(
+            [-float("inf"), -1.0, -0.0, 0.0, 1.0, float("inf"), float("nan"), *bounds],
+            device=device,
+            dtype=dtype,
+        )
+        x = torch.cat(
+            (
+                x,
+                torch.nextafter(x[-2:], torch.full_like(x[-2:], -float("inf"))),
+                torch.nextafter(x[-2:], torch.full_like(x[-2:], float("inf"))),
+            )
+        ).requires_grad_()
+        result = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": "strict_pointwise"},
+        )(x)
+        expected = fn(x)
+        self.assertEqual(result.view(_BIT_VIEW[dtype]), expected.view(_BIT_VIEW[dtype]))
+        expected_grad = torch.autograd.grad(expected, x, torch.ones_like(x))[0]
+        result_grad = torch.autograd.grad(result, x, torch.ones_like(x))[0]
+        self.assertEqual(
+            result_grad.view(_BIT_VIEW[dtype]), expected_grad.view(_BIT_VIEW[dtype])
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @ops(
+        [op for op in op_db if op.name == "nn.functional.hardtanh"],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    @parametrize("from_tensor", (False, True))
+    @parametrize("bound_kind", ("lower", "upper"))
+    def test_hardtanh_symbolic_bounds(self, device, dtype, op, from_tensor, bound_kind):
+        # The functional wrapper validates bounds in Python, which needs concrete values.
+        hardtanh = torch.ops.aten.hardtanh.default if from_tensor else op.op
+
+        def fn(x, bound):
+            if from_tensor:
+                bound = bound.item()
+            if bound_kind == "lower":
+                return hardtanh(x, bound, 6)
+            return hardtanh(x, 0, bound)
+
+        x = torch.tensor(
+            [-float("inf"), -1.0, -0.0, 0.0, 1.0, 5.0, 6.0, 7.0, float("inf")],
+            device=device,
+            dtype=dtype,
+        )
+        int_dtype = _BIT_VIEW[dtype]
+        nan_bits = x[-1:].view(int_dtype) | 1
+        nan_bits = torch.cat((nan_bits, nan_bits | torch.iinfo(int_dtype).min))
+        x = torch.cat((x, nan_bits.view(dtype)))
+        compiled = torch.compile(
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
+        )
+        bounds = (-0.0, -1.0, -0.0) if bound_kind == "lower" else (6.0, 5.0, 6.0)
+        if from_tensor:
+            bounds = (*bounds, float("nan"), bounds[0])
+        for bound in bounds:
+            with self.subTest(bound=bound):
+                if from_tensor:
+                    bound = torch.tensor(bound, dtype=torch.float64)
+                expected = fn(x, bound)
+                result = compiled(x, bound)
+                self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @ops(
+        [op for op in op_db if op.name == "nn.functional.hardtanh"],
+        allowed_dtypes=(torch.float32,),
+    )
+    @parametrize("from_tensor", (False, True))
+    @parametrize("bounds", ((float("nan"), 1e100), (-1e100, float("nan"))))
+    def test_hardtanh_nan_bound_before_conversion(
+        self, device, dtype, op, from_tensor, bounds
+    ):
+        def fn(x, lo, hi):
+            if from_tensor:
+                return torch.ops.aten.hardtanh(x, lo.item(), hi.item())
+            return op.op(x, lo, hi)
+
+        x = torch.tensor(
+            [-1.0, -0.0, 0.0, 1.0, float("nan")], device=device, dtype=dtype
+        )
+        if from_tensor:
+            bounds = tuple(torch.tensor(b, dtype=torch.float64) for b in bounds)
+        result = torch.compile(
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
+        )(x, *bounds)
+        self.assertEqual(result.view(torch.int32), fn(x, *bounds).view(torch.int32))
 
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
@@ -955,12 +1085,6 @@ POINTWISE_XFAIL = frozenset(
         ("neg", "float16"),
         ("neg", "float32"),
         ("nn_functional_gelu", "float32"),
-        ("nn_functional_hardtanh", "bfloat16"),
-        ("nn_functional_hardtanh", "float16"),
-        ("nn_functional_hardtanh", "float32"),
-        ("nn_functional_relu6", "bfloat16"),
-        ("nn_functional_relu6", "float16"),
-        ("nn_functional_relu6", "float32"),
         ("nn_functional_softplus", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),

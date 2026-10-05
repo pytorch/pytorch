@@ -38,6 +38,7 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
+from torch._refs.nn.functional import _aten_hardtanh as decomp_hardtanh
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     statically_known_true,
@@ -126,6 +127,7 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._softmax_backward_data,
     aten.clamp_max,
     aten.clamp_min,
+    aten.hardtanh.default,  # inductor preserves NaN payloads under strict numerics
     aten.embedding_dense_backward,  # we fall back on xpu
     aten.native_layer_norm,  # we fall back on mtia
     aten.index_add,  # we conditionally call this decomp
@@ -333,6 +335,47 @@ def sym_constrain_range_for_size(
     max: torch.types.Number | None = None,
 ) -> None:
     return
+
+
+@register_decomposition(aten.hardtanh.default)
+def hardtanh(
+    a: torch.Tensor,
+    min_val: torch.types.Number = -1,
+    max_val: torch.types.Number = 1,
+) -> torch.Tensor:
+    if (
+        config.strict_pointwise
+        and config.cuda_backend == "triton"
+        and torch.version.hip is None
+        and a.device.type == "cuda"
+        and a.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    ):
+        # Eager checks NaN bounds before converting either bound to opmath precision.
+        if (isinstance(min_val, (int, float)) and math.isnan(min_val)) or (
+            isinstance(max_val, (int, float)) and math.isnan(max_val)
+        ):
+            return torch.full_like(a, float("nan"))
+        # Eager compares in opmath precision and narrows only the selected result.
+        dtype = utils.get_computation_dtype(a.dtype)
+        symbolic = any(isinstance(v, torch.SymFloat) for v in (min_val, max_val))
+        if symbolic:
+            # Tensorification supports mul, avoiding scalar specialization and lost -0.
+            one = torch.scalar_tensor(1.0, dtype=dtype, device=a.device)
+            lo, hi = one * min_val, one * max_val
+        else:
+            lo = torch.scalar_tensor(min_val, dtype=dtype, device=a.device)
+            hi = torch.scalar_tensor(max_val, dtype=dtype, device=a.device)
+        x = a.to(dtype)
+        result = torch.where(x < lo, lo, x)
+        result = torch.where(hi < result, hi, result).to(a.dtype)
+        # Preserve input NaN bits through opmath casts and min/max optimizations.
+        int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[a.element_size()]
+        bits = torch.where(torch.isnan(a), a.view(int_dtype), result.view(int_dtype))
+        if symbolic:
+            nan = torch.full_like(a, float("nan")).view(int_dtype)
+            bits = torch.where(torch.isnan(lo) | torch.isnan(hi), nan, bits)
+        return bits.view(a.dtype)
+    return cast(torch.Tensor, decomp_hardtanh(a, min_val=min_val, max_val=max_val))
 
 
 @register_decomposition([aten.clamp])
