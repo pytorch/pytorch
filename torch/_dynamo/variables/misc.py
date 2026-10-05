@@ -310,9 +310,9 @@ class SuperVariable(VariableTracker):
                     raise AssertionError(
                         "source must not be None for user-defined class"
                     )
-                user_cls_source = source.member
-                user_cls_vt = variables.UserDefinedClassVariable(
-                    user_cls, source=user_cls_source
+                user_cls_source = AttrSource(source, "__self__")
+                user_cls_vt = VariableTracker.build(
+                    tx, user_cls, source=user_cls_source, realize=True
                 )
             return user_cls_vt.call_method(tx, "__new__", args, kwargs)
         elif isinstance(inner_fn, staticmethod) and isinstance(
@@ -878,7 +878,7 @@ class AutogradFunctionVariable(VariableTracker):
                 variables.UserFunctionVariable(
                     fn.__func__, source=source and AttrSource(source, "__func__")
                 ),
-                variables.UserDefinedClassVariable(self.fn_cls),
+                VariableTracker.build(tx, self.fn_cls),
                 source=source,
             ).call_function(tx, args, kwargs)
         else:
@@ -1582,7 +1582,7 @@ class TypingVariable(VariableTracker):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         new_typing = cast(Any, self.value)[key.as_python_constant()]
-        return TypingVariable(new_typing)
+        return VariableTracker.build(tx, new_typing)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
@@ -1756,8 +1756,8 @@ class NumpyVariable(VariableTracker):
             )
         return fn in cls.constant_fold_functions
 
-    @classmethod
-    def get_constant_collection_for_func(cls, fn: types.FunctionType) -> Any:
+    @staticmethod
+    def produces_constant_collection(fn: types.FunctionType) -> bool:
         mod = fn.__module__.split(".")
         if len(mod) < 2:
             raise AssertionError(
@@ -1767,7 +1767,7 @@ class NumpyVariable(VariableTracker):
             raise AssertionError(
                 f"Expected torch._numpy module, got {'.'.join(mod[:2])}"
             )
-        return np_constant_collections_map.get(fn)
+        return fn in np_constant_collection_functions
 
     def call_function(
         self,
@@ -1805,15 +1805,14 @@ class NumpyVariable(VariableTracker):
             raise AssertionError(
                 f"Could not find torch._numpy equivalent for {self.value}"
             )
-        if (
-            collection_variable_typ := self.get_constant_collection_for_func(func)
-        ) is not None:
+        if self.produces_constant_collection(func):
             try:
-                return collection_variable_typ(
+                return VariableTracker.build(
+                    tx,
                     self.as_python_constant()(
                         *[x.as_python_constant() for x in args],
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
-                    )
+                    ),
                 )
             except AsPythonConstantNotImplementedError:
                 unimplemented(
@@ -2287,10 +2286,10 @@ class ConstantLikeVariable(VariableTracker):
 
         result = getattr(self.value, name)(*cargs, **ckwargs)
 
-        if variables.ConstantVariable.is_literal(result):
+        if variables.ConstantVariable.is_literal(result) or isinstance(
+            result, re.Match
+        ):
             return VariableTracker.build(tx, result)
-        if isinstance(result, re.Match):
-            return ConstantLikeVariable(result)
 
         unimplemented(
             gb_type="constant-like method call with unsupported return type",
@@ -2307,12 +2306,11 @@ class ConstantLikeVariable(VariableTracker):
         result = getattr(self.value, name)
         if isinstance(result, self.np_floating):
             result = float(result)
-        if isinstance(result, self.np_dtype):
-            return NumpyDTypeVariable(result)
-        if isinstance(result, type) and issubclass(result, self.np_generic):
-            # things like x.dtype.type
-            return NumpyVariable(result)
-        if variables.ConstantVariable.is_literal(result):
+        if (
+            isinstance(result, self.np_dtype)
+            or (isinstance(result, type) and issubclass(result, self.np_generic))
+            or variables.ConstantVariable.is_literal(result)
+        ):
             return VariableTracker.build(tx, result)
         return GetAttrVariable(self, name, py_type=type(result))
 
@@ -2324,18 +2322,14 @@ class NumpyDTypeVariable(ConstantLikeVariable):
         np.dtype() objects are serialized as strings, torch._numpy wrappers will normalize to the torch dtype.
         This also handles unsupported things nicely (i.e. structured arrays and object arrays).
         """
-        # All three construction paths produce a real numpy.dtype: the
-        # np_constant_collections_map entry for tnp.dtype, builder.py's
+        # All three construction paths produce a real numpy.dtype:
+        # NumpyVariable.call_function, builder.py's
         # is_numpy_dtype branch, and ConstantLikeVariable.tp_getattro_impl's
         # isinstance(result, self.np_dtype) branch.
         return cast("np.dtype[Any]", self.value).type.__name__
 
 
-np_constant_collections_map = {
-    tnp.finfo: ConstantLikeVariable,
-    tnp.iinfo: ConstantLikeVariable,
-    tnp.dtype: NumpyDTypeVariable,
-}
+np_constant_collection_functions = frozenset((tnp.finfo, tnp.iinfo, tnp.dtype))
 
 
 class ContextVarVariable(VariableTracker):

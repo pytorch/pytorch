@@ -2,6 +2,7 @@
 import base64
 import binascii
 import functools
+import operator
 import os
 import re
 import sys
@@ -11,7 +12,7 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo.testing
-from torch._dynamo import external_utils
+from torch._dynamo import external_utils, polyfills, trace_rules
 from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.trace_rules import is_callable_allowed
@@ -43,6 +44,28 @@ class CodelessCallPartial(functools.partial):
 
 class DecoratorTests(PytreeRegisteringTestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def _override_trace_rule(self, fn, *, disallow=False):
+        fn_id = id(fn)
+        registries = (
+            trace_rules._allowed_callable_ids,
+            trace_rules._disallowed_callable_ids,
+            trace_rules._nonstrict_trace_callable_ids,
+        )
+        prior_state = tuple(fn_id in registry for registry in registries)
+
+        def restore():
+            for registry, was_present in zip(registries, prior_state):
+                registry.remove(fn_id)
+                if was_present:
+                    registry.add(fn_id)
+            torch._dynamo.reset()
+
+        self.addCleanup(restore)
+        torch.compiler.allow_in_graph(fn)
+        if disallow:
+            torch._dynamo.disallow_in_graph(fn)
+        torch._dynamo.reset()
 
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -286,6 +309,66 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # check for no graph break
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
+
+    def test_internal_comparisons_ignore_allow_in_graph(self):
+        class SortKey:
+            def __init__(self, value):
+                self.value = value
+
+            def __lt__(self, other):
+                return self.value % 3 < other.value % 3
+
+        def fn(x, y, z):
+            values = [3, 4, 5]
+            values.sort(key=SortKey)
+            return max([x, y, z], key=lambda t: t.ndim).sum() + values[0]
+
+        self._override_trace_rule(operator.lt)
+        x, y, z = torch.randn(2), torch.randn(2, 2), torch.randn(2, 2, 2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, y, z), fn(x, y, z))
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_computed_lazy_operator_ignores_disallow_in_graph(self):
+        def fn(x, a, b):
+            return x * (a + b)
+
+        self._override_trace_rule(operator.add, disallow=True)
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, 2, 3), fn(x, 2, 3))
+
+    def test_internal_iterator_helper_ignores_allow_in_graph(self):
+        class Sequence:
+            def __init__(self, values):
+                self.values = values
+
+            def __len__(self):
+                return len(self.values)
+
+            def __getitem__(self, index):
+                return self.values[index]
+
+        def fn(x):
+            return x + sum(reversed(Sequence([1, 2, 3])))
+
+        self._override_trace_rule(polyfills.builtins.reversed_sequence_iterator)
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_context_wrapper_ignores_allow_in_graph(self):
+        def target(y):
+            return y.sin()
+
+        def fn(x):
+            return torch.no_grad()(target)(x)
+
+        self._override_trace_rule(polyfills._fn_with_ctx)
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_allow_in_graph_no_id_reuse(self):
         cnts = torch._dynamo.testing.CompileCounter()

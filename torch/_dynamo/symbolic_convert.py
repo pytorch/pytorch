@@ -203,7 +203,6 @@ from .variables.lists import (
 from .variables.misc import (
     CellVariable,
     NullVariable,
-    PythonModuleVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
@@ -2293,7 +2292,7 @@ class InstructionTranslatorBase(
         if val.source_location is None:
             inst = self.current_instruction
             if inst.positions is not None and inst.positions.lineno is not None:
-                val.set_source_location(
+                val = val.with_source_location(
                     SourceLocation(
                         filename=self.f_code.co_filename,
                         lineno=inst.positions.lineno,
@@ -2303,7 +2302,7 @@ class InstructionTranslatorBase(
                     )
                 )
             elif inst.starts_line is not None:
-                val.set_source_location(
+                val = val.with_source_location(
                     SourceLocation(
                         filename=self.f_code.co_filename,
                         lineno=inst.starts_line,
@@ -2682,8 +2681,8 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name, bad-argument-type]
-        self.push(PythonModuleVariable(value, source=source))
+        # pyrefly: ignore [unbound-name]
+        self.push(VariableTracker.build(self, value, source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
@@ -4602,7 +4601,8 @@ class InstructionTranslatorBase(
             self, "{:" + fmt_spec.as_python_constant() + "}"
         )
 
-        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
+        format_fn = VariableTracker.build(self, str.format)
+        self.call_function(format_fn, [fmt_var, value], {})
 
     @break_graph_if_unsupported(
         push=True,
@@ -5146,7 +5146,7 @@ class InstructionTranslatorBase(
         elif inst.argval == 7:
             # INTRINSIC_TYPEVAR
             v = self.pop().as_python_constant()
-            tv = variables.TypingVariable(TypeVar(v))
+            tv = VariableTracker.build(self, TypeVar(v))
             self.push(tv)
         else:
             unimplemented(
@@ -5738,7 +5738,7 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 11):
             push_types |= CO_GENERATOR
         if f_code.co_flags & (push_types):
-            self.push(BuiltinVariable(None))
+            self.push(VariableTracker.build(self, None))
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False

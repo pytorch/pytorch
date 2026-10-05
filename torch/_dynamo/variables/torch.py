@@ -2680,11 +2680,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             tx: "InstructionTranslatorBase",
             *args: VariableTracker,
             **kwargs: VariableTracker,
-        ) -> UserDefinedObjectVariable:
+        ) -> VariableTracker:
             # Wrap C++ interpreter (torch._C._functorch.CInterpreter) as UserDefinedObjectVariable,
             # but Python interpreter (torch._functorch.pyfunctorch.FuncTorchInterpreter) as FuncTorchInterpreterVariable.
-            return UserDefinedObjectVariable(
-                torch._C._functorch.peek_interpreter_stack()
+            return VariableTracker.build(
+                tx, torch._C._functorch.peek_interpreter_stack()
             )
 
         @register(torch._functorch.pyfunctorch.coerce_cinterpreter)
