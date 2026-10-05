@@ -74,7 +74,9 @@ bool should_use_cublaslt_grouped_gemm(
     const std::optional<Tensor>& offs,
     std::optional<c10::ScalarType> out_dtype) {
   const auto dprops = at::cuda::getCurrentDeviceProperties();
-  if (!(dprops->major >= 9 && dprops->major <= 11)) {
+  const bool valid_sm =
+      dprops->major >= 9 && dprops->major <= 11;
+  if (!valid_sm) {
     return false;
   }
 
@@ -344,18 +346,18 @@ bool should_use_scaled_cublaslt_grouped_gemm(
 
   const bool uses_hopper_block = !uses_mnk4 &&
       (*scaling_a == ScalingType::BlockWise1x128 || *scaling_a == ScalingType::BlockWise128x128);
-  bool valid_device;
+  bool valid_sm;
   const auto dprops = at::cuda::getCurrentDeviceProperties();
   if (uses_hopper_block) {
-    valid_device = dprops->major == 9;
+    valid_sm = dprops->major == 9;
   } else if (uses_mnk4 ||
       *scaling_a == ScalingType::BlockWise1x16 ||
       *scaling_a == ScalingType::BlockWise1x32) {
-    valid_device = dprops->major == 10 || dprops->major == 11;
+    valid_sm = dprops->major == 10 || dprops->major == 11;
   } else {
-    valid_device = dprops->major >= 9 && dprops->major <= 11;
+    valid_sm = dprops->major >= 9 && dprops->major <= 11;
   }
-  if (!valid_device) {
+  if (!valid_sm) {
     TORCH_WARN_ONCE(
         "cuBLASLt scaled grouped GEMM is not used because this device is not supported; falling back to the non-cuBLASLt grouped GEMM path.");
     return false;
