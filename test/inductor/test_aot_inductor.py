@@ -817,6 +817,20 @@ class AOTInductorTestsTemplate:
             "::run_impl("
         ).check_not(call0).run(code)
 
+    def test_constant_folding_non_dense_view(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                # Folds to a non-dense view of w with strides (1, 12).
+                return x + self.w[:, :6].t()
+
+        example_inputs = (torch.randn(6, 8, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
     def test_const_graph_no_autotune_at_compile_time(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
