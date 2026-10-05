@@ -55,7 +55,7 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
 )
-from torch.testing._internal.common_utils import skipIfNoXNNPACK
+from torch.testing._internal.common_utils import HardwareClassification, skipIfNoXNNPACK
 
 
 hu.assert_deadline_disabled()
@@ -331,6 +331,7 @@ class _ReferenceConvBn2d(_ReferenceConvBnNd, nn.Conv2d):
 
 
 class TestQuantizeEagerQAT(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
     def setUp(self):
         super().setUp()
 
