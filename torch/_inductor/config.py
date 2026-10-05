@@ -265,6 +265,13 @@ alignment_asserts = (
     == "1"
 )
 
+# Strict mode for input alignment: assert alignment of graph inputs which
+# were codegenned under the assumption that they are aligned, instead of the
+# runtime silently realigning misaligned inputs with a clone.
+alignment_asserts_inputs = (
+    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS_INPUTS") == "1"
+)
+
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
@@ -318,6 +325,10 @@ pattern_matcher = True
 
 # set to True to enable the back-to-back GEMM pass
 b2b_gemm_pass = False
+
+# fuse shared var/std reduction computations in the post-grad pattern matcher.
+# opt-in until scheduler-level dedup is implemented.
+var_std_reduction_dedup = False
 
 # register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
@@ -694,13 +705,10 @@ bmm_shared_a: bool = Config(
 )
 
 
-# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
-# in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
-# nvfp4, M=1..4096) showed the heuristic's ranked winner sits in the top ~5 for
-# small/large M and for all nvfp4, but for mid-M (~512) bf16 the best config can
-# rank much deeper -- capping at 5 there lost up to ~11%, while cap 10 recovered
-# nearly all of it (diminishing returns beyond 10). Set to 0, None, or env var
-# "none"/"all" to tune all configs.
+# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM)
+# heuristic-ranked configs to profile per kernel family in max_autotune.
+# Explicitly supplemental, shape-scoped configs may be added after this cap.
+# Set to 0, None, or env var "none"/"all" to tune all configs.
 def _nvgemm_max_profiling_configs_default() -> int | None:
     env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10")
     if env_val.lower() in ("none", "all"):
@@ -708,6 +716,9 @@ def _nvgemm_max_profiling_configs_default() -> int | None:
     return int(env_val)
 
 
+# BF16 medium-M shapes can require a deeper heuristic pool; a sweep over
+# GDN2/attention/MoE and FLUX shapes found that 10 recovered nearly all of the
+# available performance while lower caps lost up to 11%.
 nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default()
 
 # When enabled, adds supplement kernel configs that nvMatmulHeuristics
@@ -718,11 +729,21 @@ nvgemm_supplement_configs: bool = (
     os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
 )
 
-# When enabled, adds swap_ab NVGEMM choices that swap A/B operands so the
-# large N dimension goes on the M-axis. Improves tile utilization for
-# small-M decode shapes typical in LLM inference (M << N).
+# Force swap_ab NVGEMM choices outside the automatically selected NVFP4
+# decode regime. Swapping A/B puts the large N dimension on the well-tiled
+# M-axis; NVFP4 shapes with M <= 256 and N >= 1024 enable it automatically.
 nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
 
+# Control programmatic dependent launch for the vendored SM100 block-scaled
+# NVGEMM kernel: "0" disables it, "auto" applies the measured NVFP4 shape
+# policy, and "1" forces it for every eligible NVFP4 GEMM. Every thread waits
+# before accessing global memory. All threads execute the common release at the
+# kernel tail, so non-epilogue warps can let the dependent grid launch while
+# the epilogue stores continue to drain.
+# Eligible scheduler-adjacent same-stream Triton consumers also continue the
+# PDL chain. Workspace-backed and composite launches are excluded; deferred
+# alignment copies remain ordered on the same stream before the consumer.
+nvgemm_pdl: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PDL", "auto")
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
 _conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
@@ -978,6 +999,10 @@ fallback_random = False
 # align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
 align_random_eager = False
 
+# Use tl.rand4x/randn4x for 1D CUDA Triton random. Disabled pending
+# https://github.com/pytorch/pytorch/issues/198333
+use_rand4x = os.environ.get("TORCHINDUCTOR_USE_RAND4X") == "1"
+
 # fallback embedding_bag_byte_unpack to eager
 fallback_embedding_bag_byte_unpack = False
 
@@ -1040,13 +1065,45 @@ loop_index_inversion_in_fusion: bool = True
 # For the cases loop ordering after fusion does not help, we don't lose much.
 score_fusion_memory_threshold = 10
 
-# For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
-benchmark_epilogue_fusion = (
-    os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
+# Memory-timeline fusion gating.
+#   None: disable that threshold dimension
+#   0: allow no graph-peak increase
+#   value: allow total graph-peak delta up to that limit
+# The absolute threshold is in GiB: 1 means 1024**3 bytes.
+# The percentage threshold is fractional: 0.1 means 10%.
+# The accepted delta is measured against the original graph peak before fusion.
+# When both thresholds are set, the tighter limit wins.
+fusion_memory_timeline_peak_memory_increase_gb: float | None = None
+fusion_memory_timeline_peak_memory_pct_threshold: float | None = None
+
+# Benchmark template choices with legal prologue or epilogue fusion by deferring
+# choice selection from lowering to scheduling, where fused and unfused
+# alternatives can be compared. pipeline_max_autotune_gemm may independently
+# defer selection without benchmarking fusion when this option is disabled.
+benchmark_template_fusion: bool = (
+    os.environ.get(
+        "TORCHINDUCTOR_BENCHMARK_TEMPLATE_FUSION",
+        os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1"),
+    )
+    == "1"
 )
 
-# Take how many of the top triton kernels to benchmark epilogue
-max_epilogue_benchmarked_choices = 1
+# Deprecated compatibility alias for benchmark_template_fusion.
+benchmark_epilogue_fusion: bool = Config(
+    alias="torch._inductor.config.benchmark_template_fusion",
+    deprecated=True,
+    deprecation_message="use benchmark_template_fusion instead",
+)
+
+# Maximum number of top template choices to benchmark with fusion.
+max_template_fusion_benchmarked_choices: int = 1
+
+# Deprecated compatibility alias for max_template_fusion_benchmarked_choices.
+max_epilogue_benchmarked_choices: int = Config(
+    alias="torch._inductor.config.max_template_fusion_benchmarked_choices",
+    deprecated=True,
+    deprecation_message="use max_template_fusion_benchmarked_choices instead",
+)
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -2149,6 +2206,10 @@ class triton:
     # exceeds this limit
     cudagraph_dynamic_shape_warn_limit: int | None = 8
 
+    # Stop re-recording new cudagraphs after this many distinct dynamic shapes.
+    # Shapes already recorded keep replaying; further new shapes run eager.
+    cudagraph_dynamic_shape_rerecord_limit: int | None = None
+
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 
@@ -2374,6 +2435,13 @@ class triton:
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
 
+    # Whether FlexAttention forward/decode may select AMD TDM descriptors on
+    # gfx1250. Defaults on: selection is capability-driven, so this is a kill
+    # switch for callers that do not own the flex_attention() call site and
+    # therefore cannot pass USE_TMA. It does not affect NVIDIA, XPU, dense GEMM
+    # or generic descriptor codegen.
+    enable_flex_tdm = True
+
     # (Experimental)
     # Whether to allow reordering tensor descriptor matches with descending
     # strides, at the expense of transposing values after load / before store.
@@ -2516,6 +2584,19 @@ class aot_inductor:
     # autotuning. When False (default), tensors are shared across kernels
     # and del'd at their last consumer (faster but higher peak memory).
     autotune_per_kernel_alloc: bool = False
+
+    # Offload graph constants to disk across the autotune block once they occupy
+    # this share of the device. AOT only.
+    #
+    # Defaults to 1.0, which never fires: constants are resident on the card, so
+    # they cannot reach 100% of its capacity. The offload is opt-in until it has
+    # more production mileage; set it to e.g. 0.10 to enable.
+    #
+    # A fraction rather than an absolute size so a chosen threshold scales with
+    # the card: 0.10 is ~9.5 GiB on a 95 GiB H100 but ~29 GiB on a 288 GiB
+    # MI350X, which should not pay the spill for a working set that only
+    # threatens the smaller card.
+    autotune_offload_constants_min_device_fraction: float = 1.0
 
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;

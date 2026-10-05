@@ -301,6 +301,7 @@ class DynamicTunableOpsTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -310,6 +311,7 @@ class DynamicTunableOpsTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     # -- Tuning enabled --------------------------------------------------
 
@@ -884,6 +886,7 @@ class LayoutCoverageWildcardTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -893,6 +896,7 @@ class LayoutCoverageWildcardTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     @staticmethod
     def _make_layout(
@@ -1096,6 +1100,7 @@ class BmmLayoutCoverageWildcardTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -1105,6 +1110,7 @@ class BmmLayoutCoverageWildcardTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     @staticmethod
     def _make_layout(
@@ -1312,6 +1318,7 @@ class ScaledGemmTunableOpFP8Test(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -1321,6 +1328,7 @@ class ScaledGemmTunableOpFP8Test(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     @staticmethod
     def _scaled_mm_inputs(
@@ -1505,6 +1513,7 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable._clear_all()
@@ -1514,6 +1523,7 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     def _entries_for_op(self, op_substr: str) -> list[_TunableResultEntry]:
         return [e for e in _get_tunable_results() if op_substr in e[0]]
@@ -1691,6 +1701,7 @@ class RecordUntunedConcreteMissTest(TestCase):
             shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def setUp(self) -> None:
+        super().setUp()
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.record_untuned_enable(False)
@@ -1702,6 +1713,7 @@ class RecordUntunedConcreteMissTest(TestCase):
         torch.cuda.tunable.enable(False)
         torch.cuda.tunable.tuning_enable(False)
         torch.cuda.tunable.wildcard_fallback_enable(False)
+        super().tearDown()
 
     def _record_untuned_run(self, stem: str, run_op: Callable[[], object]) -> list[str]:
         """Run `run_op` at runtime (TunableOp enabled, tuning disabled) with

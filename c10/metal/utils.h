@@ -630,29 +630,32 @@ inline float hypot(float a_, float b_) {
 
 // Copy n bytes from src to dst using the widest vector their combined alignment
 // allows (uint4 -> uint2 -> uint -> ushort -> byte), with a scalar tail.
-inline void copy_bytes_aligned(device uchar* dst, constant uchar* src, uint n) {
+inline void copy_bytes_aligned(
+    device uchar* dst,
+    device const uchar* src,
+    uint n) {
   const uint align =
       (reinterpret_cast<ulong>(dst) | reinterpret_cast<ulong>(src)) & 15;
   uint i = 0;
   if (align == 0) {
     for (; i + 16 <= n; i += 16) {
       *reinterpret_cast<device uint4*>(dst + i) =
-          *reinterpret_cast<constant uint4*>(src + i);
+          *reinterpret_cast<device const uint4*>(src + i);
     }
   } else if ((align & 7) == 0) {
     for (; i + 8 <= n; i += 8) {
       *reinterpret_cast<device uint2*>(dst + i) =
-          *reinterpret_cast<constant uint2*>(src + i);
+          *reinterpret_cast<device const uint2*>(src + i);
     }
   } else if ((align & 3) == 0) {
     for (; i + 4 <= n; i += 4) {
       *reinterpret_cast<device uint*>(dst + i) =
-          *reinterpret_cast<constant uint*>(src + i);
+          *reinterpret_cast<device const uint*>(src + i);
     }
   } else if ((align & 1) == 0) {
     for (; i + 2 <= n; i += 2) {
       *reinterpret_cast<device ushort*>(dst + i) =
-          *reinterpret_cast<constant ushort*>(src + i);
+          *reinterpret_cast<device const ushort*>(src + i);
     }
   }
   for (; i < n; ++i) {
