@@ -1,12 +1,14 @@
 # mypy: ignore-errors
 
 import atexit
+import collections
 import faulthandler
 import functools
 import inspect
 import itertools
 import logging
 import multiprocessing
+import multiprocessing.connection
 import multiprocessing.spawn
 import operator
 import os
@@ -930,12 +932,18 @@ else:
 
 
 # Spawning a rank re-imports the test module, which dominates short tests. While
-# a test runs, the next test's ranks are spawned and wait for it. They are only
-# used if nothing that affects import has changed; env vars in
-# _PRESPAWN_RUNTIME_ENV are only read at runtime, so they are sent at handoff.
+# a test runs, the ranks of the next TORCH_TEST_PRESPAWN_WORKERS tests are
+# spawned and wait for it. They are only used if nothing that affects import has
+# changed; env vars in _PRESPAWN_RUNTIME_ENV are only read at runtime, so they
+# are sent at handoff.
 _PRESPAWN_RUNTIME_ENV = frozenset({"TEMP_DIR", "INIT_METHOD", "PYTEST_CURRENT_TEST"})
-_prespawned: tuple[tuple, dict[str, str], list] | None = None
+_prespawned: collections.deque[tuple[tuple, dict[str, str], list]] = collections.deque()
 _prespawn_atexit_registered = False
+
+
+def _prespawn_depth() -> int:
+    depth = os.environ.get("TORCH_TEST_PRESPAWN_WORKERS", "2")
+    return int(depth) if depth.isdigit() else 0
 
 
 def _prespawned_worker(rank: int, cls: type, conn) -> None:
@@ -965,42 +973,39 @@ def _stop_workers(workers: list) -> None:
 
 
 def _discard_prespawned() -> None:
-    global _prespawned
-    if _prespawned is None:
-        return
-    workers = _prespawned[2]
-    _prespawned = None
-    _stop_workers(workers)
+    while _prespawned:
+        _stop_workers(_prespawned.popleft()[2])
 
 
 def _prespawn(proc, cls: type, world_size: int) -> None:
-    global _prespawned, _prespawn_atexit_registered
+    global _prespawn_atexit_registered
     if not _prespawn_atexit_registered:
         # Runs before multiprocessing's exit handler, which joins non-daemon children.
         atexit.register(_discard_prespawned)
         _prespawn_atexit_registered = True
-    workers = []
-    try:
-        for rank in range(world_size):
-            parent_conn, child_conn = torch.multiprocessing.Pipe()
-            process = proc(
-                target=_prespawned_worker,
-                name="process " + str(rank),
-                args=(rank, cls, child_conn),
-            )
-            process.start()
-            workers.append((process, parent_conn))
-    except BaseException:
-        _stop_workers(workers)
-        raise
-    _prespawned = (_prespawn_key(cls, world_size), dict(os.environ), workers)
+    key = _prespawn_key(cls, world_size)
+    while len(_prespawned) < _prespawn_depth():
+        workers = []
+        try:
+            for rank in range(world_size):
+                parent_conn, child_conn = torch.multiprocessing.Pipe()
+                process = proc(
+                    target=_prespawned_worker,
+                    name="process " + str(rank),
+                    args=(rank, cls, child_conn),
+                )
+                process.start()
+                workers.append((process, parent_conn))
+        except BaseException:
+            _stop_workers(workers)
+            raise
+        _prespawned.append((key, dict(os.environ), workers))
 
 
 def _take_prespawned(cls: type, world_size: int) -> list | None:
-    global _prespawned
-    if _prespawned is None:
+    if not _prespawned:
         return None
-    key, env, workers = _prespawned
+    key, env, workers = _prespawned[0]
     env_changed = any(
         env.get(k) != os.environ.get(k)
         for k in env.keys() | os.environ.keys()
@@ -1013,7 +1018,7 @@ def _take_prespawned(cls: type, world_size: int) -> list | None:
     ):
         _discard_prespawned()
         return None
-    _prespawned = None
+    _prespawned.popleft()
     return workers
 
 
@@ -1116,7 +1121,7 @@ class MultiProcessTestCase(TestCase):
         prespawn = (
             proc is torch.multiprocessing.get_context("spawn").Process
             and not common_utils.PYTEST_SINGLE_TEST
-            and os.environ.get("TORCH_TEST_PRESPAWN_WORKERS", "1") == "1"
+            and _prespawn_depth() > 0
         )
         workers = _take_prespawned(cls, world_size) if prespawn else None
         if workers is not None:
@@ -1335,8 +1340,10 @@ class MultiProcessTestCase(TestCase):
                     for p in self.processes:
                         p.terminate()
                     break
-                # Sleep to avoid excessive busy polling.
-                time.sleep(0.1)
+                multiprocessing.connection.wait(
+                    [p.sentinel for p in self.processes if p.exitcode is None],
+                    timeout=0.1,
+                )
 
             elapsed_time = time.time() - start_time
             self._check_return_codes(fn, elapsed_time)
