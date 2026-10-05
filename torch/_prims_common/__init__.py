@@ -2273,8 +2273,10 @@ class CUDARngStateHelper:
         torch.cuda.set_rng_state(new_state)
 
     @staticmethod
-    def set_new_offset(relative_offset: torch.Tensor) -> None:
+    def set_new_offset(philox_offset: torch.Tensor) -> None:
         # RNG ops left unfunctionalized (e.g. randperm, randn) advance the live
         # generator during the call; rewinding to the philox offset replays them.
-        new_offset = max(int(relative_offset), torch.cuda._get_rng_state_offset())
+        # TODO: within one call those ops still start at the philox base offset,
+        # so their draws can overlap the counters the philox ops consume.
+        new_offset = max(int(philox_offset), torch.cuda._get_rng_state_offset())
         torch.cuda._set_rng_state_offset(new_offset)

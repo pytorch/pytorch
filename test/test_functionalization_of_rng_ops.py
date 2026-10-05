@@ -448,7 +448,7 @@ class TestFunctionalizationRngOps(TestCase):
 
         self.assertEqual(ref, res)
         # The next call must start past everything either op drew in this one.
-        self.assertGreaterEqual(
+        self.assertEqual(
             torch.cuda._get_rng_state_offset(), max(rand_offset, randperm_offset)
         )
 
