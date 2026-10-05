@@ -55,6 +55,7 @@ from label_utils import (
     LABEL_ERR_MSG,
     NOT_USER_FACING_LABEL,
 )
+from native_stack import PULL_REQUEST_RESOLVED, RE_GHSTACK_HEAD_REF
 from trymerge_explainer import get_revert_message, TryMergeExplainer
 
 
@@ -436,7 +437,6 @@ query ($owner: String!, $name: String!) {
 }
 """
 
-RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_DESC = re.compile(r"Stack.*:\r?\n(\* [^\r\n]+\r?\n)+", re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
     r"(Pull Request resolved|Pull-Request-resolved|Pull-Request): "
@@ -1477,7 +1477,7 @@ class GitHubPR:
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
         msg += msg_body
 
-        msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
+        msg += f"\n{PULL_REQUEST_RESOLVED}{self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         if ghstack_deps:
             msg += f"ghstack dependencies: {', '.join([f'#{pr.pr_num}' for pr in ghstack_deps])}\n"
