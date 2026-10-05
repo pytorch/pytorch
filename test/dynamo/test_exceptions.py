@@ -1800,19 +1800,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         ):
             self.assertEqual(fn(x, f), opt_fn(x, f))
 
-    def test_exception_traceback_frame_unsupported_attr(self):
-        def fn(x):
-            try:
-                raise ValueError("oops")
-            except ValueError as e:
-                if e.__traceback__.tb_frame.f_trace is None:
-                    x = x + 1
-            return x
-
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(Unsupported, "Unsupported frame attribute"):
-            opt_fn(torch.randn(4))
-
     @torch._dynamo.config.patch(run_gc_after_compile=False)
     def test_exception_traceback_frame_no_tx_cycle(self):
         # The tb_frame VT must not keep its translator alive; otherwise every

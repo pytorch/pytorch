@@ -3989,16 +3989,6 @@
       ]
     }
   ],
-  "GB3482": [
-    {
-      "Gb_type": "Unsupported frame attribute",
-      "Context": "{self} accessing '{name}'",
-      "Explanation": "Dynamo only models f_lineno and f_code of frame objects.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0235": [
     {
       "Gb_type": "`torch.nn.Parameter` with non-constant Tensor attributes",

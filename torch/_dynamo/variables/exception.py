@@ -109,20 +109,6 @@ class FrameVariable(VariableTracker):
             )
         return ConstantVariable.create(positions.lineno)
 
-    def tp_getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker:
-        # Without this, an unmodeled attribute such as f_trace becomes a
-        # GetAttrVariable that silently compares unequal to its eager value.
-        if self.lookup_tp_getset_member(name) is None:
-            unimplemented(
-                gb_type="Unsupported frame attribute",
-                context=f"{self} accessing '{name}'",
-                explanation="Dynamo only models f_lineno and f_code of frame objects.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return super().tp_getattro_impl(tx, name)
-
     # ref: CPython Objects/frameobject.c frame_getsetlist
     tp_getset = {
         "f_lineno": GetSet(_get_f_lineno, unmodeled_setter),
