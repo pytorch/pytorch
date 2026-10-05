@@ -4108,6 +4108,25 @@ class AOTInductorTestsTemplate:
                     model, example_inputs, "triton_poi_fused_tanh_0 = loadKernel(", 1
                 )
 
+    def test_kernel_params_not_stale_across_compiles(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class TwoOutputs(torch.nn.Module):
+            def forward(self, x):
+                return x * 2.0, x * 3.0
+
+        class OneOutput(torch.nn.Module):
+            def forward(self, x):
+                return x * 2.0
+
+        # Both graphs name their kernel triton_poi_fused_mul_0. Serial compile
+        # makes the third compile reuse the kernel object of the first one.
+        example_inputs = (torch.randn(64, 128, device=self.device),)
+        with config.patch({"compile_threads": 1}):
+            for model in (TwoOutputs(), OneOutput(), TwoOutputs()):
+                self.check_model(model, example_inputs)
+
     def test_reuse_kernel_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
