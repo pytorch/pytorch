@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
 from torch._subclasses.fake_tensor import is_fake, is_fake_tensor
+from torch._subclasses.functional_tensor import copy_grad_dtype_override
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -396,6 +397,7 @@ class SubclassCreationMeta:
             # has correct autograd metadata, since we'll be tracing through the autograd engine with the subclass.
             # We don't trace through the autograd engine at runtime though, so no need
             # to compute this extra metadata then!
+            copy_grad_dtype_override(self.original_subclass, rebuilt)
             torch._mirror_autograd_meta_to(self.original_subclass, rebuilt)  # type: ignore[attr-defined]
 
         return rebuilt

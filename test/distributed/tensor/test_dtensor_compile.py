@@ -269,6 +269,40 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         fn(x).backward()
         self.assertEqual(local.grad, torch.full_like(local, 2))
 
+    def test_custom_autograd_grad_dtype(self):
+        # The custom backward returns an fp32 grad for a bf16 DTensor leaf with
+        # grad_dtype=fp32, so the compiled backward must not round the grad to bf16.
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        class MatmulWithFp32WeightGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x)
+                return x @ weight.T
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                (x,) = ctx.saved_tensors
+                return None, grad_out.float().T @ x.float()
+
+        def make(v):
+            t = torch.full((1, 1), v, dtype=torch.bfloat16, device=self.device_type)
+            return DTensor.from_local(t, mesh, [Replicate()], run_check=False)
+
+        def weight_grad(fn):
+            weight = nn.Parameter(make(1.0))
+            weight.grad_dtype = torch.float32
+            # (1 + 2^-7)^2 is not representable in bf16.
+            x = make(1 + 2**-7)
+            fn(x, weight).backward(x)
+            return weight.grad.to_local()
+
+        fn = MatmulWithFp32WeightGrad.apply
+        ref = weight_grad(fn)
+        res = weight_grad(torch.compile(fn, backend="aot_eager", fullgraph=True))
+        self.assertEqual(ref.dtype, torch.float32)
+        self.assertEqual(res, ref, atol=0, rtol=0)
+
     def test_compile_waits_act_nested_in_dtensor_local_tensor(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180614.
         # AOTAutograd must resolve AsyncCollectiveTensors (ACTs) nested in
