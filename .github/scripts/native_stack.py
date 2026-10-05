@@ -1,11 +1,9 @@
-"""GitHub-native PR stacks for the merge bot: reading and validating them, finding
-what landed, and building the commits that merge them."""
+"""GitHub-native PR stacks for the merge bot: reading and validating them, and
+finding what landed."""
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary
@@ -22,7 +20,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       stack {
-        number
         baseRefName
         entries(first: 100) {
           totalCount
@@ -34,7 +31,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
             pullRequest {
               number
               closed
-              isCrossRepository
               headRefName
               headRefOid
               baseRefName
@@ -63,7 +59,6 @@ class StackEntry:
     position: int
     number: int
     closed: bool
-    is_cross_repository: bool
     head_ref: str
     head_oid: str
     base_ref: str
@@ -71,7 +66,6 @@ class StackEntry:
 
 @dataclass(frozen=True)
 class NativeStack:
-    number: int
     base_ref: str
     entries: tuple[StackEntry, ...]
 
@@ -80,7 +74,7 @@ def get_native_stack(org: str, project: str, pr_num: int) -> NativeStack | None:
     try:
         rc = gh_graphql(GH_GET_PR_STACK_QUERY, owner=org, name=project, number=pr_num)
     except GHGraphQLError as e:
-        # Its message has the whole query, too long for the PR comments that quote it
+        # Its message has the whole query, too long to quote in a PR comment
         errors = "; ".join(str(err.get("message")) for err in e.response["errors"])
         raise NativeStackError(f"GraphQL errors: {errors}") from e
     stack = rc["data"]["repository"]["pullRequest"]["stack"]
@@ -101,7 +95,6 @@ def get_native_stack(org: str, project: str, pr_num: int) -> NativeStack | None:
             position=node["position"],
             number=node["pullRequest"]["number"],
             closed=node["pullRequest"]["closed"],
-            is_cross_repository=node["pullRequest"]["isCrossRepository"],
             head_ref=node["pullRequest"]["headRefName"],
             head_oid=node["pullRequest"]["headRefOid"],
             base_ref=node["pullRequest"]["baseRefName"],
@@ -109,11 +102,11 @@ def get_native_stack(org: str, project: str, pr_num: int) -> NativeStack | None:
         for node in nodes
     ]
     entries.sort(key=lambda entry: entry.position)
-    return NativeStack(stack["number"], stack["baseRefName"], tuple(entries))
+    return NativeStack(stack["baseRefName"], tuple(entries))
 
 
 def stack_dependencies_line(numbers: list[int]) -> str:
-    """The line that the merge bot adds to the landed commit of a stacked PR to name
+    """The `Stack dependencies` line of the landed commit of a stacked PR, which names
     the PRs below it, bottom first."""
     return STACK_DEPENDENCIES + ", ".join(f"#{num}" for num in numbers)
 
@@ -142,10 +135,10 @@ def _log(repo: GitRepo, rev: str, *options: str) -> list[tuple[str, str]]:
 def _own_trailers(message: str) -> tuple[str, list[int]]:
     """The URL of the last `Pull Request resolved` line of `message` ("" if none) and
     the PRs, bottom first, that the `Stack dependencies` line after it names. A
-    commit lands the PR of that URL: the merge bot appends these lines to the PR's
-    body, which may quote other commits' lines. Only LF ends a line, as for `git log
-    --grep`: the Co-authored-by lines after the bot's lines hold author names, which
-    may contain other line separators."""
+    commit lands the PR of that URL: the merge bot appends that URL's line to the
+    PR's body, which may quote other commits' lines. Only LF ends a line, as for `git
+    log --grep`: the Co-authored-by lines after the bot's lines hold author names,
+    which may contain other line separators."""
     lines = message.split("\n")
     resolved = [i for i, x in enumerate(lines) if x.startswith(PULL_REQUEST_RESOLVED)]
     if not resolved:
@@ -166,16 +159,6 @@ def _landing_candidates(
     return _log(repo, rev, *options, "-E", grep)
 
 
-def _newest_landing(repo: GitRepo, pr_url: str, rev: str) -> str | None:
-    """Newest commit of `rev` that lands `pr_url`, reverted or not."""
-    # Quoted lines are rare, so the newest candidate is nearly always the landing
-    candidates = _landing_candidates(repo, pr_url, rev, "-1")
-    if candidates and _own_trailers(candidates[0][1])[0] != pr_url:
-        candidates = _landing_candidates(repo, pr_url, rev)
-    landings = (sha for sha, msg in candidates if _own_trailers(msg)[0] == pr_url)
-    return next(landings, None)
-
-
 def _revert_of(repo: GitRepo, sha: str, rev: str) -> tuple[str, str] | None:
     """Newest commit of `rev` that reverts commit `sha`, as _log returns it: the merge
     bot's reverts and plain `git revert`s name it in a `This reverts commit <sha>.`
@@ -183,20 +166,6 @@ def _revert_of(repo: GitRepo, sha: str, rev: str) -> tuple[str, str] | None:
     grep = f"--grep=^This reverts commit {sha}([^0-9a-f]|$)"
     reverts = _log(repo, rev, "-1", "-E", grep)
     return reverts[0] if reverts else None
-
-
-def find_landed_commit(repo: GitRepo, pr_url: str, ref: str) -> str | None:
-    """Newest commit on `ref` that lands `pr_url` (see _own_trailers), or None if
-    there is none or a later commit reverted it."""
-    landing = _newest_landing(repo, pr_url, ref)
-    if landing is None or _revert_of(repo, landing, f"{landing}..{ref}") is not None:
-        return None
-    return landing
-
-
-def landed_since(repo: GitRepo, pr_url: str, start: str, ref: str) -> bool:
-    """Whether a commit in `start..ref` lands `pr_url`, reverted since or not."""
-    return _newest_landing(repo, pr_url, f"{start}..{ref}") is not None
 
 
 def _reverted(repo: GitRepo, sha: str, ref: str) -> bool:
@@ -210,42 +179,6 @@ def _reverted(repo: GitRepo, sha: str, ref: str) -> bool:
     return reverts % 2 == 1
 
 
-def find_stack_dependents(
-    repo: GitRepo, org: str, project: str, pr_num: int, ref: str
-) -> tuple[str | None, list[tuple[str, int]]]:
-    """The newest commit on `ref` that lands PR `pr_num` (see _own_trailers), unless
-    `ref` reverts it (see _reverted), and the commits on `ref` after the PR's first
-    landing whose own `Stack dependencies` line lists it and that are the newest
-    landing of their PR, which `ref` does not revert either, each with its PR number,
-    highest in the stack (longest `Stack dependencies` line) first, then newest first.
-    (None, []) if PR `pr_num` is not landed. Unlike find_landed_commit, which merges
-    use, this reads a reverted revert as a reland, so that a revert does not leave
-    behind PRs that need the reverted one."""
-    pr_url = _pr_url(org, project, pr_num)
-    candidates = _landing_candidates(repo, pr_url, ref)
-    landings = [sha for sha, msg in candidates if _own_trailers(msg)[0] == pr_url]
-    if not landings or _reverted(repo, landings[0], ref):
-        return None, []
-    # Start at the first landing: if the PR was reverted alone and relanded, the
-    # PRs that landed on top of it before that are still on `ref` and need it
-    grep = f"--grep=^{STACK_DEPENDENCIES}(#[0-9]+, )*#{pr_num}(, #[0-9]+)*$"
-    rc: list[tuple[int, str, int]] = []
-    for sha, message in _log(repo, f"{landings[-1]}..{ref}", "-E", grep):
-        url, deps = _own_trailers(message)
-        number = re.fullmatch(r".+/([0-9]+)", url)
-        if (
-            number
-            and url == _pr_url(org, project, int(number[1]))
-            and pr_num in deps
-            and _newest_landing(repo, url, ref) == sha
-            and not _reverted(repo, sha, ref)
-        ):
-            rc.append((len(deps), sha, int(number[1])))
-    # Top of the stack down: a PR relanded after a revert is newer than those above it
-    rc.sort(key=lambda dependent: -dependent[0])
-    return landings[0], [(sha, number) for _, sha, number in rc]
-
-
 def _is_ancestor(repo: GitRepo, ancestor: str, descendant: str) -> bool:
     return repo.get_merge_base(ancestor, descendant) == ancestor
 
@@ -254,9 +187,9 @@ def _stack_entries(
     stack: NativeStack, target: int
 ) -> tuple[tuple[StackEntry, ...], int]:
     """The entries of `stack` up to PR `target` and the index of the lowest open one,
-    checked to be a chain of same-repository PRs on the stack's trunk with no closed
-    PR above an open one and no ghstack PR. Even a landed ghstack PR is refused: its
-    revert takes the ghstack path, which would leave the PRs landed above it."""
+    checked to be a chain of PRs on the stack's trunk with no closed PR above an open
+    one and no ghstack PR. Even a landed ghstack PR is refused: its revert takes the
+    ghstack path, which would leave the PRs landed above it."""
     numbers = [entry.number for entry in stack.entries]
     if target not in numbers:
         raise NativeStackError(f"PR #{target} is not in the stack")
@@ -264,11 +197,6 @@ def _stack_entries(
     if entries[-1].closed:
         raise NativeStackError(f"PR #{target} is closed")
     for idx, entry in enumerate(entries):
-        if entry.is_cross_repository:
-            raise NativeStackError(
-                f"PR #{entry.number} is from a fork, but the bot only supports stacks "
-                "of PRs from this repository"
-            )
         if RE_GHSTACK_HEAD_REF.match(entry.head_ref):
             raise NativeStackError(
                 f"PR #{entry.number} is a ghstack PR, and the bot does not support "
@@ -317,9 +245,10 @@ _trunk_landings_read: WeakKeyDictionary[GitRepo, dict[str, tuple[str, list[str]]
 
 
 def _trunk_landings(repo: GitRepo, pr_url: str, trunk: str) -> list[str]:
-    """Every commit of `trunk` that lands `pr_url`, reverted or not, newest first. A
-    trunk only moves forward, so only the first call for a PR in `repo` reads the
-    whole history, and later calls read the commits added since."""
+    """Every commit of `trunk` that lands `pr_url`, reverted or not, newest first. The
+    first call for a PR in `repo` reads the whole history, and later calls only the
+    commits added since, unless `trunk` was rewritten and lost the commit that the
+    last call read up to."""
     tip = repo.rev_parse(trunk)
     read = _trunk_landings_read.setdefault(repo, {})
     rev = tip
@@ -334,11 +263,12 @@ def _trunk_landings(repo: GitRepo, pr_url: str, trunk: str) -> list[str]:
 
 
 def _landed_in(repo: GitRepo, pr_url: str, rev: str, trunk: str) -> str | None:
-    """find_landed_commit(repo, pr_url, rev) for a `rev` whose landings of the PR
-    are commits of `trunk`, read through _trunk_landings."""
+    """The newest commit of `rev` that lands `pr_url` (see _own_trailers), or None
+    if there is none or `rev` reverts it (see _reverted). The landings are read
+    through _trunk_landings, so those of `rev` must be commits of `trunk`."""
     landings = _trunk_landings(repo, pr_url, trunk)
     landing = next((sha for sha in landings if _is_ancestor(repo, sha, rev)), None)
-    if landing is None or _revert_of(repo, landing, f"{landing}..{rev}") is not None:
+    if landing is None or _reverted(repo, landing, rev):
         return None
     return landing
 
@@ -463,76 +393,3 @@ def get_native_stack_landing_prs(
         )
         rc.append((entry, lower))
     return rc
-
-
-def _git(
-    repo: GitRepo,
-    *args: str,
-    stdin: str = "",
-    env: dict[str, str] | None = None,
-    ok_codes: tuple[int, ...] = (0,),
-) -> subprocess.CompletedProcess[str]:
-    """GitRepo._run_git with stdin, extra environment and accepted exit codes. It
-    runs in bytes mode, as text mode would turn each carriage return of the output
-    into a newline."""
-    cmd = ["git", "-C", repo.repo_dir, *args]
-    if repo.debug:
-        print(f"+ {' '.join(cmd)}")
-    run = subprocess.run(
-        cmd,
-        input=stdin.encode(),
-        capture_output=True,
-        env=None if env is None else {**os.environ, **env},
-    )
-    stdout, stderr = run.stdout.decode(), run.stderr.decode()
-    proc = subprocess.CompletedProcess(cmd, run.returncode, stdout, stderr)
-    if proc.returncode not in ok_codes:
-        print(f"stdout: \n{proc.stdout}")
-        print(f"stderr: \n{proc.stderr}")
-        raise RuntimeError(
-            f"Command `{' '.join(cmd)}` returned non-zero exit code "
-            f"{proc.returncode}\n```\n{proc.stdout}{proc.stderr}```"
-        )
-    return proc
-
-
-def _merge_tree(
-    repo: GitRepo, ours: str, theirs: str, conflict: str, merge_base: str
-) -> str:
-    """The tree of merging `theirs` into `ours`, or NativeStackError(`conflict`)."""
-    args = ("merge-tree", "--write-tree", f"--merge-base={merge_base}", ours, theirs)
-    merge = _git(repo, *args, ok_codes=(0, 1))
-    if merge.returncode == 1:
-        raise NativeStackError(conflict)
-    return merge.stdout.split("\n", 1)[0]
-
-
-def build_native_stack_commits(
-    repo: GitRepo,
-    base_sha: str,
-    landing: list[tuple[StackEntry, str]],
-    commits: list[tuple[str, str]],
-) -> str:
-    """Commit the changes of each PR in `landing`, as returned by
-    get_native_stack_landing_prs, on top of `base_sha`, without touching the
-    worktree or the index, and return the last commit. `commits` holds the author
-    (`Name <email>`) and the message of each PR's commit; the message is cleaned up
-    like `git commit -m` does."""
-    current = base_sha
-    for (entry, lower), (author, message) in zip(landing, commits, strict=True):
-        conflict = f"PR #{entry.number} has conflicts with the commits below it. "
-        tree = _merge_tree(repo, current, entry.head_oid, conflict + REBASE_HINT, lower)
-        if tree == repo.rev_parse(f"{current}^{{tree}}"):
-            raise NativeStackError(
-                f"PR #{entry.number} has no changes to land: it is empty, or its "
-                "changes already landed"
-            )
-        name, _, email = author.rpartition("<")
-        env = {
-            "GIT_AUTHOR_NAME": name.strip(),
-            "GIT_AUTHOR_EMAIL": email.removesuffix(">"),
-        }
-        message = _git(repo, "stripspace", stdin=message).stdout
-        commit = _git(repo, "commit-tree", tree, "-p", current, stdin=message, env=env)
-        current = commit.stdout.strip()
-    return current
