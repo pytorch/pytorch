@@ -118,7 +118,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     isRocmArchAnyOf,
-    MACOS_VERSION,
     MI200_ARCH,
     NAVI3_ARCH,
     NAVI_ARCH,
@@ -232,9 +231,6 @@ requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
 )
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
-skip_if_x86_mac = functools.partial(
-    unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
-)
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libtest = torch.library.Library("test", "FRAGMENT")  # noqa: SCOPED_LIBRARY
@@ -263,7 +259,7 @@ test_int_dtypes = [
     torch.int64,
 ]
 
-if SM80OrLater or MACOS_VERSION >= 14.0 or GPU_TYPE == "xpu":
+if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE == "xpu":
     test_dtypes.append(torch.bfloat16)
 
 
@@ -2573,7 +2569,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
 
-    @skip_if_x86_mac()
     def test_reduction2(self):
         def fn(a):
             # FIXME: a.argmax
@@ -2581,7 +2576,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("inf")),))
 
-    @skip_if_x86_mac()
     def test_reduction3(self):
         def fn(a):
             # FIXME: a.argmin
@@ -6970,6 +6964,71 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(2, 4, 4, 4),),
         )
 
+    @skip_if_mps  # MPS does not implement adaptive_max_pool3d.
+    def test_adaptive_max_pool3d_channels_last_backward(self):
+        def fn(x):
+            return F.adaptive_max_pool3d(x, (2, 3, 5), return_indices=True)
+
+        x = torch.randperm(480, device=self.device).float().reshape(1, 4, 4, 6, 5)
+        x = x.clone(memory_format=torch.channels_last_3d)
+        eager = x.detach().clone(memory_format=torch.preserve_format).requires_grad_()
+        compiled = (
+            x.detach().clone(memory_format=torch.preserve_format).requires_grad_()
+        )
+        grad = torch.arange(1.0, 121.0, device=self.device).reshape(1, 4, 2, 3, 5)
+        eager_out, eager_indices = fn(eager)
+        compiled_out, compiled_indices = torch.compile(fn, fullgraph=True)(compiled)
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(compiled_out.stride(), eager_out.stride())
+        (eager_out * grad).sum().backward()
+        (compiled_out * grad).sum().backward()
+        self.assertEqual(compiled.grad, eager.grad)
+        self.assertEqual(compiled_indices, eager_indices)
+        self.assertEqual(
+            aten.adaptive_max_pool3d_backward(grad, eager, compiled_indices),
+            aten.adaptive_max_pool3d_backward(grad, eager, eager_indices),
+        )
+        self.assertEqual(compiled_indices.stride(), eager_indices.stride())
+
+    @skip_if_mps  # MPS does not implement adaptive_max_pool3d.
+    def test_adaptive_max_pool3d_backward_noncontiguous_indices(self):
+        """Native backward ignores index strides, so use contiguous indices as reference."""
+        x = torch.randperm(480, device=self.device).float().reshape(1, 4, 4, 6, 5)
+        grad = torch.arange(1.0, 121.0, device=self.device).reshape(1, 4, 2, 3, 5)
+        _, indices = F.adaptive_max_pool3d(x, (2, 3, 5), return_indices=True)
+        indices = indices.contiguous(memory_format=torch.channels_last_3d)
+        self.assertFalse(indices.is_contiguous())
+
+        def backward(grad_output, input, saved_indices):
+            return aten.adaptive_max_pool3d_backward(grad_output, input, saved_indices)
+
+        expected = backward(grad, x, indices.contiguous())
+        actual = torch.compile(backward, fullgraph=True)(grad, x, indices)
+        self.assertEqual(actual, expected)
+
+    @skip_if_mps  # MPS does not implement adaptive_max_pool3d.
+    def test_adaptive_max_pool3d_out_decomposition(self):
+        from torch._inductor.decomposition import decompositions
+
+        x = torch.randperm(480, device=self.device).float().reshape(1, 4, 4, 6, 5)
+        x = x.clone(memory_format=torch.channels_last_3d)
+        output = torch.empty(1, 4, 2, 3, 5, device=self.device)
+        indices = torch.empty_like(output, dtype=torch.int64)
+        expected_output = torch.empty_like(output)
+        expected_indices = torch.empty_like(indices)
+
+        expected = aten.adaptive_max_pool3d.out(
+            x, (2, 3, 5), out=expected_output, indices=expected_indices
+        )
+        actual = decompositions[aten.adaptive_max_pool3d.out](
+            x, (2, 3, 5), out=output, indices=indices
+        )
+        self.assertIs(actual[0], output)
+        self.assertIs(actual[1], indices)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual[0].stride(), expected[0].stride())
+        self.assertEqual(actual[1].stride(), expected[1].stride())
+
     # halide/mps take the non-logical-index path in _pool_argmax_inner_fn, so the
     # window offsets are still physical there; halide additionally fails to schedule
     # the fallback argmax for this shape.
@@ -10374,7 +10433,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
-    @skip_if_x86_mac()
     def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
@@ -20479,6 +20537,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    def test_masked_cse_recomputed_load(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199642
+        # When an input load is first emitted inside ops.masked (via F.pad),
+        # then loaded unmasked into the kernel-level CSE cache, and subsequently
+        # loaded again inside ops.masked, the second ops.masked block has an
+        # empty scoped_body and returns the outer CSE variable directly.
+        def fn(x, y, table):
+            padded_x = torch.nn.functional.pad(x, (1, 1, 1, 1))
+            padded_y = torch.nn.functional.pad(y, (1, 1, 1, 1))
+            m = (padded_x**2 + padded_y**2)[..., 1:-1, 1:-1]
+            i = ((x + y) * 3).round()
+            idx1 = (i % 8).long()
+            idx2 = ((i + 4) % 8).long()
+            return (m > table.gather(1, idx1)) & (m > table.gather(1, idx2))
+
+        x, y = torch.randn(2, 1, 1, 64, 80, device=self.device).unbind(0)
+        table = torch.rand(1, 8, 64, 80, device=self.device) * 4
+        self.common(fn, (x, y, table), check_lowp=False)
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -22585,11 +22662,7 @@ if RUN_GPU:
             torch.testing.assert_close(result, fn(inp))
 
         def test_3d_reductions_with_max_tiles_3(self):
-            # Inductor only supports at most two reduction iteration ranges, R0 and R1, which the
-            # reduction component of the kernel can be tiled across.
-            # When max_tiles>=3, SIMDScheduling.create_tiling would previously incorrectly allow the
-            # tiling of the kernel in three dimensions, despite there being no pointwise component
-            # of the kernel.
+            """Test that max_tiles=3 permits an R0/R1/R2 pure reduction."""
 
             @torch._inductor.config.patch(
                 {
@@ -22620,9 +22693,41 @@ if RUN_GPU:
             torch.testing.assert_close(actual=actual, expected=expected)
 
             fc = FileCheck()
-            # There's no pointwise work to do, so xnumel should be 1...
             fc.check("xnumel = 1")
+            fc.check("R2_BLOCK")
             fc.run(code[0])
+
+        @torch._inductor.config.patch(
+            {
+                "triton.prefer_nd_tiling": True,
+                "triton.max_tiles": 3,
+                "triton.tile_reductions": True,
+            }
+        )
+        def test_3d_reduction_respects_tensor_rank_limit(self):
+            """Keep three reduction tiles while limiting total tensor rank to five.
+
+            max_tiles=3 applies independently to the pointwise and reduction
+            tilings. With R0/R1/R2 present, the three pointwise dimensions must
+            therefore collapse to Y/X rather than producing a sixth tensor axis.
+            """
+
+            def reduce_3d(x):
+                return torch.sum(x, dim=(3, 4, 5))
+
+            inp = torch.empty_strided(
+                (12, 3, 4, 4, 4, 4),
+                (1536, 128, 4, 384, 32, 1),
+                device=GPU_TYPE,
+            ).normal_()
+
+            actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
+
+            torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
+            for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
+                self.assertIn(block_arg, code[0])
+            self.assertNotIn("ZBLOCK", code[0])
+            self.assertIn("tl.load", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_median_decompose_sort_ops(self):
