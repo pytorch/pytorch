@@ -1756,7 +1756,10 @@ def _get_cpp_stdlib_args(
             " -Wl,--exclude-libs,ALL",
         ]
     elif config.is_fbcode():
-        lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
+        # Without an explicit libgcc_lib, clang falls back to the host's system
+        # GCC install for -lstdc++, which can be newer than the platform runtime
+        # and yield a .so that fails to load (e.g. GLIBCXX_3.4.30 not found).
+        lib_dir_paths = [build_paths.libgcc_lib, sysconfig.get_config_var("LIBDIR")]
         libs.append("stdc++")
 
     return lib_dir_paths, libs, passthrough_args
@@ -2301,6 +2304,16 @@ def get_cpp_torch_device_options(
 
     if device_type == "mps":
         definitions.append(" USE_MPS")
+        # _get_openmp_args asks for OpenMP on every macOS build, so a model that
+        # calls no OpenMP function still records a dependency on whichever libomp
+        # the linker happened to find, by the absolute path it had here. That
+        # makes the compiled artifact load only on this machine. Dropping
+        # libraries nothing references cannot drop one the model uses.
+        #
+        # Not when libtorch is linked: a dylib there can matter without being
+        # referenced, because a static initializer in it registers something.
+        if _IS_MACOS and aot_mode and not link_libtorch:
+            ldflags.append("Wl,-dead_strip_dylibs")
 
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
