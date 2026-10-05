@@ -118,6 +118,3 @@ For example:
 
 - "Closing this PR because it requires a design discussion that we should continue on the issue.
   Please comment on the linked issue with a summary of the status and approach to further discuss."
-
-**TEMPORARY:** PRs without a linked `actionable` issue or maintainer sponsor are labeled `missing actionable issue`
-instead of being closed. You can add a PR back to your usual workflow by removing this label.

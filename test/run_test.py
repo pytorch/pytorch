@@ -27,16 +27,16 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
-    get_report_path,
+    _get_test_report_path,
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
     isRocmArchAnyOf,
     retry_shell,
+    sanitize_test_filename,
     set_cwd,
     shell,
     TEST_CUDA,
-    TEST_SAVE_XML,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
@@ -589,6 +589,7 @@ def run_test(
         unittest_args.extend(
             get_pytest_args(
                 options,
+                test_file,
                 is_cpp_test=is_cpp_test,
                 is_distributed_test=is_distributed_test,
             )
@@ -1396,7 +1397,7 @@ def handle_log_file(
     print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
-def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
+def get_pytest_args(options, test_file, is_cpp_test=False, is_distributed_test=False):
     if is_distributed_test:
         # Distributed tests do not support rerun, see https://github.com/pytorch/pytorch/issues/162978
         rerun_options = ["-x", "--reruns=0"]
@@ -1430,11 +1431,17 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # is much slower than running them directly
         pytest_args.extend(["-n", str(NUM_PROCS)])
 
-        if TEST_SAVE_XML:
-            # Add the option to generate XML test report here as C++ tests
-            # won't go into common_utils
-            test_report_path = get_report_path(pytest=True)
-            pytest_args.extend(["--junit-xml-reruns", test_report_path])
+        if IS_CI:
+            # C++ tests don't go through common_utils.run_tests, which is what
+            # sets TEST_SAVE_XML, so build the pytest report path here.
+            # The path is relative to the test directory pytest runs in.
+            report_name = sanitize_test_filename(test_file)
+            report_path = os.path.join(
+                _get_test_report_path().replace("python-unittest", "python-pytest"),
+                report_name,
+                f"{report_name}-{os.urandom(8).hex()}.xml",
+            )
+            pytest_args.extend(["--junit-xml-reruns", report_path])
 
     if options.pytest_k_expr:
         pytest_args.extend(["-k", options.pytest_k_expr])
