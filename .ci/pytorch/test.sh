@@ -1873,6 +1873,8 @@ test_distributed() {
     filter_arg=(--multigpu-filter "$multigpu_filter")
   fi
   echo "Testing distributed python tests (${multigpu_filter:-all})"
+  # Same NVSHMEM team limit as test_b200_symm_mem; test_nvshmem.py runs here too.
+  export NVSHMEM_MAX_TEAMS=512
   # shellcheck disable=SC2086
   time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
