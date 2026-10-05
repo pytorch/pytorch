@@ -32,6 +32,9 @@ from post_review import (  # noqa: E402
 
 
 SHA = "a" * 40
+# The URL linter checks every URL literal in the tree; these resolve nowhere.
+BLOB = f"https://github.com/o/r/blob/{SHA}"  # @lint-ignore
+NEW_URL = "https://x/999"  # @lint-ignore
 AUTHOR = "github-actions[bot]"
 WORKFLOW = (
     Path(__file__).resolve().parents[2] / ".github/workflows/hardened-pr-review-run.yml"
@@ -102,7 +105,7 @@ class FakeGitHub(GitHub):
             new = {
                 "id": 999,
                 "node_id": "N999",
-                "html_url": "https://x/999",
+                "html_url": NEW_URL,
                 "user": {"login": AUTHOR},
                 "body": body["body"],
             }
@@ -176,7 +179,7 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertIn("comments", first)
         self.assertNotIn("comments", second)
         self.assertIn(
-            f"\nhttps://github.com/o/r/blob/{SHA}/torch/x.py#L3\n\n\U0001f534 Off by one.\n",
+            f"\n{BLOB}/torch/x.py#L3\n\n\U0001f534 Off by one.\n",
             second["body"],
         )
 
@@ -199,8 +202,7 @@ class TestWhatIsPosted(unittest.TestCase):
         # Each permalink stands alone on its line, which is what makes GitHub
         # render the code it points at.
         self.assertIn(
-            f"\nhttps://github.com/o/r/blob/{SHA}/b.py#L7\n\nNit.\n\n---\n\n"
-            f"https://github.com/o/r/blob/{SHA}/c.py#L9\n\nNote.\n",
+            f"\n{BLOB}/b.py#L7\n\nNit.\n\n---\n\n{BLOB}/c.py#L9\n\nNote.\n",
             details,
         )
         self.assertTrue(details.endswith(f"/c.py#L9\n\nNote.\n\n"), details)
@@ -235,7 +237,7 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertIn("x\n\\`\\`\\`\ny\n\n---\n", text)
         # Everything after the quote is outside it: the next permalink still
         # starts its own line, and the section still closes.
-        self.assertIn(f"\nhttps://github.com/o/r/blob/{SHA}/b.py#L2\n", text)
+        self.assertIn(f"\n{BLOB}/b.py#L2\n", text)
         self.assertIn("\n</details>\n", text)
 
     def test_an_oversized_body_drops_findings_and_says_so(self):
@@ -249,7 +251,7 @@ class TestWhatIsPosted(unittest.TestCase):
             go(gh, row(verdict="ready_for_human_review", findings=findings))
         text = gh.posted()[0]["body"]
         self.assertLessEqual(len(text), 5000)
-        shown = text.count("https://github.com/o/r/blob/")
+        shown = text.count(BLOB)
         self.assertGreater(shown, 0)
         self.assertIn(f"{25 - shown} more findings did not fit", text)
         self.assertIn(f"<summary>\u26aa {shown} non-blocking findings</summary>", text)
@@ -295,7 +297,7 @@ class TestWhatIsPosted(unittest.TestCase):
         gh = FakeGitHub()
         go(gh, row(verdict="ready_for_human_review", findings=[minor]))
         self.assertIn(
-            f"\nhttps://github.com/o/r/blob/{SHA}/docs/a%20b/%40x%231.md#L2\n",
+            f"\n{BLOB}/docs/a%20b/%40x%231.md#L2\n",
             gh.posted()[0]["body"],
         )
 
@@ -444,7 +446,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
         )
         put, minimize = writes[2][2], writes[3][2]
         self.assertTrue(put["body"].startswith(SUPERSEDED_MARKER))
-        self.assertIn("https://x/999", put["body"])
+        self.assertIn(NEW_URL, put["body"])
         self.assertIn("minimizeComment", minimize["query"])
         self.assertEqual(minimize["variables"], {"id": "N5"})
 
@@ -456,7 +458,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
             after_post[0][:2], ("PUT", "/repos/o/r/pulls/1/reviews/5/dismissals")
         )
         self.assertEqual(after_post[0][2]["event"], "DISMISS")
-        self.assertIn("https://x/999", after_post[0][2]["message"])
+        self.assertIn(NEW_URL, after_post[0][2]["message"])
 
     def test_a_failed_dismissal_leaves_the_review_whole(self):
         class NoDismiss(FakeGitHub):
