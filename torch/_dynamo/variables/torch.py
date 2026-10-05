@@ -807,18 +807,26 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.fx.traceback._dynamo_region_activation_memory_budget,
             torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
         ):
-            if len(args) != 1 or kwargs:
+            if len(args) not in (1, 2) or kwargs:
                 raise AssertionError(
                     "_dynamo_region_activation_memory_budget expects "
-                    "one positional argument"
+                    "one or two positional arguments"
                 )
             budget = guard_if_dyn(args[0])
             if type(budget) is not float:
                 raise AssertionError(
                     f"expected a float budget, got {type(budget).__name__}"
                 )
+            extra = args[1].as_python_constant() if len(args) == 2 else ()
+            if type(extra) is not tuple:
+                raise AssertionError(
+                    f"expected a tuple extra, got {type(extra).__name__}"
+                )
             return FxTracebackAnnotateVariable(
-                {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget},
+                {
+                    torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget,
+                    torch.fx.traceback.MEMORY_BUDGET_EXTRA_ANNOTATION_KEY: extra,
+                },
                 source=self.source,
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
