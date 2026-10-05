@@ -1186,11 +1186,13 @@ def main() -> None:
                 if pip_source is None:
                     print(
                         f"{toolkit} {requested} is not available on platform {PLATFORM}. "
-                        f"Available version(s): {', '.join(sorted(available_sources, key=Version))}"
+                        f"Available version(s): {', '.join(sorted(available_sources))}"
                     )
                     sys.exit(1)
             else:
-                pip_source = available_sources[max(available_sources, key=Version)]
+                # Named channels such as "preview" are opt-in only.
+                versions = [v for v in available_sources if v[:1].isdigit()]
+                pip_source = available_sources[max(versions, key=Version)]
 
     if pip_source is None:
         pip_source = PIP_SOURCES["cpu"]  # always available

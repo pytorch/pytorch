@@ -18,6 +18,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import NamedTuple
 
 
 SCRIPT_DIR = Path(__file__).absolute().parent
@@ -50,6 +51,23 @@ CUDA_ARCHES_CUDNN_VERSION = {
 }
 
 ROCM_ARCHES = ["7.14", "10.0"]
+
+
+class RocmPreviewLane(NamedTuple):
+    arch: str
+    channel: str
+    version: str
+
+
+# Preview is a stable channel, not a version; keep its external names together.
+ROCM_PREVIEW = RocmPreviewLane(
+    arch="preview",
+    channel="rocm-preview",
+    version=(REPO_ROOT / ".ci/docker/ci_commit_pins/rocm-preview.txt")
+    .read_text()
+    .strip(),
+)
+ROCM_PREVIEW_ARCHES = [ROCM_PREVIEW.arch]
 
 XPU_ARCHES = ["xpu"]
 
@@ -95,6 +113,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     # dependency on latest patch version for (major, minor)
     "7.14": ("rocm[libraries,device-all]==7.14.*"),
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
+    ROCM_PREVIEW.arch: f"rocm[libraries,device-all]=={ROCM_PREVIEW.version}",
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.2 | "
         "intel-cmplr-lib-ur==2026.1.2 | "
@@ -150,6 +169,12 @@ ROCM_NIGHTLY_SOURCE_MATRIX = {
     )
     for major, minor in (map(int, version.split(".")) for version in ROCM_ARCHES)
 }
+ROCM_NIGHTLY_SOURCE_MATRIX[ROCM_PREVIEW.channel] = dict(
+    name=ROCM_PREVIEW.channel,
+    index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/{ROCM_PREVIEW.channel}",
+    supported_platforms=["Linux"],
+    accelerator="rocm",
+)
 XPU_NIGHTLY_SOURCE_MATRIX = {
     "xpu": dict(
         name="xpu",
@@ -289,7 +314,7 @@ def validate_runtime_release_table_consistency() -> None:
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
         return "cuda"
-    elif arch_version in ROCM_ARCHES:
+    elif arch_version in ROCM_ARCHES + ROCM_PREVIEW_ARCHES:
         return "rocm"
     elif arch_version in XPU_ARCHES:
         return "xpu"
@@ -312,6 +337,7 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
     **{gpu_arch: f"manylinux2_28-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
+    ROCM_PREVIEW.arch: f"manylinux2_28-builder:{ROCM_PREVIEW.channel}",
     "xpu": "manylinux2_28-builder:xpu",
     "cpu": "manylinux2_28-builder:cpu",
     "cpu-aarch64": "manylinux2_28_aarch64-builder:cpu-aarch64",
@@ -408,7 +434,7 @@ def generate_wheels_matrix(
         # Define default compute archivectures
         arches = ["cpu"]
         if os == "linux":
-            arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
+            arches += CUDA_ARCHES + ROCM_ARCHES + ROCM_PREVIEW_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += [
                 c for c in CUDA_ARCHES if c not in CUDA_ARCHES_NO_WINDOWS
@@ -520,6 +546,9 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
+                if gpu_arch_version == ROCM_PREVIEW.arch:
+                    # Tests install from, and uploads land in, the same index.
+                    ret[-1]["upload_subfolder"] = ROCM_PREVIEW.channel
 
     return ret
 
@@ -579,6 +608,8 @@ def generate_libtorch_extraction_configs(
             lt_config["container_image_tag_prefix"] = source_config[
                 "container_image_tag_prefix"
             ]
+        if source_config.get("upload_subfolder"):
+            lt_config["upload_subfolder"] = source_config["upload_subfolder"]
         ret.append(lt_config)
 
     return ret
