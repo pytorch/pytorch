@@ -23,6 +23,12 @@ def _flydsl_mxfp8_grouped_mm(
     global _mxfp8_grouped_param
     if output.shape[0] == 0:
         return output
+    # The lowering cannot always prove this when the token dim is dynamic, and
+    # the kernel would read A's scales past their end without it.
+    if scale_a.shape[0] != mat1.shape[0]:
+        raise ValueError(
+            f"scale_a has {scale_a.shape[0]} rows, but mat1 has {mat1.shape[0]}"
+        )
 
     param = _mxfp8_grouped_param
     if param is None:

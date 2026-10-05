@@ -777,6 +777,43 @@ class TestFlyDSLTemplate(TestCase):
                 shapes, strides, dtypes, flydsl_gpu_arch="gfx950"
             )
 
+    def test_flydsl_mxfp8_template_rejects_mismatched_scale_rows(self):
+        """The lowering may serve a dynamic token dim without proving A and its
+        scales agree, so the template checks it before launching."""
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        import jinja2
+
+        from torch._inductor.kernel.mm_common import load_kernel_template
+
+        source = jinja2.Template(
+            load_kernel_template("flydsl_mxfp8_grouped_mm")
+        ).render(
+            gen_defines=lambda: "",
+            def_kernel=lambda *names: (
+                f"def kernel_main({','.join(names)}, output, stream):"
+            ),
+            get_output=lambda: "output",
+            kernel_name="kernel",
+        )
+        namespace = dict(GEMM_K=512, GEMM_N=256, GEMM_G=2, BLOCK_R=64, BLOCK_C=128)
+        exec(compile(source, "<flydsl scale rows test>", "exec"), namespace)
+        namespace["launch_mxfp8_grouped_gemm_gfx950"] = launch = mock.Mock()
+        output = torch.empty(256, 256)
+        mat1 = torch.empty(256, 512)
+        mat2 = torch.empty(2, 512, 256)
+        offs = torch.empty(2)
+        scale_b = torch.empty(2, 4096)
+        with self.assertRaisesRegex(ValueError, "scale_a has 224 rows"):
+            namespace["kernel_main"](
+                mat1, mat2, torch.empty(224, 16), scale_b, offs, output, stream=0
+            )
+        launch.assert_not_called()
+        namespace["kernel_main"](
+            mat1, mat2, torch.empty(256, 16), scale_b, offs, output, stream=0
+        )
+        launch.assert_called_once()
+
     @parametrize("block_m", (2, 4, 8))
     def test_grouped_row_tile_upper_bound(self, block_m):
         from itertools import product
@@ -1586,6 +1623,7 @@ class TestFlyDSLTemplate(TestCase):
             "scale_a_padded_stride",
             "scale_b_wrong_shape",
             "scale_a_wrong_rows",
+            "dynamic_m_scale_rows_mismatch",
             "offs_dtype",
             "k_not_scale_aligned",
         ),
@@ -1640,6 +1678,10 @@ class TestFlyDSLTemplate(TestCase):
             scale_a = node([scale_rows, scale_k], [scale_k, 1], e8m0)
         elif case == "scale_a_wrong_rows":
             scale_a = node([m + 32, scale_k], [scale_k, 1], e8m0)
+        elif case == "dynamic_m_scale_rows_mismatch":
+            m = sympy.Symbol("s0", positive=True, integer=True)
+            mat_a = node([m, k], [k, 1], fp8)
+            scale_a = node([m + 32, scale_k], [scale_k, 1], e8m0)
         elif case == "scale_b_wrong_shape":
             scale_b = node([g, n, scale_k], [n * scale_k, scale_k, 1], e8m0)
         elif case == "offs_dtype":
@@ -1655,11 +1697,16 @@ class TestFlyDSLTemplate(TestCase):
             size=[m, n],
             device=device,
         )
+
+        def optimization_hint(expr):
+            # Every token-dim symbol hints as 512, as one real input would.
+            expr = sympy.sympify(expr)
+            return int(expr.subs(dict.fromkeys(expr.free_symbols, 512)))
+
         sizevars = SimpleNamespace(
             statically_known_equals=lambda x, y: x == y,
             statically_known_multiple_of=lambda x, y: x % y == 0,
-            optimization_hint=lambda x: 512 if isinstance(x, sympy.Expr) else x,
-            check_equals=mock.Mock(),
+            optimization_hint=optimization_hint,
         )
         configs = mock.Mock(return_value=[{"BLOCK_R": 256, "BLOCK_C": 256}])
         props = mock.Mock(return_value=SimpleNamespace(multi_processor_count=128))
@@ -1682,19 +1729,15 @@ class TestFlyDSLTemplate(TestCase):
             result = mm_grouped.get_flydsl_mxfp8_grouped_mm_template_kwargs(
                 mat_a, mat_b, scale_a, scale_b, offs, layout, True
             )
-        if not (case == "baseline" or case.startswith("dynamic_m")):
+        if case not in ("baseline", "dynamic_m", "dynamic_m_separate_scale_symbol"):
             self.assertEqual(result, [])
             return
-        if case == "dynamic_m_separate_scale_symbol":
-            sizevars.check_equals.assert_called_once_with(scale_rows, m)
-        else:
-            sizevars.check_equals.assert_not_called()
         self.assertEqual(
             result,
             [{"BLOCK_R": 256, "BLOCK_C": 256, "GEMM_G": g, "GEMM_N": n, "GEMM_K": k}],
         )
         configs.assert_called_once_with(512, n, k, g, 128)
-        props.assert_called_once_with(device)
+        props.assert_called_once_with(device.index)
 
     def _assert_compiled_mxfp8_grouped_mm(
         self, group_sizes, k, n, *, expect_flydsl: bool = True
@@ -1771,15 +1814,14 @@ class TestFlyDSLTemplate(TestCase):
 
         self._assert_compiled_mxfp8_grouped_mm([512, 300, 700, 1000], 2048, 2048)
 
+    @parametrize("autotune", (False, True))
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
-    @torch._inductor.config.patch(
-        max_autotune_gemm=True,
-        max_autotune_gemm_backends="FLYDSL",
-        flydsl_enable_autotuning=False,
-    )
-    def test_flydsl_mxfp8_grouped_mm_dynamic_m_e2e(self):
-        """A dynamic token dim is served by one graph, without a recompile."""
+    def test_flydsl_mxfp8_grouped_mm_dynamic_m_e2e(self, autotune):
+        """A dynamic token dim is served by one graph, without a recompile.
+
+        With autotuning on, every tile is also benchmarked on hint-sized inputs.
+        """
         from torch._inductor.graph import GraphLowering
 
         if not flydsl_utils.runtime_available():
@@ -1799,7 +1841,15 @@ class TestFlyDSLTemplate(TestCase):
         compiled = torch.compile(fn, backend="inductor")
         k, n = 2048, 2048
         token_counts = ([512, 300, 700, 1000], [64, 900, 0, 333], [100, 200, 300, 400])
-        with mock.patch.object(GraphLowering, "save_output_code", codes.append):
+        with (
+            mock.patch.object(GraphLowering, "save_output_code", codes.append),
+            torch._inductor.config.patch(
+                max_autotune_gemm=True,
+                max_autotune_gemm_backends="FLYDSL",
+                flydsl_enable_autotuning=autotune,
+                autotune_in_subproc=False,
+            ),
+        ):
             for step, group_sizes in enumerate(token_counts):
                 a, b, a_scale, b_scale, offs, reference = (
                     self._make_mxfp8_grouped_inputs(group_sizes, k, n)

@@ -734,16 +734,16 @@ def tuned_scaled_grouped_mm(
     )
 
 
-def _flydsl_grouped_static_shape(
+def _flydsl_grouped_shape(
     mat_a: TensorBox, mat_b: TensorBox, offs: TensorBox
 ) -> tuple[int, int, int, int] | None:
-    """(M, N, K, G) as ints for a 2D-ragged x 3D grouped GEMM, or None.
+    """(M hint, N, K, G) for a 2D-ragged x 3D grouped GEMM, or None.
 
-    N, K and G are compile keys, so a dynamic one declines the template, as
-    does `offs` not naming exactly the groups B stacks. Total M is never
-    compiled in: the kernel reads it from the output at launch and the group
-    sizes from `offs` on device. M only steers the tile heuristic, so a
-    dynamic token dim -- the usual MoE case -- is served with its size hint.
+    N, K and G are compile keys and must be static, and `offs` must name
+    exactly the groups B stacks. M is only a size hint: the kernel reads total
+    M from the output at launch and the group sizes from `offs` on device, so
+    a dynamic token dim (the usual MoE case) is served, with the tile picked
+    for the hint and reused for every M the graph sees.
     """
     g = mat_b.get_size()[0]
     k = mat_a.get_size()[-1]
@@ -758,13 +758,6 @@ def _flydsl_grouped_static_shape(
         return None
     m_hint = V.graph.sizevars.optimization_hint(mat_a.get_size()[0])
     return m_hint, n_static, k_static, g_static
-
-
-def _device_cu_count(device: torch.device | None) -> int | None:
-    """CU count of the device a kernel will launch on, which caps its grid."""
-    if device is None or device.type != "cuda":
-        return None
-    return torch.cuda.get_device_properties(device).multi_processor_count
 
 
 flydsl_mxfp8_grouped_mm_template = FlyDSLTemplate(
@@ -823,10 +816,10 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     g = mat_b.get_size()[0]
     k = mat_a.get_size()[-1]
     n = mat_b.get_size()[-1]
-    static_shape = _flydsl_grouped_static_shape(mat_a, mat_b, offs)
-    if static_shape is None:
+    shape = _flydsl_grouped_shape(mat_a, mat_b, offs)
+    if shape is None:
         return []
-    m_hint, n_static, k_static, g_static = static_shape
+    m_hint, n_static, k_static, g_static = shape
 
     if k_static % MXFP8_SCALE_BLOCK != 0:
         return []
@@ -863,13 +856,15 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     if len(scale_a.get_size()) != 2 or len(scale_b.get_size()) != 2:
         return []
     # One scale row per token row. With a dynamic token dim, dynamo gives A and
-    # its scales separate symbols, so guard the equality the MX layout implies
-    # rather than declining whenever it cannot be proven statically.
+    # its scales separate symbols, so equality cannot always be proven here.
+    # The template checks it at launch instead of guarding: a guard would be
+    # dropped for unbacked sizes and frozen shape envs, and would outlive a
+    # later decline.
     scale_rows, a_rows = scale_a.get_size()[0], mat_a.get_size()[0]
-    if not sizevars.statically_known_equals(scale_rows, a_rows):
-        if sizevars.optimization_hint(scale_rows) != sizevars.optimization_hint(a_rows):
-            return []
-        sizevars.check_equals(scale_rows, a_rows)
+    if not sizevars.statically_known_equals(
+        scale_rows, a_rows
+    ) and sizevars.optimization_hint(scale_rows) != sizevars.optimization_hint(a_rows):
+        return []
     if not sizevars.statically_known_equals(scale_a.get_size()[1], scale_k):
         return []
     if not sizevars.statically_known_equals(scale_a_stride[-1], 1):
@@ -902,6 +897,13 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     # The kernel addresses every operand through a 32-bit buffer descriptor.
     # `_row_windows` splits the token dim so the M-dependent operands always
     # fit, but the weight and its scales are not split and must fit outright.
+    # The tile is sized against the grid cap of the device the kernel launches
+    # on; resolve an index-less device the way use_flydsl_gemm_template does.
+    device = layout.device
+    num_cus = torch.cuda.get_device_properties(
+        device.index if device.index is not None else 0
+    ).multi_processor_count
+
     weight_spans = (
         (g_static, n_static * k_static, n_static * k_static),
         (g_static, n_static * scale_k, n_static * scale_k),
@@ -920,7 +922,7 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
             "GEMM_K": k_static,
         }
         for gemm_config in get_mxfp8_grouped_gemm_configs(
-            m_hint, n_static, k_static, g_static, _device_cu_count(layout.device)
+            m_hint, n_static, k_static, g_static, num_cus
         )
         if is_mxfp8_grouped_gemm_config_valid_for_shape(
             n_static, k_static, g_static, gemm_config
