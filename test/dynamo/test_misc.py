@@ -5484,6 +5484,39 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = torch.compile(fn, fullgraph=True, backend="eager")(x)
         self.assertEqual(result, correct)
 
+    def test_unbound_list_methods(self):
+        # list.<method>(lst, ...) is the same call as lst.<method>(...): the
+        # whole method table is dispatched on the explicit receiver.
+        def fn(x):
+            lst = [3, 1, 2]
+            list.sort(lst)
+            list.append(lst, 4)
+            list.extend(lst, [5])
+            list.insert(lst, 0, 0)
+            list.remove(lst, 0)
+            list.reverse(lst)
+            popped = list.pop(lst)
+            return x + len(lst) + list.count(lst, 4) + list.index(lst, 3) + popped
+
+        x = torch.randn(4)
+        correct = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+        class OverridingList(list):
+            # list.append runs list's C slot, not this override
+            def append(self, value):
+                return "overridden"
+
+        def overridden(x):
+            lst = OverridingList([1, 2])
+            list.append(lst, 3)
+            return x + len(lst)
+
+        correct = overridden(x)
+        result = torch.compile(overridden, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
     def test_unbound_method_descriptor_value(self):
         # A method descriptor of a builtin type works as a plain value, not
         # just the ones copy._copy_dispatch happens to hold.  The locals keep
