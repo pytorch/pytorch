@@ -118,7 +118,7 @@ mm_template = TritonTemplate(
     # See more details in https://github.com/pytorch/pytorch/pull/146293
     else load_kernel_template("triton_mm_rocm"),
     cache_codegen_enabled_for_template=True,
-    prologue_loads_all_named_inputs=True,
+    prologue_loads_all_inputs=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(
