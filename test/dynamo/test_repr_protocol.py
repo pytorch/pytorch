@@ -3,6 +3,7 @@
 
 import collections
 import enum
+import sys
 import types
 import typing
 import unittest
@@ -367,7 +368,10 @@ class TpReprTests(TestCase):
         self.assertEqual(compiled(x), fn(x))
         C.__name__ = "D"
         self.assertEqual(compiled(x), fn(x))
-        self.assertEqual(cnt.frame_count, 2)
+        # 3.15 shares one __dict__/__weakref__ descriptor across types, so the
+        # repr no longer names the class and the rename does not recompile.
+        expected_frames = 1 if sys.version_info >= (3, 15) else 2
+        self.assertEqual(cnt.frame_count, expected_frames)
 
     @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
     @parametrize(
