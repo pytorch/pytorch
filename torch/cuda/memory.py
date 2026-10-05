@@ -661,10 +661,10 @@ def _restore_expandable_segments(
     ``segments`` are entries from :func:`memory_snapshot` taken in the earlier
     process, all on ``device``. Each is re-reserved at the address, size and
     segment size it had, with handles shareable the way the originals were,
-    whatever this process's settings (see Note [Expandable Segment Reserved
-    Address]). The restored ranges become free blocks in ``mempool_id``, so
-    ``UntypedStorage._resize_with_addr_`` can then place a tensor back at its
-    original address.
+    whatever this process's settings
+    (see Note [Expandable Segment Reserved Address]). The restored ranges become
+    free blocks in ``mempool_id``, so ``UntypedStorage._resize_with_addr_`` can
+    then place a tensor back at its original address.
 
     Call this before anything else allocates, and keep the pool alive (e.g. hold
     the :class:`MemPool`) for as long as the restored addresses are in use.
