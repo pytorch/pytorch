@@ -974,8 +974,17 @@ if(USE_LLVM_BOLT)
   # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
   set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
   file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
-  file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+  file(ARCHIVE_EXTRACT INPUT "${PROJECT_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
        DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+
+  add_custom_target(bolt_profile_quality_summary ALL
+    COMMAND "${Python_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/tools/bolt_profile_quality.py"
+      "${CMAKE_BINARY_DIR}/logs"
+    COMMENT "Summarizing BOLT profile quality"
+    VERBATIM
+    USES_TERMINAL
+  )
 endif()
 
 # Build libtorch mobile library, which contains ATen/TH ops and native support
@@ -1095,10 +1104,9 @@ include(ExternalProject)
 
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|x86_64|aarch64)$"
-                   OR CMAKE_SIZEOF_VOID_P EQUAL 4))
+if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|aarch64)$")
   message(WARNING
-    "64-bit x86 or aarch64 required for FBGEMM. "
+    "x86_64 or aarch64 required for FBGEMM. "
     "Not compiling with FBGEMM. "
     "Turn this warning off by USE_FBGEMM=OFF.")
   set(USE_FBGEMM OFF)
