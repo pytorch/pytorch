@@ -391,6 +391,7 @@ inplaceable_ops: dict[Callable[..., Any], InplaceableOp] = {
     aten._philox_uniform.default: InplaceableOp(aten._philox_uniform_.default, 0),
     aten._philox_normal.default: InplaceableOp(aten._philox_normal_.default, 0),
     aten._philox_randint.default: InplaceableOp(aten._philox_randint_.default, 0),
+    aten._philox_uniform.Tensor: InplaceableOp(aten._philox_uniform_.Tensor, 0),
 }
 
 try:
