@@ -14,9 +14,9 @@ from .blockscaled_tma_plan import BlockscaledTmaPlan, select_blockscaled_tma_pla
 from .utils import _ceil_div
 
 
-_INT32_MAX = 2**31 - 1
-_CUDA_GRID_X_MAX = _INT32_MAX
+_CUDA_GRID_X_MAX = 2**31 - 1
 _CUDA_GRID_Y_MAX = 2**16 - 1
+_CUDA_TMA_MAX_DIM = 2**32
 _INPUT_ALIGNMENT_BYTES = 16
 
 _TwoTensorOutput: TypeAlias = tuple[torch.Tensor, torch.Tensor]
@@ -91,11 +91,6 @@ def _validate_and_normalize_blockscaled_tma(
         if quant_orientation != "dim_k":
             raise ValueError("square scaling currently supports only dim-k output")
     M, K = input.shape
-    if M > _INT32_MAX or K > _INT32_MAX:
-        raise ValueError(
-            "blockscaled TMA requires each logical dimension to fit in signed int32; "
-            f"got shape ({M}, {K})"
-        )
     if is_square_scaling and M % 32 != 0:
         raise ValueError("32x32 requires M % 32 == 0")
     if do_dim_m:
@@ -148,6 +143,11 @@ def _prepare_blockscaled_tma_launch(
 
     plan = None
     if spec.M != 0 and spec.K != 0:
+        if spec.M > _CUDA_TMA_MAX_DIM or spec.K > _CUDA_TMA_MAX_DIM:
+            raise ValueError(
+                "blockscaled TMA requires each nonempty input dimension to be at most "
+                f"{_CUDA_TMA_MAX_DIM}; got shape ({spec.M}, {spec.K})"
+            )
         plan = select_blockscaled_tma_plan(
             spec.M,
             spec.K,
@@ -156,11 +156,8 @@ def _prepare_blockscaled_tma_launch(
             is_square_scaling=spec.is_square_scaling,
         )
     if plan is not None and (
-        # the grid_k condition is unreachable since tile_k_size >= 32 and
-        #   K <= 2**31-1, we keep it here for completeness to cover both x and
-        #   y grid vals
-        # the grid_m condition is technically reachable (with a shape such as
-        #   (8,388,481, 32)), we keep it here for correctness
+        # K <= 2**32 and tile_k_size >= 32 keep grid_k below the X limit.
+        # Large M can still exceed the Y limit.
         plan.grid_k > _CUDA_GRID_X_MAX or plan.grid_m > _CUDA_GRID_Y_MAX
     ):
         raise ValueError(
