@@ -43,6 +43,17 @@ void checkSameDtype(
   }
 }
 
+// Whether a list collective can run as one collective on a flat buffer: every
+// tensor has the reference's numel. Only numels are checked since they match
+// across ranks; memory formats may differ and must not pick the NCCL call.
+bool canFlatten(
+    const std::vector<at::Tensor>& tensors,
+    const at::Tensor& reference) {
+  return std::all_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
+    return t.numel() == reference.numel();
+  });
+}
+
 } // namespace
 
 ncclConfig_t cloneNcclConfig(const ncclConfig_t& config) {
@@ -575,7 +586,7 @@ void ProcessGroupNCCL::finalize() {
 
   event_pool_->clear();
 
-  barrier_buffer_.clear();
+  barrier_buffer_.reset();
 
   dependency_event_.reset();
   internal_stream_.reset();
@@ -745,7 +756,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("send");
+  work->recordStart("send", tensor);
 
   // Wrap in ncclGroupStart/End so the kernel is enqueued on the stream before
   // we record the end event. Without the group wrapper, a non-blocking NCCL
@@ -803,7 +814,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
   auto work = createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("recv");
+  work->recordStart("recv", tensor);
 
   // Wrap in ncclGroupStart/End -- see sendImpl comment for rationale.
   // (TorchComms fix D109625550.)
@@ -881,7 +892,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
   auto work = createWork(stream, timeout, input_tensors);
 
   // Record start event before NCCL operations
-  work->recordStart("batch_op_issue");
+  work->recordStart("coalesced", input_tensors);
 
   // Start NCCL group for batched operations
   NCCL_CHECK(
@@ -954,7 +965,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("broadcast");
+  work->recordStart("broadcast", tensor);
 
   waitForNcclOperation(
       nccl_api_->bcast(
@@ -995,7 +1006,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("all_reduce");
+  work->recordStart("all_reduce", tensor);
 
   const auto dataType = getNcclDataType(tensor);
   waitForNcclOperation(
@@ -1039,7 +1050,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("reduce");
+  work->recordStart("reduce", tensor);
 
   const auto dataType = getNcclDataType(tensor);
   waitForNcclOperation(
@@ -1078,10 +1089,6 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
   // Ensure input tensor is contiguous
   ensureTensorContiguous(tensor);
 
-  // Mixed-device outputs are staged on the communicator's device.
-  std::vector<at::Tensor> local_outputs;
-  local_outputs.reserve(tensor_list.size());
-  bool needs_staging = false;
   for (const auto& t : tensor_list) {
     ensureTensorContiguous(t);
     TORCH_CHECK(
@@ -1095,6 +1102,14 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
 
   checkTensorDevice(tensor);
   checkSameDtype(tensor, tensor_list);
+  if (canFlatten(tensor_list, tensor)) {
+    return allGatherFlat(tensor_list, tensor, async_op, timeout);
+  }
+
+  // Mixed-device outputs are staged on the communicator's device.
+  std::vector<at::Tensor> local_outputs;
+  local_outputs.reserve(tensor_list.size());
+  bool needs_staging = false;
   for (const auto& output : tensor_list) {
     if (output.device() == device_) {
       local_outputs.push_back(output);
@@ -1112,8 +1127,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
       "all_gather",
       rank_,
       sequence_number_,
-      tensor_list,
-      {tensor});
+      {tensor},
+      tensor_list);
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
@@ -1128,7 +1143,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
   auto work = async_op ? createWork(stream, timeout, tensor)
                        : createWork(stream, timeout);
 
-  work->recordStart("all_gather");
+  work->recordStart("all_gather", tensor);
 
   // Use multiple broadcast operations for all_gather
   NCCL_CHECK(
@@ -1174,11 +1189,69 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
   return work;
 }
 
+// One ncclAllGather into a flat buffer, then rows are copied out on the
+// operation stream before the end event so waiting on the work also orders the
+// copies.
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherFlat(
+    const std::vector<at::Tensor>& tensor_list,
+    const at::Tensor& tensor,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "all_gather",
+      rank_,
+      sequence_number_,
+      {tensor},
+      tensor_list);
+
+  c10::cuda::CUDAGuard device_guard(device_);
+  auto flat = at::empty({comm_size_, tensor.numel()}, tensor.options());
+  cudaStream_t stream = getOperationStream(async_op);
+  auto operation_stream =
+      at::cuda::getStreamFromExternal(stream, device_.index());
+  c10::cuda::CUDACachingAllocator::recordStream(
+      flat.storage().data_ptr(), operation_stream);
+  auto work = async_op ? createWork(stream, timeout, tensor)
+                       : createWork(stream, timeout);
+
+  work->recordStart("all_gather", tensor);
+
+  {
+    at::cuda::CUDAStreamGuard stream_guard(operation_stream);
+    // Send elements in logical order so ranks with different memory formats
+    // agree.
+    auto input = tensor.contiguous();
+    waitForNcclOperation(
+        nccl_api_->allGather(
+            input.data_ptr(),
+            flat.data_ptr(),
+            input.numel(),
+            getNcclDataType(input),
+            nccl_comm_,
+            stream),
+        timeout,
+        "NCCL AllGather failed in all_gather");
+    for (size_t i = 0; i < tensor_list.size(); ++i) {
+      tensor_list[i].copy_(flat[i].view_as(tensor_list[i]), true);
+    }
+  }
+
+  work->recordEnd();
+
+  // Enqueue the work after events have been recorded
+  enqueueWork(work, stream);
+
+  return work;
+}
+
 c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
     at::Tensor& output,
     const at::Tensor& input,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    std::string_view profiling_title) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(output);
@@ -1205,7 +1278,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
   auto work = async_op ? createWork(stream, timeout, input)
                        : createWork(stream, timeout);
 
-  work->recordStart("allGatherSingleImpl");
+  work->recordStart(profiling_title, input);
 
   waitForNcclOperation(
       nccl_api_->allGather(
@@ -1251,6 +1324,11 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
   checkTensorsDevice(input_list);
   checkTensorDevice(output);
   checkSameDtype(output, input_list);
+  // World size 1 keeps ncclReduce: ncclReduceScatter is broken there
+  // (https://github.com/pytorch/pytorch/issues/168092).
+  if (comm_size_ > 1 && canFlatten(input_list, output)) {
+    return reduceScatterFlat(output, input_list, op, async_op, timeout);
+  }
 
   TracingGuard tracingGuard(
       name_,
@@ -1266,7 +1344,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
   auto work = async_op ? createWork(stream, timeout, input_list)
                        : createWork(stream, timeout);
 
-  work->recordStart("reduce_scatter");
+  work->recordStart("reduce_scatter", input_list);
 
   // Use multiple reduce operations for reduce_scatter
   NCCL_CHECK(
@@ -1322,6 +1400,68 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
   return work;
 }
 
+// Inputs are copied into a flat buffer on the operation stream, then reduced
+// with one ncclReduceScatter.
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterFlat(
+    at::Tensor& output,
+    const std::vector<at::Tensor>& input_list,
+    const ::c10d::ReduceOp& op,
+    bool async_op,
+    std::chrono::milliseconds timeout) {
+  TracingGuard tracingGuard(
+      name_,
+      comm_size_,
+      "reduce_scatter",
+      rank_,
+      sequence_number_,
+      input_list,
+      {output});
+
+  c10::cuda::CUDAGuard device_guard(device_);
+  auto flat = at::empty({comm_size_, output.numel()}, output.options());
+  cudaStream_t stream = getOperationStream(async_op);
+  auto operation_stream =
+      at::cuda::getStreamFromExternal(stream, device_.index());
+  c10::cuda::CUDACachingAllocator::recordStream(
+      flat.storage().data_ptr(), operation_stream);
+  auto work = async_op ? createWork(stream, timeout, input_list)
+                       : createWork(stream, timeout);
+
+  work->recordStart("reduce_scatter", input_list);
+
+  {
+    at::cuda::CUDAStreamGuard stream_guard(operation_stream);
+    for (size_t i = 0; i < input_list.size(); ++i) {
+      flat[i].view_as(input_list[i]).copy_(input_list[i], true);
+    }
+    // Reduce in logical order so ranks with different memory formats agree.
+    auto result = output.is_contiguous()
+        ? output
+        : at::empty_like(output, at::MemoryFormat::Contiguous);
+    waitForNcclOperation(
+        nccl_api_->reduceScatter(
+            flat.data_ptr(),
+            result.data_ptr(),
+            result.numel(),
+            getNcclDataType(result),
+            getNcclReduceOp(op, nccl_comm_, result),
+            nccl_comm_,
+            stream),
+        timeout,
+        "NCCL ReduceScatter failed in reduce_scatter");
+    if (!result.is_same(output)) {
+      output.copy_(result, true);
+    }
+  }
+
+  work->recordEnd();
+
+  // Enqueue the work after events have been recorded
+  enqueueWork(work, stream);
+
+  return work;
+}
+
 c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
     at::Tensor& output,
     const at::Tensor& input,
@@ -1355,7 +1495,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("reduceScatterSingleImpl");
+  work->recordStart("_reduce_scatter_base", input);
 
   const auto dataType = getNcclDataType(input);
   waitForNcclOperation(
@@ -1415,7 +1555,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("allToAllSingleImpl");
+  work->recordStart("all_to_all", input);
 
   size_t chunk_size = input.numel() / comm_size_;
   const auto data_type = getNcclDataType(input);
@@ -1528,7 +1668,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("all_to_all_v_single");
+  work->recordStart("all_to_all", input);
 
   // Convert split sizes to arrays and calculate displacements
   std::vector<size_t> sendcounts(comm_size_);
@@ -1642,7 +1782,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operations
-  work->recordStart("all_to_all");
+  work->recordStart("all_to_all", input_tensor_list);
 
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
@@ -1702,13 +1842,11 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   // before anything has initialized CUDA (init_process_group(device_id=...) on
   // a process that has made no torch.cuda call), and the allocator is brought
   // up lazily, so allocating there tripped "Allocator not initialized for
-  // device N". lazyInitDevice() is what ATen's own allocating paths call, and
-  // is a no-op once CUDA is up.
-  if (!barrier_buffer_) {
-    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
-    c10::cuda::CUDAGuard gpuGuard(device_);
+  // device N". at::empty lazily initializes CUDA first. Shape [1], like stock
+  // ProcessGroupNCCL's barrier tensor, which the profiler records.
+  if (!barrier_buffer_.defined()) {
     barrier_buffer_ =
-        c10::cuda::CUDACachingAllocator::get()->allocate(sizeof(float));
+        at::empty({1}, at::TensorOptions().device(device_).dtype(at::kFloat));
   }
 
   TracingGuard tracingGuard(
@@ -1722,13 +1860,13 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   work->setHostBlocking(!async_op);
 
   // Record start event before NCCL operation
-  work->recordStart("barrier");
+  work->recordStart("all_reduce_barrier", barrier_buffer_);
 
   // Use pre-allocated CUDA buffer for barrier
   waitForNcclOperation(
       nccl_api_->allReduce(
-          barrier_buffer_.get(),
-          barrier_buffer_.get(),
+          barrier_buffer_.data_ptr(),
+          barrier_buffer_.data_ptr(),
           1,
           ncclFloat32,
           ncclSum,
@@ -1791,7 +1929,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
   auto work = createWork(stream, timeout, input_tensors);
 
   // Record start event before NCCL operations
-  work->recordStart("scatter");
+  // Stock ProcessGroupNCCL records the output on every rank.
+  work->recordStart("scatter", output_tensor);
 
   // Implement scatter using point-to-point operations
   if (rank_ == root) {
@@ -1870,7 +2009,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     const at::Tensor& input_tensor,
     int root,
     bool async_op,
-    std::chrono::milliseconds timeout) {
+    std::chrono::milliseconds timeout,
+    std::string_view profiling_title) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
   ensureTensorContiguous(input_tensor);
@@ -1911,7 +2051,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operations
-  work->recordStart("gather");
+  work->recordStart(profiling_title, input_tensor);
 
   if (rank_ == root) {
     // Root receives from all ranks (except itself)
