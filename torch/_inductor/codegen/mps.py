@@ -698,13 +698,14 @@ class MetalKernel(SIMDKernel):
         is_threadgroup: bool = True,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
     ) -> CSEVariable:
-        if isinstance(dtype, torch.dtype):
-            dtype = self.dtype_to_str(dtype)
+        dtype_str = (
+            self.dtype_to_str(dtype) if isinstance(dtype, torch.dtype) else dtype
+        )
         is_threadgroup &= self.max_threadgroup_size > 1
         var_name = f"tmp_acc_{next(self.acc_var_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
         var_def = "threadgroup " if is_threadgroup else ""
-        var_def += f"{dtype} {var_name}"
+        var_def += f"{dtype_str} {var_name}"
         if elem_count:
             var_def += f"[{self.sexpr(elem_count)}]"
         if default_value is not None:
