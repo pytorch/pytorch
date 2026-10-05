@@ -25,6 +25,10 @@ class TORCH_API ScriptTypeParser {
 
   c10::TypePtr parseType(const std::string& str);
 
+  // parseType with no resolver, memoized per thread.
+  // See NOTE [ Cached type string parsing ].
+  static c10::TypePtr parseTypeCached(const std::string& str);
+
   FunctionSchema parseSchemaFromDef(const Def& def, bool skip_self);
 
   c10::IValue parseClassConstant(const Assign& assign);

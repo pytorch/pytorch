@@ -12,6 +12,9 @@
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/custom_class.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 
@@ -443,6 +446,54 @@ TEST(SerializationTest, TestPickleAppend) {
   torch::IValue expected = c10::impl::GenericList(at::AnyType::get());
   expected.toList().push_back(2);
   ASSERT_EQ(expected, actual);
+}
+
+// See NOTE [ Cached type string parsing ]: the cache must be transparent
+// across fresh Unpickler instances and return the same TypePtr per string.
+TEST(SerializationTest, UnpickleContainerTypeTagsAreStableAcrossInstances) {
+  c10::Dict<std::string, at::Tensor> dict;
+  dict.insert("a", torch::ones({2}));
+  std::vector<at::Tensor> tensor_table;
+  auto data = torch::jit::pickle(dict, &tensor_table);
+
+  for (int i = 0; i < 2; ++i) {
+    auto out = torch::jit::unpickle(
+                   data.data(),
+                   data.size(),
+                   /*type_resolver=*/nullptr,
+                   tensor_table)
+                   .toGenericDict();
+    ASSERT_TRUE(*out.keyType() == *c10::StringType::get());
+    ASSERT_TRUE(*out.valueType() == *c10::TensorType::get());
+    ASSERT_TRUE(out.at("a").toTensor().equal(torch::ones({2})));
+  }
+
+  const std::string type_str = "Dict[str, List[Tensor]]";
+  auto cached = Unpickler::defaultTypeParser(type_str);
+  ASSERT_EQ(cached.get(), Unpickler::defaultTypeParser(type_str).get());
+  ASSERT_TRUE(*cached == *ScriptTypeParser().parseType(type_str));
+}
+
+namespace {
+struct LateRegisteredClass : torch::CustomClassHolder {};
+} // namespace
+
+// A quoted custom-class type name parses to null until the class is
+// registered; the parser cache must not pin that null. Registration is
+// process-global and rejects duplicates, so only register on the first run.
+TEST(SerializationTest, UnpicklerTypeParserObservesLateClassRegistration) {
+  const std::string qualified_name =
+      "__torch__.torch.classes._SerializationTest._LateRegisteredClass";
+  const std::string type_str =
+      "\"torch.classes._SerializationTest._LateRegisteredClass\"";
+  if (!getCustomClass(qualified_name)) {
+    ASSERT_EQ(Unpickler::defaultTypeParser(type_str), nullptr);
+    torch::class_<LateRegisteredClass>(
+        "_SerializationTest", "_LateRegisteredClass");
+  }
+  auto type = Unpickler::defaultTypeParser(type_str);
+  ASSERT_NE(type, nullptr);
+  ASSERT_TRUE(type->kind() == c10::TypeKind::ClassType);
 }
 
 } // namespace jit
