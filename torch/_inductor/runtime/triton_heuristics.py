@@ -4584,15 +4584,18 @@ def _maybe_filter_configs_for_tma_restrictions(
         for block_type, min_block_value in tma_min_block_sizes.items():
             existing = config_block_sizes.get(block_type, 1)
             config_block_sizes[block_type] = max(existing, min_block_value)
-        new_configs = [
-            Config(
-                config_block_sizes,
-                num_warps=example_config.num_warps,
-                num_stages=example_config.num_stages,
-                maxnreg=example_config.maxnreg,
-                pre_hook=example_config.pre_hook,
+        new_configs = []
+        # Unraised, it would duplicate configs[0], which the loop below keeps anyway.
+        if config_block_sizes != example_config.kwargs:
+            new_configs.append(
+                Config(
+                    config_block_sizes,
+                    num_warps=example_config.num_warps,
+                    num_stages=example_config.num_stages,
+                    maxnreg=example_config.maxnreg,
+                    pre_hook=example_config.pre_hook,
+                )
             )
-        ]
         # Remove configs that will not compile
         for c in configs:
             if all(

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
+from torch._dynamo.utils import counters
 from torch._inductor import config, test_operators
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 from torch._inductor.runtime.benchmarking import set_gpu_benchmark_lock_context
@@ -112,6 +113,46 @@ class MultiKernelTest(TestCase):
         }
         return multi_kernel_call
 
+    def test_run_binds_the_picked_kernel(self):
+        events = []
+        call = self._benchmark_lock_call(events)
+        call.picked_kernel, call._recorded = 1, True
+        call.run("arg")
+        self.assertIs(call.run, call._kernels[1].run)
+        # Args split across slices still need filtering, so that call stays unbound.
+        split = self._benchmark_lock_call(events)
+        split.arg_index = {i: [slice(0, 1), slice(2, 3)] for i in (0, 1)}
+        split.picked_kernel, split._recorded = 0, True
+        split.run("a", "b", "c")
+        self.assertNotIn("run", vars(split))
+        self.assertEqual(events, ["run_1", "run_0"])
+
+    def test_failed_optional_sub_kernel_is_dropped(self):
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.codecache import LambdaFuture
+
+        attempts = []
+
+        def fail():
+            attempts.append(1)
+            raise RuntimeError("injected compile failure")
+
+        counters.clear()
+        with unittest.mock.patch.object(
+            AsyncCompile, "_triton", return_value=LambdaFuture(fail)
+        ):
+            future = AsyncCompile().triton("k_tma", "src", optional=True)
+        call = self._benchmark_lock_call([])
+        kept = list(call._kernels)
+        call._kernels.insert(1, future)
+        call.arg_index = {0: [slice(0, 1)], 1: [slice(1, 2)], 2: [slice(2, 3)]}
+        # Resolved by async_compile.wait and again by MultiKernelCall, yet compiled and reported once.
+        future.result()
+        self.assertEqual(call.kernels, kept)
+        self.assertEqual(call.arg_index, {0: [slice(0, 1)], 1: [slice(2, 3)]})
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(counters["inductor"]["optional_kernel_compile_failed"], 1)
+
     def test_benchmark_sub_kernels_holds_gpu_lock_across_candidates(self):
         events = []
         multi_kernel_call = self._benchmark_lock_call(events)
@@ -195,6 +236,31 @@ class MultiKernelTest(TestCase):
             self.assertTrue(_contains_multi_kernel_code(wrapper_code))
         else:
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
+
+    @requires_triton()
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "use_static_triton_launcher": True,
+            "fx_graph_remote_cache": False,
+            "compile_threads": 1,
+        }
+    )
+    def test_warm_fx_graph_cache(self):
+        # The warm compile rebuilds sub-kernels from the FX graph cache, and MultiKernelCall hashes their fn.cache_key.
+        from torch._inductor import codecache
+
+        x = torch.rand(2, 1024).to(GPU_TYPE)
+        ref = torch.softmax(x, -1)
+        counters.clear()
+        for _ in range(2):
+            codecache.PyCodeCache.cache_clear(purge=True)
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(torch.softmax)(x, -1), ref)
+        # Otherwise a cache miss on the second compile would pass without restoring any sub-kernel.
+        self.assertGreater(
+            counters["inductor"]["triton_bundler_load_static_autotuner"], 0
+        )
 
     @requires_triton()
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")

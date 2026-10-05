@@ -179,6 +179,20 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
+
+def _drop_optional_kernel(kernel_name: str, exc: Exception) -> Any:
+    from torch._inductor.codegen.multi_kernel import DroppedKernel
+
+    log.warning(
+        "Dropping %s, an optional kernel whose compile failed: %s",
+        kernel_name,
+        exc,
+        exc_info=exc if log.isEnabledFor(logging.DEBUG) else None,
+    )
+    counters["inductor"]["optional_kernel_compile_failed"] += 1
+    return DroppedKernel(kernel_name, exc)
+
+
 # Used to keep track of all process pools invoked so far.
 _pool_set = OrderedSet[AnyPool]()
 
@@ -494,7 +508,36 @@ class AsyncCompile:
         if isinstance(pool, SubprocPool):
             pool.wakeup()
 
-    def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+    def triton(
+        self,
+        kernel_name: str,
+        source_code: str,
+        device_str: str = "cuda",
+        optional: bool = False,
+    ):
+        """An optional kernel whose compile fails becomes a DroppedKernel, which MultiKernelCall leaves out."""
+        if not optional:
+            return self._triton(kernel_name, source_code, device_str)
+        try:
+            result = self._triton(kernel_name, source_code, device_str)
+        except Exception as exc:
+            return _drop_optional_kernel(kernel_name, exc)
+        if not isinstance(result, CodeCacheFuture):
+            return result
+        dropped: list[Any] = []
+
+        def result_or_dropped() -> Any:
+            # LambdaFuture reruns its function on every result() call, so a drop is reported once.
+            if not dropped:
+                try:
+                    return result.result()
+                except Exception as exc:
+                    dropped.append(_drop_optional_kernel(kernel_name, exc))
+            return dropped[0]
+
+        return LambdaFuture(result_or_dropped, future=getattr(result, "future", None))
+
+    def _triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         """
         Async_compile.triton is more complicated than the other backends because
         we're trying to optimize compile time as much as possible for this hot callsite.

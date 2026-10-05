@@ -250,6 +250,8 @@ class TritonBundler:
                         exc_info=True,
                     )
                     continue
+                # put_static_autotuner saved this copy with fn._hash_lock cleared, which JITFunction.cache_key enters.
+                result.kernel.restore_after_unpickle(old_values=None)
                 # We make a future instead of returning the kernel here so that
                 # kernels that are not statically launchable (i.e. cache miss)
                 # can launch a worker without waiting on the blocking step of

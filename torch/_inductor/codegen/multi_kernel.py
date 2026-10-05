@@ -312,6 +312,14 @@ class MultiKernel:
         pass
 
 
+class DroppedKernel:
+    """An optional sub-kernel whose compile failed, which MultiKernelCall leaves out."""
+
+    def __init__(self, kernel_name: str, error: Exception) -> None:
+        self.kernel_name = kernel_name
+        self.error = error
+
+
 class MultiKernelCall:
     """
     This class is called at run time to actually run the kernel
@@ -397,6 +405,14 @@ class MultiKernelCall:
         for i, kernel in enumerate(self._kernels):
             if isinstance(kernel, CodeCacheFuture):
                 self._kernels[i] = kernel.result()
+        if any(isinstance(kernel, DroppedKernel) for kernel in self._kernels):
+            kept = [
+                i
+                for i, kernel in enumerate(self._kernels)
+                if not isinstance(kernel, DroppedKernel)
+            ]
+            self._kernels = [self._kernels[i] for i in kept]
+            self.arg_index = {new: self.arg_index[old] for new, old in enumerate(kept)}
 
         return self._kernels
 
@@ -483,6 +499,8 @@ class MultiKernelCall:
         return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
     def run(self, *args, **kwargs):
+        if self.picked_kernel is None and len(self.kernels) == 1:
+            self.picked_kernel = 0
         if self.picked_kernel is None:
             timings = self.benchmark_sub_kernels(*args, **kwargs)
             self.picked_kernel = timings.index(min(timings))
@@ -514,6 +532,9 @@ class MultiKernelCall:
         run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
         filtered_args = self._get_filtered_args(args, self.picked_kernel)
         run(*filtered_args, **kwargs)
+        # The pick is final, so when no arg is filtered out, later calls go straight to the picked kernel.
+        if self.arg_index[self.picked_kernel] == [slice(0, len(args))]:
+            self.run = run  # type: ignore[method-assign]
 
     def _metrics_table_row(self, timings):
         def get_kernel_path(k):
