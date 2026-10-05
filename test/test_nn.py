@@ -5795,30 +5795,42 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_linear_cross_entropy_mm_out_dtype_devices(self, device_type, dtype):
         """A device in ``_MM_OUT_DTYPE_DEVICES`` must compute the four
         ``out_dtype=torch.float32`` overloads as fp32 matmuls of the upcast
-        operands. Integer-valued operands keep every partial sum exact in fp32,
-        so the comparison is exact whatever the summation order.
+        operands, since the chunked path uses them in place of explicit casts.
+
+        Both operand sets keep every partial sum exact in fp32, so the comparison
+        against an fp64 CPU reference is exact whatever the summation order. The
+        probe rows from ``test_linear_cross_entropy_mm_fp32_accum_devices``
+        return ``254*s`` only with an fp32 accumulator; random integer-valued
+        operands catch results written to the wrong elements, which the probe's
+        uniform output cannot.
         """
         self._skip_unless_current_accelerator(device_type)
         f32 = torch.float32
-        a, b, c = (
+        K, L, s = 256, 2048.0, 2.0 ** -6
+        row = torch.full((K,), s, dtype=dtype, device=device_type)
+        row[0], row[-1] = L, -L
+        probe_a = row.expand(2, 128, K).contiguous()
+        probe_b = torch.ones(2, K, 128, dtype=dtype, device=device_type)
+        int_a, int_b, c = (
             torch.randint(-4, 5, shape, dtype=dtype, device=device_type)
-            for shape in ((2, 128, 256), (2, 256, 128), (2, 128, 128))
+            for shape in ((2, 128, K), (2, K, 128), (2, 128, 128))
         )
-        ref = a.to(f32) @ b.to(f32)
-        with self._default_reduced_precision_matmul():
-            actual = {
-                "mm": torch.mm(a[0], b[0], out_dtype=f32, out=torch.empty_like(ref[0])),
-                "addmm": torch.addmm(c[0], a[0], b[0], out_dtype=f32, out=torch.empty_like(ref[0])),
-                "bmm": torch.bmm(a, b, out_dtype=f32, out=torch.empty_like(ref)),
-                "baddbmm": torch.baddbmm(c, a, b, out_dtype=f32, out=torch.empty_like(ref)),
-            }
-        expected = {"mm": ref[0], "addmm": ref[0] + c[0].to(f32), "bmm": ref, "baddbmm": ref + c.to(f32)}
-        for op, out in actual.items():
-            self.assertEqual(
-                out, expected[op], atol=0, rtol=0,
-                msg=f"{device_type} {dtype}: {op}(out_dtype=torch.float32) does not match the fp32 "
-                    f"reference. Remove {device_type!r} from _MM_OUT_DTYPE_DEVICES.",
-            )
+        for operands, a, b in (("probe", probe_a, probe_b), ("integer", int_a, int_b)):
+            ref = (a.cpu().double() @ b.cpu().double()).to(device=device_type, dtype=f32)
+            with self._default_reduced_precision_matmul():
+                actual = {
+                    "mm": torch.mm(a[0], b[0], out_dtype=f32, out=torch.empty_like(ref[0])),
+                    "addmm": torch.addmm(c[0], a[0], b[0], out_dtype=f32, out=torch.empty_like(ref[0])),
+                    "bmm": torch.bmm(a, b, out_dtype=f32, out=torch.empty_like(ref)),
+                    "baddbmm": torch.baddbmm(c, a, b, out_dtype=f32, out=torch.empty_like(ref)),
+                }
+            expected = {"mm": ref[0], "addmm": ref[0] + c[0].to(f32), "bmm": ref, "baddbmm": ref + c.to(f32)}
+            for op, out in actual.items():
+                self.assertEqual(
+                    out, expected[op], atol=0, rtol=0,
+                    msg=f"{device_type} {dtype}, {operands} operands: {op}(out_dtype=torch.float32) does not "
+                        f"match the fp32 reference. Remove {device_type!r} from _MM_OUT_DTYPE_DEVICES.",
+                )
 
     @parametrize_test("device_type", sorted(set(_MM_OUT_DTYPE_DEVICES) & set(_MM_FP32_ACCUM_DEVICES)))
     def test_linear_cross_entropy_device_gates_independent(self, device_type):
