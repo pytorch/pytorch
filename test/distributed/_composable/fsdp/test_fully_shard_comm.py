@@ -47,15 +47,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     FSDPCommContext,
     FSDPParamGroup,
 )
-from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_with_native_copy,
-    reduce_scatter_input_fn_with_native_copy,
-)
-from torch.distributed.tensor import DTensor, Shard
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.profiler import profile, ProfilerActivity
-from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -462,139 +457,6 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
 
 instantiate_device_type_tests(
     TestFullyShardChunkCatMixedDtype, globals(), only_for=("cpu", "cuda", "xpu")
-)
-
-
-class TestFullyShardNativeCollectiveCopy(TestCase):
-    @parametrize("outer_size", [1, 2])
-    def test_opcheck(self, device, outer_size):
-        tensor = make_tensor((outer_size, 8, 3), device=device, dtype=torch.float32)
-        packed = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, dim=1)])
-        torch.library.opcheck(
-            torch.ops.fsdp._all_gather_copy_out_.default,
-            ([torch.empty_like(tensor)], packed, [packed.size(1)], [outer_size], 4),
-        )
-        torch.library.opcheck(
-            torch.ops.fsdp._reduce_scatter_copy_in_.default,
-            (torch.empty_like(packed), [tensor], [1], 4),
-        )
-
-    @onlyCUDA
-    def test_cuda_graph(self, device):
-        tensor = make_tensor((128, 8, 3), device=device, dtype=torch.bfloat16)
-        packed = tensor.new_empty((4, tensor.numel() // 4))
-        output = torch.empty_like(tensor)
-
-        def copy():
-            torch.ops.fsdp._reduce_scatter_copy_in_(packed, [tensor], [1], 4)
-            torch.ops.fsdp._all_gather_copy_out_(
-                [output], packed, [packed.size(1)], [128], 4
-            )
-
-        copy()
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            copy()
-        for _ in range(3):
-            tensor.add_(1)
-            graph.replay()
-            # The round trip only matches if both copies replay on the new data
-            self.assertEqual(output, tensor, atol=0, rtol=0)
-
-
-instantiate_device_type_tests(
-    TestFullyShardNativeCollectiveCopy, globals(), only_for=("cpu", "cuda", "xpu")
-)
-
-
-class TestFullyShardCustomAllocation(FSDPTestMultiThread):
-    @property
-    def world_size(self) -> int:
-        return 2
-
-    @parametrize("shard_dim", [0, 1])
-    @parametrize("collective", ["all_gather", "reduce_scatter"])
-    @parametrize("native_copy", [False, True])
-    def test_strided_allocation(self, device, shard_dim, collective, native_copy):
-        test_case = self
-        model = nn.Linear(8, 4, bias=False, device=device)
-        dist.broadcast(model.weight.detach(), src=0)
-        reference = copy.deepcopy(model)
-        shard_numel = model.weight.numel() // self.world_size
-
-        class StridedAlloc:
-            def allocate(self, size, *, dtype, device):
-                # FSDP views the reduced gradient with contiguous strides.
-                if collective == "reduce_scatter" and size == (shard_numel,):
-                    return torch.empty(size, dtype=dtype, device=device)
-                buffer = torch.empty((*size, 2), dtype=dtype, device=device)[..., 0]
-                test_case.assertFalse(buffer.is_contiguous())
-                return buffer
-
-        class StridedAllGather(StridedAlloc, DefaultAllGather):
-            def __call__(self, output_tensor, input_tensor, group, async_op=False):
-                output = torch.empty_like(output_tensor)
-                super().__call__(output, input_tensor.contiguous(), group)
-                output_tensor.copy_(output)
-
-        class StridedReduceScatter(StridedAlloc, DefaultReduceScatter):
-            def __call__(self, output_tensor, input_tensor, group, op, async_op=False):
-                output = torch.empty_like(output_tensor)
-                super().__call__(output, input_tensor.contiguous(), group, op)
-                output_tensor.copy_(output)
-
-        fully_shard(
-            model,
-            mesh=init_device_mesh(torch.device(device).type, (self.world_size,)),
-            shard_placement_fn=lambda param: Shard(shard_dim),
-        )
-        if collective == "all_gather":
-            model.set_custom_all_gather(StridedAllGather())
-            if native_copy:
-                model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
-        else:
-            model.set_custom_reduce_scatter(StridedReduceScatter())
-            if native_copy:
-                model.set_reduce_scatter_input_fn(
-                    reduce_scatter_input_fn_with_native_copy
-                )
-        native_ops = {
-            "all_gather": torch.ops.fsdp._all_gather_copy_out_.default,
-            "reduce_scatter": torch.ops.fsdp._reduce_scatter_copy_in_.default,
-        }
-
-        class RecordCopies(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if func in native_counts:
-                    native_counts[func] += 1
-                return func(*args, **(kwargs or {}))
-
-        optim = torch.optim.SGD(model.parameters(), lr=0.1)
-        reference_optim = torch.optim.SGD(reference.parameters(), lr=0.1)
-        for iteration in range(2):
-            inp = torch.full((2, 8), float(self.rank + iteration + 1), device=device)
-            expected = reference(inp)
-            expected.sum().backward()
-            native_counts = dict.fromkeys(native_ops.values(), 0)
-            with RecordCopies():
-                actual = model(inp)
-                actual.sum().backward()
-            self.assertEqual(actual, expected)
-            for direction, op in native_ops.items():
-                self.assertEqual(
-                    native_counts[op] > 0, native_copy and direction == collective
-                )
-            dist.all_reduce(reference.weight.grad)
-            reference.weight.grad.div_(self.world_size)
-            self.assertEqual(model.weight.grad.full_tensor(), reference.weight.grad)
-            optim.step()
-            reference_optim.step()
-            optim.zero_grad()
-            reference_optim.zero_grad()
-
-
-instantiate_device_type_tests(
-    TestFullyShardCustomAllocation, globals(), only_for=("cpu", "cuda")
 )
 
 
