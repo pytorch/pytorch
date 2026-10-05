@@ -67,7 +67,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfMPS,
-    skipIfXpu,
     subtest,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -2447,7 +2446,6 @@ class TestScheduler(TestCase):
         {"force_disable_caches": True, "shape_padding": False}
     )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
-    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
             return
