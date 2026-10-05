@@ -107,9 +107,11 @@ class TORCH_API Unpickler {
     version_ = version_number;
   }
 
+  // Must stay inline: lite-interpreter builds compile unpickler.cpp without
+  // script_type_parser.cpp and never odr-use this function (they pass their
+  // own type parser), so an out-of-line body would be an undefined reference.
   static c10::TypePtr defaultTypeParser(const std::string& str) {
-    ScriptTypeParser parser;
-    return parser.parseType(str);
+    return ScriptTypeParser::parseTypeCached(str);
   }
 
  private:
