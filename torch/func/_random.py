@@ -88,7 +88,12 @@ class PRNGKey(torch.Tensor):
     def _fold_in(self, data: int | torch.Tensor) -> "PRNGKey":
         raise NotImplementedError
 
-    def _uniform(self, out: torch.Tensor, low: float, high: float) -> torch.Tensor:
+    def _uniform(
+        self,
+        out: torch.Tensor,
+        low: float | torch.Tensor,
+        high: float | torch.Tensor,
+    ) -> torch.Tensor:
         raise NotImplementedError
 
     def _normal(self, out: torch.Tensor, mean: float, std: float) -> torch.Tensor:
@@ -123,6 +128,8 @@ class Philox4x32_10Key(PRNGKey):
         return Philox4x32_10Key(result)
 
     def _uniform(self, out, low, high):
+        if isinstance(low, torch.Tensor):
+            return torch.ops.aten._philox_uniform_.Tensor(out, self, low, high)
         return torch.ops.aten._philox_uniform_(out, self, low, high)
 
     def _normal(self, out, mean, std):
@@ -469,8 +476,8 @@ def uniform_(
     key: torch.Tensor,
     result: torch.Tensor,
     *,
-    low: float = 0.0,
-    high: float = 1.0,
+    low: float | torch.Tensor = 0.0,
+    high: float | torch.Tensor = 1.0,
 ) -> torch.Tensor:
     r"""Fill ``result`` in-place with uniform random values from a PRNG key.
 
@@ -482,12 +489,19 @@ def uniform_(
     dimensions of ``result`` must be broadcastable with ``*batch`` and each key
     independently generates its slice of the output.
 
+    Gradients flow to tensor ``low`` / ``high`` as for a reparameterized sample
+    (like :meth:`torch.distributions.Distribution.rsample`).
+
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
         result (Tensor): The output tensor to fill in-place.
-        low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
-        high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
+        low (float or Tensor): Lower bound (inclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``result``
+            and gives a bound per element. Default: ``0.0``.
+        high (float or Tensor): Upper bound (exclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``result``
+            and gives a bound per element. Default: ``1.0``.
 
     Returns:
         ``result``, filled with uniform random values.
@@ -498,16 +512,29 @@ def uniform_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.uniform_(key, result)  # doctest: +SKIP
     """
+    tensor_bounds = isinstance(low, torch.Tensor) or isinstance(high, torch.Tensor)
+    if tensor_bounds:
+
+        def wrap_scalar(bound):
+            # A scalar mixed with a tensor bound goes in as float64, so the kernel
+            # rounds it exactly as the scalar overload rounds its double argument.
+            if isinstance(bound, torch.Tensor):
+                return bound
+            return torch.tensor(bound, dtype=torch.float64, device=result.device)
+
+        low, high = wrap_scalar(low), wrap_scalar(high)
     if isinstance(key, PRNGKey):
         return key._uniform(result, low, high)
+    if tensor_bounds:
+        return torch.ops.aten._philox_uniform_.Tensor(result, key, low, high)
     return torch.ops.aten._philox_uniform_(result, key, low, high)
 
 
 def uniform(
     key,
     *shape: tuple[int, ...],
-    low: float = 0.0,
-    high: float = 1.0,
+    low: float | torch.Tensor = 0.0,
+    high: float | torch.Tensor = 1.0,
     dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
     r"""Generate uniformly distributed random values from a PRNG key.
@@ -521,12 +548,19 @@ def uniform(
     dimensions of ``shape`` must be broadcastable with ``*batch`` and each key
     independently generates its slice of the output.
 
+    Gradients flow to tensor ``low`` / ``high`` as for a reparameterized sample
+    (like :meth:`torch.distributions.Distribution.rsample`).
+
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
         *shape (int): The desired output shape.
-        low (float): Lower bound (inclusive) of the uniform distribution. Default: ``0.0``.
-        high (float): Upper bound (exclusive) of the uniform distribution. Default: ``1.0``.
+        low (float or Tensor): Lower bound (inclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``shape``
+            and gives a bound per element. Default: ``0.0``.
+        high (float or Tensor): Upper bound (exclusive) of the uniform
+            distribution. A floating-point tensor must broadcast to ``shape``
+            and gives a bound per element. Default: ``1.0``.
         dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
 
     Returns:
