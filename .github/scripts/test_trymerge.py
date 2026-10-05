@@ -28,6 +28,7 @@ from greenlight_guard import (
     GuardVerdict,
 )
 from greenlight_identity import normalize_login
+from native_stack import NativeStack, StackEntry
 from trymerge import (
     _AUTHORIZED_WITHOUT_GREENLIGHT,
     _find_non_matching_files,
@@ -3003,6 +3004,49 @@ class TestAdvisorNotRelated(TestCase):
         # The AI category is dropped from the fallback; FLAKY still applies.
         self.assertIsNone(classified["job"].classification)
         self.assertEqual(classified["flaky job"].classification, "FLAKY")
+
+
+def stack_entry(
+    position: int, closed: bool = False, head: str | None = None
+) -> StackEntry:
+    number = 999 + position
+    base = f"user/{number - 1}" if position > 1 else "main"
+    head = head or f"head-{number}"
+    return StackEntry(position, number, closed, f"user/{number}", head, base)
+
+
+def make_stack(*entries: StackEntry) -> NativeStack:
+    return NativeStack(base_ref="main", entries=entries)
+
+
+# #1000 landed and is closed, #1001 and #1002 are open
+NATIVE_STACK = make_stack(stack_entry(1, closed=True), stack_entry(2), stack_entry(3))
+
+
+def stacked_pr(number: int) -> Any:
+    pr = mock.MagicMock(spec=GitHubPR)
+    pr.org = "pytorch"
+    pr.project = "pytorch"
+    pr.pr_num = number
+    pr.base_ref.return_value = f"user/{number - 1}"
+    pr.default_branch.return_value = "main"
+    pr.is_ghstack_pr.return_value = False
+    pr.is_closed.return_value = False
+    return pr
+
+
+class NoNetworkTestCase(TestCase):
+    """Fails tests that reach GitHub through an unpatched helper. Also checked after
+    the test, since retries_decorator and main() swallow the error."""
+
+    def setUp(self) -> None:
+        urlopen = self.patch("github_utils.urlopen", side_effect=AssertionError)
+        self.addCleanup(urlopen.assert_not_called)
+
+    def patch(self, target: str, **kwargs: Any) -> Any:
+        patcher = mock.patch(target, **kwargs)
+        self.addCleanup(patcher.stop)
+        return patcher.start()
 
 
 if __name__ == "__main__":
