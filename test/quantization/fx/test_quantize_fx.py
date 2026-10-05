@@ -6040,13 +6040,13 @@ class TestQuantizeFx(QuantizationTestCase):
             self._validate_qconfig_against_backend_config_constraints(
                 MyModel(), qconfig, backend_config, satisfies_constraints=True, qconfig_name=qconfig_name)
 
+    @unittest.skipUnless('qnnpack' in supported_qengines,
+                         "This Pytorch Build has not been built with or does not support QNNPACK")
     def test_symmetric_qnnpack_qconfig_mapping(self):
         """
         Test whether `torch.ao.quantization.qconfig_mapping._get_symmetric_qnnpack_qconfig_mapping`
         works with the QNNPACK BackendConfig.
         """
-        if "qnnpack" not in supported_qengines:
-            return
 
         class MyModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -6071,13 +6071,13 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
             model(*example_inputs)
 
+    @unittest.skipUnless('qnnpack' in supported_qengines,
+                        "This Pytorch Build has not been built with or does not support QNNPACK")
     def test_symmetric_qnnpack_qat_qconfig_mapping(self):
         """
         Test whether `torch.ao.quantization.qconfig_mapping._get_symmetric_qnnpack_qat_qconfig_mapping`
         works with the QNNPACK BackendConfig.
         """
-        if "qnnpack" not in supported_qengines:
-            return
 
         class MyModel(torch.nn.Module):
             def __init__(self) -> None:
