@@ -5363,6 +5363,13 @@ class SourcelessBuilder:
     def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
+    @staticmethod
+    def create_internal_user_function(
+        value: types.FunctionType,
+    ) -> UserFunctionVariable:
+        """Wrap a compiler-owned function that must ignore trace-rule overrides."""
+        return UserFunctionVariable(value)
+
     @overload
     @staticmethod
     def create(

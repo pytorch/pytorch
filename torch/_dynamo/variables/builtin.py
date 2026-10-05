@@ -3100,7 +3100,9 @@ class BuiltinVariable(BaseBuiltinVariable):
         if not pysequence_check(obj_type):
             raise_type_error(tx, "argument to reversed() must be a sequence")
 
-        return variables.UserFunctionVariable(
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create_internal_user_function(
             polyfills.builtins.reversed_sequence_iterator
         ).call_function(tx, [obj], {})
 
@@ -3693,7 +3695,9 @@ class IterBuiltinVariable(BaseBuiltinVariable):
         if len(args) == 1:
             return generic_getiter(tx, args[0])
         else:
-            return variables.UserFunctionVariable(
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder.create_internal_user_function(
                 polyfills.builtins.callable_iterator
             ).call_function(tx, args, kwargs)
 

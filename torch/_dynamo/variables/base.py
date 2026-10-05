@@ -2785,7 +2785,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Source | None = None,
         realize: bool = False,
     ) -> Any:
-        """Create a new VariableTracker from a value and optional Source"""
+        """Create a VariableTracker through the canonical classification path.
+
+        Sourceful values are classified by VariableBuilder when realized, which
+        also owns guard installation for that classification. Thus, ``source``
+        must reproduce the exact value without changing its lookup semantics.
+        Values without a source are unguarded and should be compiler-created or
+        otherwise ephemeral. Compiler-owned functions that must bypass user
+        trace-rule overrides use
+        ``SourcelessBuilder.create_internal_user_function``.
+        Other direct construction requires a local rationale for why builder
+        classification or guarding cannot preserve the intended semantics.
+        """
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         elif realize:
