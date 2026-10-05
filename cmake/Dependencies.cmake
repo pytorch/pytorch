@@ -87,9 +87,7 @@ if(USE_XPU)
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
   endif()
-  foreach(flag ${XPU_HOST_CXX_FLAGS})
-    add_definitions(${flag})
-  endforeach()
+  add_compile_definitions(${XPU_HOST_CXX_DEFINITIONS})
 endif()
 
 # ---[ Custom Protobuf
