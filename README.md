@@ -476,7 +476,7 @@ For information about PyTorch releases, see [RELEASE.md](RELEASE.md).
 
 ## The Team
 
-PyTorch is a community-driven project with several skillful [engineers and researchers](https://docs.pytorch.org/docs/stable/community/persons_of_interest.html) contributing to it. 
+PyTorch is a community-driven project with several skillful [engineers and researchers](https://docs.pytorch.org/docs/stable/community/persons_of_interest.html) contributing to it.
 
 Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 
