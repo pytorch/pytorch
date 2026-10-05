@@ -56,8 +56,10 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
+    DictGetItemSource,
     GenericAttrSource,
     GetItemSource,
+    TypeDictSource,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -87,7 +89,10 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import mro_attr_source
+from .object_protocol import (
+    _raise_unsupported_classmethod_descriptor_on_dict_subclass,
+    mro_attr_source,
+)
 from .user_defined import (
     call_random_fn,
     is_standard_setattr,
@@ -145,7 +150,7 @@ class SuperVariable(VariableTracker):
 
     def _resolved_getattr_and_source(
         self, tx: "InstructionTranslatorBase", name: str
-    ) -> tuple[Any, AttrSource | None]:
+    ) -> tuple[Any, Source | None]:
         if not self.objvar:
             unimplemented(
                 gb_type="1-arg super not implemented",
@@ -159,7 +164,10 @@ class SuperVariable(VariableTracker):
             )
         if self.objvar is None:
             raise AssertionError("super() requires objvar to be set")
-        search_type = self.typevar.as_python_constant()
+        search_type = self.typevar.get_real_python_backed_value()
+        if search_type is NO_SUCH_SUBOBJ:
+            search_type = self.typevar.as_python_constant()
+        search_type = cast(Any, search_type)
 
         # The rest of this function does two things:
         #   - Walk the mro to find where the attribute comes from to be
@@ -174,11 +182,12 @@ class SuperVariable(VariableTracker):
         )
         if issubclass(type_to_use, type):
             # objvar itself is a type (e.g. `super(Base, cls)` or
-            # `super(Base, list)`); as_python_constant() works uniformly here
-            # since objvar must be a type-representing VariableTracker
-            # (UserDefinedClassVariable, BaseBuiltinVariable, ...), unlike
-            # `.value` which only some of those define.
-            type_to_use = self.objvar.as_python_constant()
+            # `super(Base, list)`). Prefer its underlying Python value because
+            # not every type-representing VariableTracker is a constant.
+            type_to_use = self.objvar.get_real_python_backed_value()
+            if type_to_use is NO_SUCH_SUBOBJ:
+                type_to_use = self.objvar.as_python_constant()
+            type_to_use = cast(type, type_to_use)
             type_to_use_source = self.objvar.source
 
         source = None
@@ -209,8 +218,20 @@ class SuperVariable(VariableTracker):
             # Don't call getattr, just check the __dict__ of the class
             if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
                 if resolved_getattr is not NO_SUCH_SUBOBJ:
-                    # Equivalent of something like type(L['self']).__mro__[1].attr_name
-                    if type_to_use_source:
+                    if isinstance(resolved_getattr, types.ClassMethodDescriptorType):
+                        if isinstance(self.objvar, variables.UserDefinedDictVariable):
+                            _raise_unsupported_classmethod_descriptor_on_dict_subclass(
+                                name
+                            )
+                        if type_to_use_source:
+                            source = mro_attr_source(
+                                tx,
+                                type_to_use,
+                                type_to_use_source,
+                                name,
+                                start_index=start_index,
+                            )
+                    elif type_to_use_source:
                         source = AttrSource(
                             GetItemSource(TypeMROSource(type_to_use_source), index),
                             name,
@@ -318,10 +339,8 @@ class SuperVariable(VariableTracker):
             if hasattr(user_cls, "__module__") and user_cls.__module__ == "builtins":
                 user_cls_vt: VariableTracker = VariableTracker.build(tx, user_cls)
             else:
-                if source is None:
-                    raise AssertionError(
-                        "source must not be None for user-defined class"
-                    )
+                if not isinstance(source, AttrSource):
+                    raise AssertionError("source must be AttrSource for __new__")
                 user_cls_source = source.member
                 user_cls_vt = variables.UserDefinedClassVariable(
                     user_cls, source=user_cls_source
@@ -387,6 +406,27 @@ class SuperVariable(VariableTracker):
                 self.objvar,
                 source=source,
             ).call_function(tx, args, kwargs)
+        elif isinstance(inner_fn, types.ClassMethodDescriptorType):
+            if isinstance(source, DictGetItemSource):
+                descriptor_source = source
+            elif isinstance(source, AttrSource):
+                descriptor_source = DictGetItemSource(TypeDictSource(source.base), name)
+            else:
+                descriptor_source = None
+            descriptor = variables.ClassMethodDescriptorVariable(
+                inner_fn, source=descriptor_source
+            )
+            owner = self.objvar
+            if not issubclass(owner.python_type(), type):
+                owner_source = TypeSource(owner.source) if owner.source else None
+                if isinstance(owner, UserDefinedObjectVariable) and owner.cls_source:
+                    owner_source = owner.cls_source
+                owner = VariableTracker.build(
+                    tx, self.objvar.python_type(), source=owner_source
+                )
+            return descriptor.tp_descr_get_impl(tx, self.objvar, owner).call_function(
+                tx, args, kwargs
+            )
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
@@ -715,6 +755,9 @@ class AutogradFunctionVariable(VariableTracker):
 
     def python_type(self) -> type:
         return type
+
+    def get_real_python_backed_value(self) -> type:
+        return self.fn_cls
 
     def _resolve_kwargs(
         self,

@@ -88,6 +88,7 @@ from ..utils import (
     is_function,
     is_lru_cache_wrapper_trace_without_warning_allowed,
     is_tensor_base_attr_getter,
+    is_torch_class,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -4887,6 +4888,11 @@ class MethodDescriptorVariable(DescriptorVariable):
             )
         obj, *rest = args
         _check_descriptor_obj_type(tx, self.descriptor, obj)
+        if is_torch_class(self.descriptor.__objclass__):
+            fn_vt = VariableTracker.build(
+                tx, self.descriptor, source=self.source, realize=True
+            )
+            return fn_vt.call_function(tx, [obj, *rest], kwargs)
         bound = self.tp_descr_get_impl(tx, obj, self.owner)
         if not isinstance(bound, BoundBuiltinMethodVariable):
             raise AssertionError(f"expected bound method descriptor, got {type(bound)}")
@@ -5027,36 +5033,38 @@ class BoundBuiltinMethodVariable(VariableTracker):
             owner = self.obj.get_real_python_backed_value()
             if not issubclass(type(owner), type):
                 raise AssertionError(f"expected a type receiver, got {type(owner)}")
-            owner_cls = cast(type, owner)
             from .builtin import DictBuiltinVariable
 
-            return DictBuiltinVariable.call_custom_dict_fromkeys(tx, owner_cls, *args)
+            return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self.obj, *args)
         if isinstance(self.descriptor, types.MethodDescriptorType):
+            name = self.descriptor.__name__
+            from .object_protocol import mro_lookup
+
+            descriptor_is_overridden = (
+                mro_lookup(self.obj.python_type(), name) is not self.descriptor
+            )
             if isinstance(self.obj, UserDefinedObjectVariable):
                 if (
-                    self.obj._base_methods is not None
+                    descriptor_is_overridden
+                    and self.obj._base_methods is not None
                     and self.descriptor in self.obj._base_methods
                 ):
-                    return self.obj.call_base_method(
-                        tx, self.descriptor.__name__, list(args), kwargs
+                    return self.obj.call_base_method(tx, name, list(args), kwargs)
+                if descriptor_is_overridden:
+                    return VariableTracker.call_method(
+                        self.obj, tx, name, list(args), kwargs
                     )
-                else:
-                    from .object_protocol import mro_lookup
+            from .torch_function import TensorWithTFOverrideVariable
 
-                    if (
-                        mro_lookup(self.obj.python_type(), self.descriptor.__name__)
-                        is not self.descriptor
-                    ):
-                        return VariableTracker.call_method(
-                            self.obj,
-                            tx,
-                            self.descriptor.__name__,
-                            list(args),
-                            kwargs,
-                        )
-            return self.obj.call_method(
-                tx, self.descriptor.__name__, list(args), kwargs
-            )
+            if isinstance(self.obj, TensorWithTFOverrideVariable):
+                fn_vt = VariableTracker.build(
+                    tx,
+                    self.descriptor,
+                    source=self.descriptor_source,
+                    realize=True,
+                )
+                return fn_vt.call_function(tx, [self.obj, *args], kwargs)
+            return self.obj.call_method(tx, name, list(args), kwargs)
         return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
