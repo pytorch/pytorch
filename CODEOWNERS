@@ -1009,6 +1009,7 @@
 /torch/distributed/tensor/_ops/_view_ops.py @weifengpy
 /torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
 /torch/nn/parallel/ @weifengpy
+/test/cpp/c10d/ @d4l3k @fduwjj @kapilsh
 #
 # [infra_developer_tools]
 # /.devcontainer/
