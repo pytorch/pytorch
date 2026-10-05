@@ -338,9 +338,9 @@ class TestFullyShardMemory(FSDPTest):
         grad_refs: list[weakref.ref] = []
         num_alive_grads: list[int] = []
 
-        def recording_copy_in(grads, *args, **kwargs):
+        def recording_copy_in(grads, *args):
             grad_refs[:] = [weakref.ref(grad) for grad in grads]
-            copy_in(grads, *args, **kwargs)
+            copy_in(grads, *args)
 
         def counting_cast_and_view(*args):
             num_alive_grads.append(sum(ref() is not None for ref in grad_refs))

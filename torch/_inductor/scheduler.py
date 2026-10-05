@@ -6388,7 +6388,10 @@ class Scheduler:
                 name
                 for name in names
                 if name in kept_node_names
-                and not isinstance(self.name_to_node[name], NopKernelSchedulerNode)
+                and not isinstance(
+                    self.name_to_node[name],
+                    (NopKernelSchedulerNode, ExternKernelSchedulerNode),
+                )
             ]
             if not names:
                 # All nodes eliminated
@@ -12578,6 +12581,9 @@ class Scheduler:
         self.current_device = self.default_device_context
         if self.previous_node is not None:
             raise AssertionError("expected previous_node to be None")
+        previous_nodes_by_stream: dict[
+            tuple[torch.device | None, int], BaseSchedulerNode
+        ] = {}
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -12605,6 +12611,8 @@ class Scheduler:
                     V.graph.wrapper_code.mark_multistream_alignment(multi)
 
         for node in nodes:
+            stream_key = (node.get_device(), self.get_node_stream(node))
+            self.previous_node = previous_nodes_by_stream.get(stream_key)
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -12693,7 +12701,7 @@ class Scheduler:
             # on multiple streams get one copy per stream.
             V.graph.wrapper_code.codegen_deferred_alignment_copies(
                 (dep.name for dep in node.read_writes.reads),
-                self.node_to_stream.get(node, 0),
+                stream_key[1],
             )
 
             self.current_node = node
@@ -12765,9 +12773,9 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                self.previous_node = node
+                previous_nodes_by_stream[stream_key] = node
             else:
-                self.previous_node = None
+                previous_nodes_by_stream.pop(stream_key, None)
 
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen

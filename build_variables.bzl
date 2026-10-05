@@ -519,6 +519,8 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/FlightRecorder.cpp",
     "torch/csrc/distributed/c10d/hooks/FlightRecorderHook.cpp",
+    "torch/csrc/distributed/c10d/hooks/HealthCheck.cpp",
+    "torch/csrc/distributed/c10d/hooks/HealthCheckHook.cpp",
     "torch/csrc/distributed/c10d/hooks/NanCheckHook.cpp",
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/gloo/GlooDeviceFactory.cpp",
@@ -556,7 +558,6 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.cpp",
     "torch/csrc/distributed/fsdp/ChunkCat.cpp",
-    "torch/csrc/distributed/fsdp/CollectiveCopy.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.

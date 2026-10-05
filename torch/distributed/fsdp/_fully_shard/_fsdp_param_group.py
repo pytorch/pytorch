@@ -26,14 +26,12 @@ from ._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     AllGather,
-    AllGatherOutputFn,
     AllGatherResult,
     DefaultAllGather,
     DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
-    PrepareReduceScatterInputsFn,
     ProcessGroupAllocAllGather,
     ProcessGroupAllocReduceScatter,
     ReduceScatter,
@@ -51,7 +49,7 @@ from ._fsdp_common import (
     ShardPlacementFnResult,
     TrainingState,
 )
-from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
 
 
 if TYPE_CHECKING:
@@ -227,7 +225,7 @@ class FSDPParamGroup:
                 post_forward_mesh_info,
                 device,
                 shard_placement_fn,
-                mp_policy,
+                mp_policy._resolve_for_param(param),
                 offload_policy,
             )
             for param, module_info in zip(params, param_module_infos)
@@ -236,7 +234,6 @@ class FSDPParamGroup:
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.device_handle = _get_device_handle(device.type)
-        self.mp_policy = mp_policy
         self.offload_policy = offload_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
@@ -260,10 +257,8 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
-        self._all_gather_output_fn: AllGatherOutputFn = _default_all_gather_output_fn
-        self._prepare_reduce_scatter_inputs: PrepareReduceScatterInputsFn = (
-            _default_reduce_scatter_input_fn
-        )
+        self._all_gather_output_fn: Callable = _default_all_gather_output_fn
+        self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._reduce_scatter_param_indices: list[int] = []
         self._fsdp_params_with_wider_grad_dtype: list[FSDPParam] = []
         self._param_group_index: int = 0
@@ -334,7 +329,7 @@ class FSDPParamGroup:
     # Initialization #
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:
-            fsdp_param.init_dtype_attrs(self.mp_policy)
+            fsdp_param.init_dtype_attrs(fsdp_param.mp_policy)
         trainable_params: list[FSDPParam] = [
             p for p in self.fsdp_params if p.sharded_param.requires_grad
         ]
@@ -492,7 +487,6 @@ class FSDPParamGroup:
                 param_all_gather_input_dtypes=[],
                 param_all_gather_input_numels=[],
                 all_gather_input_split_sizes=[],
-                all_gather_input_outer_sizes=[],
             )
 
             return
@@ -530,30 +524,28 @@ class FSDPParamGroup:
             # directly initialize unsharded parameters from sharded parameters
 
             for fsdp_param in self.fsdp_params:
-                all_gather_inputs = fsdp_param.all_gather_inputs
+                # Use all_gather_inputs which already handles conversion to param_dtype
+                # This is consistent with the world_size > 1 path
+                all_gather_input = fsdp_param.all_gather_inputs[0]
+
+                # Make sure the all_gather_outputs has proper storage size before using it
+                # First ensure we have at least one tensor in all_gather_outputs
                 fsdp_param.init_all_gather_outputs(
-                    [tensor.numel() for tensor in all_gather_inputs],
-                    [tensor.dtype for tensor in all_gather_inputs],
+                    [all_gather_input.numel()],
+                    [all_gather_input.dtype],
                     world_size,
                     self.device,
                 )
-                fsdp_param.alloc_all_gather_outputs()
-                non_inference_outputs = tuple(
-                    tensor
-                    for tensor in fsdp_param.all_gather_outputs
+
+                tensor = fsdp_param.all_gather_outputs[0]
+                alloc_storage(tensor)
+
+                with (
+                    torch.autograd._unsafe_preserve_version_counter(tensor)
                     if not tensor.is_inference()
-                )
-                with torch.autograd._unsafe_preserve_version_counter(
-                    non_inference_outputs
+                    else contextlib.nullcontext()
                 ):
-                    for output, tensor in zip(
-                        fsdp_param.all_gather_outputs, all_gather_inputs
-                    ):
-                        # Like the world_size > 1 path, copy byte payloads
-                        # bytewise into cached outputs of other dtypes
-                        if tensor.dtype == torch.uint8:
-                            output = output.view(torch.uint8)
-                        output.copy_(tensor)
+                    tensor.copy_(all_gather_input)
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
@@ -902,7 +894,7 @@ class FSDPParamGroup:
             # If there was a mistargeted unshard without a corresponding wait,
             # then we wait here and clear the unshard
             if (event := self._all_gather_result.all_gather_event) is not None:
-                torch.accelerator.current_stream().wait_event(event)
+                self.device_handle.current_stream().wait_event(event)
             work = self._all_gather_result.all_gather_work
             if isinstance(work, dist.distributed_c10d.Work):
                 work.wait()
