@@ -181,7 +181,7 @@ XPU_BUILD_ENV: dict[str, str] = {
 }
 
 # ROCm builds use static linking and skip debug info; mirror the original
-# build_rocm.sh. ROCM_HOME is also read by repair_wheel.py to discover libs.
+# build_rocm.sh. ROCM_HOME is also read by repair_wheel.py to configure RPATHs.
 ROCM_BUILD_ENV_STATIC: dict[str, str] = {
     "BUILD_DEBUG_INFO": "0",
     "TH_BINARY_BUILD": "1",
@@ -200,7 +200,7 @@ def discover_rocm_home() -> str:
     Supports both the OS/tarball layout (/opt/rocm) and the TheRock multi-arch
     wheel layout, where ROCm is pip-installed under <site-packages>/_rocm_sdk_core
     and its real path is recorded in /etc/rocm_env.sh by install_rocm_wheel.sh.
-    ROCM_HOME is read by repair_wheel.py to discover the libs to bundle.
+    ROCM_HOME is read by repair_wheel.py to configure ROCm library RPATHs.
     """
     for key in ("ROCM_HOME", "ROCM_PATH"):
         val = os.environ.get(key)
@@ -503,8 +503,8 @@ def main() -> None:
         print("XPU environment configured")
     elif gpu_arch_type == "rocm":
         env_out.update(ROCM_BUILD_ENV_STATIC)
-        # ROCM_HOME is read by repair_wheel.py to choose RPATH (wheel layout) vs
-        # bundling (OS layout). cmake finds ROCm itself via LoadHIP.cmake, and
+        # ROCM_HOME is read by repair_wheel.py to configure ROCm library RPATHs.
+        # cmake finds ROCm itself via LoadHIP.cmake, and
         # MAGMA is auto-disabled by find_package(MAGMA) when it is absent (as in
         # the wheel layout), so no MAGMA_HOME/USE_MAGMA handling is needed here.
         rocm_home = discover_rocm_home()
