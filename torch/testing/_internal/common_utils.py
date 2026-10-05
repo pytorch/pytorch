@@ -94,7 +94,6 @@ from torch.testing._comparison import (
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
-from torch.utils import cpp_extension
 from torch._utils import _is_privateuse1_backend_available
 try:
     import pytest  # type: ignore[import-not-found]
@@ -6648,6 +6647,8 @@ def remove_cpp_extensions_build_root():
     """
     Removes the default root folder under which extensions are built.
     """
+    from torch.utils import cpp_extension
+
     default_build_root = cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
         if IS_WINDOWS:
@@ -6690,6 +6691,9 @@ def scoped_load_inline(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         def load_inline(*args, **kwargs):
+            # Imported lazily: cpp_extension adds ~0.2s to every test process.
+            from torch.utils import cpp_extension
+
             if IS_WINDOWS:
                 # TODO(xmfan): even using TemporaryDirectoryName will result in permission error
                 return cpp_extension.load_inline(*args, **kwargs)
