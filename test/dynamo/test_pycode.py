@@ -6,7 +6,11 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.convert_frame import fullgraph_capture
 from torch._dynamo.utils import get_metrics_context
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+)
 
 
 class SimpleLinearModule(torch.nn.Module):
@@ -21,6 +25,8 @@ class SimpleLinearModule(torch.nn.Module):
 @torch._dynamo.config.patch(generate_pycode=True)
 @skipIfTorchDynamo("Not suitable for generate_pycode=True")
 class TestPycode(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_pycode_module(self):
         mod = SimpleLinearModule()
         x = torch.randn(3, 3)
