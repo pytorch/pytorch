@@ -49,10 +49,10 @@ static ArgValue convertPyToArgValue(py::handle inp) {
     } else if (py::isinstance<BufHandle>(l[0])) {
       return py::cast<BufList>(inp);
     } else {
-      throw std::runtime_error("vector conversion failed");
+      TORCH_CHECK(false, "vector conversion failed");
     }
   } else {
-    throw std::runtime_error("conversion not yet implemented");
+    TORCH_CHECK(false, "conversion not yet implemented");
   }
 }
 
@@ -60,7 +60,7 @@ static Dtype parsePythonDtype(py::handle obj) {
   if (THPDtype_Check(obj.ptr())) {
     return Dtype(reinterpret_cast<THPDtype*>(obj.ptr())->scalar_type);
   } else {
-    throw std::runtime_error("expected a torch.dtype instance");
+    TORCH_CHECK(false, "expected a torch.dtype instance");
   }
 }
 
@@ -321,7 +321,7 @@ void initTensorExprBindings(PyObject* module) {
                 return py::cast<ExprHandle>(func(a, b, c, d));
               });
         } else {
-          throw std::runtime_error("Too many args");
+          TORCH_CHECK(false, "Too many args");
         }
       },
       py::return_value_policy::reference);
@@ -738,7 +738,7 @@ void initTensorExprBindings(PyObject* module) {
         }
         std::string msg = std::string("Unhandled node kind (in te.lower): ") +
             op.toQualString();
-        throw malformed_input(msg);
+        TORCH_CHECK(false, "MALFORMED INPUT: ", msg);
       });
 
   py::class_<ArgValue>(te, "ArgValue")
@@ -858,17 +858,16 @@ void initTensorExprBindings(PyObject* module) {
               }
             }
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-            if (py::len(values) != self.buffer_args().size()) {
-              throw malformed_input("bad args in CodeGen.call function");
-            }
+            TORCH_CHECK(
+                py::len(values) == self.buffer_args().size(),
+                "MALFORMED INPUT: bad args in CodeGen.call function");
             for (size_t i = 0; i < py::len(values); i++) {
               const auto& value = values[i];
               const auto& bufArg = self.buffer_args()[i];
               if (py::isinstance<py::int_>(value)) {
-                if (!bufArg.isVar()) {
-                  throw malformed_input(
-                      "Integer variable expected in CodeGen.call function");
-                }
+                TORCH_CHECK(
+                    bufArg.isVar(),
+                    "MALFORMED INPUT: Integer variable expected in CodeGen.call function");
                 switch (bufArg.dtype().scalar_type()) {
 #define TYPE_CASE(Type, Name)                    \
   case ScalarType::Name: {                       \
@@ -877,7 +876,7 @@ void initTensorExprBindings(PyObject* module) {
   }
                   AT_FORALL_INT_TYPES(TYPE_CASE);
                   default:
-                    throw unsupported_dtype();
+                    TORCH_CHECK(false, "UNSUPPORTED DTYPE");
                 }
               } else {
                 value_ptrs.emplace_back(value.cast<at::Tensor>().data_ptr());
@@ -931,18 +930,19 @@ void initTensorExprBindings(PyObject* module) {
 #ifdef TORCH_ENABLE_LLVM
           cg = new LLVMCodeGen(stmt, args);
 #else
-          throw std::runtime_error("PyTorch not compiled with LLVM support!");
+          TORCH_CHECK(false, "PyTorch not compiled with LLVM support!");
 #endif
         } else if (name == "cuda") {
 #ifdef USE_CUDA
           cg = new CudaCodeGen(stmt, args);
 #else
-          throw std::runtime_error("PyTorch not compiled with CUDA support!");
+          TORCH_CHECK(false, "PyTorch not compiled with CUDA support!");
 #endif
         } else if (name == "ir_eval") {
           cg = new SimpleIREvaluator(stmt, args);
         } else {
-          throw std::runtime_error(
+          TORCH_CHECK(
+              false,
               "construct_codegen() expects 'llvm', 'cuda', or 'ir_eval'");
         }
         return cg;
