@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from enum import Enum
 from functools import partial, wraps
 from typing import Any, ClassVar, TypeVar
-from typing_extensions import ParamSpec
+from typing_extensions import override, ParamSpec
 
 import torch
 from torch._inductor.utils import GPU_TYPES
@@ -899,6 +899,23 @@ class MPSTestBase(DeviceTypeTestBase):
 
     def _should_stop_test_suite(self):
         return False
+
+    @classmethod
+    @override
+    def _get_dtypes(cls, test):
+        dtypes = super()._get_dtypes(test)
+        # MPS has no float64, so drop double-precision variants unless the test
+        # asks for them explicitly with @dtypesIfMPS.
+        if dtypes is None or cls.device_type in test.dtypes:
+            return dtypes
+        unsupported = (torch.float64, torch.complex128)
+        return tuple(
+            d
+            for d in dtypes
+            if not any(
+                x in unsupported for x in (d if isinstance(d, (tuple, list)) else (d,))
+            )
+        )
 
     @classmethod
     def _capabilities(cls):
@@ -2425,15 +2442,6 @@ def skipCUDAIfNoCusolver(fn):
 # Skips a test if both cuSOLVER and MAGMA are not available
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
     if has_cusolver():
-        return fn
-    else:
-        # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
-        return skipCUDAIfNoMagma(fn)
-
-
-# Skips a test if both cuSOLVER/hipSOLVER and MAGMA are not available
-def skipCUDAIfNoMagmaAndNoLinalgsolver(fn):
-    if has_cusolver() or has_hipsolver():
         return fn
     else:
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
