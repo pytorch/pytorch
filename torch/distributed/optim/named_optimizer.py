@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 from torch import optim
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
 __all__: list[str] = []
@@ -312,6 +311,9 @@ class _NamedOptimizer(optim.Optimizer):
         self.step(closure=None)
 
     def _pre_load_state_dict(self, state_dict: dict[str, Any]) -> dict[str, Any]:
+        # Imported lazily: FSDP pulls in DTensor (~0.4s).
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
         # TODO(chienchin): This API should be FSDP agnostic and should support
         # general user hooks.
         if isinstance(self.module, FSDP):
@@ -321,6 +323,8 @@ class _NamedOptimizer(optim.Optimizer):
         return state_dict
 
     def _post_state_dict(self, state_dict: dict[str, Any]) -> dict[str, Any]:
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
         # TODO(chienchin): This API should be FSDP agnostic and should support
         # general user hooks.
         if isinstance(self.module, FSDP):
