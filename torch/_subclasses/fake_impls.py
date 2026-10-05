@@ -1426,7 +1426,7 @@ def local_scalar_dense(
     else:
         # Every binding site defines its own fresh unbacked symbol; a memo hit
         # only records that it equals the earlier one.
-        fake_mode.shape_env._eliminate_unbacked(r.node._expr, memo.node._expr)  # type: ignore[union-attr]
+        torch._check(r == memo)
     return r
 
 
@@ -1490,7 +1490,7 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
         elif isinstance(nnz, torch.SymInt):
             # Every binding site defines its own fresh unbacked symbol; a memo
             # hit only records that it equals the earlier one.
-            fake_mode.shape_env._eliminate_unbacked(nnz.node._expr, memo.node._expr)  # type: ignore[union-attr]
+            torch._check(nnz == memo)
     return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)  # type: ignore[return]
 
 
