@@ -644,12 +644,15 @@ class GuardManagerWrapper:
                     node.mark_tag_safe()
             elif (
                 issubclass(node.get_type_of_guarded_value(), tuple)
-                and node.get_source().endswith(dunder_attrs_assumed_constants)
+                and (
+                    node.get_source().endswith(dunder_attrs_assumed_constants)
+                    or node.get_source().startswith("type.__dict__['__mro__'].__get__(")
+                )
                 and config.assume_dunder_attributes_remain_unchanged
             ):
-                # We trust tuples obtained from a function's __closure__ or
-                # __defaults__. Any *other* tuple-valued attribute can be
-                # silently replaced—for example:
+                # We trust class MRO tuples and tuples obtained from a function's
+                # __closure__ or __defaults__. Any *other* tuple-valued attribute
+                # can be silently replaced—for example:
                 #
                 #     foo.bar = (1, 2)      # original
                 #     foo.bar = (3, 4)      # rebinding that our dict-tag optimisation won't see
