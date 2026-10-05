@@ -2273,6 +2273,13 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sigmoid(x):
+        if (
+            config.numerics in ("strict_pointwise", "strict")
+            and torch.version.hip is None
+            and V.graph.get_current_device_or_throw().type == "cuda"
+        ):
+            # CUDA eager uses exp and correctly rounded division at opmath precision.
+            return f"libdevice.rcp_rn(1.0 + libdevice.exp(-({x})))"
         return f"tl.sigmoid({x})"
 
     @staticmethod
