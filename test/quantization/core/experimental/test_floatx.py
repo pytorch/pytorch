@@ -290,6 +290,32 @@ class TestFloat8Dtype(TestCase):
         IMO simpler to special case e8m0 here.
         """
 
+        # Check the exact float32 subnormal boundary around the midpoint between
+        # E8M0 codes 0 (2^-127) and 1 (2^-126).
+        subnormal_bits = torch.tensor(
+            [
+                0x00000000,
+                0x003FFFFF,
+                0x00400000,
+                0x00400001,
+                0x005FFFFF,
+                0x00600000,
+                0x00600001,
+                0x007FFFFF,
+            ],
+            dtype=torch.int32,
+            device=device,
+        )
+        expected = torch.tensor(
+            [0, 0, 0, 0, 0, 1, 1, 1], dtype=torch.uint8, device=device
+        )
+        actual = (
+            subnormal_bits.view(torch.float)
+            .to(torch.float8_e8m0fnu)
+            .view(torch.uint8)
+        )
+        self.assertEqual(expected, actual, atol=0, rtol=0)
+
         for biased_exponent in range(256):
             # iterate through all the possible options of guard, round, sticky bits
             # for the current exponent
@@ -300,40 +326,33 @@ class TestFloat8Dtype(TestCase):
                 fp32_start = _int_bits_to_float(uint32_t_start)
 
                 # create an RNE rounded version of the exponent
-                if biased_exponent == 255:
+                if biased_exponent == 0:
+                    # Code 0 represents 2^-127 instead of zero. Values below
+                    # the midpoint with code 1 clamp to code 0, and the midpoint
+                    # rounds up because the retained significand bit is 1.
+                    new_biased_exponent = int(uint32_t_start >= 0x00600000)
+                elif biased_exponent == 255:
                     new_biased_exponent = biased_exponent
                 else:
-                    lsb = biased_exponent > 0
+                    lsb = True
                     g = grs >> 2
                     r = (grs >> 1) & 0b1
                     s = grs & 0b1
                     new_biased_exponent = _round_e8m0_rne(biased_exponent, lsb, g, r, s)
 
-                # create an RNE rounded version of the float
-                fp32_e8m0_fp32_emulated = _int_bits_to_float(new_biased_exponent << 23)
-
-                # now, do the same in PyTorch and see if results match
+                # Now, do the same in PyTorch and compare the encoded exponent.
                 fp32_pt_start = torch.full(
                     (1,), fp32_start, device=device, dtype=torch.float
                 )
                 fp32_pt_e8m0 = fp32_pt_start.to(torch.float8_e8m0fnu)
-                fp32_pt_e8m0_fp32 = fp32_pt_e8m0.to(torch.float)
-
-                expected = fp32_e8m0_fp32_emulated
-                if biased_exponent == 254 and grs >= 4:
-                    # special case rounding up from the largest representable float32 exponent, which
-                    # saturates to nan
-                    expected = float("nan")
-                elif biased_exponent == 255:
-                    # special case inf and nan, which becomes nan
-                    expected = float("nan")
-
-                actual = fp32_pt_e8m0_fp32.item()
+                actual = fp32_pt_e8m0.view(torch.uint8).item()
 
                 self.assertEqual(
-                    expected,
+                    new_biased_exponent,
                     actual,
-                    lambda msg: f"{msg}\nexpected: {expected}, actual: {actual}",
+                    lambda msg: (
+                        f"{msg}\nexpected: {new_biased_exponent}, actual: {actual}"
+                    ),
                 )
 
     @dtypes(*FLOAT8_DTYPES)

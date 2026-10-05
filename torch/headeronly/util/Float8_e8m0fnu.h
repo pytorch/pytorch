@@ -71,6 +71,15 @@ inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
     return exponent;
   }
 
+  // E8M0 code 0 represents 2^-127, while a zero float32 exponent represents
+  // values from zero through just below 2^-126. Clamp values below the
+  // midpoint between E8M0 codes 0 and 1 to code 0, and round the midpoint up.
+  if (exponent == 0) {
+    constexpr uint32_t fp32_e8m0_min_midpoint = 0x00600000;
+    uint32_t magnitude_bits = f_bits & 0x7FFFFFFF;
+    return static_cast<uint8_t>(magnitude_bits >= fp32_e8m0_min_midpoint);
+  }
+
   // next, we use guard, round, sticky bits and the LSB to implement round to
   // nearest, with ties to even
 
@@ -80,9 +89,8 @@ inline C10_HOST_DEVICE uint8_t fp8e8m0fnu_from_fp32_value(float f) {
   uint8_t r = (f_bits & 0x200000) > 0;
   // sticky bit - bits 21 to 1, or 20 to 0 zero-indexed
   uint8_t s = (f_bits & 0x1FFFFF) > 0;
-  // in casting to e8m0, LSB is the implied mantissa bit. It equals to 0 if the
-  // original float32 is denormal, and to 1 if the original float32 is normal.
-  uint8_t lsb = exponent > 0;
+  // in casting a normal float32 to e8m0, LSB is the implied mantissa bit
+  uint8_t lsb = 1;
 
   // implement the RNE logic
   bool round_up = false;
