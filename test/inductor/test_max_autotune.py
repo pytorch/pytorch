@@ -26,7 +26,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
 from torch._dynamo.utils import counters, identity, same
-from torch._inductor import config
+from torch._inductor import config, ir
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
     _TestCodeCacheBenchmarkRequest,
@@ -5312,6 +5312,70 @@ class TestPrologueFusion(TestCase):
         FileCheck().check("def triton").check_count(
             "tl.full([1], 1.1, tl.float32)", 3, exactly=True
         ).check("tl.store").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "mm_persistent_tma is shadowed by the Blackwell warp-specialized TMA template",
+    )
+    @config.patch(
+        {
+            "epilogue_fusion": True,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 16,
+            "triton.enable_persistent_tma_matmul": True,
+        }
+    )
+    def test_addmm_prefix_producer_benchmarks_persistent_tma_choices(self):
+        # mm_persistent_tma supports producer fusion into the addmm bias but not
+        # into A or B, so it should be benchmarked only when the bias is fused.
+        M = K = N = 128
+
+        def computed_bias(a, b, bias):
+            return torch.addmm(bias * 2.0 - 1.0, a, b)
+
+        def computed_a(a, b, bias):
+            return torch.addmm(bias, a * 2.0, b)
+
+        a = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+        bias = torch.randn(M, N, device=GPU_TYPE)
+
+        orig_swap = ir.MultiTemplateBuffer.swap_as_triton_caller
+
+        def benchmarked_template_names(fn):
+            tried: list[str] = []
+
+            def recording_swap(buf, caller):
+                tried.append(caller.name)
+                return orig_swap(buf, caller)
+
+            torch._dynamo.reset()
+            with (
+                self.force_template_fusion_benchmark(),
+                mock.patch.object(
+                    ir.MultiTemplateBuffer, "swap_as_triton_caller", recording_swap
+                ),
+            ):
+                out, code = run_and_get_code(torch.compile(fn), a, b, bias)
+            self.assertEqual(out, fn(a, b, bias), atol=0.05, rtol=0.05)
+            self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=None)
+            return tried
+
+        self.assertTrue(
+            any(
+                "persistent_tma" in name
+                for name in benchmarked_template_names(computed_bias)
+            )
+        )
+        self.assertFalse(
+            any(
+                "persistent_tma" in name
+                for name in benchmarked_template_names(computed_a)
+            )
+        )
 
     @config.patch(
         {
