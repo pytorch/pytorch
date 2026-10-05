@@ -81,18 +81,15 @@ from ..source import (
 )
 from ..utils import (
     check_constant_args,
-    check_positional,
     check_unspec_or_constant_args,
     FrameState,
     identity,
     is_function,
     is_lru_cache_wrapper_trace_without_warning_allowed,
     is_tensor_base_attr_getter,
-    is_torch_class,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
-    no_keywords,
     unpack_iterable,
 )
 from .base import (
@@ -107,7 +104,6 @@ from .base import (
     NO_SUCH_SUBOBJ,
     readonly_setter,
     store_attr_mutation,
-    type_name_no_user_code,
     type_qualified_name,
     unmodeled_setter,
     ValueMutationNew,
@@ -4856,8 +4852,6 @@ class MethodDescriptorVariable(DescriptorVariable):
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.owner = owner
-        if self.source is not None:
-            install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
 
     def __repr__(self) -> str:
         cls_name = self.descriptor.__objclass__.__name__
@@ -4883,37 +4877,29 @@ class MethodDescriptorVariable(DescriptorVariable):
         if not args:
             raise_type_error(
                 tx,
-                f"unbound method {self.descriptor.__objclass__.__name__}."
-                f"{self.descriptor.__name__}() needs an argument",
+                f"descriptor '{self.descriptor.__name__}' of "
+                f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
         obj, *rest = args
+        name = self.descriptor.__name__
         _check_descriptor_obj_type(tx, self.descriptor, obj)
-        if is_torch_class(self.descriptor.__objclass__):
-            fn_vt = VariableTracker.build(
-                tx, self.descriptor, source=self.source, realize=True
-            )
-            return fn_vt.call_function(tx, [obj, *rest], kwargs)
-        bound = self.tp_descr_get_impl(tx, obj, self.owner)
-        if not isinstance(bound, BoundBuiltinMethodVariable):
-            raise AssertionError(f"expected bound method descriptor, got {type(bound)}")
-        return bound.call_function(tx, rest, kwargs)
+        # Dispatch through the owner (UDCV for the defining class) rather
+        # than obj.call_method, which would do MRO resolution from type(obj)
+        # and find Python overrides on subclasses.
+        return self.owner.call_method(tx, name, [obj, *rest], kwargs)
 
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
         obj: VariableTracker,
         owner: VariableTracker,
-    ) -> VariableTracker:
+    ) -> "BoundBuiltinMethodVariable":
         # Mirrors method_get which calls PyCFunction_NewEx to produce a
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
-        if obj.is_constant_none():
-            return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
-        return BoundBuiltinMethodVariable(
-            self.descriptor, obj, descriptor_source=self.source
-        )
+        return BoundBuiltinMethodVariable(self.descriptor, obj, source=self.source)
 
 
 class BoundBuiltinMethodVariable(VariableTracker):
@@ -4929,7 +4915,6 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
     _nonvar_fields = {
         "descriptor",
-        "descriptor_source",
         *VariableTracker._nonvar_fields,
     }
 
@@ -4939,13 +4924,11 @@ class BoundBuiltinMethodVariable(VariableTracker):
         | types.BuiltinFunctionType
         | types.ClassMethodDescriptorType,
         obj: VariableTracker,
-        descriptor_source: Source | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.descriptor = descriptor
         self.obj = obj
-        self.descriptor_source = descriptor_source
 
     def __repr__(self) -> str:
         cls_name = getattr(
@@ -4976,119 +4959,15 @@ class BoundBuiltinMethodVariable(VariableTracker):
             return self.descriptor.__get__(obj)  # type: ignore[union-attr]
         return getattr(obj, self.descriptor.__name__)
 
-    # meth_getset / meth_members on builtin_function_or_method.
-    # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L266-L296
-    tp_members = {
-        "__name__": Member(
-            getset_build(lambda s: s.descriptor.__name__), readonly_setter
-        ),
-        "__qualname__": Member(lambda s, tx: s._qualname(tx), readonly_setter),
-        "__self__": Member(lambda s, tx: s.obj, readonly_setter),
-    }
-
-    def _qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        try:
-            receiver = self.obj.as_python_constant()
-        except AsPythonConstantNotImplementedError:
-            receiver = None
-        if isinstance(receiver, types.ModuleType):
-            return variables.ConstantVariable.create(self.descriptor.__name__)
-        if isinstance(
-            self.descriptor,
-            (types.MethodDescriptorType, types.ClassMethodDescriptorType),
-        ):
-            if isinstance(self.descriptor, types.ClassMethodDescriptorType):
-                owner = self.obj
-            else:
-                owner_source = TypeSource(self.obj.source) if self.obj.source else None
-                if owner_source is None and isinstance(
-                    self.obj, UserDefinedObjectVariable
-                ):
-                    owner_source = self.obj.cls_source
-                owner = VariableTracker.build(
-                    tx, self.obj.python_type(), source=owner_source
-                )
-            owner_qualname = owner.tp_getattro_impl(tx, "__qualname__")
-            return variables.BuiltinVariable(operator.add).call_function(
-                tx,
-                [
-                    owner_qualname,
-                    variables.ConstantVariable.create(f".{self.descriptor.__name__}"),
-                ],
-                {},
-            )
-        return VariableTracker.build(tx, self.descriptor.__qualname__)
-
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if self.descriptor is dict.__dict__["fromkeys"]:
-            if kwargs:
-                method_name = self._qualname(tx).as_python_constant()
-                no_keywords(tx, method_name, kwargs)
-            check_positional(tx, "fromkeys", len(args), 1, 2)
-            owner = self.obj.get_real_python_backed_value()
-            if not issubclass(type(owner), type):
-                raise AssertionError(f"expected a type receiver, got {type(owner)}")
-            from .builtin import DictBuiltinVariable
-
-            return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self.obj, *args)
-        if isinstance(self.descriptor, types.MethodDescriptorType):
-            name = self.descriptor.__name__
-            from .object_protocol import mro_lookup
-
-            descriptor_is_overridden = (
-                mro_lookup(self.obj.python_type(), name) is not self.descriptor
-            )
-            if isinstance(self.obj, UserDefinedObjectVariable):
-                if (
-                    descriptor_is_overridden
-                    and self.obj._base_methods is not None
-                    and self.descriptor in self.obj._base_methods
-                ):
-                    return self.obj.call_base_method(tx, name, list(args), kwargs)
-                if descriptor_is_overridden:
-                    return VariableTracker.call_method(
-                        self.obj, tx, name, list(args), kwargs
-                    )
-            from .torch_function import TensorWithTFOverrideVariable
-
-            if isinstance(self.obj, TensorWithTFOverrideVariable):
-                fn_vt = VariableTracker.build(
-                    tx,
-                    self.descriptor,
-                    source=self.descriptor_source,
-                    realize=True,
-                )
-                return fn_vt.call_function(tx, [self.obj, *args], kwargs)
-            return self.obj.call_method(tx, name, list(args), kwargs)
         return self.obj.call_method(tx, self.descriptor.__name__, list(args), kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        if (
-            isinstance(
-                self.descriptor,
-                (types.ClassMethodDescriptorType, types.MethodDescriptorType),
-            )
-            and self.descriptor_source is not None
-        ):
-
-            def load_get() -> None:
-                codegen(self.descriptor_source)
-                codegen.extend_output(codegen.create_load_attrs("__get__"))
-
-            codegen.add_push_null(load_get)
-            if isinstance(self.descriptor, types.ClassMethodDescriptorType):
-                codegen.extend_output([codegen.create_load_const(None)])
-                codegen(self.obj)
-                codegen.extend_output(create_call_function(2, False))
-            else:
-                codegen(self.obj)
-                codegen.extend_output(create_call_function(1, False))
-            return
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
 
@@ -5151,37 +5030,7 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
         # classmethod_get binds the C method to the class (ignoring obj),
         # producing a builtin_function_or_method via PyCMethod_New.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
-        owner_cls = owner.get_real_python_backed_value()
-        if owner_cls is NO_SUCH_SUBOBJ:
-            unimplemented(
-                gb_type="Unresolved classmethod descriptor owner",
-                context=f"{self.descriptor.__qualname__}.__get__",
-                explanation="Dynamo cannot prove that the descriptor owner is a class.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        owner_type = (
-            cast(type, owner_cls) if issubclass(type(owner_cls), type) else None
-        )
-        if owner_type is None:
-            owner_name = type_name_no_user_code(type(owner_cls))
-            raise_type_error(
-                tx,
-                f"descriptor '{self.descriptor.__name__}' for type "
-                f"'{self.descriptor.__objclass__.__name__}' needs a type, not a "
-                f"'{owner_name}' as arg 2",
-            )
-        if not issubclass(owner_type, self.descriptor.__objclass__):
-            owner_name = type_name_no_user_code(owner_type)
-            raise_type_error(
-                tx,
-                f"descriptor '{self.descriptor.__name__}' requires a subtype of "
-                f"'{self.descriptor.__objclass__.__name__}' but received '{owner_name}'",
-            )
-        if self.source is not None:
-            install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
-        return BoundBuiltinMethodVariable(
-            self.descriptor, owner, descriptor_source=self.source
-        )
+        return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
 
 
 # sm_init/cm_init run functools_wraps(), which copies these off the wrapped
