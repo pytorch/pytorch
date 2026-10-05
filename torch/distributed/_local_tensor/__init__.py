@@ -354,9 +354,16 @@ def _for_each_rank_run_func(
     ]
 
     lm = enabled_local_tensor_mode()
-    use_per_rank_rng = lm is not None and len(lm._per_rank_rng_states) > 0
+    # Saving/restoring CPU and accelerator RNG state dominates the per-op cost,
+    # so skip it for aten ops that don't consume RNG.
+    uses_rng = not (
+        isinstance(func, OpOverload)
+        and func.namespace == "aten"
+        and torch.Tag.nondeterministic_seeded not in func.tags
+    )
+    use_per_rank_rng = uses_rng and lm is not None and len(lm._per_rank_rng_states) > 0
 
-    global_rng_state = None if use_per_rank_rng else _get_rng_state()
+    global_rng_state = _get_rng_state() if uses_rng and not use_per_rank_rng else None
 
     flat_rank_rets = {}
 
@@ -367,9 +374,7 @@ def _for_each_rank_run_func(
                 raise AssertionError
             if r in lm._per_rank_rng_states:
                 _set_rng_state(*lm._per_rank_rng_states[r])
-        else:
-            if global_rng_state is None:
-                raise AssertionError
+        elif global_rng_state is not None:
             _set_rng_state(*global_rng_state)
 
         rank_flat_args = [_map_to_rank_local_val(a, r) for a in flat_args]
