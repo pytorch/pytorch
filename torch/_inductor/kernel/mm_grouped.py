@@ -739,24 +739,32 @@ def _flydsl_grouped_static_shape(
 ) -> tuple[int, int, int, int] | None:
     """(M, N, K, G) as ints for a 2D-ragged x 3D grouped GEMM, or None.
 
-    None means one of them is dynamic, or `offs` does not name exactly the
-    groups B stacks. Total M only prunes configs -- the exact per-group sizes
-    stay runtime values that the kernel reads from `offs` on device -- but the
-    other three are compile keys, so a dynamic one has to decline the template.
+    N, K and G are compile keys, so a dynamic one declines the template, as
+    does `offs` not naming exactly the groups B stacks. Total M is never
+    compiled in: the kernel reads it from the output at launch and the group
+    sizes from `offs` on device. M only steers the tile heuristic, so a
+    dynamic token dim -- the usual MoE case -- is served with its size hint.
     """
     g = mat_b.get_size()[0]
     k = mat_a.get_size()[-1]
     n = mat_b.get_size()[-1]
     statically_known = PythonWrapperCodegen.statically_known_int_or_none
-    m_static = statically_known(mat_a.get_size()[0])
     n_static = statically_known(n)
     k_static = statically_known(k)
     g_static = statically_known(g)
-    if m_static is None or n_static is None or k_static is None or g_static is None:
+    if n_static is None or k_static is None or g_static is None:
         return None
     if not V.graph.sizevars.statically_known_equals(offs.get_size()[0], g):
         return None
-    return m_static, n_static, k_static, g_static
+    m_hint = V.graph.sizevars.optimization_hint(mat_a.get_size()[0])
+    return m_hint, n_static, k_static, g_static
+
+
+def _device_cu_count(device: torch.device | None) -> int | None:
+    """CU count of the device a kernel will launch on, which caps its grid."""
+    if device is None or device.type != "cuda":
+        return None
+    return torch.cuda.get_device_properties(device).multi_processor_count
 
 
 flydsl_mxfp8_grouped_mm_template = FlyDSLTemplate(
@@ -818,7 +826,7 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     static_shape = _flydsl_grouped_static_shape(mat_a, mat_b, offs)
     if static_shape is None:
         return []
-    m_static, n_static, k_static, g_static = static_shape
+    m_hint, n_static, k_static, g_static = static_shape
 
     if k_static % MXFP8_SCALE_BLOCK != 0:
         return []
@@ -854,8 +862,14 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     # for B, which is a [G, N, K // 32] plane per group.
     if len(scale_a.get_size()) != 2 or len(scale_b.get_size()) != 2:
         return []
-    if not sizevars.statically_known_equals(scale_a.get_size()[0], mat_a.get_size()[0]):
-        return []
+    # One scale row per token row. With a dynamic token dim, dynamo gives A and
+    # its scales separate symbols, so guard the equality the MX layout implies
+    # rather than declining whenever it cannot be proven statically.
+    scale_rows, a_rows = scale_a.get_size()[0], mat_a.get_size()[0]
+    if not sizevars.statically_known_equals(scale_rows, a_rows):
+        if sizevars.optimization_hint(scale_rows) != sizevars.optimization_hint(a_rows):
+            return []
+        sizevars.check_equals(scale_rows, a_rows)
     if not sizevars.statically_known_equals(scale_a.get_size()[1], scale_k):
         return []
     if not sizevars.statically_known_equals(scale_a_stride[-1], 1):
@@ -906,7 +920,7 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
             "GEMM_K": k_static,
         }
         for gemm_config in get_mxfp8_grouped_gemm_configs(
-            m_static, n_static, k_static, g_static
+            m_hint, n_static, k_static, g_static, _device_cu_count(layout.device)
         )
         if is_mxfp8_grouped_gemm_config_valid_for_shape(
             n_static, k_static, g_static, gemm_config

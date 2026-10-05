@@ -583,7 +583,7 @@ def get_exhaustive_mxfp8_grouped_gemm_configs() -> list[FlyDSLMXFP8GroupedGemmCo
 
 
 def get_default_mxfp8_grouped_gemm_config(
-    m: int, n: int, group_count: int
+    m: int, n: int, group_count: int, num_cus: int | None = None
 ) -> FlyDSLMXFP8GroupedGemmConfig:
     """The tile the kernel's own measured heuristic picks for this shape.
 
@@ -593,17 +593,20 @@ def get_default_mxfp8_grouped_gemm_config(
     ends up with, and both terms move with (M/G, N). ``pick_tile`` is the
     upstream kernel's own measured answer, so the single non-autotuned choice
     is the one it makes rather than a fixed tile that is wrong at both ends.
+
+    ``num_cus`` should be the CU count of the device the kernel will launch
+    on, which is what its grid is capped at; None reads the current device.
     """
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
         pick_mxfp8_grouped_gemm_tile,
     )
 
-    block_r, block_c = pick_mxfp8_grouped_gemm_tile(m, group_count, n)
+    block_r, block_c = pick_mxfp8_grouped_gemm_tile(m, group_count, n, num_cus=num_cus)
     return FlyDSLMXFP8GroupedGemmConfig(BLOCK_R=block_r, BLOCK_C=block_c)
 
 
 def get_mxfp8_grouped_gemm_configs(
-    m: int, n: int, k: int, group_count: int
+    m: int, n: int, k: int, group_count: int, num_cus: int | None = None
 ) -> list[dict[str, int]]:
     """Return configs for the MXFP8 ragged grouped GEMM kernel.
 
@@ -614,7 +617,7 @@ def get_mxfp8_grouped_gemm_configs(
     if config.flydsl_enable_autotuning:
         candidates = get_exhaustive_mxfp8_grouped_gemm_configs()
     else:
-        candidates = [get_default_mxfp8_grouped_gemm_config(m, n, group_count)]
+        candidates = [get_default_mxfp8_grouped_gemm_config(m, n, group_count, num_cus)]
 
     valid_configs: list[FlyDSLMXFP8GroupedGemmConfig] = []
     for gemm_config in candidates:

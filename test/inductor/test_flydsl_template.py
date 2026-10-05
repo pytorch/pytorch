@@ -7,6 +7,8 @@ from dataclasses import asdict
 from types import SimpleNamespace
 from unittest import mock
 
+import sympy
+
 import torch
 import torch.nn.functional as F
 from torch._inductor import config as inductor_config
@@ -1571,6 +1573,11 @@ class TestFlyDSLTemplate(TestCase):
     @parametrize(
         "case",
         (
+            # Accepted: the baseline itself, and the same shape with a dynamic
+            # token dim, which only steers the tile heuristic.
+            "baseline",
+            "dynamic_m",
+            "dynamic_m_separate_scale_symbol",
             "a_dtype",
             "out_dtype",
             "scale_dtype",
@@ -1578,6 +1585,7 @@ class TestFlyDSLTemplate(TestCase):
             "a_padded_stride",
             "scale_a_padded_stride",
             "scale_b_wrong_shape",
+            "scale_a_wrong_rows",
             "offs_dtype",
             "k_not_scale_aligned",
         ),
@@ -1589,9 +1597,12 @@ class TestFlyDSLTemplate(TestCase):
         GPU, and -- more to the point -- without ATen, which has no MXFP8
         grouped kernel on ROCm to fall back to.
         """
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
         from torch._inductor.kernel import mm_grouped
 
         m, k, n, g = 512, 2048, 256, 4
+        if case.startswith("dynamic_m"):
+            m = sympy.Symbol("s0", positive=True, integer=True)
         scale_k = k // 32
 
         def node(size, stride, dtype, offset=0):
@@ -1623,6 +1634,12 @@ class TestFlyDSLTemplate(TestCase):
             mat_a = node([m, k], [k + 32, 1], fp8)
         elif case == "scale_a_padded_stride":
             scale_a = node([m, scale_k], [scale_k + 4, 1], e8m0)
+        elif case == "dynamic_m_separate_scale_symbol":
+            # Dynamo gives A and its scales separate symbols for the token dim.
+            scale_rows = sympy.Symbol("s1", positive=True, integer=True)
+            scale_a = node([scale_rows, scale_k], [scale_k, 1], e8m0)
+        elif case == "scale_a_wrong_rows":
+            scale_a = node([m + 32, scale_k], [scale_k, 1], e8m0)
         elif case == "scale_b_wrong_shape":
             scale_b = node([g, n, scale_k], [n * scale_k, scale_k, 1], e8m0)
         elif case == "offs_dtype":
@@ -1630,27 +1647,54 @@ class TestFlyDSLTemplate(TestCase):
         elif case == "k_not_scale_aligned":
             mat_a = node([m, k + 16], [k + 16, 1], fp8)
 
+        # Not the current device, so the CU count has to come from the layout.
+        device = torch.device("cuda", 1)
         layout = SimpleNamespace(
             stride=[n, 1],
             dtype=out_dtype,
             size=[m, n],
-            device=torch.device("cpu"),
+            device=device,
         )
         sizevars = SimpleNamespace(
             statically_known_equals=lambda x, y: x == y,
             statically_known_multiple_of=lambda x, y: x % y == 0,
+            optimization_hint=lambda x: 512 if isinstance(x, sympy.Expr) else x,
+            check_equals=mock.Mock(),
         )
+        configs = mock.Mock(return_value=[{"BLOCK_R": 256, "BLOCK_C": 256}])
+        props = mock.Mock(return_value=SimpleNamespace(multi_processor_count=128))
         with (
             V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
             mock.patch.object(
                 mm_grouped, "use_flydsl_gemm_template", return_value=True
             ),
             mock.patch.object(mm_grouped, "is_unaligned", return_value=False),
+            mock.patch.object(
+                flydsl_heuristics, "get_mxfp8_grouped_gemm_configs", configs
+            ),
+            mock.patch.object(
+                flydsl_heuristics,
+                "is_mxfp8_grouped_gemm_config_valid_for_shape",
+                return_value=True,
+            ),
+            mock.patch("torch.cuda.get_device_properties", props),
         ):
             result = mm_grouped.get_flydsl_mxfp8_grouped_mm_template_kwargs(
                 mat_a, mat_b, scale_a, scale_b, offs, layout, True
             )
-        self.assertEqual(result, [])
+        if not (case == "baseline" or case.startswith("dynamic_m")):
+            self.assertEqual(result, [])
+            return
+        if case == "dynamic_m_separate_scale_symbol":
+            sizevars.check_equals.assert_called_once_with(scale_rows, m)
+        else:
+            sizevars.check_equals.assert_not_called()
+        self.assertEqual(
+            result,
+            [{"BLOCK_R": 256, "BLOCK_C": 256, "GEMM_G": g, "GEMM_N": n, "GEMM_K": k}],
+        )
+        configs.assert_called_once_with(512, n, k, g, 128)
+        props.assert_called_once_with(device)
 
     def _assert_compiled_mxfp8_grouped_mm(
         self, group_sizes, k, n, *, expect_flydsl: bool = True
@@ -1701,6 +1745,8 @@ class TestFlyDSLTemplate(TestCase):
     def test_flydsl_mxfp8_grouped_mm_e2e(self, group_sizes, k, n):
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
 
         code = self._assert_compiled_mxfp8_grouped_mm(group_sizes, k, n)
         self.assertIn("flydsl_tensor_arg", code)
@@ -1720,8 +1766,56 @@ class TestFlyDSLTemplate(TestCase):
         """Autotuning walks every tile the kernel implements, and each is correct."""
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
 
         self._assert_compiled_mxfp8_grouped_mm([512, 300, 700, 1000], 2048, 2048)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    def test_flydsl_mxfp8_grouped_mm_dynamic_m_e2e(self):
+        """A dynamic token dim is served by one graph, without a recompile."""
+        from torch._inductor.graph import GraphLowering
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        def fn(a, b, a_scale, b_scale, offs):
+            return self._scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, offs)
+
+        # The MoE pattern: the token count changes, automatic dynamic shapes
+        # recompile once with a symbolic token dim, and later counts reuse it.
+        # run_and_get_code would reset dynamo between calls, so capture the
+        # generated code directly instead.
+        codes: list[str] = []
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="inductor")
+        k, n = 2048, 2048
+        token_counts = ([512, 300, 700, 1000], [64, 900, 0, 333], [100, 200, 300, 400])
+        with mock.patch.object(GraphLowering, "save_output_code", codes.append):
+            for step, group_sizes in enumerate(token_counts):
+                a, b, a_scale, b_scale, offs, reference = (
+                    self._make_mxfp8_grouped_inputs(group_sizes, k, n)
+                )
+                with torch._dynamo.config.patch(error_on_recompile=step == 2):
+                    result = compiled(a, b, a_scale, b_scale, offs)
+                rows = int(offs[-1])
+                self.assertEqual(
+                    result[:rows].float(),
+                    reference[:rows].float(),
+                    atol=6e-2,
+                    rtol=6e-2,
+                )
+        # One static graph, then one with a symbolic token dim, both FlyDSL.
+        self.assertEqual(len(codes), 2)
+        self.assertIn("async_compile.flydsl", codes[1])
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
     @unittest.skipIf(torch.version.hip is None, "requires ROCm")
@@ -1740,6 +1834,8 @@ class TestFlyDSLTemplate(TestCase):
 
         if not flydsl_utils.runtime_available():
             self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
         module = importlib.import_module(
             "torch._inductor.kernel.vendored_templates.flydsl.kernels."
             "mxfp8_grouped_gemm_gfx950"
