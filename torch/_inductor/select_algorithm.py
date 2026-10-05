@@ -4539,8 +4539,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     return timings
 
             # No choice has won yet, so take the union of inputs allowed at each
-            # producer-fusion placement. During benchmark fusion, exclude choices
-            # that do not support the full union for the enabled placements.
+            # producer-fusion placement. During benchmark fusion, only consider
+            # choices that support every input produced by the fused producers.
             load_input_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
             store_output_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
             for c in choices:
