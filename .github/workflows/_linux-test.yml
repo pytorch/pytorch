@@ -353,7 +353,8 @@ jobs:
           # (so offline Hub datasets resolve); the refresh step syncs it back to S3.
           export HF_DATASETS_CACHE="${RUNNER_TEMP}/hf_datasets"
           mkdir -p "${HF_DATASETS_CACHE}"
-          if [[ -d /mnt/hf_cache/datasets ]]; then
+          # Distributed tests don't use datasets and the copy takes up to ~3 min.
+          if [[ -d /mnt/hf_cache/datasets && "${TEST_CONFIG}" != *distributed* ]]; then
             cp -a /mnt/hf_cache/datasets/. "${HF_DATASETS_CACHE}/" 2>/dev/null || true
           fi
 

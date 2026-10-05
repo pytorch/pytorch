@@ -55,6 +55,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.11-gcc11
+      build-additional-packages: "torchcomms spmd_types"
       docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       ignore-test-config-labels: true

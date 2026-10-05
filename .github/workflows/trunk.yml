@@ -123,6 +123,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.2-py3.11-gcc11
+      build-additional-packages: "torchcomms spmd_types"
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '7.5 8.9'
@@ -336,6 +337,7 @@ jobs:
     with:
       runner_prefix: "mt-"
       build-environment: linux-noble-rocm-py3.11-mi350
+      build-additional-packages: "torchcomms spmd_types"
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       # TODO (huydhn): Add this back once other workflow migrates

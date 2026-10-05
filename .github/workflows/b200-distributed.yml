@@ -42,6 +42,7 @@ jobs:
       runner: l-x86iavx512-16-128
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-jammy-cuda13.2-py3.12-gcc11-distributed-b200
+      build-additional-packages: "torchcomms spmd_types"
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11
       cuda-arch-list: '10.0'
       test-matrix: |
