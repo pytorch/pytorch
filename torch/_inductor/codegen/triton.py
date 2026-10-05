@@ -2274,7 +2274,7 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     def sigmoid(x):
         if (
-            config.is_strict_pointwise()
+            config.strict_pointwise
             and torch.version.hip is None
             and V.graph.get_current_device_or_throw().type == "cuda"
         ):
