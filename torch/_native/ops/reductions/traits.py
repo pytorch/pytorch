@@ -23,11 +23,19 @@ def _idx_sentinel(idx_dtype):
 
 def _pos_id(acc):
     # A typed +inf or integer maximum; bare Python values become Float32 and break fp64 ifexp.
+    if acc is Int32:
+        return acc(_INT32_MAX)
+    if acc is Int64:
+        return acc(_INT64_MAX)
     return acc(acc.inf)
 
 
 def _neg_id(acc):
     # Typed -inf or integer minimum for max-reduction initialization.
+    if acc is Int32:
+        return acc(-_INT32_MAX - 1)
+    if acc is Int64:
+        return acc(-_INT64_MAX - 1)
     return acc(-acc.inf)
 
 
@@ -650,23 +658,33 @@ class AMinOps:
         return acc[0]
 
 
-def _offsets(threads_per_row):
-    # PyTorch/Triton use decreasing offsets; ATen's tile merge uses ascending offsets.
-    # The direction changes association and is part of the numerical contract.
+def _offsets(threads_per_row, ascending: bool = False):
+    # Decreasing matches PyTorch/Triton; ascending matches ATen and changes association.
     n = min(threads_per_row, WARP)
     if n <= 0 or n & (n - 1):
         raise ValueError(f"butterfly width must be a positive power of two, got {n}")
     offs = []
-    o = n // 2
-    while o > 0:
-        offs.append(o)
-        o = o // 2
+    if ascending:
+        o = 1
+        while o < n:
+            offs.append(o)
+            o = o * 2
+    else:
+        o = n // 2
+        while o > 0:
+            offs.append(o)
+            o = o // 2
     return offs
 
 
 @cute.jit
-def warp_reduce(trait, acc, threads_per_row: cutlass.Constexpr):
-    for offset in _offsets(threads_per_row):
+def warp_reduce(
+    trait,
+    acc,
+    threads_per_row: cutlass.Constexpr,
+    ascending: cutlass.Constexpr = False,
+):
+    for offset in _offsets(threads_per_row, ascending):
         acc = trait.combine(acc, trait.shfl_down(acc, offset))
     return acc
 
