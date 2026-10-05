@@ -530,16 +530,6 @@ def _default_all_gather_output_fn(
             torch.cat(chunks, dim=1, out=output.view(outer_size, -1))
 
 
-def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
-    all_gather_work = all_gather_result.all_gather_work
-    device = all_gather_result.all_gather_output.device
-    device_handle = _get_device_handle(device.type)
-    if (all_gather_event := all_gather_result.all_gather_event) is not None:
-        device_handle.current_stream().wait_event(all_gather_event)
-    if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
-        all_gather_work.wait()
-
-
 @torch.no_grad()
 def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
