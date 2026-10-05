@@ -1342,16 +1342,6 @@
       ]
     }
   ],
-  "GB6134": [
-    {
-      "Gb_type": "torch.while_loop: carried input mutation",
-      "Context": "carried_inputs={mutated_carried_inputs}",
-      "Explanation": "torch.while_loop's cond_fn and body_fn must not mutate carried_inputs in-place. Return updated carried values from body_fn, cloning them before any in-place mutation.",
-      "Hints": [
-        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
   "GB0085": [
     {
       "Gb_type": "Non-function or method in subclass of torch.autograd.Function",

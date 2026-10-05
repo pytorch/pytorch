@@ -38,7 +38,11 @@ def validate_while_loop_mutated_arg_indices(
     carried_inputs,
     additional_inputs,
 ) -> set[int]:
-    """Validate indices into flattened carried_inputs + additional_inputs."""
+    """Validate indices into tree_leaves(carried_inputs) + tree_leaves(additional_inputs).
+
+    This checks explicit mutation annotations, not subgraph implementations.
+    Compiler-generated loops may mutate loop-local buffers without annotations.
+    """
     if not isinstance(mutated_arg_indices, str):
         raise RuntimeError(
             "torch.while_loop mutated_arg_indices must be a comma-separated "
@@ -64,16 +68,6 @@ def validate_while_loop_mutated_arg_indices(
         raise RuntimeError(
             "torch.while_loop mutated_arg_indices contains out-of-range indices: "
             f"{', '.join(str(index) for index in out_of_range_indices)}"
-        )
-
-    mutated_carried_inputs = sorted(
-        index for index in mutated_inputs if index < len(flat_carried_inputs)
-    )
-    if mutated_carried_inputs:
-        raise RuntimeError(
-            "torch.while_loop's cond_fn and body_fn must not mutate "
-            "carried_inputs in-place; got flattened carried input indices: "
-            f"{', '.join(str(index) for index in mutated_carried_inputs)}"
         )
 
     non_tensor_indices = sorted(
