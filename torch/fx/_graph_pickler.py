@@ -88,6 +88,12 @@ def _unpickle_as_dead_weakref() -> Callable[[], None]:
     return lambda: None
 
 
+def _rebuild_pinned_storage(rebuild: Callable[..., Any], args: tuple[Any, ...]) -> Any:
+    storage = rebuild(*args)
+    pinned_storage = storage._untyped_storage.pin_memory()
+    return storage._new_wrapped_storage(pinned_storage)
+
+
 @contextlib.contextmanager
 def patch_pytree_map_over_slice() -> Generator[None]:
     if slice in pytree.SUPPORTED_NODES:
@@ -157,6 +163,12 @@ class GraphPickler(pickle.Pickler):
 
         if is_fake_tensor(obj):
             return _TensorPickleData.reduce_helper(self, obj)
+        elif (
+            isinstance(obj, torch.storage.TypedStorage)
+            and obj._untyped_storage.is_pinned()
+        ):
+            rebuild, args = obj.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
+            return _rebuild_pinned_storage, (rebuild, args)
         elif isinstance(obj, torch.fx.GraphModule):
             return _GraphModulePickleData.reduce_helper(self, obj)
         elif isinstance(obj, (torch._ops.OperatorBase, torch._ops.OpOverloadPacket)):
