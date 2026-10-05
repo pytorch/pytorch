@@ -193,8 +193,8 @@ def _e8m0(amax: cutlass.Float32) -> tuple[cutlass.Float32, cutlass.Uint8]:
 def _store_scale_bytes_as_uint(
     mScaleLogical: cute.Tensor,
     rScale: cute.Tensor,
-    row: cutlass.Int32,
-    col: cutlass.Int32,
+    row: cutlass.Int64,
+    col: cutlass.Int64,
     count: cutlass.Constexpr,
 ) -> None:
     """Store adjacent one-byte scale values with one naturally sized integer write.
@@ -235,9 +235,9 @@ def _store_scale_bytes_as_uint(
 def _store_unswizzled_scale_groups_as_uint(
     mScale: cute.Tensor,
     rScale: cute.Tensor,
-    row: cutlass.Int32,
-    scale_col: cutlass.Int32,
-    row_stride: cutlass.Int32,
+    row: cutlass.Int64,
+    scale_col: cutlass.Int64,
+    row_stride: cutlass.Int64,
     group_count: cutlass.Constexpr,
 ) -> None:
     """Store adjacent bytes into a compact row-major scale tensor.

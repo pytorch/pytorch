@@ -69,8 +69,8 @@ class _BlockscaledTma:
         output_m_smem_layout: cute.ComposedLayout | None,
         data_k_tv_layout: cute.Layout | None,
         output_k_tv_layout: cute.Layout | None,
-        M: cutlass.Int32,
-        K: cutlass.Int32,
+        M: cutlass.Int64,
+        K: cutlass.Int64,
     ) -> None:
         r"""
         Kernel for MXFP8 quantization across dim-K, dim-M, and dim-KM.
@@ -114,7 +114,9 @@ class _BlockscaledTma:
 
         # bookkeeping
         tidx, _, _ = cute.arch.thread_idx()
-        tile_k_idx, tile_m_idx, _ = cute.arch.block_idx()
+        tile_k_idx_i32, tile_m_idx_i32, _ = cute.arch.block_idx()
+        tile_k_idx = cutlass.Int64(tile_k_idx_i32)
+        tile_m_idx = cutlass.Int64(tile_m_idx_i32)
         warp = cute.arch.make_warp_uniform(cute.arch.warp_idx())
         if cutlass.const_expr(not needs_boundary_masking):
             M = cute.assume(M, divby=128)
@@ -542,8 +544,8 @@ class _BlockscaledTma:
         mOutputM: cute.Tensor | None,
         mScaleM: cute.Tensor | None,
         stream: cuda.CUstream,
-        M: cutlass.Int32,
-        K: cutlass.Int32,
+        M: cutlass.Int64,
+        K: cutlass.Int64,
         grid_m: cutlass.Int32,
         grid_k: cutlass.Int32,
     ) -> None:
@@ -813,7 +815,7 @@ def _make_dynamic_matrix_fake(dtype: type[cutlass.Numeric]) -> cute.Tensor:
     """Match a 16-byte-aligned row-major tensor with a dynamic, 16-divisible K."""
     return cute.runtime.make_fake_tensor(
         dtype,
-        (cute.sym_int(), cute.sym_int(divisibility=16)),
+        (cute.sym_int64(), cute.sym_int64(divisibility=16)),
         stride=(cute.sym_int64(divisibility=16), 1),
         assumed_align=16,
     )
@@ -823,7 +825,7 @@ def _make_dynamic_scale_fake() -> cute.Tensor:
     """Match the compact, padded byte-scale allocation used by the runtime wrapper."""
     return cute.runtime.make_fake_tensor(
         cutlass.Uint8,
-        (cute.sym_int(divisibility=512),),
+        (cute.sym_int64(divisibility=512),),
         stride=(1,),
         assumed_align=4,
     )
@@ -833,7 +835,7 @@ def _make_dynamic_compact_scale_fake() -> cute.Tensor:
     """Match the flat allocation backing a compact scale output."""
     return cute.runtime.make_fake_tensor(
         cutlass.Uint8,
-        (cute.sym_int(),),
+        (cute.sym_int64(),),
         stride=(1,),
         assumed_align=4,
     )
@@ -907,8 +909,8 @@ def _compile_blockscaled_tma(
         mOutputM,
         mScaleM,
         cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
-        cutlass.Int32(0),
-        cutlass.Int32(0),
+        cutlass.Int64(0),
+        cutlass.Int64(0),
         cutlass.Int32(0),
         cutlass.Int32(0),
         options="--enable-tvm-ffi",
