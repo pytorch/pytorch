@@ -4152,11 +4152,13 @@ class WorkHookTest(MultiProcessTestCase):
 
         c10d.destroy_process_group(pg)
 
-        self.assertTrue(OpType.ALLGATHER in num_hook_fired)
+        self.assertTrue(OpType._ALLGATHER_BASE in num_hook_fired)
         self.assertEqual(len(num_hook_fired), 1)
-        # two allgathers, one for size and another for values
-        self.assertEqual(num_hook_fired[OpType.ALLGATHER], 2)
-        self.assertTrue(all(duration > 0 for duration in durations[OpType.ALLGATHER]))
+        # two all_gather_single, one for size and another for values
+        self.assertEqual(num_hook_fired[OpType._ALLGATHER_BASE], 2)
+        self.assertTrue(
+            all(duration > 0 for duration in durations[OpType._ALLGATHER_BASE])
+        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
