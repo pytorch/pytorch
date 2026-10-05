@@ -315,7 +315,7 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
         self._test_default_store_timeout("gloo")
 
 
-class ProcessGroupGlooTest(MultiProcessTestCase):
+class _ProcessGroupGlooTestBase(MultiProcessTestCase):
     lazy_init = False
 
     def _create_process_group_gloo(self, store, rank, world_size, opts):
@@ -335,6 +335,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         opts.group_name = group_name
         return opts
 
+
+class ProcessGroupGlooTest(_ProcessGroupGlooTestBase):
     @requires_gloo()
     def test_multi_device_constructor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3374,7 +3376,43 @@ class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
         return super().tearDown()
 
 
-class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
+# Argument validation and stress repeats add no lazy connection coverage beyond
+# the basics tests (test_allreduce_stress is kept for concurrent first use).
+for _name in (
+    "test_broadcast_checks",
+    "test_broadcast_stress",
+    "test_broadcast_stress_cuda",
+    "test_allreduce_checks",
+    "test_allreduce_stress_cuda",
+    "test_allreduce_coalesced_checks",
+    "test_allreduce_coalesced_checks_cuda",
+    "test_allreduce_coalesced_stress",
+    "test_sparse_allreduce_checks",
+    "test_scatter_checks",
+    "test_scatter_stress",
+    "test_scatter_stress_cuda",
+    "test_gather_checks",
+    "test_gather_stress",
+    "test_gather_stress_cuda",
+    "test_allgather_checks",
+    "test_allgather_stress",
+    "test_allgather_stress_cuda",
+    "test_allgather_coalesced_checks",
+    "test_reduce_checks",
+    "test_reduce_stress",
+    "test_reduce_stress_cuda",
+    "test_alltoall_checks",
+    "test_alltoall_stress",
+    "test_alltoall_stress_cuda",
+):
+    if not hasattr(ProcessGroupGlooTest, _name):
+        raise AssertionError(f"ProcessGroupGlooTest has no {_name}")
+    setattr(ProcessGroupGlooLazyInitTest, _name, None)
+
+
+# Only runs the flight recorder tests; the collective tests are covered by
+# ProcessGroupGlooTest.
+class ProcessGroupGlooFRTest(_ProcessGroupGlooTestBase):
     def setUp(self):
         os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
         super().setUp()
