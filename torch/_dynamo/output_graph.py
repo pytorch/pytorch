@@ -1344,7 +1344,7 @@ class OutputGraph(OutputGraphCommon):
         stack = traceback.StackSummary.from_list(frames)
         # format() collapses runs of identical consecutive frames (recursion),
         # which per-frame memoization cannot reproduce; that case is rare.
-        if any(
+        if sys.version_info < (3, 11) or any(
             (a.filename, a.lineno, a.name) == (b.filename, b.lineno, b.name)
             for a, b in itertools.pairwise(frames)
         ):
