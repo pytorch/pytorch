@@ -52,7 +52,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
       index++;
     }
     oss << ']';
-    throw std::runtime_error(std::move(oss).str());
+    TORCH_CHECK(false, std::move(oss).str());
   }
   return iter->second;
 }
@@ -101,7 +101,7 @@ void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
 #undef TYPE_CASE
 
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
 }
 
