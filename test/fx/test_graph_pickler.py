@@ -300,10 +300,7 @@ class TestHigherOrderOperatorPickle(TestCase):
         Test that unpickling a missing HOP target reports its name.
         """
         from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx._graph_pickler import (
-            _OpFunctionPickleData,
-            _UnpickleState,
-        )
+        from torch.fx._graph_pickler import _OpFunctionPickleData, _UnpickleState
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         pickle_data = _OpFunctionPickleData("torch", "ops.higher_order.non_existent_op")
