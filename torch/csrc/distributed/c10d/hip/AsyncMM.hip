@@ -15,6 +15,12 @@
 
 #include <string_view>
 
+// ck_tile truncates fp32 -> bf16 by default on gfx942. Round to nearest even,
+// as hipBLASLt and the CUDA kernel do. The C++ STANDARD mode compiles to
+// branches that slow the epilogue, so use the asm one. Must precede the
+// ck_tile includes.
+#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_STANDARD_ASM
+
 #include <ck_tile/core.hpp>
 #include <ck_tile/ops/gemm/kernel/gemm_kernel.hpp>
 #include <ck_tile/ops/gemm/kernel/universal_gemm_kernel.hpp>
