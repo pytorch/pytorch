@@ -61,6 +61,32 @@ from torch.testing._internal.common_utils import skipIfNoXNNPACK
 hu.assert_deadline_disabled()
 from functools import reduce
 
+# ---------------------------------------------------------------------------
+# Device-agnostic helper: resolve the currently available test device so that
+# data creation and gradient comparison can run on the active accelerator
+# (e.g. Ascend NPU) when one is present, and fall back to CPU otherwise.
+# ---------------------------------------------------------------------------
+def _get_test_device():
+    """Return the currently available test device. Prefer torch.accelerator
+    (PyTorch's official device-agnostic API); fall back to CPU otherwise."""
+    try:
+        if torch.accelerator.is_available():
+            return torch.accelerator.current_device()
+    except (AttributeError, RuntimeError):
+        pass
+    return "cpu"
+
+
+class _DeviceAwareMixin:
+    """Base mixin providing a resolved test device for data creation."""
+    _test_device = None
+
+    @classmethod
+    def _resolve_test_device(cls):
+        if cls._test_device is None:
+            cls._test_device = _get_test_device()
+        return cls._test_device
+
 
 class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
     """
@@ -330,18 +356,20 @@ class _ReferenceConvBn2d(_ReferenceConvBnNd, nn.Conv2d):
         )
 
 
-class TestQuantizeEagerQAT(QuantizationTestCase):
+class TestQuantizeEagerQAT(_DeviceAwareMixin, QuantizationTestCase):
     def setUp(self):
         super().setUp()
+        # Resolve the current test device for data creation
+        self.test_device = self._resolve_test_device()
 
         self.embed_linear_data_train = [
             [
-                torch.randint(0, 10, (12, 12), dtype=torch.long),
-                torch.randn((12, 1), dtype=torch.float),
+                torch.randint(0, 10, (12, 12), dtype=torch.long, device=self.test_device),
+                torch.randn((12, 1), dtype=torch.float, device=self.test_device),
             ]
             for _ in range(2)
         ]
-        self.embed_data = [[torch.randint(0, 10, (12, 1))]]
+        self.embed_data = [[torch.randint(0, 10, (12, 1), device=self.test_device)]]
 
     def test_manual(self):
         for qengine in supported_qengines:
@@ -584,7 +612,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
 
                 quant_state_dict = model.state_dict()
 
-                x = torch.rand(2, 5, dtype=torch.float)
+                x = torch.rand(2, 5, dtype=torch.float, device=self.test_device)
                 ref = model(x)
 
                 # Create model again for eval. Check result using quantized state_dict
@@ -663,7 +691,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
             )
 
         checkHooksIsPresent(model, True)
-        x = torch.rand(2, 5, dtype=torch.float)
+        x = torch.rand(2, 5, dtype=torch.float, device=self.test_device)
         model(x)
         torch.ao.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
@@ -683,9 +711,9 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
         m = M()
         m.qconfig = torch.ao.quantization.default_qconfig
         mp = torch.ao.quantization.prepare_qat(m)
-        mp(torch.randn(4, 4))
+        mp(torch.randn(4, 4, device=self.test_device))
         mq = torch.ao.quantization.convert(mp)
-        res = mq(torch.randn(4, 4))
+        res = mq(torch.randn(4, 4, device=self.test_device))
         eps = 1e-5
         self.assertTrue(torch.abs(mq.quant.scale - res.q_scale()) < eps)
 
@@ -704,9 +732,9 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
         m = M()
         m.qconfig = torch.ao.quantization.default_qconfig
         mp = torch.ao.quantization.prepare_qat(m)
-        mp(torch.randn(4, 4))
+        mp(torch.randn(4, 4, device=self.test_device))
         mq = torch.ao.quantization.convert(mp)
-        res = mq(torch.randn(4, 4))
+        res = mq(torch.randn(4, 4, device=self.test_device))
         eps = 1e-5
         self.assertTrue(torch.abs(mq.quant.scale * 2 - res.q_scale()) < eps)
 
@@ -764,7 +792,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
         )
 
 
-class TestQuantizeEagerQATNumerics(QuantizationTestCase):
+class TestQuantizeEagerQATNumerics(_DeviceAwareMixin, QuantizationTestCase):
     def _test_activation_convert_numerics_impl(self, Act, data):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -812,7 +840,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             self.assertEqual(
                 type(getattr(m, attr).activation_post_process), FixedQParamsFakeQuantize
             )
-        data = torch.randn(1, 3, 2, 4)
+        data = torch.randn(1, 3, 2, 4, device=self.test_device)
         before_convert = m(data)
         m = convert(m)
         after_convert = m(data)
@@ -839,7 +867,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         checkNoFQModule(m)
 
     def test_leaky_relu(self):
-        data = torch.randn(1, 3, 2, 4)
+        data = torch.randn(1, 3, 2, 4, device=self.test_device)
         self._test_activation_convert_numerics_impl(nn.LeakyReLU, data)
 
     def test_relu(self):
@@ -961,6 +989,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             height,
             width,
             dtype=torch.double,
+            device=self.test_device,
             requires_grad=True,
         )
         conv_op.weight = torch.nn.Parameter(qat_op.weight.detach())
@@ -1000,22 +1029,22 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             self.assertEqual(result_ref, result_actual)
 
             # backward
-            dout = torch.randn(result_ref.size(), dtype=torch.double)
+            dout = torch.randn(result_ref.size(), dtype=torch.double, device=self.test_device)
             loss = (result_ref - dout).sum()
             loss.backward()
-            input_grad_ref = input.grad.cpu()
-            weight_grad_ref = conv_op.weight.grad.cpu()
-            gamma_grad_ref = bn_op.weight.grad.cpu()
-            beta_grad_ref = bn_op.bias.grad.cpu()
+            input_grad_ref = input.grad
+            weight_grad_ref = conv_op.weight.grad
+            gamma_grad_ref = bn_op.weight.grad
+            beta_grad_ref = bn_op.bias.grad
             running_mean_ref = bn_op.running_mean
             running_var_ref = bn_op.running_var
             num_batches_tracked_ref = bn_op.num_batches_tracked
             loss = (result_actual - dout).sum()
             loss.backward()
-            input_grad_actual = input_clone.grad.cpu()
-            weight_grad_actual = qat_op.weight.grad.cpu()
-            gamma_grad_actual = qat_op.bn.weight.grad.cpu()
-            beta_grad_actual = qat_op.bn.bias.grad.cpu()
+            input_grad_actual = input_clone.grad
+            weight_grad_actual = qat_op.weight.grad
+            gamma_grad_actual = qat_op.bn.weight.grad
+            beta_grad_actual = qat_op.bn.bias.grad
             running_mean_actual = qat_op.bn.running_mean
             running_var_actual = qat_op.bn.running_var
             num_batches_tracked_actual = qat_op.bn.num_batches_tracked
@@ -1147,6 +1176,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
                 height,
                 width,
                 dtype=torch.double,
+                device=self.test_device,
                 requires_grad=True,
             )
             input_clone = input.detach().clone().requires_grad_()
@@ -1164,24 +1194,24 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             self.assertEqual(result_ref, result_actual)
 
             # backward
-            dout = torch.randn(result_ref.size(), dtype=torch.double) + 10.0
+            dout = torch.randn(result_ref.size(), dtype=torch.double, device=self.test_device) + 10.0
 
             loss = (result_ref - dout).sum()
             loss.backward()
-            input_grad_ref = input.grad.cpu()
-            weight_grad_ref = qat_ref_op.weight.grad.cpu()
-            gamma_grad_ref = qat_ref_op.gamma.grad.cpu()
-            beta_grad_ref = qat_ref_op.beta.grad.cpu()
+            input_grad_ref = input.grad
+            weight_grad_ref = qat_ref_op.weight.grad
+            gamma_grad_ref = qat_ref_op.gamma.grad
+            beta_grad_ref = qat_ref_op.beta.grad
             running_mean_ref = qat_ref_op.running_mean
             running_var_ref = qat_ref_op.running_var
             num_batches_tracked_ref = qat_ref_op.num_batches_tracked
 
             loss = (result_actual - dout).sum()
             loss.backward()
-            input_grad_actual = input_clone.grad.cpu()
-            weight_grad_actual = qat_op.weight.grad.cpu()
-            gamma_grad_actual = qat_op.bn.weight.grad.cpu()
-            beta_grad_actual = qat_op.bn.bias.grad.cpu()
+            input_grad_actual = input_clone.grad
+            weight_grad_actual = qat_op.weight.grad
+            gamma_grad_actual = qat_op.bn.weight.grad
+            beta_grad_actual = qat_op.bn.bias.grad
             running_mean_actual = qat_op.bn.running_mean
             running_var_actual = qat_op.bn.running_var
             num_batches_tracked_actual = qat_op.bn.num_batches_tracked
@@ -1224,7 +1254,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
 
         # without fake_quants, fused QAT module should match fp32 module
         m.apply(torch.ao.quantization.disable_fake_quant)
-        data = torch.randn(4, 4)
+        data = torch.randn(4, 4, device=self.test_device)
         r1 = m_ref(data)
         r2 = m(data)
         self.assertTrue(torch.allclose(r1, r2))
@@ -1247,7 +1277,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
 
         # without fake_quants, fused QAT module should match fp32 module
         m.apply(torch.ao.quantization.disable_fake_quant)
-        data = torch.randn(4, 4)
+        data = torch.randn(4, 4, device=self.test_device)
         r1 = m_ref(data)
         r2 = m(data)
         self.assertTrue(torch.allclose(r1, r2))
@@ -1260,7 +1290,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             nn.Linear(4, 4),
             nn.BatchNorm1d(4),
         )
-        data = torch.randn(4, 4)
+        data = torch.randn(4, 4, device=self.test_device)
         m.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
         m = torch.ao.quantization.fuse_modules_qat(m, [["1", "2"]])
         mp = prepare_qat(m)
@@ -1282,7 +1312,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         m_ref_copy.qconfig = qconfig
         weight_post_process = copy.deepcopy(qconfig.weight())
         activation = copy.deepcopy(qconfig.activation())
-        activation(torch.randn(4, 4))
+        activation(torch.randn(4, 4, device=self.test_device))
         m_ref_copy.activation_post_process = activation
         m_ref_copy = nnq.Linear.from_float(m_ref_copy)
         weight_post_process = qconfig.weight()
