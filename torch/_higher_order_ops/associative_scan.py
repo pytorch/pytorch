@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import operator
 from collections.abc import Callable
 from typing import Any
 
@@ -35,6 +36,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 
 aten = torch._ops.ops.aten
@@ -478,6 +480,81 @@ def associative_scan_op_dense(combine_fn, xs, additional_inputs):
     return generic_associative_scan(combine_fn, xs, additional_inputs=additional_inputs)
 
 
+def _leaf_dependencies(
+    combine_fn_bw_gm: torch.fx.GraphModule, num_xs: int, num_additional_inputs: int
+) -> tuple[list[list[bool]], list[list[int]], list[bool]]:
+    """
+    Reads the dependencies between the xs leaves off the joint graph of one combine
+    step, see NOTE: [associative_scan leaf dependencies]. Returns:
+
+    deps[i][j]: whether the upstream gradient of output leaf i reaches the gradient
+        of the previous output ys{t-1}^j for j < num_xs, or of the input
+        xst^(j - num_xs) otherwise.
+    groups: the leaves grouped such that within a group the previous outputs depend
+        on each other, ordered such that gradients only flow into later groups.
+    elementwise: for each group, whether its outputs depend on the previous outputs
+        of the group through pointwise operations and layout changes only.
+    """
+    graph = combine_fn_bw_gm.graph
+    tangents = graph.find_nodes(op="placeholder")[2 * num_xs + num_additional_inputs :]
+    outputs = graph.output_node().args[0]
+    if not isinstance(outputs, (list, tuple)):
+        raise AssertionError(f"Expected the joint to return a list, got {outputs}")
+    grads = outputs[: 2 * num_xs]
+
+    def closure(start, step):
+        seen, todo = set(), list(start)
+        while todo:
+            n = todo.pop()
+            if n not in seen:
+                seen.add(n)
+                todo.extend(step(n))
+        return seen
+
+    below = [closure([t], lambda n: n.users) for t in tangents]
+    deps = [[g in b for g in grads] for b in below]
+
+    # reach[i]: the leaves whose g_ys receives contributions from the g_ys of leaf i
+    reach = [
+        closure([i], lambda k: [j for j in range(num_xs) if deps[k][j]])
+        for i in range(num_xs)
+    ]
+    groups: list[list[int]] = []
+    for i in range(num_xs):
+        if not any(i in group for group in groups):
+            groups.append(sorted(j for j in reach[i] if i in reach[j]))
+    # Every leaf that reaches a group also reaches the groups it flows into
+    groups.sort(key=lambda group: sum(group[0] in r for r in reach))
+
+    def numel(n):
+        val = n.meta.get("val")
+        return val.numel() if isinstance(val, torch.Tensor) else None
+
+    def is_elementwise(n, on_paths):
+        if (
+            n.op != "call_function"
+            or n.target is operator.getitem
+            or torch.Tag.pointwise in getattr(n.target, "tags", ())
+            or numel(n) is None
+        ):
+            return True
+        # Layout changes, such as the permutes of vmap, keep every element, while
+        # indexing or broadcasting a slice changes the number of elements
+        return all(
+            statically_known_true(numel(a) == numel(n))
+            for a in n.all_input_nodes
+            if a in on_paths and numel(a) is not None
+        )
+
+    elementwise = []
+    for group in groups:
+        above = closure([grads[j] for j in group], lambda n: n.all_input_nodes)
+        on_paths = above & set().union(*[below[i] for i in group])
+        elementwise.append(all(is_elementwise(n, on_paths) for n in on_paths))
+
+    return deps, groups, elementwise
+
+
 class AssociativeScanAutogradOp(torch.autograd.Function):
     r""" associative_scan
         Example::
@@ -554,39 +631,38 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         g_ys3 = gl_ys3 + gl_ys4 * bw(ys4, ys3)
         g_ys4 = gl_ys4
 
-        Notice that the above can be re-written as a right-to-left associative_scan over
-        affine maps. With a single xs leaf, an element is the pair (bw, gl) standing for
-        the map v -> bw * v + gl, and composition is
+        Notice that the above can be re-written as a right-to-left associative_scan with flat operator
 
         def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
             return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl) # gl_next + bw_next * gl
 
-        With N xs leaves the structure stays the same and only the types grow. One
-        forward step maps the N-tuple (ys{t-1}, xst) to the N-tuple yst, so
-        bw(ys{t+1}, yst) is an N x N Jacobian over the leaf index instead of a single
-        number: bw is a matrix, gl a vector, `bw * bw_next` a matrix product and
-        `bw_next * gl` a matrix-vector product. Each individual product is still
-        elementwise in the tensor entries. Every output leaf i contributes to the
-        gradient of every leaf j, so
-
-        g_yst^i = gl_yst^i + sum_j bw(ys{t+1}, yst)[j][i] * g_ys{t+1}^j
-        g_xst^j = sum_i bw(yst, xst)[i][j] * g_yst^i
-
-        For N = 1 these collapse to the formulas above.
-
         The recurrence g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst) means step t consumes
-        bwys shifted one step forward: bwys_aligned = [bwys21, bwys32, bwys43, pad], where
+        bwys shifted one step forward: bwys_aligned = [bwys21, bwys32, bwys43, 1], where
         bwys21 abbreviates bw(ys2, ys1) and so on. The final step (g_ys4) has no successor,
-        so bwys_aligned gets a pad slice, whose value does not matter (see 5.1 below).
-        gl_ys is used as-is (no padding):
+        so bwys_aligned is padded with a single 1. gl_ys is used as-is (no padding):
 
-        bwys_aligned = [bwys21, bwys32, bwys43, pad]
+        bwys_aligned = [bwys21, bwys32, bwys43, 1]
         gl_ys        = [gl_ys1, gl_ys2, gl_ys3, gl_ys4]
 
         g_ys is recovered by flipping, scanning left-to-right, and flipping back:
-            leaves_rev = [*bwys_aligned.flip([0]), *gl_ys.flip([0])]
+            leaves_rev = [bwys_aligned.flip([0]), gl_ys.flip([0])]
             result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
-            g_ys = result_rev[N * N:].flip([0])
+            g_ys = result_rev[1].flip([0])
+
+        With N xs leaves, one step maps the N-tuples ys{t-1} and xst to the N-tuple yst,
+        and every output leaf may depend on every input leaf. The local gradients
+        bw(ys{t+1}, yst) and bw(yst, xst) then become N x N Jacobians over the leaf
+        index, whose entries are tensors of the leaf shape, see
+        NOTE: [associative_scan leaf dependencies]. The chain rule sums over the leaves:
+
+        g_yst^i = gl_yst^i + sum_j g_ys{t+1}^j * bw(ys{t+1}^j, yst^i)
+        g_xst^i = sum_j g_yst^j * bw(yst^j, xst^i)
+
+        The same scan applies if the argument bw of g_ys_combine_fn_flat holds the
+        transposed Jacobian, with bw(ys{t+1}^j, yst^i) in row i and column j, and gl
+        holds a vector: bw * bw_next becomes the matrix product bw_next @ bw,
+        bw_next * gl becomes the matrix-vector product bw_next @ gl, and the pad becomes
+        the identity matrix. For N = 1 this is the scalar case above.
 
         References: https://justintchiu.com/blog/pscan_diff/
 
@@ -610,14 +686,12 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             cannot trace through the joint backward function dynamically.
 
         4.) Compute the single step bw (instantaneous gradients) at every step t
-            The per-step Jacobian is read off one row at a time: seeding the joint with
-            row i of the identity in leaf space, i.e. ones on output leaf i and zeros on
-            the others, returns row i of it:
-            bwys[i]{t-1}, bwxs[i]t = combine_fn_bw(ys{t-1}, xst, identity_row(i))
+            bwys[i] = combine_fn_bw(ys{t-1}, xst, e_i)
+            Here we pass e_i, i.e. 1 for output leaf i and 0 for all other leaves, as
+            the upstream gradient to obtain row i of the local ys-Jacobian.
 
             This gives, for every pair of leaves (i, j):
                 bwys[i][j] = [bw(ys1^i, ys0^j), bw(ys2^i, ys1^j), ..., bw(ysT^i, ys{T-1}^j)]
-                bwxs[i][j] = [bw(ys1^i, xs0^j), bw(ys2^i, xs1^j), ..., bw(ysT^i, xsT^j)]
 
         5.) Compute the gradients using a right-to-left associative scan
 
@@ -625,7 +699,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             According to the chain rule, each such path contributes a product of local gradients g_ysk.
 
             For example:
-                g_yst^i = gl_yst^i + sum_j bwys[j][i]{t+1} * g_ys{t+1}^j
+                g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst)
 
             This motivates a right-to-left associative scan over bwys and gl_ys.
             We call the raw associative_scan_op HOP with the flat operator
@@ -634,11 +708,12 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
             5.1) Align bwys to the recurrence
 
-                Step t consumes bwys[t+1] (the local ys-Jacobian of the next step), so
-                bwys is shifted one step forward and a pad slice is appended for the
-                final step, which has no successor. The pad only ever reaches the
-                composed matrix, never the affine constant that carries g_ys, hence its
-                value does not affect g_ys. gl_ys is used unchanged.
+                bwys_aligned[i][j] = torch.cat([bwys[j][i][1:], identity[i][j]], 0)
+
+                Step t consumes the transpose of bwys[t+1] (the local ys-Jacobian of the
+                next step), so bwys is shifted one step forward. The final step has no
+                successor, so the identity is appended as padding; it does not affect
+                the final g_ys. gl_ys is used unchanged.
 
             5.2) Flip, scan left-to-right, and flip back
 
@@ -646,11 +721,49 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
                 result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
                 g_ys = result_rev[N * N:].flip([0])
 
-        6.) Contract with the instantaneous input gradients bwxs
-            g_xst^j = sum_i bwxs[i][j] * g_yst^i
+                where bwys_aligned is flattened in row-major order.
+
+        6.) Contract g_ys with the instantaneous input gradients, see g_xst above
+            Since combine_fn_bw is a VJP, this is one more invocation of it, seeded
+            with g_ys instead of a basis vector, so the xs-Jacobian is not materialized.
+            The first step is excluded, as ys0 equals xs0 and no combine_fn is applied.
 
             This gives the final input gradients:
                 g_xs = [∂L/∂xs0, ∂L/∂xs1, ..., ∂L/∂xsT]
+
+        NOTE: [associative_scan leaf dependencies]
+            The scan of 5.) multiplies the entries of the ys-Jacobian elementwise. This
+            requires that each element of an output leaf only depends on the same
+            element of the previous outputs it is coupled with, and that coupled leaves
+            have the same shape. Therefore, the leaves are grouped by their dependencies,
+            which _leaf_dependencies reads off the graph of combine_fn_bw: a group holds
+            the leaves whose previous outputs depend on each other, possibly through
+            other leaves. Steps 4.) and 5.) are performed per group. Across groups,
+            gradients flow in one direction only, e.g. from the states to a decay factor
+            that they read. The groups are processed in that direction, and the g_ys of
+            the already processed leaves j enter a group through
+
+                gl_yst^i += sum_j g_ys{t+1}^j * bw(ys{t+1}^j, yst^i)
+
+            which is one more invocation of combine_fn_bw, seeded with those g_ys. Like
+            the contraction of 6.), it handles any operation between the groups, such
+            as broadcasting or indexing.
+
+            Groups whose g_ys does not reach any xs leaf that requires gradients are
+            skipped. For the other groups, the backward raises if coupled leaves differ
+            in shape or depend on each other through operations that change the number
+            of elements, such as indexing, and for complex leaves, as the basis vectors
+            of 4.) only give the Jacobian of a holomorphic combine_fn. Permutations of
+            the elements within a group are not detected. Coupled leaves of different real dtypes are
+            processed in their promoted dtype.
+
+        NOTE: [cost of the leaf-index Jacobian]
+            A group of n coupled leaves carries n * n Jacobian entries through the scan
+            of 5.) and performs O(n**3) elementwise multiply-adds per combine step.
+            Jacobian entries that are structurally zero within a group are not skipped.
+            The basis vectors of leaves in different groups whose Jacobian rows do not
+            overlap share one invocation of combine_fn_bw in 4.), so N independent
+            leaves need a single one, as for N = 1.
 
         NOTE: [scan partial grad handling]
             If any element of xs or of the outputs does not require gradients
@@ -720,8 +833,10 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             )
 
         # First_slice_copy does not keep the original requires_grad flag,
-        # but we need it here in order to compute the correcte gradients
-        xs_slices = first_slice_copy_with_grad(itertools.chain(xs, xs))
+        # but we need it here in order to compute the correcte gradients.
+        # The previous outputs ys{t-1} require grad even if their xs leaf does not,
+        # because other leaves can depend on them.
+        xs_slices = first_slice_copy_with_grad(itertools.chain(outs, xs))
 
         # Construct the operands from the forward, fw_operands
         # and the operands for a single event t of the forward, fw_operands_slice
@@ -766,112 +881,167 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         # pyrefly: ignore [bad-argument-type]
         mapped_combine_fn_bw_gm = torch.vmap(combine_fn_bw_gm_xs, in_dims, 0)
 
-        # 4.) Compute the single step bw (instantaneous gradients) at every step ``t``
-        # The per-step map (ys{t-1}, xst) -> yst consumes all leaves, so its local
-        # derivative is a full num_xs x num_xs Jacobian in the leaf index. Seeding the
-        # joint with row ``i`` of the identity in leaf space returns row ``i`` of it:
-        #   bwys[i][j] = d yst^i / d ys{t-1}^j and bwxs[i][j] = d yst^i / d xst^j
-        # The leaves may differ in shape and dtype, so the identity is a list of rows
-        # rather than a single tensor; the same ones and zeros are reused across rows.
-        # Note: for a fixed ``i`` all steps ``t`` are still computed in parallel by vmap.
-        ones = [torch.ones_like(g) for g in gl_ys]
-        zeros = [torch.zeros_like(g) for g in gl_ys]
-        rolled_outs = [o.roll(1, dim) for o in outs]
-        bwys: list[list[torch.Tensor]] = []
-        bwxs: list[list[torch.Tensor]] = []
-        for i in range(num_xs):
-            identity_row = [ones[j] if i == j else zeros[j] for j in range(num_xs)]
-            row = mapped_combine_fn_bw_gm(*rolled_outs, *fw_operands, *identity_row)
-            row_ys, row_xs = split_into_chunks(row, [num_xs, num_xs])
-            bwys.append(row_ys)
-            bwxs.append(row_xs)
+        # 4.) to 6.) evaluate the vmapped joint at the previous outputs ys{t-1}
+        prev_outs = [o.roll(1, dim) for o in outs]
 
-        num_mat = num_xs * num_xs
+        def step_bw(upstream_grads):
+            return mapped_combine_fn_bw_gm(*prev_outs, *fw_operands, *upstream_grads)
 
-        def g_ys_combine_fn_flat(*args):
-            """Right-to-left affine composition, see 5.) above.
+        # Entry (i, j) of the identity matrix over the leaf index, shaped like ``t``
+        def eye_like(i: int, j: int, t: torch.Tensor) -> torch.Tensor:
+            return torch.ones_like(t) if i == j else torch.zeros_like(t)
 
-            An element encodes the affine map v -> M @ v + g as the ``num_xs**2``
-            entries of M in row-major order followed by the ``num_xs`` entries of g.
-            The matrix product is over the leaf index; each entry is a full
-            per-timestep tensor and all its products are elementwise.
+        def compute_gys_associative_scan(
+            gl_ys: list[torch.Tensor], bwys: list[list[torch.Tensor]]
+        ) -> list[torch.Tensor]:
             """
-            mat, vec, mat_next, vec_next = split_into_chunks(
-                args, [num_mat, num_xs, num_mat, num_xs]
-            )
+            Computes the gradient g_ys via a right-to-left associative scan:
+            I.e., the gradients are computed from the last time step to the first, following this equation
+                g_yst^i = gl_yst^i + sum_j g_ys{t+1}^j * bw(ys{t+1}^j, yst^i)
+            """
+            n = len(gl_ys)
+            idx = range(n)
 
-            def entry(m, i, j):
-                return m[i * num_xs + j]
+            # 5.1) Align bwys to the recurrence above: step t consumes the transpose of
+            # bwys[t+1], and the last step (t = T-1) has no successor, so pad with the
+            # identity.
+            bwys_aligned = [
+                torch.cat([bwys[j][i][1:], eye_like(i, j, bwys[j][i][0:1])], 0)
+                for i in idx
+                for j in idx
+            ]
 
-            def contract(row_of, col_of, base=None):
-                # Accumulate sum_k row_of(k) * col_of(k), onto ``base`` when given.
-                # addcmul keeps each multiply-accumulate in a single kernel, so for
-                # num_xs == 1 this emits the plain scalar affine recurrence.
-                acc = base
-                for k in range(num_xs):
-                    row, col = row_of(k), col_of(k)
-                    acc = (
-                        row * col
-                        if acc is None
-                        else torch.addcmul(acc, tensor1=row, tensor2=col)
-                    )
+            def dot(pairs, acc=None):
+                # sum(a * b for a, b in pairs), accumulated with addcmul onto ``acc``
+                for a, b in pairs:
+                    acc = a * b if acc is None else torch.addcmul(acc, a, b)
                 return acc
 
-            new_mat = [
-                contract(
-                    lambda k, i=i: entry(mat_next, i, k),
-                    lambda k, j=j: entry(mat, k, j),
-                )
-                for i in range(num_xs)
-                for j in range(num_xs)
-            ]
-            new_vec = [
-                contract(
-                    lambda k, i=i: entry(mat_next, i, k),
-                    lambda k: vec[k],
-                    vec_next[i],
-                )
-                for i in range(num_xs)
-            ]
-            return (*new_mat, *new_vec)
+            def g_ys_combine_fn_flat(*args):
+                # An element is the affine map v -> bw @ v + gl, flattened into the
+                # n * n entries of bw in row-major order and the n entries of gl.
+                bw, gl, bw_next, gl_next = split_into_chunks(args, [n * n, n, n * n, n])
+                bw = split_into_chunks(bw, [n] * n)
+                bw_next = split_into_chunks(bw_next, [n] * n)
 
-        # 5.1) Align to the recurrence g_yst = gl_yst + bwys{t+1}^T @ g_ys{t+1}: step t
-        # consumes the transposed ys-Jacobian of step t+1, hence the shift by one. The
-        # last step has no successor, so a pad slice is appended. It only ever reaches
-        # the composed matrix, never the affine constant term that carries g_ys, so its
-        # value is irrelevant; zeros keep the discarded products from overflowing.
-        mat_aligned = [
-            torch.cat([bwys[j][i][1:], torch.zeros_like(bwys[j][i][0:1])], 0).flip([0])
-            for i in range(num_xs)
-            for j in range(num_xs)
-        ]
+                # bw_next @ bw and gl_next + bw_next @ gl
+                new_bw = [
+                    dot((bw_next[i][k], bw[k][j]) for k in idx)
+                    for i in idx
+                    for j in idx
+                ]
+                new_gl = [
+                    dot(((bw_next[i][k], gl[k]) for k in idx), gl_next[i]) for i in idx
+                ]
+                # A list, as dynamo requires the same pytree structure as the xs below
+                return [*new_bw, *new_gl]
 
-        # 5.2) Flip, scan left-to-right, and flip back to get g_ys. We call the raw
-        # associative_scan_op HOP (not generic_associative_scan) so this scan is
-        # Triton-lowerable under compiled autograd.
-        result_rev = associative_scan_op(
-            g_ys_combine_fn_flat,
-            [*mat_aligned, *[g.flip([0]) for g in gl_ys]],
-            (),
+            # 5.2) Flip, scan left-to-right, and flip back to get g_ys. We call the raw
+            # associative_scan_op HOP (not generic_associative_scan) so this scan is
+            # Triton-lowerable under compiled autograd.
+            result_rev = associative_scan_op(
+                g_ys_combine_fn_flat,
+                [x.flip([0]) for x in (*bwys_aligned, *gl_ys)],
+                (),
+            )
+            g_ys = [r.flip([0]) for r in result_rev[n * n :]]
+
+            return g_ys
+
+        # See NOTE: [associative_scan leaf dependencies]
+        deps, groups, elementwise = _leaf_dependencies(
+            combine_fn_bw_gm, num_xs, num_additional_inputs
         )
-        g_ys = [r.flip([0]) for r in result_rev[num_mat:]]
+        group_of = {i: group for group in groups for i in group}
 
-        # 6.) Scale with the instantaneous input gradients bwxs:
-        #     g_xst^j = sum_i bwxs[i][j] * g_yst^i
-        g_xs = []
-        for j in range(num_xs):
-            terms = []
-            for i in range(num_xs):
-                bwxs_ij = bwxs[i][j]
-                # The first output ys0 equals xs0, so the xs-Jacobian of the first step
-                # is the identity. Splice it in with a fresh tensor: for an additive
-                # combine_fn the joint graph can hand back the same tensor object as
-                # both the ys and the xs grad, so bwxs may alias bwys and writing into
-                # it in place would clobber that.
-                like = torch.ones_like if i == j else torch.zeros_like
-                first = like(bwxs_ij[0:1])
-                terms.append(g_ys[i] * torch.cat([first, bwxs_ij[1:]], 0))
-            g_xs.append(terms[0] if num_xs == 1 else sum(terms[1:], terms[0]))
+        # The leaves whose g_ys reaches the gradient of an xs leaf that requires it
+        needs_grad = ctx.needs_input_grad[3 : 3 + num_xs]
+        needed: set[int] = set()
+        for group in reversed(groups):
+            if any(
+                needs_grad[j]
+                or any(deps[j][num_xs + k] and needs_grad[k] for k in range(num_xs))
+                or any(deps[j][k] for k in needed)
+                for j in group
+            ):
+                needed.update(group)
+
+        def unsupported(reason: str) -> RuntimeError:
+            return RuntimeError(
+                "associative_scan with combine_mode='pointwise' does not support "
+                f"gradients for {reason}, consider combine_mode='generic'"
+            )
+
+        for group, is_elementwise in zip(groups, elementwise):
+            if group[0] not in needed:
+                continue
+            if any(xs[j].shape[1:] != xs[group[0]].shape[1:] for j in group):
+                raise unsupported(
+                    "xs leaves of different shapes whose previous outputs depend on "
+                    "each other"
+                )
+            if any(xs[j].is_complex() for j in group):
+                raise unsupported("complex xs leaves")
+            if not is_elementwise:
+                raise unsupported(
+                    "outputs that depend on previous outputs through indexing or other "
+                    "operations that change the number of elements"
+                )
+
+        # 4.) Compute the single step bw (instantaneous gradients) at every step: the
+        # rows of the local ys-Jacobian within each group. The basis vectors of leaves
+        # whose rows do not overlap share one invocation.
+        bwys: dict[int, list[torch.Tensor]] = {}
+        todo = [i for i in range(num_xs) if i in needed]
+        while todo:
+            batch: list[int] = []
+            for i in todo:
+                if all(
+                    group_of[i] is not group_of[k]
+                    and not any(deps[i][j] for j in group_of[k])
+                    and not any(deps[k][j] for j in group_of[i])
+                    for k in batch
+                ):
+                    batch.append(i)
+            bw_batch = step_bw(
+                [
+                    (torch.ones_like if j in batch else torch.zeros_like)(gl)
+                    for j, gl in enumerate(gl_ys)
+                ]
+            )
+            for i in batch:
+                bwys[i] = [bw_batch[j] for j in group_of[i]]
+            todo = [i for i in todo if i not in batch]
+
+        g_ys = [torch.zeros_like(gl) for gl in gl_ys]
+        for group in groups:
+            if group[0] not in needed:
+                continue
+            dtype = functools.reduce(torch.promote_types, (xs[j].dtype for j in group))
+
+            # The g_ys of earlier groups enter through the previous outputs of this group
+            # that they read. The g_ys of this and later groups are still zero.
+            gl_group = [gl_ys[j] for j in group]
+            if any(deps[k][j] for k in range(num_xs) if k not in group for j in group):
+                bw_earlier = step_bw(g_ys)
+                # As in 5.1), step t contributes to g_ys{t-1}
+                gl_group = [
+                    gl + torch.cat([bw_earlier[j][1:], torch.zeros_like(gl[0:1])], 0)
+                    for gl, j in zip(gl_group, group)
+                ]
+
+            # 5.) Compute the gradients via an associative_scan
+            g_ys_group = compute_gys_associative_scan(
+                [gl.to(dtype) for gl in gl_group],
+                [[b.to(dtype) for b in bwys[i]] for i in group],
+            )
+            for j, g in zip(group, g_ys_group):
+                g_ys[j] = g.to(xs[j].dtype)
+
+        # 6.) Contract with the instantaneous input gradients
+        g_xs = step_bw(g_ys)[num_xs:]
+        # The first output ys0 equals xs0, so no combine_fn is applied at t = 0
+        g_xs = [torch.cat([g[0:1], gx[1:]], 0) for g, gx in zip(g_ys, g_xs)]
 
         # TODO: Currently the gradients for the additional_inputs are not computed properly
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs

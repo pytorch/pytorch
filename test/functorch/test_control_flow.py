@@ -5303,10 +5303,8 @@ class AssociativeScanTestsDevice(TestCase):
                 "The number of elements requiring gradients is different for the results and the expected results"
             )
 
-        # The upstream gradients must differ per output leaf: an all-ones cotangent
-        # weights every leaf equally, which makes a backward that sums over the output
-        # leaves agree with one that contracts them leaf by leaf. The local generator
-        # keeps the comparison deterministic and independent of the global RNG state.
+        # Upstream gradients that differ per output leaf catch a backward that mixes up
+        # the leaves. A local generator keeps them deterministic.
         gen = torch.Generator(device="cpu").manual_seed(1234)
         grad_init = [
             torch.rand(el.shape, generator=gen, dtype=el.dtype).to(el.device) + 0.5
@@ -5320,6 +5318,8 @@ class AssociativeScanTestsDevice(TestCase):
         )
 
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
+
+        return expected_grads
 
     def _run_test(self, model, model_fake, inputs, autograd_param=None):
         result = model(inputs)
@@ -6151,74 +6151,294 @@ class AssociativeScanTestsDevice(TestCase):
             autograd_param=None if not autograd else elements,
         )
 
-    # combine_mode=pointwise only needs scan codegen (CUDA/XPU) once it is lowered; in
-    # eager it dense-decomposes on any device and still routes autograd through
-    # AssociativeScanAutogradOp, which is the path this test covers. Hence only the
-    # compiled pointwise variants are skipped: compile_dynamic_shape does not support
-    # lifted arguments, and CPU has no scan lowering for compile.
+    # Skipping the combination of device=cpu and the compile modes that use inductor,
+    # as the pointwise scan is only lowered for CUDA
     @decorateIf(
         unittest.skip,
         lambda params: (
-            params["combine_mode"] == "pointwise"
-            and (
-                params["compile_mode"] == "compile_dynamic_shape"
-                or (params["device"] == "cpu" and params["compile_mode"] == "compile")
-            )
+            params["device"] == "cpu"
+            and params["compile_mode"] in ("compile", "compile_dynamic_shape")
         ),
     )
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
-    def test_associative_scan_linear_recurrence_grads(
-        self, device, compile_mode, combine_mode, reverse
+    @parametrize("partial_grad", [False, True])
+    @parametrize("coupling", ["linear_recurrence", "quaternion"])
+    def test_associative_scan_coupled_grads(
+        self, device, compile_mode, reverse, partial_grad, coupling
     ):
-        # A linear recurrence y[t] = a[t] * y[t-1] + b[t] expressed as the scan of the
-        # composition of the affine maps y -> a*y + b. Only the accumulated addend (the
-        # second leaf) is the recurrence output; the accumulated multiplier is discarded,
-        # as any user of this scan would do. The gradient of ``a`` therefore flows
-        # exclusively through the second output leaf, and a backward that treats each
-        # leaf in isolation returns exactly zero for it.
-        # Regression test for https://github.com/pytorch/pytorch/issues/172568.
         def affine_compose(left, right):
             a_l, b_l = left
             a_r, b_r = right
             return a_l * a_r, b_r + a_r * b_l
 
-        def linear_recurrence_ref(a, b):
-            y, out = torch.zeros_like(b[0]), []
-            steps = range(b.shape[0])
-            for t in reversed(steps) if reverse else steps:
-                y = a[t] * y + b[t]
-                out.append(y)
-            if reverse:
-                out.reverse()
-            return torch.stack(out, 0)
+        # Every output leaf of the quaternion product depends on every input leaf
+        def quaternion_mul(left, right):
+            w1, x1, y1, z1 = left
+            w2, x2, y2, z2 = right
+            return (
+                w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+                w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+            )
 
-        # Keep ``a`` away from 0 so the recurrence does not decay into a regime where a
-        # zero gradient for ``a`` is numerically indistinguishable from the truth.
-        a = (torch.rand(7, 3, device=device, dtype=torch.double) + 0.5).requires_grad_(
-            True
+        # combine_fn, number of leaves and the output leaves the loss depends on
+        combine_fn, num_leaves, used_outputs = {
+            "linear_recurrence": (affine_compose, 2, [1]),
+            "quaternion": (quaternion_mul, 4, [0, 1, 2, 3]),
+        }[coupling]
+
+        # Leaves in [0.5, 1.5) keep the product over all steps well scaled. With
+        # partial_grad the last leaf requires no gradient, but the gradients of the
+        # other leaves still flow through its state.
+        xs = tuple(
+            (torch.rand(7, 3, device=device, dtype=torch.double) + 0.5).requires_grad_(
+                ind < num_leaves - 1 or not partial_grad
+            )
+            for ind in range(num_leaves)
         )
-        b = torch.randn(7, 3, device=device, dtype=torch.double, requires_grad=True)
 
-        scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, combine_mode)
-        _, y = scan_fct(affine_compose, (a, b), 0, reverse)
+        scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, "pointwise")
+        ys = scan_fct(combine_fn, xs, 0, reverse)
+        ys_exp = _fake_associative_scan(combine_fn, xs, 0, reverse)
+        self.assertEqual(ys, ys_exp)
 
-        a_ref = a.detach().clone().requires_grad_(True)
-        b_ref = b.detach().clone().requires_grad_(True)
-        y_ref = linear_recurrence_ref(a_ref, b_ref)
-        self.assertEqual(y, y_ref)
+        expected_grads = self._check_autograd(
+            [ys[ind] for ind in used_outputs],
+            [ys_exp[ind] for ind in used_outputs],
+            xs,
+        )
+        # A backward that returns a gradient of zero would otherwise compare equal
+        self.assertTrue(all(g.abs().max() > 1e-3 for g in expected_grads))
 
-        # The upstream gradient must be non-uniform, see ``_check_autograd`` above.
-        gy = torch.randn(7, 3, device=device, dtype=torch.double)
-        grads = torch.autograd.grad(y, [a, b], gy)
-        expected_grads = torch.autograd.grad(y_ref, [a_ref, b_ref], gy)
+        # Gradcheck compares against finite differences instead of the backward of the
+        # reference. compile_mode="none" is the cheapest variant that reaches
+        # AssociativeScanAutogradOp, and ``reverse`` only flips the inputs in the
+        # frontend. It is skipped under dynamo, where it is slow.
+        if compile_mode == "none" and not reverse and not TEST_WITH_TORCHDYNAMO:
+            self.assertTrue(
+                torch.autograd.gradcheck(
+                    lambda *leaves: scan_fct(combine_fn, leaves, 0, reverse),
+                    xs,
+                    fast_mode=True,
+                )
+            )
 
-        # Check that the gradient of ``a`` is non-trivial, otherwise a backward that
-        # zeroes it out would compare equal.
-        self.assertTrue(expected_grads[0].abs().max() > 1e-3)
-        self.assertEqual(grads, expected_grads)
+    # Skipping the combine_fns with indexing under aot_eager, as its forward applies
+    # the indexing to the batched slices of generic_associative_scan
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["compile_mode"] == "aot_eager_dynamic_shape"
+            and params["leaves"] in ("select", "unflatten", "slice", "xs_slice")
+        ),
+    )
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "aot_eager_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize(
+        "leaves",
+        [
+            "unequal",
+            "decay_input",
+            "decay_state",
+            "decay_no_grad",
+            "state_no_grad",
+            "dim",
+            "shared",
+            "nested",
+            "select",
+            "unflatten",
+            "slice",
+            "xs_slice",
+            "dtype",
+            "real_complex",
+        ],
+    )
+    def test_associative_scan_leaf_dependencies_grads(
+        self, device, compile_mode, reverse, leaves
+    ):
+        def uncoupled(left, right):
+            return left[0] * right[0], left[1] + right[1]
+
+        # The state b depends on the decay a through the input or through the state
+        def affine_decay_input(left, right):
+            return left[0] * right[0], right[1] + right[0] * left[1]
+
+        def affine_decay_state(left, right):
+            return left[0] * right[0], left[0] * right[1] + left[1]
+
+        # One decay shared by two states, whose shapes do not broadcast to each other
+        def shared_decay(left, right):
+            a, b, c = left
+            a2, b2, c2 = right
+            return a * a2, b2 + a2 * b, c2 + a2 * c
+
+        # Products of the matrices [[p, q, s], [0, r, w], [0, 0, z]], where gradients
+        # flow from s to q and w and from there to p, r and z
+        def upper_triangular(left, right):
+            p, q, s, r, w, z = left
+            p2, q2, s2, r2, w2, z2 = right
+            return (
+                p * p2,
+                p * q2 + q * r2,
+                p * s2 + q * w2 + s * z2,
+                r * r2,
+                r * w2 + w * z2,
+                z * z2,
+            )
+
+        # The state b reads a row of the decay a, the decay a viewed as a matrix, or
+        # the first row of the decay a broadcast to its own shape
+        def select_decay_state(left, right):
+            return left[0] * right[0], left[0][..., 0, :] * right[1] + left[1]
+
+        def unflatten_decay_state(left, right):
+            a, b = left
+            a2, b2 = right
+            return a * a2, a.unflatten(-1, (4, 3)) * b2 + b
+
+        def slice_decay_state(left, right):
+            return left[0] * right[0], left[0][..., :1, :] * right[1] + left[1]
+
+        # A single leaf scaled by the first row of the input
+        def xs_slice(left, right):
+            return (left[0] * right[0][..., :1, :],)
+
+        one, row, mat = (1, 1), (1, 3), (4, 3)
+        # combine_fn, leaf shapes and the leaves that require no gradient
+        combine_fn, shapes, no_grad = {
+            "unequal": (uncoupled, [(4,), (3,)], []),
+            "decay_input": (affine_decay_input, [row, mat], []),
+            "decay_state": (affine_decay_state, [row, mat], []),
+            "decay_no_grad": (affine_decay_state, [row, mat], [0]),
+            "state_no_grad": (affine_decay_state, [row, mat], [1]),
+            "dim": (affine_decay_state, [row, mat], []),
+            "shared": (shared_decay, [row, mat, (5, 3)], []),
+            "nested": (upper_triangular, [one, row, mat, one, row, one], []),
+            "select": (select_decay_state, [mat, (3,)], []),
+            "unflatten": (unflatten_decay_state, [(12,), mat], []),
+            "slice": (slice_decay_state, [mat, mat], []),
+            "xs_slice": (xs_slice, [mat], []),
+            "dtype": (affine_decay_input, [mat, mat], []),
+            "real_complex": (uncoupled, [mat, mat], [1]),
+        }[leaves]
+        dtypes = {
+            "dtype": [torch.float, torch.double],
+            "real_complex": [torch.double, torch.cdouble],
+        }.get(leaves, [torch.double] * len(shapes))
+        dim = 1 if leaves == "dim" else 0
+
+        # Leaves in [0.5, 1.5) keep the product over all steps well scaled
+        xs = tuple(
+            torch.rand(*shape[:dim], 6, *shape[dim:], device=device, dtype=dtype) + 0.5
+            for shape, dtype in zip(shapes, dtypes)
+        )
+        for ind, x in enumerate(xs):
+            x.requires_grad_(ind not in no_grad)
+
+        if compile_mode == "aot_eager_dynamic_shape":
+            # The inductor forward is wrong for leaves of different shapes
+            scan_fct = torch.compile(
+                associative_scan, backend="aot_eager", fullgraph=True, dynamic=True
+            )
+            ys = scan_fct(combine_fn, xs, dim, reverse, combine_mode="pointwise")
+        else:
+            scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, "pointwise")
+            ys = scan_fct(combine_fn, xs, dim, reverse)
+
+        ys_exp = _fake_associative_scan(combine_fn, xs, dim, reverse)
+        self.assertEqual(ys, ys_exp)
+
+        used = [ind for ind, y in enumerate(ys_exp) if y.requires_grad]
+        expected_grads = self._check_autograd(
+            [ys[ind] for ind in used], [ys_exp[ind] for ind in used], xs
+        )
+        self.assertTrue(all(g.abs().max() > 1e-3 for g in expected_grads))
+
+        # See the gradcheck of test_associative_scan_coupled_grads, which needs leaves
+        # in double precision
+        if (
+            compile_mode == "none"
+            and not reverse
+            and not TEST_WITH_TORCHDYNAMO
+            and all(dtype == torch.double for dtype in dtypes)
+        ):
+            self.assertTrue(
+                torch.autograd.gradcheck(
+                    lambda *ls: scan_fct(combine_fn, ls, dim, reverse),
+                    xs,
+                    fast_mode=True,
+                )
+            )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("case", ["complex", "state_slice", "coupled_shapes"])
+    def test_associative_scan_unsupported_grads_raises(self, device, case):
+        def real(x):
+            return (x + x.conj_physical()) * 0.5
+
+        # The complex states u and w are coupled through their real parts, which is
+        # not holomorphic, and the gradient of the real decay a flows through w
+        def complex_states(left, right):
+            a, u, w = left
+            a2, u2, w2 = right
+            return a * a2, real(u) * u2, real(w) * u2 + a * w2
+
+        # A single leaf that reads the first row of its previous output
+        def state_slice(left, right):
+            return (left[0][..., :1, :] * right[0],)
+
+        # Two leaves of different shapes that read each other's previous outputs
+        def coupled_shapes(left, right):
+            a, b = left
+            a2, b2 = right
+            return a * a2 + b, b * b2 + a[..., :1, :]
+
+        combine_fn, shapes, dtypes, error = {
+            "complex": (
+                complex_states,
+                [(1, 3), (4, 3), (4, 3)],
+                [torch.double, torch.cdouble, torch.cdouble],
+                "complex xs leaves",
+            ),
+            "state_slice": (
+                state_slice,
+                [(4, 3)],
+                [torch.double],
+                "operations that change the number of elements",
+            ),
+            "coupled_shapes": (
+                coupled_shapes,
+                [(4, 3), (1, 3)],
+                [torch.double, torch.double],
+                "leaves of different shapes",
+            ),
+        }[case]
+        xs = tuple(
+            torch.rand(6, *shape, device=device, dtype=dtype) + 0.5
+            for shape, dtype in zip(shapes, dtypes)
+        )
+        xs[0].requires_grad_()
+        ys = associative_scan(combine_fn, xs, 0, combine_mode="pointwise")
+        with self.assertRaisesRegex(RuntimeError, error):
+            torch.autograd.grad(ys, xs[0], [torch.ones_like(y) for y in ys])
+
+    @onlyAccelerator
+    def test_associative_scan_leaves_on_different_devices_grads(self, device):
+        def uncoupled(left, right):
+            return left[0] * right[0], left[1] + right[1]
+
+        xs = (
+            (torch.rand(6, 4, dtype=torch.double) + 0.5).requires_grad_(),
+            torch.rand(6, 4, device=device, dtype=torch.double).requires_grad_(),
+        )
+        ys = associative_scan(uncoupled, xs, 0, combine_mode="pointwise")
+        ys_exp = _fake_associative_scan(uncoupled, xs, 0)
+        self.assertEqual(ys, ys_exp)
+        self._check_autograd(list(ys), list(ys_exp), xs)
 
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
