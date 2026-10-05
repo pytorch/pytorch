@@ -29,6 +29,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
@@ -762,6 +763,67 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
         self._wait_for_rank_zero(pg)
         dist.destroy_process_group(pg)
         self._check_all_reduce()
+
+    def _new_subgroup_with_error_handling(self, async_error_handling: str):
+        # Like legacy wait(), no TORCH_NCCL_ASYNC_ERROR_HANDLING mode, including
+        # TearDown (1), may ::abort() the process under blocking wait.
+        env = {"TORCH_NCCL_ASYNC_ERROR_HANDLING": async_error_handling}
+        with mock.patch.dict(os.environ, env):
+            return self._new_subgroup(timeout=timedelta(seconds=5))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("async_error_handling", ["3", "1"])
+    def test_collective_after_timeout_raises(self, async_error_handling) -> None:
+        pg = self._new_subgroup_with_error_handling(async_error_handling)
+        backend = dist.get_backend_impl(pg, device=self.device)
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            dist.set_timeout(timedelta(milliseconds=1), group=pg)
+            work = dist.all_reduce(
+                torch.ones(1024, device=self.device), group=pg, async_op=True
+            )
+            with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
+                work.wait()
+            with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
+                dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+            self.assertEqual(backend.comm_ptr, 0)
+
+        self._wait_for_rank_zero(pg)
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("async_error_handling", ["3", "1"])
+    def test_unwaited_timeout_raises_on_next_collective(
+        self, async_error_handling
+    ) -> None:
+        pg = self._new_subgroup_with_error_handling(async_error_handling)
+        backend = dist.get_backend_impl(pg, device=self.device)
+        self._check_all_reduce(pg)
+
+        if self.rank == 0:
+            dist.set_timeout(timedelta(milliseconds=1), group=pg)
+            work = dist.all_reduce(
+                torch.ones(1024, device=self.device), group=pg, async_op=True
+            )
+            # Never completes; is_completed() turns true once it times out.
+            deadline = time.time() + 60
+            while time.time() < deadline and not work.is_completed():
+                time.sleep(0.1)
+            self.assertTrue(work.is_completed())
+            with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
+                dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+            self.assertEqual(backend.comm_ptr, 0)
+
+        self._wait_for_rank_zero(pg)
+        dist.destroy_process_group(pg)
+        self._check_all_reduce()
+
+
+instantiate_parametrized_tests(ProcessGroupNCCL2BlockingWaitTest)
 
 
 class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
