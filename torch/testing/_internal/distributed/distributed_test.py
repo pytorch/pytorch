@@ -860,7 +860,7 @@ class DistributedTest:
             # Reinitialize global process group
             timeout = timedelta(seconds=1)
             dist.init_process_group(
-                init_method=INIT_METHOD,
+                init_method=os.environ["INIT_METHOD"],
                 backend=BACKEND,
                 world_size=int(os.environ["WORLD_SIZE"]),
                 rank=self.rank,
