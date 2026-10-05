@@ -2224,6 +2224,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         best_item, best_key = items[0], keyvals[0]
         for item, keyval in zip(items[1:], keyvals[1:]):
             left, right = (best_key, keyval) if self.fn is max else (keyval, best_key)
+            # Internal comparison semantics must ignore trace-rule overrides.
             cmp = BuiltinVariable(operator.lt).call_function(tx, [left, right], {})
             if not cmp.is_python_constant():
                 unimplemented(
