@@ -1306,6 +1306,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.kv_block_size = kv_block_size
         self.q_block_size = q_block_size
         self.partition_size = partition_size
+        self.head_size_v = 0
+        self.is_decoding = False
         self.has_other_buffer = has_other_buffer
         self.no_full_kv_block = no_full_kv_block
         self.other_buffer_input_offset = 2
@@ -1598,6 +1600,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
         self.accumulate_dtype = torch.float
         self.input_dtype = query.layout.dtype
+        self.head_size_v = value.layout.size[3]
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1642,6 +1645,7 @@ class CppFlexAttentionTemplate(CppTemplate):
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
             FLEX_TEMPLATE = self.choose_flex_template(query, key, num_threads)
+            self.is_decoding = FLEX_TEMPLATE is FLEX_DECODING_TEMPLATE
             return self._template_from_string(INIT_PARAMS + FLEX_TEMPLATE).render(
                 **options
             )
@@ -1675,6 +1679,15 @@ class CppFlexAttentionTemplate(CppTemplate):
             )
         )
 
+    def gemm_blocking(self, n_dim) -> GemmBlocking:
+        if self.is_decoding:
+            return GemmBlocking(1, 16, 1)
+        n = sympy.sympify(n_dim)
+        block_n = 16
+        if n.is_number:
+            block_n = next((bn for bn in (64, 32, 16) if int(n) % bn == 0), 16)
+        return GemmBlocking(8, block_n, 1)
+
     def micro_gemm_define(self, kernel_name: str):
         from torch._inductor.codegen.cpp_gemm_template import (
             CppTemplateKernel,
@@ -1689,10 +1702,11 @@ class CppFlexAttentionTemplate(CppTemplate):
             self.input_dtype,
             self.accumulate_dtype,
             self.accumulate_dtype,
-            GemmBlocking(1, 16, 1),
+            self.gemm_blocking(self.kv_block_size),
             1,
             True,
             True,
+            pow2_m_tails=True,
         )
 
         micro_gemm = CppMicroGemmFP32Vec(
@@ -1701,10 +1715,11 @@ class CppFlexAttentionTemplate(CppTemplate):
             self.input_dtype,
             self.accumulate_dtype,
             self.accumulate_dtype,
-            GemmBlocking(1, 16, 1),
+            self.gemm_blocking(self.head_size_v),
             1,
             True,
             False,
+            pow2_m_tails=True,
         )
 
         with V.set_graph_handler(V.graph):
