@@ -1161,8 +1161,8 @@ jobs:
         # Only a clean verdict changes anything: it adds the marker and takes
         # the gating label off. Every other outcome leaves the labels alone.
         #
-        # Last step, and after the terminal row is in S3, so a labelling failure
-        # can never cost telemetry.
+        # After the terminal row is in S3, so a labelling failure can never
+        # cost telemetry.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -1329,3 +1329,17 @@ jobs:
             exit 0
           fi
           echo "::notice::PR #${PR_NUMBER} moved to '${DONE_LABEL}'"
+
+      - name: Post the automated review on the PR
+        # A native review notifies the author, which an edit to the Dr.CI
+        # comment never did, and puts each finding on its line. The script
+        # posts only a `succeeded` verdict, re-checks every string from the
+        # row, skips a moved head or an opted-out PR, defuses `@pytorchbot`,
+        # and replaces the previous automated review. It never fails the job.
+        # After the label move, so a review-posting problem cannot touch labels.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}
+        run: python3 scripts/pr_review/post_review.py --row-file terminal.json
