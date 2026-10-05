@@ -2210,6 +2210,61 @@ def run_test_module(
         return TestFailure(test.test, f"{str(test)} failed! {e}")
 
 
+def get_selection_counts(
+    tests: list[ShardedTest], test_directory: str, marker_args: list[str]
+) -> dict[str, list[int]]:
+    """Collect all python test files in one pytest process and return
+    {abs path: [selected items, selected items marked serial]} for the files
+    that collected cleanly (see SelectionCountPlugin in conftest.py)."""
+    files = sorted(
+        {
+            os.path.join(test_directory, f"{t.name}.py")
+            for t in tests
+            if can_run_in_pytest(t)
+            and not _is_cpp_test(t.name)
+            and t.name not in CUSTOM_HANDLERS
+        }
+    )
+    if not files:
+        return {}
+    fd, counts_file = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    os.remove(counts_file)
+    # fmt: off
+    cmd = [
+        sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:xdist",
+        "--continue-on-collection-errors", f"--selection-counts-file={counts_file}",
+        *marker_args, *files,
+    ]
+    # fmt: on
+    # Keep the 4-GPU config's selected-test tally to the real runs.
+    env = os.environ.copy()
+    env.pop("PYTORCH_MULTIGPU_SELECTION_COUNT_FILE", None)
+    start = time.perf_counter()
+    try:
+        subprocess.run(
+            cmd,
+            cwd=test_directory,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=900,
+        )
+        with open(counts_file) as f:
+            counts = json.load(f)
+    except Exception as e:
+        print_to_stderr(f"Selection count collection failed, running all files: {e}")
+        return {}
+    finally:
+        if os.path.exists(counts_file):
+            os.remove(counts_file)
+    print_to_stderr(
+        f"Collected selection counts for {len(counts)}/{len(files)} files in "
+        f"{time.perf_counter() - start:.1f}s"
+    )
+    return counts
+
+
 def run_tests(
     selected_tests: list[ShardedTest],
     test_directory: str,
@@ -2249,6 +2304,22 @@ def run_tests(
             args += ["--multigpu-min-gpus", str(min_gpus)]
         return args
 
+    # A run whose markers deselect every test in the file still costs a process
+    # start, torch import and collection (~4s). Common for the serial pass and
+    # for the multigpu split of distributed tests, so skip those runs.
+    counts = get_selection_counts(selected_tests, test_directory, marker_args(None))
+
+    def selects_nothing(test: ShardedTest, serial: bool | None) -> bool:
+        count = counts.get(os.path.join(test_directory, f"{test.name}.py"))
+        if count is None:
+            return False
+        total, num_serial = count
+        selected = {None: total, True: num_serial, False: total - num_serial}
+        if selected[serial] > 0:
+            return False
+        print_to_stderr(f"Skipping {test}: no tests selected")
+        return True
+
     # NB: This is a hack to make conftest.py and files it depends on available
     # on CPP_TESTS_DIR. We should see if the file could be turned into a
     # full-fledge ptest plugin instead
@@ -2285,6 +2356,8 @@ def run_tests(
     pool = None
     try:
         for test in selected_tests_serial:
+            if selects_nothing(test, None):
+                continue
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
@@ -2301,6 +2374,8 @@ def run_tests(
 
         # Run tests marked as serial first
         for test in selected_tests_parallel:
+            if selects_nothing(test, True):
+                continue
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
@@ -2338,6 +2413,8 @@ def run_tests(
                 pool.terminate()
 
         for test in selected_tests_parallel:
+            if selects_nothing(test, False):
+                continue
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
