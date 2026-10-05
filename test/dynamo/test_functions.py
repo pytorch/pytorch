@@ -6360,6 +6360,482 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(Unsupported):
             torch.compile(m, backend="eager", fullgraph=True)(x)
 
+    def test_classmethod_descriptor_instance_attribute(self):
+        class DictSubclass(dict):
+            @classmethod
+            def fromkeys(cls, *args, **kwargs):
+                raise AssertionError("subclass override must not run")
+
+        class Holder:
+            def __init__(self):
+                self._orig = dict.__dict__["fromkeys"]
+
+        holder = Holder()
+
+        def fn(x):
+            bound = holder._orig.__get__(None, DictSubclass)
+            exact = holder._orig.__get__(None, dict)
+            inferred = holder._orig.__get__({}, None)
+            return (
+                exact(("a",), x)["a"] + inferred(("b",), x)["b"],
+                bound.__name__,
+                bound.__qualname__,
+                bound.__self__ is DictSubclass,
+            )
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+        def escape_bound(x):
+            bound = holder._orig.__get__(None, dict)
+            x = x + 1
+            torch._dynamo.graph_break()
+            d = bound(["a"], x)
+            return d["a"], bound.__name__, bound.__qualname__, bound.__self__
+
+        opt_escape_bound = torch.compile(escape_bound, backend="eager")
+        self.assertEqual(opt_escape_bound(x), escape_bound(x))
+
+        calls = []
+
+        class Meta(type):
+            @property
+            def __name__(cls):
+                calls.append(cls)
+                return "SideEffect"
+
+        class BadOwner(metaclass=Meta):
+            pass
+
+        def invalid_owner(x):
+            try:
+                holder._orig.__get__(None, BadOwner)
+            except TypeError as e:
+                return x + 1, str(e)
+            raise AssertionError("expected descriptor binding to fail")
+
+        expected = invalid_owner(x)
+        calls.clear()
+        opt_invalid_owner = torch.compile(
+            invalid_owner, backend="eager", fullgraph=True
+        )
+        self.assertEqual(opt_invalid_owner(x), expected)
+        self.assertEqual(calls, [])
+
+        def dynamic_owner(owner):
+            return holder._orig.__get__(None, owner)
+
+        with self.assertRaisesRegex(TypeError, "needs a type"):
+            dynamic_owner(x)
+        with self.assertRaisesRegex(
+            Unsupported, "Unresolved classmethod descriptor owner"
+        ):
+            torch.compile(dynamic_owner, backend="eager", fullgraph=True)(x)
+
+    def test_classmethod_descriptor_through_super(self):
+        class Mid(dict):
+            pass
+
+        class D(Mid):
+            @classmethod
+            def from_class(cls, value):
+                return super().fromkeys((1,), value)
+
+        def fn(x):
+            result = D.from_class(x)
+            return result[1] + 1, type(result) is D
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+        def replacement(cls, keys, value=None):
+            return {1: value + 10}
+
+        Mid.fromkeys = classmethod(replacement)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_bound_builtin_method_guard_distinguishes_equal_aliases(self):
+        class Holder:
+            target = (1).conjugate
+
+        holder = Holder()
+
+        def fn(x):
+            return x + 1, holder.target.__name__, holder.target.__qualname__
+
+        self.assertEqual(holder.target, (1).__trunc__)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+        holder.target = (1).__trunc__
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_prebound_method_descriptor_bypasses_subclass_override(self):
+        import math
+
+        class L(list):
+            def count(self, value):
+                return 99
+
+        obj = L([1, 1])
+        bound = list.count.__get__(obj, L)
+        module_bound = types.ModuleType.__dir__.__get__(math)
+
+        def fn(x):
+            return (
+                x + bound(1),
+                bound.__name__,
+                bound.__qualname__,
+                bound.__self__ is obj,
+                module_bound.__qualname__,
+            )
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+        def across_graph_break(x):
+            local = bound
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + local(1)
+
+        self.assertEqual(
+            torch.compile(across_graph_break, backend="eager")(x),
+            across_graph_break(x),
+        )
+
+        def call_raw(x):
+            raw = list.__dict__["count"]
+            unbound = raw.__get__(None, list)
+            try:
+                raw()
+            except TypeError as exc:
+                error = str(exc)
+            return x + raw(obj, 1), unbound is raw, unbound.__name__, error
+
+        self.assertEqual(
+            torch.compile(call_raw, backend="eager", fullgraph=True)(x), call_raw(x)
+        )
+
+        class Direct(list):
+            count = list.count
+
+        direct_obj = Direct([1, 1])
+
+        def direct(x):
+            return x + direct_obj.count(1)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_direct = torch.compile(direct, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_direct(x), direct(x))
+        self.assertEqual(cnt.frame_count, 1)
+        original = Direct.count
+        try:
+            Direct.count = lambda self, value: 99
+            self.assertEqual(opt_direct(x), direct(x))
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            Direct.count = original
+
+    def test_method_descriptor_preserves_polyfill_trace_rule(self):
+        class C:
+            def __init__(self, value):
+                self.value = value
+
+        descriptor = object.__reduce_ex__
+
+        def fn(obj):
+            reduction = descriptor(obj, 4)
+            return reduction[2]["value"] + 1
+
+        obj = C(torch.ones(1))
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(obj), fn(obj)
+        )
+
+    def test_classmethod_descriptor_mro_sources(self):
+        class Direct(dict):
+            fromkeys = dict.__dict__["fromkeys"]
+
+        class Inherited(dict):
+            pass
+
+        class Meta(type):
+            pass
+
+        class WithMeta(metaclass=Meta):
+            pass
+
+        def fn(x):
+            return (
+                x + 1,
+                Direct.fromkeys.__name__,
+                Inherited.fromkeys.__name__,
+                WithMeta.__prepare__.__self__ is Meta,
+            )
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.ones(1)
+        self.assertEqual(opt_fn(x), (x + 1, "fromkeys", "fromkeys", True))
+        self.assertEqual(cnt.frame_count, 1)
+
+        try:
+            Inherited.fromkeys = dict.__dict__["__class_getitem__"]
+            self.assertEqual(opt_fn(x), (x + 1, "fromkeys", "__class_getitem__", True))
+            self.assertEqual(cnt.frame_count, 2)
+        finally:
+            del Inherited.fromkeys
+
+    @parametrize(
+        "dict_type, input_type, expected_before, expected_after",
+        (
+            (dict, dict, 3, 3),
+            (collections.OrderedDict, dict, 3, 6),
+            (collections.defaultdict, dict, 3, 6),
+            (dict, "keys", 3, 6),
+        ),
+    )
+    def test_bound_fromkeys_hash_reuse(
+        self, dict_type, input_type, expected_before, expected_after
+    ):
+        class HashCountingInt(int):
+            def __init__(self, *args):
+                self.hash_count = 0
+
+            def __hash__(self):
+                self.hash_count += 1
+                return int.__hash__(self)
+
+        bound = dict_type.fromkeys
+
+        def fn(x):
+            keys = [HashCountingInt(i) for i in range(3)]
+            if input_type is dict:
+                source = dict.fromkeys(keys)
+            else:
+                d = dict.fromkeys(keys)
+                source = d.keys()
+            before = sum(key.hash_count for key in keys)
+            out = bound(source)
+            after = sum(key.hash_count for key in keys)
+            return x + len(out), before, after
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected[1:], (expected_before, expected_after))
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+    @parametrize("use_subclass", (False, True))
+    def test_bound_fromkeys_ordered_dict_input(self, use_subclass):
+        class OD(collections.OrderedDict):
+            pass
+
+        dict_type = OD if use_subclass else collections.OrderedDict
+        source = dict_type.fromkeys((1, 2))
+        bound = dict.fromkeys
+
+        def fn(x):
+            return x + len(bound(source))
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_bound_dict_subclass_fromkeys(self):
+        class D(dict):
+            pass
+
+        bound = D.fromkeys
+
+        def fn(x):
+            return bound((1,), x)
+
+        x = torch.ones(1)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, fn(x))
+        self.assertIs(type(actual), D)
+
+    @parametrize("access", ("direct", "super"))
+    def test_dict_subclass_instance_fromkeys_unsupported(self, access):
+        calls = []
+
+        class D(dict):
+            def from_super(self, value):
+                return super().fromkeys((1,), value)
+
+        obj = D()
+
+        def fn(x):
+            calls.append("call")
+            result = obj.fromkeys((1,), x) if access == "direct" else obj.from_super(x)
+            return result[1] + 1, type(result) is D
+
+        x = torch.ones(1)
+        expected = fn(x)
+        expected_calls = calls.copy()
+        calls.clear()
+        with self.assertRaisesRegex(
+            Unsupported, "classmethod descriptor on dict subclass instance"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(calls, [])
+
+        self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
+        self.assertEqual(calls, expected_calls)
+
+    def test_bound_dict_subclass_fromkeys_hooks(self):
+        calls = []
+
+        class D(dict):
+            def __new__(cls):
+                calls.append("new")
+                return super().__new__(cls)
+
+            def __init__(self):
+                calls.append("init")
+
+            def __setitem__(self, key, value):
+                calls.append(("setitem", key))
+                return super().__setitem__(key, value)
+
+        bound = D.fromkeys
+
+        def fn(x):
+            result = bound((1, 2), x)
+            return result[1] + result[2], type(result) is D
+
+        x = torch.ones(1)
+        expected = fn(x)
+        expected_calls = calls.copy()
+        calls.clear()
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+        self.assertEqual(calls, expected_calls)
+
+    @parametrize(
+        "case, error, expected_call",
+        (
+            (
+                "custom_metaclass",
+                r"Unsupported dict subclass fromkeys\(\) construction",
+                "call",
+            ),
+            (
+                "plain_dict_result",
+                r"Unsupported dict subclass fromkeys\(\) result",
+                "new",
+            ),
+        ),
+    )
+    def test_bound_dict_subclass_fromkeys_custom_metaclass(
+        self, case, error, expected_call
+    ):
+        calls = []
+
+        if case == "custom_metaclass":
+
+            class Meta(type):
+                def __call__(cls, *args, **kwargs):
+                    calls.append("call")
+                    return super().__call__(*args, **kwargs)
+
+            class D(dict, metaclass=Meta):
+                pass
+
+        else:
+
+            class D(dict):
+                def __new__(cls):
+                    calls.append("new")
+                    return {}
+
+        bound = D.fromkeys
+
+        def fn(x):
+            return bound((1,), x)[1]
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(Unsupported, error):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(calls, [])
+
+        self.assertEqual(torch.compile(fn, backend="eager")(x), x)
+        self.assertEqual(calls, [expected_call])
+
+    @parametrize(
+        "case, error",
+        (
+            ("keywords", r"dict\.fromkeys\(\) takes no keyword arguments"),
+            ("missing", "fromkeys expected at least 1 argument, got 0"),
+            ("extra", "fromkeys expected at most 2 arguments, got 3"),
+        ),
+    )
+    def test_classmethod_descriptor_fromkeys_errors(self, case, error):
+        bound = dict.fromkeys
+
+        def invalid():
+            if case == "keywords":
+                return bound([], value=None)
+            if case == "missing":
+                return bound()
+            return bound([], None, None)
+
+        with self.assertRaisesRegex(TypeError, error):
+            invalid()
+
+        def caught(x):
+            try:
+                invalid()
+            except TypeError as exc:
+                return x + 1, str(exc)
+            raise AssertionError("expected fromkeys to raise TypeError")
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(caught, backend="eager", fullgraph=True)(x), caught(x)
+        )
+
+    @parametrize("descriptor_kind", ("classmethod", "method"))
+    def test_descriptor_source_rejects_metaclass_dict(self, descriptor_kind):
+        descriptor = (
+            dict.__dict__["fromkeys"]
+            if descriptor_kind == "classmethod"
+            else list.count
+        )
+        calls = []
+
+        class Meta(type):
+            @property
+            def __dict__(cls):
+                calls.append(cls)
+                return {"target": descriptor}
+
+        class D(metaclass=Meta):
+            pass
+
+        def fn(x):
+            raw = D.__dict__["target"]
+            if descriptor_kind == "classmethod":
+                return x + 1, raw.__name__
+            return x + raw.__get__([1, 1], list)(1)
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(Unsupported, "custom metaclass __dict__"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(calls, [D])
+
     def test_torch_function_metadata_attrs_constant(self):
         def fn(x):
             names = [

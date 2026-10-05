@@ -383,8 +383,13 @@ class GenericAttrSource(ChainedSource):
 @dataclass_with_cached_hash(frozen=True)
 class TypeDictSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, "get_type_dict_no_user_code"
+            )
+        )
         codegen(self.base)
-        codegen.extend_output(codegen.create_load_attrs("__dict__"))
+        codegen.extend_output(create_call_function(1, False))
 
     @property
     def _name_template(self) -> str:
@@ -392,19 +397,24 @@ class TypeDictSource(ChainedSource):
         # guard accessor, we use type->tp_dict which is a dict. So,
         # forcefully pass a dict object to ensure that the GuardManager
         # registers that it's working on a dict object.
-        return "dict({0}.__dict__)"
+        return "dict(type.__dict__['__dict__'].__get__({0}, type({0})))"
 
 
 # Represents obj.__mro__ where object is type object
 @dataclass_with_cached_hash(frozen=True)
 class TypeMROSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, "get_type_mro_no_user_code"
+            )
+        )
         codegen(self.base)
-        codegen.extend_output(codegen.create_load_attrs("__mro__"))
+        codegen.extend_output(create_call_function(1, False))
 
     @property
     def _name_template(self) -> str:
-        return "{0}.__mro__"
+        return "type.__dict__['__mro__'].__get__({0}, type({0}))"
 
 
 @dataclass_with_cached_hash(frozen=True)
