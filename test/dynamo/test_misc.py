@@ -1920,6 +1920,7 @@ L['x'].size()[1] == L['x'].size()[0]
 L['x'].storage_offset() == 0
 2 <= L['x'].size()[0]
 utils_device.CURRENT_DEVICE == None
+torch.fx.traceback._get_current_annotation() == None
 str(L['x'].dtype) == 'torch.float32'
 str(L['x'].device) == 'cpu'
 L['x'].requires_grad == False

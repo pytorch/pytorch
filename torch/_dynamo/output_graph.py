@@ -480,6 +480,8 @@ class OutputGraphGuardsState:
     # without it pins the index. Deserializing has to rebuild whichever kind was
     # saved, not whichever the loading process happens to be configured for.
     compile_on_one_rank: bool = False
+    # torch.fx.traceback annotation active when the frame started tracing
+    fx_annotation: dict[str, Any] | None = None
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -505,6 +507,7 @@ class OutputGraphGuardsState:
             functorch_layers=self.functorch_layers,
             current_device=self.current_device,
             global_state_guard=self.global_state_guard,
+            fx_annotation=self.fx_annotation,
             name_of_builtins_dict_key_in_fglobals=self.name_of_builtins_dict_key_in_fglobals,
             export=self.export,
             export_constraints=self.export_constraints,
@@ -659,6 +662,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.export_constraints,
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
             output_graph_guards_state.compile_on_one_rank,
+            fx_annotation=output_graph_guards_state.fx_annotation,
         )
 
         self.import_sources = import_sources or {}
@@ -741,6 +745,7 @@ class OutputGraph(OutputGraphCommon):
             dual_level=torch.autograd.forward_ad._current_level,
             functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
             current_device=torch.utils._device.CURRENT_DEVICE,
+            fx_annotation=torch.fx.traceback._get_current_annotation(),
             # initial_global_state is only None during NopTest.
             global_state_guard=torch._dynamo.convert_frame.initial_global_state
             or torch._C._dynamo.guards.GlobalStateGuard(),
@@ -1220,6 +1225,8 @@ class OutputGraph(OutputGraphCommon):
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.FX_ANNOTATION))
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GLOBAL_STATE))
         self.guards.add(
