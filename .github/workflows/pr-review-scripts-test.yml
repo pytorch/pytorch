@@ -15,8 +15,8 @@ on:
       # rubric names no severity the sanitizer would drop, and the rubric
       # delegates to pr-review. Without these a skill-only change skips the
       # one check that would catch it.
-      - ".agents/skills/pr-review-readiness/**"
-      - ".agents/skills/pr-review/**"
+      - ".claude/skills/pr-review-readiness/**"
+      - ".claude/skills/pr-review/**"
   pull_request:
     paths:
       - "scripts/pr_review/**"
@@ -28,8 +28,8 @@ on:
       # rubric names no severity the sanitizer would drop, and the rubric
       # delegates to pr-review. Without these a skill-only change skips the
       # one check that would catch it.
-      - ".agents/skills/pr-review-readiness/**"
-      - ".agents/skills/pr-review/**"
+      - ".claude/skills/pr-review-readiness/**"
+      - ".claude/skills/pr-review/**"
 
 permissions:
   contents: read

@@ -15,6 +15,7 @@ from torchgen.gen import (
     get_grouped_native_functions,
     LineLoader,
     parse_native_yaml_struct,
+    ParsedYaml,
 )
 from torchgen.model import DispatchKey, NativeFunctionsGroup
 from torchgen.selective_build.selector import SelectiveBuilder
@@ -37,6 +38,10 @@ NATIVE_YAML = """\
   dispatch:
     CUDA: embbar_cuda
 
+- func: embmulti(Tensor self, bool flag) -> Tensor
+  dispatch:
+    CUDA: embmulti_cuda
+
 - func: embmulti.alpha_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
@@ -57,7 +62,7 @@ NATIVE_YAML = """\
 """
 
 
-def _parse_fixture():
+def _parse_fixture() -> ParsedYaml:
     es = yaml.load(NATIVE_YAML, Loader=LineLoader)
     parsed = parse_native_yaml_struct(
         es, set(), path="fixture", skip_native_fns_gen=True
@@ -192,14 +197,6 @@ class TestManifestValidation(unittest.TestCase):
                 {(DispatchKey.CUDA, "embbar"): m}, self.grouped
             )
 
-    def test_functional_op_accepted(self) -> None:
-        m = native_aot.NativeAotManifest(
-            op="embbar", dispatch_key=DispatchKey.CUDA, structured=False
-        )
-        native_aot.validate_native_aot_manifests(
-            {(DispatchKey.CUDA, "embbar"): m}, self.grouped
-        )
-
     def test_unknown_op_rejected(self) -> None:
         m = native_aot.NativeAotManifest(op="embmissing", dispatch_key=DispatchKey.CUDA)
         with self.assertRaisesRegex(RuntimeError, "not a structured op"):
@@ -284,6 +281,25 @@ DECLARE_DISPATCH(embfoo_aot_fn, embfoo_aot_stub)
         self.assertLess(
             body.index("return aot_result;"), body.index("embbar_cuda(self)")
         )
+        self.assertIn("allowNativeAot()", body)
+        self.assertNotIn("maskUnconditionalNativeAot()", body)
+        self.assertLess(body.index("allowNativeAot()"), body.index("aot_result;"))
+        gen.native_aot_manifests["embbar"] = native_aot.NativeAotManifest(
+            op="embbar",
+            dispatch_key=DispatchKey.CUDA,
+            structured=False,
+            unconditional=True,
+        )
+        body = "\n".join(gen(f))
+        self.assertNotIn("allowNativeAot()", body)
+        self.assertIn("!at::globalContext().maskUnconditionalNativeAot()", body)
+        self.assertLess(
+            body.index("maskUnconditionalNativeAot()"), body.index("aot_result;")
+        )
+        self.assertIn("embbar_aot_stub.is_device_supported", body)
+        self.assertLess(
+            body.index("return aot_result;"), body.index("embbar_cuda(self)")
+        )
 
     def test_stub_definition(self) -> None:
         defn = native_aot.gen_stub_definition(self.manifest)
@@ -293,6 +309,44 @@ DECLARE_DISPATCH(embfoo_aot_fn, embfoo_aot_stub)
 DEFINE_DISPATCH(embfoo_aot_stub);
 REGISTER_NO_CPU_DISPATCH(embfoo_aot_stub)
 """,
+        )
+
+    def test_functional_base_does_not_hook_structured_overloads(self) -> None:
+        parsed = _parse_fixture()
+        grouped = get_grouped_native_functions(parsed.native_functions)
+        functional = native_aot.NativeAotManifest(
+            op="embmulti", dispatch_key=DispatchKey.CUDA, structured=False
+        )
+        structured = native_aot.NativeAotManifest(
+            op="embmulti.alpha", dispatch_key=DispatchKey.CUDA
+        )
+        manifests = {m.op: m for m in (functional, structured)}
+        native_aot.validate_native_aot_manifests(
+            {(m.dispatch_key, m.op): m for m in manifests.values()}, grouped
+        )
+        gen = RegisterDispatchKey(
+            parsed.backend_indices[DispatchKey.CUDA],
+            Target.ANONYMOUS_DEFINITION,
+            SelectiveBuilder.get_nop_selector(),
+            rocm=False,
+            symint=True,
+            class_method_name=None,
+            skip_dispatcher_op_registration=False,
+            native_aot_manifests=manifests,
+        )
+        body = "\n".join(code for g in grouped for code in gen(g))
+        self.assertEqual(body.count("embmulti_aot_stub("), 1)
+        self.assertIn(
+            "embmulti_aot_stub(c10::DeviceType::CUDA, self, flag, aot_result)", body
+        )
+        self.assertEqual(body.count("embmulti_alpha_aot_stub("), 2)
+        self.assertIn("op.impl(self, k, op.outputs_[0]);", body)
+        self.assertFalse(
+            any(
+                functional.matches_group(g)
+                for g in grouped
+                if isinstance(g, NativeFunctionsGroup) and g.structured
+            )
         )
 
     def _wrapper_body(self, with_manifest: bool) -> str:

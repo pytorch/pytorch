@@ -571,24 +571,13 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 aot_consultation = ""
                 aot_manifest = self.native_aot_manifests.get(str(f.func.name))
                 if aot_manifest is not None and not aot_manifest.structured:
-                    stub = f"at::native::{aot_manifest.stub_name()}"
-                    device_type = f"c10::DeviceType::{aot_manifest.dispatch_key}"
-                    gate = (
-                        "!at::globalContext().maskUnconditionalNativeAot()"
-                        if aot_manifest.unconditional
-                        else "at::globalContext().allowNativeAot()"
+                    from torchgen.native_aot import gen_stub_consultation
+
+                    aot_consultation = gen_stub_consultation(
+                        aot_manifest,
+                        ", ".join(a.name for a in sig.arguments()),
+                        returns_type=returns_type,
                     )
-                    aot_args = ", ".join(
-                        [*(a.name for a in sig.arguments()), "aot_result"]
-                    )
-                    aot_consultation = f"""
-  if ({gate} && {stub}.is_device_supported({device_type})) {{
-    {returns_type} aot_result;
-    if ({stub}({device_type}, {aot_args})) {{
-      return aot_result;
-    }}
-  }}
-"""
                 return f"""\
 namespace {{
 
@@ -1011,7 +1000,7 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 ) or self.native_aot_manifests.get(
                     self.g.functional.func.name.name.base
                 )
-                if aot_manifest is not None:
+                if aot_manifest is not None and aot_manifest.matches_group(self.g):
                     from torchgen.native_aot import gen_stub_consultation
 
                     sig_body.append(gen_stub_consultation(aot_manifest, impl_exprs))

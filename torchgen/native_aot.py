@@ -27,6 +27,7 @@ from torchgen.native_aot_decl import decl_id_for_op as _decl_id, discover_declar
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from torchgen.api.types import Binding
     from torchgen.model import NativeFunction, NativeFunctionsGroup
 
 
@@ -54,15 +55,17 @@ class NativeAotManifest:
         return f"{self.decl_id}_aot_fn"
 
     def matches_group(self, g: NativeFunctionsGroup) -> bool:
-        """Does this manifest target group g? A qualified op matches the exact
+        """Does this structured manifest target group g? A qualified op matches the exact
         functional overload name; a base name matches the group's base, whose
         uniqueness validate_native_aot_manifests checks."""
+        if not self.structured or not g.structured:
+            return False
         if "." in self.op:
             return self.op == str(g.functional.func.name)
         return self.op == g.functional.func.name.name.base
 
 
-def is_unconditional(d) -> bool:
+def is_unconditional(d: object) -> bool:
     """Whether a declaration's kernels ARE the op's implementation rather than a
     faster route to the same answer (``UNCONDITIONAL``, default False). Such an op's
     gate reads the private mask instead of the user-facing switch, so nothing a caller
@@ -105,7 +108,7 @@ def parse_native_aot_manifests(
     return manifests
 
 
-def _impl_bindings(g: NativeFunctionsGroup) -> list:
+def _impl_bindings(g: NativeFunctionsGroup) -> list[Binding]:
     import torchgen.api.structured as structured
     from torchgen.context import native_function_manager
 
@@ -146,10 +149,11 @@ REGISTER_NO_CPU_DISPATCH({m.stub_name()})
 """
 
 
-def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
-    """The structured-wrapper call site. The stub has no kernel unless the AOT
-    library registered one, and a Context switch gates the whole path; a true return
-    means the AOT kernel filled the meta()-allocated outputs and op.impl is skipped.
+def gen_stub_consultation(
+    m: NativeAotManifest, impl_exprs: str, *, returns_type: str | None = None
+) -> str:
+    """The wrapper call site. A Context switch gates the stub, which either fills
+    structured outputs or assigns the functional result and skips the backend.
 
     Which switch depends on the declaration: an ordinary op reads allowNativeAot(),
     the user-facing off switch, while an UNCONDITIONAL op reads
@@ -161,8 +165,24 @@ def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
     call site alone does not show."""
     device_type = f"c10::DeviceType::{m.dispatch_key}"
     stub = f"at::native::{m.stub_name()}"
+    gate = (
+        "!at::globalContext().maskUnconditionalNativeAot()"
+        if m.unconditional
+        else "at::globalContext().allowNativeAot()"
+    )
+    if not m.structured:
+        if returns_type is None:
+            raise AssertionError("functional native-AOT hooks require a return type")
+        args = ", ".join(filter(None, (impl_exprs, "aot_result")))
+        return f"""
+  if ({gate} && {stub}.is_device_supported({device_type})) {{
+    {returns_type} aot_result;
+    if ({stub}({device_type}, {args})) {{
+      return aot_result;
+    }}
+  }}
+"""
     if m.unconditional:
-        gate = "!at::globalContext().maskUnconditionalNativeAot()"
         # The user-facing switch does NOT reach this op, so the shared comment's
         # "switched off" case would describe a route that does not exist here.
         gate_comment = (
@@ -177,7 +197,6 @@ def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
             "// below is the ordinary aten kernel.\n"
         )
     else:
-        gate = "at::globalContext().allowNativeAot()"
         gate_comment = ""
         cases = (
             "// the stub is never called when AOT is switched off or the device is\n"
@@ -210,7 +229,7 @@ def validate_native_aot_manifests(
     from torchgen.model import BaseTy, BaseType, NativeFunctionsGroup, SchemaKind
 
     structured_by_base: dict[str, list[str]] = defaultdict(list)
-    functional_by_name = {}
+    functional_by_name: dict[str, NativeFunction] = {}
     for g in grouped_native_functions:
         if isinstance(g, NativeFunctionsGroup) and g.structured:
             structured_by_base[g.functional.func.name.name.base].append(
