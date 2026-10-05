@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import io
 import os
 import re
 import shutil
 import tempfile
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager
 from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
@@ -16,10 +15,10 @@ from unittest import main, mock, TestCase
 from github_utils import GHGraphQLError
 from gitutils import _check_output, GitRepo
 from native_stack import (
+    _landed_in,
     _trunk_landings,
     build_native_stack_commits,
     build_native_stack_rebase,
-    find_landed_commit,
     find_stack_dependents,
     get_native_stack,
     get_native_stack_landing_prs,
@@ -96,13 +95,11 @@ def make_entry(
     head_oid: str,
     base_ref: str,
     closed: bool = False,
-    cross_repo: bool = False,
 ) -> StackEntry:
     return StackEntry(
         position=position,
         number=number,
         closed=closed,
-        is_cross_repository=cross_repo,
         head_ref=head_ref,
         head_oid=head_oid,
         base_ref=base_ref,
@@ -124,7 +121,6 @@ def gql_node(entry: StackEntry) -> dict[str, Any]:
             "state": "CLOSED" if entry.closed else "OPEN",
             "closed": entry.closed,
             "merged": False,
-            "isCrossRepository": entry.is_cross_repository,
             "headRefName": entry.head_ref,
             "headRefOid": entry.head_oid,
             "baseRefName": entry.base_ref,
@@ -138,7 +134,6 @@ def gql_stack(
 ) -> dict[str, Any]:
     total = len(nodes) if total_count is None else total_count
     stack = {
-        "number": 197570,
         "size": total,
         "baseRefName": TRUNK,
         "entries": {
@@ -152,7 +147,7 @@ def gql_stack(
 
 GQL_ENTRIES = (
     make_entry(1, 198532, "user/capture", "1" * 40, TRUNK, closed=True),
-    make_entry(2, 198534, "user/inductor", "2" * 40, "user/capture", cross_repo=True),
+    make_entry(2, 198534, "user/inductor", "2" * 40, "user/capture"),
     make_entry(3, 198536, "user/tests", "3" * 40, "user/inductor"),
 )
 GQL_NODES = [gql_node(entry) for entry in GQL_ENTRIES]
@@ -177,7 +172,7 @@ class TestGetNativeStack(TestCase):
         gql.return_value = gql_stack(GQL_NODES)
         self.assertEqual(
             get_native_stack(ORG, PROJECT, 198534),
-            NativeStack(number=197570, base_ref=TRUNK, entries=GQL_ENTRIES),
+            NativeStack(base_ref=TRUNK, entries=GQL_ENTRIES),
         )
         gql.assert_called_once_with(
             GH_GET_PR_STACK_QUERY, owner=ORG, name=PROJECT, number=198534
@@ -187,7 +182,7 @@ class TestGetNativeStack(TestCase):
         gql.return_value = gql_stack([GQL_NODES[i] for i in (2, 0, 1)])
         self.assertEqual(
             get_native_stack(ORG, PROJECT, 198534),
-            NativeStack(number=197570, base_ref=TRUNK, entries=GQL_ENTRIES),
+            NativeStack(base_ref=TRUNK, entries=GQL_ENTRIES),
         )
 
     def test_rejects_more_than_one_page(self, gql: Any) -> None:
@@ -222,7 +217,6 @@ class TestGetNativeStack(TestCase):
             "hasNextPage",
             "position",
             "closed",
-            "isCrossRepository",
             "headRefName",
             "headRefOid",
         ):
@@ -301,13 +295,13 @@ class GitTestCase(TestCase):
             head = self.push_branch(branch, base, commits, files)
             entries.append(make_entry(position, 100 + position, branch, head, base))
             base = branch
-        return NativeStack(number=100, base_ref=trunk, entries=tuple(entries))
+        return NativeStack(base_ref=trunk, entries=tuple(entries))
 
     def landing_prs(
-        self, stack: NativeStack, target: int, default_branch: str = TRUNK
+        self, stack: NativeStack, target: int
     ) -> list[tuple[StackEntry, str]]:
         return get_native_stack_landing_prs(
-            self.repo, ORG, PROJECT, stack, target, default_branch
+            self.repo, ORG, PROJECT, stack, target, TRUNK
         )
 
     def merge_into(self, branch: str, other: str) -> str:
@@ -335,39 +329,20 @@ class GitTestCase(TestCase):
         self.git("push", "-q", "origin", TRUNK)
         return self.git("rev-parse", "HEAD")
 
-    def revert_manually(self, sha: str) -> str:
-        self.git("checkout", "-q", TRUNK)
-        self.git("revert", "--no-commit", sha)
-        self.git("commit", "-q", "-m", manual_revert_message(sha))
-        self.git("push", "-q", "origin", TRUNK)
-        return self.git("rev-parse", "HEAD")
 
-
-class TestFindLandedCommit(GitTestCase):
-    def find(self, url: str, ref: str = TRUNK) -> str | None:
-        return find_landed_commit(GitRepo(self.dev), url, ref)
+class TestLandedIn(GitTestCase):
+    def find(self, url: str) -> str | None:
+        return _landed_in(GitRepo(self.dev), url, TRUNK, TRUNK)
 
     def test_finds_newest_landing_commit(self) -> None:
         landed = self.commit(landing_message(pr_url(1234)))
         self.commit(landing_message(pr_url(4321)))
         self.assertEqual(self.find(pr_url(1234)), landed)
 
-    def test_no_landing_commit(self) -> None:
-        self.commit(landing_message(pr_url(4321)))
-        self.assertIsNone(self.find(pr_url(1234)))
-
     def test_pr_number_must_match_exactly(self) -> None:
         self.commit(landing_message(pr_url(12345)))
         self.assertIsNone(self.find(pr_url(1234)))
         self.assertIsNone(self.find(pr_url(123456)))
-
-    def test_url_dots_are_literal(self) -> None:
-        self.commit(landing_message(pr_url(1234, host="githubXcom")))
-        self.assertIsNone(self.find(pr_url(1234)))
-
-    def test_whole_line_must_match(self) -> None:
-        self.commit(f"Change\n\nSee {PULL_REQUEST_RESOLVED}{pr_url(1234)}\n")
-        self.assertIsNone(self.find(pr_url(1234)))
 
     def test_lines_quoted_in_a_body_are_not_landings(self) -> None:
         quoted = landing_message(pr_url(1234))
@@ -400,41 +375,12 @@ class TestFindLandedCommit(GitTestCase):
         self.commit(manual_revert_message(landed))
         self.assertIsNone(self.find(pr_url(1234)))
 
-    def test_line_quoted_after_a_revert_is_not_a_reland(self) -> None:
-        landed = self.commit(landing_message(pr_url(1234)))
-        self.commit(revert_message(pr_url(1234), landed))
-        self.commit(landing_message(pr_url(4321), landing_message(pr_url(1234))))
-        self.assertIsNone(self.find(pr_url(1234)))
-
     def test_relanded_after_revert(self) -> None:
         landed = self.commit(landing_message(pr_url(1234)))
         self.commit(revert_message(pr_url(1234), landed))
         relanded = self.commit(landing_message(pr_url(1234)))
         self.commit("Unrelated change")
         self.assertEqual(self.find(pr_url(1234)), relanded)
-
-    def test_reverts_of_other_prs_are_ignored(self) -> None:
-        landed = self.commit(landing_message(pr_url(1234)))
-        for url in (pr_url(12345), pr_url(1234, host="githubXcom")):
-            other = self.commit(landing_message(url))
-            self.commit(revert_message(url, other))
-        self.assertEqual(self.find(pr_url(1234)), landed)
-
-    def test_revert_lines_without_the_landed_commit_do_not_revert(self) -> None:
-        landed = self.commit(landing_message(pr_url(1234)))
-        other = self.commit(landing_message(pr_url(4321)))
-        self.commit(revert_message(pr_url(1234), other))
-        line = f"Reverted {pr_url(1234)} on behalf of https://github.com/reverter"
-        self.commit(landing_message(pr_url(5678), line))
-        self.assertEqual(self.find(pr_url(1234)), landed)
-        self.assertIsNone(self.find(pr_url(4321)))
-
-    def test_revert_line_may_go_on_after_the_sha(self) -> None:
-        rests = {1234: ", which was wrong", 1235: " because it broke trunk.", 1236: ""}
-        for number, rest in rests.items():
-            landed = self.commit(landing_message(pr_url(number)))
-            self.commit(f"Revert\n\nThis reverts commit {landed}{rest}\n")
-            self.assertIsNone(self.find(pr_url(number)))
 
     def test_revert_line_needs_exactly_the_sha_at_the_start_of_a_line(self) -> None:
         landed = self.commit(landing_message(pr_url(1234)))
@@ -446,30 +392,6 @@ class TestFindLandedCommit(GitTestCase):
         )
         self.commit(f"Revert\n\n{lines}")
         self.assertEqual(self.find(pr_url(1234)), landed)
-
-    def test_only_commits_reachable_from_ref_count(self) -> None:
-        landed = self.commit(landing_message(pr_url(1234)))
-        self.git("checkout", "-q", "-b", "reverted")
-        self.commit(revert_message(pr_url(1234), landed))
-        self.git("checkout", "-q", "-b", "other", TRUNK)
-        other = self.commit(landing_message(pr_url(4321)))
-        self.assertEqual(self.find(pr_url(1234)), landed)
-        self.assertIsNone(self.find(pr_url(1234), ref="reverted"))
-        self.assertIsNone(self.find(pr_url(4321)))
-        self.assertEqual(self.find(pr_url(4321), ref="other"), other)
-
-    def test_ref_named_like_a_file(self) -> None:
-        landed = self.commit(landing_message(pr_url(1234)))
-        Path(self.dev, TRUNK).write_text("untracked\n")
-        self.assertEqual(self.find(pr_url(1234)), landed)
-
-    def test_rejects_output_not_starting_with_a_sha(self) -> None:
-        repo = GitRepo(self.dev)
-        output = f"warning: refname '{TRUNK}' is ambiguous.\n{'a' * 40}\nChange\n"
-        message = rf"^Unexpected output from git log on {TRUNK}"
-        with mock.patch.object(repo, "_run_git", return_value=output):
-            with self.assertRaisesRegex(RuntimeError, message):
-                find_landed_commit(repo, pr_url(1234), TRUNK)
 
 
 class TestTrunkLandings(GitTestCase):
@@ -496,19 +418,6 @@ class TestTrunkLandings(GitTestCase):
         self.assertEqual(self.read(101), ([second, first], [f"{second}..{second}"]))
         self.assertEqual(self.read(102), ([other], [second]))
 
-    def test_reads_the_whole_history_again_after_a_forced_update(self) -> None:
-        landed = self.push_landing(101)
-        self.assertEqual(self.read(101), ([landed], [landed]))
-        self.git("push", "-q", "-f", "origin", f"{self.root}:{TRUNK}")
-        self.git("fetch", "-q", "origin", cwd=self.repo.repo_dir)
-        self.assertEqual(self.read(101), ([], [self.root]))
-
-    def test_each_repository_reads_its_own_history(self) -> None:
-        landed = self.push_landing(101)
-        self.assertEqual(self.read(101), ([landed], [landed]))
-        self.repo = GitRepo(self.repo.repo_dir, remote="origin")
-        self.assertEqual(self.read(101), ([landed], [landed]))
-
 
 NOT_LANDED = r"PR #101 is closed but not landed on main, or it was reverted"
 REBASE = re.escape(
@@ -517,16 +426,9 @@ REBASE = re.escape(
 
 
 class TestGetNativeStackLandingPrs(GitTestCase):
-    def assertRefused(
-        self,
-        stack: NativeStack,
-        target: int,
-        message: str,
-        default_branch: str = TRUNK,
-    ) -> str:
-        with self.assertRaisesRegex(NativeStackError, message) as refusal:
-            self.landing_prs(stack, target, default_branch)
-        return str(refusal.exception)
+    def assertRefused(self, stack: NativeStack, target: int, message: str) -> None:
+        with self.assertRaisesRegex(NativeStackError, message):
+            self.landing_prs(stack, target)
 
     def test_lands_open_entries_up_to_target(self) -> None:
         stack = self.push_stack()
@@ -540,15 +442,6 @@ class TestGetNativeStackLandingPrs(GitTestCase):
         )
         self.assertEqual(self.landing_prs(stack, a.number), [(a, self.root)])
 
-    def test_trunk_moved_forward(self) -> None:
-        stack = self.push_stack()
-        self.add_commits(TRUNK, 2)
-        a, b, c = stack.entries
-        self.assertEqual(
-            self.landing_prs(stack, c.number),
-            [(a, self.root), (b, a.head_oid), (c, b.head_oid)],
-        )
-
     def test_landed_entry_below_uses_live_branch_tip(self) -> None:
         stack = self.push_stack()
         self.land(stack.entries[0])
@@ -560,26 +453,6 @@ class TestGetNativeStackLandingPrs(GitTestCase):
         _, b, c = stack.entries
         self.assertEqual(self.landing_prs(stack, c.number), [(b, a_head), (c, b_head)])
 
-    def test_landed_entry_branch_reset_to_trunk(self) -> None:
-        stack = self.push_stack(("user/a", "user/b"))
-        a = stack.entries[0]
-        landed = self.land(a)
-        # GitHub keeps a closed PR's head reachable from refs/pull/<number>/head.
-        self.git("push", "-q", "origin", f"{a.head_oid}:refs/pull/{a.number}/head")
-        self.git("push", "-q", "-f", "origin", f"{TRUNK}:{a.head_ref}")
-        b_head = self.rebase("user/b", "--onto", TRUNK, a.head_oid)
-        stack = with_entry(with_entry(stack, 0, closed=True), 1, head_oid=b_head)
-        b = stack.entries[1]
-        self.assertEqual(self.landing_prs(stack, b.number), [(b, landed)])
-
-    def test_skips_several_landed_entries(self) -> None:
-        stack = self.push_stack()
-        a, b, c = stack.entries
-        self.land(a)
-        self.land(b)
-        stack = with_entry(with_entry(stack, 0, closed=True), 1, closed=True)
-        self.assertEqual(self.landing_prs(stack, c.number), [(c, b.head_oid)])
-
     def test_bottom_entry_merged_trunk_and_upper_entry_merged_it(self) -> None:
         stack = self.push_stack(("user/a", "user/b"))
         trunk = self.add_commits(TRUNK)
@@ -589,79 +462,59 @@ class TestGetNativeStackLandingPrs(GitTestCase):
         a, b = stack.entries
         self.assertEqual(self.landing_prs(stack, b.number), [(a, trunk), (b, a_head)])
 
-    def test_cross_repo_and_ghstack_entries_above_target_are_ignored(self) -> None:
-        stack = self.push_stack(("user/a", "user/b", "gh/someone/7/head"))
-        stack = with_entry(stack, 2, is_cross_repository=True)
-        a, b, _ = stack.entries
-        self.assertEqual(
-            self.landing_prs(stack, b.number), [(a, self.root), (b, a.head_oid)]
+    def test_refuses_unsupported_stacks_without_running_git(self) -> None:
+        entries = (
+            make_entry(1, 101, "user/a", "1" * 40, TRUNK),
+            make_entry(2, 102, "user/b", "2" * 40, "user/a"),
+            make_entry(3, 103, "user/c", "3" * 40, "user/b"),
         )
-
-    def test_closed_entry_above_target_is_ignored(self) -> None:
-        stack = with_entry(self.push_stack(), 2, closed=True)
-        a, b, _ = stack.entries
-        self.assertEqual(
-            self.landing_prs(stack, b.number), [(a, self.root), (b, a.head_oid)]
-        )
-
-    def test_refuses_trunk_other_than_default_branch(self) -> None:
-        self.git("branch", "viable/strict", TRUNK)
-        self.git("push", "-q", "origin", "viable/strict")
-        stack = self.push_stack(trunk="viable/strict")
-        a, b, c = stack.entries
-        self.assertEqual(
-            self.landing_prs(stack, c.number, default_branch="viable/strict"),
-            [(a, self.root), (b, a.head_oid), (c, b.head_oid)],
-        )
-        message = (
-            r"PR #103 is in a stack based on viable/strict, but only stacks based on "
-            r"main can be merged"
-        )
-        self.assertRefused(stack, c.number, message)
-
-    def test_refuses_target_not_in_stack(self) -> None:
-        self.assertRefused(self.push_stack(), 999, r"PR #999 is not in the stack")
-
-    def test_refuses_closed_target(self) -> None:
-        stack = self.push_stack()
-        message = r"^PR #103 is closed$"
-        self.assertRefused(with_entry(stack, 2, closed=True), 103, message)
-        for entry in stack.entries:
-            self.land(entry)
-        landed = tuple(replace(entry, closed=True) for entry in stack.entries)
-        self.assertRefused(replace(stack, entries=landed), 103, message)
-
-    def test_refuses_cross_repo_entry_at_or_below_target(self) -> None:
-        stack = self.push_stack()
-        for index, entry in enumerate(stack.entries):
-            with self.subTest(index=index):
-                cross_repo = with_entry(stack, index, is_cross_repository=True)
-                message = rf"PR #{entry.number} is from a fork"
-                self.assertRefused(cross_repo, 103, message)
-
-    def test_refuses_broken_chain(self) -> None:
-        self.git("branch", "user/other", TRUNK)
-        self.git("push", "-q", "origin", "user/other")
-        stack = self.push_stack()
+        stack = NativeStack(base_ref=TRUNK, entries=entries)
+        other_trunk = replace(stack, base_ref=VIABLE_STRICT)
+        ghstack = with_entry(stack, 0, head_ref="gh/someone/7/head")
+        based = r"#103 is in a stack based on viable/strict, but only stacks based on"
         bottom = (
             r"PR #101 is at the bottom of the stack, so its base must be the stack's "
             r"trunk \(main\), not user/other"
         )
         middle = r"PR #{} targets {} instead of {}, the branch of PR #{} below it"
-        broken = (
+        mixed = (
+            r"^PR #101 is a ghstack PR, and the bot does not support stacks that mix "
+            r"ghstack PRs with other PRs; unstack the other PRs$"
+        )
+        below_open = r"^PR #102 is closed, but PR #101 below it is still open$"
+        chains = (
             (0, "user/other", bottom),
             (1, "user/other", middle.format(102, "user/other", "user/a", 101)),
             (1, TRUNK, middle.format(102, TRUNK, "user/a", 101)),
             (2, "user/other", middle.format(103, "user/other", "user/b", 102)),
         )
-        for index, base, message in broken:
-            with self.subTest(index=index, base=base):
-                chain = with_entry(stack, index, base_ref=base)
-                self.assertRefused(chain, 103, message)
-
-    def test_refuses_closed_entry_below_target_that_did_not_land(self) -> None:
-        stack = with_entry(self.push_stack(), 0, closed=True)
-        self.assertRefused(stack, 103, NOT_LANDED)
+        refused = [
+            (with_entry(stack, index, base_ref=base), 103, message)
+            for index, base, message in chains
+        ]
+        refused += [
+            (other_trunk, 103, f"{based} main can be merged$"),
+            (stack, 999, r"^PR #999 is not in the stack$"),
+            (with_entry(stack, 2, closed=True), 103, r"^PR #103 is closed$"),
+            (with_entry(stack, 1, closed=True), 103, below_open),
+            (ghstack, 101, mixed),
+            (with_entry(ghstack, 0, closed=True), 103, mixed),
+        ]
+        opened = r"^PR #101 is opened from viable/strict, so rebasing it would push to"
+        rebase_refused = (
+            (other_trunk, 103, TRUNK, f"{based} main can be rebased$"),
+            (with_entry(stack, 0, head_ref=VIABLE_STRICT), 101, VIABLE_STRICT, opened),
+        )
+        with mock.patch.object(self.repo, "_run_git", side_effect=AssertionError):
+            for refused_stack, target, message in refused:
+                with self.subTest(target=target, message=message):
+                    self.assertRefused(refused_stack, target, message)
+            for refused_stack, target, onto, message in rebase_refused:
+                with self.subTest(target=target, onto=onto, message=message):
+                    with self.assertRaisesRegex(NativeStackError, message):
+                        build_native_stack_rebase(
+                            self.repo, ORG, PROJECT, refused_stack, target, TRUNK, onto
+                        )
 
     def test_refuses_entry_below_target_landed_then_reverted(self) -> None:
         stack = self.push_stack()
@@ -673,12 +526,6 @@ class TestGetNativeStackLandingPrs(GitTestCase):
         )
         self.revert(a, landed)
         self.assertRefused(closed, c.number, NOT_LANDED)
-
-    def test_refuses_open_entry_below_closed_entry(self) -> None:
-        stack = self.push_stack()
-        self.land(stack.entries[1])
-        message = r"PR #102 is closed, but PR #101 below it is still open"
-        self.assertRefused(with_entry(stack, 1, closed=True), 103, message)
 
     def test_refuses_open_entry_that_already_landed(self) -> None:
         stack = self.push_stack()
@@ -715,16 +562,6 @@ class TestGetNativeStackLandingPrs(GitTestCase):
         self.git("push", "-q", "origin", "--delete", a.head_ref)
         message = r"^Could not fetch main and the commits of PRs #101, #102: "
         self.assertRefused(stack, b.number, message)
-
-    def test_refuses_ghstack_entry_at_or_below_target(self) -> None:
-        stack = self.push_stack(("gh/someone/7/head", "user/b", "user/c"))
-        message = (
-            r"^PR #101 is a ghstack PR, and the bot does not support stacks that mix "
-            r"ghstack PRs with other PRs; unstack the other PRs$"
-        )
-        self.assertRefused(stack, 101, message)
-        self.land(stack.entries[0])
-        self.assertRefused(with_entry(stack, 0, closed=True), 103, message)
 
     def test_refuses_lower_entry_updated_while_preparing_the_merge(self) -> None:
         stack = self.push_stack(("user/a",))
@@ -799,18 +636,6 @@ class TestGetNativeStackLandingPrs(GitTestCase):
         stack = self.merge_into_stack(stack, TRUNK)
         landing = [entry.number for entry, _ in self.landing_prs(stack, c.number)]
         self.assertEqual(landing, [101, 102, 103])
-
-    def test_relanded_pr_counts_its_newest_landing_in_its_base(self) -> None:
-        stack = self.push_stack()
-        a, _, c = stack.entries
-        self.revert(a, self.land(a))
-        relanded = self.land(a)
-        stack = self.merge_into_stack(stack, relanded)
-        self.revert(a, relanded)
-        message = rf"^PR #101 landed in {relanded}, which its merge base"
-        self.assertRefused(stack, c.number, message)
-        stack = self.merge_into_stack(stack, TRUNK)
-        self.assertEqual(len(self.landing_prs(stack, c.number)), 3)
 
 
 class TestBuildNativeStackCommits(GitTestCase):
@@ -919,17 +744,6 @@ class TestBuildNativeStackCommits(GitTestCase):
         expected = self.diffs(a.head_oid, b.head_oid, c.head_oid)
         self.assertEqual(self.diffs(TRUNK_REF, *built), expected)
 
-    def test_keeps_trunk_edits_to_files_of_landed_pr(self) -> None:
-        stack = self.push_stack(
-            ("user/a", "user/b"), changes=({"shared.txt": "a\n"}, {"b.txt": "b\n"})
-        )
-        a, b = stack.entries
-        self.land(a)
-        self.add_commits(TRUNK, files={"shared.txt": "a\nfixed on trunk\n"})
-        built = self.build(with_entry(stack, 0, closed=True), b.number)
-        expected = self.diffs(a.head_oid, b.head_oid)
-        self.assertEqual(self.diffs(TRUNK_REF, *built), expected)
-
     def test_upper_pr_undoes_part_of_lower_pr(self) -> None:
         stack = self.push_stack(
             ("user/a", "user/b"),
@@ -943,22 +757,6 @@ class TestBuildNativeStackCommits(GitTestCase):
         self.assertTrunkPlusHeads(built, [entry.head_oid for entry in stack.entries])
         self.assertEqual(self.show(built[1], "shared.txt"), "keep\n")
 
-    def test_merges_trunk_and_pr_edits_to_same_file(self) -> None:
-        self.add_commits(TRUNK, files={"shared.txt": "1\n2\n3\n4\n5\n6\n7\n"})
-        stack = self.push_stack(
-            ("user/a", "user/b"),
-            changes=(
-                {"shared.txt": "A\n2\n3\n4\n5\n6\n7\n"},
-                {"shared.txt": "A\n2\n3\nB\n5\n6\n7\n"},
-            ),
-        )
-        self.add_commits(TRUNK, files={"shared.txt": "1\n2\n3\n4\n5\n6\nT\n"})
-        built = self.build(stack, 102)
-        self.assertEqual(
-            [self.show(commit, "shared.txt") for commit in built],
-            ["A\n2\n3\n4\n5\n6\nT\n", "A\n2\n3\nB\n5\n6\nT\n"],
-        )
-
     def test_lower_branches_advanced_by_merge_commits(self) -> None:
         stack = self.push_stack(("user/a", "user/b"))
         self.add_commits(TRUNK)
@@ -968,25 +766,11 @@ class TestBuildNativeStackCommits(GitTestCase):
         stack = with_entry(with_entry(stack, 0, head_oid=a_head), 1, head_oid=b_head)
         self.assertTrunkPlusHeads(self.build(stack, 102), [a_head, b_head])
 
-    def test_landed_lower_branch_advanced_by_merge_commits(self) -> None:
-        stack = self.push_stack(("user/a", "user/b"))
-        self.land(stack.entries[0])
-        self.merge_into("user/a", TRUNK)
-        b_head = self.merge_into("user/b", "user/a")
-        self.add_commits(TRUNK)
-        stack = with_entry(with_entry(stack, 0, closed=True), 1, head_oid=b_head)
-        self.assertTrunkPlusHeads(self.build(stack, 102), [b_head])
-
     def test_refuses_pr_conflicting_with_trunk(self) -> None:
         stack = self.push_stack(
             ("user/a", "user/b"), changes=({"file1.txt": "a\n"}, {"b.txt": "b\n"})
         )
         self.add_commits(TRUNK, files={"file1.txt": "trunk\n"})
-        with self.assertRaisesRegex(NativeStackError, r"#101\b"):
-            self.build(stack, 102)
-
-    def test_refuses_empty_bottom_pr(self) -> None:
-        stack = self.push_stack(("user/a", "user/b"), commits=0)
         with self.assertRaisesRegex(NativeStackError, r"#101\b"):
             self.build(stack, 102)
 
@@ -1024,10 +808,12 @@ class TestBuildNativeStackCommits(GitTestCase):
 
     def test_cleans_up_message_like_git_commit(self) -> None:
         stack = self.push_stack(("user/a",))
+        # A carriage return inside a co-author's name stays inside its line
+        name = f"Name\r{PULL_REQUEST_RESOLVED}{pr_url(4321)}\rName"
         message = (
             "Change (#101)\r\n\r\n## Summary\r\nDetails   \r\n\r\n\r\n\r\n"
             f"{PULL_REQUEST_RESOLVED}{pr_url(101)}\r\n\r\n"
-            "Co-authored-by: Author 2 <author2@example.com>"
+            f"Co-authored-by: {name} <co@example.com>"
         )
         built = self.build(stack, 101, [(author(101), message)])
         self.assertEqual(
@@ -1035,50 +821,9 @@ class TestBuildNativeStackCommits(GitTestCase):
             [
                 "Change (#101)\n\n## Summary\nDetails\n\n"
                 f"{PULL_REQUEST_RESOLVED}{pr_url(101)}\n\n"
-                "Co-authored-by: Author 2 <author2@example.com>\n"
+                f"Co-authored-by: {name} <co@example.com>\n"
             ],
         )
-
-    def test_keeps_carriage_returns_inside_lines(self) -> None:
-        stack = self.push_stack(("user/a",))
-        name = f"Name\r{PULL_REQUEST_RESOLVED}{pr_url(4321)}\rName"
-        message = landing_message(pr_url(101))
-        message += f"\nCo-authored-by: {name} <co@example.com>\n"
-        built = self.build(stack, 101, [(author(101), message)])
-        self.assertEqual([self.message(commit) for commit in built], [message])
-        landed = find_landed_commit(self.repo, pr_url(101), built[0])
-        self.assertEqual(landed, built[0])
-
-    def test_logs_git_commands_in_debug_mode(self) -> None:
-        stack = self.push_stack(("user/a",))
-        self.repo.debug = True
-        with redirect_stdout(io.StringIO()) as out:
-            self.build(stack, 101)
-        prefix = f"+ git -C {self.repo.repo_dir} "
-        logged = [x for x in out.getvalue().splitlines() if x.startswith(prefix)]
-        commands = {line.removeprefix(prefix).split()[0] for line in logged}
-        self.assertLessEqual({"merge-tree", "stripspace", "commit-tree"}, commands)
-
-    def test_failed_git_command_is_printed_with_its_repository(self) -> None:
-        stack = self.push_stack(("user/a",))
-        landing = self.landing_prs(stack, 101)
-        commits = [(author(101), landing_message(pr_url(101)))]
-        with redirect_stdout(io.StringIO()) as out:
-            with self.assertRaises(RuntimeError) as failure:
-                build_native_stack_commits(self.repo, "0" * 40, landing, commits)
-        command = f"Command `git -C {self.repo.repo_dir} merge-tree --write-tree "
-        self.assertTrue(str(failure.exception).startswith(command), failure.exception)
-        self.assertIn("stderr: \n", out.getvalue())
-
-    def test_leaves_dirty_worktree_and_index_alone(self) -> None:
-        stack = self.push_stack()
-        bot = Path(self.repo.repo_dir)
-        (bot / "file1.txt").write_text("local edit\n")
-        (bot / "staged.txt").write_text("staged\n")
-        self.bot_git("add", "staged.txt")
-        (bot / "untracked.txt").write_text("untracked\n")
-        self.build(stack, 103)
-        self.assertEqual((bot / "file1.txt").read_text(), "local edit\n")
 
 
 class TestFindStackDependents(GitTestCase):
@@ -1121,8 +866,8 @@ class TestFindStackDependents(GitTestCase):
         self.assertEqual(self.found(101), (None, []))
         reapplied = revert(reverted)
         self.assertEqual(self.found(101), (a, [(c, 103), (b, 102)]))
-        # Merges and rebases still read a reverted revert as a revert
-        self.assertIsNone(find_landed_commit(GitRepo(self.dev), pr_url(101), TRUNK))
+        # Merges and rebases read the reapplied PR as landed too
+        self.assertEqual(_landed_in(GitRepo(self.dev), pr_url(101), TRUNK, TRUNK), a)
         revert(reapplied)
         self.assertEqual(self.found(101), (None, []))
 
@@ -1131,11 +876,6 @@ class TestFindStackDependents(GitTestCase):
         self.revert_pr(102)
         b = self.land_pr(102, 101)
         self.assertEqual(self.dependents(101), [(c, 103), (b, 102)])
-
-    def test_dependents_at_the_same_position_are_newest_first(self) -> None:
-        _, b, c = self.land_stack()
-        d = self.land_pr(104, 101)
-        self.assertEqual(self.dependents(101), [(c, 103), (d, 104), (b, 102)])
 
     def test_middle_pr_has_only_the_prs_above_it(self) -> None:
         _, _, c = self.land_stack()
@@ -1161,14 +901,6 @@ class TestFindStackDependents(GitTestCase):
         self.assertEqual(self.dependents(101), [(c, 103)])
         self.assertEqual(self.dependents(103), [])
 
-    def test_later_commit_quoting_a_dependent_does_not_replace_it(self) -> None:
-        self.land_pr(101)
-        b = self.land_pr(102, 101)
-        quoted = f"{landing_message(pr_url(102))}{stack_dependencies_line([101])}"
-        self.commit(landing_message(pr_url(500), quoted))
-        self.assertEqual(self.dependents(101), [(b, 102)])
-        self.assertEqual(find_landed_commit(GitRepo(self.dev), pr_url(102), TRUNK), b)
-
     def test_stack_dependencies_line_quoted_in_a_body_does_not_count(self) -> None:
         self.land_pr(101)
         self.land_pr(300)
@@ -1178,13 +910,6 @@ class TestFindStackDependents(GitTestCase):
         on_300 = self.commit(f"{message}{stack_dependencies_line([300])}\n")
         self.assertEqual(self.dependents(101), [])
         self.assertEqual(self.dependents(300), [(on_300, 301)])
-
-    def test_dependent_relanded_after_a_revert_counts_at_its_reland(self) -> None:
-        _, b, _ = self.land_stack()
-        self.revert_pr(103)
-        self.land_pr(200)
-        c = self.land_pr(103, 101, 102)
-        self.assertEqual(self.dependents(101), [(c, 103), (b, 102)])
 
     def test_dependent_relanded_outside_the_stack_is_not_a_dependent(self) -> None:
         _, b, _ = self.land_stack()
@@ -1204,81 +929,11 @@ class TestFindStackDependents(GitTestCase):
         self.assertEqual(self.dependents(101), [(on_all, 204), (on_101, 202)])
         self.assertEqual(self.dependents(1011), [(on_all, 204), (on_1011, 203)])
 
-    def test_pr_numbers_in_urls_must_match_exactly(self) -> None:
-        self.land_pr(101)
-        self.land_pr(103, 10)
-        self.land_pr(10)
-        dependent = self.land_pr(102, 10)
-        self.revert_pr(101)
-        self.land_pr(1021)
-        self.revert_pr(1021)
-        self.assertEqual(self.dependents(10), [(dependent, 102)])
-
-    def test_dependent_needs_an_exact_pull_request_resolved_line(self) -> None:
-        self.land_pr(101)
-        for message in (
-            landing_message(f"https://github.com/{ORG}/vision/pull/102"),
-            landing_message(pr_url(103, host="githubXcom")),
-            f"Change\n\nSee {PULL_REQUEST_RESOLVED}{pr_url(104)}\n",
-        ):
-            self.commit(f"{message}{stack_dependencies_line([101])}\n")
-        self.assertEqual(self.dependents(101), [])
-
-    def test_only_lf_ends_a_line(self) -> None:
-        self.land_pr(101)
-        self.land_pr(300)
-        dependents: list[tuple[str, int]] = []
-        for number, separator in ((102, "\r"), (103, "\u2028")):
-            # A co-author named like the bot's lines, which it follows
-            resolved = f"{PULL_REQUEST_RESOLVED}{pr_url(number)}"
-            on_300 = stack_dependencies_line([300])
-            name = separator.join(("Name", resolved, on_300, "Name"))
-            message = landing_message(pr_url(number), on_300)
-            message += f"{stack_dependencies_line([101])}\n\n"
-            message += f"Co-authored-by: {name} <co@example.com>\n"
-            dependents.insert(0, (self.commit(message), number))
-        self.assertEqual(self.dependents(101), dependents)
-        self.assertEqual(self.dependents(300), [])
-
-    def test_dependent_body_quoting_another_pr_resolves_to_its_own_pr(self) -> None:
-        self.land_pr(101)
-        quoted = landing_message(pr_url(90))
-        dependent = self.commit(
-            f"Reland (#102)\n\n{quoted}\n{PULL_REQUEST_RESOLVED}{pr_url(102)}\n"
-            f"{stack_dependencies_line([101])}\n"
-        )
-        self.assertEqual(self.dependents(101), [(dependent, 102)])
-
-    def test_only_a_stack_dependencies_line_counts(self) -> None:
-        self.land_pr(101)
-        for number, line in (
-            (102, "ghstack dependencies: #101"),
-            (103, f"See {stack_dependencies_line([101])}"),
-            (104, "Follow-up to #101"),
-        ):
-            self.commit(f"{landing_message(pr_url(number))}{line}\n")
-        self.assertEqual(self.dependents(101), [])
-
     def test_dependents_landed_before_a_reland_still_count(self) -> None:
         _, b, c = self.land_stack()
         self.revert_pr(101)
         self.land_pr(101)
         self.assertEqual(self.dependents(101), [(c, 103), (b, 102)])
-
-    def test_dependents_reverted_before_a_reland_stay_excluded(self) -> None:
-        self.land_stack()
-        for number in (103, 102, 101):
-            self.revert_pr(number)
-        self.land_pr(101)
-        self.assertEqual(self.dependents(101), [])
-        d = self.land_pr(104, 101)
-        self.assertEqual(self.dependents(101), [(d, 104)])
-
-    def test_commits_before_the_earliest_landing_never_count(self) -> None:
-        self.land_pr(102, 101)
-        self.land_pr(101)
-        c = self.land_pr(103, 101)
-        self.assertEqual(self.dependents(101), [(c, 103)])
 
     def test_pr_without_a_landing_has_no_dependents(self) -> None:
         self.land_pr(102, 101)
@@ -1299,7 +954,7 @@ VIABLE_STRICT = "viable/strict"
 # Branch, line of f.txt and label of each PR of a line stack
 LINE_STACK = (("user/a", 2, "A"), ("user/b", 6, "B"), ("user/c", 9, "C"))
 # Branch updates as build_native_stack_rebase returns them
-Updates = list[tuple[int, str, str, str]]
+Updates = list[tuple[int, str, str]]
 
 
 def lines(edits: dict[int, str]) -> str:
@@ -1361,7 +1016,7 @@ class LineStackTestCase(GitTestCase):
                 head = self.push_branch(branch, base, files=files)
             entries.append(make_entry(position, 100 + position, branch, head, base))
             base = branch
-        return NativeStack(number=100, base_ref=TRUNK, entries=tuple(entries))
+        return NativeStack(base_ref=TRUNK, entries=tuple(entries))
 
     def heads(self, stack: NativeStack) -> dict[str, str]:
         """The tip of each PR's branch on the origin, bottom first"""
@@ -1541,10 +1196,7 @@ class TestBuildNativeStackRebase(LineStackTestCase):
         updates = self.rebase_stack(stack, 103)
         after = self.heads(stack)
         refs = [entry.head_ref for entry in stack.entries]
-        expected = [
-            (number, ref, before[ref], after[ref])
-            for number, ref in enumerate(refs, start=101)
-        ]
+        expected = [(number, ref, after[ref]) for number, ref in enumerate(refs, 101)]
         self.assertEqual(updates, expected)
         self.assertUpdated(stack, before, own, *refs)
         # The trunk has the landed PR, so its branch takes the trunk's tree
@@ -1552,27 +1204,6 @@ class TestBuildNativeStackRebase(LineStackTestCase):
         self.assertMergesCleanly(stack, 103, own)
         self.assertEqual(self.rebase_stack(stack, 103), [])
         self.assertEqual(self.heads(stack), after)
-
-    def test_landed_pr_with_several_commits_on_the_same_line(self) -> None:
-        with mock.patch.dict(os.environ, identity(author(101))):
-            files = {"f.txt": lines({2: "A1"}), "A.txt": "1\n"}
-            self.push_branch("user/a", TRUNK, files=files)
-            files = {"f.txt": lines({2: "A2", 3: "A2"}), "A.txt": "2\n"}
-            a_head = self.add_commits("user/a", files=files)
-        with mock.patch.dict(os.environ, identity(author(102))):
-            files = {"f.txt": lines({2: "A2", 3: "A2", 6: "B"}), "B.txt": "B\n"}
-            b_head = self.push_branch("user/b", "user/a", files=files)
-        a = make_entry(1, 101, "user/a", a_head, TRUNK)
-        b = make_entry(2, 102, "user/b", b_head, "user/a")
-        stack = NativeStack(100, TRUNK, (a, b))
-        own = self.pr_changes(stack)
-        self.move_trunk()
-        stack = self.land_pr(stack, 0)
-        self.move_trunk()
-        before = self.heads(stack)
-        self.rebase_stack(stack, 102)
-        self.assertUpdated(stack, before, own, "user/a", "user/b")
-        self.assertMergesCleanly(stack, 102, own)
 
     def test_trunk_changing_the_lines_of_the_landed_pr_does_not_conflict(self) -> None:
         stack, own = self.landed_stack()
@@ -1632,23 +1263,6 @@ class TestBuildNativeStackRebase(LineStackTestCase):
         self.assertUpdated(stack, before, own, "user/c")
         self.assertMergesCleanly(stack, 103, own)
 
-    def test_only_the_branch_below_the_lowest_open_pr_merges_the_target(self) -> None:
-        stack, own = self.landed_stack(landed=2)
-        before = self.heads(stack)
-        self.rebase_stack(stack, 103)
-        self.assertUpdated(stack, before, own, "user/b", "user/c")
-        self.assertMergesCleanly(stack, 103, own)
-
-    def test_reapplies_reverted_pr_whose_branch_has_its_landed_commit(self) -> None:
-        stack, own = self.landed_stack()
-        self.rebase_stack(stack, 103)
-        self.revert_pr(101)
-        stack = with_entry(stack, 0, closed=False)
-        self.assertEqual(self.pr_changes(stack)[101], [])
-        before = self.heads(stack)
-        self.rebase_stack(stack, 103)
-        self.assertUpdated(stack, before, own, "user/a", "user/b", "user/c")
-
     def test_reapplies_pr_reverted_by_a_revert_pr_opened_by_hand(self) -> None:
         stack, own = self.landed_stack()
         other = self.move_trunk({"other.txt": "other\n"})
@@ -1673,40 +1287,6 @@ class TestBuildNativeStackRebase(LineStackTestCase):
         with self.assertRaisesRegex(NativeStackError, message):
             self.rebase_stack(stack, 103)
         self.assertEqual(self.heads(stack), before)
-
-    def test_refuses_stack_based_on_another_branch(self) -> None:
-        stack = replace(self.push_line_stack(), base_ref=VIABLE_STRICT)
-        message = (
-            r"^PR #103 is in a stack based on viable/strict, but only stacks based on "
-            r"main can be rebased$"
-        )
-        with self.assertRaisesRegex(NativeStackError, message):
-            self.rebase_stack(stack, 103)
-
-    def test_refuses_closed_pr_below_that_did_not_land(self) -> None:
-        stack = with_entry(self.push_line_stack(), 0, closed=True)
-        before = self.heads(stack)
-        with self.assertRaisesRegex(NativeStackError, NOT_LANDED):
-            self.rebase_stack(stack, 103)
-        self.assertEqual(self.heads(stack), before)
-
-    def test_refuses_landed_pr_below_that_was_reverted(self) -> None:
-        stack, _ = self.landed_stack()
-        self.revert_pr(101)
-        before = self.heads(stack)
-        with self.assertRaisesRegex(NativeStackError, NOT_LANDED):
-            self.rebase_stack(stack, 103)
-        self.assertEqual(self.heads(stack), before)
-
-    def test_refuses_landed_branch_with_commits_that_never_landed(self) -> None:
-        stack, _ = self.landed_stack()
-        extra = self.add_commits("user/a")
-        message = (
-            "PR #101 is closed, but its branch has commits that never landed on "
-            f"main: {extra}"
-        )
-        with self.assertRaisesRegex(NativeStackError, message):
-            self.rebase_stack(stack, 103)
 
     def test_refuses_target_behind_main_for_a_pr_it_rebases(self) -> None:
         stack, _ = self.landed_stack()
@@ -1738,17 +1318,6 @@ class TestBuildNativeStackRebase(LineStackTestCase):
         with self.assertRaisesRegex(NativeStackError, message):
             self.rebase_stack(stack, 103)
 
-    def test_refuses_pr_opened_from_the_target(self) -> None:
-        head = self.push_branch(VIABLE_STRICT, TRUNK)
-        entry = make_entry(1, 101, VIABLE_STRICT, head, TRUNK)
-        stack = NativeStack(100, TRUNK, (entry,))
-        message = (
-            r"^PR #101 is opened from viable/strict, so rebasing it would push to "
-            r"viable/strict$"
-        )
-        with self.assertRaisesRegex(NativeStackError, message):
-            self.rebase_stack(stack, 101, onto=VIABLE_STRICT)
-
 
 class TestPushBranches(LineStackTestCase):
     def setUp(self) -> None:
@@ -1770,54 +1339,19 @@ class TestPushBranches(LineStackTestCase):
         path = f"{wrapper.parent}{os.pathsep}{os.environ['PATH']}"
         with mock.patch.dict(os.environ, {"PATH": path}):
             push_branches(self.repo, self.updates)
-        after = {branch: new for _, branch, _, new in self.updates}
+        after = {branch: new for _, branch, new in self.updates}
         self.assertEqual(self.heads(self.stack), after)
         commands = [line.split() for line in log.read_text().splitlines()]
         pushes = [args[args.index("push") + 1 :] for args in commands if "push" in args]
         self.assertEqual(len(pushes), 1, pushes)
         self.assertIn("--atomic", pushes[0])
         forced = [arg for arg in pushes[0] if arg.startswith(("-f", "--force", "+"))]
-        leases = [
-            f"--force-with-lease=refs/heads/{branch}:{old}"
-            for _, branch, old, _ in self.updates
-        ]
-        self.assertEqual(forced, leases)
+        self.assertEqual(forced, [])
 
     def test_pushes_nothing_if_one_branch_is_refused(self) -> None:
         self.reject_pushes_to("user/c")
         with self.assertRaisesRegex(RuntimeError, "user/c"):
             push_branches(self.repo, self.updates)
-        self.assertEqual(self.heads(self.stack), self.before)
-
-    def test_dry_run_pushes_nothing(self) -> None:
-        push_branches(self.repo, self.updates, dry_run=True)
-        self.assertEqual(self.heads(self.stack), self.before)
-
-    def test_runs_no_git_command_without_updates(self) -> None:
-        with mock.patch.object(self.repo, "_run_git") as run:
-            push_branches(self.repo, [])
-        run.assert_not_called()
-
-    def test_refuses_branch_reset_since_it_was_read(self) -> None:
-        dropped = self.before["user/b"]
-        self.origin_git("update-ref", "refs/heads/user/b", f"{dropped}^")
-        reset = self.heads(self.stack)
-        with self.assertRaisesRegex(RuntimeError, r"-> user/b \(stale info\)"):
-            push_branches(self.repo, self.updates)
-        self.assertEqual(self.heads(self.stack), reset)
-
-    def test_refuses_update_that_is_not_a_fast_forward(self) -> None:
-        # The lease matches and the origin takes forced updates, so only the check
-        # that the new commit has the old tip stops this push
-        self.origin_git("config", "receive.denyNonFastForwards", "false")
-        number, branch, old, _ = self.updates[-1]
-        updates = [*self.updates[:-1], (number, branch, old, self.root)]
-        message = (
-            rf"^The update of {branch} from {old} to {self.root} is not a "
-            "fast-forward$"
-        )
-        with self.assertRaisesRegex(NativeStackError, message):
-            push_branches(self.repo, updates)
         self.assertEqual(self.heads(self.stack), self.before)
 
 

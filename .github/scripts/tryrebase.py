@@ -15,6 +15,7 @@ from github_utils import (
 )
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from native_stack import (
+    branch_update_comments,
     build_native_stack_rebase,
     get_native_stack,
     NativeStack,
@@ -119,7 +120,9 @@ def rebase_native_stack_onto(
 ) -> bool:
     """Merge `onto_branch` into the branches of `pr`'s GitHub-native stack up to `pr`
     (see build_native_stack_rebase) and fast-forward them. A stacked PR's branch is
-    never force-pushed, as the PR above it is based on its commits."""
+    never force-pushed, as the PR above it is based on its commits. A stack that
+    already has `onto_branch` counts as rebased, so that `merge -r` still merges it:
+    a stack cut from a newer main already has viable/strict."""
     default_branch = pr.default_branch()
     onto = onto_branch.removeprefix(f"refs/remotes/{repo.remote}/")
     if onto not in (default_branch, VIABLE_STRICT_BRANCH):
@@ -132,19 +135,10 @@ def rebase_native_stack_onto(
     )
     if not updates:
         post_already_uptodate(pr, repo, onto_branch, dry_run)
-        return False
+        return True
     push_branches(repo, updates, dry_run)
-    closed = {entry.number for entry in stack.entries if entry.closed}
-    for number, branch, _, _ in updates:
-        if number in closed:
-            continue
-        msg = f"Merged `{onto_branch}` into `{branch}`"
-        if number != pr.pr_num:
-            msg += f" because #{pr.pr_num} was rebased"
-        msg += (
-            ", please pull locally before adding more changes (for example, via "
-            f"`git checkout {branch} && git pull --rebase`)"
-        )
+    comments = branch_update_comments(stack, updates, onto_branch, pr.pr_num, "rebased")
+    for number, msg in comments:
         gh_post_comment(pr.org, pr.project, number, msg, dry_run=dry_run)
     return True
 
@@ -300,9 +294,9 @@ def main() -> None:
         else:
             stack = None
             # Forks are never stacked, and neither is a PR on the default branch
-            # that no PR is based on. Only the other PRs read the stack, a preview
-            # API whose failure refuses the rebase: force-pushing a stack's bottom
-            # PR would break the PRs above it.
+            # that no PR is based on. Only the other PRs read the stack, and a
+            # failed read refuses the rebase: force-pushing a stack's bottom PR
+            # would break the PRs above it.
             if not pr.is_cross_repo() and (
                 pr.base_ref() != pr.default_branch()
                 or gh_fetch_json_list(

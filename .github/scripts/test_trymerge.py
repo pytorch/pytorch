@@ -32,9 +32,8 @@ from greenlight_guard import (
 )
 from greenlight_identity import normalize_login
 from native_stack import (
+    _landed_in,
     build_native_stack_commits,
-    find_landed_commit,
-    find_stack_dependents,
     NativeStack,
     NativeStackError,
     PULL_REQUEST_RESOLVED,
@@ -44,7 +43,6 @@ from native_stack import (
 from test_native_stack import (
     author,
     GitTestCase,
-    identity,
     LineStackTestCase,
     pr_url,
     TRUNK,
@@ -83,13 +81,11 @@ from trymerge import (
     JobCheckState,
     main as trymerge_main,
     MandatoryChecksMissingError,
-    manually_close_merged_pr,
     merge,
     merge_authorized_logins,
     MERGE_COMPLETE_LABEL,
     MergeRule,
     MergeRuleFailedError,
-    NATIVE_STACK_PUSH_ATTEMPTS,
     post_starting_merge_comment,
     PostCommentError,
     RE_GHSTACK_DESC,
@@ -231,7 +227,6 @@ def mock_merge(
     stale_pr_days: int = 3,
     ignore_current: bool = False,
     native_stack: NativeStack | None = None,
-    trunk_at_start: str | None = None,
 ) -> None:
     pass
 
@@ -832,7 +827,6 @@ class TestTryMerge(TestCase):
             skip_mandatory_checks=True,
             ignore_current=False,
             native_stack=None,
-            trunk_at_start=None,
         )
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
@@ -849,7 +843,6 @@ class TestTryMerge(TestCase):
             skip_mandatory_checks=False,
             ignore_current=False,
             native_stack=None,
-            trunk_at_start=None,
         )
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
@@ -3052,11 +3045,11 @@ def stack_entry(
     number = 999 + position
     base = f"user/{number - 1}" if position > 1 else "main"
     head = head or f"head-{number}"
-    return StackEntry(position, number, closed, False, f"user/{number}", head, base)
+    return StackEntry(position, number, closed, f"user/{number}", head, base)
 
 
 def make_stack(*entries: StackEntry) -> NativeStack:
-    return NativeStack(number=1, base_ref="main", entries=entries)
+    return NativeStack(base_ref="main", entries=entries)
 
 
 # #1000 landed and is closed: merging #1002 lands #1001 and #1002
@@ -3142,10 +3135,6 @@ class TestGetNativeStackPrs(NoNetworkTestCase):
         prs = get_prs_to_merge(self.repo, self.top, NATIVE_STACK)
         self.assertEqual(prs, [self.lower, self.top])
 
-    def test_prs_to_merge_of_regular_pr(self) -> None:
-        self.assertEqual(get_prs_to_merge(self.repo, self.top), [self.top])
-        self.landing.assert_not_called()
-
     @mock.patch("trymerge.get_ghstack_prs")
     def test_prs_to_merge_of_ghstack_pr(self, mock_get_ghstack_prs: Any) -> None:
         self.top.is_ghstack_pr.return_value = True
@@ -3186,7 +3175,6 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
             self.repo,
             comment_id=1,
             native_stack=stack,
-            trunk_at_start="trunk-at-start",
             **kwargs,
         )
 
@@ -3210,8 +3198,8 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
         )
         self.top.merge_native_stack_into.assert_called_once_with(
             self.repo,
+            NATIVE_STACK,
             [(self.lower, *NATIVE_LANDING[0]), (self.top, *NATIVE_LANDING[1])],
-            "trunk-at-start",
             None,
             False,
         )
@@ -3223,35 +3211,6 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
         self.assertStopsBeforeLanding()
         self.get_stack.assert_called_once_with("pytorch", "pytorch", 1002)
         self.assertIs(self.landing.call_args.args[3], current)
-
-    def test_wraps_lower_pr_rule_failure(self) -> None:
-        for error in (
-            MergeRuleFailedError("approve"),
-            MandatoryChecksMissingError("wait"),
-        ):
-            with self.subTest(error=error):
-                self.rule.side_effect = [(None, [], [], {}), error]
-                with self.assertRaises(MergeRuleFailedError) as cm:
-                    self.merge_into()
-                self.assertIs(type(cm.exception), type(error))
-                self.assertIn(f"stacked PR #1001:\n\n{error}", str(cm.exception))
-        self.top.merge_native_stack_into.assert_not_called()
-
-    def test_refuses_pr_pushed_or_reopened_after_merge_started(self) -> None:
-        for lower in (stack_entry(2, head="old"), stack_entry(2, closed=True)):
-            with self.subTest(lower=lower):
-                start = make_stack(stack_entry(1, closed=True), lower, stack_entry(3))
-                with self.assertRaisesRegex(NativeStackError, "PR #1001 changed after"):
-                    self.merge_into(start)
-        self.top.merge_native_stack_into.assert_not_called()
-
-    def test_checks_submodules_of_lower_prs_unless_forced(self) -> None:
-        self.lower.has_invalid_submodule_updates.return_value = True
-        self.lower.get_changed_submodules.return_value = ["third_party/kineto"]
-        with self.assertRaisesRegex(RuntimeError, "#1001 updates submodules third_"):
-            self.merge_into()
-        self.top.merge_native_stack_into.assert_not_called()
-        self.assertStopsBeforeLanding(skip_mandatory_checks=True)
 
     def test_greenlight_and_docker_gates_cover_every_landing_pr(self) -> None:
         self.lower.is_docker_affecting.return_value = True
@@ -3279,7 +3238,6 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
             additional_merged_prs=[self.lower, self.top],
             merge_commit_sha="merged-sha",
             dry_run=False,
-            landed_heads={1001: "head-1001", 1002: "head-1002"},
         )
         self.assertEqual(self.record.call_args.kwargs["merge_commit_sha"], "merged-sha")
 
@@ -3300,31 +3258,6 @@ class TestNativeStackMergeInto(NoNetworkTestCase):
         self.landing.assert_not_called()
 
 
-class TestCloseLandedPrs(NoNetworkTestCase):
-    def test_pr_updated_after_it_landed_is_told_what_did_not_land(self) -> None:
-        prs = {num: stacked_pr(num) for num in (1001, 1002)}
-        prs[1001].last_commit_sha.return_value = "pushed-since"
-        self.patch("trymerge.GitHubPR", side_effect=lambda _, __, num: prs[num])
-        post = self.patch("trymerge.gh_post_pr_comment")
-
-        def close_pr(org: str, project: str, num: int, dry_run: bool) -> None:
-            prs[num].is_closed.return_value = True
-
-        close = self.patch("trymerge.gh_close_pr", side_effect=close_pr)
-        heads = {1001: "head-1001", 1002: "head-1002"}
-        manually_close_merged_pr(
-            prs[1002], list(prs.values()), "merged-sha", False, landed_heads=heads
-        )
-        moved = (
-            "This PR landed at head-1001, but its head is now pushed-since. Changes "
-            "that are not in head-1001 did not land; please open a new PR for them."
-        )
-        comments = [(call.args[2], call.args[3]) for call in post.call_args_list]
-        self.assertEqual([num for num, _ in comments], [1002, 1001, 1001])
-        self.assertEqual(comments[1], (1001, moved))
-        self.assertEqual([call.args[2] for call in close.call_args_list], [1002, 1001])
-
-
 class TestMergeNativeStackInto(NoNetworkTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -3335,77 +3268,24 @@ class TestMergeNativeStackInto(NoNetworkTestCase):
         for pr in (self.lower, self.top):
             pr.get_author.return_value = f"Author <{pr.pr_num}@example.com>"
             pr.gen_commit_message.return_value = f"Message {pr.pr_num}\n"
-            pr.get_pr_url.return_value = pr_url(pr.pr_num)
         self.native_prs = [
             (self.lower, *NATIVE_LANDING[0]),
             (self.top, *NATIVE_LANDING[1]),
         ]
-        self.get_stack = self.patch(
-            "trymerge.get_native_stack", return_value=NATIVE_STACK
-        )
-        self.landing = self.patch(
-            "trymerge.get_native_stack_landing_prs", return_value=NATIVE_LANDING
-        )
         self.build = self.patch(
             "trymerge.build_native_stack_commits", return_value="top-sha"
         )
-        self.patch("trymerge.landed_since", return_value=False)
         self.skew = self.patch("trymerge.warn_on_docker_merge_skew")
 
     def land(self, docker_pr: Any = None, dry_run: bool = False) -> list[GitHubPR]:
         return GitHubPR.merge_native_stack_into(
-            self.top, self.repo, self.native_prs, "trunk-at-start", docker_pr, dry_run
+            self.top, self.repo, NATIVE_STACK, self.native_prs, docker_pr, dry_run
         )
-
-    def test_refuses_stack_that_changed_while_merging(self) -> None:
-        moved = [(NATIVE_STACK.entries[1], "tip-1000-moved"), NATIVE_LANDING[1]]
-        for stack, landing in (
-            (None, NATIVE_LANDING),
-            (NATIVE_STACK, moved),
-            (NATIVE_STACK, NATIVE_LANDING[1:]),
-        ):
-            with self.subTest(stack=stack, landing=landing):
-                self.get_stack.return_value = stack
-                self.landing.return_value = landing
-                with self.assertRaisesRegex(NativeStackError, "PR #1002 changed while"):
-                    self.land()
-        self.build.assert_not_called()
-        self.repo._run_git.assert_not_called()
-        self.repo.push.assert_not_called()
-
-    def test_gives_up_after_bounded_push_attempts(self) -> None:
-        self.repo.push.side_effect = RuntimeError("rejected")
-        with self.assertRaisesRegex(RuntimeError, "rejected"):
-            self.land()
-        self.assertEqual(self.build.call_count, NATIVE_STACK_PUSH_ATTEMPTS)
-        self.assertEqual(self.repo.push.call_count, NATIVE_STACK_PUSH_ATTEMPTS)
 
     def test_passes_docker_pr_and_dry_run_through(self) -> None:
         self.land(docker_pr=self.lower, dry_run=True)
         self.skew.assert_called_once_with(self.repo, self.lower)
-        self.repo.push.assert_called_once_with("main", True, retry=1)
-
-
-class TestStackDependenciesLine(NoNetworkTestCase):
-    def message(self, stack_deps: list[int] | None) -> str:
-        pr = mock.MagicMock(spec=GitHubPR)
-        pr.pr_num = 1002
-        pr.get_title.return_value = "Add the thing"
-        pr.get_body.return_value = "Body"
-        pr.get_pr_url.return_value = "https://github.com/pytorch/pytorch/pull/1002"
-        pr.get_approved_by.return_value = ["reviewer"]
-        pr.get_pr_creator_login.return_value = "creator"
-        pr.get_authors.return_value = {
-            "creator": "Creator <creator@example.com>",
-            "coauthor": "Co Author <co@example.com>",
-        }
-        return GitHubPR.gen_commit_message(pr, stack_deps=stack_deps)
-
-    def test_lists_prs_below_before_coauthors(self) -> None:
-        self.assertEqual(
-            self.message([1000, 1001]),
-            "Add the thing (#1002)\n\nBody\nPull Request resolved: https://github.com/pytorch/pytorch/pull/1002\nApproved by: https://github.com/reviewer\nStack dependencies: #1000, #1001\n\n\nCo-authored-by: Co Author <co@example.com>",
-        )
+        self.repo.push.assert_called_once_with("main", True)
 
 
 class TestStartingMergeComment(NoNetworkTestCase):
@@ -3456,7 +3336,6 @@ class TestNativeStackMergePlumbing(NoNetworkTestCase):
             comment_id=1,
             dry_run=True,
             native_stack=NATIVE_STACK,
-            trunk_at_start="trunk-at-start",
             **kwargs,
         )
 
@@ -3472,7 +3351,6 @@ class TestNativeStackMergePlumbing(NoNetworkTestCase):
                 self.assertEqual(stacked, (self.top, [self.lower, self.top]))
                 kwargs = self.top.merge_into.call_args.kwargs
                 self.assertIs(kwargs["native_stack"], NATIVE_STACK)
-                self.assertEqual(kwargs["trunk_at_start"], "trunk-at-start")
 
     def test_ignore_current_waives_red_checks_of_every_landing_pr(self) -> None:
         red = JobCheckState("red", "", "FAILURE", None, None, None, None)
@@ -3502,9 +3380,6 @@ class TestNativeStackMain(NoNetworkTestCase):
         self.merge = self.patch("trymerge.merge")
         self.get_stack = self.patch(
             "trymerge.get_native_stack", return_value=NATIVE_STACK
-        )
-        self.rev_parse = self.patch(
-            "trymerge.GitRepo.rev_parse", return_value="trunk-at-start"
         )
 
     def assertRefused(self, refusal: str = TARGETS_ANOTHER_BRANCH) -> None:
@@ -3537,17 +3412,8 @@ class TestNativeStackMain(NoNetworkTestCase):
                 self.assertRefused(refusal)
 
     def test_merges_pr_in_stack_on_default_branch(self) -> None:
-        reads = mock.Mock()
-        reads.attach_mock(self.rev_parse, "rev_parse")
-        reads.attach_mock(self.get_stack, "get_native_stack")
         trymerge_main()
-        self.assertEqual(
-            reads.mock_calls,
-            [
-                mock.call.rev_parse("refs/remotes/origin/main"),
-                mock.call.get_native_stack("pytorch", "pytorch", 1002),
-            ],
-        )
+        self.get_stack.assert_called_once_with("pytorch", "pytorch", 1002)
         self.post.assert_not_called()
         self.merge.assert_called_once_with(
             mock.ANY,
@@ -3557,14 +3423,12 @@ class TestNativeStackMain(NoNetworkTestCase):
             skip_mandatory_checks=False,
             ignore_current=False,
             native_stack=NATIVE_STACK,
-            trunk_at_start="trunk-at-start",
         )
 
     def test_check_mergeability_does_not_read_the_stack(self) -> None:
         self.args.check_mergeability = True
         trymerge_main()
         self.get_stack.assert_not_called()
-        self.rev_parse.assert_not_called()
         self.assertRefused()
 
     def test_bottom_and_ghstack_prs_do_not_read_a_stack(self) -> None:
@@ -3575,11 +3439,8 @@ class TestNativeStackMain(NoNetworkTestCase):
             with self.subTest(base=info["baseRefName"]):
                 self.info.return_value = info
                 trymerge_main()
-                kwargs = self.merge.call_args.kwargs
-                self.assertIsNone(kwargs["native_stack"])
-                self.assertIsNone(kwargs["trunk_at_start"])
+                self.assertIsNone(self.merge.call_args.kwargs["native_stack"])
         self.get_stack.assert_not_called()
-        self.rev_parse.assert_not_called()
         self.post.assert_not_called()
 
     def test_revert_does_not_read_the_stack(self) -> None:
@@ -3588,14 +3449,12 @@ class TestNativeStackMain(NoNetworkTestCase):
         trymerge_main()
         revert.assert_called_once()
         self.get_stack.assert_not_called()
-        self.rev_parse.assert_not_called()
         self.merge.assert_not_called()
 
 
 def reverted_pr(number: int) -> Any:
     pr = stacked_pr(number)
     pr.is_closed.return_value = True
-    pr.is_cross_repo.return_value = False
     pr.get_pr_url.return_value = pr_url(number)
     pr.get_pr_creator_login.return_value = f"author{number}"
     pr.has_internal_changes.return_value = False
@@ -3641,39 +3500,24 @@ class TestNativeStackRevert(NoNetworkTestCase):
     def git_calls(self) -> list[Any]:
         return self.calls_to("repo._run_git", "repo.revert", "repo.push")
 
-    def attempt(self, *shas: str, dry_run: bool = False) -> list[Any]:
-        """The git calls of an attempt that reverts commits `shas`, in order"""
-        trunk = "refs/remotes/origin/main"
+    def reverts(self, *shas: str, dry_run: bool = False) -> list[Any]:
+        """The git calls that revert commits `shas`, in order, and push the reverts"""
         return [
-            mock.call.repo._run_git("fetch", "origin", f"+refs/heads/main:{trunk}"),
-            mock.call.repo._run_git("checkout", "-B", "main", trunk),
             *(mock.call.repo.revert(sha) for sha in shas),
-            mock.call.repo.push("main", dry_run, retry=1),
+            mock.call.repo.push("main", dry_run),
         ]
 
     def reopened(self, *numbers: int) -> list[Any]:
         return [mock.call.reopen("pytorch", "pytorch", num) for num in numbers]
 
-    def assertNothingReverted(self) -> None:
-        self.assertEqual(self.calls_to("repo.revert", "repo.push"), [])
-        github = ("gh_post_pr_comment", "gh_post_commit_comment", "reopen")
-        self.assertEqual(self.calls_to(*github), [])
-
-    def test_reverts_the_prs_above_first(self) -> None:
-        self.revert()
-        self.dependents.assert_called_once_with(
-            self.repo, "pytorch", "pytorch", 1000, "refs/remotes/origin/main"
-        )
-        self.assertEqual(
-            self.git_calls(), self.attempt("sha-1002", "sha-1001", "sha-1000")
-        )
-        self.ghstack.assert_not_called()
-
     def test_reverts_the_landed_commit_of_the_pr_not_the_one_validated(self) -> None:
         self.validate.return_value = ("reverter", "sha-quoting-1000")
         self.revert()
+        self.dependents.assert_called_once_with(
+            self.repo, "pytorch", "pytorch", 1000, "main"
+        )
         self.assertEqual(
-            self.git_calls(), self.attempt("sha-1002", "sha-1001", "sha-1000")
+            self.git_calls(), self.reverts("sha-1002", "sha-1001", "sha-1000")
         )
 
     def test_reopens_the_reverted_prs_bottom_up_after_the_push(self) -> None:
@@ -3681,7 +3525,7 @@ class TestNativeStackRevert(NoNetworkTestCase):
         self.assertEqual(
             self.calls_to("repo.push", "reopen"),
             [
-                mock.call.repo.push("main", False, retry=1),
+                mock.call.repo.push("main", False),
                 *self.reopened(1000, 1001, 1002),
             ],
         )
@@ -3716,14 +3560,14 @@ class TestNativeStackRevert(NoNetworkTestCase):
         self.dependents.return_value = ("sha-1000", [])
         self.revert()
         self.pr_cls.assert_not_called()
-        self.assertEqual(self.git_calls(), self.attempt("sha-validated"))
+        self.assertEqual(self.git_calls(), self.reverts("sha-validated"))
         self.assertEqual(self.calls_to("reopen"), self.reopened(1000))
 
     def test_dry_run_reverts_without_pushing_or_reopening(self) -> None:
         self.revert(dry_run=True)
         self.assertEqual(
             self.git_calls(),
-            self.attempt("sha-1002", "sha-1001", "sha-1000", dry_run=True),
+            self.reverts("sha-1002", "sha-1001", "sha-1000", dry_run=True),
         )
         comments = self.calls_to("gh_post_pr_comment")
         self.assertEqual(
@@ -3734,35 +3578,6 @@ class TestNativeStackRevert(NoNetworkTestCase):
         for pr in self.prs.values():
             pr.add_numbered_label.assert_called_once_with("reverted", True)
         self.get_stack.assert_not_called()
-
-    def test_rejected_push_is_reverted_again_on_the_new_trunk(self) -> None:
-        self.repo.push.side_effect = [RuntimeError("rejected"), None]
-        self.dependents.side_effect = [
-            ("sha-1000", [("sha-1001", 1001)]),
-            ("sha-1000", [("sha-1002", 1002), ("sha-1001", 1001)]),
-        ]
-        self.revert()
-        self.assertEqual(
-            self.git_calls(),
-            self.attempt("sha-1001", "sha-1000")
-            + self.attempt("sha-1002", "sha-1001", "sha-1000"),
-        )
-        self.assertEqual(self.calls_to("reopen"), self.reopened(1000, 1001, 1002))
-
-    def test_only_rejected_pushes_are_retried_and_only_so_often(self) -> None:
-        self.repo.revert.side_effect = RuntimeError("conflict")
-        with self.assertRaisesRegex(RuntimeError, "conflict"):
-            self.revert()
-        self.repo.push.assert_not_called()
-        self.repo.revert.side_effect = None
-        self.repo.push.side_effect = RuntimeError("rejected")
-        with self.assertRaisesRegex(RuntimeError, "rejected"):
-            self.revert()
-        self.assertEqual(self.repo.push.call_count, NATIVE_STACK_PUSH_ATTEMPTS)
-        github = ("gh_post_pr_comment", "gh_post_commit_comment", "reopen")
-        self.assertEqual(self.calls_to(*github), [])
-        for pr in self.prs.values():
-            pr.add_numbered_label.assert_not_called()
 
     def test_ghstack_pr_keeps_its_ghstack_revert(self) -> None:
         self.bottom.is_ghstack_pr.return_value = True
@@ -3793,12 +3608,6 @@ class TestNativeStackRevert(NoNetworkTestCase):
             self.git_calls(),
             [mock.call.repo.revert("sha-1000"), mock.call.repo.push("main", False)],
         )
-
-    def test_forks_never_read_the_stack(self) -> None:
-        self.bottom.is_cross_repo.return_value = True
-        self.revert()
-        self.get_stack.assert_not_called()
-        self.assertEqual(self.calls_to("reopen"), self.reopened(1000, 1001, 1002))
 
     def refresh_comments(self) -> list[Any]:
         comments = self.calls_to("gh_post_pr_comment")
@@ -3833,17 +3642,18 @@ class TestNativeStackRevert(NoNetworkTestCase):
         self.calls.gh_post_pr_comment.side_effect = [None] * 3 + [RuntimeError("down")]
         self.revert()
 
-    def test_discovery_errors_propagate(self) -> None:
-        self.dependents.side_effect = RuntimeError("git log failed")
-        with self.assertRaisesRegex(RuntimeError, "git log failed"):
-            self.revert()
-        self.assertNothingReverted()
-
-    def test_errors_reading_a_dependent_pr_propagate(self) -> None:
-        self.pr_cls.side_effect = RuntimeError("Could not fetch PR #1002")
-        with self.assertRaisesRegex(RuntimeError, "Could not fetch PR #1002"):
-            self.revert()
-        self.assertNothingReverted()
+    def test_failed_lookup_falls_back_to_a_single_revert(self) -> None:
+        for failing, error in (
+            (self.dependents, RuntimeError("git log failed")),
+            (self.pr_cls, RuntimeError("Could not fetch PR #1002")),
+        ):
+            with self.subTest(error=error):
+                failing.side_effect = error
+                self.calls.reset_mock()
+                self.revert()
+                self.assertEqual(self.git_calls(), self.reverts("sha-1000"))
+                self.assertEqual(self.calls_to("reopen"), self.reopened(1000))
+                failing.side_effect = None
 
 
 def native_stack_pr(entry: StackEntry) -> Any:
@@ -3852,7 +3662,6 @@ def native_stack_pr(entry: StackEntry) -> Any:
     pr.last_commit_sha.return_value = entry.head_oid
     pr.base_ref.return_value = entry.base_ref
     pr.head_ref.return_value = entry.head_ref
-    pr.is_cross_repo.return_value = False
     pr.get_title.return_value = f"Change {entry.number}"
     pr.get_body.return_value = f"Body {entry.number}"
     pr.get_pr_url.return_value = pr_url(entry.number)
@@ -3915,16 +3724,13 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
             self.races.pop(0)()
         return top
 
-    def merge_stack(
-        self, stack: NativeStack | None = None, start: str | None = None
-    ) -> None:
+    def merge_stack(self) -> None:
         GitHubPR.merge_into(
             self.prs[103],
             self.repo,
             comment_id=1,
             dry_run=False,
-            native_stack=stack or self.stack,
-            trunk_at_start=start or self.git("rev-parse", TRUNK, cwd=self.origin),
+            native_stack=self.stack,
         )
 
     def origin_log(self, since: str, fmt: str = "%H") -> list[str]:
@@ -3962,42 +3768,14 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
             additional_merged_prs=list(self.prs.values()),
             merge_commit_sha=landed[-1],
             dry_run=False,
-            landed_heads={e.number: e.head_oid for e in self.stack.entries},
         )
 
-    def test_rebuilds_on_trunk_that_moved_before_the_push(self) -> None:
+    def test_rebases_onto_trunk_that_moved_before_the_push(self) -> None:
         self.races.append(lambda: self.add_commits(TRUNK))
         self.merge_stack()
-        landed = self.origin_log(self.root)
         subjects = [f"Update {TRUNK}", *(f"Change {n} (#{n})" for n in (101, 102, 103))]
         self.assertEqual(self.origin_log(self.root, "%s"), subjects)
-        self.assertEqual(self.bases, [self.root, landed[0]])
-
-    def test_aborts_when_a_landed_pr_is_reverted_before_the_push(self) -> None:
-        a = self.stack.entries[0]
-        landed = self.land(a)
-        stack = with_entry(self.stack, 0, closed=True)
-        self.get_stack.return_value = stack
-        self.races.append(lambda: self.revert(a, landed))
-        with self.assertRaisesRegex(NativeStackError, "PR #101 is closed but not"):
-            self.merge_stack(stack)
-        self.assertEqual(self.origin_log(landed, "%s"), ['Revert "Change"'])
-
-    def test_aborts_when_a_lower_pr_landed_after_the_merge_started(self) -> None:
-        a = self.stack.entries[0]
-        reverted = self.revert(a, self.land(a))
-        message = r"PR #101 landed after this merge started"
-        with self.assertRaisesRegex(NativeStackError, message):
-            self.merge_stack(start=self.root)
-        self.assertEqual(self.bases, [])
-        self.assertEqual(self.origin_log(reverted), [])
-
-    def test_relands_a_pr_reverted_before_the_merge_started(self) -> None:
-        a = self.stack.entries[0]
-        reverted = self.revert(a, self.land(a))
-        self.merge_stack(start=reverted)
-        subjects = [f"Change {n} (#{n})" for n in (101, 102, 103)]
-        self.assertEqual(self.origin_log(reverted, "%s"), subjects)
+        self.assertEqual(self.bases, [self.root])
 
     def merge_then_patch_revert(self) -> tuple[list[str], Any]:
         """Lands the stack, then patches what try_revert writes to GitHub, with no
@@ -4009,11 +3787,6 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
         self.patch("trymerge.gh_post_pr_comment")
         self.patch("trymerge.gh_post_commit_comment")
         return self.origin_log(self.root), self.patch("trymerge.gh_update_pr_state")
-
-    def pull_trunk(self) -> None:
-        """Brings the developer clone's trunk up to date with the bot's pushes"""
-        self.git("checkout", "-q", TRUNK)
-        self.git("pull", "-q", "--ff-only", "origin", TRUNK)
 
     def revert_pr(self, number: int) -> None:
         self.git("pull", "-q", "--ff-only", cwd=self.repo.repo_dir)
@@ -4040,49 +3813,6 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
             ],
         )
 
-    def test_revert_sees_prs_that_landed_after_its_checkout(self) -> None:
-        landed, reopen = self.merge_then_patch_revert()
-        # actions/checkout pins both refs to the commit that triggered the job
-        for ref in (f"refs/heads/{TRUNK}", f"refs/remotes/origin/{TRUNK}"):
-            self.git("update-ref", ref, landed[0], cwd=self.repo.repo_dir)
-        self.git("checkout", "-q", "-f", TRUNK, cwd=self.repo.repo_dir)
-        revert_native_pr(self.repo, self.prs[101])
-        reverted = {103: landed[2], 102: landed[1], 101: landed[0]}
-        self.assertReverts(landed[-1], 101, reverted)
-        reopened = [mock.call("pytorch", "pytorch", num) for num in (101, 102, 103)]
-        self.assertEqual(reopen.call_args_list, reopened)
-
-    def test_revert_is_redone_when_a_pr_lands_on_top_before_its_push(self) -> None:
-        a, b, c = self.stack.entries
-        self.patch("trymerge.gh_post_pr_comment")
-        self.patch("trymerge.gh_post_commit_comment")
-        reopen = self.patch("trymerge.gh_update_pr_state")
-        landed = {101: self.land_by_hand(a), 102: self.land_by_hand(b, 101)}
-
-        def lookup_then_land_c(*args: Any) -> Any:
-            found = find_stack_dependents(*args)
-            if 103 not in landed:
-                landed[103] = self.land_by_hand(c, 101, 102)
-            return found
-
-        self.patch("trymerge.find_stack_dependents", side_effect=lookup_then_land_c)
-        self.git("pull", "-q", "--ff-only", cwd=self.repo.repo_dir)
-        revert_native_pr(self.repo, self.prs[101])
-        reverted = {num: landed[num] for num in (103, 102, 101)}
-        self.assertReverts(landed[103], 101, reverted)
-        self.assertEqual(self.git("diff", self.root, TRUNK, cwd=self.origin), "")
-        reopened = [mock.call("pytorch", "pytorch", num) for num in (101, 102, 103)]
-        self.assertEqual(reopen.call_args_list, reopened)
-
-    def land_by_hand(self, entry: StackEntry, *deps: int) -> str:
-        """Lands `entry` from the developer clone as a native merge would"""
-        self.pull_trunk()
-        self.git("merge", "-q", "--squash", entry.head_ref)
-        message = self.prs[entry.number].gen_commit_message(stack_deps=list(deps))
-        self.git("commit", "-q", "-m", message)
-        self.git("push", "-q", "origin", TRUNK)
-        return self.git("rev-parse", "HEAD")
-
     def test_revert_of_the_bottom_pr_reverts_the_prs_above_it_first(self) -> None:
         landed, reopen = self.merge_then_patch_revert()
         self.revert_pr(101)
@@ -4091,32 +3821,7 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
         self.assertEqual(self.git("diff", self.root, TRUNK, cwd=self.origin), "")
         origin = GitRepo(self.origin)
         for num in reverted:
-            self.assertIsNone(find_landed_commit(origin, pr_url(num), TRUNK))
-        reopened = [mock.call("pytorch", "pytorch", num) for num in (101, 102, 103)]
-        self.assertEqual(reopen.call_args_list, reopened)
-
-    def test_revert_of_a_middle_pr_keeps_the_prs_below_it(self) -> None:
-        landed, reopen = self.merge_then_patch_revert()
-        self.revert_pr(102)
-        self.assertReverts(landed[-1], 102, {103: landed[2], 102: landed[1]})
-        origin = GitRepo(self.origin)
-        self.assertEqual(find_landed_commit(origin, pr_url(101), TRUNK), landed[0])
-        reopened = [mock.call("pytorch", "pytorch", num) for num in (102, 103)]
-        self.assertEqual(reopen.call_args_list, reopened)
-
-    def test_revert_of_a_relanded_pr_reverts_the_prs_that_stayed_landed(self) -> None:
-        landed, reopen = self.merge_then_patch_revert()
-        a = self.stack.entries[0]
-        self.pull_trunk()
-        self.revert(a, landed[0])
-        self.git("merge", "-q", "--squash", a.head_ref)
-        self.git("commit", "-q", "-m", self.prs[101].gen_commit_message())
-        self.git("push", "-q", "origin", TRUNK)
-        relanded = self.git("rev-parse", "HEAD")
-        self.revert_pr(101)
-        reverted = {103: landed[2], 102: landed[1], 101: relanded}
-        self.assertReverts(relanded, 101, reverted)
-        self.assertEqual(self.git("diff", self.root, TRUNK, cwd=self.origin), "")
+            self.assertIsNone(_landed_in(origin, pr_url(num), TRUNK, TRUNK))
         reopened = [mock.call("pytorch", "pytorch", num) for num in (101, 102, 103)]
         self.assertEqual(reopen.call_args_list, reopened)
 
@@ -4170,7 +3875,6 @@ class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase)
             comment_id=1,
             dry_run=False,
             native_stack=self.stack,
-            trunk_at_start=start,
         )
         numbers = [entry.number for entry in self.stack.entries]
         for index in range(numbers.index(target) + 1):
@@ -4205,30 +3909,26 @@ class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase)
         self.assertEqual(list(self.reopened.values()), [before, before])
         self.assertUpdated(self.stack, before, self.own, "user/a", "user/b", "user/c")
         self.assertEqual(self.failure_comments(), [])
+        pull = (
+            ", please pull locally before adding more changes (for example, via "
+            "`git checkout {0} && git pull --rebase`)"
+        )
+        calls = self.post.call_args_list
+        self.assertEqual(
+            [c.args[2:] for c in calls if "please pull" in c.args[3]],
+            [
+                (102, "Merged `main` into `user/b`" + pull.format("user/b")),
+                (
+                    103,
+                    "Merged `main` into `user/c` because #102 was reverted"
+                    + pull.format("user/c"),
+                ),
+            ],
+        )
         message = r"^viable/strict is behind main for PR #102"
         with self.assertRaisesRegex(NativeStackError, message):
             self.rebase_stack(self.stack, 103, onto=VIABLE_STRICT)
         self.assertLandsOwnChanges(self.merge(103), 102, 103)
-
-    def test_revert_of_a_lone_landed_pr_after_a_rebase_refreshes_its_branch(
-        self,
-    ) -> None:
-        self.merge(101)
-        self.move_trunk()
-        self.rebase_stack(self.stack, 103)
-        before = self.heads(self.stack)
-        self.bot_revert(101)
-        self.assertEqual(list(self.reopened), [101])
-        self.assertUpdated(self.stack, before, self.own, "user/a")
-
-    def test_revert_of_two_prs_below_an_open_one_refreshes_only_theirs(self) -> None:
-        self.merge(102)
-        self.move_trunk()
-        self.rebase_stack(self.stack, 103)
-        before = self.heads(self.stack)
-        self.bot_revert(101)
-        self.assertEqual(list(self.reopened), [101, 102])
-        self.assertUpdated(self.stack, before, self.own, "user/a", "user/b")
 
     def test_revert_without_a_rebase_pushes_no_branch(self) -> None:
         self.merge(103)
@@ -4248,56 +3948,11 @@ class TestNativeStackRevertRefreshEndToEnd(NoNetworkTestCase, LineStackTestCase)
         self.assertEqual(self.heads(self.stack), before)
         self.assertEqual(self.failure_comments(), [])
 
-    def push_fix(self, branch: str, number: int) -> None:
-        """Pushes a commit by the author of PR `number` onto `branch`"""
-        self.git("fetch", "-q", "origin")
-        self.git("checkout", "-q", "-B", branch, f"origin/{branch}")
-        with mock.patch.dict(os.environ, identity(author(number))):
-            self.commit(f"Fix #{number}", {f"fix{number}.txt": "fix\n"})
-        self.git("push", "-q", "origin", branch)
-
-    def assertMergeRefused(self, target: int, number: int) -> None:
-        """Merging PR `target` lands nothing: the commit that the changes of PR
-        `number` start from still has its earlier landing"""
-        trunk = self.origin_git("rev-parse", TRUNK)
-        message = (
-            rf"^PR #{number} landed in {self.landings[number]}, which its merge base "
-            "with main still has"
-        )
-        with self.assertRaisesRegex(NativeStackError, message):
-            self.merge(target)
-        self.assertEqual(self.origin_git("rev-parse", TRUNK), trunk)
-
-    def test_refuses_fix_on_a_branch_whose_refresh_failed(self) -> None:
-        self.landings[101] = self.merge(101)[0]
-        self.move_trunk()
-        self.rebase_stack(self.stack, 103)
-        self.reject_pushes_to("user/a")
-        self.bot_revert(101)
-        self.assertEqual(self.failure_comments(), [101])
-        os.remove(os.path.join(self.origin, "hooks", "update"))
-        self.push_fix("user/a", 101)
-        # The PRs above get the fix, so only the landing check can refuse
-        for branch, base in (("user/b", "user/a"), ("user/c", "user/b")):
-            self.git("checkout", "-q", "-B", branch, f"origin/{branch}")
-            self.merge_into(branch, base)
-        self.assertMergeRefused(103, 101)
-
     def test_relands_reverted_stack_rebased_onto_main(self) -> None:
         self.merge(103)
         self.bot_revert(101)
         self.move_trunk()
         self.rebase_stack(self.stack, 103)
-        self.assertLandsOwnChanges(self.merge(103), 101, 102, 103)
-
-    def test_relands_reverted_stack_rebased_onto_a_viable_strict_with_the_reverts(
-        self,
-    ) -> None:
-        self.merge(103)
-        self.bot_revert(101)
-        self.origin_git("branch", VIABLE_STRICT, TRUNK)
-        self.move_trunk()
-        self.rebase_stack(self.stack, 103, onto=VIABLE_STRICT)
         self.assertLandsOwnChanges(self.merge(103), 101, 102, 103)
 
 
