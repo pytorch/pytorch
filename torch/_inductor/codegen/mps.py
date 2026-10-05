@@ -13,7 +13,6 @@ import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
-from torch._utils_internal import get_file_path
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min
@@ -256,7 +255,7 @@ class MetalOverrides(OpOverrides):
             rc = body()
 
         # Compute cache key manually as variable name is needed to actually generate the code
-        cache_key = f"{mask}:{scoped_body.getvalue()}:{other_str}"
+        cache_key = f"{mask}:{scoped_body.getvalue()}:{rc}:{other_str}"
         var = V.kernel.cse.try_get(cache_key)
         if not var:
             var = V.kernel.cse.newvar(dtype=rc.dtype)
@@ -1074,7 +1073,7 @@ class MetalKernel(SIMDKernel):
                 ]
                 header_contents = _embed_headers(
                     headers,
-                    [Path(get_file_path("torch")) / "include"],
+                    [Path(__file__).parent.parent.parent / "include"],
                     OrderedSet(),  # type: ignore[arg-type]
                 )
                 code.writeline(header_contents)

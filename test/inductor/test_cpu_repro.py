@@ -207,7 +207,9 @@ class CPUReproTests(TestCase):
         expected = run(fn)
         with functorch_config.patch(activation_memory_budget=activation_memory_budget):
             actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
-        self.assertEqual(actual, expected)
+        # mean/std grads are 256-term float32 sums; without vectorization
+        # (ATEN_CPU_CAPABILITY=default) inductor sums them sequentially.
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
 
     @parametrize("activation_memory_budget", (0, 1))
     def test_interpolate_mutated_input_backward(self, activation_memory_budget):
@@ -1961,6 +1963,22 @@ class CPUReproTests(TestCase):
         self.assertEqual(
             torch.unique(sliced_actual[:, 0]).numel(), sliced_actual.size(0)
         )
+
+    def test_randperm_full_index_add_issue_196631(self):
+        from torch._dynamo.utils import counters
+
+        def fn(x, y):
+            index = torch.randperm(x.size(0))
+            return torch.index_add(x, 0, index, y), index
+
+        x = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+        y = torch.arange(12, dtype=torch.float32).reshape(3, 4) * 10
+
+        counters.clear()
+        actual, index = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        expected = torch.index_add(x, 0, index, y)
+        self.assertEqual(actual, expected)
 
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
@@ -5638,6 +5656,68 @@ class CPUReproTests(TestCase):
                 torch.compile(fn, backend="inductor")().dtype,
                 dtype if dtype else torch.float32,
             )
+
+    @parametrize(
+        "mean_dtype,std_dtype",
+        [
+            (torch.float16, torch.float32),
+            (torch.bfloat16, torch.float32),
+            (torch.float32, torch.float64),
+            (torch.float64, torch.float32),
+        ],
+    )
+    def test_aten_normal_tensor_tensor_mixed_dtype(self, mean_dtype, std_dtype):
+        # aten.normal(Tensor, Tensor) takes its output dtype from mean,
+        # not from elementwise promotion between mean and std. See #194547.
+        mean = torch.zeros(8, dtype=mean_dtype)
+        std = torch.ones(8, dtype=std_dtype)
+
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        eager = fn(mean, std)
+
+        for backend in ("aot_eager_decomp_partition", "inductor"):
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend=backend)(mean, std)
+            self.assertEqual(compiled.dtype, eager.dtype)
+            self.assertEqual(compiled.dtype, mean.dtype)
+            self.assertEqual(compiled.shape, eager.shape)
+
+    def test_aten_normal_tensor_scalar_dtype(self):
+        mean = torch.zeros(8, dtype=torch.float16)
+        eager = torch.normal(mean, 1.0)
+
+        compiled = torch.compile(
+            lambda mean: torch.normal(mean, 1.0),
+            backend="inductor",
+        )(mean)
+
+        self.assertEqual(compiled.dtype, eager.dtype)
+        self.assertEqual(compiled.dtype, mean.dtype)
+
+    def test_aten_normal_scalar_tensor_dtype(self):
+        std = torch.ones(8, dtype=torch.float16)
+        eager = torch.normal(0.0, std)
+
+        compiled = torch.compile(
+            lambda std: torch.normal(0.0, std),
+            backend="inductor",
+        )(std)
+
+        self.assertEqual(compiled.dtype, eager.dtype)
+        self.assertEqual(compiled.dtype, std.dtype)
+
+    def test_aten_normal_tensor_tensor_broadcast_dtype(self):
+        mean = torch.zeros(3, 1, dtype=torch.float16)
+        std = torch.ones(1, 4, dtype=torch.float32)
+
+        eager = torch.normal(mean, std)
+        compiled = torch.compile(torch.normal, backend="inductor")(mean, std)
+
+        self.assertEqual(compiled.dtype, torch.float16)
+        self.assertEqual(compiled.shape, (3, 4))
+        self.assertEqual(compiled.shape, eager.shape)
 
     def test_group_norm_vec(self):
         class M(torch.nn.Module):

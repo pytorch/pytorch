@@ -13861,7 +13861,6 @@ class TestAutogradDeviceType(TestCase):
             with self.assertRaises(RuntimeError):
                 x.grad = torch.randn(5, 5, device=devices[1])
 
-    @dtypesIfMPS(torch.float32)
     @deviceCountAtLeast(1)
     @dtypes(torch.float, torch.double)
     def test_requires_grad_factory(self, devices, dtype):

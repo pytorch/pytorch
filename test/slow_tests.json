@@ -130,7 +130,7 @@
   "test_count_nonzero_all (__main__.TestBool)": 654.9627821180555,
   "test_create_rand_mask_from_inputs_dynamic_shapes (__main__.DynamicShapesReproTests)": 92.5728333791097,
   "test_dijkstra_expand_single_dim_strategy_to_mesh_hard_4d (__main__.TestDijkstraExpandSingleDimStrategy)": 303.05066935221356,
-  "test_dispatch_symbolic_meta_outplace_all_strides_nn_functional_gaussian_nll_loss_cuda_float32 (__main__.TestMetaCUDA)": 95.07450103759766,
+  "test_dispatch_symbolic_meta_outplace_all_strides_nn_functional_gaussian_nll_loss_cuda_float32 (__main__.TestMetaCudaRefCUDA)": 95.07450103759766,
   "test_dtensor_op_db__native_batch_norm_legit_cpu_float32 (__main__.TestMultiThreadedDTensorOpsCPU)": 172.50000508626303,
   "test_dtensor_op_db_native_batch_norm_cpu_float32 (__main__.TestMultiThreadedDTensorOpsCPU)": 200.29400126139322,
   "test_dtensor_op_db_nn_functional_batch_norm_cpu_float32 (__main__.TestMultiThreadedDTensorOpsCPU)": 199.36066691080728,
