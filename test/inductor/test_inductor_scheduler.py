@@ -19,6 +19,7 @@ from torch._inductor.codegen.simd import (
     _PointwiseRemapHandler,
     _SubParentValueResolver,
     SIMDScheduling,
+    tile_fits_reduction_epilogue,
 )
 from torch._inductor.codegen.simd_kernel_features import (
     DisableReduction,
@@ -756,6 +757,155 @@ class TestScheduler(TestCase):
         scheduler.fuse_if_speedup.assert_called_once_with(
             template, expected, speedup, fused_nodes
         )
+
+    @parametrize("template_reduction_epilogue", (False, True))
+    def test_pending_template_fusion_skips_operand_fused_with_reduction(
+        self, template_reduction_epilogue
+    ):
+        scheduler = object.__new__(Scheduler)
+        template = self._mock_base_snode("template")
+        retired = self._mock_base_snode("retired")
+        current = self._mock_base_snode("current")
+        template.is_template.return_value = True
+        template.get_template_node.return_value = None
+        current.is_reduction.return_value = True
+        scheduler.name_to_fused_node = {
+            "template": template,
+            "retired": current,
+            "current": current,
+        }
+        scheduler._fusion_memory_state = None
+        scheduler.fuse_if_speedup = Mock(return_value=False)
+        speedup = Mock(return_value=True)
+        pending = PendingFusion(speedup, template, retired)
+        fused_nodes = OrderedSet([template, current])
+
+        with inductor_config.patch(
+            {"triton.template_reduction_epilogue": template_reduction_epilogue}
+        ):
+            scheduler._evaluate_pending_template_fusions(
+                {retired: [pending]}, fused_nodes
+            )
+
+        if template_reduction_epilogue:
+            # The speedup was benchmarked without the reduction retired fused
+            # with since, so its template choice may not fit it.
+            scheduler.fuse_if_speedup.assert_not_called()
+        else:
+            scheduler.fuse_if_speedup.assert_called_once_with(
+                template, retired, speedup, fused_nodes
+            )
+
+    def test_choice_supports_reduction_epilogue(self):
+        template = self._mock_base_snode("template")
+        template.is_template.return_value = True
+        reduction = self._mock_base_snode("reduction")
+        reduction.is_reduction.return_value = True
+        epilogue = ir.ReductionEpilogue(template, reduction)
+        self.assertEqual(epilogue.nodes, [reduction])
+
+        extern = ir.ChoiceCaller("extern", [], Mock(), "")
+        self.assertFalse(extern.supports_reduction_epilogue(epilogue))
+
+        # Triton choices are judged by their output tiles, once per tile.
+        tiles = [(128, 256, 1), (128, 256, 1), (128, 128, 1)]
+        choices = [ir.TritonTemplateCallerBase("triton", [], Mock(), "") for _ in tiles]
+        for choice, tile in zip(choices, tiles):
+            choice.output_tile = tile
+        with (
+            patch(
+                "torch._inductor.codegen.triton.template_reduction_epilogue_supported",
+                return_value=True,
+            ) as supported,
+            patch(
+                "torch._inductor.codegen.simd.tile_fits_reduction_epilogue",
+                side_effect=lambda tile, template, nodes: tile[1] >= 256,
+            ) as fits,
+        ):
+            self.assertEqual(
+                [choice.supports_reduction_epilogue(epilogue) for choice in choices],
+                [True, True, False],
+            )
+        supported.assert_called_once()
+        self.assertEqual(fits.call_count, 2)
+
+    def test_tile_fits_reduction_epilogue(self):
+        M = N = 64
+        x, r = sympy.symbols("x r", integer=True, nonnegative=True)
+        template = Mock()
+        template.get_size.return_value = [sympy.Integer(M), sympy.Integer(N)]
+        template.get_name.return_value = "buf0"
+
+        def reduction(index, group=(M, N)):
+            node = self._mock_base_snode("buf1")
+            node.is_reduction.return_value = True
+            node.group = ("cuda", group)
+            node.read_writes.reads = OrderedSet(
+                [MemoryDep("buf0", index, (x, r), (M, N))]
+            )
+            return node
+
+        row = reduction(N * x + r)
+        cases = [
+            (None, row, False),
+            # Across epilogue subtiles.
+            ((128, 32, 2), row, True),
+            # Across column tiles, only reductions that finish from partials fit.
+            ((128, 32, 1), row, False),
+            # A column read: (M, N) matches (N, M), but the read isn't row-major.
+            ((128, N, 1), reduction(x + N * r), False),
+            ((128, N, 1), reduction(N * x + r, group=(M * N, 1)), False),
+            ((128, N, 1), row, True),
+        ]
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            # Meta automatic warp specialization rejects subtiled reductions.
+            patch("torch._inductor.codegen.simd.meta_ws_enabled", return_value=False),
+        ):
+            for tile, node, expected in cases:
+                self.assertEqual(
+                    tile_fits_reduction_epilogue(tile, template, [node]),
+                    expected,
+                    (tile, node.read_writes.reads),
+                )
+
+    def test_tile_fits_reduction_epilogue_chained_partials(self):
+        M = N = 64
+        x, r = sympy.symbols("x r", integer=True, nonnegative=True)
+        template = Mock()
+        template.get_size.return_value = [sympy.Integer(M), sympy.Integer(N)]
+        template.get_name.return_value = "buf0"
+
+        def node(name, reads, reduction):
+            node = self._mock_base_snode(name)
+            node.is_reduction.return_value = reduction
+            node.group = ("cuda", (M, N) if reduction else (M * N, sympy.S.One))
+            node.get_buffer_names.return_value = OrderedSet([name])
+            node.read_writes.reads = OrderedSet(
+                MemoryDep(dep, index, (x, r), (M, N)) for dep, index in reads
+            )
+            return node
+
+        mean = node("buf1", [("buf0", N * x + r)], True)
+        center = node("buf2", [("buf0", N * x + r), ("buf1", x)], False)
+        sq_sum = node("buf3", [("buf2", N * x + r)], True)
+        # Row reductions of tiles narrower than N store partials. center reads
+        # mean's finished result, so it runs after the kernel, and so must
+        # sq_sum, which reads center.
+        tile = (128, 32, 1)
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            patch(
+                "torch._inductor.codegen.simd.finishes_from_partials",
+                return_value=True,
+            ),
+        ):
+            self.assertTrue(
+                tile_fits_reduction_epilogue(tile, template, [mean, center])
+            )
+            self.assertFalse(
+                tile_fits_reduction_epilogue(tile, template, [mean, center, sq_sum])
+            )
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
