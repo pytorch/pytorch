@@ -240,6 +240,13 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_argmax_bf16(self):
+        def fn(x):
+            return x.argmax(-1)
+
+        x = torch.randn(1, 65536, dtype=torch.bfloat16)
+        self.common(fn, (x,), check_lowp=False)
+
     @parametrize("shape", [(4, 5000), (3, 1023), (7, 1025), (5, 32), (1, 30000)])
     def test_welford_reduction_dynamic_shape(self, shape):
         # (5, 32): single-stage welford_reduce
