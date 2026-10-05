@@ -2217,6 +2217,20 @@ def mro_lookup(py_type: type, name: str) -> object:
     return NO_SUCH_SUBOBJ
 
 
+def _raise_unsupported_classmethod_descriptor_on_dict_subclass(
+    name: str,
+) -> NoReturn:
+    unimplemented(
+        gb_type="Unsupported classmethod descriptor on dict subclass instance",
+        context=f"name={name}",
+        explanation="Dynamo cannot safely trace a C classmethod descriptor through a dict subclass instance.",
+        hints=[
+            "Call the descriptor through the class instead of an instance.",
+            *graph_break_hints.SUPPORTABLE,
+        ],
+    )
+
+
 def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
     """Source for ``klass.__mro__[idx]``.
 
@@ -2235,6 +2249,8 @@ def mro_attr_source(
     klass_source: Source,
     name: str,
     expected: object = NO_SUCH_SUBOBJ,
+    *,
+    start_index: int = 0,
 ) -> "DictGetItemSource | None":
     """Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
 
@@ -2243,11 +2259,12 @@ def mro_attr_source(
     the class chain -- a different object than `mro_lookup` returned. Index the
     owning class's ``__dict__`` instead.
 
-    Returns None if *name* is absent from the whole MRO; callers decide whether
-    that is an error.
+    Returns None if *name* is absent from the searched MRO suffix; callers
+    decide whether that is an error.
     """
     entries = tuple(iter_mro_static_dicts(klass))
-    for idx, (base, namespace) in enumerate(entries):
+    for idx in range(start_index, len(entries)):
+        base, namespace = entries[idx]
         if name not in namespace:
             continue
         descriptor = namespace[name]
@@ -2258,7 +2275,7 @@ def mro_attr_source(
         # of them later gains *name*. Deduplicated by (id(klass), name): the
         # caller's TYPE_MATCH pins the MRO, so an id always means the same class.
         if expected is NO_SUCH_SUBOBJ:
-            for absent_idx in range(idx):
+            for absent_idx in range(start_index, idx):
                 absent_key = (id(entries[absent_idx][0]), name)
                 if absent_key in tx.output.guarded_mro_absent_keys:
                     continue
