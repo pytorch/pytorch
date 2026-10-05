@@ -69,4 +69,13 @@ jobs:
       build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
+      # The default config picks these up by discovery; inductor-rocm-mi300.yml already
+      # runs them on the same schedule. A PR tagged only for this workflow will
+      # not cover them, so tag both. Only affects default (see EXCLUDE_CLAUSE in
+      # .ci/pytorch/test.sh).
+      tests-to-exclude: >-
+        inductor/test_torchinductor
+        inductor/test_torchinductor_opinfo
+        inductor/test_aot_inductor
+        inductor/test_cpu_select_algorithm
     secrets: inherit
