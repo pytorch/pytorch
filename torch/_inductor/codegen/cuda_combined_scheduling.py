@@ -299,10 +299,9 @@ class CUDACombinedScheduling(BaseScheduling):
             preserve_rng_state(),
             device_interface.device(V.graph.get_current_device_or_throw()),
         ):
-            args = module.get_args()
-            call = module.call
-
             try:
+                args = module.get_args()
+                call = module.call
                 call(args)
             except Exception as e:
                 fusion_log.warning(
