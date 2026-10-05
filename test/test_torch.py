@@ -310,7 +310,6 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(_throws_on_data_ptr_access(s2))
         self.assertFalse(raises_on_data_ptr(s2))
 
-    @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
@@ -3777,6 +3776,7 @@ class TestTorchDeviceType(TestCase):
     # FIXME: find a test suite for the masked scatter operator
     #   test_scatter_gather_ops or test_masked_ops?
     @onlyAccelerator
+    @largeTensorTest('10GB', device='cpu')
     @largeTensorTest('30GB')
     def test_masked_scatter_large_tensor(self, device):
         t_cpu = torch.empty(2**31 + 1, dtype=torch.bool).random_()
@@ -6842,9 +6842,11 @@ class TestTorchCUDA(TestCase):
         size = 4
         x = torch.rand(size, device=device)
         y = torch.rand((), device=device)
+        y_cpu = y.cpu()
         ind = torch.randint(size, (3,), device=device)
         ind_2d = torch.randint(size, (2, 3), device=device)
         ind_cpu = ind.cpu()
+        scalar_ind = torch.randint(size, (), device=device)
         repeats = torch.full((1,), 2, device=device)
         mask = torch.randint(2, (size,), device=device, dtype=bool)
         mask_cpu = mask.cpu()
@@ -6853,6 +6855,8 @@ class TestTorchCUDA(TestCase):
                           lambda: _ind_put_fn(x, ind, y),
                           lambda: _ind_put_fn(x, ind, 1.),
                           lambda: _ind_put_fn(x, ind_2d, 1.),
+                          lambda: _ind_put_fn(x, scalar_ind, y),
+                          lambda: _ind_put_fn(x, scalar_ind, 1.),
                           lambda: _ind_put_fn(x, 0, 5.),
                           lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
@@ -6866,6 +6870,7 @@ class TestTorchCUDA(TestCase):
                           lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
+                       lambda: _ind_put_fn(x, scalar_ind, y_cpu),
                        lambda: _ind_get_fn(x, mask),
                        lambda: _ind_get_fn(x, ind_cpu),
                        lambda: x.nonzero(),
@@ -10057,6 +10062,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             g.replay()
             for expect, t in zip(expects, out):
                 self.assertTrue(expect.eq(t).all().item())
+
+        # Empty inputs, including all-empty splits, copy nothing
+        for shape, dim, split_sizes in (((30, 0, 50), 1, [0, 0]), ((0, 40), 1, [10, 30])):
+            x = torch.rand(*shape, device=device)
+            views = x.split_with_sizes(split_sizes, dim=dim)
+            out = [torch.empty_like(v) for v in views]
+            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            self.assertEqual([t.shape for t in out], [v.shape for v in views])
 
     def test_type(self):
         x = torch.randn(3, 3).double()

@@ -606,7 +606,7 @@ class TritonTemplateKernel(TritonKernel):
         )
         if tma_2d:
             # By default `construct_range_trees` will return the range_trees in the order
-            # ["z", "y", "x", "r0_", "r1_"] (see simd.py:all_prefixes)
+            # ["z", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
             # and this order defines what the kernel block shape will be. So if the template
             # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
             # trees in the order ["y", "x"]. This would mean that the template would need to transpose
@@ -966,6 +966,8 @@ class TritonTemplateKernel(TritonKernel):
             self.triton_meta = triton_meta
         else:
             self.triton_meta.update(triton_meta)
+        if not config.emulate_precision_casts:
+            self.triton_meta.setdefault("enable_fp_fusion", True)
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
@@ -1569,16 +1571,6 @@ class TritonTemplateKernel(TritonKernel):
         """
         return f"{output_name} = {index_name} < {shape_val}"
 
-    def _config_supports_reduction_epilogue(self) -> bool:
-        """Whether this config may host a reduction epilogue."""
-        return not (
-            # Automatic warp specialization's data partitioning fails on
-            # reduction epilogues.
-            self.meta.get("DATA_PARTITION_FACTOR", 1) > 1
-            # Untested with reduction epilogues.
-            or self.meta.get("TWO_CTAS", False)
-        )
-
     def store_output(
         self,
         indices: list[Any] | tuple[Any],
@@ -1660,7 +1652,10 @@ class TritonTemplateKernel(TritonKernel):
                 tile = [sympy.sympify(s).subs(meta) for s in (*val_shape, subtiles)]
                 if (
                     all(isinstance(t, sympy.Integer) for t in tile)
-                    and self._config_supports_reduction_epilogue()
+                    # Automatic warp specialization's data partitioning and
+                    # 2CTA are untested with reduction epilogues.
+                    and self.meta.get("DATA_PARTITION_FACTOR", 1) == 1
+                    and not self.meta.get("TWO_CTAS", False)
                 ):
                     self.output_tiles[subgraph_idx] = (
                         index_symbols,
@@ -3099,6 +3094,7 @@ class GeneratedCodeCache:
                 "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
+                "emulate_precision_casts": config.emulate_precision_casts,
                 "triton_meta": triton_meta,
             }
         )
@@ -3403,6 +3399,8 @@ class TritonTemplate(KernelTemplate):
                     return None
                 code, extra = result
                 tiles = [tile for _, tile, _ in kernel.output_tiles.values()]
+                # Templates with several store_output calls don't host
+                # reduction epilogues.
                 output_tile = tiles[0] if len(tiles) == 1 else None
                 self._generated_code_cache.put_entry(
                     cache_key, code, extra, kernel.cached_replay_events, output_tile
@@ -3755,6 +3753,7 @@ class ExternKernelChoice:
         input_nodes,
         layout,
         ordered_kwargs_for_cpp_kernel=(),
+        benchmark_request_kwargs=None,
         **kwargs,
     ):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
@@ -3764,6 +3763,7 @@ class ExternKernelChoice:
             layout,
             kwargs,
             has_out_variant=self.has_out_variant,
+            benchmark_request_kwargs=benchmark_request_kwargs,
         )
 
     @property
@@ -3848,6 +3848,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         if (
             config.profile_bandwidth_with_do_bench_using_profiling
             and not self._benchmark_with_cudagraphs
+            and not self.bmreq.config_cudagraph_benchmarking
         ):
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)
@@ -3923,10 +3924,12 @@ class ExternKernelCaller(ChoiceCaller):
         kwargs=None,
         *,
         has_out_variant=True,
+        benchmark_request_kwargs=None,
     ) -> None:
         super().__init__(choice.name, input_nodes, layout, description="")
         self.choice = choice
         self.kwargs = kwargs or {}
+        self.benchmark_request_kwargs = benchmark_request_kwargs or {}
         self.has_out_variant = has_out_variant
         self.gm = choice.gm
         self.bmreq: BenchmarkRequest | None = None
@@ -3978,6 +3981,8 @@ class ExternKernelCaller(ChoiceCaller):
             callable_path=self.choice.call_name(),
             kwargs=self.kwargs,
             has_out_variant=self.has_out_variant,
+            benchmark_device_type=device.type,
+            **self.benchmark_request_kwargs,
         )
 
     def __str__(self) -> str:
@@ -4022,6 +4027,10 @@ class ExternKernelCaller(ChoiceCaller):
                 *[
                     f"{kwarg}={repr(self.kwargs[kwarg])}"
                     for kwarg in sorted(self.kwargs.keys())
+                ],
+                *[
+                    f"benchmark_{kwarg}={repr(self.benchmark_request_kwargs[kwarg])}"
+                    for kwarg in sorted(self.benchmark_request_kwargs.keys())
                 ],
                 self.choice.hash_key(),
             ]
@@ -4230,6 +4239,30 @@ def get_num_workers() -> int:
 
 def create_inputs_key(input_nodes) -> str:
     return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
+
+
+def create_benchmark_cache_key(
+    inputs_key: str,
+    device_type: str,
+    benchmark_with_cudagraphs: bool,
+) -> str:
+    """Separate timing and prescreen caches by the effective benchmark policy."""
+    if benchmark_with_cudagraphs:
+        policy = "cudagraph_required"
+    elif (
+        device_type == "cuda"
+        and config.autotune_cudagraph_benchmarking
+        and config.max_autotune
+    ):
+        policy = "cudagraph_auto"
+    else:
+        policy = "eager"
+    cache_key = f"{inputs_key}:benchmark_policy={policy}"
+    if policy != "eager":
+        cache_key += (
+            f":cudagraph_unroll={max(1, config.autotune_cudagraph_benchmarking_iters)}"
+        )
+    return cache_key
 
 
 def create_precompile_key(
@@ -4516,6 +4549,9 @@ class AlgorithmSelectorCache(PersistentCache):
         if benchmark_with_cudagraphs:
             for choice in choices:
                 choice._benchmark_with_cudagraphs = True
+                bmreq = _benchmark_request_for_choice(choice)
+                if bmreq is not None:
+                    bmreq.benchmark_with_cudagraphs = True
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
@@ -4543,6 +4579,11 @@ class AlgorithmSelectorCache(PersistentCache):
             return node, choice
 
         inputs_key = create_inputs_key(input_nodes)
+        benchmark_inputs_key = create_benchmark_cache_key(
+            inputs_key,
+            layout.device.type,
+            benchmark_with_cudagraphs,
+        )
 
         has_cutlass = any(isinstance(c, CUTLASSTemplateCaller) for c in choices)
         if config.autotune_in_subproc or has_cutlass:
@@ -4553,6 +4594,7 @@ class AlgorithmSelectorCache(PersistentCache):
             choices,
             name,
             inputs_key,
+            benchmark_inputs_key=benchmark_inputs_key,
             precompilation_timeout_seconds=precompilation_timeout_seconds,
         )
 
@@ -4567,7 +4609,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 ]
                 # Make sure the autotune subprocess for benchmarking is fed as much as possible
                 # Extern kernels do not have to precompile, so can feed them before triton
-                AsyncAutotuner.start(extern_kernels, inputs_key)
+                AsyncAutotuner.start(extern_kernels, benchmark_inputs_key)
                 triton_kernels = [
                     c for c in choices if not AlgorithmSelectorCache._is_extern(c)
                 ]
@@ -4580,7 +4622,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         input_nodes,
                         layout,
                         input_gen_fns,
-                        inputs_key,
+                        benchmark_inputs_key,
                         triton_kernels,
                         precompile_fn,
                     )
@@ -4607,7 +4649,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
                     # Await autotuning in subproc pool
                     autotune_start_ts = time.time()
-                    results = AsyncAutotuner.get_results(final_choices, inputs_key)
+                    results = AsyncAutotuner.get_results(
+                        final_choices, benchmark_inputs_key
+                    )
                     if not any(math.isfinite(timing) for timing in results.values()):
                         raise self.create_no_valid_choices(
                             name, "All choices failed to benchmark for backend."
@@ -4636,7 +4680,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         input_nodes,
                         layout,
                         input_gen_fns,
-                        inputs_key,
+                        benchmark_inputs_key,
                         filtered_choices,
                         precompile_fn,
                         hint_override=hint_override,
@@ -4685,7 +4729,7 @@ class AlgorithmSelectorCache(PersistentCache):
             input_nodes,
             layout,
             input_gen_fns,
-            inputs_key,
+            benchmark_inputs_key,
             choices,
             precompile_fn,
             best_config_future=best_config_future,
@@ -5113,6 +5157,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices,
         name: str,
         inputs_key: str,
+        benchmark_inputs_key: str | None = None,
         precompilation_timeout_seconds: int | None = 60 * 60,
     ) -> Callable[[], dict[ChoiceCaller, float]]:
         """
@@ -5147,7 +5192,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timings = self.lookup(
             choices,
             name,
-            inputs_key,
+            benchmark_inputs_key or inputs_key,
             benchmark=None,
         )
 
@@ -5283,6 +5328,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             swizzle_type_a=c.bmreq.swizzle_type_a,
                             swizzle_type_b=c.bmreq.swizzle_type_b,
                             has_bias_epilogue=c.bmreq.has_bias_epilogue,
+                            has_output_scale=c.bmreq.has_output_scale,
                             swap_ab=c.bmreq.swap_ab,
                             metadata=c.bmreq.kernel.metadata,
                         )
