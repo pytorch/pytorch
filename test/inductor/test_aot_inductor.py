@@ -4437,7 +4437,7 @@ class AOTInductorTestsTemplate:
             package = torch._inductor.aoti_compile_and_package(
                 ep, package_path=os.path.join(directory, "model.pt2")
             )
-            loaded = torch._inductor.aoti_load_package(package)
+            loaded = AOTIRunnerUtil.load_package(package)
             actual = loaded(x)
         self.assertIs(type(actual), type(expected))
         self.assertEqual(actual, expected)
