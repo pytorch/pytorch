@@ -310,9 +310,9 @@ class SuperVariable(VariableTracker):
                     raise AssertionError(
                         "source must not be None for user-defined class"
                     )
-                user_cls_source = source.member
-                user_cls_vt = variables.UserDefinedClassVariable(
-                    user_cls, source=user_cls_source
+                user_cls_source = AttrSource(source, "__self__")
+                user_cls_vt = VariableTracker.build(
+                    tx, user_cls, source=user_cls_source, realize=True
                 )
             return user_cls_vt.call_method(tx, "__new__", args, kwargs)
         elif isinstance(inner_fn, staticmethod) and isinstance(
@@ -878,7 +878,7 @@ class AutogradFunctionVariable(VariableTracker):
                 variables.UserFunctionVariable(
                     fn.__func__, source=source and AttrSource(source, "__func__")
                 ),
-                variables.UserDefinedClassVariable(self.fn_cls),
+                VariableTracker.build(tx, self.fn_cls),
                 source=source,
             ).call_function(tx, args, kwargs)
         else:

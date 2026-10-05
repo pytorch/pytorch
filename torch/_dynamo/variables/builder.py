@@ -1928,21 +1928,25 @@ class VariableBuilder:
             result = RandomVariable(value, source=self.source)
             self.tx.output.side_effects.track_mutable(value, result)
             return result
+        elif isinstance(value, replay_record.DummyModule):
+            # Replay substitutes recorded modules with DummyModule instances.
+            # Preserve their historical unguarded, immutable treatment: a
+            # MODULE_MATCH guard requires an actual module.
+            return PythonModuleVariable(
+                value,  # type: ignore[arg-type]
+                source=self.source,
+            )
         # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
         # E.g, type(torch.ops) -> <class 'torch._ops._Ops'>,
         # type(torch.backends.cudnn) -> <class 'torch.backends.cudnn.CudnnModule'>
-        elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
+        elif isinstance(value, types.ModuleType):
             from torch.utils import _config_module
 
             if isinstance(value, _config_module.ConfigModule):
                 self.install_guards(GuardBuilder.MODULE_MATCH)
                 return UserDefinedObjectVariable(value, source=self.source)
             self.install_guards(GuardBuilder.MODULE_MATCH)
-            result = PythonModuleVariable(
-                # type: ignore[arg-type]
-                value,
-                source=self.source,
-            )
+            result = PythonModuleVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, result)
             return result
         elif (
@@ -5685,6 +5689,9 @@ class SourcelessBuilder:
             lambda tx, value: FuncTorchInterpreterVariable(
                 value, mutation_type=ValueMutationNew()
             )
+        )
+        handlers[torch._C._functorch.CInterpreter] = (
+            lambda tx, value: UserDefinedObjectVariable(value)
         )
 
         handlers[torch.distributions.constraints._Real] = (
