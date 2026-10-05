@@ -103,7 +103,7 @@ are unsupported. `--prompt-length` (default 1000) and `--batch-size` configure
 the prefill workload; generation retains its existing `1 x 1000` inputs and
 rejects `--prompt-length`.
 
-CSV `abs_latency` and `eager_prefill_latency` are milliseconds for all
+CSV `abs_latency` and `eager_latency` are milliseconds for all
 `--iterations-per-run` requests; `input_tokens_per_second` includes all batch
 elements. Default output and profiler trace names get a `_prefill` suffix; use
 separate files for different input dimensions.

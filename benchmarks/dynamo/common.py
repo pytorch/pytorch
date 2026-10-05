@@ -644,7 +644,7 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"{data[col].mean():.3f}")
             elif col in ("compilation_latency"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
-            elif col == "eager_prefill_latency":
+            elif col == "eager_latency":
                 print(col.ljust(width), f"mean={data[col].mean():.3f} ms")
             elif col == "input_tokens_per_second":
                 print(col.ljust(width), f"mean={data[col].mean():.3f} tokens/s")
@@ -1203,7 +1203,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     row = first_fields + [float(speedup), median[1] * 1000]
     if getattr(args, "hf_inference_mode", "generate") == "prefill":
         input_tokens = times * example_inputs["input_ids"].numel()
-        headers += ["eager_prefill_latency", "input_tokens_per_second"]
+        headers += ["eager_latency", "input_tokens_per_second"]
         row += [median[0] * 1000, input_tokens / median[1]]
     msg = f"{speedup:.3f}x"
     if getattr(args, "_print_latency_ms", False):

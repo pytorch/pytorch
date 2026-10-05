@@ -115,9 +115,10 @@ class BenchmarkRunnerTests(TestCase):
         self.assertEqual(row["speedup"], 2.0)
         self.assertEqual(row["abs_latency"], 2000.0)
         if mode == "prefill":
-            self.assertEqual(row["eager_prefill_latency"], 4000.0)
+            self.assertEqual(row["eager_latency"], 4000.0)
             self.assertEqual(row["input_tokens_per_second"], 12.0)
         else:
+            self.assertNotIn("eager_latency", row)
             self.assertNotIn("input_tokens_per_second", row)
         self.assertEqual(timed.call_count, 4)
         for call in timed.call_args_list:
@@ -439,6 +440,7 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         self.assertEqual(cache_lengths, [(0, 7)] * 15)
         self.assertEqual(row["name"], "Qwen/Qwen3-0.6B")
         self.assertEqual(int(row["batch_size"]), 2)
+        self.assertGreater(float(row["eager_latency"]), 0)
         tokens_per_second = 2 * 2 * 7 / (float(row["abs_latency"]) / 1000)
         self.assertEqual(
             float(row["input_tokens_per_second"]), tokens_per_second, rtol=1e-3, atol=0
