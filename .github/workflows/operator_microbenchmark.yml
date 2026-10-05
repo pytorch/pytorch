@@ -39,8 +39,8 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
@@ -50,7 +50,7 @@ jobs:
         ]}
       python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   opmicrobenchmark-test:
@@ -66,7 +66,7 @@ jobs:
       test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
       python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   # B200 runner (OSDC), always use OSDC runner to test this workflow
@@ -77,8 +77,8 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "mt-"
-      build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm100
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11
+      build-environment: linux-jammy-cuda13.2-py3.12-gcc11-sm100
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '10.0'
       test-matrix: |
@@ -96,7 +96,7 @@ jobs:
         ]}
       python-version: "3.12"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   opmicrobenchmark-test-b200:
@@ -112,7 +112,7 @@ jobs:
       test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
       python-version: "3.12"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   # ROCM MI300 runner

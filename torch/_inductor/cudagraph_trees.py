@@ -446,6 +446,12 @@ def cudagraphify_impl(
     *args: Any,
     **kwargs: Any,
 ) -> ModelType:
+    """
+    Wrap ``model`` so it is cudagraphified lazily on first call, recording a
+    separate cudagraph tree function per distinct set of int (dynamic shape)
+    inputs. Shapes excluded by ``cudagraph_capture_sizes`` or beyond
+    ``cudagraph_dynamic_shape_rerecord_limit`` run eagerly.
+    """
     fn_cache: dict[tuple[int, ...], Callable[..., Any]] = {}
 
     # Detect int inputs: we need to index on these
@@ -456,18 +462,49 @@ def cudagraphify_impl(
 
     del inputs
 
+    def run_eager(inputs: list[InputType]) -> OutputType:
+        # See [Backward Generation Handling]: the forward may have been
+        # cudagraphed even though this backward runs eager.
+        if kwargs.get("is_backward"):
+            manager = get_manager(kwargs["device_index"], create_if_none_exists=False)
+            if manager is not None:
+                manager.set_to_running_backward()
+        return model(inputs)
+
     def deferred_cudagraphify(inputs: list[InputType]) -> OutputType:
         nonlocal has_warn
 
         int_key = get_ints(inputs)
 
         if not is_cudagraph_capture_sizes(int_key):
-            return model(inputs)
+            return run_eager(inputs)
 
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
+
         compile_id = kwargs.get("compile_id", "")
+
+        limit = config.triton.cudagraph_dynamic_shape_rerecord_limit
+        if limit is not None and len(fn_cache) >= limit:
+            if kwargs["is_backward"]:
+                mode = CompilationMode.BACKWARD
+            elif kwargs["is_inference"]:
+                mode = CompilationMode.INFERENCE
+            else:
+                mode = CompilationMode.FORWARD
+            # warning_once caches on its args, and fwd/bwd share compile_id, so
+            # include the mode or a backward skip after a forward one is silent.
+            torch._logging.warning_once(
+                log,
+                "[%s] %s graph hit cudagraph_dynamic_shape_rerecord_limit=%s; "
+                "already-recorded shapes still replay, new shapes run eager.",
+                compile_id,
+                mode.name.lower(),
+                limit,
+            )
+            return run_eager(inputs)
+
         if int_key is None:
             log.info(
                 "[%s] Recording cudagraph tree for graph without symints", compile_id
