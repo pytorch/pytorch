@@ -932,7 +932,6 @@ def run_test_with_class_supervisors(test_module, test_directory, options, classe
         or not test_module.test.is_full_file()
         or options.pytest_k_expr
         or options.pytest_xdist_workers is not None
-        or options.continue_through_error
         or options.coverage
         or options.dynamo
         or options.inductor
@@ -946,11 +945,17 @@ def run_test_with_class_supervisors(test_module, test_directory, options, classe
         subset_options.pytest_k_expr = expression
         return subset_options
 
+    failed = 0
     for name in classes:
-        if result := run_test(test_module, test_directory, subset(name)):
+        result = run_test(test_module, test_directory, subset(name))
+        if not result:
+            continue
+        if not options.continue_through_error:
             return result
+        failed = failed or result
     rest = subset(f"not ({' or '.join(classes)})")
-    return run_test_with_subprocess(test_module, test_directory, rest)
+    result = run_test_with_subprocess(test_module, test_directory, rest)
+    return failed or result
 
 
 def run_gloo_test(test_module, test_directory, options):
