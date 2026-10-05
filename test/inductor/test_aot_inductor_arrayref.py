@@ -365,8 +365,6 @@ LITE_MODE_TEST_FAILURES = {
     "test_kernel_profile_template_kernel": fail_stack_allocation(),
     # C++ compile error
     "test_quanatized_int8_linear": fail_stack_allocation(),
-    # Wrong results
-    "test_return_view_constant": fail_stack_allocation(),
     # Expects split/cat merge passes, which lite mode disables
     "test_simple_split": fail_stack_allocation(),
 }
