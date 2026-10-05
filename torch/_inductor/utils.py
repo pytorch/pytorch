@@ -236,6 +236,12 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
+
+# FX metadata marking a compiler-created ``_scaled_mm(..., scale_result=...)``
+# that represents an explicit post-GEMM scalar multiply.  Unlike the public
+# operator argument, this scale must still be applied for BF16 output.
+FOLDED_SCALED_MM_OUTPUT_SCALE = "inductor_folded_scaled_mm_output_scale"
+
 # Scanned exactly once, when this module is imported. Safe because both
 # registration paths precede any import of inductor: autoloaded out-of-tree
 # backends register during `import torch` (TORCH_DEVICE_BACKEND_AUTOLOAD, end
@@ -2227,6 +2233,17 @@ def _use_autotune_backend(backend: str) -> bool:
     return backend.upper() in [
         x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
     ]
+
+
+def _is_only_autotune_backend(backend: str) -> bool:
+    """Return whether ``backend`` is the only configured GEMM autotune backend."""
+    return OrderedSet(
+        [
+            x.strip()
+            for x in config.max_autotune_gemm_backends.upper().split(",")
+            if x.strip()
+        ]
+    ) == OrderedSet([backend.upper()])
 
 
 def _use_conv_autotune_backend(backend: str) -> bool:
@@ -5693,27 +5710,36 @@ def is_collective_op(op_name: str) -> bool:
 
 
 @lru_cache
+def _tlx_registry() -> Any:
+    try:
+        # Succeeds only when fbtriton (a Triton fork) is installed
+        from triton.language.extra.tlx.inductor import registry
+
+        return registry
+    except ImportError:
+        return None
+
+
+def _tlx_registry_options(name: str) -> list[str]:
+    from torch._inductor import config
+    from torch._inductor.compile_worker.utils import in_toplevel_process
+
+    # Importing the registry replaces config.inductor_choices_class, which keys
+    # the FX graph cache, so the parent must not import it while TLX is off.
+    # Compile workers do not inherit config.patch'd tlx_mode, so they stay
+    # ungated to avoid dropping enabled TLX options.
+    if config.triton.tlx_mode is None and in_toplevel_process():
+        return []
+    registry = _tlx_registry()
+    return [] if registry is None else getattr(registry, name, [])
+
+
 def tlx_only_cuda_options() -> list[str]:
-    try:
-        # Succeeds only when fbtriton (a Triton fork) is installed
-        from triton.language.extra.tlx.inductor.registry import tlx_only_cuda_options
-
-        return tlx_only_cuda_options
-
-    except ImportError:
-        return []
+    return _tlx_registry_options("tlx_only_cuda_options")
 
 
-@lru_cache
 def tlx_only_hip_options() -> list[str]:
-    try:
-        # Succeeds only when fbtriton (a Triton fork) is installed
-        from triton.language.extra.tlx.inductor.registry import tlx_only_hip_options
-
-        return tlx_only_hip_options
-
-    except ImportError:
-        return []
+    return _tlx_registry_options("tlx_only_hip_options")
 
 
 def _round_up(x: int, y: int) -> int:

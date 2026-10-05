@@ -16577,6 +16577,7 @@ fn
         with self.assertRaises(ImportError):
             fn(x)
 
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_dynamo_cache_move_to_front(self):
         def fn(x, const):
             return x + const
