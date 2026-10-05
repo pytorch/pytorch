@@ -5,39 +5,82 @@
 
 #if !defined(_MSC_VER) && defined(__x86_64__)
 #include <x86intrin.h>
+#define TE_SLEEF_128
+#define TE_SLEEF_256
+using SleefFloat4 = __m128;
+using SleefDouble2 = __m128d;
+// Sleef only emits the unsuffixed aliases below when built with ENABLE_ALIAS,
+// which is off for Apple and Windows targets.
+#elif !defined(_MSC_VER) && !defined(__APPLE__) && defined(__aarch64__)
+#include <arm_neon.h>
+#define TE_SLEEF_128
+using SleefFloat4 = float32x4_t;
+using SleefDouble2 = float64x2_t;
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
 
-__m128 Sleef_acosf4_u10(__m128);
-__m128 Sleef_asinf4_u10(__m128);
-__m128 Sleef_atanf4_u10(__m128);
-__m128 Sleef_cosf4_u10(__m128);
-__m128 Sleef_sinf4_u10(__m128);
-__m128 Sleef_tanf4_u10(__m128);
-__m128 Sleef_coshf4_u10(__m128);
-__m128 Sleef_sinhf4_u10(__m128);
-__m128 Sleef_tanhf4_u10(__m128);
-__m128 Sleef_erff4_u10(__m128);
-__m128 Sleef_erfcf4_u15(__m128);
-__m128 Sleef_expf4_u10(__m128);
-__m128 Sleef_expm1f4_u10(__m128);
-__m128 Sleef_logf4_u10(__m128);
-__m128 Sleef_log2f4_u10(__m128);
-__m128 Sleef_log10f4_u10(__m128);
-__m128 Sleef_log1pf4_u10(__m128);
-__m128 Sleef_sqrtf4_u05(__m128);
-__m128 Sleef_fabsf4(__m128);
-__m128 Sleef_floorf4(__m128);
-__m128 Sleef_ceilf4(__m128);
-__m128 Sleef_truncf4(__m128);
-__m128 Sleef_roundf4(__m128);
-__m128 Sleef_lgammaf4_u10(__m128);
-__m128 Sleef_atan2f4_u10(__m128, __m128);
-__m128 Sleef_powf4_u10(__m128, __m128);
-__m128 Sleef_fmodf4(__m128, __m128);
+#ifdef TE_SLEEF_128
+SleefFloat4 Sleef_acosf4_u10(SleefFloat4);
+SleefFloat4 Sleef_asinf4_u10(SleefFloat4);
+SleefFloat4 Sleef_atanf4_u10(SleefFloat4);
+SleefFloat4 Sleef_cosf4_u10(SleefFloat4);
+SleefFloat4 Sleef_sinf4_u10(SleefFloat4);
+SleefFloat4 Sleef_tanf4_u10(SleefFloat4);
+SleefFloat4 Sleef_coshf4_u10(SleefFloat4);
+SleefFloat4 Sleef_sinhf4_u10(SleefFloat4);
+SleefFloat4 Sleef_tanhf4_u10(SleefFloat4);
+SleefFloat4 Sleef_erff4_u10(SleefFloat4);
+SleefFloat4 Sleef_erfcf4_u15(SleefFloat4);
+SleefFloat4 Sleef_expf4_u10(SleefFloat4);
+SleefFloat4 Sleef_expm1f4_u10(SleefFloat4);
+SleefFloat4 Sleef_logf4_u10(SleefFloat4);
+SleefFloat4 Sleef_log2f4_u10(SleefFloat4);
+SleefFloat4 Sleef_log10f4_u10(SleefFloat4);
+SleefFloat4 Sleef_log1pf4_u10(SleefFloat4);
+SleefFloat4 Sleef_sqrtf4_u05(SleefFloat4);
+SleefFloat4 Sleef_fabsf4(SleefFloat4);
+SleefFloat4 Sleef_floorf4(SleefFloat4);
+SleefFloat4 Sleef_ceilf4(SleefFloat4);
+SleefFloat4 Sleef_truncf4(SleefFloat4);
+SleefFloat4 Sleef_roundf4(SleefFloat4);
+SleefFloat4 Sleef_lgammaf4_u10(SleefFloat4);
+SleefFloat4 Sleef_atan2f4_u10(SleefFloat4, SleefFloat4);
+SleefFloat4 Sleef_powf4_u10(SleefFloat4, SleefFloat4);
+SleefFloat4 Sleef_fmodf4(SleefFloat4, SleefFloat4);
 
+SleefDouble2 Sleef_acosd2_u10(SleefDouble2);
+SleefDouble2 Sleef_asind2_u10(SleefDouble2);
+SleefDouble2 Sleef_atand2_u10(SleefDouble2);
+SleefDouble2 Sleef_cosd2_u10(SleefDouble2);
+SleefDouble2 Sleef_sind2_u10(SleefDouble2);
+SleefDouble2 Sleef_tand2_u10(SleefDouble2);
+SleefDouble2 Sleef_coshd2_u10(SleefDouble2);
+SleefDouble2 Sleef_sinhd2_u10(SleefDouble2);
+SleefDouble2 Sleef_tanhd2_u10(SleefDouble2);
+SleefDouble2 Sleef_erfd2_u10(SleefDouble2);
+SleefDouble2 Sleef_erfcd2_u15(SleefDouble2);
+SleefDouble2 Sleef_expd2_u10(SleefDouble2);
+SleefDouble2 Sleef_expm1d2_u10(SleefDouble2);
+SleefDouble2 Sleef_logd2_u10(SleefDouble2);
+SleefDouble2 Sleef_log2d2_u10(SleefDouble2);
+SleefDouble2 Sleef_log10d2_u10(SleefDouble2);
+SleefDouble2 Sleef_log1pd2_u10(SleefDouble2);
+SleefDouble2 Sleef_sqrtd2_u05(SleefDouble2);
+SleefDouble2 Sleef_fabsd2(SleefDouble2);
+SleefDouble2 Sleef_floord2(SleefDouble2);
+SleefDouble2 Sleef_ceild2(SleefDouble2);
+SleefDouble2 Sleef_truncd2(SleefDouble2);
+SleefDouble2 Sleef_roundd2(SleefDouble2);
+SleefDouble2 Sleef_lgammad2_u10(SleefDouble2);
+SleefDouble2 Sleef_atan2d2_u10(SleefDouble2, SleefDouble2);
+SleefDouble2 Sleef_powd2_u10(SleefDouble2, SleefDouble2);
+SleefDouble2 Sleef_fmodd2(SleefDouble2, SleefDouble2);
+#endif // TE_SLEEF_128
+
+#ifdef TE_SLEEF_256
 __m256 Sleef_acosf8_u10(__m256);
 __m256 Sleef_asinf8_u10(__m256);
 __m256 Sleef_atanf8_u10(__m256);
@@ -66,34 +109,6 @@ __m256 Sleef_atan2f8_u10(__m256, __m256);
 __m256 Sleef_powf8_u10(__m256, __m256);
 __m256 Sleef_fmodf8(__m256, __m256);
 
-__m128d Sleef_acosd2_u10(__m128d);
-__m128d Sleef_asind2_u10(__m128d);
-__m128d Sleef_atand2_u10(__m128d);
-__m128d Sleef_cosd2_u10(__m128d);
-__m128d Sleef_sind2_u10(__m128d);
-__m128d Sleef_tand2_u10(__m128d);
-__m128d Sleef_coshd2_u10(__m128d);
-__m128d Sleef_sinhd2_u10(__m128d);
-__m128d Sleef_tanhd2_u10(__m128d);
-__m128d Sleef_erfd2_u10(__m128d);
-__m128d Sleef_erfcd2_u15(__m128d);
-__m128d Sleef_expd2_u10(__m128d);
-__m128d Sleef_expm1d2_u10(__m128d);
-__m128d Sleef_logd2_u10(__m128d);
-__m128d Sleef_log2d2_u10(__m128d);
-__m128d Sleef_log10d2_u10(__m128d);
-__m128d Sleef_log1pd2_u10(__m128d);
-__m128d Sleef_sqrtd2_u05(__m128d);
-__m128d Sleef_fabsd2(__m128d);
-__m128d Sleef_floord2(__m128d);
-__m128d Sleef_ceild2(__m128d);
-__m128d Sleef_truncd2(__m128d);
-__m128d Sleef_roundd2(__m128d);
-__m128d Sleef_lgammad2_u10(__m128d);
-__m128d Sleef_atan2d2_u10(__m128d, __m128d);
-__m128d Sleef_powd2_u10(__m128d, __m128d);
-__m128d Sleef_fmodd2(__m128d, __m128d);
-
 __m256d Sleef_acosd4_u10(__m256d);
 __m256d Sleef_asind4_u10(__m256d);
 __m256d Sleef_atand4_u10(__m256d);
@@ -121,11 +136,11 @@ __m256d Sleef_lgammad4_u10(__m256d);
 __m256d Sleef_atan2d4_u10(__m256d, __m256d);
 __m256d Sleef_powd4_u10(__m256d, __m256d);
 __m256d Sleef_fmodd4(__m256d, __m256d);
+#endif // TE_SLEEF_256
 
 #ifdef __cplusplus
 }
 #endif // __cplusplus
-#endif // !defined(_MSC_VER) && defined(__x86_64__)
 
 namespace torch::jit::tensorexpr {
 
@@ -162,8 +177,8 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
       {"__gnu_f2h_ieee",
        reinterpret_cast<void*>(&c10::detail::fp16_ieee_from_fp32_value)},
 
-#if !defined(_MSC_VER) && defined(__x86_64__)
-      // FP32 Sleef functions -- SSE
+#ifdef TE_SLEEF_128
+      // FP32 Sleef functions -- SSE / Advanced SIMD
       {"Sleef_acosf4", reinterpret_cast<void*>(&Sleef_acosf4_u10)},
       {"Sleef_asinf4", reinterpret_cast<void*>(&Sleef_asinf4_u10)},
       {"Sleef_atanf4", reinterpret_cast<void*>(&Sleef_atanf4_u10)},
@@ -192,6 +207,37 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
       {"Sleef_powf4", reinterpret_cast<void*>(&Sleef_powf4_u10)},
       {"Sleef_fmodf4", reinterpret_cast<void*>(&Sleef_fmodf4)},
 
+      // FP64 Sleef functions -- SSE / Advanced SIMD
+      {"Sleef_acosd2", reinterpret_cast<void*>(&Sleef_acosd2_u10)},
+      {"Sleef_asind2", reinterpret_cast<void*>(&Sleef_asind2_u10)},
+      {"Sleef_atand2", reinterpret_cast<void*>(&Sleef_atand2_u10)},
+      {"Sleef_cosd2", reinterpret_cast<void*>(&Sleef_cosd2_u10)},
+      {"Sleef_sind2", reinterpret_cast<void*>(&Sleef_sind2_u10)},
+      {"Sleef_tand2", reinterpret_cast<void*>(&Sleef_tand2_u10)},
+      {"Sleef_coshd2", reinterpret_cast<void*>(&Sleef_coshd2_u10)},
+      {"Sleef_sinhd2", reinterpret_cast<void*>(&Sleef_sinhd2_u10)},
+      {"Sleef_tanhd2", reinterpret_cast<void*>(&Sleef_tanhd2_u10)},
+      {"Sleef_erfd2", reinterpret_cast<void*>(&Sleef_erfd2_u10)},
+      {"Sleef_erfcd2", reinterpret_cast<void*>(&Sleef_erfcd2_u15)},
+      {"Sleef_expd2", reinterpret_cast<void*>(&Sleef_expd2_u10)},
+      {"Sleef_expm1d2", reinterpret_cast<void*>(&Sleef_expm1d2_u10)},
+      {"Sleef_logd2", reinterpret_cast<void*>(&Sleef_logd2_u10)},
+      {"Sleef_log2d2", reinterpret_cast<void*>(&Sleef_log2d2_u10)},
+      {"Sleef_log10d2", reinterpret_cast<void*>(&Sleef_log10d2_u10)},
+      {"Sleef_log1pd2", reinterpret_cast<void*>(&Sleef_log1pd2_u10)},
+      {"Sleef_sqrtd2", reinterpret_cast<void*>(&Sleef_sqrtd2_u05)},
+      {"Sleef_fabsd2", reinterpret_cast<void*>(&Sleef_fabsd2)},
+      {"Sleef_floord2", reinterpret_cast<void*>(&Sleef_floord2)},
+      {"Sleef_ceild2", reinterpret_cast<void*>(&Sleef_ceild2)},
+      {"Sleef_truncd2", reinterpret_cast<void*>(&Sleef_truncd2)},
+      {"Sleef_roundd2", reinterpret_cast<void*>(&Sleef_roundd2)},
+      {"Sleef_lgammad2", reinterpret_cast<void*>(&Sleef_lgammad2_u10)},
+      {"Sleef_atan2d2", reinterpret_cast<void*>(&Sleef_atan2d2_u10)},
+      {"Sleef_powd2", reinterpret_cast<void*>(&Sleef_powd2_u10)},
+      {"Sleef_fmodd2", reinterpret_cast<void*>(&Sleef_fmodd2)},
+#endif
+
+#ifdef TE_SLEEF_256
       // FP32 Sleef functions -- AVX2
       {"Sleef_acosf8", reinterpret_cast<void*>(&Sleef_acosf8_u10)},
       {"Sleef_asinf8", reinterpret_cast<void*>(&Sleef_asinf8_u10)},
@@ -220,35 +266,6 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
       {"Sleef_atan2f8", reinterpret_cast<void*>(&Sleef_atan2f8_u10)},
       {"Sleef_powf8", reinterpret_cast<void*>(&Sleef_powf8_u10)},
       {"Sleef_fmodf8", reinterpret_cast<void*>(&Sleef_fmodf8)},
-
-      // FP64 Sleef functions -- SSE
-      {"Sleef_acosd2", reinterpret_cast<void*>(&Sleef_acosd2_u10)},
-      {"Sleef_asind2", reinterpret_cast<void*>(&Sleef_asind2_u10)},
-      {"Sleef_atand2", reinterpret_cast<void*>(&Sleef_atand2_u10)},
-      {"Sleef_cosd2", reinterpret_cast<void*>(&Sleef_cosd2_u10)},
-      {"Sleef_sind2", reinterpret_cast<void*>(&Sleef_sind2_u10)},
-      {"Sleef_tand2", reinterpret_cast<void*>(&Sleef_tand2_u10)},
-      {"Sleef_coshd2", reinterpret_cast<void*>(&Sleef_coshd2_u10)},
-      {"Sleef_sinhd2", reinterpret_cast<void*>(&Sleef_sinhd2_u10)},
-      {"Sleef_tanhd2", reinterpret_cast<void*>(&Sleef_tanhd2_u10)},
-      {"Sleef_erfd2", reinterpret_cast<void*>(&Sleef_erfd2_u10)},
-      {"Sleef_erfcd2", reinterpret_cast<void*>(&Sleef_erfcd2_u15)},
-      {"Sleef_expd2", reinterpret_cast<void*>(&Sleef_expd2_u10)},
-      {"Sleef_expm1d2", reinterpret_cast<void*>(&Sleef_expm1d2_u10)},
-      {"Sleef_logd2", reinterpret_cast<void*>(&Sleef_logd2_u10)},
-      {"Sleef_log2d2", reinterpret_cast<void*>(&Sleef_log2d2_u10)},
-      {"Sleef_log10d2", reinterpret_cast<void*>(&Sleef_log10d2_u10)},
-      {"Sleef_log1pd2", reinterpret_cast<void*>(&Sleef_log1pd2_u10)},
-      {"Sleef_sqrtd2", reinterpret_cast<void*>(&Sleef_sqrtd2_u05)},
-      {"Sleef_fabsd2", reinterpret_cast<void*>(&Sleef_fabsd2)},
-      {"Sleef_floord2", reinterpret_cast<void*>(&Sleef_floord2)},
-      {"Sleef_ceild2", reinterpret_cast<void*>(&Sleef_ceild2)},
-      {"Sleef_truncd2", reinterpret_cast<void*>(&Sleef_truncd2)},
-      {"Sleef_roundd2", reinterpret_cast<void*>(&Sleef_roundd2)},
-      {"Sleef_lgammad2", reinterpret_cast<void*>(&Sleef_lgammad2_u10)},
-      {"Sleef_atan2d2", reinterpret_cast<void*>(&Sleef_atan2d2_u10)},
-      {"Sleef_powd2", reinterpret_cast<void*>(&Sleef_powd2_u10)},
-      {"Sleef_fmodd2", reinterpret_cast<void*>(&Sleef_fmodd2)},
 
       // FP64 Sleef functions -- AVX2
       {"Sleef_acosd4", reinterpret_cast<void*>(&Sleef_acosd4_u10)},
