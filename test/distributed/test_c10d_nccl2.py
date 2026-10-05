@@ -1455,6 +1455,86 @@ backend.shutdown()
         self._run_child("dist.barrier()")
 
 
+_TELEMETRY_SCRIPT = """\
+import sys
+from datetime import timedelta
+
+import torch
+import torch.distributed as dist
+from torch.testing._internal.common_utils import get_cycles_per_ms
+
+device = torch.device("cuda:0")
+torch.cuda.set_device(device)
+dist.init_process_group(
+    "nccl2", rank=0, world_size=1, store=dist.HashStore(), device_id=device
+)
+backend = dist.group.WORLD._get_backend(device)
+# The first collective blocks the host while the communicator starts.
+dist.all_reduce(torch.ones(1, device=device))
+torch.cuda.synchronize()
+# Hold the collective behind a sleep so it is still pending below.
+torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+work = dist.all_reduce(torch.ones(1, device=device), async_op=True)
+{body}
+try:
+    work.wait({wait_args})
+except RuntimeError as e:
+    print("WAIT_ERROR", e, flush=True)
+else:
+    sys.exit("wait() did not fail")
+torch.cuda.synchronize()
+dist.destroy_process_group()
+"""
+
+# Logged next to the work_nccl_exception C10dLogger record. No C10dLogger can
+# be registered from Python, and API usage only reaches stderr when
+# PYTORCH_API_USAGE_STDERR is set at process start, hence the child process.
+_WORK_EXCEPTION_KEY = "PYTORCH_API_USAGE ProcessGroupNCCL.WorkNCCL.handleException"
+
+
+class ProcessGroupNCCL2TelemetryTest(TestCase):
+    def _run_child(self, body: str = "", wait_args: str = "") -> str:
+        env = {
+            **os.environ,
+            "PYTORCH_API_USAGE_STDERR": "1",
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "0",
+        }
+        try:
+            return subprocess.check_output(
+                [
+                    sys.executable,
+                    "-c",
+                    _TELEMETRY_SCRIPT.format(body=body, wait_args=wait_args),
+                ],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                env=env,
+                timeout=300,
+            ).decode()
+        except subprocess.TimeoutExpired:
+            self.fail("child process timed out")
+        except subprocess.CalledProcessError as e:
+            self.fail(f"child process failed with:\n{e.output.decode()}")
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_timeout_logs_work_exception(self) -> None:
+        out = self._run_child(wait_args="timedelta(milliseconds=1)")
+        self.assertIn(_WORK_EXCEPTION_KEY, out)
+        self.assertRegex(
+            out, r"WAIT_ERROR .*timed out: WorkNCCL\(SeqNum=\d+, OpType=all_reduce"
+        )
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_abort_does_not_log_work_exception(self) -> None:
+        out = self._run_child(body="backend.abort()")
+        self.assertIn("communicator was aborted", out)
+        self.assertNotIn(_WORK_EXCEPTION_KEY, out)
+
+
 if __name__ == "__main__":
     if TEST_CUDA:
         run_tests()

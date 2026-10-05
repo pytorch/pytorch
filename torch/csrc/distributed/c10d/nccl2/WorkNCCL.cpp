@@ -8,11 +8,13 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/WaitCounter.h>
 
 #include <iterator>
 #include <thread>
 
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
@@ -21,6 +23,18 @@ namespace c10d::nccl2 {
 
 namespace {
 std::atomic<uint64_t> nextCompletionKey{1};
+
+// Same record legacy WorkNCCL::handleException emits.
+void logWorkException(const std::string& message) {
+  C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleException");
+  auto logger = ::c10d::C10dLogger::getLogger();
+  if (!logger) {
+    return;
+  }
+  ::c10d::C10dLoggingData data;
+  data.strings["work_nccl_exception"] = message;
+  logger->log(data);
+}
 } // namespace
 
 NCCLEventPool::NCCLEventPool(
@@ -172,6 +186,7 @@ void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
 }
 
 void WorkNCCL::recordStart(std::string_view coll_name) {
+  state_->opType = coll_name;
   recordFunctionStart(coll_name);
   state_->events->start->record(state_->stream);
 }
@@ -184,13 +199,16 @@ void WorkNCCL::recordEnd() {
   }
 }
 
-bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
+bool WorkNCCL::State::setTerminalStatus(
+    WorkStatus terminal_status,
+    std::string_view reason) {
   TORCH_INTERNAL_ASSERT(
       terminal_status == WorkStatus::COMPLETED ||
       terminal_status == WorkStatus::TIMEDOUT ||
       terminal_status == WorkStatus::ERROR);
 
   WorkResult result = WorkResult::SUCCESS;
+  std::string message;
   {
     std::lock_guard<std::mutex> lock(terminalStatusMutex);
     WorkStatus current = status();
@@ -201,19 +219,46 @@ bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
 
     if (terminal_status == WorkStatus::TIMEDOUT) {
       result = WorkResult::TIMEOUT;
-      workException = std::make_exception_ptr(C10_BUILD_ERROR(
-          DistBackendError,
+      message = c10::str(
           "Watchdog caught collective operation timeout: NCCL operation "
-          "timed out"));
+          "timed out: ",
+          describe(),
+          ": ",
+          reason);
+      workException =
+          std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, message));
     } else if (terminal_status == WorkStatus::ERROR) {
       result = WorkResult::COMM_ERROR;
-      workException = std::make_exception_ptr(
-          C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
+      message = c10::str("NCCL operation failed: ", describe(), ": ", reason);
+      workException =
+          std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, message));
     }
     workStatus.store(terminal_status, std::memory_order_release);
   }
+  // A failure caused by a user-requested abort() is expected, not an NCCL
+  // exception worth reporting.
+  const bool log = terminal_status != WorkStatus::COMPLETED && !comm->aborted_;
   futureWorkResult->markCompleted(c10::IValue(static_cast<uint8_t>(result)));
+  if (!log) {
+    return true;
+  }
+  try {
+    logWorkException(message);
+  } catch (const std::exception& e) {
+    TC_LOG(WARNING, comm) << "Failed to log work exception: " << e.what();
+  }
   return true;
+}
+
+std::string WorkNCCL::State::describe() const {
+  return c10::str(
+      "WorkNCCL(SeqNum=",
+      seq,
+      ", OpType=",
+      opType,
+      ", Timeout(ms)=",
+      timeout.count(),
+      ")");
 }
 
 void WorkNCCL::State::notifyCompletion() {
@@ -298,11 +343,13 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
 
   auto comm_error = comm->getError();
   if (comm_error == ErrorType::TIMEOUT) {
-    setTerminalStatus(WorkStatus::TIMEDOUT);
+    setTerminalStatus(
+        WorkStatus::TIMEDOUT,
+        "another operation on the communicator timed out");
     return status();
   }
   if (comm_error != ErrorType::SUCCESS) {
-    setTerminalStatus(WorkStatus::ERROR);
+    setTerminalStatus(WorkStatus::ERROR, comm->commErrorReason());
     return status();
   }
 
@@ -316,7 +363,9 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
     } catch (const std::exception& e) {
       TC_LOG(ERROR, comm) << "CUDA error during start event query: "
                           << e.what();
-      setTerminalStatus(WorkStatus::ERROR);
+      setTerminalStatus(
+          WorkStatus::ERROR,
+          c10::str("CUDA error during start event query: ", e.what()));
     }
   }
   if (status() == WorkStatus::ERROR) {
@@ -335,19 +384,27 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
       }
     } catch (const std::exception& e) {
       TC_LOG(ERROR, comm) << "CUDA error during end event query: " << e.what();
-      setTerminalStatus(WorkStatus::ERROR);
+      setTerminalStatus(
+          WorkStatus::ERROR,
+          c10::str("CUDA error during end event query: ", e.what()));
       return status();
     }
   }
 
+  // Only the timeout check is timed, like legacy WorkNCCL::checkTimeout().
+  STATIC_SCOPED_WAIT_COUNTER(
+      pytorch.wait_counter.ProcessGroupNCCL__checkTimeout);
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - workStartTime);
   auto work_timeout = timeout.value_or(this->timeout);
-  if (elapsed >= work_timeout) {
-    TC_LOG(ERROR, comm) << "Operation timed out after " << elapsed.count()
-                        << " ms";
-    setTerminalStatus(WorkStatus::TIMEDOUT);
+  if (elapsed < work_timeout) {
+    return status();
   }
+  TC_LOG(ERROR, comm) << "Operation timed out after " << elapsed.count()
+                      << " ms";
+  setTerminalStatus(
+      WorkStatus::TIMEDOUT,
+      c10::str("ran for ", elapsed.count(), " milliseconds before timing out"));
   return status();
 }
 

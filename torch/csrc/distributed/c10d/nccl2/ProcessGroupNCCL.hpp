@@ -428,6 +428,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::atomic<CommState> comm_state_{CommState::NORMAL};
   std::atomic<bool> revoked_{false};
+  // Set by abort(), so the work failures it causes are not reported.
+  std::atomic<bool> aborted_{false};
+  // Why comm_state_ is ERROR, for the work it fails.
+  std::string commErrorReason();
+  std::mutex comm_error_mutex_;
+  std::string comm_error_reason_;
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
   c10::intrusive_ptr<WorkNCCL> createWork(

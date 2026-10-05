@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -136,7 +137,10 @@ class WorkNCCL : public c10d::Work {
 
     WorkStatus status() const;
     std::exception_ptr exception() const;
-    bool setTerminalStatus(WorkStatus status);
+    // reason says why a TIMEDOUT or ERROR work failed; it ends up in the
+    // work's exception.
+    bool setTerminalStatus(WorkStatus status, std::string_view reason = {});
+    std::string describe() const;
     WorkStatus checkStatus(
         std::optional<std::chrono::milliseconds> timeout = std::nullopt);
     void notifyCompletion();
@@ -153,6 +157,8 @@ class WorkNCCL : public c10d::Work {
     std::atomic<bool> ephemeralTimeoutReleased{false};
     bool timingEnabled;
     uint64_t seq{0};
+    // Set by recordStart(), whose callers pass string literals.
+    std::string_view opType;
     std::shared_ptr<Events> events;
     std::mutex durationMutex;
     std::shared_ptr<Events> durationStartEvents;
