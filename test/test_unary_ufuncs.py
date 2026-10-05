@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCPU,
     ops,
     precisionOverride,
 )
@@ -1475,6 +1476,24 @@ class TestUnaryUfuncs(TestCase):
         if dtype not in [torch.half, torch.bfloat16]:
             check_equal(t, torch.special.i1, scipy.special.i1)
             check_equal(t, torch.special.i1e, scipy.special.i1e)
+
+    # On CPU, erf vectorizes through Vectorized<float>::erf() for bfloat16 and
+    # float16, for float32 when MKL is not used (aarch64, or MKL off), and under
+    # torch.compile. Its rational approximation (Abramowitz and Stegun 7.1.26)
+    # has an absolute error of 1.5e-7, so it needs a small-argument branch to
+    # keep the relative error: without one erf(x) is 0 for |x| <= 1e-7 and has
+    # about three digits at 1e-4. OpInfo samples rarely land there, so this
+    # checks the relative error against float64 over small |x|. float16 starts
+    # at 1e-4 because its subnormal outputs have less than 1e-3 of precision.
+    @onlyCPU
+    @dtypes(torch.float32, torch.bfloat16, torch.float16)
+    def test_erf_small_arguments(self, device, dtype):
+        low = -4 if dtype is torch.float16 else -7
+        x = torch.logspace(low, -0.5, 200, dtype=torch.float64, device=device)
+        x = torch.cat([x, -x]).to(dtype)
+        expected = torch.erf(x.double())
+        rtol = {torch.float32: 1e-5, torch.bfloat16: 4e-3, torch.float16: 1e-3}
+        self.assertEqual(torch.erf(x).double(), expected, atol=0, rtol=rtol[dtype])
 
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
