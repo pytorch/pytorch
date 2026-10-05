@@ -12,6 +12,7 @@ from torch._inductor.config import (
     inductor_default_autotune_warmup,
 )
 from torch._inductor.runtime.benchmarking import (
+    _get_default_gpu_device_type,
     Benchmarker,
     InductorBenchmarker,
     TorchProfilerBenchmarker,
@@ -20,6 +21,7 @@ from torch._inductor.runtime.benchmarking import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -727,6 +729,23 @@ class TestBenchmarker(TestCase):
         self.assertGreater(len(captured_buffer_lengths), 0)
         self.assertEqual(captured_buffer_lengths[0], expected_buffer_size_bytes // 4)
         self.assertEqual(captured_buffer_devices[0], device)
+
+
+class TestGpuBenchmarkDeviceTypes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_default_delegates_to_get_gpu_type(self):
+        # _get_default_gpu_device_type is a thin delegate to
+        # torch._inductor.utils.get_gpu_type, which owns GPU discovery
+        # (DeviceInterface.is_gpu()) and multi-GPU disambiguation. Patching
+        # get_gpu_type at the module attribute is picked up because the
+        # delegate imports it by name at each call, sidestepping its
+        # functools.cache.
+        sentinel = "privateuse1_test_device"
+        with patch(
+            "torch._inductor.utils.get_gpu_type", return_value=sentinel
+        ):
+            self.assertEqual(_get_default_gpu_device_type(), sentinel)
 
 
 if __name__ == "__main__":
