@@ -1966,6 +1966,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return self.value
 
 
+# Flag Include/object.h
+Py_TPFLAGS_HEAPTYPE = 1 << 9
+
+
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
     def fn(self) -> type[object]:
@@ -1982,8 +1986,11 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
         if self.source is None:
             # NB: If source is added via side effects, create the exception
             # object through side_effects as well. See FrozenDataClass creation
+            base_cls = self.value
+            while base_cls.__flags__ & Py_TPFLAGS_HEAPTYPE and base_cls.__base__:
+                base_cls = base_cls.__base__
             var = tx.output.side_effects.track_new_user_defined_object(
-                SourcelessBuilder.create(tx, BaseException),
+                SourcelessBuilder.create(tx, base_cls),
                 self,
                 list(args),
                 tx=tx,
