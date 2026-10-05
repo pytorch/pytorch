@@ -196,39 +196,128 @@ deterministic run to run (an atomicAdd-based reservation would make the order de
 The counts are double buffered, so the next iteration's barrier also orders this iteration's reads before the
 buffer is overwritten, and one barrier per iteration suffices. The running write index is kept in a register by
 every thread; it is identical across the block, which keeps the phase 2 early exit block-uniform.
+
+The barrier is amortized over kGatherBatch block-strided sub-iterations per round: sub-iteration u of a round
+covers input indices base + u * blockDim.x + threadIdx.x, so u-major order is ascending input-index order. The
+per-warp counts of two sub-iterations are packed into one 32-bit word (16 bits each; a sub-iteration counts at
+most blockDim.x <= 1024 matches per block, so a field never carries into its neighbour) and scanned together.
+With 16 waves sharing 4 SIMDs the round is bound by vector ALU issue, so the per-element path is kept to a handful of
+vector instructions: predicates stay in wave masks, the in-warp rank uses mbcnt, load addresses are one add plus
+a clamp, and the scan outputs are moved to scalar registers before the per-field bookkeeping.
+
+Phase 1 also ballots "== k-th value" per sub-iteration and scans those counts as extra packed fields, so every
+thread learns the ascending-input-index rank of each equal element it holds and keeps up to kEqCap of them in
+registers (value, index, rank). Unless some thread held more than kEqCap (a per-warp sticky flag published in the
+last round, OR-reduced with one ballot), phase 2 is then two predicated writes with no re-read of the slice, no
+loop and no barrier; otherwise the re-reading phase 2 runs as before.
 */
 
-// Upper bound on warps per block; sizes the per-warp count buffer and the shuffle scan over it.
+// Sub-iterations per barrier round in the gather phases.
+constexpr int kGatherBatch = 4;
+// num_warps <= 1024 / C10_WARP_SIZE_LOWER_BOUND <= 32, so a warp-count scan fits in one warp.
 constexpr int kMaxWarps = 1024 / C10_WARP_SIZE_LOWER_BOUND;
+// Phase 1 counts two predicates per sub-iteration (beyond the k-th value, equal to it), phase 2 one; two
+// 16-bit per-warp counts share a 32-bit word.
+constexpr int kMaxFields = 2 * kGatherBatch;
+template <int F>
+constexpr int countWords() { return (F + 1) / 2; }
+constexpr int kCountWords = countWords<kMaxFields>();
+// Equal elements each thread keeps ranked in registers for the loop-free phase 2.
+constexpr int kEqCap = 2;
+static_assert(kEqCap >= 1, "a single-round slice must never overflow the held equal elements");
 
-// Returns the exclusive prefix of matches in warps before this one for the current iteration, the iteration's
-// total over the block, and this lane's offset within its warp. All threads of the block must call it.
-template <typename IndexType>
-__device__ __forceinline__ IndexType orderedWarpOffset(bool hasTopK,
-                                                       IndexType* warpCounts,
-                                                       IndexType& total,
-                                                       int& my_offset) {
-  auto ballot = WARP_BALLOT(hasTopK);
-  int lane_id = at::cuda::getLaneId();
-  int warp_id = threadIdx.x / C10_WARP_SIZE;
-  int num_warps = blockDim.x / C10_WARP_SIZE;
+// Number of set bits of `ballot` in lanes below the calling lane.
+__device__ __forceinline__ uint32_t laneRank(uint64_t ballot) {
+  uint32_t r = __builtin_amdgcn_mbcnt_lo(static_cast<uint32_t>(ballot), 0u);
+  return __builtin_amdgcn_mbcnt_hi(static_cast<uint32_t>(ballot >> 32), r);
+}
+
+// Inclusive scan of the per-warp counts held by lanes 0..num_warps-1; returns the block total and this warp's
+// exclusive prefix as wave-uniform values. The combine after the barrier is a serial dependency chain, so it
+// is written to minimize dependent cross-lane steps: on GFX9 (wave64, so <= 16 warps per 1024-thread block)
+// the scan is four v_add_u32_dpp row_shr steps inside one 16-lane row and the two broadcasts are v_readlane
+// (their lane index is wave-uniform). wave32 keeps the shuffle scan, SPIR-V also the shuffle broadcasts.
+__device__ __forceinline__ void scanWarpCounts(uint32_t c, int lane_id, int warp_id, int num_warps,
+                                               uint32_t& total, uint32_t& prefix) {
+  uint32_t incl = c;
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+  // Block-uniform branch; the compiler drops it where it can prove num_warps <= 16.
+  if (num_warps <= 16) {
+    // row_shr:d (dpp_ctrl 0x110 + d) within the 16-lane row; lanes with (lane % 16) < d read 0 (bound_ctrl),
+    // i.e. add nothing. The dpp_ctrl argument must be a literal, hence the four explicit steps.
+    incl += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(incl), 0x111, 0xf, 0xf, true));
+    incl += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(incl), 0x112, 0xf, 0xf, true));
+    incl += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(incl), 0x114, 0xf, 0xf, true));
+    incl += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(incl), 0x118, 0xf, 0xf, true));
+  } else
+#endif
+  {
+    #pragma unroll
+    for (int d = 1; d < kMaxWarps; d <<= 1) {
+      if (d >= num_warps) break;  // block-uniform
+      uint32_t n = __shfl_up(incl, d);
+      incl += (lane_id >= d) ? n : 0;
+    }
+  }
+  const uint32_t excl = incl - c;
+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__SPIRV__)
+  total = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(incl), num_warps - 1));
+  prefix = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(excl), warp_id));
+#else
+  total = __shfl(incl, num_warps - 1);
+  prefix = __shfl(excl, warp_id);
+#endif
+}
+
+// Moves a scan output the compiler cannot prove wave-uniform to a scalar register (a no-op where
+// scanWarpCounts already returns SGPRs).
+__device__ __forceinline__ uint32_t asUniform(uint32_t x) {
+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__SPIRV__)
+  return x;
+#else
+  return static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(x));
+#endif
+}
+
+// For each of the round's F ballots, returns the block total of set bits and the exclusive prefix over the
+// warps before this one, both wave-uniform; the per-warp counts travel through LDS two per 32-bit word.
+// warpCounts points at this round's [countWords<F>()][kMaxWarps] buffer. All threads must call it.
+template <int F>
+__device__ __forceinline__ void orderedWarpOffset(const uint64_t (&ballot)[kMaxFields],
+                                                  uint32_t* warpCounts,
+                                                  uint32_t (&total)[kMaxFields],
+                                                  uint32_t (&prefix)[kMaxFields]) {
+  constexpr int kWords = countWords<F>();
+  const int lane_id = at::cuda::getLaneId();
+  const int warp_id = threadIdx.x / C10_WARP_SIZE;
+  const int num_warps = blockDim.x / C10_WARP_SIZE;
   if (lane_id == 0) {
-    warpCounts[warp_id] = __popcll(ballot);
+    #pragma unroll
+    for (int w = 0; w < kWords; ++w) {
+      uint32_t packed = __popcll(ballot[2 * w]);
+      if (2 * w + 1 < F) {
+        packed |= static_cast<uint32_t>(__popcll(ballot[2 * w + 1])) << 16;
+      }
+      warpCounts[w * kMaxWarps + warp_id] = packed;
+    }
   }
   __syncthreads();
-  // Lane w of every warp loads warp w's count; an inclusive shuffle scan across lanes then gives
-  // every warp's prefix. num_warps <= kMaxWarps <= warp size, so it fits in one warp.
-  IndexType c = (lane_id < num_warps) ? warpCounts[lane_id] : 0;
-  IndexType incl = c;
+  // Lane w of every warp loads warp w's packed counts; an inclusive scan across lanes then gives every
+  // warp's prefix for both fields at once. The outputs are wave-uniform, so the unpack is scalar.
   #pragma unroll
-  for (int d = 1; d < kMaxWarps; d <<= 1) {
-    IndexType n = __shfl_up(incl, d);
-    incl += (lane_id >= d) ? n : 0;
+  for (int w = 0; w < kWords; ++w) {
+    uint32_t c = (lane_id < num_warps) ? warpCounts[w * kMaxWarps + lane_id] : 0;
+    uint32_t t, p;
+    scanWarpCounts(c, lane_id, warp_id, num_warps, t, p);
+    t = asUniform(t);
+    p = asUniform(p);
+    total[2 * w] = t & 0xFFFF;
+    prefix[2 * w] = p & 0xFFFF;
+    if (2 * w + 1 < F) {
+      total[2 * w + 1] = t >> 16;
+      prefix[2 * w + 1] = p >> 16;
+    }
   }
-  total = __shfl(incl, num_warps - 1);
-  IndexType prefix = __shfl(incl, warp_id) - __shfl(c, warp_id);
-  my_offset = __popcll(ballot & at::cuda::getLaneMaskLt());
-  return prefix;
 }
 
 // helper function to write the result to the output.
@@ -241,7 +330,7 @@ __device__ __forceinline__ void writeResult(T* topKSliceStart,
                                             IndexType writeIndex,
                                             T v,
                                             IndexType i){
-  CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize); // assert that the write index is within the output slice size.
+  // Bounds are checked once per round by the caller (see gatherRound).
   IndexType topKOffset = writeIndex * topKWithinSliceStride; // calculate the offset to the topk value in the output slice.
   IndexType indexOffset = writeIndex * indicesWithinSliceStride; // calculate the offset to the index in the output slice.
   topKSliceStart[topKOffset] = v; // write the value to the output slice.
@@ -273,8 +362,10 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // HIP workgroups have at most 1024 threads. Warp size is at least 32 (can be 64 on some
   // architectures), so we use 32 for safety: 2 buffers * (1024/32) warps * 4 radix bins = 256.
   __shared__ IndexType smem[256];
-  // Per-warp match counts for the ordered compaction, double buffered.
-  __shared__ IndexType warpCounts[2][kMaxWarps];
+  // Packed per-warp match counts for the ordered compaction, double buffered; sized for wave32.
+  __shared__ uint32_t warpCounts[2][kCountWords * kMaxWarps];
+  // Per-warp "some lane holds more than kEqCap equal elements" flag, published in the last phase-1 round.
+  __shared__ int warpOverflow[kMaxWarps];
 
   IndexType slice = getLinearBlockId<IndexType>();
   if (slice >= numInputSlices) {
@@ -314,81 +405,230 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // are within the top-k, we don't know at what index to write out
   // the resulting values. orderedWarpOffset computes it.
 
-  // orderedWarpOffset has a barrier, so every thread must run the same number of iterations.
-  IndexType numIterations = round_up(inputSliceSize, (IndexType) blockDim.x);
+  // orderedWarpOffset has a barrier, so every thread must run the same number of rounds. Slices that fit in
+  // one block-stride take a single lean round per phase (U = 1, no prefetch). Longer slices run kGatherBatch
+  // sub-iterations per round; the last round is peeled since it is the only one with out-of-range elements
+  // and the only one without a prefetch, so the loop body issues its (clamped, in-bounds) prefetch
+  // unconditionally and the compiler can keep it in flight instead of draining vector memory before the compare.
+  using RadixType = typename TopKTypeConfig<T>::RadixType;
+  const IndexType stride = blockDim.x;
+  // Offsets are in units of inputWithinSliceStride; the per-thread part is fixed, the per-round part uniform.
+  const IndexType tidOff = threadIdx.x * inputWithinSliceStride;
+  const IndexType rowStep = stride * inputWithinSliceStride;
+  const IndexType lastOff = (inputSliceSize - 1) * inputWithinSliceStride;
+  // key > kthKey is "strictly beyond the k-th value" in the sort direction for both directions.
+  const RadixType flip = largest ? RadixType(0) : ~RadixType(0);
+  const RadixType kthKey = topKConverted ^ flip;
+  const int lane_id = at::cuda::getLaneId();
+  const int warp_id = threadIdx.x / C10_WARP_SIZE;
+  const int num_warps = blockDim.x / C10_WARP_SIZE;
   IndexType writeIndex = 0;
   int buf = 0;
+  T v[kGatherBatch];
+  // Equal elements seen so far: block-uniform count, and this thread's first kEqCap of them with their ranks.
+  IndexType eqRunning = 0;
+  int eqHeld = 0;
+  T eqVal[kEqCap];
+  IndexType eqIdx[kEqCap];
+  IndexType eqRank[kEqCap];
+  #pragma unroll
+  for (int e = 0; e < kEqCap; ++e) {
+    eqVal[e] = static_cast<T>(0);
+    eqIdx[e] = 0;
+    eqRank[e] = 0;
+  }
+
+  // One barrier round over U sub-iterations starting at `base` (rowOff = base * inputWithinSliceStride);
+  // unless kLast it also prefetches the next round's U values. Phase 1 ballots "beyond" in fields 0..U-1 and
+  // "equal" in fields U..2U-1; phase 2 ballots "equal" in fields 0..U-1. kFlagOverflow (last phase-1 round of a
+  // multi-round slice) publishes the per-warp held-equal overflow flag; a single U = 1 round cannot overflow.
+  auto gatherRound = [&]<int U, bool kPhase2, bool kLast, bool kFlagOverflow>(IndexType base, IndexType rowOff) {
+    static_assert(!kFlagOverflow || (!kPhase2 && kLast), "the overflow flag is published in the last phase-1 round");
+    constexpr int F = kPhase2 ? U : 2 * U;
+    T v_next[kGatherBatch];
+    if constexpr (!kLast) {
+      #pragma unroll
+      for (int u = 0; u < U; ++u) {
+        v_next[u] = doLdg(&inputSliceStart[min(rowOff + (U + u) * rowStep + tidOff, lastOff)]);
+      }
+    }
+
+    bool has[kMaxFields];
+    uint64_t ballot[kMaxFields];
+    #pragma unroll
+    for (int u = 0; u < U; ++u) {
+      const RadixType key = TopKTypeConfig<T>::convert(v[u]) ^ flip;
+      const bool match = kPhase2 ? (key == kthKey) : (key > kthKey);
+      const bool equal = key == kthKey;
+      if constexpr (kLast) {
+        const bool inRange = base + u * stride + threadIdx.x < inputSliceSize;
+        const uint64_t inMask = WARP_BALLOT(inRange);
+        has[u] = match && inRange;
+        ballot[u] = WARP_BALLOT(match) & inMask;
+        if constexpr (!kPhase2) {
+          has[U + u] = equal && inRange;
+          ballot[U + u] = WARP_BALLOT(equal) & inMask;
+        }
+      } else {
+        has[u] = match;
+        ballot[u] = WARP_BALLOT(match);
+        if constexpr (!kPhase2) {
+          has[U + u] = equal;
+          ballot[U + u] = WARP_BALLOT(equal);
+        }
+      }
+    }
+    if constexpr (kFlagOverflow) {
+      // The overflow condition is sticky, so the flag computed in the last round covers every round. It is
+      // written before this round's barrier and read after phase 1.
+      int eqAfter = eqHeld;
+      #pragma unroll
+      for (int u = 0; u < U; ++u) {
+        eqAfter += has[U + u] ? 1 : 0;
+      }
+      const bool overflow = WARP_BALLOT(eqAfter > kEqCap) != 0;
+      if (lane_id == 0) {
+        warpOverflow[warp_id] = overflow;
+      }
+    }
+
+    uint32_t total[kMaxFields];
+    uint32_t prefix[kMaxFields];
+    orderedWarpOffset<F>(ballot, warpCounts[buf], total, prefix);
+
+    // total/prefix are wave-uniform: the running indices stay in scalar registers.
+    IndexType running = writeIndex;
+    IndexType eqRun = eqRunning;
+    #pragma unroll
+    for (int u = 0; u < U; ++u) {
+      const IndexType idx = base + u * stride + threadIdx.x;
+      const IndexType slot = running + prefix[u] + laneRank(ballot[u]);
+      running += total[u];
+      bool doWrite = has[u];
+      if constexpr (kPhase2) {
+        doWrite = doWrite && slot < outputSliceSize;
+      }
+      if (doWrite) {
+        writeResult(topKSliceStart,
+          indicesSliceStart,
+          topKWithinSliceStride,
+          indicesWithinSliceStride,
+          outputSliceSize,
+          /*writeIndex=*/slot,
+          /*value=*/v[u],
+          /*index=*/idx);
+      }
+      if constexpr (!kPhase2) {
+        if (has[U + u]) {
+          const IndexType rank = eqRun + prefix[U + u] + laneRank(ballot[U + u]);
+          #pragma unroll
+          for (int e = 0; e < kEqCap; ++e) {
+            if (eqHeld == e) {
+              eqVal[e] = v[u];
+              eqIdx[e] = idx;
+              eqRank[e] = rank;
+            }
+          }
+          ++eqHeld;
+        }
+        eqRun += total[U + u];
+      }
+      if constexpr (!kLast) {
+        v[u] = v_next[u];
+      }
+    }
+    writeIndex = running;
+    eqRunning = eqRun;
+    if constexpr (!kPhase2) {
+      // Every phase-1 slot of this round is below the new writeIndex, so this is the per-write bound check of
+      // writeResult hoisted to one block-uniform check per round (phase 2 clips its writes explicitly).
+      CUDA_KERNEL_ASSERT(writeIndex <= outputSliceSize);
+    }
+    buf ^= 1;
+  };
+
+  // After phase 1: fills the output from the register-held equal elements and returns true, unless some
+  // thread held more than kEqCap of them (block-uniform decision), in which case the caller re-reads.
+  auto finishWithHeldEquals = [&](bool mayOverflow) -> bool {
+    if (writeIndex >= outputSliceSize) {
+      return true;
+    }
+    if (mayOverflow) {
+      const bool warpFlag = lane_id < num_warps && warpOverflow[lane_id] != 0;
+      if (WARP_BALLOT(warpFlag) != 0) {
+        return false;
+      }
+    }
+    const IndexType need = outputSliceSize - writeIndex;
+    #pragma unroll
+    for (int e = 0; e < kEqCap; ++e) {
+      if (eqHeld > e && eqRank[e] < need) {
+        writeResult(topKSliceStart,
+          indicesSliceStart,
+          topKWithinSliceStride,
+          indicesWithinSliceStride,
+          outputSliceSize,
+          /*writeIndex=*/writeIndex + eqRank[e],
+          /*value=*/eqVal[e],
+          /*index=*/eqIdx[e]);
+      }
+    }
+    return true;
+  };
+
+  if (inputSliceSize <= stride) {
+    // Short slice: one round per phase.
+    v[0] = doLdg(&inputSliceStart[min(tidOff, lastOff)]);
+    gatherRound.template operator()<1, false, true, false>(0, 0);
+    if (finishWithHeldEquals(/*mayOverflow=*/false)) {
+      return;
+    }
+    // v[0] still holds this thread's element; the re-reading phase 2 needs no load.
+    gatherRound.template operator()<1, true, true, false>(0, 0);
+    return;
+  }
+
+  const IndexType roundStride = stride * kGatherBatch;
+  const IndexType roundStep = roundStride * inputWithinSliceStride;
+  const IndexType numIterations = round_up(inputSliceSize, roundStride);
+  const IndexType lastBase = numIterations - roundStride;
+
+  auto loadFirstRound = [&]() {
+    #pragma unroll
+    for (int u = 0; u < kGatherBatch; ++u) {
+      v[u] = doLdg(&inputSliceStart[min(u * rowStep + tidOff, lastOff)]);
+    }
+  };
 
   // phase 1: write actual > `pattern` (or < `pattern`, depending on the sort direction) values to the output.
-  // prefetching data from global memory.
-  T v = (threadIdx.x < inputSliceSize) ? doLdg(&inputSliceStart[threadIdx.x * inputWithinSliceStride]) : static_cast<T>(0);
-  for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
-    T v_next = (i + blockDim.x < inputSliceSize) ? doLdg(&inputSliceStart[(i + blockDim.x) * inputWithinSliceStride]) : static_cast<T>(0);
-
-    bool hasTopK = false;
-    if (i < inputSliceSize) {
-      const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
-      hasTopK = (largest) ? (convertedV > topKConverted) : (convertedV < topKConverted);
-    }
-
-    IndexType total;
-    int my_offset;
-    IndexType warpStart = writeIndex + orderedWarpOffset(hasTopK, warpCounts[buf], total, my_offset);
-
-    if (hasTopK) {
-      writeResult(topKSliceStart,
-        indicesSliceStart,
-        topKWithinSliceStride,
-        indicesWithinSliceStride,
-        outputSliceSize,
-        /*writeIndex=*/warpStart + my_offset,
-        /*value=*/v,
-        /*index=*/i);
-    }
-
-    writeIndex += total;
-    buf ^= 1;
-    v = v_next;
+  loadFirstRound();
+  IndexType rowOff = 0;
+  for (IndexType base = 0; base < lastBase; base += roundStride, rowOff += roundStep) {
+    gatherRound.template operator()<kGatherBatch, false, false, false>(base, rowOff);
   }
+  gatherRound.template operator()<kGatherBatch, false, true, true>(lastBase, 0);
 
   // We need to fill in the rest with actual == top-K values.
   // The number that we need is outputSliceSize - writeIndex.
   // There might be more than that number available in input,
   // in which case we have to choose the first seen set.
 
-  // phase 2: write actual == `pattern` values to the output.
-  // prefetching data from global memory.
-  T V = (threadIdx.x < inputSliceSize) ? doLdg(&inputSliceStart[threadIdx.x * inputWithinSliceStride]) : static_cast<T>(0);
-  for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
-    // writeIndex is the same in every thread, so the whole block exits together.
+  if (finishWithHeldEquals(/*mayOverflow=*/true)) {
+    return;
+  }
+
+  // phase 2 (many ties): write actual == `pattern` values to the output, until the output is full.
+  // writeIndex is the same in every thread, so the whole block exits together.
+  loadFirstRound();
+  rowOff = 0;
+  for (IndexType base = 0; base < lastBase; base += roundStride, rowOff += roundStep) {
     if (writeIndex >= outputSliceSize) {
       break;
     }
-    T V_next = (i + blockDim.x < inputSliceSize) ? doLdg(&inputSliceStart[(i + blockDim.x) * inputWithinSliceStride]) : static_cast<T>(0);
-    bool hasTopK = false;
-    if (i < inputSliceSize) {
-      const auto convertedV = at::native::TopKTypeConfig<T>::convert(V);
-      hasTopK = convertedV == topKConverted;
-    }
-
-    IndexType total;
-    int my_offset;
-    IndexType warpStart = writeIndex + orderedWarpOffset(hasTopK, warpCounts[buf], total, my_offset);
-
-    if (hasTopK && warpStart + my_offset < outputSliceSize) {
-      writeResult(topKSliceStart,
-        indicesSliceStart,
-        topKWithinSliceStride,
-        indicesWithinSliceStride,
-        outputSliceSize,
-        /*writeIndex=*/warpStart + my_offset,
-        /*value=*/V,
-        /*index=*/i);
-    }
-
-    writeIndex += total;
-    buf ^= 1;
-    V = V_next;
+    gatherRound.template operator()<kGatherBatch, true, false, false>(base, rowOff);
+  }
+  if (writeIndex < outputSliceSize) {
+    gatherRound.template operator()<kGatherBatch, true, true, false>(lastBase, 0);
   }
 }
 
