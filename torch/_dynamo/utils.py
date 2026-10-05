@@ -5667,7 +5667,7 @@ def is_torch_class(cls: type) -> bool:
     inplace-view-on-input-tensor detection. This helper identifies classes
     whose descriptors should take that path instead of descriptor VTs.
     """
-    module = next(iter_mro_static_attrs(cls, "__module__"), None)
+    module = type.__dict__["__module__"].__get__(cls, type(cls))
     return type(module) is str and (
         module == "torch" or str.startswith(module, "torch.")
     )
