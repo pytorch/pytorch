@@ -378,15 +378,15 @@ class CuspyObserver:
         finally:
             self.pop_annotation()
 
-    def push_collective_kernel_metadata(self, metadata: dict[str, Any]) -> None:
+    def _push_collective_kernel_metadata(self, metadata: dict[str, Any]) -> None:
         """Attach a collective's ``record_param_comms`` fields to the kernels it
         launches. Cuspy doesn't see ``record_param_comms``, so c10d calls this from a
         pre-hook (see ``_set_collective_annotation_hooks``).
 
         Pushes a new external correlation id and keys ``metadata`` on it, so the
         fields land on every kernel this thread launches until the matching
-        :meth:`pop_collective_kernel_metadata`. The kernels also keep the name of the
-        innermost enclosing ``record_function`` scope.
+        :meth:`_pop_collective_kernel_metadata`. The kernels also keep the name of
+        the innermost enclosing ``record_function`` scope.
         """
         cuspy = self._cuspy
         if not self.available or cuspy is None:
@@ -416,7 +416,7 @@ class CuspyObserver:
         # current id is still the enclosing region's.
         torch._C._profiler._cuspy.metadata_put_external(json.dumps(metadata), ext_id)
 
-    pop_collective_kernel_metadata = pop_annotation
+    _pop_collective_kernel_metadata = pop_annotation
 
     def annotation_names(self, *, reset: bool = False) -> dict[int, str]:
         """Snapshot of the ``external_id -> name`` map pushed so far; pass

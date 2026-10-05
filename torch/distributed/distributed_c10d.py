@@ -8350,10 +8350,10 @@ def _collective_metadata(group: ProcessGroup, args: PreHookArgs) -> dict[str, An
 
 def _set_collective_annotation_hooks(annotator: Any) -> None:
     """Hook every existing process group so that each collective calls
-    ``annotator.push_collective_kernel_metadata(metadata)`` just before it launches
-    its kernels and ``annotator.pop_collective_kernel_metadata()`` just after. The
-    push must attach ``metadata`` to every kernel the calling thread launches until
-    the matching pop.
+    ``annotator._push_collective_kernel_metadata(metadata)`` just before it
+    launches its kernels and ``annotator._pop_collective_kernel_metadata()`` just
+    after. The push must attach ``metadata`` to every kernel the calling thread
+    launches until the matching pop.
 
     Kineto already copies ``record_param_comms`` onto eager kernels; this is for
     replayed CUDA graphs, which have no CPU op to copy from, and Cuspy, which does not
@@ -8370,12 +8370,12 @@ def _set_collective_annotation_hooks(annotator: Any) -> None:
     for group in _world.pg_names:
         group.register_pre_hook(
             id(annotator),
-            lambda args, group=group: annotator.push_collective_kernel_metadata(
+            lambda args, group=group: annotator._push_collective_kernel_metadata(
                 _collective_metadata(group, args)
             ),
         )
         group.register_post_hook(
-            id(annotator), lambda _: annotator.pop_collective_kernel_metadata()
+            id(annotator), lambda _: annotator._pop_collective_kernel_metadata()
         )
 
 

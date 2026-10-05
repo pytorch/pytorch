@@ -1466,7 +1466,7 @@ class graph:
             self.stream_ctx.__exit__(None, None, None)
             raise
 
-    def push_collective_kernel_metadata(self, metadata: dict[str, Any]) -> None:
+    def _push_collective_kernel_metadata(self, metadata: dict[str, Any]) -> None:
         from torch.cuda._graph_annotations import mark_kernels
 
         # Backward attribution would tag whatever autograd node launched the
@@ -1475,7 +1475,7 @@ class graph:
         scope.__enter__()
         self._collective_kernel_scopes.append(scope)
 
-    def pop_collective_kernel_metadata(self) -> None:
+    def _pop_collective_kernel_metadata(self) -> None:
         self._collective_kernel_scopes.pop().__exit__(None, None, None)
 
     def _unset_collective_hooks(self) -> None:

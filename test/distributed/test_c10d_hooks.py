@@ -167,9 +167,8 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         finally:
             _unset_collective_annotation_hooks(annotator)
 
-        allreduce, allgather, p2p = (
-            c.args[0] for c in annotator.push_collective_kernel_metadata.call_args_list
-        )
+        pushes = annotator._push_collective_kernel_metadata.call_args_list
+        allreduce, allgather, p2p = (c.args[0] for c in pushes)
         self.assertEqual(
             allreduce,
             {
@@ -210,9 +209,9 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         dist.all_reduce(torch.ones(1), group=group)
         self.assertEqual(
             [name for name, _, _ in annotator.mock_calls],
-            ["push_collective_kernel_metadata", "pop_collective_kernel_metadata"],
+            ["_push_collective_kernel_metadata", "_pop_collective_kernel_metadata"],
         )
-        metadata = annotator.push_collective_kernel_metadata.call_args.args[0]
+        metadata = annotator._push_collective_kernel_metadata.call_args.args[0]
         self.assertEqual(metadata["Process Group Name"], group.group_name)
         dist.destroy_process_group(group)
 
