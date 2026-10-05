@@ -3917,15 +3917,24 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 )
 
         if selected_overload is not None:
-            out_arg_names.extend(
-                name
-                for name in self._get_mutating_kwarg_names(selected_overload)
-                if name in kwargs
-            )
+            if torch._library.utils.is_out(selected_overload):
+                out_arg_names.extend(
+                    name
+                    for name in self._get_mutating_kwarg_names(selected_overload)
+                    if name in kwargs
+                )
         elif (
             not isinstance(self.value, torch._ops.OpOverloadPacket) and "out" in kwargs
         ):
             out_arg_names.append("out")
+
+        auto_functionalizes = False
+        if out_arg_names and selected_overload is not None:
+            from torch._higher_order_ops.auto_functionalize import (
+                can_auto_functionalize,
+            )
+
+            auto_functionalizes = can_auto_functionalize(selected_overload)
 
         saved_out_args: list[
             tuple[VariableTracker, torch.Size | list[torch.Size | None]]
@@ -4029,7 +4038,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                                 *graph_break_hints.SUPPORTABLE,
                             ],
                         )
-                    if not _is_supported_out_tensor_layout(
+                    if not auto_functionalizes and not _is_supported_out_tensor_layout(
                         fake_out, false_if_dde=False
                     ):
                         # It's difficult to handle strides correctly in functionalization
@@ -4064,7 +4073,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                if not _is_supported_out_tensor_layout(fake_out, false_if_dde=True):
+                if not auto_functionalizes and not _is_supported_out_tensor_layout(
+                    fake_out, false_if_dde=True
+                ):
                     # It's difficult to handle strides correctly in functionalization
                     # when calling an out= op with a non-contiguous out argument
                     unimplemented(
