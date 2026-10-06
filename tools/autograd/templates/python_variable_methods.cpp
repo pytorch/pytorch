@@ -94,7 +94,7 @@ static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable_size(PyObject* self, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -102,10 +102,10 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   });
   auto& self_ = THPVariable_Unpack(self);
   ParsedArgs<3> parsed_args;
-  auto r = parser.parse(self, args, kwargs, parsed_args);
+  auto r = parser.parse(self, args, nargs, kwnames, parsed_args);
 
   if(r.has_torch_function()){
-    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+    return handle_torch_function(r, self, args, nargs, kwnames, THPVariableClass, "torch.Tensor");
   }
   if (!r.toInt64Optional(0).has_value()) {
     return THPSize_NewFromSymSizes(self_);
@@ -119,7 +119,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable_stride(PyObject* self, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -127,10 +127,10 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   });
   auto& self_ = THPVariable_Unpack(self);
   ParsedArgs<3> parsed_args;
-  auto r = parser.parse(self, args, kwargs, parsed_args);
+  auto r = parser.parse(self, args, nargs, kwnames, parsed_args);
 
   if(r.has_torch_function()){
-    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+    return handle_torch_function(r, self, args, nargs, kwnames, THPVariableClass, "torch.Tensor");
   }
 
   if (r.toInt64Optional(0).has_value()) {
@@ -1307,10 +1307,10 @@ PyMethodDef variable_methods[] = {
   {"requires_grad_", castPyCFunctionWithKeywords(THPVariable_requires_grad_), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"size", castPyCFunctionFastWithKeywords(THPVariable_size), METH_FASTCALL | METH_KEYWORDS, nullptr},
   {"untyped_storage", THPVariable_storage, METH_NOARGS, nullptr},
   {"storage_offset", THPVariable_storage_offset, METH_NOARGS, nullptr},
-  {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"stride", castPyCFunctionFastWithKeywords(THPVariable_stride), METH_FASTCALL | METH_KEYWORDS, nullptr},
   {"to", castPyCFunctionWithKeywords(THPVariable_to), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"tolist", THPVariable_tolist, METH_NOARGS, nullptr},
   {"type", castPyCFunctionWithKeywords(THPVariable_type), METH_VARARGS | METH_KEYWORDS, nullptr},

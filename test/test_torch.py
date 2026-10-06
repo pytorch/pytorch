@@ -7373,6 +7373,8 @@ class TestTorch(TestCase):
         self.assertEqual(torch.sum(x, axis=1, keepdims=True), torch.tensor([[3], [12]]))
         self.assertEqual(x.sum(dim=1), torch.tensor([3, 12]))
         self.assertEqual(x.view(3, 2), torch.tensor([[0, 1], [2, 3], [4, 5]]))
+        self.assertEqual(x.size(1), 3)
+        self.assertEqual(x.stride(0), 3)
 
         with self.assertRaisesRegex(TypeError, "received an invalid combination of arguments"):
             torch.sum(x, input=x)
