@@ -148,8 +148,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // hipBLASLt handles are per-(device, stream) on ROCm and lazily created.
   // Ensure the handle for the intended capture stream exists before
   // capture begins, because hipblasLtCreate performs internal allocations
-  // that are not allowed once stream capture is active.
-  if (at::globalContext().blasPreferredBackend() == at::BlasBackend::Cublaslt) {
+  // that are not allowed once stream capture is active. Some ops (e.g.
+  // _scaled_mm, _int_mm) use hipBLASLt whatever the preferred backend is, so
+  // this is keyed on hipBLASLt being usable on the device.
+  auto& hooks = at::detail::getCUDAHooks();
+  if (at::globalContext().hasCuBLASLt() &&
+      hooks.isGPUArch(hooks.getHipblasltSupportedArchs(), capture_dev_)) {
     (void)at::cuda::getCurrentCUDABlasLtHandle();
     // The line above only covers this thread. Backward inside the capture
     // region runs its gemms from an autograd worker thread, whose first
@@ -157,6 +161,9 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     // stock a spare in the shared pool for it to reserve instead.
     at::cuda::ensureCublasLtHandlesAvailable(1);
   }
+  // Under capture the public BLAS handle is a capture handle, and handles
+  // cannot be created once capture is active.
+  at::cuda::prepareCaptureCublasHandles();
 #endif
 
   if (pool.first != 0 || pool.second != 0) {
@@ -240,6 +247,9 @@ void CUDAGraph::capture_end_pre() {
   // Allocation recording has stopped (even if endCaptureErr is a failure), so
   // reset() must not end the pool again.
   capturing_to_pool_ = false;
+#if defined(USE_ROCM)
+  at::cuda::releaseCaptureCublasWorkspaces(capture_id_);
+#endif
   AT_CUDA_CHECK(endCaptureErr);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
@@ -374,6 +384,10 @@ void CUDAGraph::reset() {
   captured_generator_states_.clear();
 
   if (capture_id_ != 0) {
+#if defined(USE_ROCM)
+    // Only has work to do if the capture was abandoned before capture_end().
+    at::cuda::releaseCaptureCublasWorkspaces(capture_id_);
+#endif
     std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
     _currently_capturing_graphs.erase(capture_id_);
     capture_id_ = 0;
