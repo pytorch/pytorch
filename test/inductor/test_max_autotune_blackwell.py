@@ -1711,6 +1711,41 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    def test_blackwell_mm_reduction_epilogue_benchmark_unsplit_mix_order(self):
+        """Benchmarking a mix-order reduction whose column reduction isn't
+        split leaves that reduction's loop body unchanged for codegen."""
+        self._run_reduction(
+            lambda a, b: ((y := (a @ b).float()).sum(0), y.sum(1)),
+            65536,
+            128,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{
+                "triton.template_reduction_epilogue": True,
+                "split_reductions": False,
+            },
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_reduction_epilogue_benchmark_wide_mix_order(self):
+        """An output wide enough that its column reduction isn't split forms
+        an unsplit mix-order reduction under the default config."""
+        self._run_reduction(
+            lambda a, b: ((y := (a @ b).float()).sum(0), y.sum(1)),
+            8192,
+            128,
+            16384,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True},
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     def test_blackwell_mm_reduction_epilogue_benchmark_deferred_epilogue(self):
         """Epilogue benchmarking also times the nodes run after the finish of
         the reduction partials."""
