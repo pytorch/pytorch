@@ -1144,13 +1144,16 @@ def pointless_cumsum_check(match: Match) -> bool:
             _users=MULTIPLE,
         ),
         KeywordArg("dim"),
+        dtype=KeywordArg("out_dtype"),
         _users=MULTIPLE,
     ),
     extra_check=pointless_cumsum_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )
-def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype, dim):
+def pointless_cumsum_replacement(
+    match: Match, shape, fill_value, device, dtype, dim, out_dtype
+):
     """Based on a pattern in OPTForCausalLM"""
 
     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
@@ -1159,7 +1162,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
         # cumsum promotes all integral types to int64
         dtype = torch.int64
 
-    out_dtype = match.output_node().kwargs.get("dtype") or dtype
+    out_dtype = out_dtype or dtype
     bool_out = is_boolean_dtype(out_dtype)  # pyrefly: ignore[bad-argument-type]
     # pyrefly: ignore[bad-argument-type]
     integral_out = bool_out or is_integer_dtype(out_dtype)
