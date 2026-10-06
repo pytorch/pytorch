@@ -1403,7 +1403,6 @@ class TestFP8Matmul(TestCase):
                     )
 
     @onlyOn(["cpu", "cuda", "xpu"])
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("fake", [False, True])
     @parametrize("use_out", [False, True])
