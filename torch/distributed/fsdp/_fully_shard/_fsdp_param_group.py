@@ -545,6 +545,10 @@ class FSDPParamGroup:
                     if not tensor.is_inference()
                     else contextlib.nullcontext()
                 ):
+                    # Like the world_size > 1 path, copy a byte payload bytewise
+                    # into a cached output of another dtype
+                    if all_gather_input.dtype == torch.uint8:
+                        tensor = tensor.view(torch.uint8)
                     tensor.copy_(all_gather_input)
 
         else:
