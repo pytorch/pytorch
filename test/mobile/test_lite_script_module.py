@@ -2,7 +2,6 @@
 
 import inspect
 import io
-from tempfile import TemporaryFileName
 
 import torch
 import torch.utils.bundled_inputs
@@ -14,7 +13,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationLiteTestCase,
     TwoLayerLinearModel,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
 
 
 class TestLiteScriptModule(TestCase):
@@ -241,16 +240,16 @@ class TestLiteScriptModule(TestCase):
             script_module._save_to_buffer_for_lite_interpreter()
 
     def test_unsupported_return_list_with_module_class(self):
-        class Foo(torch.nn.Module):
+        class ListFoo(torch.nn.Module):
             pass
 
         class MyTestModuleForListWithModuleClass(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.foo = Foo()
+                self.foo = ListFoo()
 
             def forward(self):
-                my_list: list[Foo] = [self.foo]
+                my_list: list[ListFoo] = [self.foo]
                 return my_list
 
         script_module = torch.jit.script(MyTestModuleForListWithModuleClass())
@@ -265,16 +264,16 @@ class TestLiteScriptModule(TestCase):
             script_module._save_to_buffer_for_lite_interpreter()
 
     def test_unsupported_return_dict_with_module_class(self):
-        class Foo(torch.nn.Module):
+        class DictFoo(torch.nn.Module):
             pass
 
         class MyTestModuleForDictWithModuleClass(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.foo = Foo()
+                self.foo = DictFoo()
 
             def forward(self):
-                my_dict: dict[int, Foo] = {1: self.foo}
+                my_dict: dict[int, DictFoo] = {1: self.foo}
                 return my_dict
 
         script_module = torch.jit.script(MyTestModuleForDictWithModuleClass())
@@ -289,7 +288,7 @@ class TestLiteScriptModule(TestCase):
             script_module._save_to_buffer_for_lite_interpreter()
 
     def test_module_export_operator_list(self):
-        class Foo(torch.nn.Module):
+        class OperatorListModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.ones((20, 1, 5, 5))
@@ -315,7 +314,7 @@ class TestLiteScriptModule(TestCase):
                 )
                 return (x1, x2, x3)
 
-        m = torch.jit.script(Foo())
+        m = torch.jit.script(OperatorListModule())
 
         buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
         buffer.seek(0)
