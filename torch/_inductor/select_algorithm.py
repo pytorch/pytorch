@@ -721,7 +721,7 @@ class TritonTemplateKernel(TritonKernel):
         # Reductions fused into the epilogue as per-tile partials, which the
         # wrapper reduces after the kernel.
         self.partial_reductions: list[_PartialReduction] = []
-        # Epilogue nodes reading the finished partials, generated after them.
+        # Epilogue nodes codegen'd after the kernel call instead of fused into it.
         self._unfused_epilogues: list[Any] = []
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
@@ -2040,6 +2040,8 @@ class TritonTemplateKernel(TritonKernel):
     def _emit_post_kernel_code(self, wrapper, kernel_name: str) -> None:
         """Finish reduction partials after the kernel call, before workspace
         dealloc, then generate the epilogue nodes that read them."""
+        from .scheduler import FusedSchedulerNode
+
         if not self.partial_reductions:
             return
         if self.workspace_arg is None:
@@ -2047,22 +2049,17 @@ class TritonTemplateKernel(TritonKernel):
         ws = self.workspace_arg.outer_name
         for reduction in self.partial_reductions:
             codegen_reduced_buffer(reduction.buffer, _partials_finish(ws, reduction))
-        from .scheduler import FusedSchedulerNode
-
-        # Consecutive nodes over the same ranges run as one kernel.
         scheduler = V.graph.scheduler
         backend = scheduler.get_backend(self.output_node.get_device())
         # The buffers the template's fused nodes last read are already queued
         # for freeing, and each kernel below frees the queue when it finishes,
         # so hold them until the last one has run.
-        to_free, scheduler.buffer_names_to_free = (
-            scheduler.buffer_names_to_free,
-            OrderedSet(),
-        )
+        to_free = scheduler.buffer_names_to_free
+        scheduler.buffer_names_to_free = OrderedSet()
         try:
-            for _, group in itertools.groupby(
-                self._unfused_epilogues, lambda n: n.group
-            ):
+            # Consecutive nodes over the same ranges run as one kernel.
+            groups = itertools.groupby(self._unfused_epilogues, lambda n: n.group)
+            for _, group in groups:
                 nodes = list(group)
                 backend.codegen_node(
                     nodes[0]
@@ -2330,9 +2327,11 @@ class TritonTemplateKernel(TritonKernel):
                 name = stage2.get_outputs()[0].node.get_name()
             # One partial per tile along the reduced dim.
             if columns:
-                tiles, size, tile = ceildiv(int(m), rows), int(n), (origin[0], rows)
+                tiles, size = ceildiv(int(m), rows), int(n)
+                tile_idx = f"{origin[0]} // {rows}"
             else:
-                tiles, size, tile = ceildiv(int(n), cols), int(m), (origin[1], cols)
+                tiles, size = ceildiv(int(n), cols), int(m)
+                tile_idx = f"{origin[1]} // {cols}"
             nbytes = tiles * size * torch.float32.itemsize
             ws = next(
                 (w for w in self.args.workspace_args if w.inner_name == "ws_ptr"), None
@@ -2359,7 +2358,7 @@ class TritonTemplateKernel(TritonKernel):
             indexing = self.indexing(index, block_ptr=False)
             self.post_loop_store.writeline(
                 f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
-                f"{size} * ({tile[0]} // {tile[1]}) + {indexing.index_str}, "
+                f"{size} * ({tile_idx}) + {indexing.index_str}, "
                 f"{value}, {indexing.mask_str})"
             )
 
@@ -2538,8 +2537,6 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         # Call emission state, populated by _setup_fusion_hooks / external render
         self._call_preamble: list[str] = []
         self._call_args: list[str] = []
-        # Epilogues that could not be fused into the kernel
-        self._unfused_epilogues: list[Any] = []
         # Reference to the scheduler, set by _compute_fusion_metadata;
         # used in call_kernel() to codegen unfused epilogue nodes
         self._scheduling_ref: Any = None

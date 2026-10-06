@@ -1147,19 +1147,23 @@ class TestBlackwellTMALoadFusion(TestCase):
             "dynamic",
             "cpp_wrapper",
             "fp32",
+            "var_mean_wide",
         ),
     )
     def test_blackwell_mm_row_reduction_epilogue_not_fused(self, case: str):
         """The reduction stays unfused when the flag is off, when the fused
         kernel benchmarks slower or isn't benchmarked, for arg reductions,
         configs that can't host it (EPILOGUE_SUBTILE > 1, data partitioning,
-        2CTA), dynamic shapes, cpp_wrapper, and fp32 outputs."""
+        2CTA), dynamic shapes, cpp_wrapper, fp32 outputs, and welford
+        reductions of tiles narrower than N, which can't finish from
+        partials."""
         fn = {
             "max_values": lambda a, b: (a @ b).float().max(-1).values,
             "argmax": lambda a, b: (a @ b).argmax(-1),
+            "var_mean_wide": lambda a, b: torch.var_mean((a @ b).float(), -1),
         }.get(case, self.ROW_OPS["sum"])
         # With N == 8, BLOCK_N is clamped to 16, so one of two subtiles spans N.
-        M, K, N = 1024, 512, {"subtile": 8}.get(case, 128)
+        M, K, N = 1024, 512, {"subtile": 8, "var_mean_wide": 256}.get(case, 128)
         test_config = BlackwellGPUGemmConfig(
             128,
             128,
@@ -1202,7 +1206,9 @@ class TestBlackwellTMALoadFusion(TestCase):
             fused_ms=1e6 if case == "unprofitable" else 0.0,
             **patches,
         )
-        self.assertEqual(actual, fn(a, b), atol=0, rtol=0)
+        # var_mean's division may be reassociated.
+        tol = 1e-5 if case == "var_mean_wide" else 0
+        self.assertEqual(actual, fn(a, b), atol=tol, rtol=tol)
         kernels = re.findall(r"def (triton_\w+)\(", code[0])
         self.assertTrue(any(k.startswith("triton_tem") for k in kernels), kernels)
         self.assertTrue(
@@ -1241,7 +1247,8 @@ class TestBlackwellTMALoadFusion(TestCase):
             **{"triton.template_reduction_epilogue": True, "split_reductions": split},
         )
         self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
-        # Nodes reading the finished column results stay unfused.
+        # Nodes reading the finished column results run after the template as
+        # separate kernels.
         self.assertEqual(len(kernels), 2 if op in ("mean", "center") else 1, kernels)
 
     @unittest.skipIf(
@@ -1505,10 +1512,37 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    @parametrize("op", ("col_reads_row", "row_reads_col", "pw_reads_col"))
+    def test_blackwell_mm_row_and_col_reduction_epilogue_pw_reads_col(self):
+        """The column reduction fuses even when a pointwise node reads its
+        result. That node runs after the template, in the kernel the scheduler
+        already fused it into with the row reduction."""
+
+        def fn(a, b):
+            c = (a @ b).float()
+            s = c.sum(0)
+            return s, c * s, c.sum(1)
+
+        kernels, _ = self._run_reduction(
+            fn,
+            1024,
+            128,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertEqual(len(kernels), 2, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertIn("sum", kernels[0])
+        self.assertTrue(kernels[1].startswith("triton_per"), kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("col_reads_row", "row_reads_col"))
     def test_blackwell_mm_row_and_col_reduction_epilogue_not_fused(self, op: str):
-        """A column reduction may not read a row result, and nothing may read a
-        column result, since column results finish after the kernel."""
+        """A column reduction may not read a row result, and no reduction may
+        read a column result, since column results finish after the kernel."""
         fn = {
             "col_reads_row": lambda a, b: (
                 (d := (c := (a @ b).float()) - c.sum(1, keepdim=True)),
@@ -1517,11 +1551,6 @@ class TestBlackwellTMALoadFusion(TestCase):
             "row_reads_col": lambda a, b: (
                 (s := (c := (a @ b).float()).sum(0)),
                 (c * s).sum(1),
-            ),
-            "pw_reads_col": lambda a, b: (
-                (s := (c := (a @ b).float()).sum(0)),
-                c * s,
-                c.sum(1),
             ),
         }[op]
         kernels, _ = self._run_reduction(

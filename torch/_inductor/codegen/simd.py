@@ -547,7 +547,7 @@ def finished_after_kernel(
         *(node.get_buffer_names() for node in epilogue_nodes)
     )
     axes = (1,)
-    if not V.graph.sizevars.statically_known_geq(tile[1] * tile[2], n):
+    if not V.graph.sizevars.statically_known_geq(tile[1], n):
         axes = (0, 1)
     partials = [
         node
