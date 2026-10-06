@@ -534,31 +534,81 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertNotIn("index=0", graph0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    @compiler_config.patch(compile_on_one_rank=True)
-    def test_rng_ops_compile_under_coor(self):
-        # Not a divergence -- a hard failure, and it covers every RNG op, not just
-        # dropout:
+    @parametrize("align_random_eager", (False, True))
+    def test_rng_ops_compile_under_coor(self, align_random_eager):
+        # replace_random/replace_randint run on the joint graph, where a factory's
+        # device operand is still a coor current_device() node. Handing that node to
+        # inductor_prims.seed() failed every RNG op:
         #
         #   RuntimeError: prims::inductor_seed() Expected a value of type 'Device'
         #                 for argument 'device' but instead found type 'Node'
         #
-        # replace_random/replace_randint run on the joint graph, where a factory's
-        # device operand is still a coor current_device() node (respecialize does not
-        # concretise those until post_grad). The handler takes that kwarg straight off
-        # the matched node and hands it to inductor_prims.seed(), whose schema declares
-        # Device and cannot accept a graph node. rand, randn and randint all reach it.
-        cases = {
-            "dropout": lambda x: torch.nn.functional.dropout(x, 0.5, True).sum(),
-            "rand_like": lambda x: (torch.rand_like(x) * x).sum(),
-            "randn_like": lambda x: (torch.randn_like(x) + x).sum(),
-            "randint_like": lambda x: (torch.randint_like(x, 0, 10) * x).sum(),
-        }
-        for name, fn in cases.items():
-            with self.subTest(op=name):
-                torch._dynamo.reset()
-                x = torch.randn(64, 128, device="cuda", requires_grad=True)
-                out = torch.compile(fn, backend="inductor")(x)
-                self.assertEqual(out.shape, torch.Size([]))
+        # Comparing against CooR off also checks that the per-replacement
+        # current_device() nodes still fuse into one seed; otherwise the values shift.
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def f(x):
+            a = torch.nn.functional.dropout(x, 0.5, True)
+            b = torch.rand_like(x) * torch.randn_like(x)
+            return a + b + torch.randint_like(x, 0, 10)
+
+        x = torch.randn(64, 128, device="cuda", requires_grad=True)
+
+        def run(coor):
+            torch._dynamo.reset()
+            with (
+                compiler_config.patch(compile_on_one_rank=coor),
+                torch._inductor.config.patch(align_random_eager=align_random_eager),
+                fresh_cache(),
+            ):
+                torch.manual_seed(0)
+                return run_and_get_code(torch.compile(f, backend="inductor"), x)
+
+        out, codes = run(True)
+        ref, _ = run(False)
+        self.assertEqual(out, ref)
+        self._assert_no_baked_device("\n".join(codes))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_post_grad_replacement_with_device_under_coor(self):
+        # pointless_cumsum_replacement builds an arange on the matched device, and it
+        # runs after respecialize_current_device_nodes. Tracing it with CooR live would
+        # splice in a current_device() node that nothing concretises before lowering.
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def f(x):
+            return torch.full([4, 128], 1.0, device=x.device).cumsum(1) * x
+
+        torch._dynamo.reset()
+        x = torch.randn(4, 128, device="cuda")
+        with fresh_cache():
+            out, codes = run_and_get_code(torch.compile(f, fullgraph=True), x)
+        self.assertEqual(out, f(x))
+        self._assert_no_baked_device("\n".join(codes))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_mutating_custom_op_with_device_arg_under_coor(self):
+        # decompose_auto_functionalized re-traces its replacement graph; with CooR
+        # live that replays a current_device() node, which make_fx cannot handle.
+        with torch.library._scoped_library("coor_test", "FRAGMENT") as lib:
+            lib.define("fill_ones(Tensor(a!) out, Device d) -> ()")
+
+            def fill_ones(out, d):
+                out.copy_(torch.ones(out.shape, device=d))
+
+            lib.impl("fill_ones", fill_ones, "CompositeExplicitAutograd")
+            lib.impl("fill_ones", lambda out, d: None, "Meta")
+
+            def f(x):
+                y = x.clone()
+                torch.ops.coor_test.fill_ones(y, x.device)
+                return y + x
+
+            torch._dynamo.reset()
+            x = torch.randn(8, device="cuda")
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
 
     # ---- tensor guards must be rank-invariant without losing their teeth ----
     # A TENSOR_MATCH guard records the device as two independent pieces: the type
