@@ -6444,11 +6444,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         shape=accumulator.shape,
                     )
 
+                # Cast the int8 result back to tl.int1, otherwise result_var is
+                # tracked as torch.bool but holds int8 (e.g. `~` yields -2, not 0)
                 final_reduction_define(
                     self.post_loop_combine,
                     cast(CSEVariable, result_var),
                     accumulator,
-                    None,
+                    torch.bool if src_dtype == torch.bool else None,
                 )
 
         if self.cooperative_reduction:

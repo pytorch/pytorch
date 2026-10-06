@@ -11514,6 +11514,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
+    @parametrize("reduction", ["any", "amax"])
+    def test_bool_reduction_bitwise_op(self, reduction):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199745
+        def fn(x, y):
+            r = getattr(x, reduction)(dim=1)
+            return r & y, r | y, r ^ y
+
+        x = torch.zeros(4, 64, dtype=torch.bool)
+        x[1, 7] = x[3, 63] = True
+        y = torch.tensor([True, True, False, False])
+        self.common(fn, (x, y))
+
     @skip_if_gpu_halide
     def test_multilayer_any(self):
         def fn(x):
