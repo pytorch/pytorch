@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, KW_ONLY, replace
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 
 
 _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
@@ -12,32 +13,50 @@ _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
 
 @dataclass(frozen=True)
 class MixedPrecisionPolicy:
-    """
-    This configures FSDP's mixed precision. Unlike autocast, this applies mixed
-    precision at the module level, not op level, which means low-precision
-    activations are saved for backward and high-to-low-precision casts are
-    incurred only at module boundaries.
+    r"""
+    This configures FSDP's mixed precision. Unlike autocast, parameter casting
+    happens when parameters are all-gathered, while optional input and output
+    casting happens at module boundaries. This means low-precision activations
+    are saved for backward and high-to-low-precision casts are incurred only at
+    those boundaries.
 
     FSDP works well with module-level mixed precision since it keeps the
     high-precision sharded parameters in memory anyway. In other words, FSDP
     does not require any extra memory to keep a high-precision copy of the
     parameters for the optimizer step.
 
+    .. warning::
+        ``param_dtype_override_fn`` must return the same result for each logical parameter
+        on every rank. Rank-dependent results may cause ranks to build incompatible
+        collective buffers, which can fail or hang.
+
     Attributes:
-        param_dtype (Optional[torch.dtype]): This specifies the dtype for
-            the unsharded parameter and hence the dtype for forward/backward
-            computation and the parameter all-gather. If this is ``None``, then
-            the unsharded parameter uses the original dtype. The optimizer step
-            uses the sharded parameter in the original dtype. (Default:
+        param_dtype (Optional[torch.dtype]): This specifies the default dtype
+            for the unsharded parameters and hence the dtype for
+            forward/backward computation and the parameter all-gather. Forward
+            input casting also uses this dtype. If this is ``None``, then the
+            unsharded parameters use their original dtype. The optimizer step
+            uses the sharded parameters in the original dtype. (Default:
             ``None``)
-        reduce_dtype (Optional[torch.dtype]): This specifies the dtype for
-            gradient reduction (i.e. reduce-scatter or all-reduce). If this is
-            ``None`` but ``param_dtype`` is not ``None``, then the reduction
-            uses the compute dtype. This can be used to run gradient reduction
-            in full precision while using low precision for compute. If also
-            gradient reduction is disabled via :meth:`set_requires_gradient_sync`,
-            then FSDP will accumulate gradients using ``reduce_dtype``.
-            (Default: ``None``)
+        reduce_dtype (Optional[torch.dtype]): The dtype for gradient reduction
+            (reduce-scatter or all-reduce) and for accumulating gradients while
+            reduction is disabled via :meth:`FSDPModule.set_requires_gradient_sync`.
+            If ``None``, follows the parameter's ``grad_dtype`` configured before
+            lazy initialization (the first forward or :meth:`FSDPModule.unshard`):
+            unset uses the original parameter dtype;
+            explicit ``None`` accepts any incoming gradient dtype. This fallback
+            is independent of ``param_dtype``. Gradients with different dtypes
+            in one communication group are reduced in their promoted dtype
+            (e.g. fp32 for bf16 and fp32). Reduced shards retain the input
+            ``grad_dtype`` policy. (Default: ``None``)
+
+            .. versionchanged:: 2.15
+                With ``reduce_dtype=None``, gradients were previously reduced
+                in ``param_dtype`` when it was set. They now follow the
+                parameter's ``grad_dtype`` as described above, e.g. fp32 for fp32
+                parameters with ``param_dtype=torch.bfloat16``. Set
+                ``reduce_dtype=torch.bfloat16`` to keep the previous behavior.
+                FSDP1 still reduces in ``param_dtype``.
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
             help implement cases where different modules have different mixed
@@ -46,12 +65,49 @@ class MixedPrecisionPolicy:
             forward's floating-point input tensors to ``param_dtype`` or not.
             For grouped ``fully_shard([a, b, ...])``, the cast is applied per
             module, before each module's forward.
+        param_dtype_override_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
+            Optional per-parameter override for ``param_dtype``. The callable
+            is evaluated once for each managed parameter when FSDP is applied.
+            Returning the parameter's original dtype preserves that parameter
+            in its original dtype; returning ``None`` or ``param_dtype`` uses
+            the default ``param_dtype``. Other dtypes are not supported.
+            Forward input casting continues to use ``param_dtype``.
+            (Default: ``None``)
     """
 
     param_dtype: torch.dtype | None = None
     reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     cast_forward_inputs: bool = True
+    param_dtype_override_fn: Callable[[nn.Parameter], torch.dtype | None] | None = (
+        field(default=None, kw_only=True)
+    )
+
+    def _resolve_for_param(self, param: nn.Parameter) -> "MixedPrecisionPolicy":
+        if self.param_dtype_override_fn is None:
+            return self
+        param_dtype = self.param_dtype
+        if self.param_dtype_override_fn is not None:
+            param_dtype_override = self.param_dtype_override_fn(param)
+            if param_dtype_override is not None:
+                if not isinstance(param_dtype_override, torch.dtype):
+                    raise ValueError(
+                        "param_dtype_override_fn must return a torch.dtype or None but got "
+                        f"{type(param_dtype_override)}"
+                    )
+                if param_dtype_override not in (self.param_dtype, param.dtype):
+                    raise ValueError(
+                        "param_dtype_override_fn must return None, param_dtype, or the "
+                        "parameter's original dtype but got "
+                        f"{param_dtype_override} for a parameter with dtype "
+                        f"{param.dtype} and param_dtype {self.param_dtype}"
+                    )
+                param_dtype = param_dtype_override
+        return replace(
+            self,
+            param_dtype=param_dtype,
+            param_dtype_override_fn=None,
+        )
 
 
 class Comm(ABC):
@@ -197,3 +253,35 @@ class CPUOffloadPolicy(OffloadPolicy):
     """
 
     pin_memory: bool = True
+
+
+@dataclass(frozen=True)
+class AllGatherInput:
+    r"""Describe one payload returned by an FSDP all-gather extension.
+
+    Return these records in the inputs of ``(inputs, metadata)`` from
+    ``fsdp_pre_all_gather``. Each rank's payload is concatenated along ``dim``
+    using its own shape, independently of the parameter's shard dimension.
+    For example, a payload of shape ``(2, F, D)`` with ``dim=1`` produces
+    ``(2, world_size * F, D)``. Scalar payloads are treated as shape ``(1,)``.
+    The gathered payload is optionally reshaped to ``output_size`` before
+    being passed to the unchanged ``fsdp_post_all_gather`` hook.
+
+    Payloads must be flattenable with ``view(-1)``. Each rank must return the
+    same payload shapes, dtypes, and layouts; extensions own any padding.
+    The number, element counts, and dtypes of payloads must stay fixed across
+    calls so FSDP can reuse their output buffers.
+
+    Attributes:
+        tensor (Tensor): Local payload to communicate.
+        dim (int): Payload dimension to concatenate across ranks. Negative
+            dimensions are supported. Defaults to 0.
+        output_size (torch.Size, optional): Shape passed to the post hook, with
+            the same number of elements as the gathered payload. Defaults to
+            the concatenated shape.
+    """
+
+    tensor: torch.Tensor
+    _: KW_ONLY
+    dim: int = 0
+    output_size: torch.Size | None = None
