@@ -181,6 +181,8 @@ def copy_strided_storage_(dst: torch.Tensor, src: torch.Tensor) -> None:
 def maybe_handle_backward_generation(
     compiled_graph: CompiledFxGraph,
     boxed_forward_device_index: BoxedDeviceIndex | None,
+    *,
+    forward_cudagraphs_enabled: bool = True,
 ) -> None:
     if compiled_graph.current_callable is None:
         raise AssertionError("compiled_graph.current_callable must not be None")
@@ -190,21 +192,36 @@ def maybe_handle_backward_generation(
     # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
     # know we are running the backward even if we will not run it in cudagraphs
     if is_backward and config.triton.cudagraph_trees:
+        if not forward_cudagraphs_enabled:
+            return
         if boxed_forward_device_index is None:
             raise AssertionError("boxed_forward_device_index must not be None")
         if boxed_forward_device_index.value is None:
             raise AssertionError("boxed_forward_device_index.value must not be None")
+        forward_box = boxed_forward_device_index
+        device_index = forward_box.value
         compiled_graph_callable = compiled_graph.current_callable
 
-        manager = torch._inductor.cudagraph_trees.get_manager(
-            boxed_forward_device_index.value, create_if_none_exists=False
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            current_autograd_invocation,
         )
-        # should already exist from forward
-        if manager is None:
-            raise AssertionError("CUDAGraph manager must not be None")
+        from torch._inductor.cudagraph_trees import get_manager
 
         def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
-            manager.set_to_running_backward()  # type: ignore[union-attr]
+            # Look the manager up per call rather than at compile time: the
+            # backward can be lowered before the forward has ever run (eager
+            # backward lowering), and cudagraphify only creates the manager on
+            # the forward's first invocation. Only a forward call that was
+            # captured left a generation to transition, and the call this
+            # backward belongs to is the one with the same autograd invocation.
+            # It is owed one transition: a retained graph can run this backward
+            # again after another forward is pending.
+            invocation = current_autograd_invocation()
+            if invocation in forward_box.captured_invocations:
+                forward_box.captured_invocations.discard(invocation)
+                manager = get_manager(device_index, create_if_none_exists=False)
+                if manager is not None:
+                    manager.set_to_running_backward()
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
@@ -253,7 +270,6 @@ def cudagraph_post_compile(
     # Check if bisector wants to disable cudagraphs for this graph
     if CompilerBisector.disable_subsystem("inductor", "cudagraphs"):
         BoxedBool.disable(cudagraphs)
-        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
         log_cudagraph_skip_and_bump_counter("skipping cudagraphs due to bisector")
         return
 
@@ -282,6 +298,9 @@ def cudagraph_post_compile(
         }
 
         device_index = next(iter(compiled_graph.device_idxs))
+        forward_device_index = (
+            None if is_backward or is_inference else boxed_forward_device_index
+        )
         cudagraphify_kwargs = dict(
             device_index=device_index,
             stack_traces=stack_traces,
@@ -292,6 +311,7 @@ def cudagraph_post_compile(
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
             kernel_free_cudagraph=compiled_graph.kernel_free_cudagraph,
             user_visible_output_idxs=tuple(user_visible_output_idxs),
+            forward_device_index=forward_device_index,
         )
 
         policy = config.cudagraph_policy
@@ -313,7 +333,6 @@ def cudagraph_post_compile(
 
     else:
         BoxedBool.disable(cudagraphs)
-        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
 
         if any(is_gpu(device) for device in compiled_graph.device_types):
             # prefer better disable_cudagraphs_reason bc stack trace
@@ -346,7 +365,6 @@ def cudagraph_partition_post_compile(
 
     if CompilerBisector.disable_subsystem("inductor", "cudagraphs"):
         BoxedBool.disable(cudagraphs)
-        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
         log_cudagraph_skip_and_bump_counter("skipping cudagraphs due to bisector")
         return
 
@@ -361,7 +379,6 @@ def cudagraph_partition_post_compile(
     ):
         # cudagraphify is not called if there are no partitions
         BoxedBool.disable(cudagraphs)
-        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
         return
 
     if compiled_graph.current_callable is None:
@@ -400,6 +417,9 @@ def cudagraph_partition_post_compile(
 
     from .compile_fx import cudagraphify
 
+    forward_device_index = (
+        None if is_backward or is_inference else boxed_forward_device_index
+    )
     # cudagraphify each partition function, assuming every graph partition function
     # is cudagraphable. Non-cudagraphable ops (e.g., cpu ops) are inlined into
     # `call` function and not included in partition functions.
@@ -422,6 +442,7 @@ def cudagraph_partition_post_compile(
             mutated_input_idxs=tuple(partition_metadata.mutated_input_idxs),
             kernel_free_cudagraph=compiled_graph.kernel_free_cudagraph,
             user_visible_output_idxs=tuple(partition_metadata.user_visible_output_idxs),
+            forward_device_index=forward_device_index,
         )
         cudagraphify_fns.append(cudagraphify_fn)
 
@@ -856,7 +877,11 @@ class CompiledFxGraph(OutputCode):
         This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
         The results of this function are *not* saved in the cache itself.
         """
-        if config.graph_partition and _unstable_customized_partition_wrapper.wrapper:
+        # partition_maps also records partitioning that a nested region forced
+        # on. cpp_wrapper/aot_mode graphs never partition but still follow
+        # config.graph_partition here.
+        partitioned = config.graph_partition or self.partition_maps is not None
+        if partitioned and _unstable_customized_partition_wrapper.wrapper:
             # Mechanically apply user-specified cudagraph wrappers without modification
             if self.recursively_apply_fns is None:
                 raise AssertionError("self.recursively_apply_fns must not be None")
@@ -882,6 +907,24 @@ class CompiledFxGraph(OutputCode):
             raise AssertionError("graph_kwargs['is_backward'] must not be None")
         is_backward = graph_kwargs["is_backward"]
         cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
+        if is_backward:
+            if "boxed_forward_device_index" not in graph_kwargs:
+                raise AssertionError(
+                    "Expected 'boxed_forward_device_index' in graph_kwargs"
+                )
+            boxed_forward_device_index = graph_kwargs["boxed_forward_device_index"]
+        else:
+            # On the forward we don't know whether or not
+            # boxed_forward_device_index is set yet
+            boxed_forward_device_index = graph_kwargs.get(
+                "boxed_forward_device_index", None
+            )
+        forward_cudagraphs_enabled = graph_kwargs.get("cudagraphs_forward_enabled")
+        if forward_cudagraphs_enabled is None:
+            forward_cudagraphs_enabled = (
+                boxed_forward_device_index is not None
+                and boxed_forward_device_index.value is not None
+            )
 
         # When a CUDAGraphPolicy is set and it says not to wrap this
         # inner CompiledFxGraph (e.g. because wrapping happens at the
@@ -889,7 +932,8 @@ class CompiledFxGraph(OutputCode):
         # this graph so the rest of post_compile (input realignment,
         # _wrap_compiled_regions) still runs normally.
         policy = config.cudagraph_policy
-        if policy is not None and not policy.should_wrap(self):
+        policy_wraps_elsewhere = policy is not None and not policy.should_wrap(self)
+        if policy_wraps_elsewhere:
             counters["inductor"]["cudagraph_skips"] += 1
             BoxedBool.disable(cudagraphs)
 
@@ -905,23 +949,15 @@ class CompiledFxGraph(OutputCode):
                 else:
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
+            elif self.cudagraph_info is None:
+                # Compiled with cudagraphs off, so there is no capture metadata
+                # to replay with. A cache hit lands here when this graph's setting
+                # differs from the one the caller's box carries (a backward-specific
+                # or region-local opt-out).
+                counters["inductor"]["cudagraph_skips"] += 1
+                BoxedBool.disable(cudagraphs)
             else:
-                if is_backward:
-                    if "boxed_forward_device_index" not in graph_kwargs:
-                        raise AssertionError(
-                            "Expected 'boxed_forward_device_index' in graph_kwargs"
-                        )
-                    boxed_forward_device_index = graph_kwargs[
-                        "boxed_forward_device_index"
-                    ]
-                else:
-                    # On the forward we don't know whether or not
-                    # boxed_forward_device_index is set yet
-                    boxed_forward_device_index = graph_kwargs.get(
-                        "boxed_forward_device_index", None
-                    )
-
-                if config.graph_partition and policy is None:
+                if partitioned and policy is None:
                     # With graph_partition=True, we skip some cudagraph checks
                     # if it's supported with partition, so we use
                     # cudagraph_partition_post_compile.  When a CUDAGraphPolicy
@@ -942,6 +978,14 @@ class CompiledFxGraph(OutputCode):
                         constants.unwrap(self),
                         boxed_forward_device_index,
                     )
+        # The policy's own wrapper drives the CUDA Graph transition when it takes
+        # over, so only signal it here for a backward nobody else will wrap.
+        if is_backward and not cudagraphs and not policy_wraps_elsewhere:
+            maybe_handle_backward_generation(
+                self,
+                boxed_forward_device_index,
+                forward_cudagraphs_enabled=forward_cudagraphs_enabled,
+            )
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens

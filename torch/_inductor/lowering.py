@@ -4965,7 +4965,7 @@ def index_put_fallback(self, indices, values, accumulate):
     # When graph_partition is enabled, skip - partitioning handles this
     fx_node = V.graph.current_node
     if (
-        not config.graph_partition
+        not V.graph.partition_handles_cudagraph_unsafe_ops
         and fx_node is not None
         and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node)
     ):
@@ -9255,7 +9255,7 @@ def switch(index, branches, operands) -> list[ir.TensorBox | ir.ShapeAsConstantB
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
     # TODO: when graph_partition is enabled, skip - partitioning handles control flow
     # we run into memory cleanup issue
-    if not config.graph_partition and any(
+    if not V.graph.partition_handles_cudagraph_unsafe_ops and any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
     ):

@@ -865,6 +865,7 @@ def run_joint_graph_passes_on_hops(
     """
     from torch._higher_order_ops import invoke_subgraph
     from torch._higher_order_ops.invoke_subgraph import (
+        _specialize_nested_region_configs_for_backward,
         get_backward_nested_region_config,
     )
 
@@ -1039,6 +1040,7 @@ def run_joint_graph_passes_on_hops(
                 raise
 
         # Save the new forward and backward graph modules
+        _specialize_nested_region_configs_for_backward(new_bw_hop_gm)
         new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
         new_hop_graphs[identifier].new_bw_hop_gm = new_bw_hop_gm
 
