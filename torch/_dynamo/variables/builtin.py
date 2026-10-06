@@ -76,6 +76,7 @@ from ..utils import (
     get_fake_value,
     has_torch_function,
     is_tensor_getset_descriptor,
+    is_torch_class,
     istype,
     no_keywords,
     numpy_operator_wrapper,
@@ -502,6 +503,15 @@ class BaseBuiltinVariable(VariableTracker):
             attr = getattr(fn, name)
         except AttributeError as e:
             raise_observed_exception(AttributeError, tx, args=list(e.args))
+        if isinstance(attr, types.MethodDescriptorType) and not is_torch_class(fn):
+            # Unbound C method read off a builtin type, e.g. list.count. Torch
+            # types keep their trace-rule path through GetAttrVariable.
+            from .functions import MethodDescriptorVariable
+
+            owner: VariableTracker = self
+            if attr.__objclass__ is not fn:
+                owner = VariableTracker.build(tx, attr.__objclass__)
+            return MethodDescriptorVariable(attr, owner=owner, source=source)
         return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_obj_hasattr(

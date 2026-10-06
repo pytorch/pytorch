@@ -1102,6 +1102,16 @@
       "Hints": []
     }
   ],
+  "GB7811": [
+    {
+      "Gb_type": "Bound builtin method shadowed by an override",
+      "Context": "{self}",
+      "Explanation": "type({obj}) overrides {name}, and Dynamo has no base implementation of the bound C method to call instead.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0069": [
     {
       "Gb_type": "Import failure",
