@@ -5030,9 +5030,9 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
         # Handles calls like `list.append(L_subclass, item)`
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L60-L90
-        # In CPython, builtin_function_or_method receives the fn pointer to call
-        # Dynamo diverges a bit as we compute the correct fn/slot/method to call
-        # here
+        # CPython calls the C function the method was created with. Dynamo has
+        # no function pointer, so it picks the implementation to trace from the
+        # descriptor and the receiver.
         name = self.descriptor.__name__
         obj = self.obj.realize()
         descriptor = self.descriptor
@@ -5040,7 +5040,7 @@ class BoundBuiltinMethodVariable(VariableTracker):
         if isinstance(descriptor, types.ClassMethodDescriptorType):
             # PyCMethod_New bound the C function to the class in obj; the class
             # VT models the classmethod with itself as receiver.
-            return obj.call_method(tx, name, list(args), kwargs)
+            return obj.call_method(tx, name, args, kwargs)
         if not isinstance(descriptor, types.MethodDescriptorType):
             # METH_STATIC C functions stored directly in a type dict, e.g.
             # tuple.__new__; the receiver is the class itself.
@@ -5065,8 +5065,26 @@ class BoundBuiltinMethodVariable(VariableTracker):
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen(self.obj)
-        codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
+        # Rebuild through the descriptor: loading obj.<name> would resolve the
+        # name on type(obj) and find a subclass override.
+        descriptor = self.descriptor
+        load_descriptor = codegen.create_load_const_unchecked(descriptor)
+        if not hasattr(descriptor, "__get__"):
+            # METH_STATIC functions are already bound, e.g. tuple.__new__.
+            codegen.append_output(load_descriptor)
+            return
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [load_descriptor, *codegen.create_load_attrs("__get__")]
+            )
+        )
+        if isinstance(descriptor, types.ClassMethodDescriptorType):
+            codegen.append_output(codegen.create_load_const(None))
+            codegen(self.obj)
+            codegen.extend_output(create_call_function(2, False))
+        else:
+            codegen(self.obj)
+            codegen.extend_output(create_call_function(1, False))
 
 
 class ClassMethodDescriptorVariable(DescriptorVariable):
