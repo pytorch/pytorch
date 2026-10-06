@@ -162,8 +162,8 @@ def associative_scan(
 
     .. warning::
 
-        ``torch.associative_scan`` is a prototype feature in PyTorch. It currently
-        does not support autograd and you may run into miscompiles.
+        ``torch.associative_scan`` is a prototype feature in PyTorch. You may run
+        into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
@@ -176,11 +176,10 @@ def associative_scan(
         combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
             or if input is a pytree ``(pytree, pytree) -> pytree``.
             This function must be pure, satisfy the associative property and have no
-            side-effects. It may close over lifted arguments (e.g. freevars). On the
-            autograd path in eager mode, tensor freevars are permitted as long as they do
-            not require gradients (gradients for lifted arguments are not supported). Under
-            ``torch.compile`` with ``backend="inductor"`` tensor freevars are still rejected
-            outright; only ``int``/``SymInt`` lifted arguments are supported there.
+            side-effects. It may close over lifted arguments (e.g. freevars), which may
+            require gradients. Without gradients, under ``torch.compile`` with
+            ``backend="inductor"`` tensor freevars are rejected; only ``int``/``SymInt``
+            lifted arguments are supported there.
         xs (torch.Tensor): The input tensor, or nested pytree of tensors.
         dim (int): the dimension to scan over
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
@@ -190,6 +189,8 @@ def associative_scan(
             (CUDA or XPU), otherwise the generic fallback is used.
             In all other cases ``combine_mode=generic`` should be used.
             Note: ``combine_mode=pointwise`` is more efficient than ``combine_mode=generic``.
+            If gradients are required, ``combine_mode=pointwise`` uses the generic
+            implementation as well.
 
     Returns:
         A pytree of the same structure and shape as ``xs``. If the scan dimension has size 0,
@@ -248,6 +249,15 @@ def associative_scan(
 
     if reverse:
         leaves_xs = [torch.flip(elem, [0]) for elem in leaves_xs]
+
+    # Gradients are computed through the generic implementation, see
+    # associative_scan_autograd.
+    if (
+        combine_mode == "pointwise"
+        and torch.is_grad_enabled()
+        and any(x.requires_grad for x in leaves_xs)
+    ):
+        combine_mode = "generic"
 
     if combine_mode == "generic":
         # The generic_associative_scan implementation calls the combine_fn with a `batch` along the scan dimension
@@ -815,31 +825,18 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
 @associative_scan_op.py_autograd_impl
 def associative_scan_autograd(combine_fn, xs, additional_inputs):
-    num_xs = len(xs)
-
-    # additional_inputs may interleave Tensors with integer/SymInt constants lifted
-    # by dynamo (e.g. shape SymInts of a dynamic-shaped closed-over tensor, inserted
-    # before the tensor itself). Only Tensor additional_inputs participate in autograd;
-    # gradients for lifted parameters are not supported yet.
-    # NOTE: the isinstance guard below is defensive against such interleaved non-Tensor
-    # entries. It is currently unexercised in CI because every pointwise autograd test
-    # skips compile_dynamic_shape, which is what would produce a lifted SymInt here.
-    if any(a.requires_grad for a in additional_inputs if isinstance(a, torch.Tensor)):
-        raise RuntimeError(
-            "Associative_scan does currently not support gradients for lifted parameters!"
-        )
-
-    # Pass all additional_inputs through in their original order. combine_fn is invoked
-    # purely positionally as operator(*lhs, *rhs, *additional_inputs), so preserving the
-    # interleaved order is required; backward excludes them from the vmap batch dims and
-    # drops their grad slots (see AssociativeScanAutogradOp.backward).
-    flat_out = AssociativeScanAutogradOp.apply(
-        combine_fn,
-        num_xs,
-        len(additional_inputs),
-        *(tuple(xs) + tuple(additional_inputs)),
-    )
-    return (*flat_out,)
+    # Note, the current AssociativeScanAutogradOp implementation silently returns wrong
+    # gradients for combine_fn with interacting input leaves.
+    # Thus we use the dense, generic_associative_scan, implementation for the moment.
+    # additional_inputs may also contain SymInts that dynamo lifts for dynamic shapes,
+    # hence the isinstance check, as only Tensors may require gradients
+    if torch.is_grad_enabled() and any(
+        isinstance(t, torch.Tensor) and t.requires_grad
+        for t in itertools.chain(xs, additional_inputs)
+    ):
+        return tuple(associative_scan_op_dense(combine_fn, xs, additional_inputs))
+    with torch._C._AutoDispatchBelowAutograd():
+        return associative_scan_op(combine_fn, xs, additional_inputs)
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)

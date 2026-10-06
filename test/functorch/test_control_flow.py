@@ -5254,14 +5254,21 @@ class AssociativeScanTestsDevice(TestCase):
                 "The number of elements requiring gradients is different for the results and the expected results"
             )
 
-        grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        # All-ones upstream gradients can hide a backward that mixes up the leaves
+        gen = torch.Generator(device="cpu").manual_seed(1234)
+        grad_init = [
+            torch.rand(el.shape, generator=gen, dtype=el.dtype).to(el.device) + 0.5
+            for el in result_exp_flatten
+        ]
         expected_grads = torch.autograd.grad(
-            result_exp_flatten, grad_param, grad_exp_init
+            result_exp_flatten, grad_param, [g.clone() for g in grad_init]
         )
-        grad_init = [torch.ones_like(el) for el in result_flatten]
-        grads = torch.autograd.grad(result_flatten, grad_param, grad_init)
+        grads = torch.autograd.grad(
+            result_flatten, grad_param, [g.clone() for g in grad_init]
+        )
 
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
+        return expected_grads
 
     def _run_test(self, model, model_fake, inputs, autograd_param=None):
         result = model(inputs)
@@ -6096,6 +6103,250 @@ class AssociativeScanTestsDevice(TestCase):
     @skipCUDAIf(not SM70OrLater, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
+    @parametrize("partial_grad", [False, True])
+    @parametrize("coupling", ["linear_recurrence", "quaternion"])
+    def test_associative_scan_coupled_grads(
+        self, device, compile_mode, reverse, partial_grad, coupling
+    ):
+        # The linear recurrence of https://github.com/pytorch/pytorch/issues/172568
+        def affine_compose(left, right):
+            a_l, b_l = left
+            a_r, b_r = right
+            return a_l * a_r, b_r + a_r * b_l
+
+        def quaternion_mul(left, right):
+            w1, x1, y1, z1 = left
+            w2, x2, y2, z2 = right
+            return (
+                w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+                w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+                w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+            )
+
+        combine_fn, num_leaves, used_outputs = {
+            "linear_recurrence": (affine_compose, 2, [1]),
+            "quaternion": (quaternion_mul, 4, [0, 1, 2, 3]),
+        }[coupling]
+
+        xs = tuple(
+            (torch.rand(7, 3, device=device, dtype=torch.double) + 0.5).requires_grad_(
+                ind < num_leaves - 1 or not partial_grad
+            )
+            for ind in range(num_leaves)
+        )
+
+        scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, "pointwise")
+        ys = scan_fct(combine_fn, xs, 0, reverse)
+        ys_exp = _fake_associative_scan(combine_fn, xs, 0, reverse)
+        self.assertEqual(ys, ys_exp)
+
+        expected_grads = self._check_autograd(
+            [ys[ind] for ind in used_outputs],
+            [ys_exp[ind] for ind in used_outputs],
+            xs,
+        )
+        self.assertTrue(all(g.abs().max() > 1e-3 for g in expected_grads))
+
+        # gradcheck is slow, so it only runs for one variant
+        if compile_mode == "none" and not reverse and not TEST_WITH_TORCHDYNAMO:
+            self.assertTrue(
+                torch.autograd.gradcheck(
+                    lambda *leaves: scan_fct(combine_fn, leaves, 0, reverse),
+                    xs,
+                    fast_mode=True,
+                )
+            )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize(
+        "leaves",
+        [
+            "unequal",
+            "decay_input",
+            "decay_state",
+            "decay_no_grad",
+            "state_no_grad",
+            "dim",
+            "shared",
+            "nested",
+            "select",
+            "unflatten",
+            "slice",
+            "xs_slice",
+            "state_slice",
+            "dtype",
+            "real_complex",
+            "complex_states",
+        ],
+    )
+    def test_associative_scan_leaf_dependencies_grads(
+        self, device, compile_mode, reverse, leaves
+    ):
+        def uncoupled(left, right):
+            return left[0] * right[0], left[1] + right[1]
+
+        def affine_decay_input(left, right):
+            return left[0] * right[0], right[1] + right[0] * left[1]
+
+        def affine_decay_state(left, right):
+            return left[0] * right[0], left[0] * right[1] + left[1]
+
+        def shared_decay(left, right):
+            a, b, c = left
+            a2, b2, c2 = right
+            return a * a2, b2 + a2 * b, c2 + a2 * c
+
+        # Products of the matrices [[p, q, s], [0, r, w], [0, 0, z]]
+        def upper_triangular(left, right):
+            p, q, s, r, w, z = left
+            p2, q2, s2, r2, w2, z2 = right
+            return (
+                p * p2,
+                p * q2 + q * r2,
+                p * s2 + q * w2 + s * z2,
+                r * r2,
+                r * w2 + w * z2,
+                z * z2,
+            )
+
+        def select_decay_state(left, right):
+            return left[0] * right[0], left[0][..., 0, :] * right[1] + left[1]
+
+        def unflatten_decay_state(left, right):
+            a, b = left
+            a2, b2 = right
+            return a * a2, a.unflatten(-1, (4, 3)) * b2 + b
+
+        def slice_decay_state(left, right):
+            return left[0] * right[0], left[0][..., :1, :] * right[1] + left[1]
+
+        def xs_slice(left, right):
+            return (left[0] * right[0][..., :1, :],)
+
+        def state_slice(left, right):
+            return (left[0][..., :1, :] * right[0],)
+
+        def real(x):
+            return (x + x.conj_physical()) * 0.5
+
+        def complex_states(left, right):
+            a, u, w = left
+            a2, u2, w2 = right
+            return a * a2, real(u) * u2, real(w) * u2 + a * w2
+
+        one, row, mat = (1, 1), (1, 3), (4, 3)
+        combine_fn, shapes, no_grad = {
+            "unequal": (uncoupled, [(4,), (3,)], []),
+            "decay_input": (affine_decay_input, [row, mat], []),
+            "decay_state": (affine_decay_state, [row, mat], []),
+            "decay_no_grad": (affine_decay_state, [row, mat], [0]),
+            "state_no_grad": (affine_decay_state, [row, mat], [1]),
+            "dim": (affine_decay_state, [row, mat], []),
+            "shared": (shared_decay, [row, mat, (5, 3)], []),
+            "nested": (upper_triangular, [one, row, mat, one, row, one], []),
+            "select": (select_decay_state, [mat, (3,)], []),
+            "unflatten": (unflatten_decay_state, [(12,), mat], []),
+            "slice": (slice_decay_state, [mat, mat], []),
+            "xs_slice": (xs_slice, [mat], []),
+            "state_slice": (state_slice, [mat], []),
+            "dtype": (affine_decay_input, [mat, mat], []),
+            "real_complex": (uncoupled, [mat, mat], [1]),
+            "complex_states": (complex_states, [row, mat, mat], [1, 2]),
+        }[leaves]
+        dtypes = {
+            "dtype": [torch.float, torch.double],
+            "real_complex": [torch.double, torch.cdouble],
+            "complex_states": [torch.double, torch.cdouble, torch.cdouble],
+        }.get(leaves, [torch.double] * len(shapes))
+        dim = 1 if leaves == "dim" else 0
+
+        xs = tuple(
+            torch.rand(*shape[:dim], 6, *shape[dim:], device=device, dtype=dtype) + 0.5
+            for shape, dtype in zip(shapes, dtypes)
+        )
+        for ind, x in enumerate(xs):
+            x.requires_grad_(ind not in no_grad)
+
+        scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, "pointwise")
+        ys = scan_fct(combine_fn, xs, dim, reverse)
+        ys_exp = _fake_associative_scan(combine_fn, xs, dim, reverse)
+        self.assertEqual(ys, ys_exp)
+
+        used = [ind for ind, y in enumerate(ys_exp) if y.requires_grad]
+        expected_grads = self._check_autograd(
+            [ys[ind] for ind in used], [ys_exp[ind] for ind in used], xs
+        )
+        self.assertTrue(all(g.abs().max() > 1e-3 for g in expected_grads))
+
+        if (
+            compile_mode == "none"
+            and not reverse
+            and not TEST_WITH_TORCHDYNAMO
+            and all(dtype == torch.double for dtype in dtypes)
+        ):
+            self.assertTrue(
+                torch.autograd.gradcheck(
+                    lambda *ls: scan_fct(combine_fn, ls, dim, reverse),
+                    xs,
+                    fast_mode=True,
+                )
+            )
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_associative_scan_pointwise_dependent_leaves_functorch_grads(self, device):
+        def affine(left, right):
+            (a_l, b_l), (a_r, b_r) = left, right
+            return a_l * a_r, b_r + a_r * b_l
+
+        def keep_y(a, b):
+            return associative_scan(affine, (a, b), 0, combine_mode="pointwise")[1]
+
+        a = torch.rand(2, 7, 3, device=device, dtype=torch.double) + 0.5
+        b = torch.rand(2, 7, 3, device=device, dtype=torch.double) + 0.5
+        xs = (a.requires_grad_(), b.requires_grad_())
+
+        # vmap hides requires_grad from the frontend, so the HOP has to fall back
+        y = torch.vmap(keep_y)(*xs)
+        y_exp = torch.stack(
+            [_fake_associative_scan(affine, (a[i], b[i]), 0)[1] for i in range(2)]
+        )
+        self.assertEqual(y, y_exp)
+        expected_grads = self._check_autograd(y, y_exp, xs)
+        self.assertTrue(all(g.abs().max() > 1e-3 for g in expected_grads))
+
+        # torch.func.grad cannot trace the HOP, so the frontend has to fall back
+        w = torch.rand(7, 3, device=device, dtype=torch.double) + 0.5
+
+        def loss(a, b):
+            return (keep_y(a, b) * w).sum()
+
+        def loss_exp(a, b):
+            return (_fake_associative_scan(affine, (a, b), 0)[1] * w).sum()
+
+        args = (a[0].detach(), b[0].detach())
+        grads = torch.func.grad(loss, argnums=(0, 1))(*args)
+        self.assertEqual(grads, torch.func.grad(loss_exp, argnums=(0, 1))(*args))
+
+    @onlyAccelerator
+    def test_associative_scan_leaves_on_different_devices_grads(self, device):
+        def uncoupled(left, right):
+            return left[0] * right[0], left[1] + right[1]
+
+        xs = (
+            (torch.rand(6, 4, dtype=torch.double) + 0.5).requires_grad_(),
+            torch.rand(6, 4, device=device, dtype=torch.double).requires_grad_(),
+        )
+        ys = associative_scan(uncoupled, xs, 0, combine_mode="pointwise")
+        ys_exp = _fake_associative_scan(uncoupled, xs, 0)
+        self.assertEqual(ys, ys_exp)
+        self._check_autograd(list(ys), list(ys_exp), xs)
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
     def test_associative_scan_different_input_size(self, device, compile_mode, reverse):
         batch = 5
         hidden_dim = 3
@@ -6616,19 +6867,24 @@ class AssociativeScanTestsDevice(TestCase):
         grads_ref = torch.autograd.grad(result_ref.sum(), xs)
         self.assertEqual(grads, grads_ref)
 
-    @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
-    def test_associative_scan_pointwise_additional_input_requires_grad_raises(
-        self, device
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("xs_requires_grad", [False, True])
+    def test_associative_scan_pointwise_additional_input_requires_grad(
+        self, device, compile_mode, xs_requires_grad
     ):
         H = torch.rand(2, device=device, requires_grad=True)
 
         def combine_fn(x, y):
             return x + y + H
 
-        xs = torch.randn(4, 2, device=device, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "lifted parameters"):
-            associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+        # Without gradients for xs, only the HOP sees that H requires them
+        xs = torch.randn(4, 2, device=device, requires_grad=xs_requires_grad)
+        scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, "pointwise")
+        result = scan_fct(combine_fn, xs, 0, False)
+        result_exp = _fake_associative_scan(combine_fn, xs, 0)
+        self.assertEqual(result, result_exp)
+        self._check_autograd(result, result_exp, (xs, H))
 
     @onlyAccelerator
     def test_associative_scan_input_mutation(self, device):
