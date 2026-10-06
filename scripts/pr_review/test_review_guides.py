@@ -191,5 +191,113 @@ class TestTheCommandLine(unittest.TestCase):
             self.assertFalse(out.exists())
 
 
+class TestTheGitForm(unittest.TestCase):
+    """`review_guides.py BASE HEAD`, run in a checkout, as a local review does."""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.repo = Path(self._td.name) / "repo"
+        self.repo.mkdir()
+        self.git("init", "-q", "-b", "main")
+
+    def tearDown(self):
+        self._td.cleanup()
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=self.repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def write(self, rel: str, text: str) -> None:
+        (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / rel).write_text(text)
+
+    def commit(self, msg: str) -> str:
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", msg)
+        return self.git("rev-parse", "HEAD")
+
+    def run_script(self, base: str, head: str):
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), base, head],
+            cwd=self.repo,
+            capture_output=True,
+        )
+
+    def test_guides_come_from_base_and_cover_both_sides_of_a_rename(self):
+        self.write("REVIEW.md", "root rules\n")
+        self.write("a/REVIEW.md", "a rules\n")
+        self.write("a/x.py", "x\n")
+        self.write("b/REVIEW.md", "b rules\n")
+        self.write("b/z.py", "z\n")
+        self.write("e/REVIEW.md", "e rules\n")
+        self.commit("base")
+        self.git("checkout", "-q", "-b", "pr")
+        self.write("a/REVIEW.md", "anything goes\n")
+        self.write("c/REVIEW.md", "c rules from the PR\n")
+        self.write("c/y.py", "y\n")
+        (self.repo / "d").mkdir()
+        self.git("mv", "b/z.py", "d/z.py")
+        self.commit("pr")
+        proc = self.run_script("main", "pr")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = proc.stdout.decode()
+        self.assertIn("<!-- begin REVIEW.md -->\nroot rules\n", out)
+        self.assertIn("<!-- begin a/REVIEW.md -->\na rules\n", out)
+        self.assertNotIn("anything goes", out)
+        self.assertNotIn("c rules from the PR", out)
+        self.assertIn("<!-- begin b/REVIEW.md -->\nb rules\n", out)
+        self.assertNotIn("e rules", out)
+
+    def test_guides_are_read_at_base_not_at_the_merge_base(self):
+        """A guide added to BASE after the change forked still applies."""
+        self.write("a/x.py", "x\n")
+        fork = self.commit("fork")
+        self.git("checkout", "-q", "-b", "pr")
+        self.write("a/x.py", "x2\n")
+        self.commit("pr")
+        self.git("checkout", "-q", "main")
+        self.write("a/REVIEW.md", "newer a rules\n")
+        self.commit("main moves on")
+        out = self.run_script("main", "pr").stdout.decode()
+        self.assertIn("newer a rules", out)
+        self.assertIn("no guide applies", self.run_script(fork, "pr").stdout.decode())
+
+    def test_a_symlinked_guide_is_not_read(self):
+        self.write("outside.md", "rules from outside\n")
+        (self.repo / "a").mkdir()
+        os.symlink("../outside.md", self.repo / "a" / "REVIEW.md")
+        self.write("a/x.py", "x\n")
+        self.commit("base")
+        self.git("checkout", "-q", "-b", "pr")
+        self.write("a/x.py", "x2\n")
+        self.commit("pr")
+        out = self.run_script("main", "pr").stdout.decode()
+        self.assertNotIn("rules from outside", out)
+        self.assertIn("no guide applies", out)
+
+    def test_a_branch_named_like_a_directory_works(self):
+        self.write("a/REVIEW.md", "a rules\n")
+        self.write("a/x.py", "x\n")
+        self.commit("base")
+        self.git("checkout", "-q", "-b", "a")
+        self.write("a/x.py", "x2\n")
+        self.commit("pr")
+        proc = self.run_script("main", "a")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("a rules", proc.stdout.decode())
+
+    def test_an_unknown_revision_fails(self):
+        self.write("REVIEW.md", "root\n")
+        self.commit("base")
+        proc = self.run_script("main", "no-such-branch")
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(proc.stdout, b"")
+
+
 if __name__ == "__main__":
     run_this_suite()
