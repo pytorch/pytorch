@@ -63,6 +63,7 @@ from torchgen.gen import cpp_string, parse_native_yaml, parse_tags_yaml
 from torchgen.model import (
     Argument,
     BaseOperatorName,
+    BaseTy,
     FunctionSchema,
     NativeFunction,
     SchemaKind,
@@ -227,6 +228,22 @@ def get_pycname(name: BaseOperatorName) -> str:
 
 def is_noarg(overloads: Sequence[PythonSignatureNativeFunctionPair]) -> bool:
     return len(overloads) == 1 and overloads[0].signature.arguments_count() == 0
+
+
+def uses_varargs_intlist(
+    overloads: Sequence[PythonSignatureNativeFunctionPair],
+) -> bool:
+    for overload in overloads:
+        input_args = overload.signature.input_args
+        if len(input_args) != 1:
+            continue
+        list_type = input_args[0].type.is_list_like()
+        if list_type is not None and (
+            list_type.elem.is_base_ty_like(BaseTy.int)
+            or list_type.elem.is_base_ty_like(BaseTy.SymInt)
+        ):
+            return True
+    return False
 
 
 def is_py_variable_method(f: NativeFunction) -> bool:
@@ -831,7 +848,30 @@ def generate_return_type_declarations(
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-# python binding for all overloads of a particular function/method
+# vectorcall python binding for all overloads of a particular function/method
+PY_VARIABLE_METHOD_FASTCALL = CodeTemplate(
+    r"""\
+// ${name}
+static PyObject * ${pycname}(PyObject* self_, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames)
+{
+  ${method_header}
+  static PythonArgParser parser({
+    ${signatures}
+  }, /*traceable=*/${traceable});
+
+  ParsedArgs<${max_args}> parsed_args;
+  auto _r = parser.parse(${self_}, args, nargs, kwnames, parsed_args);
+  ${check_has_torch_function}
+  switch (_r.idx) {
+    ${dispatch}
+  }
+  ${method_footer}
+}
+
+"""
+)
+
+# legacy python binding for all overloads of a particular function/method
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate(
     r"""\
 // ${name}
@@ -865,7 +905,28 @@ case ${overload_index}: {
 """
 )
 
-# python binding for single-overload function/method
+# vectorcall python binding for single-overload function/method
+PY_VARIABLE_METHOD_FASTCALL_SINGLETON = CodeTemplate(
+    """\
+// ${name}
+static PyObject * ${pycname}(PyObject* self_, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames)
+{
+  ${method_header}
+  static PythonArgParser parser({
+    ${signatures}
+  }, /*traceable=*/${traceable});
+
+  ParsedArgs<${max_args}> parsed_args;
+  auto _r = parser.parse(${self_}, args, nargs, kwnames, parsed_args);
+  ${check_has_torch_function}
+  ${dispatch}
+  ${method_footer}
+}
+
+"""
+)
+
+# legacy python binding for single-overload function/method
 PY_VARIABLE_METHOD_VARARGS_SINGLETON = CodeTemplate(
     """\
 // ${name}
@@ -915,6 +976,7 @@ def method_impl(
     """
     pycname = get_pycname(name)
     noarg = is_noarg(overloads)
+    varargs_intlist = uses_varargs_intlist(overloads)
     structseq_inits, structseq_typenames = emit_structseq_call(overloads)
 
     method_header = ["HANDLE_TH_ERRORS"]
@@ -947,10 +1009,14 @@ def method_impl(
 
     if noarg:
         template = PY_VARIABLE_METHOD_NOARGS
-    elif is_singleton:
+    elif varargs_intlist and is_singleton:
         template = PY_VARIABLE_METHOD_VARARGS_SINGLETON
-    else:
+    elif varargs_intlist:
         template = PY_VARIABLE_METHOD_VARARGS
+    elif is_singleton:
+        template = PY_VARIABLE_METHOD_FASTCALL_SINGLETON
+    else:
+        template = PY_VARIABLE_METHOD_FASTCALL
 
     return template.substitute(
         name=name,
@@ -964,6 +1030,7 @@ def method_impl(
             module=module,
             noarg=noarg,
             method=method,
+            fastcall=not varargs_intlist,
         ),
         dispatch=dispatch,
         method_footer=method_footer,
@@ -972,7 +1039,12 @@ def method_impl(
 
 
 def gen_has_torch_function_check(
-    name: BaseOperatorName, module: str | None, *, noarg: bool, method: bool
+    name: BaseOperatorName,
+    module: str | None,
+    *,
+    noarg: bool,
+    method: bool,
+    fastcall: bool,
 ) -> str:
     if noarg:
         if method:
@@ -999,6 +1071,12 @@ if (has_torch_function(self_)) {{
         else "THPVariableClass"
     )
 
+    if fastcall:
+        return f"""\
+if(_r.has_torch_function()) {{
+  return handle_torch_function(_r, {self_}, args, nargs, kwnames, {namespace}, "{module or "torch.Tensor"}");
+}}
+"""
     return f"""\
 if(_r.has_torch_function()) {{
   return handle_torch_function(_r, {self_}, args, kwargs, {namespace}, "{module or "torch.Tensor"}");
@@ -1074,10 +1152,16 @@ def forward_decls(
 static PyObject * {pycname}(PyObject* self_, PyObject* args);
 """,
         )
-    else:
+    elif uses_varargs_intlist(overloads):
         return (
             f"""\
 static PyObject * {pycname}(PyObject* self_, PyObject* args, PyObject* kwargs);
+""",
+        )
+    else:
+        return (
+            f"""\
+static PyObject * {pycname}(PyObject* self_, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames);
 """,
         )
 
@@ -1107,9 +1191,12 @@ def method_def(
 
     if is_noarg(overloads):
         flags = "METH_NOARGS" if method else "METH_VARARGS | METH_KEYWORDS"
-    else:
+    elif uses_varargs_intlist(overloads):
         pycname = f"castPyCFunctionWithKeywords({pycname})"
         flags = "METH_VARARGS | METH_KEYWORDS"
+    else:
+        pycname = f"castPyCFunctionFastWithKeywords({pycname})"
+        flags = "METH_FASTCALL | METH_KEYWORDS"
 
     if module == "torch":
         flags += " | METH_STATIC"
