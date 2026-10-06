@@ -2207,6 +2207,11 @@ def is_valid_addmm_fusion(match):
     ):
         return False
 
+    # addmm skips the operand scaled by 0, so it wouldn't propagate its NaN/inf
+    alpha = match.output_node().kwargs.get("alpha", 1)
+    if not isinstance(alpha, (int, float)) or alpha == 0:
+        return False
+
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 
@@ -2251,8 +2256,13 @@ def is_valid_addmm_fusion(match):
     extra_check=is_valid_addmm_fusion,
 )
 def addmm(match, mat1, mat2, *, inp):
+    add = match.output_node()
+    alpha = add.kwargs.get("alpha", 1)
+    # add(inp, mm, alpha) = inp + alpha * mm; add(mm, inp, alpha) = mm + alpha * inp
+    scale = {} if alpha == 1 else {"alpha" if add.args[0] is inp else "beta": alpha}
+
     def repl(inp, mat1, mat2):
-        return aten.addmm(inp, mat1, mat2)
+        return aten.addmm(inp, mat1, mat2, **scale)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
 
