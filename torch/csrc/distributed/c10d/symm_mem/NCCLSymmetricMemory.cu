@@ -19,6 +19,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
+#include <map>
 #include <mutex>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
@@ -75,8 +76,10 @@ struct NCCLAllocation {
 
 namespace {
 
-// Base allocation ptr -> owning NCCL allocation metadata.
-using NCCLAllocMap = ska::flat_hash_map<void*, std::unique_ptr<NCCLAllocation>>;
+// Data buffer ptr (the pointer alloc() returned) -> owning NCCL allocation
+// metadata. Ordered, so the allocation covering an interior pointer is found
+// with upper_bound rather than a scan.
+using NCCLAllocMap = std::map<void*, std::unique_ptr<NCCLAllocation>>;
 // (Tensor storage/data ptr, group name) -> cached SymmetricMemory handle.
 using NCCLSymmMemMap = ska::flat_hash_map<
     SymmMemKey,
@@ -95,34 +98,19 @@ bool pointer_in_allocation(void* ptr, const NCCLAllocation& allocation) {
   return ptr_int >= buffer_ptr && ptr_int < buffer_ptr + allocation.buffer_size;
 }
 
-NCCLAllocMap::iterator find_allocation_covering_linear(
-    void* ptr,
-    NCCLAllocMap& allocations) {
-  return std::find_if(
-      allocations.begin(),
-      allocations.end(),
-      [&](const auto& entry) {
-        return pointer_in_allocation(ptr, *entry.second);
-      });
-}
-
 NCCLAllocMap::iterator find_allocation_covering(
     void* ptr,
     NCCLAllocMap& allocations) {
-  auto alloc_it = allocations.find(ptr);
-  if (alloc_it != allocations.end()) {
-    return alloc_it;
+  // `ptr` may be interior (a MemPool hands those out): the covering
+  // allocation is the one with the greatest key not above it, if its buffer
+  // reaches that far. Keys are data buffer pointers, so each allocation's own
+  // stored buffer_offset is what decides, not the current pad size setting.
+  auto it = allocations.upper_bound(ptr);
+  if (it == allocations.begin()) {
+    return allocations.end();
   }
-  // `ptr` is not an allocation key (a MemPool hands out interior pointers), so
-  // scan for the allocation whose [buffer, buffer + size) range covers it. We
-  // deliberately do not reconstruct the key from the process-global pad size:
-  // get_signal_pad_size() may have changed via set_signal_pad_size() since
-  // this allocation was created, whereas the scan uses each allocation's own
-  // stored buffer_offset.
-  // TODO: this linear std::find_if is O(n) in the number of live allocations.
-  // Make it O(log n) by switching NCCLAllocMap to an ordered map and using
-  // upper_bound to find the covering allocation.
-  return find_allocation_covering_linear(ptr, allocations);
+  --it;
+  return pointer_in_allocation(ptr, *it->second) ? it : allocations.end();
 }
 
 } // namespace
