@@ -708,7 +708,11 @@ class TestPatternMatcher(TestCase):
             return bool(pattern.match(node))
 
         self.assertTrue(matches(undeclared, add))
-        self.assertTrue(matches(undeclared, add, alpha=1))
+        # make_fx drops kwargs equal to their default, so build alpha=1 by hand
+        graph = torch.fx.Graph()
+        x, y = graph.placeholder("x"), graph.placeholder("y")
+        explicit = graph.call_function(add.Tensor, (x, y), {"alpha": 1})
+        self.assertTrue(undeclared.match(explicit))
         self.assertFalse(matches(undeclared, add, alpha=2))
         self.assertTrue(matches(declared, add, alpha=2))
         # rounding_mode is Optional with no schema default, so None is the default

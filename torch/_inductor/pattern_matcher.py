@@ -925,7 +925,9 @@ _NodeMeta = tuple[Sequence["torch.SymInt | int"], torch.dtype, torch.device]
 
 @functools.cache
 def _schema_defaults(op: torch._ops.OpOverload) -> dict[str, Any]:
-    # an Optional arg without a default (e.g. div's rounding_mode) defaults to None
+    # An Optional arg without a default (e.g. div's rounding_mode) defaults to None.
+    # Enum defaults (dtype, memory_format, layout) come back as ints, so a node that
+    # explicitly passes one is conservatively treated as non-default.
     return {
         a.name: a.default_value if a.has_default_value() else None
         for a in op._schema.arguments
