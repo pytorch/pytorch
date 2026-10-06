@@ -132,7 +132,7 @@ from .fx_passes.post_grad import (
 )
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .ir import get_device_type, IRNode
+from .ir import get_device_type, IRNode, is_triton
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
@@ -1768,6 +1768,9 @@ class _InProcessFxCompile(FxCompile):
                 const_graph = None
                 const_wrapper_code = None
                 const_kernel_code = None
+                # Shared so the const graph's proxy-executor calls get indices
+                # distinct from the main graph's in the one serialized list.
+                extern_kernel_nodes: list[ExternKernelNode] = []
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
                     # torchbind objects have name that starts with _torchbind_obj
@@ -1798,7 +1801,7 @@ class _InProcessFxCompile(FxCompile):
                     )
                     with (
                         V.set_graph_handler(const_graph),
-                        V.set_extern_kernel_nodes([]),
+                        V.set_extern_kernel_nodes(extern_kernel_nodes),
                     ):
                         if not cpp_wrapper:
                             raise AssertionError("AOT mode only supports C++ wrapper")
@@ -1839,7 +1842,7 @@ class _InProcessFxCompile(FxCompile):
                 graph.freeze_runtime_asserts()
                 with (
                     V.set_graph_handler(graph),
-                    V.set_extern_kernel_nodes([]),
+                    V.set_extern_kernel_nodes(extern_kernel_nodes),
                     distributed_autotune.graph_context(),
                 ):
                     graph.run(*example_inputs)
@@ -3183,10 +3186,9 @@ def compile_fx(
         compile_region_name=compile_region_name,
     )
 
-    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
+    # Wake up the AsyncCompile subproc pool as early as possible (if the graph uses Triton).
     if any(
-        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
-        for e in example_inputs_
+        isinstance(e, torch.Tensor) and is_triton(e.device) for e in example_inputs_
     ):
         torch._inductor.async_compile.AsyncCompile.wakeup()
 
