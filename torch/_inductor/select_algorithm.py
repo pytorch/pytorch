@@ -712,11 +712,11 @@ class TritonTemplateKernel(TritonKernel):
         self.template_out_shape: str | tuple[str] | None = None
         self.ops_handler: V.WrapperHandler | None = None  # type: ignore[name-defined]
         self.root_var_renames: dict[str, str] = {}
-        # Per store_output subgraph: scalar (row, col) tile origin and (rows, cols,
-        # subtiles) tile shape from block indexing, used to codegen reduction
-        # epilogues over the tile.
+        # Per store_output subgraph: scalar (row, col) tile origin, (rows, cols,
+        # subtiles) tile shape from block indexing, and the subtile loop index,
+        # used to codegen reduction epilogues over the tile.
         self.output_tiles: dict[
-            int, tuple[list[sympy.Symbol], tuple[int, int, int]]
+            int, tuple[list[sympy.Symbol], tuple[int, int, int], str | None]
         ] = {}
         # Reductions fused into the epilogue as per-tile partials, which the
         # wrapper reduces after the kernel.
@@ -1671,7 +1671,7 @@ class TritonTemplateKernel(TritonKernel):
                     for k, v in self.meta.items()
                     if isinstance(v, int)
                 }
-                subtiles = subtile_loop[1] if subtile_loop else 1
+                subtile_index, subtiles = subtile_loop or (None, "1")
                 tile = [sympy.sympify(s).subs(meta) for s in (*val_shape, subtiles)]
                 if (
                     all(isinstance(t, sympy.Integer) for t in tile)
@@ -1683,6 +1683,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.output_tiles[subgraph_idx] = (
                         index_symbols,
                         (int(tile[0]), int(tile[1]), int(tile[2])),
+                        subtile_index,
                     )
                 intermediate_lines: list[str] = []
                 epilogue_index_symbols: list[sympy.Symbol] = []
@@ -2261,28 +2262,33 @@ class TritonTemplateKernel(TritonKernel):
         row_loads: dict[tuple[str, sympy.Expr], CSEVariable] | None = None,
     ) -> dict[tuple[str, sympy.Expr], CSEVariable]:
         """Codegen row reductions of the output, and the nodes after them, as a
-        persistent reduction over the output tile: x spans the tile's rows and
-        r0_ its columns, so loads of the output buffer resolve to the
-        in-register tile.
+        reduction over the output tile: x spans the tile's rows and r0_ its
+        columns, so loads of the output buffer resolve to the in-register tile.
+        A tile split into subtiles by an unrolled loop is a looped reduction whose
+        loop is the template's: accumulators start at the first subtile and the
+        reduction finishes at the last.
 
-        Column reductions swap the roles (x spans columns, r0_ rows) and store
-        fp32 partials per row tile to the workspace, which the wrapper reduces
-        after the kernel (see _emit_post_kernel_code). Split column reductions
-        are generated whole. Row reductions store partials per column tile
-        when the tile doesn't span the output's columns.
+        Column reductions swap the roles (x spans columns, r0_ rows), are
+        persistent over each (sub)tile, and store fp32 partials per row tile to
+        the workspace, which the wrapper reduces after the kernel (see
+        _emit_post_kernel_code). Split column reductions are generated whole.
+        Row reductions do the same, per column (sub)tile, when the tile doesn't
+        span the output's columns.
 
         A row pass returns its loads keyed by buffer and tile position; the
         column pass takes them as row_loads and reuses them transposed."""
         columns = row_loads is not None
         m, n = self.output_node.get_size()
-        origin, (rows, cols, _) = self.output_tiles[subgraph_idx]
-        partial = columns or not V.graph.sizevars.statically_known_geq(cols, n)
+        origin, (rows, cols, subtiles), subtile_index = self.output_tiles[subgraph_idx]
+        spans = V.graph.sizevars.statically_known_geq(cols * subtiles, n)
+        partial = columns or not spans
         numels = {"x": m, "r0_": n}
         sizes, offsets = (rows, cols), origin
+        persistent = subtiles == 1 or partial
         if columns:
             numels = {"x": n, "r0_": m}
             sizes, offsets = (cols, rows), origin[::-1]
-        with patch.object(self, "persistent_reduction", True):
+        with patch.object(self, "persistent_reduction", persistent):
             roots = self.construct_range_trees(None, True, True, numels, False)
         range_trees = [
             DerivedIterationRangesRoot(
@@ -2356,10 +2362,16 @@ class TritonTemplateKernel(TritonKernel):
                 )
             )
             indexing = self.indexing(index, block_ptr=False)
+            mask = indexing.mask_str
+            if not columns and subtiles > 1:
+                # A trailing subtile can start past the last column; its slot
+                # would be past this partial's region in the workspace.
+                in_bounds = f"({origin[1]} < {n})"
+                mask = in_bounds if mask == "None" else f"{mask} & {in_bounds}"
             self.post_loop_store.writeline(
                 f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
                 f"{size} * ({tile_idx}) + {indexing.index_str}, "
-                f"{value}, {indexing.mask_str})"
+                f"{value}, {mask})"
             )
 
         tile_syms = [tree.index_sym() for tree in range_trees]
@@ -2391,6 +2403,7 @@ class TritonTemplateKernel(TritonKernel):
         codegen_nodes = [
             node.unsplit_reduction() if columns else node for node in nodes
         ]
+        header, init, tail = self.body, IndentedBuffer(), IndentedBuffer()
         with (
             self.use_range_trees(range_trees),
             patch.object(self.cse, "store_cache", store_cache),
@@ -2399,7 +2412,7 @@ class TritonTemplateKernel(TritonKernel):
                 numels=numels,
                 range_tree_nodes={},
                 inside_reduction=True,
-                persistent_reduction=True,
+                persistent_reduction=persistent,
                 template_mask=None,
                 template_out_shape=None,
                 features=SIMDKernelFeatures(codegen_nodes, numels["x"], numels["r0_"]),
@@ -2409,29 +2422,67 @@ class TritonTemplateKernel(TritonKernel):
             ),
         ):
             for tree in range_trees:
-                self.iteration_ranges_codegen_header(tree, self.body)
-            self.body.writeline(f"rindex = {range_trees[1].name}")
-            for original, node in zip(nodes, codegen_nodes):
-                # Nodes over rows only (e.g. mean's division) run outside the reduction.
-                self.inside_reduction = node.group[1] != (numels["x"], sympy.S.One)
-                with (
-                    (
+                self.iteration_ranges_codegen_header(tree, header)
+            header.writeline(f"rindex = {range_trees[1].name}")
+            if not persistent:
+                # The tile spans all columns, so its column origin is the reduction offset.
+                header.writeline(f"roffset = {origin[1]}")
+            # Looped reductions emit accumulator inits into self.body.
+            with patch.object(self, "body", init):
+                for original, node in zip(nodes, codegen_nodes):
+                    # Nodes over rows only (e.g. mean's division) run after the reduction.
+                    self.inside_reduction = node.group[1] != (numels["x"], sympy.S.One)
+                    after_loop = not (persistent or self.inside_reduction)
+                    with (
+                        (
+                            patch.multiple(
+                                self,
+                                indexing_code=tail,
+                                loads=tail,
+                                compute=tail,
+                                stores=tail,
+                            )
+                            if after_loop
+                            else contextlib.nullcontext()
+                        ),
+                        (
+                            patch.object(
+                                self,
+                                "store_reduction",
+                                functools.partial(
+                                    store_partials,
+                                    original,
+                                    node.node.get_reduction_type(),
+                                ),
+                            )
+                            if partial
+                            else contextlib.nullcontext()
+                        ),
+                        # Tail loads run under the last subtile's branch only.
                         patch.object(
                             self,
-                            "store_reduction",
-                            functools.partial(
-                                store_partials, original, node.node.get_reduction_type()
-                            ),
-                        )
-                        if partial
-                        else contextlib.nullcontext()
-                    ),
-                    patch.object(
-                        self, "load", functools.partial(tile_load, not columns)
-                    ),
-                ):
-                    node.codegen(self.split_and_set_ranges(node.get_ranges()))
-            self.codegen_body()
+                            "load",
+                            functools.partial(tile_load, not (columns or after_loop)),
+                        ),
+                    ):
+                        node.codegen(self.split_and_set_ranges(node.get_ranges()))
+            if persistent:
+                header.splice(init)
+                self.codegen_body()
+                return tile_loads
+            # The subtile loop is an unrolled tl.static_range, so names defined
+            # under the first subtile's branch stay visible in later ones.
+            header.writeline(f"if {subtile_index} == 0:")
+            with header.indent():
+                header.splice(init or "pass")
+            for buf in (self.indexing_code, self.loads, self.compute, self.stores):
+                header.splice(buf)
+                buf.clear()
+            header.writeline(f"if {subtile_index} == {subtiles - 1}:")
+            with header.indent():
+                for buf in (self.post_loop_combine, self.post_loop_store, tail):
+                    header.splice(buf)
+                    buf.clear()
         return tile_loads
 
     def codegen_prologues_in_subgraphs(
@@ -3380,7 +3431,7 @@ class TritonTemplate(KernelTemplate):
                 if result is None:  # happens at ZeroDivisionError:
                     return None
                 code, extra = result
-                tiles = [tile for _, tile in kernel.output_tiles.values()]
+                tiles = [tile for _, tile, _ in kernel.output_tiles.values()]
                 # Templates with several store_output calls don't host
                 # reduction epilogues.
                 output_tile = tiles[0] if len(tiles) == 1 else None
