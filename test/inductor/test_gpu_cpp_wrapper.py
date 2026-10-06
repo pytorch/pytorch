@@ -393,7 +393,9 @@ class TestGpuWrapper(InductorTestCase):
         scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(
             0,
             TritonScratchWorkspace(
-                size=256, generate_dtype_str=lambda: "at::ScalarType::Byte"
+                size=256,
+                generate_dtype_str=lambda: "at::ScalarType::Byte",
+                generate_device_type_str=lambda: "cached_torch_device_type_cuda",
             ),
             prefix="global_scratch",
         )
@@ -401,6 +403,7 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn(
             "static_cast<int64_t>(256) * grid_0 * grid_1 * grid_2", scratch_def[0]
         )
+        self.assertIn("cached_torch_device_type_cuda", scratch_def[3])
 
     @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_triton_wrapper_scales_scratch_with_num_ctas(self):
