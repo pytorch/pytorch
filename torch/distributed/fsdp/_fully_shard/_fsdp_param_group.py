@@ -1135,7 +1135,9 @@ class FSDPParamGroup:
     def _to_sharded(self):
         if not self.is_sharded:
             if self._all_gather_result is not None:
-                # Discard a post-forward mesh prefetch before changing meshes.
+                # A backward prefetch of a group that backward did not use was
+                # gathered over the post-forward mesh, which a later forward
+                # cannot copy out, so wait for it and discard it
                 _wait_all_gather(self._all_gather_result)
                 self._all_gather_result = None
             for fsdp_param in self.fsdp_params:
