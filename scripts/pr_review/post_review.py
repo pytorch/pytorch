@@ -1,40 +1,26 @@
 #!/usr/bin/env python3
 """Post the hardened PR review's verdict as a native GitHub pull-request review.
 
-A submitted review notifies the PR author, and its findings sit on the lines
-they are about.
+A review notifies the PR author and puts findings on their lines.
 
-Reads the TERMINAL ROW (terminal.json), never the review job's artifact: the row
-is what emit_row.py re-checked, so the review cannot say something the row and
-the label step did not agree to. Every string is re-checked here again with the
-same predicates, and anything that fails is dropped rather than repaired.
+Input is the terminal row (terminal.json) that emit_row.py already checked.
+Every string is checked again with the sanitizer's predicates; anything that
+fails is dropped, never repaired.
 
-EARLIER AUTOMATED REVIEWS ARE HIDDEN, NEVER EDITED. A new review is posted
-first; only once that has succeeded are the earlier ones hidden, so a failed
-post never leaves the PR with no review at all. Hiding resolves the review's
-inline threads, then minimizes it as outdated; a review whose threads cannot
-be resolved stays visible until a later publication manages it. A change
-request is hidden only once it no longer stands. Nothing is
-deleted, and GitHub cannot delete a submitted review anyway.
-
-A CHANGE REQUEST STANDS UNTIL A NEWER VERDICT REPLACES IT. A newer
-REQUEST_CHANGES review takes its place in the PR's review decision. A clean
-verdict is a COMMENT, which does not clear an earlier request, so after one
-the earlier requests are dismissed. Apart from a run retracting its own review
-for a commit that is no longer the head, that is the only dismissal. A run
-that fails, is skipped or is opted out of leaves the last verdict as it is.
-
-`@pytorchbot` IS DEFUSED IN EVERYTHING POSTED. pytorch-bot parses submitted and
-edited review bodies for commands (torchci/lib/bot/pytorchBot.ts) and only skips
-its own accounts, so a review body line starting `@pytorchbot merge` would run.
-The sanitizer already defuses every mention in model prose; `defuse_bot_commands`
-is the last pass over the text this script assembles, paths and framing included.
-
-An API failure never fails the job: the telemetry row is already written, and a
-red publish job on every GitHub hiccup would teach people to ignore it. Problems
-are `::warning::`, and idempotent calls are retried. The one exit 1 is a change
-request that may still stand after a clean verdict, which nothing else would
-clear.
+Invariants:
+- A `changes_requested` verdict is REQUEST_CHANGES; anything else is COMMENT,
+  never APPROVE.
+- A new review is posted before earlier ones are hidden. Hiding resolves the
+  review's inline threads and minimizes it as outdated. Nothing is edited or
+  deleted. A change request is hidden only once it no longer stands.
+- A newer REQUEST_CHANGES replaces an older one in the review decision. A
+  COMMENT does not, so after a clean verdict earlier requests are dismissed.
+  The only other dismissal is a run retracting its own review because the
+  head moved. Failed, skipped and opted-out runs change nothing.
+- `@pytorchbot` is escaped in all posted text, because pytorch-bot reads
+  commands from review bodies.
+- API errors are warnings. The step fails only when an earlier change request
+  may still stand after a clean verdict.
 """
 
 from __future__ import annotations
@@ -132,19 +118,15 @@ class GitHub:
     def request(
         self, method: str, path: str, body: dict | None = None, idempotent=None
     ):
-        """One API call. Idempotent calls are retried on transient failures.
-
-        GET, PUT and DELETE are idempotent, and so is every GraphQL call made
-        here; creating a review is not, so a failed POST is never repeated.
-        """
+        """One API call. Idempotent calls (GET, PUT, DELETE, our GraphQL) retry
+        on transient errors; creating a review never does."""
         if idempotent is None:
             idempotent = method in ("GET", "PUT", "DELETE")
         for attempt in range(RETRIES if idempotent else 1):
             try:
                 return self._once(method, path, body)
             except GitHubError as exc:
-                # A secondary rate limit arrives as a 403 carrying Retry-After;
-                # a plain 403 is a permission answer and is not retried.
+                # A rate limit can be a 403 with Retry-After; a plain 403 is not.
                 throttled = exc.retry_after is not None
                 transient = exc.status in (0, 429) or exc.status >= 500 or throttled
                 if not transient or attempt == RETRIES - 1 or not idempotent:
@@ -170,8 +152,7 @@ class GitHub:
             except (OSError, http.client.HTTPException):
                 detail = repr(exc)
             raise GitHubError(exc.code, detail, _retry_after(exc.headers)) from exc
-        # URLError, timeouts, resets and truncated bodies carry no HTTP status.
-        # They must still be a GitHubError, which is what callers isolate.
+        # Transport errors have no HTTP status but must still be GitHubError.
         except (OSError, http.client.HTTPException) as exc:
             raise GitHubError(0, repr(exc)) from exc
         try:
@@ -180,11 +161,7 @@ class GitHub:
             raise GitHubError(0, f"unparsable response: {exc}") from exc
 
     def graphql(self, query: str, variables: dict) -> dict:
-        """One GraphQL call, retried like an idempotent REST call.
-
-        GraphQL reports most failures inside an HTTP 200, which `request`'s
-        retry never sees; every query and mutation sent here is idempotent.
-        """
+        """One GraphQL call, retried also on errors reported inside an HTTP 200."""
         for attempt in range(RETRIES):
             out = self.request(
                 "POST", "/graphql", {"query": query, "variables": variables}, True
@@ -222,9 +199,8 @@ def load_review(row: dict) -> tuple[str, str, list[dict]] | None:
     return verdict, summary, published_findings({"findings": raw})
 
 
-# A line that starts markdown block syntax: heading, list, quote, table row,
-# indented code, or an (escaped) fence run. Prefixing a mark would turn it into
-# plain text, so the mark then goes on a line of its own.
+# A line starting markdown block syntax; a mark in front would break it, so the
+# mark goes on its own line.
 _BLOCK_START = re.compile(r"^(?: {4}|\s*(?:#|[-*+>|]|\d+[.)]|\\[`~]))")
 
 
@@ -244,12 +220,7 @@ def count(n: int, noun: str) -> str:
 
 
 def blocking_findings(verdict: str, findings: list[dict]) -> list[dict]:
-    """The findings that hold the PR back, posted inline; the rest are folded.
-
-    Normally the `major` ones. A `changes_requested` verdict with no major
-    finding is resting on its minor ones, so then every finding blocks, rather
-    than requesting changes while calling all of them non-blocking.
-    """
+    """The `major` findings, or all of them if changes are requested without one."""
     major = [f for f in findings if f["severity"] == "major"]
     if verdict == "changes_requested" and not major:
         return list(findings)
@@ -260,33 +231,20 @@ _FENCE_RUN = re.compile(r"`{3,}|~{3,}")
 
 
 def contained(text: str) -> list[str]:
-    """`text` as lines, with every possible code-fence run escaped.
+    """`text` as lines with every run of 3+ backticks or tildes escaped.
 
-    The sanitizer has already removed links, images, HTML, mentions and issue
-    references, so what a message can still carry is markdown STRUCTURE. Nearly
-    all of it ends at the blank line after the message: a heading, list, table,
-    setext underline or quote cannot reach the next finding. A fenced code block
-    is the one construct that runs on until it is closed, and an open one would
-    turn every later finding, link and `</details>` into code.
-
-    Escaping, not balancing: whether a run opens or closes a fence depends on
-    the list or quote it sits in, and a balancer that misreads a container
-    adds the very fence it meant to close. A backslash-escaped backtick or
-    tilde is never a fence character, in any container. The cost is that a
-    model's fenced block shows as literal backticks around plain text; inline
-    code still renders.
+    A fenced code block is the only markdown that runs past the blank line
+    after a message, so an unclosed one would swallow the rest of the body.
+    Escaping is used rather than balancing, which depends on list and quote
+    context and can get it wrong.
     """
     escaped = _FENCE_RUN.sub(lambda m: "".join("\\" + c for c in m.group()), text)
     return escaped.split("\n")
 
 
 def permalink(repo: str, sha: str, finding: dict) -> str:
-    """A blob link to the finding's line, built on the POSTING repo.
-
-    Alone on its own line, GitHub renders it as the code it points at; it does
-    so only when the link's repo is the one the comment is posted in. Every
-    character outside `/` is percent-encoded, which also keeps `@` out of it.
-    """
+    """A blob link to the finding's line in the posting repo, which GitHub
+    renders as the code. The path is percent-encoded, so it cannot carry `@`."""
     path = urllib.parse.quote(unescape_path(finding["path"]), safe="/")
     return f"https://github.com/{repo}/blob/{sha}/{path}#L{finding['line']}"
 
@@ -294,11 +252,7 @@ def permalink(repo: str, sha: str, finding: dict) -> str:
 def finding_blocks(
     repo: str, sha: str, findings: list[dict], mark: str = ""
 ) -> list[str]:
-    """Each finding as its code link with the message under it, rule-separated.
-
-    The blank line after the link is required: GitHub renders the code only
-    for a link alone in its paragraph. `mark` leads the message's first line.
-    """
+    """Each finding as its code link, a blank line, then the message."""
     lines: list[str] = []
     for i, f in enumerate(findings):
         if i:
@@ -310,22 +264,15 @@ def finding_blocks(
     return lines
 
 
-# GitHub refuses a review body over 65536 characters, and the sanitizer's caps
-# do not bound this one: percent-encoding and the layout expand the text.
+# GitHub's limit is 65536; encoding and layout can exceed the sanitizer's caps.
 MAX_BODY = 60_000
 
 
 def review_body(
     verdict: str, summary: str, findings: list[dict], sha: str, repo: str, inline: bool
 ) -> str:
-    """The review body: verdict, summary, and every finding not posted inline.
-
-    Blocking findings are inline comments when GitHub accepts them; the rest
-    are folded into one collapsed section, each led by a permalink so it still
-    shows its code. `<summary>` text is plain: GitHub renders no markdown there.
-    A body over MAX_BODY drops findings from the end, folded ones first, and
-    says how many; the Dr.CI comment still lists them all.
-    """
+    """Verdict, summary, and the findings not posted inline (non-blocking ones
+    folded). Over MAX_BODY, findings are dropped from the end and counted."""
     blocking = blocking_findings(verdict, findings)
     in_body = [] if inline else blocking
     folded = [f for f in findings if f not in blocking]
@@ -396,19 +343,8 @@ def _compose(
 
 
 def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
-    """Create the review: blocking findings inline, the rest folded in the body.
-
-    A `changes_requested` verdict is a REQUEST_CHANGES review, so the PR shows
-    it the way it shows a human's; anything else is a COMMENT. Never APPROVE: a
-    bot approval would read as a maintainer's sign-off.
-
-    GitHub refuses the WHOLE review (422) if any comment's line is not in its
-    diff. The sanitizer anchored every finding to our own diff, which should
-    match, but a refusal must cost the anchoring, not the review: the blocking
-    findings then move into the body too. If a REQUEST_CHANGES review is
-    refused outright (the token cannot request changes on this PR), it is
-    posted as a COMMENT rather than not at all.
-    """
+    """Create the review. If GitHub refuses the inline comments (422), they go
+    into the body; if it refuses REQUEST_CHANGES, the review is a COMMENT."""
     path = f"/repos/{gh.repo}/pulls/{pr}/reviews"
     event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
     base = {"commit_id": sha, "event": event}
@@ -447,12 +383,10 @@ _MINIMIZED = "query($ids: [ID!]!) { nodes(ids: $ids) { ... on PullRequestReview 
 
 
 def earlier_reviews(gh: GitHub, pr: int, author: str, new_id: int) -> list[dict]:
-    """This workflow's reviews posted BEFORE `new_id` that are not yet hidden.
+    """This workflow's visible reviews older than `new_id`.
 
-    OLDER, not merely other: review ids increase, so when two publish runs
-    overlap the later review survives both cleanups instead of each run hiding
-    the other's. A minimized review is done: its threads were resolved before it
-    was minimized, and leaving it alone keeps a thread someone reopened open.
+    Older, not just other, so overlapping runs never hide the newer review.
+    Minimized reviews are skipped, so a thread someone reopened stays open.
     """
     mine = [
         r
@@ -462,8 +396,7 @@ def earlier_reviews(gh: GitHub, pr: int, author: str, new_id: int) -> list[dict]
         and (r.get("user") or {}).get("login") == author
         and (r.get("body") or "").startswith(MARKER)
     ]
-    # Only a review GitHub explicitly reports as visible is touched; one whose
-    # state did not come back is left for the next publication.
+    # A review whose state did not come back is left alone.
     visible: set[str] = set()
     for i in range(0, len(mine), 100):
         ids = [r["node_id"] for r in mine[i : i + 100]]
@@ -476,12 +409,10 @@ _MINIMIZE = "mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classi
 
 
 def retract(gh: GitHub, pr: int, review: dict) -> None:
-    """Take back this run's own review, posted for a commit that is no longer the head.
+    """Take back this run's review of a commit that is no longer the head.
 
-    A change request is dismissed as well as hidden: a newer run may already
-    have posted its clean verdict and finished, and nothing after that would
-    clear a request this run left standing. If the dismissal fails the review
-    stays visible, so the request it makes is not hidden.
+    A change request is dismissed first, since a newer clean run may already
+    have finished. If that fails, the review stays visible.
     """
     if review.get("state") == "CHANGES_REQUESTED":
         try:
@@ -503,12 +434,10 @@ def retract(gh: GitHub, pr: int, review: dict) -> None:
 
 
 def take_down(gh: GitHub, pr: int, review: dict) -> None:
-    """Hide an automated review as outdated, leaving its text and state alone.
+    """Resolve the review's threads, then minimize it as outdated.
 
-    Its inline threads are resolved, then the review is minimized. A reader can
-    expand either one. A change request is not dismissed here (see the module
-    docstring). If a thread cannot be resolved the review stays visible, and the
-    next publication tries again.
+    Its text and state are unchanged. If a thread cannot be resolved, the
+    review stays visible for the next run to retry.
     """
     rid = review["id"]
     try:
@@ -540,11 +469,7 @@ _RESOLVE = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { c
 
 
 def resolve_threads(gh: GitHub, pr: int, comment_ids: set[int]) -> bool:
-    """Resolve every open thread started by one of `comment_ids`.
-
-    True when each of those threads was found and is now resolved. Threads are
-    listed once per call, not once per comment.
-    """
+    """Resolve the open threads started by `comment_ids`; True if all are."""
     if not comment_ids:
         return True
     owner, name = gh.repo.split("/")
@@ -590,12 +515,8 @@ def standing_requests(gh: GitHub, pr: int, author: str) -> list[dict]:
 
 
 def in_scope(review: dict, keep_commit=None, older_than=None) -> bool:
-    """Whether a standing request is one this run may take back.
-
-    `keep_commit` spares requests on that commit; `older_than` spares any
-    review at or above that id, so an overlapping run's newer request on the
-    same commit is never touched.
-    """
+    """Whether this run may dismiss a request: not on `keep_commit`, and older
+    than `older_than`, so an overlapping run's newer request is never touched."""
     if keep_commit and review.get("commit_id") == keep_commit:
         return False
     return older_than is None or review["id"] < older_than
@@ -610,18 +531,14 @@ def withdraw(
     keep_commit=None,
     older_than=None,
 ):
-    """Dismiss this workflow's standing change requests that are in scope.
-
-    Dismissal only: the findings stay readable under the dismissal.
-    """
+    """Dismiss this workflow's standing change requests that are in scope."""
     standing = [
         r
         for r in standing_requests(gh, pr, author)
         if in_scope(r, keep_commit, older_than)
     ]
-    # LIST, THEN RE-READ THE HEAD. A run for a newer head may have posted a
-    # change request on that head; if it did so before this read, the head has
-    # moved and nothing is dismissed. If it posts after, it is not in the list.
+    # List, then re-read the head: a newer run's request is either not in the
+    # list or makes the head check fail.
     if head and standing and head_sha(gh, pr) != head:
         print("head moved while withdrawing; leaving change requests alone")
         return
@@ -641,8 +558,7 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
     review = load_review(row)
     current = head_sha(gh, pr)
     if current != sha:
-        # A run for the newer head is coming; anything done here could act on
-        # that run's review.
+        # A run for the newer head will handle it.
         print(f"head moved {sha} -> {current}; not posting a stale review")
         return 0
     labels = (
@@ -662,16 +578,14 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
         if not clean:
             raise
         warn(f"automated review not posted: {exc}")
-        # No review of ours to measure age against: spare this commit's
-        # requests, which an overlapping run may have just posted.
+        # Without our review id, spare this commit's requests (overlapping run).
         return clear_after_clean(gh, pr, sha, author, keep_commit=sha)
     if new_id is RETRACTED or not clean:
         return 0
     if new_id is None:
         return clear_after_clean(gh, pr, sha, author, keep_commit=sha)
     rc = clear_after_clean(gh, pr, sha, author, older_than=new_id)
-    # Now hide the requests that were just dismissed; any still standing stay
-    # visible (see `hide_earlier`).
+    # Hide the requests just dismissed; any still standing stay visible.
     try:
         hide_earlier(gh, pr, author, {"id": new_id, "state": "COMMENTED"})
     except GitHubError as exc:
@@ -682,14 +596,10 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
 def clear_after_clean(
     gh: GitHub, pr: int, sha: str, author: str, keep_commit=None, older_than=None
 ) -> int:
-    """After a clean verdict, no earlier change request from this workflow may remain.
+    """Dismiss earlier change requests after a clean verdict; 1 if any may remain.
 
-    The clean review is a COMMENT, which leaves an earlier request standing, and
-    the PR has moved to `ready for review`, after which pushes trigger no
-    review. So the earlier requests are dismissed here; if one still stands,
-    fail the step naming it, so it reaches a maintainer. Only requests in scope
-    (see `in_scope`) count, both times. An API error here fails the step too,
-    because the earlier requests are already hidden and may still stand.
+    A COMMENT does not clear them, and after `ready for review` no later push
+    is reviewed, so a leftover request fails the step, as does an API error.
     """
     try:
         return _clear_after_clean(gh, pr, sha, author, keep_commit, older_than)
@@ -716,8 +626,7 @@ def _clear_after_clean(gh, pr, sha, author, keep_commit, older_than) -> int:
         for r in standing_requests(gh, pr, author)
         if in_scope(r, keep_commit, older_than)
     ]
-    # Same order as `withdraw`: list, then re-read the head. A moved head means
-    # a newer run owns the PR now, and any request it posted is not stale.
+    # A moved head means a newer run owns the PR.
     if not left or head_sha(gh, pr) != sha:
         return 0
     for r in left:
@@ -732,18 +641,14 @@ RETRACTED = object()
 
 
 def publish(gh, pr, sha, author, verdict, summary, findings):
-    """Post the review and hide earlier ones.
-
-    Returns the new review's id, None if GitHub returned none, or RETRACTED
-    when the head moved while posting and the review was taken back.
-    """
+    """Post the review and hide earlier ones. Returns the new id, None if GitHub
+    gave none, or RETRACTED if the head moved while posting."""
     new = post(gh, pr, sha, verdict, summary, findings[:MAX_FINDINGS])
     print(f"posted automated review {new.get('id')}: {new.get('html_url')}")
     if not isinstance(new.get("id"), int):
         warn("GitHub returned no review id; leaving earlier reviews in place")
         return None
-    # Once the review exists, its id is what scopes the clean-verdict check,
-    # so nothing after this point may lose it by raising.
+    # The id scopes the clean-verdict check, so cleanup errors must not lose it.
     try:
         return replace_earlier(gh, pr, sha, author, new)
     except GitHubError as exc:
@@ -753,12 +658,8 @@ def publish(gh, pr, sha, author, verdict, summary, findings):
 
 def replace_earlier(gh, pr, sha, author, new):
     """Hide `new` if the head moved, else hide earlier reviews."""
-    # CHECKED AGAIN AFTER POSTING. If the head moved between the check above and
-    # the post, a run for the newer commit may already have published, with a
-    # SMALLER review id, and the id rule below would hide the current review
-    # in favour of this stale one. So a moved head retracts this review
-    # instead. If the head moves after this read, the newer commit's run has
-    # not posted yet; its review gets the larger id and hides this one.
+    # Re-checked after posting: a newer run may already have posted a review
+    # with a smaller id, which hiding by id would wrongly take down.
     current = head_sha(gh, pr)
     if current != sha:
         print(f"head moved {sha} -> {current} while posting; retracting this review")
@@ -771,15 +672,11 @@ def replace_earlier(gh, pr, sha, author, new):
 def hide_earlier(gh, pr, author, new):
     """Hide this workflow's reviews older than `new`.
 
-    A REQUEST HIDDEN ONLY ONCE IT NO LONGER STANDS. An earlier change request is
-    hidden here only when `new` itself requests changes and so replaces it.
-    Otherwise it stays visible until `clear_after_clean` has dismissed it, and
-    `run` calls this again after that.
+    An earlier change request is hidden only if `new` requests changes too;
+    otherwise it waits until `clear_after_clean` has dismissed it.
     """
     replaced = new.get("state") == "CHANGES_REQUESTED"
-    # Newest first, and each one isolated: the review being replaced matters
-    # more than retrying leftovers on long-superseded ones, and one failed call
-    # must not stop the rest.
+    # Newest first; one failure does not stop the rest.
     olds = earlier_reviews(gh, pr, author, new["id"])
     for old in sorted(olds, key=lambda r: r["id"], reverse=True):
         if old.get("state") == "CHANGES_REQUESTED" and not replaced:
