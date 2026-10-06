@@ -1,11 +1,10 @@
 r"""Experimental FSDP2 customization APIs.
 
 FSDP copies nonzero-dimension shards through intermediate buffers by default.
-Register the ``with_native_copy`` callbacks to copy directly between parameter
-layouts and collective buffers. Each direction can be selected independently
-on a fully sharded model::
+The ``with_native_copy`` functions copy directly between parameter layouts and
+collective buffers instead. Register the reduce-scatter copy-in on a fully
+sharded model::
 
-    model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
     model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
 
 The native CUDA copies can improve performance for wide contiguous tensors with
@@ -54,8 +53,6 @@ def all_gather_output_fn_with_native_copy(
 ) -> None:
     r"""Copy gathered payloads directly into their final layout.
 
-    Register with
-    :meth:`torch.distributed.fsdp.FSDPModule.set_all_gather_output_fn`.
     See the module documentation for the performance tradeoffs. Groups with a
     tensor payload smaller than its cached output use the default copy-out.
     """

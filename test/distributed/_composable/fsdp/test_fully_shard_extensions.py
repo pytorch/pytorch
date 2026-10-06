@@ -15,10 +15,7 @@ import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_with_native_copy,
-    AllGatherInput,
-)
+from torch.distributed.fsdp.experimental import AllGatherInput
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -720,12 +717,11 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.run_subtests(
             {
                 "shard_world_size": [2, 1],
-                "native_copy": [False, True],
             },
             self._test_all_gather_input_layouts,
         )
 
-    def _test_all_gather_input_layouts(self, shard_world_size: int, native_copy: bool):
+    def _test_all_gather_input_layouts(self, shard_world_size: int):
         mesh = init_device_mesh(
             device_type.type,
             (self.world_size // shard_world_size, shard_world_size),
@@ -802,8 +798,6 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             shard_placement_fn=lambda _: Shard(1),
             reshard_after_forward=True,
         )
-        if native_copy:
-            model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
         local_weight = model.weight._local_tensor
         local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
         local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)

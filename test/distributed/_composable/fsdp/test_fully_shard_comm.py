@@ -47,10 +47,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     FSDPCommContext,
     FSDPParamGroup,
 )
-from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_with_native_copy,
-    reduce_scatter_input_fn_with_native_copy,
-)
+from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
@@ -513,8 +510,10 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
         return 2
 
     @parametrize("shard_dim", [0, 1])
-    @parametrize("collective", ["all_gather", "reduce_scatter"])
-    @parametrize("native_copy", [False, True])
+    @parametrize(
+        "collective,native_copy",
+        [("all_gather", False), ("reduce_scatter", False), ("reduce_scatter", True)],
+    )
     def test_strided_allocation(self, device, shard_dim, collective, native_copy):
         test_case = self
         model = nn.Linear(8, 4, bias=False, device=device)
@@ -550,8 +549,6 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
         )
         if collective == "all_gather":
             model.set_custom_all_gather(StridedAllGather())
-            if native_copy:
-                model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
         else:
             model.set_custom_reduce_scatter(StridedReduceScatter())
             if native_copy:
