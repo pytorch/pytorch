@@ -3000,6 +3000,42 @@ instantiate_parametrized_tests(TestTestParametrization)
 instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
 
 
+class TestDeviceTypeTestsNaming(TestCase):
+    @staticmethod
+    def _make_template(name):
+        def test_x(self, device):
+            pass
+
+        return type(name, (TestCase,), {"test_x": test_x})
+
+    def test_device_suffix_is_appended(self):
+        template = self._make_template("TestFoo")
+        scope = {"TestFoo": template}
+        instantiate_device_type_tests(template, scope, only_for="cpu")
+        self.assertEqual(list(scope.keys()), ["TestFooCPU"])
+
+    def test_device_suffix_is_not_duplicated(self):
+        template = self._make_template("TestFooCPU")
+        scope = {"TestFooCPU": template}
+        instantiate_device_type_tests(template, scope, only_for="cpu")
+        self.assertEqual(list(scope.keys()), ["TestFooCPU"])
+
+    def test_name_collision_is_reported(self):
+        # A generic ``TestFoo`` and a device-specific ``TestFooCPU`` both map onto the
+        # instantiated name ``TestFooCPU``, in either instantiation order.
+        generic = self._make_template("TestFoo")
+        device_specific = self._make_template("TestFooCPU")
+
+        scope = {"TestFoo": generic, "TestFooCPU": device_specific}
+        instantiate_device_type_tests(device_specific, scope, only_for="cpu")
+        with self.assertRaisesRegex(RuntimeError, "already defined in the target scope"):
+            instantiate_device_type_tests(generic, scope, only_for="cpu")
+
+        scope = {"TestFoo": generic, "TestFooCPU": device_specific}
+        with self.assertRaisesRegex(RuntimeError, "already defined in the target scope"):
+            instantiate_device_type_tests(generic, scope, only_for="cpu")
+
+
 class TestImports(TestCase):
     @classmethod
     def _check_python_output(cls, program) -> str:

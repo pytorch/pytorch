@@ -1288,6 +1288,17 @@ def instantiate_device_type_tests(
         if not class_name.endswith(device_type_upper):
             class_name += device_type_upper
 
+        # Two different test templates can map onto the same instantiated name, e.g. a
+        # generic "TestFoo" and a device-specific "TestFooCPU". Without this check one
+        # silently overwrites the other (or fails later with a confusing MRO error).
+        if class_name in scope:
+            raise RuntimeError(
+                f"Cannot instantiate '{class_name}' for '{generic_test_class.__name__}': "
+                f"the name '{class_name}' is already defined in the target scope. "
+                f"Rename one of the conflicting test classes (e.g. use "
+                f"'{generic_test_class.__name__}Device' for the generic one)."
+            )
+
         # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
