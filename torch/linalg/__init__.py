@@ -3014,15 +3014,18 @@ Differences with `scipy.linalg.qr` with argument pivoting=True:
 - Unlike `scipy.linalg.qr` with argument pivoting=True, this function always returns a tuple of three tensors.
   When :attr:`mode`\ `= 'r'`, the `Q` tensor is an empty tensor.
 
+.. note:: This function is currently only implemented for CPU tensors.
+
 .. warning:: The elements in the diagonal of `R` are not necessarily positive.
              As such, the returned QR decomposition is only unique up to the sign of the diagonal of `R`.
              Therefore, different platforms, like SciPy, or inputs on different devices,
              may produce different valid decompositions.
 
-.. warning:: The pivoted QR decomposition is only well-defined if the pivoted matrix
-             :attr:`A`\ `[:, P]` has full rank `k = min(m, n)`, i.e. if :attr:`A` has full rank `k`.
-             If this condition is not met, no error will be thrown, but the QR produced
-             may be incorrect and its autodiff may fail or produce incorrect results.
+.. warning:: The derivative of the pivoted QR decomposition is only well-defined if the pivoted
+             matrix :attr:`A`\ `[:, P]` has full rank `k = min(m, n)`, i.e. if :attr:`A` has full
+             rank `k`. If this condition is not met, no error will be thrown, but the computed
+             gradients may be incorrect. The forward decomposition itself remains well-defined
+             and correct regardless of the rank of :attr:`A`.
 
 .. warning:: The derivatives of this function assume that the pivot pattern `P` is locally
              constant, i.e. that `P` does not change under small perturbations of :attr:`A`.
