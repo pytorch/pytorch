@@ -16,11 +16,8 @@ from torch._inductor.pretty_print_ir import (
 )
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import skipIfWindows
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.logging_utils import (
-    logs_to_string,
-    multiple_logs_to_string,
-)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
+from torch.testing._internal.logging_utils import multiple_logs_to_string
 
 
 try:
@@ -42,6 +39,16 @@ def filesize(filename: Path):
 
 @config.patch("trace.enabled", True)
 class TestDebugTrace(test_torchinductor.TestCase):
+    def _compile_pretty_ir(self, fn, *inputs):
+        """Compile fn and return its pretty IR log for each stage."""
+        log_streams, ctx = multiple_logs_to_string(
+            "torch._inductor.debug", "ir_post_lowering_pretty", "ir_pre_fusion_pretty"
+        )
+        with config.patch("force_disable_caches", True), ctx():
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+        self.assertEqual(actual, fn(*inputs))
+        return tuple(stream.getvalue().strip() for stream in log_streams)
+
     def test_ir_pre_fusion_pretty_unsupported(self):
         class UnsupportedNode:
             @staticmethod
@@ -53,32 +60,63 @@ class TestDebugTrace(test_torchinductor.TestCase):
             "kernel op0:\n    unimplemented UnsupportedNode",
         )
 
+    @requires_gpu()
     def test_ir_pre_fusion_pretty(self):
         def fn(a):
             return torch.sin(a + 1), a.sum(dim=1)
 
-        log_stream, ctx = logs_to_string(
-            "torch._inductor.debug", "ir_pre_fusion_pretty"
-        )
-        inp = torch.randn(4, 8)
-        with config.patch("force_disable_caches", True), ctx():
-            actual = torch.compile(fn, fullgraph=True)(inp)
+        inp = torch.randn(4, 8, device=GPU_TYPE)
+        post_lowering, pre_fusion = self._compile_pretty_ir(fn, inp)
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[p1 + 8*p0] = tmp3
 
-        self.assertEqual(actual, fn(inp))
-        output = log_stream.getvalue()
-        self.assertIn("PRE-FUSION PRETTY IR", output)
-        self.assertIn("kernel op0(", output)
-        self.assertIn("for p0 in [0, 32):", output)
-        self.assertIn("arg0_1[p0]", output)
-        self.assertIn("buf0[p0]", output)
-        self.assertIn("kernel op1(", output)
-        self.assertIn("for p0 in [0, 4):", output)
-        self.assertIn("for r0 in [0, 8):", output)
-        self.assertIn("arg0_1[r0 + 8*p0]", output)
-        self.assertIn("acc_0: f32 = 0", output)
-        self.assertIn("acc_0 +=", output)
-        self.assertIn("buf1[p0] = acc_0", output)
-        self.assertNotIn("unimplemented", output)
+kernel op1(
+    arg0_1: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf1[p0] = acc_0""",
+        )
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[p1 + 8*p0] = tmp3
+
+kernel op1(
+    arg0_1: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf1[p0] = acc_0""",
+        )
 
     def test_ir_post_lowering_pretty_unsupported(self):
         class UnsupportedOperation:
@@ -91,102 +129,243 @@ class TestDebugTrace(test_torchinductor.TestCase):
             "kernel op0:\n    unimplemented UnsupportedOperation",
         )
 
+    @requires_gpu()
     def test_ir_post_lowering_pretty(self):
         def fn(a):
             return torch.sin(a + 1), a.sum(dim=1), a.unsqueeze(1) * 2
 
-        log_stream, ctx = logs_to_string(
-            "torch._inductor.debug", "ir_post_lowering_pretty"
+        inp = torch.randn(4, 8, device=GPU_TYPE)
+        post_lowering, pre_fusion = self._compile_pretty_ir(fn, inp)
+        # Post-lowering loops keep their lowered shape, including size-1 dims.
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[p1 + 8*p0] = tmp3
+
+kernel op1(
+    arg0_1: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf1[p0] = acc_0
+
+kernel op2(
+    arg0_1: f32[4, 8]
+) -> buf2: f32[4, 1, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 1):
+            for p2 in [0, 8):
+                tmp0: f32 = arg0_1[p2 + 8*p0]
+                tmp1: f32 = 2.0
+                tmp2: f32 = tmp0 * tmp1
+                buf2[p2 + 8*p0] = tmp2""",
         )
-        inp = torch.randn(4, 8)
-        with config.patch("force_disable_caches", True), ctx():
-            actual = torch.compile(fn, fullgraph=True)(inp)
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[p1 + 8*p0] = tmp3
 
-        self.assertEqual(actual, fn(inp))
-        output = log_stream.getvalue()
-        self.assertIn("POST-LOWERING PRETTY IR", output)
-        # Loops keep their lowered shape instead of being merged by the scheduler.
-        self.assertIn("kernel op0(", output)
-        self.assertIn("for p0 in [0, 4):", output)
-        self.assertIn("for p1 in [0, 8):", output)
-        self.assertIn("arg0_1[p1 + 8*p0]", output)
-        self.assertIn("buf0[p1 + 8*p0] = tmp3", output)
-        self.assertNotIn("[0, 32)", output)
-        self.assertIn("kernel op1(", output)
-        self.assertIn("for r0 in [0, 8):", output)
-        self.assertIn("arg0_1[r0 + 8*p0]", output)
-        self.assertIn("buf1[p0] = acc_0", output)
-        # Size-1 dims keep their loop.
-        self.assertIn("kernel op2(", output)
-        self.assertIn("for p1 in [0, 1):", output)
-        self.assertIn("buf2[p2 + 8*p0] = tmp2", output)
-        self.assertNotIn("unimplemented", output)
+kernel op1(
+    arg0_1: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf1[p0] = acc_0
 
+kernel op2(
+    arg0_1: f32[4, 8]
+) -> buf2: f32[4, 1, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 2.0
+            tmp2: f32 = tmp0 * tmp1
+            buf2[p1 + 8*p0] = tmp2""",
+        )
+
+    @requires_gpu()
     def test_ir_post_lowering_pretty_indirect(self):
         def fn(idx, table):
             return table[idx], torch.nn.functional.pad(table[idx], (1, 1))
 
-        log_stream, ctx = logs_to_string(
-            "torch._inductor.debug", "ir_post_lowering_pretty"
+        idx = torch.tensor([2, -3, 1], device=GPU_TYPE)
+        table = torch.randn(3, 8, device=GPU_TYPE)
+        post_lowering, pre_fusion = self._compile_pretty_ir(fn, idx, table)
+        # Inside masked(), the indirect index is inlined into the load.
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+kernel op0(
+    arg0_1: i64[3],
+    arg1_1: f32[3, 8]
+) -> buf0: f32[3, 8]:
+    for p0 in [0, 3):
+        for p1 in [0, 8):
+            tmp0: i64 = arg0_1[p0]
+            tmp1: f32 = arg1_1[p1 + 8*wrap_neg(tmp0)]
+            buf0[p1 + 8*p0] = tmp1
+
+kernel op1(
+    arg0_1: i64[3],
+    arg1_1: f32[3, 8]
+) -> buf1: f32[3, 10]:
+    for p0 in [0, 3):
+        for p1 in [0, 10):
+            tmp0: i64 = (-1) + p1
+            tmp1: i64 = 0
+            tmp2: bool = tmp0 >= tmp1
+            tmp3: i64 = (-1) + p1
+            tmp4: i64 = 8
+            tmp5: bool = tmp3 < tmp4
+            tmp6: bool = tmp2 & tmp5
+            tmp7: f32 = where(tmp6, arg1_1[(-1) + p1 + 8*wrap_neg(arg0_1[p0])], 0.0)
+            buf1[p1 + 10*p0] = tmp7""",
         )
-        inputs = (torch.tensor([2, -3, 1]), torch.randn(3, 8))
-        with config.patch("force_disable_caches", True), ctx():
-            actual = torch.compile(fn, fullgraph=True)(*inputs)
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+kernel op0(
+    arg0_1: i64[3],
+    arg1_1: f32[3, 8]
+) -> buf0: f32[3, 8]:
+    for p0 in [0, 3):
+        for p1 in [0, 8):
+            tmp0: i64 = arg0_1[p0]
+            tmp1: f32 = arg1_1[p1 + 8*wrap_neg(tmp0)]
+            buf0[p1 + 8*p0] = tmp1
 
-        self.assertEqual(actual, fn(*inputs))
-        output = log_stream.getvalue()
-        self.assertIn("tmp0: i64 = arg0_1[p0]", output)
-        self.assertIn("arg1_1[p1 + 8*wrap_neg(tmp0)]", output)
-        # Inside masked(), the index is inlined into the where().
-        self.assertIn("arg1_1[(-1) + p1 + 8*wrap_neg(arg0_1[p0])]", output)
-        self.assertNotIn("unimplemented", output)
+kernel op1(
+    arg0_1: i64[3],
+    arg1_1: f32[3, 8]
+) -> buf1: f32[3, 10]:
+    for p0 in [0, 3):
+        for p1 in [0, 10):
+            tmp0: i64 = (-1) + p1
+            tmp1: i64 = 0
+            tmp2: bool = tmp0 >= tmp1
+            tmp3: i64 = (-1) + p1
+            tmp4: i64 = 8
+            tmp5: bool = tmp3 < tmp4
+            tmp6: bool = tmp2 & tmp5
+            tmp7: f32 = where(tmp6, arg1_1[(-1) + p1 + 8*wrap_neg(arg0_1[p0])], 0.0)
+            buf1[p1 + 10*p0] = tmp7""",
+        )
 
+    @requires_gpu()
     def test_ir_pretty_extern_kernel(self):
         def fn(x, w):
             return (x @ w).relu()
 
-        log_streams, ctx = multiple_logs_to_string(
-            "torch._inductor.debug", "ir_post_lowering_pretty", "ir_pre_fusion_pretty"
+        x, w = torch.randn(4, 8, device=GPU_TYPE), torch.randn(8, 8, device=GPU_TYPE)
+        post_lowering, pre_fusion = self._compile_pretty_ir(fn, x, w)
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+extern_kernel op0(  # extern_kernels.mm
+    arg1_1: f32[4, 8],
+    arg0_1: f32[8, 8]
+) -> buf0: f32[4, 8]
+
+kernel op1(
+    buf0: f32[4, 8]
+) -> buf1: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = buf0[p1 + 8*p0]
+            tmp1: f32 = relu(tmp0)
+            buf1[p1 + 8*p0] = tmp1""",
         )
-        inputs = (torch.randn(4, 8), torch.randn(8, 8))
-        with config.patch("force_disable_caches", True), ctx():
-            actual = torch.compile(fn, fullgraph=True)(*inputs)
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+extern_kernel op0(  # extern_kernels.mm
+    arg1_1: f32[4, 8],
+    arg0_1: f32[8, 8]
+) -> buf0: f32[4, 8]
 
-        self.assertEqual(actual, fn(*inputs))
-        for stream in log_streams:
-            output = stream.getvalue()
-            self.assertRegex(
-                output,
-                r"extern_kernel op0\(  # extern_kernels\.mm\n    arg\d_1: f32\[4, 8\],\n    arg\d_1: f32\[8, 8\]\n\) -> buf0: f32\[4, 8\]\n",
-            )
-            self.assertNotIn("unimplemented", output)
+kernel op1(
+    buf0: f32[4, 8]
+) -> buf1: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = buf0[p1 + 8*p0]
+            tmp1: f32 = relu(tmp0)
+            buf1[p1 + 8*p0] = tmp1""",
+        )
 
+    @requires_gpu()
     def test_ir_pretty_extern_kernel_multi_output(self):
         def fn(x):
-            values, indices = torch.sort(x)
+            values, indices = torch.kthvalue(x, 2)
             return values + 1, indices
 
-        log_streams, ctx = multiple_logs_to_string(
-            "torch._inductor.debug", "ir_post_lowering_pretty", "ir_pre_fusion_pretty"
-        )
-        inputs = (torch.randn(5),)
-        with config.patch("force_disable_caches", True), ctx():
-            actual = torch.compile(fn, fullgraph=True)(*inputs)
+        inp = torch.randn(4, 5, device=GPU_TYPE)
+        post_lowering, pre_fusion = self._compile_pretty_ir(fn, inp)
+        # The MultiOutput selectors op1 and op2 are folded into op0's outputs.
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+extern_kernel op0(  # torch.ops.aten.kthvalue.default
+    arg0_1: f32[4, 5]
+) -> (buf1: f32[4], buf2: i64[4])
 
-        self.assertEqual(actual, fn(*inputs))
-        for stream in log_streams:
-            output = stream.getvalue()
-            self.assertIn(
-                "extern_kernel op0(  # torch.ops.aten.sort.stable\n"
-                "    arg0_1: f32[5]\n"
-                ") -> (buf1: f32[5], buf2: i64[5])\n",
-                output,
-            )
-            # The MultiOutput selectors are folded into op0's outputs.
-            self.assertNotIn("extern_kernel op1", output)
-            self.assertNotIn("extern_kernel op2", output)
-            self.assertIn("buf1: f32[5]", output.split("kernel op3", 1)[1])
-            self.assertNotIn("unimplemented", output)
+kernel op3(
+    buf1: f32[4]
+) -> buf3: f32[4]:
+    for p0 in [0, 4):
+        tmp0: f32 = buf1[p0]
+        tmp1: f32 = 1.0
+        tmp2: f32 = tmp0 + tmp1
+        buf3[p0] = tmp2""",
+        )
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+extern_kernel op0(  # torch.ops.aten.kthvalue.default
+    arg0_1: f32[4, 5]
+) -> (buf1: f32[4], buf2: i64[4])
+
+kernel op3(
+    buf1: f32[4]
+) -> buf3: f32[4]:
+    for p0 in [0, 4):
+        tmp0: f32 = buf1[p0]
+        tmp1: f32 = 1.0
+        tmp2: f32 = tmp0 + tmp1
+        buf3[p0] = tmp2""",
+        )
 
     def test_debug_trace(self):
         @torch.compile
