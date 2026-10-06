@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
 """Post the hardened PR review's verdict as a native GitHub pull-request review.
 
-Until this existed, the verdict reached the PR only as a collapsed section of the
-Dr.CI comment, and an EDIT to that comment sends no notification. Authors whose
-PR was blocked on them never found out. A submitted review notifies the author,
-and its findings sit on the lines they are about.
+A submitted review notifies the PR author, and its findings sit on the lines
+they are about.
 
 Reads the TERMINAL ROW (terminal.json), never the review job's artifact: the row
 is what emit_row.py re-checked, so the review cannot say something the row and
 the label step did not agree to. Every string is re-checked here again with the
 same predicates, and anything that fails is dropped rather than repaired.
 
-ONE AUTOMATED REVIEW PER PR. A new review is posted first; only once that has
-succeeded are the earlier automated reviews taken down, so a failed post never
-leaves the PR with no review at all. GitHub cannot delete a SUBMITTED review
-(GraphQL `deletePullRequestReview` answers "Can not delete a non-pending pull
-request review"; measured on pytorch/ciforge, 2026-10-05), so taking one down is
-the most the API allows, and it deletes nothing: dismiss it if it requested
-changes, resolve its inline threads, put a "Superseded by" line above its body,
-and minimize it as outdated.
+EARLIER AUTOMATED REVIEWS ARE HIDDEN, NEVER EDITED. A new review is posted
+first; only once that has succeeded are the earlier ones hidden, so a failed
+post never leaves the PR with no review at all. Hiding resolves the review's
+inline threads, then minimizes it as outdated; a review whose threads cannot
+be resolved stays visible until a later publication manages it. A change
+request is hidden only once it no longer stands. Nothing is
+deleted, and GitHub cannot delete a submitted review anyway.
+
+A CHANGE REQUEST STANDS UNTIL A NEWER VERDICT REPLACES IT. A newer
+REQUEST_CHANGES review takes its place in the PR's review decision. A clean
+verdict is a COMMENT, which does not clear an earlier request, so after one
+the earlier requests are dismissed. Apart from a run retracting its own review
+for a commit that is no longer the head, that is the only dismissal. A run
+that fails, is skipped or is opted out of leaves the last verdict as it is.
 
 `@pytorchbot` IS DEFUSED IN EVERYTHING POSTED. pytorch-bot parses submitted and
 edited review bodies for commands (torchci/lib/bot/pytorchBot.ts) and only skips
@@ -29,7 +33,8 @@ is the last pass over the text this script assembles, paths and framing included
 An API failure never fails the job: the telemetry row is already written, and a
 red publish job on every GitHub hiccup would teach people to ignore it. Problems
 are `::warning::`, and idempotent calls are retried. The one exit 1 is a change
-request still standing after a clean verdict, which nothing else would clear.
+request that may still stand after a clean verdict, which nothing else would
+clear.
 """
 
 from __future__ import annotations
@@ -59,7 +64,6 @@ from extract_verdict import (
 # model prose, so no summary or finding can forge it; the author check below is
 # what stops a human pasting it into their own review.
 MARKER = "<!-- hardened-pr-review -->"
-SUPERSEDED_MARKER = "<!-- hardened-pr-review superseded -->"
 DEFAULT_AUTHOR = "github-actions[bot]"
 RETRIES = 3
 MAX_WAIT = 60  # longest rate-limit wait honoured; the job has a 10-minute budget
@@ -439,80 +443,89 @@ def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
     return gh.request("POST", path, {**base, "event": "COMMENT", "body": body})
 
 
+_MINIMIZED = "query($ids: [ID!]!) { nodes(ids: $ids) { ... on PullRequestReview { id isMinimized } } }"
+
+
 def earlier_reviews(gh: GitHub, pr: int, author: str, new_id: int) -> list[dict]:
-    """This workflow's reviews posted BEFORE `new_id`, superseded ones included.
+    """This workflow's reviews posted BEFORE `new_id` that are not yet hidden.
 
     OLDER, not merely other: review ids increase, so when two publish runs
-    overlap the later review survives both cleanups instead of each run taking
-    down the other's. Superseded reviews stay in the set so that a comment whose
-    deletion failed last time is retried rather than abandoned.
+    overlap the later review survives both cleanups instead of each run hiding
+    the other's. A minimized review is done: its threads were resolved before it
+    was minimized, and leaving it alone keeps a thread someone reopened open.
     """
-    return [
+    mine = [
         r
         for r in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
         if isinstance(r.get("id"), int)
         and r["id"] < new_id
         and (r.get("user") or {}).get("login") == author
-        and (r.get("body") or "").startswith((MARKER, SUPERSEDED_MARKER))
+        and (r.get("body") or "").startswith(MARKER)
     ]
+    # Only a review GitHub explicitly reports as visible is touched; one whose
+    # state did not come back is left for the next publication.
+    visible: set[str] = set()
+    for i in range(0, len(mine), 100):
+        ids = [r["node_id"] for r in mine[i : i + 100]]
+        nodes = gh.graphql(_MINIMIZED, {"ids": ids}).get("nodes") or []
+        visible |= {n["id"] for n in nodes if n and n.get("isMinimized") is False}
+    return [r for r in mine if r["node_id"] in visible]
 
 
 _MINIMIZE = "mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { clientMutationId } }"
 
 
-def take_down(gh: GitHub, pr: int, review: dict, new_url: str) -> None:
-    """Retire an earlier automated review, keeping everything it said.
+def retract(gh: GitHub, pr: int, review: dict) -> None:
+    """Take back this run's own review, posted for a commit that is no longer the head.
 
-    Nothing is deleted. A REQUEST_CHANGES review is DISMISSED first, so the PR
-    stops showing changes requested even if a later step fails. Then its inline
-    threads are resolved, a "Superseded by" line is put above its body, and
-    the review is minimized as outdated. Each step is something GitHub lets a
-    reader undo: expand the review, show the resolved thread.
-
-    The threads are resolved once, when the review is first superseded; the
-    superseded line then marks it done, so a thread someone reopens to keep
-    discussing is left open. If a resolve fails the line is not added, and the
-    next publication tries again.
+    A change request is dismissed as well as hidden: a newer run may already
+    have posted its clean verdict and finished, and nothing after that would
+    clear a request this run left standing. If the dismissal fails the review
+    stays visible, so the request it makes is not hidden.
     """
-    rid = review["id"]
     if review.get("state") == "CHANGES_REQUESTED":
-        message = f"Superseded by a newer automated review: {new_url}"
         try:
             gh.request(
                 "PUT",
-                f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}/dismissals",
-                {"message": message, "event": "DISMISS"},
+                f"/repos/{gh.repo}/pulls/{pr}/reviews/{review['id']}/dismissals",
+                {
+                    "message": "Retracted: the PR changed while this review was posted.",
+                    "event": "DISMISS",
+                },
             )
         except GitHubError as exc:
-            # Leave it whole: hiding a change request that still stands would
-            # make the PR claim a verdict nobody can read. The next
-            # publication retries it.
-            warn(f"could not dismiss review {rid}; leaving it in place: {exc}")
+            print(
+                f"::error::could not dismiss retracted review {review['id']}; "
+                f"it still requests changes on an old commit: {exc}"
+            )
             return
-    body = review.get("body") or ""
-    if not body.startswith(SUPERSEDED_MARKER):
-        try:
-            ids = {
-                c["id"]
-                for c in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}/comments")
-            }
-            resolved = resolve_threads(gh, pr, ids)
-        except GitHubError as exc:
-            warn(f"could not resolve the threads of review {rid}: {exc}")
-            resolved = False
-        if resolved:
-            note = f"{SUPERSEDED_MARKER}\n**Superseded by a newer automated review:** {new_url}\n\n"
-            try:
-                gh.request(
-                    "PUT",
-                    f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}",
-                    {"body": note + body},
-                )
-            except GitHubError as exc:
-                warn(f"could not mark review {rid} superseded: {exc}")
+    take_down(gh, pr, review)
+
+
+def take_down(gh: GitHub, pr: int, review: dict) -> None:
+    """Hide an automated review as outdated, leaving its text and state alone.
+
+    Its inline threads are resolved, then the review is minimized. A reader can
+    expand either one. A change request is not dismissed here (see the module
+    docstring). If a thread cannot be resolved the review stays visible, and the
+    next publication tries again.
+    """
+    rid = review["id"]
+    try:
+        ids = {
+            c["id"]
+            for c in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}/comments")
+        }
+        resolved = resolve_threads(gh, pr, ids)
+    except GitHubError as exc:
+        warn(f"could not resolve the threads of review {rid}: {exc}")
+        resolved = False
+    if not resolved:
+        warn(f"leaving review {rid} visible until its threads are resolved")
+        return
     try:
         gh.graphql(_MINIMIZE, {"id": review["node_id"]})
-        print(f"superseded earlier automated review {rid}")
+        print(f"hid earlier automated review {rid} as outdated")
     except GitHubError as exc:
         warn(f"could not minimize review {rid}: {exc}")
 
@@ -572,7 +585,7 @@ def standing_requests(gh: GitHub, pr: int, author: str) -> list[dict]:
         for r in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
         if r.get("state") == "CHANGES_REQUESTED"
         and (r.get("user") or {}).get("login") == author
-        and (r.get("body") or "").startswith((MARKER, SUPERSEDED_MARKER))
+        and (r.get("body") or "").startswith(MARKER)
     ]
 
 
@@ -599,9 +612,7 @@ def withdraw(
 ):
     """Dismiss this workflow's standing change requests that are in scope.
 
-    A REQUEST_CHANGES review stays until it is dismissed, and only a write user
-    can dismiss it, so a request the pipeline will not replace has to be taken
-    back here. Dismissal only: the findings stay readable under the dismissal.
+    Dismissal only: the findings stay readable under the dismissal.
     """
     standing = [
         r
@@ -639,21 +650,9 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
     )
     if any(str(lb.get("name", "")).lower() == opt_out.lower() for lb in labels):
         print(f"PR carries '{opt_out}'; not posting")
-        withdraw(gh, pr, author, "Withdrawn: this PR opted out of automated review.")
         return 0
     if review is None:
-        # The head is `sha`, so a change request on any other commit is about
-        # code that has since changed, and no review is replacing it.
         print(f"status={row.get('status')}; no review to post")
-        withdraw(
-            gh,
-            pr,
-            author,
-            f"Withdrawn: the automated review of {sha[:12]} did not complete, "
-            "and this request was about an earlier commit.",
-            head=sha,
-            keep_commit=sha,
-        )
         return 0
     verdict, summary, findings = review
     clean = verdict == "ready_for_human_review"
@@ -670,7 +669,14 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
         return 0
     if new_id is None:
         return clear_after_clean(gh, pr, sha, author, keep_commit=sha)
-    return clear_after_clean(gh, pr, sha, author, older_than=new_id)
+    rc = clear_after_clean(gh, pr, sha, author, older_than=new_id)
+    # Now hide the requests that were just dismissed; any still standing stay
+    # visible (see `hide_earlier`).
+    try:
+        hide_earlier(gh, pr, author, {"id": new_id, "state": "COMMENTED"})
+    except GitHubError as exc:
+        warn(f"could not hide the withdrawn reviews: {exc}")
+    return rc
 
 
 def clear_after_clean(
@@ -678,12 +684,24 @@ def clear_after_clean(
 ) -> int:
     """After a clean verdict, no earlier change request from this workflow may remain.
 
-    A clean verdict moves the PR to `ready for review`, after which ordinary
-    pushes trigger no review, so nothing would come back to withdraw a request
-    left standing by a failed post or dismissal. Withdraw them now; if one
-    still stands, fail the step naming it, so it reaches a maintainer. Only
-    requests in scope (see `in_scope`) count, both times.
+    The clean review is a COMMENT, which leaves an earlier request standing, and
+    the PR has moved to `ready for review`, after which pushes trigger no
+    review. So the earlier requests are dismissed here; if one still stands,
+    fail the step naming it, so it reaches a maintainer. Only requests in scope
+    (see `in_scope`) count, both times. An API error here fails the step too,
+    because the earlier requests are already hidden and may still stand.
     """
+    try:
+        return _clear_after_clean(gh, pr, sha, author, keep_commit, older_than)
+    except GitHubError as exc:
+        print(
+            "::error::could not confirm that earlier automated change requests "
+            f"were withdrawn after a clean verdict; check the PR's reviews: {exc}"
+        )
+        return 1
+
+
+def _clear_after_clean(gh, pr, sha, author, keep_commit, older_than) -> int:
     withdraw(
         gh,
         pr,
@@ -714,7 +732,7 @@ RETRACTED = object()
 
 
 def publish(gh, pr, sha, author, verdict, summary, findings):
-    """Post the review and take earlier ones down.
+    """Post the review and hide earlier ones.
 
     Returns the new review's id, None if GitHub returned none, or RETRACTED
     when the head moved while posting and the review was taken back.
@@ -734,28 +752,42 @@ def publish(gh, pr, sha, author, verdict, summary, findings):
 
 
 def replace_earlier(gh, pr, sha, author, new):
-    """Retract `new` if the head moved, else take earlier reviews down."""
+    """Hide `new` if the head moved, else hide earlier reviews."""
     # CHECKED AGAIN AFTER POSTING. If the head moved between the check above and
     # the post, a run for the newer commit may already have published, with a
-    # SMALLER review id, and the id rule below would take the current review
-    # down in favour of this stale one. So a moved head retracts this review
+    # SMALLER review id, and the id rule below would hide the current review
+    # in favour of this stale one. So a moved head retracts this review
     # instead. If the head moves after this read, the newer commit's run has
-    # not posted yet; its review gets the larger id and takes this one down.
+    # not posted yet; its review gets the larger id and hides this one.
     current = head_sha(gh, pr)
     if current != sha:
         print(f"head moved {sha} -> {current} while posting; retracting this review")
-        take_down(gh, pr, new, f"https://github.com/{gh.repo}/pull/{pr}")
+        retract(gh, pr, new)
         return RETRACTED
+    hide_earlier(gh, pr, author, new)
+    return new["id"]
+
+
+def hide_earlier(gh, pr, author, new):
+    """Hide this workflow's reviews older than `new`.
+
+    A REQUEST HIDDEN ONLY ONCE IT NO LONGER STANDS. An earlier change request is
+    hidden here only when `new` itself requests changes and so replaces it.
+    Otherwise it stays visible until `clear_after_clean` has dismissed it, and
+    `run` calls this again after that.
+    """
+    replaced = new.get("state") == "CHANGES_REQUESTED"
     # Newest first, and each one isolated: the review being replaced matters
     # more than retrying leftovers on long-superseded ones, and one failed call
     # must not stop the rest.
     olds = earlier_reviews(gh, pr, author, new["id"])
     for old in sorted(olds, key=lambda r: r["id"], reverse=True):
+        if old.get("state") == "CHANGES_REQUESTED" and not replaced:
+            continue
         try:
-            take_down(gh, pr, old, new.get("html_url", ""))
+            take_down(gh, pr, old)
         except GitHubError as exc:
-            warn(f"could not take down review {old['id']}: {exc}")
-    return new["id"]
+            warn(f"could not hide review {old['id']}: {exc}")
 
 
 def main() -> int:

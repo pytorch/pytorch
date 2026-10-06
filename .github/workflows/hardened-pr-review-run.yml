@@ -1331,15 +1331,9 @@ jobs:
           echo "::notice::PR #${PR_NUMBER} moved to '${DONE_LABEL}'"
 
       - name: Post the automated review on the PR
-        # A native review notifies the author, which an edit to the Dr.CI
-        # comment never did, and puts each finding on its line. The script
-        # posts only a `succeeded` verdict (REQUEST_CHANGES or COMMENT),
-        # re-checks every string from the row, skips a moved head, defuses
-        # `@pytorchbot`, and replaces the previous automated review. On a run
-        # that did not succeed, or an opted-out PR, it withdraws change
-        # requests the pipeline will not replace. It fails only when a change
-        # request still stands after a clean verdict, naming it.
-        # After the label move, so a review-posting problem cannot touch labels.
+        # Posts the verdict as a GitHub review and hides the previous one.
+        # Runs after the label move, so a posting failure cannot affect labels.
+        # See the docstring of post_review.py.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}

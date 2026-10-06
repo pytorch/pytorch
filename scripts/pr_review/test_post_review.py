@@ -27,7 +27,6 @@ from post_review import (  # noqa: E402
     GitHubError,
     MARKER,
     run,
-    SUPERSEDED_MARKER,
 )
 
 
@@ -114,6 +113,10 @@ class FakeGitHub(GitHub):
                 "html_url": NEW_URL,
                 "user": {"login": AUTHOR},
                 "body": body["body"],
+                "state": {
+                    "REQUEST_CHANGES": "CHANGES_REQUESTED",
+                    "COMMENT": "COMMENTED",
+                }[body["event"]],
             }
             self.reviews.append(new)
             return new
@@ -139,6 +142,25 @@ class FakeGitHub(GitHub):
                     }
                 }
             }
+        if method == "POST" and path == "/graphql" and "isMinimized" in body["query"]:
+            ids = body["variables"]["ids"]
+            nodes = [
+                {"id": r["node_id"], "isMinimized": r.get("minimized", False)}
+                if not r.get("unreadable")
+                else None
+                for r in self.reviews
+                if r["node_id"] in ids
+            ]
+            return {"data": {"nodes": nodes}}
+        if (
+            method == "POST"
+            and path == "/graphql"
+            and "minimizeComment" in body["query"]
+        ):
+            for r in self.reviews:
+                if r["node_id"] == body["variables"]["id"]:
+                    r["minimized"] = True
+            return {"data": {}}
         if method == "POST" and path == "/graphql":
             return {"data": {}}
         return None
@@ -167,6 +189,19 @@ def old_review(
         "state": state,
         "commit_id": commit,
     }
+
+
+def minimized(gh):
+    """Review node ids this run minimized, in order."""
+    return [
+        w[2]["variables"]["id"]
+        for w in gh.writes()
+        if w[1] == "/graphql" and "minimizeComment" in w[2]["query"]
+    ]
+
+
+def dismissed(gh):
+    return [w[1].split("/")[7] for w in gh.writes() if w[1].endswith("/dismissals")]
 
 
 def resolved(gh):
@@ -351,13 +386,17 @@ class TestWhatIsPosted(unittest.TestCase):
                     raise GitHubError(422, "cannot request changes")
                 return super().request(method, path, body)
 
-        gh = NoRequestChanges()
+        old = old_review(5, state="CHANGES_REQUESTED")
+        gh = NoRequestChanges(reviews=[old])
         go(gh)
         events = [(b["event"], "comments" in b) for b in gh.posted()]
         self.assertEqual(
             events,
             [("REQUEST_CHANGES", True), ("REQUEST_CHANGES", False), ("COMMENT", False)],
         )
+        # The COMMENT does not replace the earlier request, so it stays visible.
+        self.assertEqual(minimized(gh), [])
+        self.assertEqual(old["state"], "CHANGES_REQUESTED")
 
     def test_a_clean_verdict_with_no_findings_still_posts(self):
         gh = FakeGitHub()
@@ -421,70 +460,37 @@ class TestContained(unittest.TestCase):
         self.assertEqual(contained("````"), ["\\`\\`\\`\\`"])
 
 
-class TestStandingChangeRequestsAreWithdrawn(unittest.TestCase):
-    def dismissed(self, gh):
-        return [w[1].split("/")[7] for w in gh.writes() if w[1].endswith("/dismissals")]
-
-    def test_a_failed_run_withdraws_a_request_on_an_earlier_commit(self):
-        gh = FakeGitHub(
-            reviews=[
-                old_review(5, state="CHANGES_REQUESTED"),  # earlier commit
-                old_review(6, state="CHANGES_REQUESTED", commit=SHA),  # this commit
-                old_review(7, state="CHANGES_REQUESTED", author="someone"),
-            ]
-        )
-        go(gh, row(status="model_error"))
-        self.assertEqual(self.dismissed(gh), ["5"])
-        self.assertEqual(gh.posted(), [])
-
-    def test_a_failed_run_on_a_moved_head_touches_nothing(self):
-        gh = FakeGitHub(
-            head="b" * 40, reviews=[old_review(5, state="CHANGES_REQUESTED")]
-        )
+class TestAnUnfinishedRunLeavesTheLastVerdict(unittest.TestCase):
+    def test_a_failed_run_dismisses_nothing(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
         go(gh, row(status="model_error"))
         self.assertEqual(gh.writes(), [])
 
-    def test_a_newer_runs_request_is_not_withdrawn_by_a_failed_run(self):
-        class NewerRunPosts(FakeGitHub):
-            def request(self, method, path, body=None, idempotent=None):
-                out = super().request(method, path, body)
-                if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews?"):
-                    self.head = "b" * 40  # the newer head's review is in this list
-                return out
-
-        newer = old_review(6, state="CHANGES_REQUESTED", commit="b" * 40)
-        gh = NewerRunPosts(reviews=[newer])
-        go(gh, row(status="model_error"))
-        self.assertEqual(gh.writes(), [])
-
-    def test_opting_out_withdraws_every_standing_request(self):
+    def test_an_opted_out_pr_dismisses_nothing(self):
         gh = FakeGitHub(
             labels=("no automated review",),
-            reviews=[old_review(5, state="CHANGES_REQUESTED", commit=SHA)],
+            reviews=[old_review(5, state="CHANGES_REQUESTED")],
         )
         go(gh)
-        self.assertEqual(self.dismissed(gh), ["5"])
-        self.assertEqual(gh.posted(), [])
+        self.assertEqual(gh.writes(), [])
 
 
 class TestACleanVerdictLeavesNoChangeRequest(unittest.TestCase):
     def clean(self):
         return row(verdict="ready_for_human_review", findings=[])
 
-    def test_a_failed_takedown_dismissal_is_retried_by_the_clean_check(self):
-        class FailOnce(FakeGitHub):
-            failed = False
-
-            def request(self, method, path, body=None, idempotent=None):
-                if path.endswith("/dismissals") and not self.failed:
-                    self.failed = True
-                    self.calls.append((method, path, body))
-                    raise GitHubError(403, "forbidden")
-                return super().request(method, path, body)
-
-        gh = FailOnce(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+    def test_earlier_requests_are_dismissed_without_a_link(self):
+        gh = FakeGitHub(
+            reviews=[
+                old_review(5, state="CHANGES_REQUESTED"),
+                old_review(6, state="CHANGES_REQUESTED", commit=SHA),
+                old_review(7, state="CHANGES_REQUESTED", author="someone"),
+            ]
+        )
         self.assertEqual(go(gh, self.clean()), 0)
-        self.assertEqual(gh.reviews[0]["state"], "DISMISSED")
+        self.assertEqual(dismissed(gh), ["5", "6"])
+        for w in gh.writes("PUT"):
+            self.assertNotIn("http", w[2]["message"])
 
     def test_a_request_that_cannot_be_dismissed_fails_the_step(self):
         class NeverDismiss(FakeGitHub):
@@ -495,6 +501,7 @@ class TestACleanVerdictLeavesNoChangeRequest(unittest.TestCase):
 
         gh = NeverDismiss(reviews=[old_review(5, state="CHANGES_REQUESTED")])
         self.assertEqual(go(gh, self.clean()), 1)
+        self.assertEqual(minimized(gh), [])
 
     def test_a_failed_post_still_withdraws_on_a_clean_verdict(self):
         class PostDown(FakeGitHub):
@@ -542,6 +549,54 @@ class TestACleanVerdictLeavesNoChangeRequest(unittest.TestCase):
         gh = NoDismissThenMove(reviews=[old_review(5, state="CHANGES_REQUESTED")])
         self.assertEqual(go(gh, self.clean()), 0)
 
+    def test_a_request_is_hidden_only_after_it_is_dismissed(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        self.assertEqual(go(gh, self.clean()), 0)
+        steps = [
+            "dismiss" if w[1].endswith("/dismissals") else "minimize"
+            for w in gh.writes()
+            if w[1].endswith("/dismissals")
+            or (w[1] == "/graphql" and "minimizeComment" in w[2]["query"])
+        ]
+        self.assertEqual(steps, ["dismiss", "minimize"])
+
+    def test_a_request_left_standing_by_a_moved_head_stays_visible(self):
+        class MovesBeforeWithdraw(FakeGitHub):
+            lists = 0
+
+            def request(self, method, path, body=None, idempotent=None):
+                out = super().request(method, path, body)
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews?"):
+                    self.lists += 1
+                    if self.lists == 2:  # withdraw's listing
+                        self.head = "b" * 40
+                return out
+
+        old = old_review(5, state="CHANGES_REQUESTED")
+        gh = MovesBeforeWithdraw(reviews=[old])
+        self.assertEqual(go(gh, self.clean()), 0)
+        self.assertEqual(old["state"], "CHANGES_REQUESTED")
+        self.assertEqual(minimized(gh), [])
+
+    def test_an_api_error_in_the_clean_check_fails_the_step(self):
+        class FinalListingDown(FakeGitHub):
+            lists = 0
+
+            def request(self, method, path, body=None, idempotent=None):
+                if path.endswith("/dismissals"):
+                    raise GitHubError(403, "forbidden")
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews?"):
+                    self.lists += 1
+                    if self.lists == 3:  # the final check's listing
+                        raise GitHubError(503, "unavailable")
+                return super().request(method, path, body)
+
+        old = old_review(5, state="CHANGES_REQUESTED")
+        gh = FinalListingDown(reviews=[old])
+        with mock.patch("post_review._sleep"):
+            self.assertEqual(go(gh, self.clean()), 1)
+        self.assertEqual(minimized(gh), [])
+
     def test_a_changes_requested_verdict_does_not_run_the_clean_check(self):
         gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
         self.assertEqual(go(gh), 0)
@@ -550,15 +605,20 @@ class TestACleanVerdictLeavesNoChangeRequest(unittest.TestCase):
 class TestCleanupFailuresKeepTheNewReviewId(unittest.TestCase):
     def test_a_failed_listing_after_posting_still_clears_older_requests(self):
         class ListingDown(FakeGitHub):
+            failures = 0
+
             def request(self, method, path, body=None, idempotent=None):
-                if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews/5/"):
+                if path == "/graphql" and "isMinimized" in body["query"]:
+                    self.failures += 1
                     raise GitHubError(503, "unavailable")
                 return super().request(method, path, body)
 
         old = old_review(5, state="CHANGES_REQUESTED", commit=SHA)
         gh = ListingDown(reviews=[old])
         clean = row(verdict="ready_for_human_review", findings=[])
-        self.assertEqual(go(gh, clean), 0)
+        with mock.patch("post_review._sleep"):
+            self.assertEqual(go(gh, clean), 0)
+        self.assertGreater(gh.failures, 0)
         self.assertEqual(old["state"], "DISMISSED")
 
 
@@ -569,16 +629,14 @@ class TestNothingIsDeleted(unittest.TestCase):
         self.assertEqual(gh.writes("DELETE"), [])
         self.assertEqual(sorted(resolved(gh)), ["T50", "T60"])
 
-    def test_the_original_body_stays_under_the_superseded_line(self):
-        gh = FakeGitHub(reviews=[old_review(5, body=MARKER + "\nThe old findings.")])
+    def test_the_earlier_body_is_never_edited(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
         go(gh)
-        (put,) = gh.writes("PUT")
-        body = put[2]["body"]
-        self.assertTrue(body.startswith(SUPERSEDED_MARKER + "\n**Superseded by"))
-        self.assertIn(NEW_URL, body)
-        self.assertTrue(body.endswith(MARKER + "\nThe old findings."))
+        self.assertEqual(gh.writes("PUT"), [])
+        self.assertEqual(gh.writes("PATCH"), [])
+        self.assertEqual(minimized(gh), ["N5"])
 
-    def test_a_failed_resolve_skips_the_line_so_the_next_run_retries(self):
+    def test_a_failed_resolve_leaves_the_review_visible_for_the_next_run(self):
         class NoResolve(FakeGitHub):
             def request(self, method, path, body=None, idempotent=None):
                 if path == "/graphql" and "resolveReviewThread" in body["query"]:
@@ -588,13 +646,7 @@ class TestNothingIsDeleted(unittest.TestCase):
         gh = NoResolve(reviews=[old_review(5)])
         with mock.patch("post_review._sleep"):
             go(gh)
-        self.assertEqual(gh.writes("PUT"), [])
-        minimized = [
-            w
-            for w in gh.writes()
-            if w[1] == "/graphql" and "minimizeComment" in w[2]["query"]
-        ]
-        self.assertEqual(len(minimized), 1)
+        self.assertEqual(minimized(gh), [])
 
 
 class TestRetries(unittest.TestCase):
@@ -666,51 +718,24 @@ class TestRetries(unittest.TestCase):
 
 
 class TestTheEarlierReviewIsReplaced(unittest.TestCase):
-    def test_earlier_review_is_taken_down_after_the_new_one_posts(self):
+    def test_earlier_review_is_hidden_after_the_new_one_posts(self):
         gh = FakeGitHub(reviews=[old_review(5)])
         go(gh)
         writes = gh.writes()
         self.assertEqual(writes[0][:2], ("POST", "/repos/o/r/pulls/1/reviews"))
-        self.assertEqual(
-            [w[:2] for w in writes[1:]],
-            [
-                ("POST", "/graphql"),  # list the review threads
-                ("POST", "/graphql"),  # resolve T50
-                ("PUT", "/repos/o/r/pulls/1/reviews/5"),
-                ("POST", "/graphql"),  # minimize
-            ],
-        )
+        self.assertEqual([w[:2] for w in writes[1:]], [("POST", "/graphql")] * 4)
+        queries = [w[2]["query"] for w in writes[1:]]
+        self.assertIn("isMinimized", queries[0])
+        self.assertIn("reviewThreads", queries[1])
         self.assertEqual(resolved(gh), ["T50"])
-        put, minimize = writes[3][2], writes[4][2]
-        self.assertTrue(put["body"].startswith(SUPERSEDED_MARKER))
-        self.assertIn(NEW_URL, put["body"])
-        self.assertIn("minimizeComment", minimize["query"])
-        self.assertEqual(minimize["variables"], {"id": "N5"})
+        self.assertIn("minimizeComment", queries[3])
+        self.assertEqual(minimized(gh), ["N5"])
 
-    def test_a_changes_requested_review_is_dismissed_first(self):
+    def test_a_newer_change_request_does_not_dismiss_the_older_one(self):
         gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
         go(gh)
-        after_post = gh.writes()[1:]
-        self.assertEqual(
-            after_post[0][:2], ("PUT", "/repos/o/r/pulls/1/reviews/5/dismissals")
-        )
-        self.assertEqual(after_post[0][2]["event"], "DISMISS")
-        self.assertIn(NEW_URL, after_post[0][2]["message"])
-
-    def test_a_failed_dismissal_leaves_the_review_whole(self):
-        class NoDismiss(FakeGitHub):
-            def request(self, method, path, body=None, idempotent=None):
-                if path.endswith("/dismissals"):
-                    self.calls.append((method, path, body))
-                    raise GitHubError(403, "forbidden")
-                return super().request(method, path, body)
-
-        gh = NoDismiss(reviews=[old_review(5, state="CHANGES_REQUESTED")])
-        go(gh)
-        self.assertEqual(
-            [w[:2] for w in gh.writes()[1:]],
-            [("PUT", "/repos/o/r/pulls/1/reviews/5/dismissals")],
-        )
+        self.assertEqual(dismissed(gh), [])
+        self.assertEqual(gh.reviews[0]["state"], "CHANGES_REQUESTED")
 
     def test_a_comment_review_is_not_dismissed(self):
         gh = FakeGitHub(reviews=[old_review(5)])
@@ -736,19 +761,15 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
             [w for w in gh.writes() if w[1] != "/repos/o/r/pulls/1/reviews"], []
         )
 
-    def test_a_superseded_review_is_only_minimized_again(self):
-        # Its threads were resolved when it was superseded; one reopened since
-        # is left open.
-        gh = FakeGitHub(
-            reviews=[old_review(7, body=SUPERSEDED_MARKER + "\nx")],
-        )
+    def test_a_hidden_review_is_left_alone(self):
+        # Its threads were resolved when it was hidden; one reopened since
+        # stays open.
+        old = old_review(7)
+        old["minimized"] = True
+        gh = FakeGitHub(reviews=[old])
         go(gh)
         self.assertEqual(resolved(gh), [])
-        self.assertEqual(gh.writes("PUT"), [], "a superseded body is rewritten")
-        self.assertEqual(
-            [w[2]["variables"] for w in gh.writes() if w[1] == "/graphql"],
-            [{"id": "N7"}],
-        )
+        self.assertEqual(minimized(gh), [])
 
     def test_one_failed_takedown_does_not_stop_the_others(self):
         class Flaky(FakeGitHub):
@@ -771,8 +792,34 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
 
         gh = Moves(reviews=[old_review(5)])
         go(gh)
-        deleted = [w[2]["variables"] for w in gh.writes() if w[1] == "/graphql"]
-        self.assertEqual(deleted, [{"id": "N999"}])
+        self.assertEqual(minimized(gh), ["N999"])
+        # A newer run may already have finished with a clean verdict, so this
+        # stale change request is withdrawn too, and nothing older is touched.
+        self.assertEqual(dismissed(gh), ["999"])
+        (put,) = gh.writes("PUT")
+        self.assertNotIn("http", put[2]["message"])
+
+    def test_a_retraction_that_cannot_dismiss_leaves_the_review_visible(self):
+        class MovesNoDismiss(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if path.endswith("/dismissals"):
+                    raise GitHubError(403, "forbidden")
+                out = super().request(method, path, body)
+                if method == "POST" and path == "/repos/o/r/pulls/1/reviews":
+                    self.head = "b" * 40
+                return out
+
+        gh = MovesNoDismiss(reviews=[old_review(5)])
+        go(gh)
+        self.assertEqual(minimized(gh), [])
+
+    def test_a_review_whose_state_did_not_come_back_is_left_alone(self):
+        old = old_review(5)
+        old["unreadable"] = True
+        gh = FakeGitHub(reviews=[old])
+        go(gh)
+        self.assertEqual(resolved(gh), [])
+        self.assertEqual(minimized(gh), [])
 
     def test_pagination_reaches_the_second_page(self):
         reviews = [old_review(i, author="someone") for i in range(1, 101)]
