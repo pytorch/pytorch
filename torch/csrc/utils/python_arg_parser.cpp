@@ -1056,6 +1056,51 @@ static bool is_int_or_symint(PyObject* obj) {
   return false;
 }
 
+template <typename ItemAt>
+static bool is_int_or_symint_items(
+    Py_ssize_t size,
+    ItemAt item_at,
+    py::object* failed_item = nullptr,
+    std::vector<PyObject*>* overloaded_args = nullptr) {
+  if (size == 0) {
+    return true;
+  }
+
+  // Check all elements, not just the first one, when looking for torch
+  // functions
+  bool has_torch_func = false;
+  for (Py_ssize_t idx = 0; idx < size; idx++) {
+    PyObject* item_ptr = item_at(idx);
+
+    // Check if this element has torch function
+    if (overloaded_args &&
+        check_has_torch_function(item_ptr, /*ignore_mode*/ true)) {
+      append_overloaded_arg(overloaded_args, item_ptr, /*obj_is_type*/ false);
+      has_torch_func = true;
+    }
+
+    // For the first element, do the original type checking
+    if (idx == 0) {
+      if (is_int_or_symint(item_ptr)) {
+        continue;
+      }
+
+      // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+      // in an intlist argument. Even float or complex scalar tensors.
+      const bool valid_scalar_tensor = jit::tracer::isTracing() &&
+          THPVariable_Check(item_ptr) &&
+          THPVariable_Unpack(item_ptr).sizes().empty();
+      if (!valid_scalar_tensor && failed_item != nullptr) {
+        *failed_item = py::reinterpret_borrow<py::object>(item_ptr);
+      }
+      if (!valid_scalar_tensor && !has_torch_func) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 static bool is_int_or_symint_list(
     PyObject* obj,
     int broadcast_size,
@@ -1064,51 +1109,31 @@ static bool is_int_or_symint_list(
   const bool is_tuple = PyTuple_Check(obj);
   if (is_tuple || PyList_Check(obj)) {
     const auto size = is_tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-    if (size == 0) {
-      return true;
-    }
-
-    // Check all elements, not just the first one, when looking for torch
-    // functions
-    bool has_torch_func = false;
-
-    for (Py_ssize_t idx = 0; idx < size; idx++) {
-      PyObject* item_ptr =
-          is_tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
-
-      // Check if this element has torch function
-      if (overloaded_args &&
-          check_has_torch_function(item_ptr, /*ignore_mode*/ true)) {
-        append_overloaded_arg(overloaded_args, item_ptr, /*obj_is_type*/ false);
-        has_torch_func = true;
-      }
-
-      // For the first element, do the original type checking
-      if (idx == 0) {
-        if (is_int_or_symint(item_ptr)) {
-          continue;
-        }
-
-        // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-        // in an intlist argument. Even float or complex scalar tensors.
-        bool r =
-            (jit::tracer::isTracing() && THPVariable_Check(item_ptr) &&
-             THPVariable_Unpack(item_ptr).sizes().empty());
-        if (!r && failed_item != nullptr) {
-          *failed_item = py::reinterpret_borrow<py::object>(item_ptr);
-        }
-        if (!r && !has_torch_func) {
-          return false;
-        }
-      }
-    }
-
-    return true;
+    return is_int_or_symint_items(
+        size,
+        [obj, is_tuple](Py_ssize_t idx) {
+          return is_tuple ? PyTuple_GET_ITEM(obj, idx)
+                          : PyList_GET_ITEM(obj, idx);
+        },
+        failed_item,
+        overloaded_args);
   }
 
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
   return broadcast_size > 0 && is_int_or_symint(obj);
+}
+
+static bool is_int_or_symint_array(
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    py::object* failed_item,
+    std::vector<PyObject*>* overloaded_args) {
+  return is_int_or_symint_items(
+      nargs,
+      [args](Py_ssize_t idx) { return args[idx]; },
+      failed_item,
+      overloaded_args);
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.
@@ -1599,14 +1624,16 @@ class TupleDictInput {
     return PyDict_GetItem(kwargs_, name);
   }
 
-  PyObject* varargs_intlist(
+  bool is_varargs_intlist(
       int broadcast_size,
       py::object* failed_item,
       std::vector<PyObject*>* overloaded_args) const {
     return is_int_or_symint_list(
-               args_, broadcast_size, failed_item, overloaded_args)
-        ? args_
-        : nullptr;
+        args_, broadcast_size, failed_item, overloaded_args);
+  }
+
+  PyObject* bind_varargs_intlist(at::ArrayRef<PyObject*>&) const {
+    return args_;
   }
 
   PyObject* next_kwarg_name(Py_ssize_t& pos) const {
@@ -1659,11 +1686,18 @@ class VectorcallInput {
     return nullptr;
   }
 
-  PyObject* varargs_intlist(
+  bool is_varargs_intlist(
       int,
-      py::object*,
-      std::vector<PyObject*>*) const {
-    return nullptr;
+      py::object* failed_item,
+      std::vector<PyObject*>* overloaded_args) const {
+    return is_int_or_symint_array(args_, nargs_, failed_item, overloaded_args);
+  }
+
+  PyObject* bind_varargs_intlist(
+      at::ArrayRef<PyObject*>& varargs_intlist_args) const {
+    TORCH_INTERNAL_ASSERT(nargs_ > 0);
+    varargs_intlist_args = at::ArrayRef<PyObject*>(args_, nargs_);
+    return args_[0];
   }
 
   PyObject* next_kwarg_name(Py_ssize_t& pos) const {
@@ -1803,12 +1837,13 @@ bool FunctionSignature::parse(
     const Input& input,
     PyObject* dst[], // NOLINT
     std::vector<PyObject*>& overloaded_args,
-    bool raise_exception) {
+    bool raise_exception,
+    at::ArrayRef<PyObject*>& varargs_intlist_args) {
   const Py_ssize_t nargs = input.num_positional_args();
   const auto num_kwargs = input.num_kwargs();
   auto remaining_kwargs = num_kwargs;
   size_t arg_pos = 0;
-  PyObject* varargs_intlist = nullptr;
+  bool allow_varargs_intlist = false;
 
   // if there is a single positional IntArrayRef argument, i.e. expand(..),
   // view(...), allow a var-args style IntArrayRef, so expand(5,3) behaves as
@@ -1816,14 +1851,13 @@ bool FunctionSignature::parse(
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
        params[0].type_ == ParameterType::SYM_INT_LIST)) {
-    varargs_intlist = input.varargs_intlist(
+    allow_varargs_intlist = input.is_varargs_intlist(
         params[0].size,
         /*failed_item=*/nullptr,
         &overloaded_args);
   }
 
-  if (static_cast<size_t>(nargs) > max_pos_args &&
-      varargs_intlist == nullptr) {
+  if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {
     if (raise_exception) {
       // foo() takes 2 positional arguments but 3 were given
       extra_args(*this, nargs);
@@ -1859,8 +1893,7 @@ bool FunctionSignature::parse(
     }
 
     py::object failed_item;
-    bool varargs_eligible =
-        varargs_intlist != nullptr && arg_pos == 0 && !is_kwd;
+    bool varargs_eligible = allow_varargs_intlist && arg_pos == 0 && !is_kwd;
     if ((!obj && param.optional) || (Py_IsNone(obj) && param.allow_none)) {
       dst[i++] = nullptr;
     } else if (!obj) {
@@ -1876,11 +1909,10 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         varargs_eligible &&
-        (varargs_intlist = input.varargs_intlist(
-             param.size, &failed_item, &overloaded_args))) {
+        input.is_varargs_intlist(param.size, &failed_item, &overloaded_args)) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
-      dst[i++] = varargs_intlist;
+      dst[i++] = input.bind_varargs_intlist(varargs_intlist_args);
       arg_pos = nargs;
       continue;
     } else if (raise_exception) {
@@ -1895,7 +1927,6 @@ bool FunctionSignature::parse(
                 param.type_name(),
                 Py_TYPE(obj)->tp_name));
       } else {
-        // foo(): argument 'other' (position 2) must be ...
         // is_int_or_symint_list only type-checks index 0, so "at pos 0" is
         // accurate whenever failed_item is set.
         if (failed_item) {
@@ -1948,12 +1979,14 @@ bool FunctionSignature::parse(
     PyObject* dst[], // NOLINT
     std::vector<PyObject*>& overloaded_args,
     bool raise_exception) {
+  at::ArrayRef<PyObject*> varargs_intlist_args;
   return parse(
       self,
       TupleDictInput(args, kwargs),
       dst,
       overloaded_args,
-      raise_exception);
+      raise_exception,
+      varargs_intlist_args);
 }
 
 // Parses vectorcall arguments directly, avoiding tuple and dictionary
@@ -1965,13 +1998,16 @@ bool FunctionSignature::parse(
     PyObject* kwnames,
     PyObject* dst[], // NOLINT
     std::vector<PyObject*>& overloaded_args,
-    bool raise_exception) {
+    bool raise_exception,
+    at::ArrayRef<PyObject*>& varargs_intlist_args) {
+  varargs_intlist_args = {};
   return parse(
       self,
       VectorcallInput(args, nargs, kwnames),
       dst,
       overloaded_args,
-      raise_exception);
+      raise_exception,
+      varargs_intlist_args);
 }
 
 PythonArgParser::PythonArgParser(
@@ -2064,9 +2100,11 @@ PythonArgs PythonArgParser::raw_parse(
     Py_ssize_t nargs,
     PyObject* kwnames,
     PyObject* parsed_args[]) { // NOLINT
+  const bool skip_torch_function = torch::consume_should_skip_torch_function();
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     std::vector<PyObject*> overloaded_args;
+    at::ArrayRef<PyObject*> varargs_intlist_args;
     signature.parse(
         self,
         args,
@@ -2074,17 +2112,21 @@ PythonArgs PythonArgParser::raw_parse(
         kwnames,
         parsed_args,
         overloaded_args,
-        true);
+        true,
+        varargs_intlist_args);
     check_deprecated(signature);
     return PythonArgs(
         traceable,
+        skip_torch_function,
         signature,
         parsed_args,
-        std::move(overloaded_args));
+        std::move(overloaded_args),
+        varargs_intlist_args);
   }
 
   for (auto& signature : signatures_) {
     std::vector<PyObject*> overloaded_args;
+    at::ArrayRef<PyObject*> varargs_intlist_args;
     if (signature.parse(
             self,
             args,
@@ -2092,13 +2134,16 @@ PythonArgs PythonArgParser::raw_parse(
             kwnames,
             parsed_args,
             overloaded_args,
-            false)) {
+            false,
+            varargs_intlist_args)) {
       check_deprecated(signature);
       return PythonArgs(
           traceable,
+          skip_torch_function,
           signature,
           parsed_args,
-          std::move(overloaded_args));
+          std::move(overloaded_args),
+          varargs_intlist_args);
     }
   }
 

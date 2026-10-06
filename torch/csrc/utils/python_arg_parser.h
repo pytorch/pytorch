@@ -205,7 +205,8 @@ struct FunctionSignature {
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       PyObject* dst[],
       std::vector<PyObject*>& overloaded_args,
-      bool raise_exception);
+      bool raise_exception,
+      at::ArrayRef<PyObject*>& varargs_intlist_args);
 
   std::string toString() const;
 
@@ -226,7 +227,8 @@ struct FunctionSignature {
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       PyObject* dst[],
       std::vector<PyObject*>& overloaded_args,
-      bool raise_exception);
+      bool raise_exception,
+      at::ArrayRef<PyObject*>& varargs_intlist_args);
 };
 
 // A PythonArgParser contains a list of valid signatures. Instances are
@@ -301,13 +303,15 @@ struct TORCH_PYTHON_API PythonArgs {
       bool skip_torch_function,
       const FunctionSignature& signature,
       PyObject** args,
-      std::vector<PyObject*> overloaded_args)
+      std::vector<PyObject*> overloaded_args,
+      at::ArrayRef<PyObject*> varargs_intlist_args = {})
       : idx(signature.index),
         traceable(traceable),
         skip_torch_function(skip_torch_function),
         signature(signature),
         args(args),
-        overloaded_args(std::move(overloaded_args)) {}
+        overloaded_args(std::move(overloaded_args)),
+        varargs_intlist_args(varargs_intlist_args) {}
 
   int idx;
   bool traceable;
@@ -316,6 +320,9 @@ struct TORCH_PYTHON_API PythonArgs {
   const FunctionSignature& signature;
   PyObject** args;
   std::vector<PyObject*> overloaded_args; // NOTE: borrowed references
+  // When non-empty, this is the complete value of the IntList/SymIntList at
+  // args[0]; list accessors must use this span rather than args[0] directly.
+  at::ArrayRef<PyObject*> varargs_intlist_args;
 
   inline bool has_torch_function();
   inline std::string get_func_name();
@@ -611,33 +618,32 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   }
 
   const auto size1 = signature.params[i].size;
-  if (size1 > 0 && THPUtils_checkLong(args[i])) {
-    return std::vector<c10::SymInt>(
-        size1, c10::SymInt(THPUtils_unpackLong(args[i])));
+  at::ArrayRef<PyObject*> items =
+      i == 0 ? varargs_intlist_args : at::ArrayRef<PyObject*>();
+  if (items.empty()) {
+    if (size1 > 0 && THPUtils_checkLong(args[i])) {
+      return std::vector<c10::SymInt>(
+          size1, c10::SymInt(THPUtils_unpackLong(args[i])));
+    }
+    if (size1 > 0 && torch::is_symint(py::handle(args[i]))) {
+      auto si = py::handle(args[i]).cast<c10::SymInt>();
+      return std::vector<c10::SymInt>(size1, si);
+    }
+    if (size1 > 0 && THPVariable_Check(args[i])) {
+      return std::vector<c10::SymInt>(
+          size1, THPVariable_Unpack(args[i]).item().toSymInt());
+    }
+    PyObject* arg = args[i];
+    TORCH_INTERNAL_ASSERT(
+        PyTuple_Check(arg) || PyList_Check(arg), "expected tuple or list");
+    items = at::ArrayRef<PyObject*>(
+        PySequence_Fast_ITEMS(arg), PySequence_Fast_GET_SIZE(arg));
   }
-
-  if (size1 > 0 && torch::is_symint(py::handle(args[i]))) {
-    auto si = py::handle(args[i]).cast<c10::SymInt>();
-    return std::vector<c10::SymInt>(size1, si);
-  }
-
-  if (size1 > 0 && THPVariable_Check(args[i])) {
-    return std::vector<c10::SymInt>(
-        size1, THPVariable_Unpack(args[i]).item().toSymInt());
-  }
-
-  PyObject* arg = args[i];
-  auto tuple = PyTuple_Check(arg);
-  if (!tuple) {
-    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
-  }
-  // NOLINTNEXTLINE(bugprone-branch-clone)
-  const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  const auto size2 = static_cast<Py_ssize_t>(items.size());
   std::vector<c10::SymInt> res;
   res.reserve(size2);
   for (const auto idx : c10::irange(size2)) {
-    PyObject* obj =
-        tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    PyObject* obj = items[idx];
 
     // Elements of torch.Size are tensors during tracing, and we need to
     // record extra information before they are turned into an IntArrayRef
@@ -698,30 +704,33 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
     return default_intlist;
   PyObject* arg = args[i];
   const auto size1 = signature.params[i].size;
-  if (size1 > 0 && THPUtils_checkLong(arg)) {
-    return std::vector<int64_t>(size1, THPUtils_unpackLong(arg));
+  at::ArrayRef<PyObject*> items =
+      i == 0 ? varargs_intlist_args : at::ArrayRef<PyObject*>();
+  if (items.empty()) {
+    if (size1 > 0 && THPUtils_checkLong(arg)) {
+      return std::vector<int64_t>(size1, THPUtils_unpackLong(arg));
+    }
+    if (size1 > 0 && torch::is_symint(py::handle(arg))) {
+      return std::vector<int64_t>(
+          size1,
+          py::handle(arg).cast<c10::SymInt>().guard_int(__FILE__, __LINE__));
+    }
+    if (size1 > 0 && torch::is_dynint(py::handle(arg))) {
+      return std::vector<int64_t>(size1, py::handle(arg).cast<int>());
+    }
+    if (size1 > 0 && THPVariable_Check(arg)) {
+      return std::vector<int64_t>(
+          size1, THPVariable_Unpack(arg).item<int64_t>());
+    }
+    TORCH_INTERNAL_ASSERT(
+        PyTuple_Check(arg) || PyList_Check(arg), "expected tuple or list");
+    items = at::ArrayRef<PyObject*>(
+        PySequence_Fast_ITEMS(arg), PySequence_Fast_GET_SIZE(arg));
   }
-  if (size1 > 0 && torch::is_symint(py::handle(arg))) {
-    return std::vector<int64_t>(
-        size1,
-        py::handle(arg).cast<c10::SymInt>().guard_int(__FILE__, __LINE__));
-  }
-  if (size1 > 0 && torch::is_dynint(py::handle(arg))) {
-    return std::vector<int64_t>(size1, py::handle(arg).cast<int>());
-  }
-  if (size1 > 0 && THPVariable_Check(arg)) {
-    return std::vector<int64_t>(size1, THPVariable_Unpack(arg).item<int64_t>());
-  }
-  auto tuple = PyTuple_Check(arg);
-  if (!tuple) {
-    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
-  }
-  // NOLINTNEXTLINE(bugprone-branch-clone)
-  const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  const auto size2 = static_cast<Py_ssize_t>(items.size());
   std::vector<int64_t> res(size2);
   for (const auto idx : c10::irange(size2)) {
-    PyObject* obj =
-        tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    PyObject* obj = items[idx];
     // Elements of torch.Size are tensors during tracing, and we need to
     // record extra information before they are turned into an IntArrayRef
     if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
