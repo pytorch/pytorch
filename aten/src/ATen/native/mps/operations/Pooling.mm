@@ -523,13 +523,9 @@ static void adaptive_max_pool_out_mps_template(const Tensor& output,
   launch_max_pool_kernel(input, output, indices, params, op_name);
 }
 
-static int64_t pool_backward_num_threads(const Tensor& grad_output, int32_t dims, int32_t pooling_dims) {
+static int64_t pool_backward_num_threads(const Tensor& grad_output, int32_t dims, int32_t pooling_dims, bool serial) {
   auto numThreads = grad_output.numel();
-  // See Note [Enabling Deterministic Operations]
-  // The operation is normally nondeterministic because of atomic accumulation
-  // across multiple threads. To make it deterministic, dispatch only one thread
-  // per batch, so the accumulations are serialized.
-  if (numThreads > 0 && at::globalContext().deterministicAlgorithms()) {
+  if (numThreads > 0 && serial) {
     for (const auto dim : c10::irange(dims - pooling_dims, dims)) {
       numThreads /= grad_output.size(dim);
     }
@@ -550,7 +546,12 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims);
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  bool serial = at::globalContext().deterministicAlgorithms();
+  auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims, serial);
   TORCH_CHECK_NOT_IMPLEMENTED(
       canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output) && canUse32BitIndexMath(indices),
       op_name,
@@ -572,7 +573,7 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       auto maxPoolPSO = lib.getPipelineStateForFunc("max_pool_backward_" + scalarToMetalTypeString(input) +
-                                                    (at::globalContext().deterministicAlgorithms() ? "_serial" : ""));
+                                                    (serial ? "_serial" : ""));
 
       getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input}, mpsStream);
       [computeEncoder setComputePipelineState:maxPoolPSO];
@@ -866,7 +867,12 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims);
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  bool serial = at::globalContext().deterministicAlgorithms();
+  auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims, serial);
   TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output),
                               op_name,
                               ": MPS does not support tensors that require 64-bit indexing");
@@ -896,7 +902,7 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       auto PSO = lib.getPipelineStateForFunc("avg_pool_backward_" + scalarToMetalTypeString(input) +
-                                             (at::globalContext().deterministicAlgorithms() ? "_serial" : ""));
+                                             (serial ? "_serial" : ""));
 
       getMPSProfiler().beginProfileKernel(PSO, op_name, {grad_output}, mpsStream);
       [computeEncoder setComputePipelineState:PSO];
