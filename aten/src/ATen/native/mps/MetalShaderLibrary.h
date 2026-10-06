@@ -21,7 +21,6 @@ typedef void* MTLBuffer_t;
 #include <c10/core/Scalar.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <functional>
-#include <mutex>
 #include <optional>
 #include <type_traits>
 #include <unordered_map>
@@ -193,7 +192,14 @@ class MetalShaderLibrary {
       const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
       const std::optional<c10::ScalarType> natural_output_dtype = std::nullopt,
       const std::optional<uint32_t> ilp_threshold = std::nullopt);
-  void exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name);
+  // `alpha` is the scalar ternary ops such as addcmul carry next to their
+  // three tensors; `scalar_arg_type` is the dtype it is narrowed to before
+  // binding (defaults to the kernel's compute dtype).
+  void exec_ternary_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      const std::optional<c10::Scalar> alpha = std::nullopt,
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
 
   template <typename T>
   void exec_unary_kernel_with_params(
@@ -213,11 +219,8 @@ class MetalShaderLibrary {
   virtual MTLLibrary_t getLibrary();
   virtual MTLLibrary_t getLibrary(
       const std::initializer_list<std::string>& params);
-  // Guards `library` and every cache below. MPS ops run on whatever thread
-  // called into ATen, so lazy compilation and cache population race. Recursive
-  // because the accessors call each other (hasFunction -> getFunctionNames ->
-  // getLibrary).
-  std::recursive_mutex cache_mutex;
+  // `library` and the caches below are guarded by a mutex private to
+  // OperationUtils.mm, where every accessor that touches them is defined.
   MTLLibrary_t library = nullptr;
 
  private:
