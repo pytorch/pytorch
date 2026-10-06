@@ -612,13 +612,12 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 struct RegisterNVSHMEMSymmetricMemoryAllocator {
   RegisterNVSHMEMSymmetricMemoryAllocator() {
     auto allocator = c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>();
+    // Available to `set_backend` whether or not it is the default
+    register_availability("NVSHMEM", allocator);
     // Query backend used for CUDA tensor
     if (getSymmMemBackendCUDA() == "NVSHMEM") {
       // Direct set (static registration)
       register_allocator(c10::DeviceType::CUDA, allocator);
-    } else {
-      // Register availability in case `set_backend` is called dynamically
-      register_availability("NVSHMEM", allocator);
     }
   }
 };
