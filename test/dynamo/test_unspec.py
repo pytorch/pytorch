@@ -24,6 +24,7 @@ from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
@@ -63,7 +64,10 @@ _TIME_FUNCTION_TEST_CASES = tuple(
 )
 
 
-@torch._dynamo.config.patch(assume_static_by_default=False)
+UNSPEC_CONFIG = {"assume_static_by_default": False}
+
+
+@torch._dynamo.config.patch(**UNSPEC_CONFIG)
 @instantiate_parametrized_tests
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_time_function_names(self):
@@ -161,6 +165,29 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    def test_random_seed_takes_effect_on_first_call(self):
+        # An in-function random.seed() must be visible to a scalar draw
+        # traced right after it, including on the very first (compiling)
+        # call - unlike test_feed_random_values_into_graph_only and
+        # test_random_values_with_graph_break above, this deliberately does
+        # NOT "shake out" the compile before comparing, since that's exactly
+        # the call this is testing.
+        def fn(x):
+            random.seed(0)
+            return x + random.random(), random.random(), random.randint(0, 100)
+
+        x = torch.zeros(1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        for _ in range(3):
+            res1 = fn(x)
+            eager_state = random.getstate()
+            res2 = opt_fn(x)
+            compiled_state = random.getstate()
+            self.assertEqual(res1, res2)
+            self.assertEqual(eager_state, compiled_state)
+        self.assertEqual(cnts.frame_count, 1)
+
     # Really annoying intersection of specialization and RandomValueSource
     # If we get a RandomValueSource with a single element tensor, we should return a ConstantVariable like other
     # unspects... but if we do, we break the bytecode assumptions and guards will not work as we will be referring
@@ -217,6 +244,42 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             res.append(fn(torch.ones(2)))
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_random_float_draws_inductor(self, dtype):
+        # Float draws reach the graph as float64 tensors, so the graph input must
+        # be traced as float64 too; otherwise Inductor reads them as float32.
+        # The products stay separate: summed, Inductor rounds once where eager
+        # rounds per op, which costs low-precision dtypes their tolerance.
+        def fn(x, rng):
+            return x * rng.random(), x * rng.uniform(0, 1), x * random.random()
+
+        x = torch.arange(4.0, dtype=dtype)
+        random.seed(0)
+        expected = fn(x, random.Random(0))
+        random.seed(0)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(opt_fn(x, random.Random(0)), expected)
+
+    def test_numpy_scalar_inputs_inductor(self):
+        def fn(x, a, b):
+            return x * a + x * b
+
+        x = torch.arange(4.0)
+        a, b = np.float32(0.5), np.float64(0.25)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
+
+    # The draw is a 0-dim float64 tensor in the graph, so it promotes an integer
+    # tensor to float64, while eager treats it as a Python float (float32).
+    @unittest.expectedFailure
+    def test_random_float_draw_integer_tensor_dtype(self):
+        def fn(x, rng):
+            return x * rng.random()
+
+        x = torch.arange(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, random.Random(0)), fn(x, random.Random(0)))
 
     @parametrize("clock_name,clock_args", _TIME_FUNCTION_TEST_CASES)
     def test_time_function_unused_no_warning(self, clock_name, clock_args):
@@ -468,6 +531,184 @@ else:
         with self.assertRaises(ValueError):
             opt_fn()
 
+    def test_random_object_draws_advance_input_state(self):
+        # A cache hit must draw from the input object's live state rather
+        # than replay the trace-time snapshot (and must advance that state).
+        def fn(x, rng):
+            return x + rng.randint(1, 100)
+
+        shapes = ([1], [1, 5], [2, 2], [2, 3])
+
+        def run(f):
+            rng = random.Random(123456)
+            outs = [f(torch.zeros(s), rng).flatten()[0].item() for s in shapes]
+            return outs, rng.getstate()
+
+        ref, ref_state = run(fn)
+        for fullgraph in (False, True):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, dynamic=True, fullgraph=fullgraph)
+            res, res_state = run(opt_fn)
+            self.assertEqual(res, ref)
+            self.assertEqual(res_state, ref_state)
+            self.assertLess(cnt.frame_count, len(shapes))
+
+    @parametrize("reset_method", ["seed", "setstate"])
+    def test_random_object_draws_before_and_after_reset(self, reset_method):
+        def fn(x, rng):
+            before = rng.random()
+            if reset_method == "seed":
+                rng.seed(42)
+            else:
+                rng.setstate(random.Random(42).getstate())
+            return x + before + rng.random() + rng.random()
+
+        def run(f):
+            rng = random.Random(123)
+            outs = []
+            states = []
+            for _ in range(3):
+                outs.append(f(torch.zeros(3), rng))
+                states.append(rng.getstate())
+            return outs, states
+
+        ref = run(fn)
+        cnt = CompileCounter()
+        res = run(torch.compile(fn, backend=cnt, fullgraph=True))
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("method", ["getstate", "shuffle", "sample"])
+    @parametrize("draw_before", [False, True])
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: params["method"] != "getstate" or params["draw_before"],
+    )
+    def test_random_object_live_state_operations(self, method, draw_before):
+        # These operations still capture the trace-time state/permutation.
+        # A later mutation can also write that state back after live draws,
+        # rewinding the runtime RNG on cache hits. Record this existing
+        # limitation without changing the imported CPython tests.
+        # getstate/setstate without a preceding draw restores the input state
+        # on every eager call too, so that case already passes.
+        def fn(x, rng):
+            a = rng.random() if draw_before else 0
+            if method == "getstate":
+                state = rng.getstate()
+                b = rng.random()
+                rng.setstate(state)
+                return x + a + b
+            items = list(range(10))
+            if method == "shuffle":
+                rng.shuffle(items)
+            else:
+                items = rng.sample(items, 4)
+            return x + a + rng.random(), items
+
+        def run(f):
+            rng = random.Random(123)
+            results = []
+            for shape in ([1], [1, 5], [2, 2], [2, 3], [2, 3], [2, 3]):
+                results.append((f(torch.zeros(shape), rng), rng.getstate()))
+            return results
+
+        ref = run(fn)
+        res = run(torch.compile(fn, backend="eager", dynamic=True, fullgraph=True))
+        self.assertEqual(res, ref)
+
+    def test_random_object_module_attribute(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rng = random.Random(123)
+
+            def forward(self, x):
+                return x + self.rng.random() + self.rng.randint(1, 100)
+
+        for fullgraph in (False, True):
+            torch._dynamo.reset()
+            eager = Model()
+            model = Model()
+            cnt = CompileCounter()
+            compiled = torch.compile(
+                model, backend=cnt, dynamic=True, fullgraph=fullgraph
+            )
+            for shape in ([1], [1, 5], [2, 2], [2, 3]):
+                x = torch.zeros(shape)
+                self.assertEqual(compiled(x), eager(x))
+                self.assertEqual(model.rng.getstate(), eager.rng.getstate())
+            frame_count = cnt.frame_count
+            self.assertLess(frame_count, 4)
+            for _ in range(3):
+                x = torch.zeros(2, 3)
+                self.assertEqual(compiled(x), eager(x))
+                self.assertEqual(model.rng.getstate(), eager.rng.getstate())
+            self.assertEqual(cnt.frame_count, frame_count)
+
+    def test_random_object_alternating_instances(self):
+        def fn(x, rng):
+            return x.sum() + rng.random()
+
+        def run(f):
+            r1, r2 = random.Random(1), random.Random(2)
+            outs = [f(torch.ones(2), r).item() for r in (r1, r2, r1, r2)]
+            return outs, r1.getstate(), r2.getstate()
+
+        ref = run(fn)
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        res = run(torch.compile(fn, backend=cnt))
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_random_object_mixed_with_global_draws(self):
+        # Module-level and instance draws in one frame must interleave in
+        # program order on a cache hit.
+        def fn(x, rng):
+            a = random.randint(1, 100)
+            b = rng.randint(1, 100)
+            c = random.uniform(0, 1)
+            d = rng.random()
+            return x + a + b + c + d
+
+        shapes = ([1], [1, 5], [2, 2], [2, 3])
+
+        def run(f):
+            random.seed(7)
+            rng = random.Random(11)
+            outs = [f(torch.zeros(s), rng).flatten()[0].item() for s in shapes]
+            return outs, random.getstate(), rng.getstate()
+
+        ref = run(fn)
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=True)
+        # Warm up so compile-time draws do not perturb the measured run.
+        run(opt_fn)
+        frame_count = cnt.frame_count
+        res = run(opt_fn)
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, frame_count)
+
+    def test_random_object_draws_across_graph_break(self):
+        def fn(x, rng):
+            x = x + rng.randint(1, 100)
+            torch._dynamo.graph_break()
+            return x + rng.randint(1, 100)
+
+        def run(f):
+            rng = random.Random(5)
+            outs = [f(torch.zeros(3), rng).sum().item() for _ in range(3)]
+            return outs, rng.getstate()
+
+        ref = run(fn)
+        torch._dynamo.reset()
+        cnt = CompileCounter()
+        res = run(torch.compile(fn, backend=cnt))
+        self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_random_module_shuffle_sample(self):
         # Module-level random.shuffle/random.sample must trace under fullgraph
         # (exercised by the CPython dict/list tests). Like an explicit Random
@@ -545,6 +786,7 @@ else:
         # if Dynamo calls random methods.
 
         exit_stack = contextlib.ExitStack()
+        self.addCleanup(exit_stack.close)
 
         def patch_fn_with_rng_burn(name):
             orig_fn = eval(name)
@@ -974,6 +1216,39 @@ else:
         t = torch.tensor([1])
         compl_fn = torch.compile(fn, dynamic=True, backend="eager")
         self.assertEqual(fn(t, 1.0), compl_fn(t, 1.0))
+
+    def test_symint_number_methods(self):
+        def fn(x):
+            n = x.size(0)
+            bit_length = n.bit_length()
+            conjugate = n.conjugate()
+            ratio = n.as_integer_ratio()[0]
+            return bit_length + conjugate + ratio + n.__int__()
+
+        x = torch.randn(8, 3)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_symint_bit_length_wrong_arity(self):
+        def fn(x):
+            return x.size(0).bit_length(1)
+
+        x = torch.randn(8, 3)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "takes no arguments"
+        ):
+            compiled(x)
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_symfloat_number_methods(self):
+        def fn(t, m):
+            return (2 * t if m.is_integer() else t) + m.conjugate()
+
+        t = torch.tensor([1.0])
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t, 1.0), fn(t, 1.0))
+        self.assertEqual(compiled(t, 1.5), fn(t, 1.5))
 
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspec_roundtrip_float_input(self):

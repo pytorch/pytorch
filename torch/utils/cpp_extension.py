@@ -2177,7 +2177,8 @@ def load_inline(name,
                 with_pytorch_error_handling=True,
                 keep_intermediates=True,
                 use_pch=False,
-                no_implicit_headers=False):
+                no_implicit_headers=False,
+                gil_not_used=False):
     r'''
     Load a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -2251,6 +2252,9 @@ def load_inline(name,
             ``#include <torch/extension.h>`` and ``#include <torch/types.h>`` lines.
             Use this option to improve cold start times when you
             already include the necessary headers in your source code. Default: ``False``.
+        gil_not_used: If ``True``, generated bindings declare that they support
+            running with the GIL disabled. The bound functions and any state they
+            access must be thread-safe. Default: ``False``.
 
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
@@ -2301,8 +2305,14 @@ def load_inline(name,
     # Here, `functions` is (or becomes, after some processing) a map from
     # function names to function docstrings.
     if functions is not None:
-        module_def = []
-        module_def.append('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {')
+        module_def = [
+            (
+                'PYBIND11_MODULE(TORCH_EXTENSION_NAME, m, '
+                'pybind11::mod_gil_not_used()) {'
+                if gil_not_used
+                else 'PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {'
+            )
+        ]
         if isinstance(functions, str):
             functions = [functions]
         if isinstance(functions, list):
