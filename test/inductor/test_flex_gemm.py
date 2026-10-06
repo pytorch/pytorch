@@ -307,7 +307,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             with fresh_cache():
                 root = os.environ["TORCHINDUCTOR_CACHE_DIR"]
                 self.assertEqual(
-                    inductor_quack_cache_dir(), os.path.join(root, "quack")
+                    inductor_quack_cache_dir(),
+                    os.path.join(os.path.abspath(root), "quack"),
                 )
                 seen.add(root)
         self.assertEqual(len(seen), 2)
