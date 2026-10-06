@@ -676,9 +676,10 @@ class StrictNumericsCompileTest(TestCase):
         [op for op in op_db if op.name in ("clamp", "nn.functional.hardtanh")],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
     )
-    @parametrize("from_tensor", (False, True))
+    @parametrize("bound_source", ("python_float", "python_int", "tensor"))
     @parametrize("bound_kind", ("lower", "upper"))
-    def test_clamp_symbolic_bounds(self, device, dtype, op, from_tensor, bound_kind):
+    def test_clamp_symbolic_bounds(self, device, dtype, op, bound_source, bound_kind):
+        from_tensor = bound_source == "tensor"
         # The functional wrapper validates bounds in Python, which needs concrete values.
         fn_op = op.op
         if from_tensor and op.name == "nn.functional.hardtanh":
@@ -702,8 +703,13 @@ class StrictNumericsCompileTest(TestCase):
         x = torch.cat((x, nan_bits.view(dtype)))
         counter = CompileCounterWithBackend("inductor")
         compiled = torch.compile(fn, backend=counter, fullgraph=True)
-        bounds = (-0.0, -1.0) if bound_kind == "lower" else (6.0, 5.0)
-        bounds = (*bounds, 0.7, 0.1, 1e-42, bounds[0])
+        if bound_source == "python_int":
+            bounds = (1, 2, 257, 2049, 16777217, 9007199254740993, 1)
+            if bound_kind == "lower":
+                bounds = tuple(-bound for bound in bounds)
+        else:
+            bounds = (-0.0, -1.0) if bound_kind == "lower" else (6.0, 5.0)
+            bounds = (*bounds, 0.7, 0.1, 1e-42, bounds[0])
         if from_tensor:
             bounds = (*bounds, float("nan"), bounds[0])
         for bound in bounds:

@@ -17,7 +17,7 @@ from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.fx_utils import get_node_storage
-from torch._inductor.utils import get_gpu_type
+from torch._inductor.utils import get_gpu_type, is_strict_cuda_triton
 from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
@@ -645,10 +645,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
             # Preserve NaN bit patterns; codegen canonicalizes floating NaN constants.
             if (
-                config.strict_pointwise
-                and config.cuda_backend == "triton"
-                and torch.version.hip is None
-                and fake_tensor.device.type == "cuda"
+                is_strict_cuda_triton(fake_tensor.device)
                 and isinstance(value, float)
                 and math.isnan(value)
             ):

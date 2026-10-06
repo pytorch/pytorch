@@ -50,6 +50,7 @@ from . import config, inductor_prims
 from .utils import (
     is_bf16x9_matmul,
     is_gpu,
+    is_strict_cuda_triton,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
@@ -339,14 +340,9 @@ def sym_constrain_range_for_size(
 
 
 def _use_strict_clamp(a: torch.Tensor, dtype: torch.dtype | None = None) -> bool:
-    return (
-        config.strict_pointwise
-        and config.cuda_backend == "triton"
-        and torch.version.hip is None
-        and a.device.type == "cuda"
-        and (a.dtype if dtype is None else dtype)
-        in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-    )
+    return is_strict_cuda_triton(a.device) and (
+        a.dtype if dtype is None else dtype
+    ) in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 
 
 @register_decomposition(aten.hardtanh.default)
