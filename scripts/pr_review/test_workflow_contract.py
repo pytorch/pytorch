@@ -1211,6 +1211,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         "Read(/${{ github.workspace }}/trusted/.agents/skills/pr-review/**),"
         "Read(//tmp/pr-diff.txt),"
         "Read(//tmp/pr-files.txt),"
+        "Read(//tmp/pr-comments.json),"
         "Read(/${{ runner.temp }}/pr-review-findings.json),"
         "Write,"
         # pr-review's sub-agents. They inherit this session's rules and hooks;
@@ -1376,8 +1377,8 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         `echo "on ${{ github.event.workflow_run.head_branch }}"` inside a
         `publish` step is substituted by the runner before bash parses, and a
         fork branch name may contain `$( )`, a backtick or `;` — command
-        execution in the job holding `issues: write`, `pull-requests: write`
-        and a token. Every value Stage 2 needs already arrives through `env:`,
+        execution in the job holding `pull-requests: write` and a token.
+        Every value Stage 2 needs already arrives through `env:`,
         which is quoting-safe; the construct is refused in `run:` bodies.
         """
         text = STAGE2.read_text()
@@ -1446,22 +1447,6 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             f"Stage 2's jobs are {jobs}. Every role, environment and "
             "checkout assertion in this file names one of three; a fourth is "
             "covered by none of them.",
-        )
-
-    def test_the_label_move_is_gated_on_the_row_it_records(self):
-        """The class named for this contradiction did not pin it.
-
-        It asserted only that the label step READS the row's effective status;
-        replacing the comparison with a constant lets a `model_error` row sit
-        beside a PR marked `ready for review`, which then suppresses every
-        future automatic review of it.
-        """
-        publish = strip_comments(job_block(STAGE2.read_text(), "publish"))
-        self.assertIn(
-            '[ "$STATUS" != "succeeded" ]',
-            publish,
-            "the label move no longer compares the recorded status against "
-            "`succeeded`; a failed review could still mark the PR reviewed.",
         )
 
     # The review job's step set, by name and in order. Stage 1 pins jobs,
@@ -1670,6 +1655,8 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "scripts/pr_review/emit_row.py",
             "scripts/pr_review/validate_findings.py",
             "scripts/pr_review/verdict_after_subagents.py",
+            # Decides which comments the review is shown.
+            "scripts/pr_review/fetch_pr_comments.py",
             ".agents/skills/pr-review-readiness/SKILL.md",
             # The rubric's delegates. They carry the review logic, so omitting
             # them lets the whole checklist be rewritten under an unmoved hash.
@@ -2615,61 +2602,6 @@ class TestOptOutLabel(unittest.TestCase):
         self.assertEqual(self._eligible(("in progress",)), "true")
 
 
-_PUBLISH_GH_STUB = """#!/bin/bash
-printf '%s\\n' "$*" >> "$GH_ARGV"
-case "$*" in
-  *"/labels?per_page=100"*) printf '%s' "$LABELS_JSON" ;;
-  *"/pulls/"*) echo "$CURRENT_SHA" ;;
-  *) ;;
-esac
-"""
-
-
-class TestPublishHonoursALateOptOut(unittest.TestCase):
-    """An opt-out added during the review stops the label move."""
-
-    def _run(self, labels):
-        with tempfile.TemporaryDirectory() as td:
-            # The label step reads the verdict back from the row it follows.
-            (Path(td) / "terminal.json").write_text(
-                json.dumps({"status": "succeeded", "verdict": "ready_for_human_review"})
-            )
-            argv = Path(td) / "gh_calls"
-            argv.write_text("")
-            proc, _out = run_step(
-                STAGE2.read_text(),
-                "Move the PR out of review",
-                td,
-                {
-                    "GH_ARGV": str(argv),
-                    "GH_TOKEN": "stub-token",
-                    "REPO": "o/r",
-                    "PR_NUMBER": "1",
-                    "REVIEWED_SHA": STUB_API_HEAD,
-                    "CURRENT_SHA": STUB_API_HEAD,
-                    "EFFECTIVE_STATUS": "succeeded",
-                    "LABELS_JSON": json.dumps([{"name": n} for n in labels]),
-                    "REVIEW_LABEL": "in progress",
-                    "DONE_LABEL": "ready for review",
-                    "OPT_OUT_LABEL": "no automated review",
-                },
-                {"gh": _PUBLISH_GH_STUB},
-            )
-            calls = argv.read_text()
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        return proc, calls
-
-    def test_opted_out_pr_keeps_its_labels(self):
-        proc, calls = self._run(("in progress", "No Automated Review"))
-        self.assertIn("leaving labels alone", proc.stdout)
-        self.assertNotIn("DELETE", calls)
-        self.assertNotIn("POST", calls)
-
-    def test_pr_without_the_label_is_moved(self):
-        _proc, calls = self._run(("in progress",))
-        self.assertIn("DELETE", calls)
-
-
 class TestCorroboratedValuesAreTheOnlyOnesOffered(unittest.TestCase):
     """`base_sha` and `is_fork` must reach a row only from the trusted API.
 
@@ -2847,8 +2779,8 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "CLAUDE_CODE_SUBAGENT_MODEL",
             "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
             "CLAUDE_OUTCOME",
+            "CONVERSATION_FETCHED_AT",
             "DONE_LABEL",
-            "EFFECTIVE_STATUS",
             "EVENT_HEAD_BRANCH",
             "EVENT_HEAD_REPO",
             "EVENT_HEAD_SHA",
@@ -2864,6 +2796,7 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "MERGE_BASE_SHA",
             "OPT_OUT_LABEL",
             "PROMPT_HASH",
+            "PR_COMMENTS",
             "PR_DIR",
             "PR_NUMBER",
             "PR_REVIEW_DIFF_FILE",
@@ -3135,7 +3068,7 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
     `prepare` and `publish` each check this repository out at the workspace
     root and then run `scripts/pr_review/emit_row.py` from it — `prepare` with
     GITHUB_TOKEN and the publisher AWS session, `publish` with those plus
-    `issues: write` and `pull-requests: write`. Pointing either `ref:` at the
+    `pull-requests: write`. Pointing either `ref:` at the
     pull request's head is one token, and runs pull-request-authored Python
     with all of it. It is the same mutation the review job's trusted checkout
     is already pinned against, one job over, where nothing looked.
@@ -3238,10 +3171,9 @@ class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
                 },
                 "review": {"contents": "read", "id-token": "write"},
                 "publish": {
-                    "issues": "write",
-                    "pull-requests": "write",
                     "contents": "read",
                     "id-token": "write",
+                    "pull-requests": "write",
                 },
             },
             "a Stage 2 job's token scopes are not the ones this design was "
@@ -4901,6 +4833,100 @@ class TestTheChangedFileListIsAPointerNotAPayload(unittest.TestCase):
         )
 
 
+class TestThePrConversationReachesTheReview(unittest.TestCase):
+    """The review checks maintainer comments it can only see through a file.
+
+    `prepare` fetches the conversation with its token, hands it over as a job
+    output, and the review writes it to a path the prompt names and the tool
+    policy grants. Any of those spellings drifting leaves the model reviewing
+    as if nobody had commented, which is the failure this exists to prevent.
+    """
+
+    PATH = "/tmp/pr-comments.json"
+    GATE = (
+        "steps.freshness.outputs.eligible == 'true' && "
+        "steps.freshness.outputs.fresh == 'true' && "
+        "steps.freshness.outputs.too_large != 'true'"
+    )
+
+    def setUp(self):
+        text = STAGE2.read_text()
+        self.prepare = strip_comments(job_block(text, "prepare"))
+        self.review = strip_comments(job_block(text, "review"))
+
+    def _step(self, job: str, name: str) -> str:
+        hits = re.split(r"(?m)^      -(?: |$)", job)
+        (step,) = [s for s in hits if s.startswith(f"name: {name}\n")]
+        return step
+
+    def test_the_fetch_the_output_and_the_writer_agree(self):
+        fetch = self._step(self.prepare, "Fetch the PR conversation")
+        out = re.search(r"fetch_pr_comments\.py .*--out (\S+)", fetch)
+        self.assertIsNotNone(out, "the fetch step no longer names its output")
+        f = out.group(1)
+        self.assertIn(f'wc -l < {f})" -ne 0', fetch)
+        self.assertIn(
+            f"{{ printf 'comments='; cat {f}; echo; }} >> \"$GITHUB_OUTPUT\"", fetch
+        )
+        outputs = mapping_items(indented_block(self.prepare, "outputs:"))
+        self.assertEqual(
+            norm_expr(outputs["comments"]), "${{ steps.conversation.outputs.comments }}"
+        )
+        write = self._step(self.review, "Write the PR conversation")
+        self.assertEqual(
+            env_values(write, "PR_COMMENTS"), ["${{ needs.prepare.outputs.comments }}"]
+        )
+        self.assertIn('[ -z "$PR_COMMENTS" ]', write)
+        self.assertIn(f"printf '%s' \"$PR_COMMENTS\" > {self.PATH}", write)
+
+    def test_the_model_is_granted_and_told_the_path(self):
+        self.assertIn(f"Read(/{self.PATH})", self.review)
+        self.assertIn(self.PATH, prompt_scalar(self.review))
+
+    def test_the_fetch_fails_closed_before_the_started_row(self):
+        fetch = self._step(self.prepare, "Fetch the PR conversation")
+        self.assertEqual(
+            uncommented(re.search(r"(?m)^        if: (.*)$", fetch).group(1)), self.GATE
+        )
+        self.assertNotIn("continue-on-error", fetch)
+        self.assertNotIn(
+            "continue-on-error", self._step(self.review, "Write the PR conversation")
+        )
+        self.assertLess(
+            self.prepare.index("- name: Fetch the PR conversation"),
+            self.prepare.index("- name: Record `started` row"),
+            "the conversation is fetched after the `started` row, so a fetch "
+            "failure leaves a started row with no review behind it.",
+        )
+
+
+class TestPublishMovesNoLabels(unittest.TestCase):
+    """`ready for review` is Dr. CI's decision, made from the recorded row.
+
+    `publish` used to move labels itself, with `issues: write`. It still posts
+    the review through post_review.py, and the `pull-requests: write` that
+    needs is also enough to write labels, so the guard is on the code: no
+    direct API call in the job, and post_review.py only reads labels.
+    """
+
+    def test_publish_holds_no_issue_scope(self):
+        scopes = mapping_items(
+            indented_block(job_block(STAGE2.read_text(), "publish"), "permissions:")
+        )
+        self.assertNotIn("issues", scopes)
+
+    def test_publish_makes_no_direct_github_api_call(self):
+        publish = strip_comments(job_block(STAGE2.read_text(), "publish"))
+        for needle in ("gh api", "gh pr", "/labels"):
+            self.assertNotIn(needle, publish)
+
+    def test_post_review_only_reads_labels(self):
+        source = (HERE / "post_review.py").read_text()
+        calls = re.findall(r'request\(\s*"(\w+)",[^)]*/labels', source)
+        self.assertEqual(calls, ["GET"])
+        self.assertNotIn("Labelable", source)
+
+
 class TestSymlinkScrubIsNulSafe(unittest.TestCase):
     """A newline in a path component must not split one entry into two.
 
@@ -4999,39 +5025,6 @@ class TestSymlinkScrubIsNulSafe(unittest.TestCase):
     def test_it_still_fails_closed(self):
         self.assertIn("::error::escaping symlink still present", self.scrub)
         self.assertIn("exit 1", self.scrub)
-
-
-class TestLabelMoveCannotContradictTheRow(unittest.TestCase):
-    def setUp(self):
-        self.publish = strip_comments(job_block(STAGE2.read_text(), "publish"))
-
-    def test_the_label_step_reads_the_effective_status_not_the_raw_claim(self):
-        self.assertIn("steps.row.outputs.effective_status", self.publish)
-        # The claim alone must not be what gates the label.
-        self.assertNotIn("STATUS=$(jq -r '.status", self.publish)
-
-    def test_the_row_step_exports_that_status(self):
-        self.assertIn("effective_status=", self.publish)
-
-    def test_status_and_verdict_are_read_back_from_the_row(self):
-        # emit_row.py can refuse a verdict itself, so only the row it wrote
-        # knows the final status and verdict; the artifact does not.
-        self.assertRegex(
-            self.publish, r"EFFECTIVE_STATUS=\"\$\(jq -r '\.status[^']*' terminal\.json"
-        )
-        self.assertIn(
-            "VERDICT=$(jq -r '.verdict // \"none\"' terminal.json", self.publish
-        )
-        self.assertNotIn("'.verdict // \"none\"' out/verdict.json", self.publish)
-
-    def test_the_head_is_rechecked_before_the_label_moves(self):
-        self.assertIn("CURRENT_SHA", self.publish)
-        self.assertIn("REVIEWED_SHA", self.publish)
-        self.assertIn('"$CURRENT_SHA" != "$REVIEWED_SHA"', self.publish)
-
-    def test_a_failed_removal_is_not_reported_as_a_move(self):
-        self.assertIn("could not remove", self.publish)
-        self.assertNotIn(">/dev/null 2>&1 || true", self.publish)
 
 
 class TestLabelComparisonsAreCaseInsensitive(unittest.TestCase):
