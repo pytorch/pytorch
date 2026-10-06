@@ -1,4 +1,5 @@
 import contextlib
+import dataclasses
 import functools
 import itertools
 import logging
@@ -33,6 +34,56 @@ from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class InlinedSubgraphPlan:
+    """A temporary, inspectable lowering of a :class:`SubgraphChoiceCaller`.
+
+    Unlike a ``SubgraphBuffer``, this exposes the individual operations.  It is
+    intended for schedulers which need to inspect or benchmark an internal
+    template boundary before committing to a multi-kernel subgraph choice.
+
+    The plan is only valid inside ``SubgraphChoiceCaller.speculative_inline``.
+    Call ``commit`` to retain the lowering in the parent graph; otherwise all
+    graph mutations are rolled back on context-manager exit.
+    """
+
+    output: Any
+    operations: tuple[ir.Operation, ...]
+    buffers: tuple[Buffer, ...]
+    _committed: bool = False
+
+    @property
+    def template_operations(self) -> tuple[ir.TemplateBuffer, ...]:
+        return tuple(
+            operation
+            for operation in self.operations
+            if isinstance(operation, ir.TemplateBuffer)
+        )
+
+    def commit(self) -> None:
+        self._committed = True
+
+
+@dataclasses.dataclass
+class InlinedMultiKernelFusionPlan:
+    """A temporary multi-kernel plan owned by one autotuning choice."""
+
+    inlined_subgraph: InlinedSubgraphPlan
+    operation_groups: tuple[tuple[ir.Operation, ...], ...]
+    workspace_names: tuple[str, ...] = ()
+
+    @property
+    def output(self) -> Any:
+        return self.inlined_subgraph.output
+
+    @property
+    def buffers(self) -> tuple[Buffer, ...]:
+        return self.inlined_subgraph.buffers
+
+    def commit(self) -> None:
+        self.inlined_subgraph.commit()
 
 
 def inline_subgraph_to_ir_nodes(
@@ -271,8 +322,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             self._bmreq = self._create_benchmark_request()
         return self._bmreq
 
-    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
-        """Regular benchmarking: compile if needed, then use benchmarker."""
+    def _benchmark_complete_plan(self, *args: list[Any], out: torch.Tensor) -> float:
+        """Compile and benchmark the complete ordered subgraph wrapper."""
         bmreq = (
             self._ensure_benchmark_request()
             if self.layout.device.type != "cpu"
@@ -296,14 +347,21 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 return do_bench_using_profiling(fn)
             return bmreq.benchmark_run_fn(fn, out=out)
 
+        return self._benchmark_callable(fn, *sym_inputs, *args)
+
+    def _benchmark_callable(self, fn: Callable[[], Any], *args: Any) -> float:
         if self._benchmark_with_cudagraphs:
             return benchmarker.benchmark_gpu_with_cuda_graph(fn)
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(fn)
         return benchmarker.benchmark(
             fn,
-            device=benchmarker.infer_device(*sym_inputs, *args),
+            device=benchmarker.infer_device(*args),
         )
+
+    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
+        """Compile if needed, then benchmark the complete subgraph."""
+        return self._benchmark_complete_plan(*args, out=out)
 
     def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> None:
         """Run once for collective benchmarking (barrier sync handled by caller)."""
@@ -336,6 +394,70 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             )
         )
 
+    @contextlib.contextmanager
+    def speculative_inline(self):
+        """Temporarily lower this choice into the current parent graph.
+
+        This is the graph-level analogue of ``MultiTemplateBuffer``'s temporary
+        caller swap.  A scheduler can inspect the internal template operation,
+        construct scheduler nodes, and benchmark a complete multi-operation
+        plan without permanently selecting the choice.  Unless the yielded
+        plan is explicitly committed, registrations made while lowering are
+        removed.
+
+        This deliberately snapshots graph registration state rather than
+        cloning IR objects.  Re-entering the context re-lowers the FX graph and
+        therefore produces a fresh candidate.  That makes rollback reliable
+        even when lowering mutates layouts or realizes inputs.
+        """
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
+
+        graph = V.graph
+        operation_watermark = len(graph.operations)
+        buffer_watermark = len(graph.buffers)
+        operation_names = OrderedSet(graph.name_to_op)
+        buffer_names = OrderedSet(graph.name_to_buffer)
+        env = graph.env.copy()
+        removed_buffers = graph.removed_buffers.copy()
+        removed_operations = graph.removed_operations.copy()
+
+        plan: InlinedSubgraphPlan | None = None
+        try:
+            output = inline_subgraph_to_ir_nodes(self.gm, self.input_nodes, self.name)
+            plan = InlinedSubgraphPlan(
+                output=output,
+                operations=tuple(graph.operations[operation_watermark:]),
+                buffers=tuple(graph.buffers[buffer_watermark:]),
+            )
+            yield plan
+        finally:
+            if plan is None or not plan._committed:
+                new_operations = graph.operations[operation_watermark:]
+                new_buffers = graph.buffers[buffer_watermark:]
+                del graph.operations[operation_watermark:]
+                del graph.buffers[buffer_watermark:]
+                graph.env.clear()
+                graph.env.update(env)
+                graph.removed_buffers.clear()
+                graph.removed_buffers.update(removed_buffers)
+                graph.removed_operations.clear()
+                graph.removed_operations.update(removed_operations)
+
+                for name in OrderedSet(graph.name_to_op) - operation_names:
+                    graph.name_to_op.pop(name, None)
+                for name in OrderedSet(graph.name_to_buffer) - buffer_names:
+                    graph.name_to_buffer.pop(name, None)
+
+                # A later committed expansion may reuse the same deterministic
+                # registration names.  Clear them from discarded IR objects so
+                # a failed candidate cannot appear registered twice in
+                # diagnostics.
+                for operation in new_operations:
+                    operation.operation_name = None
+                for buffer in new_buffers:
+                    buffer.name = None
+
     def info_dict(self) -> dict[str, Any]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
@@ -345,6 +467,85 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
     def autoheuristic_id(self) -> str:
         return f"subgraph_{self.name}"
+
+
+class MultiKernelFusionPlanChoice(SubgraphChoiceCaller):
+    """A subgraph choice with explicit ordered fusion groups.
+
+    The choice owns the complete executable and cache identity inherited from
+    ``SubgraphChoiceCaller``.  ``group_builder`` describes which operations
+    form each generated kernel, while ``speculative_fusion_plan`` owns the
+    graph transaction used to inspect or reject the candidate.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        group_builder: Callable[
+            [InlinedSubgraphPlan], tuple[tuple[ir.Operation, ...], ...]
+        ],
+        fusion_plan_key: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.group_builder = group_builder
+        self.fusion_plan_key = fusion_plan_key
+
+    @contextlib.contextmanager
+    def speculative_fusion_plan(self):
+        with self.speculative_inline() as inlined_subgraph:
+            operation_groups = self.group_builder(inlined_subgraph)
+            flattened_operations = tuple(
+                operation for group in operation_groups for operation in group
+            )
+            if flattened_operations != inlined_subgraph.operations:
+                raise AssertionError(
+                    "fusion-plan groups must cover every operation exactly once "
+                    "and preserve program order"
+                )
+            if len(operation_groups) < 2 or any(
+                not group for group in operation_groups
+            ):
+                raise AssertionError(
+                    "a multi-kernel fusion plan requires at least two nonempty groups"
+                )
+            yield InlinedMultiKernelFusionPlan(
+                inlined_subgraph=inlined_subgraph,
+                operation_groups=operation_groups,
+            )
+
+    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
+        scheduler = getattr(V.graph, "scheduler", None)
+        if scheduler is None:
+            return self._benchmark_complete_plan(*args, out=out)
+        return scheduler.benchmark_multi_kernel_fusion_plan(self, args, out)
+
+    def hash_key(self) -> str:
+        input_metadata = tuple(
+            (
+                tuple(inp.get_size()),
+                tuple(inp.get_stride()),
+                inp.get_dtype(),
+                inp.get_device(),
+            )
+            for inp in self.input_nodes
+        )
+        output_metadata = (
+            tuple(self.layout.size),
+            tuple(self.layout.stride),
+            self.layout.dtype,
+            self.layout.device,
+        )
+        return "-".join(
+            (
+                super().hash_key(),
+                "fusion-plan",
+                self.fusion_plan_key,
+                str(input_metadata),
+                str(output_metadata),
+                str(sorted(self.config_patches.items())),
+            )
+        )
 
 
 class SubgraphTemplate(KernelTemplate):
