@@ -1880,18 +1880,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        try:
-            is_class_construction = (
-                self.fn is type
-                and len(args) == 3
-                and issubclass(args[0].python_type(), str)
-                and issubclass(args[1].python_type(), tuple)
-                and issubclass(args[2].python_type(), dict)
-            )
-        except NotImplementedError:
-            is_class_construction = False
-
-        if is_class_construction:
+        if self.fn is type and len(args) == 3:
             unimplemented(
                 gb_type="Dynamic class creation with type",
                 context="type(name, bases, namespace)",
