@@ -104,6 +104,7 @@ def get_autotuned_amd_sqr_kernel():
         key=[],
     )(amd_sqr_kernel)
 
+
 class TestTritonHeuristicsXPU(TestCase):
     def test_patch_triton_intel_launcher_binds_global_scratch(self):
         import textwrap
@@ -2020,6 +2021,7 @@ class TestMakeLaunchersMemory(TestCase):
             gc.enable()
 
         self.assertEqual(len(fake_self.launchers), 1)
+
 
 if __name__ == "__main__":
     if IS_LINUX:
