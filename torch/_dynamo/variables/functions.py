@@ -98,6 +98,7 @@ from .base import (
     GetSet,
     getset_build,
     getset_load_or_build,
+    getset_read,
     getset_set,
     Member,
     Method,
