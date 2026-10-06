@@ -4922,6 +4922,20 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.cuda_backend
 
 
+def is_strict_cuda_triton(device: torch.device | None = None) -> bool:
+    if not (
+        config.strict_pointwise
+        and config.cuda_backend == "triton"
+        and torch.version.hip is None
+    ):
+        return False
+    if device is None:
+        from torch._inductor.virtualized import V
+
+        device = V.graph.get_current_device_or_throw()
+    return device.type == "cuda"
+
+
 def device_supports_fp64(device: torch.device | None) -> bool:
     """Check if the given device supports float64."""
     if device is not None and device.type == "xpu":

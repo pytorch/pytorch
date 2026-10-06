@@ -66,7 +66,7 @@ from torch.compiler._cache import (
     CacheArtifactRecorder,
 )
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
-from torch.fx.node import Node
+from torch.fx.node import map_aggregate, Node
 from torch.fx.traceback import _get_memory_budget_annotation
 from torch.utils._triton import has_triton_package
 
@@ -746,6 +746,18 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 for name, obj in python_code.globals.items()
             )
         )
+        # Generated code spells all NaNs alike; pickle preserves their exact bits.
+        nan_constants: list[float | complex] = []
+
+        def collect_nan(arg: Any) -> Any:
+            if isinstance(arg, (float, complex)) and arg != arg:
+                nan_constants.append(arg)
+            return arg
+
+        for node in gm.graph.nodes:
+            map_aggregate((node.args, node.kwargs), collect_nan)
+        if nan_constants:
+            return (_ident, ((dict_without_graph, import_block, nan_constants),))
         return (_ident, ((dict_without_graph, import_block),))
 
     # [NOTE] Tensor subclass stable hashing for AOT autograd cache

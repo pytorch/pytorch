@@ -1086,9 +1086,7 @@ class PythonPrinter(_PythonPrinter):
 
 
 class OpDecompositions:
-    """
-    Decomposes inductor ops
-    """
+    """Decompose Inductor scalar operations using shared primitive operations."""
 
     @staticmethod
     def identity(value: OpVarT) -> OpVarT:
@@ -1141,6 +1139,14 @@ class OpDecompositions:
     @staticmethod
     def relu(x: OpVarT) -> OpVarT:
         return ops.maximum(x, ops.constant(0, torch.int32))
+
+    @staticmethod
+    def fmin(a: OpVarT, b: OpVarT) -> OpVarT:
+        return ops.where(ops.or_(ops.isnan(b), ops.gt(b, a)), a, b)
+
+    @staticmethod
+    def fmax(a: OpVarT, b: OpVarT) -> OpVarT:
+        return ops.where(ops.or_(ops.isnan(b), ops.lt(b, a)), a, b)
 
     @staticmethod
     def fma(x: OpVarT, y: OpVarT, z: OpVarT) -> OpVarT:

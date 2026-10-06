@@ -3,6 +3,7 @@ import functools
 import logging
 import math
 import operator
+import struct
 import sys
 from collections.abc import Callable
 from typing import Any, cast, TypeAlias, TypeVar
@@ -22,8 +23,14 @@ from torch._decomp.decompositions import (
     _index_add,
     adaptive_max_pool3d as decomp_adaptive_max_pool3d,
     embedding_dense_backward as decomp_embedding_dense_backward,
+    gelu_backward as decomp_gelu_backward,
+    hardswish_backward as decomp_hardswish_backward,
+    mish_backward as decomp_mish_backward,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
+    sigmoid_backward as decomp_sigmoid_backward,
+    silu_backward as decomp_silu_backward,
+    tanh_backward as decomp_tanh_backward,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
@@ -38,6 +45,11 @@ from torch._prims_common import (
     type_to_dtype,
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
+from torch._refs.nn.functional import (
+    _aten_hardtanh as decomp_hardtanh,
+    gelu as decomp_gelu,
+    softplus as decomp_softplus,
+)
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     statically_known_true,
@@ -48,6 +60,7 @@ from . import config, inductor_prims
 from .utils import (
     is_bf16x9_matmul,
     is_gpu,
+    is_strict_cuda_triton,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
@@ -126,6 +139,15 @@ decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = 
     aten._softmax_backward_data,
     aten.clamp_max,
     aten.clamp_min,
+    aten.gelu.default,
+    aten.gelu_backward.default,
+    aten.hardtanh.default,  # inductor preserves NaN payloads under strict numerics
+    aten.hardswish_backward.default,
+    aten.mish_backward.default,
+    aten.sigmoid_backward.default,
+    aten.silu_backward.default,
+    aten.softplus.default,
+    aten.tanh_backward.default,
     aten.embedding_dense_backward,  # we fall back on xpu
     aten.native_layer_norm,  # we fall back on mtia
     aten.index_add,  # we conditionally call this decomp
@@ -335,18 +357,164 @@ def sym_constrain_range_for_size(
     return
 
 
-@register_decomposition([aten.clamp])
+def _use_strict_clamp(a: torch.Tensor, dtype: torch.dtype | None = None) -> bool:
+    return is_strict_cuda_triton(a.device) and (
+        a.dtype if dtype is None else dtype
+    ) in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+
+
+@register_decomposition(aten.hardtanh.default)
+def hardtanh(
+    a: torch.Tensor,
+    min_val: torch.types.Number = -1,
+    max_val: torch.types.Number = 1,
+) -> torch.Tensor:
+    if _use_strict_clamp(a):
+        # Preserve the original input bits before the reference's opmath casts.
+        return clamp(a, min_val, max_val)
+    return cast(torch.Tensor, decomp_hardtanh(a, min_val=min_val, max_val=max_val))
+
+
 @pw_cast_for_opmath_non_tensor_args
-def clamp(
+def _clamp_default(
     x: torch.Tensor,
-    min: torch.types.Number | None = None,
-    max: torch.types.Number | None = None,
+    min: torch.types.Number | torch.Tensor | None = None,
+    max: torch.types.Number | torch.Tensor | None = None,
 ) -> torch.Tensor:
     if min is not None:
         x = x.clamp_min(min)
     if max is not None:
         x = x.clamp_max(max)
     return x
+
+
+def _cuda_tensor_iterator_cast(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    # TensorIterator narrows CUDA doubles through float32.
+    if x.dtype == torch.float64 and dtype in (torch.float16, torch.bfloat16):
+        x = x.float()
+    result = x.to(dtype)
+    if x.dtype == torch.float16 and dtype == torch.float64:
+        # CUDA's half-to-double path canonicalizes NaNs before widening.
+        bits = torch.where(torch.isnan(x), 0x7FFFFFFFE0000000, result.view(torch.int64))
+        result = bits.view(dtype)
+    return result
+
+
+def _clamp_nan_fill(x: torch.Tensor, value: torch.types.Number | None) -> torch.Tensor:
+    if value is None or x.dtype == torch.bfloat16:
+        return torch.full_like(x, float("nan"))
+    if isinstance(value, torch.SymFloat):
+        one = torch.scalar_tensor(1.0, dtype=torch.float64, device=x.device)
+        bits = (one * value).view(torch.int64)
+    else:
+        value_bits = int.from_bytes(struct.pack("<d", value), "little", signed=True)
+        bits = torch.scalar_tensor(value_bits, dtype=torch.int64, device=x.device)
+    # Match the host Scalar conversion, including NaN sign and payload.
+    if x.dtype == torch.float16:
+        bits = ((bits >> 48) & 0x8000) | 0x7E00
+    elif x.dtype == torch.float32:
+        bits = ((bits >> 32) & 0x80000000) | ((bits >> 29) & 0x7FFFFF) | 0x7FC00000
+    int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[x.element_size()]
+    shape, permutation = _get_shape_permutation_like(x)
+    return bits.to(int_dtype).expand(shape).clone().permute(permutation).view(x.dtype)
+
+
+def _strict_clamp(
+    x: torch.Tensor,
+    min: torch.types.Number | torch.Tensor | None = None,
+    max: torch.types.Number | torch.Tensor | None = None,
+    *,
+    nan_fill_value: torch.types.Number | None = None,
+) -> torch.Tensor:
+    tensor_bounds = isinstance(min, torch.Tensor) or isinstance(max, torch.Tensor)
+    dtype = x.dtype
+    if config.strict_pointwise and tensor_bounds:
+        _, dtype = elementwise_dtypes(
+            x, min, max, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+        )
+    if not _use_strict_clamp(x, dtype) or (min is None and max is None):
+        return NotImplemented
+
+    compute_dtype = dtype if tensor_bounds else utils.get_computation_dtype(dtype)
+    nan_bounds = None
+    if tensor_bounds:
+        # TensorIterator converts all operands to their joint result dtype.
+        x = _cuda_tensor_iterator_cast(x, dtype)
+        lo = (
+            _cuda_tensor_iterator_cast(min, dtype)
+            if isinstance(min, torch.Tensor)
+            else None
+        )
+        hi = (
+            _cuda_tensor_iterator_cast(max, dtype)
+            if isinstance(max, torch.Tensor)
+            else None
+        )
+    else:
+        # Eager checks NaN bounds before converting either to opmath precision.
+        if (isinstance(min, (int, float)) and math.isnan(min)) or (
+            isinstance(max, (int, float)) and math.isnan(max)
+        ):
+            return _clamp_nan_fill(x, nan_fill_value)
+        min = -float("inf") if min is None else min
+        max = float("inf") if max is None else max
+        if any(isinstance(v, torch.SymFloat) for v in (min, max)):
+            # Tensorification avoids scalar specialization and lost negative zero.
+            one = torch.scalar_tensor(1.0, dtype=compute_dtype, device=x.device)
+            lo, hi = one * min, one * max
+            nan_bounds = torch.isnan(lo) | torch.isnan(hi)
+        else:
+            lo = torch.scalar_tensor(min, dtype=compute_dtype, device=x.device)
+            hi = torch.scalar_tensor(max, dtype=compute_dtype, device=x.device)
+    result = x.to(compute_dtype)
+    if lo is not None:
+        result = (
+            torch.maximum(result, lo)
+            if hi is None
+            else torch.where(result < lo, lo, result)
+        )
+    if hi is not None:
+        result = (
+            torch.minimum(result, hi)
+            if lo is None
+            else torch.where(hi < result, hi, result)
+        )
+    result = result.to(dtype)
+    # Preserve input NaN bits through opmath casts and min/max optimizations.
+    int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[x.element_size()]
+    bits = result.view(int_dtype)
+    if tensor_bounds:
+        # Eager's NaN precedence is input, lower bound, then upper bound.
+        for bound in (hi, lo):
+            if bound is not None:
+                bits = torch.where(torch.isnan(bound), bound.view(int_dtype), bits)
+    bits = torch.where(torch.isnan(x), x.view(int_dtype), bits)
+    if nan_bounds is not None:
+        nan = _clamp_nan_fill(x, nan_fill_value).view(int_dtype)
+        bits = torch.where(nan_bounds, nan, bits)
+    return bits.view(dtype)
+
+
+@register_decomposition(aten.clamp)
+def clamp(
+    x: torch.Tensor,
+    min: torch.types.Number | torch.Tensor | None = None,
+    max: torch.types.Number | torch.Tensor | None = None,
+) -> torch.Tensor:
+    result = _strict_clamp(x, min, max)
+    return _clamp_default(x, min, max) if result is NotImplemented else result
+
+
+@register_decomposition(aten.clamp_min)
+def clamp_min(x: torch.Tensor, min: torch.types.Number | torch.Tensor) -> torch.Tensor:
+    nan_fill = None if isinstance(min, torch.Tensor) else min
+    return _strict_clamp(x, min=min, nan_fill_value=nan_fill)
+
+
+@register_decomposition(aten.clamp_max)
+def clamp_max(x: torch.Tensor, max: torch.types.Number | torch.Tensor) -> torch.Tensor:
+    nan_fill = None if isinstance(max, torch.Tensor) else max
+    return _strict_clamp(x, max=max, nan_fill_value=nan_fill)
 
 
 # Inductor-specific SiLU decomposition for exact eager matching.
@@ -356,6 +524,139 @@ def clamp(
 @pw_cast_for_opmath
 def silu(x: torch.Tensor) -> torch.Tensor:
     return x / (1 + x.neg().exp())
+
+
+@register_decomposition(aten.gelu.default)
+@pw_cast_for_opmath
+def gelu(a: torch.Tensor, approximate: str = "none") -> torch.Tensor:
+    if (
+        not is_strict_cuda_triton(a.device)
+        or a.dtype != torch.float32
+        or approximate != "tanh"
+    ):
+        return cast(torch.Tensor, decomp_gelu(a, approximate))
+    k_beta = math.sqrt(2) * (2 / math.sqrt(math.pi)) * 0.5
+    inner = k_beta * torch.add(a, a * a * a, alpha=0.044715)
+    return 0.5 * a * (1 + torch.tanh(inner))
+
+
+@register_decomposition(aten.softplus.default)
+@pw_cast_for_opmath
+def softplus(
+    a: torch.Tensor, beta: float | None = None, threshold: float = 20
+) -> torch.Tensor:
+    if not is_strict_cuda_triton(a.device) or a.dtype != torch.float32 or beta is None:
+        return cast(torch.Tensor, decomp_softplus(a, beta, threshold))
+    divisor = torch.ones((), dtype=a.dtype, device=a.device) * beta
+    scaled = a * divisor
+    # addcdiv preserves true division; -0 preserves the quotient's zero sign.
+    zero = torch.full((), -0.0, dtype=a.dtype, device=a.device)
+    result = torch.addcdiv(zero, torch.log1p(torch.exp(scaled)), divisor)
+    return torch.where(scaled > threshold, a, result)
+
+
+def _strict_activation_inputs(
+    grad_output: torch.Tensor, self: torch.Tensor, dtype: torch.dtype | None = None
+) -> tuple[torch.Tensor, torch.Tensor, torch.dtype] | None:
+    if not is_strict_cuda_triton(self.device):
+        return None
+    dtype = torch.result_type(grad_output, self) if dtype is None else dtype
+    if dtype not in (torch.float16, torch.bfloat16, torch.float32):
+        return None
+    # CUDA loads operands in the kernel dtype before converting to opmath.
+    return (
+        _cuda_tensor_iterator_cast(grad_output, dtype).float(),
+        _cuda_tensor_iterator_cast(self, dtype).float(),
+        dtype,
+    )
+
+
+@register_decomposition(aten.gelu_backward.default)
+def gelu_backward(
+    grad_output: torch.Tensor, self: torch.Tensor, approximate: str = "none"
+) -> torch.Tensor:
+    inputs = (
+        _strict_activation_inputs(grad_output, self) if approximate == "tanh" else None
+    )
+    if inputs is None:
+        return decomp_gelu_backward(grad_output, self, approximate)
+    grad_output, self, dtype = inputs
+    k_beta = math.sqrt(2) * (2 / math.sqrt(math.pi)) * 0.5
+    x_sq = self * self
+    t = torch.tanh(k_beta * torch.add(self, x_sq * self, alpha=0.044715))
+    one = torch.ones((), dtype=self.dtype, device=self.device)
+    tanh_derivative = torch.addcmul(one, -t, t)
+    # CUDA rounds 3 * kKappa in opmath precision before multiplying by x_sq.
+    inner_derivative = k_beta * torch.add(one, x_sq, alpha=0.13414499163627625)
+    right_derivative = (0.5 * self) * tanh_derivative * inner_derivative
+    return (grad_output * (0.5 * (1 + t) + right_derivative)).to(dtype)
+
+
+@register_decomposition(aten.hardswish_backward.default)
+def hardswish_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor:
+    inputs = _strict_activation_inputs(grad_output, self)
+    if inputs is None:
+        return decomp_hardswish_backward(grad_output, self)
+    grad_output, self, dtype = inputs
+    half = torch.full((), 0.5, dtype=self.dtype, device=self.device)
+    three = torch.full((), 3, dtype=self.dtype, device=self.device)
+    # addcdiv preserves CUDA's rounded division instead of multiplying by 1/3.
+    slope = torch.addcdiv(half, self, three)
+    return torch.where(
+        self <= -3, 0.0, torch.where(self < 3, grad_output * slope, grad_output)
+    ).to(dtype)
+
+
+@register_decomposition(aten.mish_backward.default)
+def mish_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor:
+    # Unlike the other backwards, eager allocates Mish's output in self.dtype.
+    inputs = _strict_activation_inputs(grad_output, self, dtype=self.dtype)
+    if inputs is None:
+        return decomp_mish_backward(grad_output, self)
+    grad_output, self, dtype = inputs
+    t = torch.tanh(torch.nn.functional.softplus(self))
+    s = torch.sigmoid(self)
+    one = torch.ones((), dtype=self.dtype, device=self.device)
+    derivative = torch.addcmul(t, self * s, torch.addcmul(one, -t, t))
+    return (grad_output * derivative).to(dtype)
+
+
+@register_decomposition(aten.silu_backward.default)
+def silu_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.Tensor:
+    inputs = _strict_activation_inputs(grad_output, self)
+    if inputs is None:
+        return decomp_silu_backward(grad_output, self)
+    grad_output, self, dtype = inputs
+    s = torch.sigmoid(self)
+    one = torch.ones((), dtype=self.dtype, device=self.device)
+    return (grad_output * s * torch.addcmul(one, self, 1 - s)).to(dtype)
+
+
+@register_decomposition(aten.tanh_backward.default)
+def tanh_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
+    inputs = _strict_activation_inputs(grad_output, output)
+    if inputs is None:
+        return decomp_tanh_backward(grad_output, output)
+    grad_output, output, dtype = inputs
+    if dtype in (torch.float16, torch.bfloat16):
+        # Eager rounds each arithmetic operation in the tensor dtype.
+        product = (output * output).to(dtype)
+        delta = (1 - product.float()).to(dtype)
+        return (grad_output * delta.float()).to(dtype)
+    one = torch.ones((), dtype=dtype, device=output.device)
+    return grad_output * torch.addcmul(one, -output, output)
+
+
+@register_decomposition(aten.sigmoid_backward.default)
+def sigmoid_backward(grad_output: torch.Tensor, output: torch.Tensor) -> torch.Tensor:
+    inputs = _strict_activation_inputs(grad_output, output)
+    if inputs is None:
+        return decomp_sigmoid_backward(grad_output, output)
+    grad_output, output, dtype = inputs
+    # CUDA associates left and rounds each operation to the tensor dtype.
+    delta = (1 - output).to(dtype)
+    product = (grad_output * delta.float()).to(dtype)
+    return (product.float() * output).to(dtype)
 
 
 @register_decomposition([aten.full])
@@ -772,11 +1073,15 @@ def lift(self: torch.Tensor) -> torch.Tensor:
 
 @register_decomposition([aten.fmin, prims.fmin])
 def fmin(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
+    if is_strict_cuda_triton(self.device) or is_strict_cuda_triton(other.device):
+        return NotImplemented
     return torch.where(torch.isnan(other) | (other > self), self, other)
 
 
 @register_decomposition([aten.fmax, prims.fmax])
 def fmax(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
+    if is_strict_cuda_triton(self.device) or is_strict_cuda_triton(other.device):
+        return NotImplemented
     return torch.where(torch.isnan(other) | (other < self), self, other)
 
 

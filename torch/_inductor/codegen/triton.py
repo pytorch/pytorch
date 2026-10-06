@@ -1340,14 +1340,6 @@ class TritonOverrides(OpOverrides):
     _LOG_2_E = math.log2(math.e)
 
     @staticmethod
-    def _strict_cuda_pointwise() -> bool:
-        return (
-            config.strict_pointwise
-            and torch.version.hip is None
-            and V.graph.get_current_device_or_throw().type == "cuda"
-        )
-
-    @staticmethod
     @override
     def to_dtype(
         x,
@@ -1404,7 +1396,7 @@ class TritonOverrides(OpOverrides):
         if (
             dtype in (torch.uint8, torch.int8, torch.int16)
             and (src_dtype is None or src_dtype.is_floating_point)
-            and TritonOverrides._strict_cuda_pointwise()
+            and utils.is_strict_cuda_triton()
         ):
             # CUDA narrows through int32; c10 routes uint8 through int64 instead.
             intermediate = "tl.int64" if dtype == torch.uint8 else "tl.int32"
@@ -1426,6 +1418,22 @@ class TritonOverrides(OpOverrides):
         else:
             out_dtype = triton_store_type(dtype)
 
+        if (
+            dtype == torch.bfloat16
+            and src_dtype is not None
+            and src_dtype in (torch.int32, torch.int64, torch.uint32, torch.uint64)
+            and utils.is_strict_cuda_triton()
+        ):
+            # Eager converts through float32; preserve that rounding when narrowing.
+            convert = {
+                torch.int32: "int2float_rn",
+                torch.int64: "ll2float_rn",
+                torch.uint32: "uint2float_rn",
+                torch.uint64: "ull2float_rn",
+            }[src_dtype]
+            x = TritonOverrides._cast_libdevice_arg(x, src_dtype)
+            return f"libdevice.{convert}({x}).to({out_dtype})"
+
         # Triton cannot cast integers to any fp8 type directly, so go through float32.
         if (
             src_dtype is not None
@@ -1433,6 +1441,33 @@ class TritonOverrides(OpOverrides):
             and (src_dtype == torch.bool or is_integer_dtype(src_dtype))
         ):
             return f"{x}.to(tl.float32).to({out_dtype})"
+
+        if (
+            src_dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+            and src_dtype != dtype
+            and dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+            and utils.is_strict_cuda_triton()
+        ):
+            if src_dtype == torch.float32 and dtype == torch.float64:
+                # Widening quiets signaling NaNs even if a later cast narrows back.
+                nan = (
+                    f"({x}.to(tl.int32, bitcast=True) | 0x00400000)"
+                    ".to(tl.float32, bitcast=True).to(tl.float64)"
+                )
+                return f"tl.where({x} != {x}, {nan}, {x}.to({out_dtype}))"
+            nan_bits = None
+            if dtype in (torch.float16, torch.bfloat16):
+                nan_bits = 0x7FFF
+            elif src_dtype == torch.float16:
+                nan_bits = 0x7FFFFFFF if dtype == torch.float32 else 0x7FFFFFFFE0000000
+            if nan_bits is not None:
+                # Preserve CUDA's NaN conversion when Triton folds a cast chain.
+                int_type = {2: "tl.int16", 4: "tl.int32", 8: "tl.int64"}[dtype.itemsize]
+                nan = (
+                    f"tl.full((), {nan_bits}, {int_type})"
+                    f".to({triton_type(dtype)}, bitcast=True).to({out_dtype})"
+                )
+                return f"tl.where({x} != {x}, {nan}, {x}.to({out_dtype}))"
 
         return f"{x}.to({out_dtype})"
 
@@ -1613,6 +1648,10 @@ class TritonOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + 1"
         elif bug is None:
+            if utils.is_strict_cuda_triton():
+                # Eager preserves the input's negative zero and NaN payload.
+                zero = ops.constant(0, torch.int32)
+                return ops.where(ops.lt(x, zero), zero, x)
             return ops.maximum(ops.constant(0, torch.int32), x)
         else:
             raise AssertionError(
@@ -1628,6 +1667,28 @@ class TritonOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
+
+    @staticmethod
+    def _fminmax(a, b, name):
+        result = f"tl.{name}({a}, {b})"
+        both_nan = f"tl.{name}({a}, {b}, tl.PropagateNan.ALL)"
+        if a.dtype == torch.float64:
+            # Lowering orders the operands so the second NaN supplies the payload.
+            both_nan = (
+                f"({b}.to(tl.int64, bitcast=True) | 0x0008000000000000)"
+                ".to(tl.float64, bitcast=True)"
+            )
+        return f"tl.where(({a} != {a}) & ({b} != {b}), {both_nan}, {result})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def fmin(a, b):
+        return TritonOverrides._fminmax(a, b, "minimum")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def fmax(a, b):
+        return TritonOverrides._fminmax(a, b, "maximum")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -2292,7 +2353,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sigmoid(x):
-        if TritonOverrides._strict_cuda_pointwise():
+        if utils.is_strict_cuda_triton():
             # CUDA eager uses exp and correctly rounded division at opmath precision.
             return f"libdevice.rcp_rn(1.0 + libdevice.exp(-({x})))"
         return f"tl.sigmoid({x})"
