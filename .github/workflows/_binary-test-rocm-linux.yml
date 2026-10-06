@@ -1,9 +1,9 @@
 # Owner(s): ["module: rocm"]
 name: linux-binary-test-rocm
 
-# Reusable workflow that runs the ROCm binary test (setup-rocm, GPU device
-# passthrough, ECR docker pull, test-pytorch-binary, teardown-rocm). Called
-# from the matrix-driven manywheel-test-rocm job in
+# Reusable workflow that runs the ROCm binary test inside the job container.
+# The runner infrastructure assigns the GPU on that pod. Called from the
+# matrix-driven manywheel-test-rocm job in
 # generated-linux-binary-manywheel-nightly.yml.
 
 on:
@@ -50,15 +50,13 @@ permissions:
   contents: read
 
 jobs:
-  # ROCm test runs the test container via the GHA `container:` directive.
-  # ROCm device passthrough flags go through container.options. Same shape
-  # as the standard _binary-test-linux.yml.
+  # The job image is started by the runner's container hook. GPU devices come
+  # from the job pod, not from Docker --device flags.
   test:
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     container:
       image: pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
-      options: --device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
@@ -73,7 +71,6 @@ jobs:
       BUILD_ENVIRONMENT: linux-binary-manywheel
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      GPU_FLAG: "--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon"
     permissions:
       id-token: write
       contents: read
