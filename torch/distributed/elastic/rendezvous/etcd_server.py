@@ -99,14 +99,16 @@ class EtcdServer:
     Usage
     ::
 
-     server = EtcdServer("/usr/bin/etcd", 2379, "/tmp/default.etcd")
+     server = EtcdServer()
      server.start()
      client = server.get_client()
      # use client
      server.stop()
 
     Args:
-        etcd_binary_path: path of etcd server binary (see above for fallback path)
+        data_dir: directory for the etcd server data. If not provided, a
+            temporary directory is created with ``tempfile.mkdtemp()`` and
+            deleted when the server stops (or on process exit).
     """
 
     def __init__(self, data_dir: str | None = None):

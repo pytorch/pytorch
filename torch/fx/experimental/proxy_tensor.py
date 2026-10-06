@@ -2518,11 +2518,18 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
         )
 
     def run_node(self, n: fx.Node) -> Any:
+        from torch._guards import detect_fake_mode
+        from torch.fx.experimental.symbolic_shapes import rebind_unbacked
+
         if self.should_decompose(n):
             with decompose(self.decomposition_table):
                 result = super().run_node(n)
         else:
             result = super().run_node(n)
+        # Retracing allocates fresh unbacked symbols; tie them back to the
+        # originals, which deferred runtime asserts are keyed on.
+        if (fake_mode := detect_fake_mode()) is not None:
+            rebind_unbacked(fake_mode.shape_env, n, result)
         return result
 
 
@@ -2534,6 +2541,12 @@ def selective_decompose(
     trace_joint_graph: bool,
 ) -> fx.GraphModule:
     """Retrace a joint graph module and selectively apply decomposition."""
+    from torch._guards import detect_fake_mode
+
+    # rebind_unbacked (in _SelectiveDecomposeInterpreter.run_node) requires that
+    # the retrace not hit fake tensor memos from the original trace.
+    if (fake_mode := detect_fake_mode(args)) is not None:
+        fake_mode.epoch += 1
 
     if trace_joint_graph:
         # the arg name, primals and tangents, are important.
@@ -2777,8 +2790,20 @@ class _ModuleStackTracer(PythonKeyTracer):
         global _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT
         _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT.clear()
 
-        for key, val in self.tensor_tracker.items():
-            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
+        # Only step (2) of the strategy above, and only the consumers gated on
+        # detect_non_strict_fake_tensor_leaks ever read this. Populating it
+        # regardless kept a node per traced tensor in a module-level dict, and
+        # through them the graph, its owning module, and every parameter -- for
+        # the life of the process, long after the trace returned.
+        # Imported here rather than at module level on purpose: importing
+        # torch._export.config runs torch/_export/__init__.py, which does
+        # `from torch.fx.experimental.proxy_tensor import make_fx` -- a cycle
+        # back into this module while it is still initialising.
+        import torch._export.config as _export_config
+
+        if _export_config.detect_non_strict_fake_tensor_leaks:
+            for key, val in self.tensor_tracker.items():
+                _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
 
         # Since we are making _AttrProxy mimic the original
         # submodule, when someone registers a module directly
