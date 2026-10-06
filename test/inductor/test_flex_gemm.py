@@ -6,6 +6,7 @@ import importlib
 import inspect
 import itertools
 import math
+import os
 import re
 import struct
 import subprocess
@@ -296,6 +297,21 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = False
         with self.assertRaisesRegex(NotImplementedError, r"fp32_precision is 'ieee'"):
             lowering.check_quack_fp32_operand(fp32)
+
+    def test_quack_cache_dir_follows_inductor_cache_dir(self):
+        from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
+        from torch._inductor.utils import fresh_cache
+
+        # Memoization must respect fresh_cache() changes to TORCHINDUCTOR_CACHE_DIR.
+        seen = set()
+        for _ in range(2):
+            with fresh_cache():
+                root = os.environ["TORCHINDUCTOR_CACHE_DIR"]
+                self.assertEqual(
+                    inductor_quack_cache_dir(), os.path.join(root, "quack")
+                )
+                seen.add(root)
+        self.assertEqual(len(seen), 2)
 
     def test_clamp_codegen_uses_public_cutlass_api(self):
         from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
@@ -781,13 +797,14 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         graph_module = make_fx(lambda a, b, bias: torch.mm(a, b) + bias)(
             torch.randn(4, 8), torch.randn(8, 16), torch.randn(16)
         )
-        placeholders = [
-            node for node in graph_module.graph.nodes if node.op == "placeholder"
-        ]
+        nodes = list(graph_module.graph.nodes)
+        placeholders = [node for node in nodes if node.op == "placeholder"]
+        add = next(n for n in nodes if n.target == torch.ops.aten.add.Tensor)
         match = SimpleNamespace(
             args=tuple(placeholders[:2]),
             kwargs={"inp": placeholders[2]},
-            nodes=list(graph_module.graph.nodes),
+            nodes=nodes,
+            output_node=lambda: add,
         )
         self.assertTrue(is_valid_addmm_fusion(match))
 
