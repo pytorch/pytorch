@@ -4911,6 +4911,18 @@ class MethodDescriptorVariable(DescriptorVariable):
         # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
         return BoundBuiltinMethodVariable(self.descriptor, obj)
 
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        # PyMethodDescr_Type leaves tp_richcompare NULL and inherits
+        # object_richcompare from object.
+        from .object_protocol import object_richcompare
+
+        return object_richcompare(self, tx, other, op)
+
 
 class BoundBuiltinMethodVariable(VariableTracker):
     """Bound builtin_function_or_method (PyCFunction_Type).
@@ -5155,6 +5167,13 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
                 f"'{owner_type.__name__}' as arg 2",
             )
         owner_value = owner.get_real_python_backed_value()
+        if not isinstance(owner_value, type):
+            unimplemented(
+                gb_type="Unresolved classmethod descriptor owner",
+                context=f"{self} owner={owner}",
+                explanation="Dynamo cannot resolve the class this classmethod descriptor is bound to.",
+                hints=[*graph_break_hints.DYNAMO_BUG],
+            )
         if not issubclass(owner_value, self.descriptor.__objclass__):
             raise_type_error(
                 tx,

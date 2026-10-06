@@ -2925,6 +2925,16 @@
       "Hints": []
     }
   ],
+  "GB2315": [
+    {
+      "Gb_type": "Unresolved classmethod descriptor owner",
+      "Context": "{self} owner={owner}",
+      "Explanation": "Dynamo cannot resolve the class this classmethod descriptor is bound to.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0174": [
     {
       "Gb_type": "bad args to builtin cast()",
