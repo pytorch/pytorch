@@ -357,8 +357,18 @@ class Match:
         # pyrefly: ignore [bad-context-manager]
         with context:
             if trace_fn is None:
+                # Under compile-on-one-rank the graph stays rank-agnostic until
+                # post_grad's respecialize_current_device_nodes, so a replacement
+                # spliced in before then must not bake the compiling rank's device.
+                rank_agnostic = bool(
+                    self.graph.find_nodes(
+                        op="call_function", target=torch.ops.coor.current_device.default
+                    )
+                )
                 trace_fn = functools.partial(
-                    fwd_only, run_functional_passes=run_functional_passes
+                    fwd_only,
+                    run_functional_passes=run_functional_passes,
+                    is_replacement=rank_agnostic,
                 )
 
             if should_propagate_eager_input_vals(self.nodes):
@@ -3082,17 +3092,26 @@ def fwd_only(
     *,
     run_functional_passes: bool = True,
     get_decomp_fn: Callable[..., Any] = select_decomp_table,
+    is_replacement: bool = False,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
+    import contextlib
+
     from torch.compiler import config as compiler_config
 
-    # Patterns are device-agnostic templates traced with fixed example tensors; keep the
-    # compile-on-one-rank device handling out of pattern tracing so make_fx's single-device
-    # check only validates real user graphs, not these internal fixed-device templates.
     # TODO - look into using aot autograd, asserting no mutating ops here
-    with (
+    # A pattern template is matched against, never spliced in, so tracing it with a
+    # fixed example device is fine -- and CooR's single-device check would reject it.
+    # A replacement spliced into a still rank-agnostic graph has to be traced with
+    # CooR live or it bakes a rank-specific device into that graph.
+    coor_ctx = (
+        contextlib.nullcontext()
+        if is_replacement
         # pyrefly: ignore [missing-attribute]
-        compiler_config.patch(compile_on_one_rank=False),
+        else compiler_config.patch(compile_on_one_rank=False)
+    )
+    with (
+        coor_ctx,
         enable_python_dispatcher(),
         preserve_node_meta(),
     ):
