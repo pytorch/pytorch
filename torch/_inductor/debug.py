@@ -58,6 +58,7 @@ ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_lowering_pretty_log = getArtifactLogger(__name__, "ir_post_lowering_pretty")
 ir_pre_fusion_pretty_log = getArtifactLogger(__name__, "ir_pre_fusion_pretty")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
+ir_post_fusion_pretty_log = getArtifactLogger(__name__, "ir_post_fusion_pretty")
 SchedulerNodeList = list[Any]
 BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
 GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
@@ -810,7 +811,7 @@ def log_ir_post_lowering_pretty(operations: list[Any]) -> None:
         output = format_post_lowering_ir(operations)
     except Exception as exc:
         output = f"unimplemented post_lowering_ir({type(exc).__name__}: {exc})"
-    ir_post_lowering_pretty_log.info("POST-LOWERING PRETTY IR\n%s", output)
+    ir_post_lowering_pretty_log.info("POST-LOWERING PRETTY IR\n%s\n", output)
 
 
 def log_ir_pre_fusion_pretty(nodes: SchedulerNodeList) -> None:
@@ -823,7 +824,7 @@ def log_ir_pre_fusion_pretty(nodes: SchedulerNodeList) -> None:
         output = format_pre_fusion_ir(nodes)
     except Exception as exc:
         output = f"unimplemented pre_fusion_ir({type(exc).__name__}: {exc})"
-    ir_pre_fusion_pretty_log.info("PRE-FUSION PRETTY IR\n%s", output)
+    ir_pre_fusion_pretty_log.info("PRE-FUSION PRETTY IR\n%s\n", output)
 
 
 def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
@@ -831,6 +832,19 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
         ir_post_fusion_log.info("AFTER FUSION\n%s", DebugFormatter._write_ir(nodes))
 
     V.debug.ir_post_fusion(nodes)
+
+
+def log_ir_post_fusion_pretty(nodes: SchedulerNodeList) -> None:
+    if not ir_post_fusion_pretty_log.isEnabledFor(logging.INFO):
+        return
+
+    from .pretty_print_ir import format_post_fusion_ir
+
+    try:
+        output = format_post_fusion_ir(nodes)
+    except Exception as exc:
+        output = f"unimplemented post_fusion_ir({type(exc).__name__}: {exc})"
+    ir_post_fusion_pretty_log.info("POST-FUSION PRETTY IR\n%s\n", output)
 
 
 def _dump_collective_schedule(schedule: list[str | None]) -> None:
