@@ -559,7 +559,6 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
 
   params.dims = dims;
   params.pooling_dims = pooling_dims;
-  params.grad_output_numel = safe_downcast<int32_t, int64_t>(grad_output.numel());
 
   for (const auto dim : c10::irange(dims)) {
     params.grad_input_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_input.size(dim));
@@ -572,7 +571,8 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto maxPoolPSO = lib.getPipelineStateForFunc("max_pool_backward_" + scalarToMetalTypeString(input));
+      auto maxPoolPSO = lib.getPipelineStateForFunc("max_pool_backward_" + scalarToMetalTypeString(input) +
+                                                    (at::globalContext().deterministicAlgorithms() ? "_serial" : ""));
 
       getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input}, mpsStream);
       [computeEncoder setComputePipelineState:maxPoolPSO];
@@ -880,7 +880,6 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   if (divisor_override.has_value()) {
     params.divisor_override = safe_downcast<int32_t, int64_t>(divisor_override.value());
   }
-  params.output_numel = safe_downcast<int32_t, int64_t>(grad_output.numel());
 
   for (const auto dim : c10::irange(dims)) {
     params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_output.size(dim));
@@ -896,7 +895,8 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto PSO = lib.getPipelineStateForFunc("avg_pool_backward_" + scalarToMetalTypeString(input));
+      auto PSO = lib.getPipelineStateForFunc("avg_pool_backward_" + scalarToMetalTypeString(input) +
+                                             (at::globalContext().deterministicAlgorithms() ? "_serial" : ""));
 
       getMPSProfiler().beginProfileKernel(PSO, op_name, {grad_output}, mpsStream);
       [computeEncoder setComputePipelineState:PSO];

@@ -743,17 +743,25 @@ static bool within_bounds(T pos, T size) {
 }
 
 template <typename T, typename idx_t>
-kernel void grid_sampler_3d_backward(
-    constant T* grad_output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
-    device AtomicType_t<T>* grad_input [[buffer(3)]],
-    device T* grad_grid [[buffer(4)]],
-    constant GridSamplerBackwardParams<5, idx_t>& params [[buffer(5)]],
-    uint3 thread_index [[thread_position_in_grid]],
-    uint3 threads_per_grid [[threads_per_grid]]) {
+void grid_sampler_3d_backward_impl(
+    constant T* grad_output,
+    constant T* input,
+    constant T* grid,
+    device AtomicType_t<T>* grad_input,
+    device T* grad_grid,
+    constant GridSamplerBackwardParams<5, idx_t>& params,
+    uint3 thread_index) {
+  const int32_t out_w = thread_index.x;
+  const int32_t out_d_h_combined = thread_index.y;
   const int32_t n = thread_index.z;
-  if (n >= params.forward.input_sizes[0]) {
+
+  const int32_t out_d = out_d_h_combined / params.forward.output_sizes[3];
+  const int32_t out_h = out_d_h_combined % params.forward.output_sizes[3];
+
+  if (n >= params.forward.input_sizes[0] ||
+      out_d >= params.forward.output_sizes[2] ||
+      out_h >= params.forward.output_sizes[3] ||
+      out_w >= params.forward.output_sizes[4]) {
     return;
   }
 
@@ -762,68 +770,135 @@ kernel void grid_sampler_3d_backward(
   const auto inp_H = params.forward.input_sizes[3];
   const auto inp_W = params.forward.input_sizes[4];
 
-  uint grid_numel = static_cast<uint>(
-      params.forward.output_sizes[2] * params.forward.output_sizes[3] *
-      params.forward.output_sizes[4]);
-  // `thread_numel = 1` in default case. `thread_nume > 1` in the deterministic
-  // case, when dispatched with one thread per batch.
-  uint thread_numel = grid_numel / (threads_per_grid.x * threads_per_grid.y);
-  bool serial = thread_numel > 1;
+  const auto grid_offset = n * params.forward.grid_strides[0] +
+      out_d * params.forward.grid_strides[1] +
+      out_h * params.forward.grid_strides[2] +
+      out_w * params.forward.grid_strides[3];
 
-  for (uint pool_idx = 0; pool_idx < thread_numel; pool_idx++) {
-    const int32_t out_w =
-        serial ? pool_idx % params.forward.output_sizes[4] : thread_index.x;
-    const int32_t out_d_h_combined =
-        serial ? pool_idx / params.forward.output_sizes[4] : thread_index.y;
-    const int32_t out_d = out_d_h_combined / params.forward.output_sizes[3];
-    const int32_t out_h = out_d_h_combined % params.forward.output_sizes[3];
+  const float grid_x = grid[grid_offset];
+  const float grid_y = grid[grid_offset + params.forward.grid_strides[4]];
+  const float grid_z = grid[grid_offset + 2 * params.forward.grid_strides[4]];
 
-    if (out_d >= params.forward.output_sizes[2] ||
-        out_h >= params.forward.output_sizes[3] ||
-        out_w >= params.forward.output_sizes[4]) {
-      continue;
+  float2 ix_grad = compute_source_index_set_grad(
+      grid_x,
+      static_cast<int32_t>(inp_W),
+      params.forward.align_corners,
+      params.padding_mode);
+  float2 iy_grad = compute_source_index_set_grad(
+      grid_y,
+      static_cast<int32_t>(inp_H),
+      params.forward.align_corners,
+      params.padding_mode);
+  float2 iz_grad = compute_source_index_set_grad(
+      grid_z,
+      static_cast<int32_t>(inp_D),
+      params.forward.align_corners,
+      params.padding_mode);
+  float ix = ix_grad.x, gix_mult = ix_grad.y;
+  float iy = iy_grad.x, giy_mult = iy_grad.y;
+  float iz = iz_grad.x, giz_mult = iz_grad.y;
+
+  if (params.interpolation_mode == GridSamplerInterpolation::Bilinear) {
+    const int ix_0 = static_cast<int>(floor(ix));
+    const int iy_0 = static_cast<int>(floor(iy));
+    const int iz_0 = static_cast<int>(floor(iz));
+    const float dx = ix - ix_0;
+    const float dy = iy - iy_0;
+    const float dz = iz - iz_0;
+    const float wx[2] = {1 - dx, dx};
+    const float wy[2] = {1 - dy, dy};
+    const float wz[2] = {1 - dz, dz};
+
+    float gix = 0, giy = 0, giz = 0;
+
+    for (int32_t c = 0; c < C; c++) {
+      const auto grad_out_offset = n * params.grad_output_strides[0] +
+          c * params.grad_output_strides[1] +
+          out_d * params.grad_output_strides[2] +
+          out_h * params.grad_output_strides[3] +
+          out_w * params.grad_output_strides[4];
+      const float gOut = grad_output[grad_out_offset];
+      const auto base_grad_input_offset =
+          n * params.grad_input_strides[0] + c * params.grad_input_strides[1];
+      const auto input_base_offset = n * params.forward.input_strides[0] +
+          c * params.forward.input_strides[1];
+
+      for (int i = 0; i < 8; i++) {
+        const int xi = i & 1;
+        const int yi = (i >> 1) & 1;
+        const int zi = (i >> 2) & 1;
+        const int cx = ix_0 + xi;
+        const int cy = iy_0 + yi;
+        const int cz = iz_0 + zi;
+
+        if (within_bounds(int3(cx, cy, cz), int3(inp_W, inp_H, inp_D))) {
+          const float w = wx[xi] * wy[yi] * wz[zi];
+
+          if (params.compute_grad_input) {
+            AtomicType<T>::atomic_add(
+                grad_input,
+                base_grad_input_offset + cz * params.grad_input_strides[2] +
+                    cy * params.grad_input_strides[3] +
+                    cx * params.grad_input_strides[4],
+                static_cast<T>(w * gOut));
+          }
+
+          if (params.compute_grad_grid) {
+            const float val = input
+                [input_base_offset + cz * params.forward.input_strides[2] +
+                 cy * params.forward.input_strides[3] +
+                 cx * params.forward.input_strides[4]];
+            const float sign_x = xi ? 1 : -1;
+            const float sign_y = yi ? 1 : -1;
+            const float sign_z = zi ? 1 : -1;
+            gix += sign_x * val * wy[yi] * wz[zi] * gOut;
+            giy += sign_y * val * wx[xi] * wz[zi] * gOut;
+            giz += sign_z * val * wx[xi] * wy[yi] * gOut;
+          }
+        }
+      }
     }
 
-    const auto grid_offset = n * params.forward.grid_strides[0] +
-        out_d * params.forward.grid_strides[1] +
-        out_h * params.forward.grid_strides[2] +
-        out_w * params.forward.grid_strides[3];
-
-    const float grid_x = grid[grid_offset];
-    const float grid_y = grid[grid_offset + params.forward.grid_strides[4]];
-    const float grid_z = grid[grid_offset + 2 * params.forward.grid_strides[4]];
-
-    float2 ix_grad = compute_source_index_set_grad(
+    if (params.compute_grad_grid) {
+      const auto grad_grid_base_offset = n * params.grad_grid_strides[0] +
+          out_d * params.grad_grid_strides[1] +
+          out_h * params.grad_grid_strides[2] +
+          out_w * params.grad_grid_strides[3];
+      grad_grid[grad_grid_base_offset] = static_cast<T>(gix_mult * gix);
+      grad_grid[grad_grid_base_offset + params.forward.grid_strides[4]] =
+          static_cast<T>(giy_mult * giy);
+      grad_grid[grad_grid_base_offset + 2 * params.forward.grid_strides[4]] =
+          static_cast<T>(giz_mult * giz);
+    }
+  } else if (params.compute_grad_input) { // nearest
+    float src_x = compute_source(
         grid_x,
         static_cast<int32_t>(inp_W),
         params.forward.align_corners,
         params.padding_mode);
-    float2 iy_grad = compute_source_index_set_grad(
+    float src_y = compute_source(
         grid_y,
         static_cast<int32_t>(inp_H),
         params.forward.align_corners,
         params.padding_mode);
-    float2 iz_grad = compute_source_index_set_grad(
+    float src_z = compute_source(
         grid_z,
         static_cast<int32_t>(inp_D),
         params.forward.align_corners,
         params.padding_mode);
-    float ix = ix_grad.x, gix_mult = ix_grad.y;
-    float iy = iy_grad.x, giy_mult = iy_grad.y;
-    float iz = iz_grad.x, giz_mult = iz_grad.y;
 
-    if (params.interpolation_mode == GridSamplerInterpolation::Bilinear) {
-      const int ix_0 = static_cast<int>(floor(ix));
-      const int iy_0 = static_cast<int>(floor(iy));
-      const int iz_0 = static_cast<int>(floor(iz));
-      const float dx = ix - ix_0;
-      const float dy = iy - iy_0;
-      const float dz = iz - iz_0;
-      const float wx[2] = {1 - dx, dx};
-      const float wy[2] = {1 - dy, dy};
-      const float wz[2] = {1 - dz, dz};
+    int32_t ix_n = static_cast<int32_t>(rint(src_x));
+    int32_t iy_n = static_cast<int32_t>(rint(src_y));
+    int32_t iz_n = static_cast<int32_t>(rint(src_z));
 
-      float gix = 0, giy = 0, giz = 0;
+    bool in_bounds =
+        within_bounds(int3(ix_n, iy_n, iz_n), int3(inp_W, inp_H, inp_D));
+
+    if (in_bounds) {
+      const auto base_offset = n * params.grad_input_strides[0] +
+          iz_n * params.grad_input_strides[2] +
+          iy_n * params.grad_input_strides[3] +
+          ix_n * params.grad_input_strides[4];
 
       for (int32_t c = 0; c < C; c++) {
         const auto grad_out_offset = n * params.grad_output_strides[0] +
@@ -832,101 +907,42 @@ kernel void grid_sampler_3d_backward(
             out_h * params.grad_output_strides[3] +
             out_w * params.grad_output_strides[4];
         const float gOut = grad_output[grad_out_offset];
-        const auto base_grad_input_offset =
-            n * params.grad_input_strides[0] + c * params.grad_input_strides[1];
-        const auto input_base_offset = n * params.forward.input_strides[0] +
-            c * params.forward.input_strides[1];
-
-        for (int i = 0; i < 8; i++) {
-          const int xi = i & 1;
-          const int yi = (i >> 1) & 1;
-          const int zi = (i >> 2) & 1;
-          const int cx = ix_0 + xi;
-          const int cy = iy_0 + yi;
-          const int cz = iz_0 + zi;
-
-          if (within_bounds(int3(cx, cy, cz), int3(inp_W, inp_H, inp_D))) {
-            const float w = wx[xi] * wy[yi] * wz[zi];
-
-            if (params.compute_grad_input) {
-              AtomicType<T>::atomic_add(
-                  grad_input,
-                  base_grad_input_offset + cz * params.grad_input_strides[2] +
-                      cy * params.grad_input_strides[3] +
-                      cx * params.grad_input_strides[4],
-                  static_cast<T>(w * gOut));
-            }
-
-            if (params.compute_grad_grid) {
-              const float val = input
-                  [input_base_offset + cz * params.forward.input_strides[2] +
-                   cy * params.forward.input_strides[3] +
-                   cx * params.forward.input_strides[4]];
-              const float sign_x = xi ? 1 : -1;
-              const float sign_y = yi ? 1 : -1;
-              const float sign_z = zi ? 1 : -1;
-              gix += sign_x * val * wy[yi] * wz[zi] * gOut;
-              giy += sign_y * val * wx[xi] * wz[zi] * gOut;
-              giz += sign_z * val * wx[xi] * wy[yi] * gOut;
-            }
-          }
-        }
+        AtomicType<T>::atomic_add(
+            grad_input,
+            base_offset + c * params.grad_input_strides[1],
+            static_cast<T>(gOut));
       }
+    }
+  }
+}
 
-      if (params.compute_grad_grid) {
-        const auto grad_grid_base_offset = n * params.grad_grid_strides[0] +
-            out_d * params.grad_grid_strides[1] +
-            out_h * params.grad_grid_strides[2] +
-            out_w * params.grad_grid_strides[3];
-        grad_grid[grad_grid_base_offset] = static_cast<T>(gix_mult * gix);
-        grad_grid[grad_grid_base_offset + params.forward.grid_strides[4]] =
-            static_cast<T>(giy_mult * giy);
-        grad_grid[grad_grid_base_offset + 2 * params.forward.grid_strides[4]] =
-            static_cast<T>(giz_mult * giz);
-      }
-    } else if (params.compute_grad_input) { // nearest
-      float src_x = compute_source(
-          grid_x,
-          static_cast<int32_t>(inp_W),
-          params.forward.align_corners,
-          params.padding_mode);
-      float src_y = compute_source(
-          grid_y,
-          static_cast<int32_t>(inp_H),
-          params.forward.align_corners,
-          params.padding_mode);
-      float src_z = compute_source(
-          grid_z,
-          static_cast<int32_t>(inp_D),
-          params.forward.align_corners,
-          params.padding_mode);
-
-      int32_t ix_n = static_cast<int32_t>(rint(src_x));
-      int32_t iy_n = static_cast<int32_t>(rint(src_y));
-      int32_t iz_n = static_cast<int32_t>(rint(src_z));
-
-      bool in_bounds =
-          within_bounds(int3(ix_n, iy_n, iz_n), int3(inp_W, inp_H, inp_D));
-
-      if (in_bounds) {
-        const auto base_offset = n * params.grad_input_strides[0] +
-            iz_n * params.grad_input_strides[2] +
-            iy_n * params.grad_input_strides[3] +
-            ix_n * params.grad_input_strides[4];
-
-        for (int32_t c = 0; c < C; c++) {
-          const auto grad_out_offset = n * params.grad_output_strides[0] +
-              c * params.grad_output_strides[1] +
-              out_d * params.grad_output_strides[2] +
-              out_h * params.grad_output_strides[3] +
-              out_w * params.grad_output_strides[4];
-          const float gOut = grad_output[grad_out_offset];
-          AtomicType<T>::atomic_add(
-              grad_input,
-              base_offset + c * params.grad_input_strides[1],
-              static_cast<T>(gOut));
-        }
-      }
+template <typename T, typename idx_t, bool serial>
+kernel void grid_sampler_3d_backward(
+    constant T* grad_output [[buffer(0)]],
+    constant T* input [[buffer(1)]],
+    constant T* grid [[buffer(2)]],
+    device AtomicType_t<T>* grad_input [[buffer(3)]],
+    device T* grad_grid [[buffer(4)]],
+    constant GridSamplerBackwardParams<5, idx_t>& params [[buffer(5)]],
+    uint3 thread_index [[thread_position_in_grid]]) {
+  if IF_CONSTEXPR (!serial) {
+    grid_sampler_3d_backward_impl<T, idx_t>(
+        grad_output, input, grid, grad_input, grad_grid, params, thread_index);
+    return;
+  }
+  const uint out_d_h = static_cast<uint>(
+      params.forward.output_sizes[2] * params.forward.output_sizes[3]);
+  const uint out_w = static_cast<uint>(params.forward.output_sizes[4]);
+  for (uint d_h = 0; d_h < out_d_h; d_h++) {
+    for (uint w = 0; w < out_w; w++) {
+      grid_sampler_3d_backward_impl<T, idx_t>(
+          grad_output,
+          input,
+          grid,
+          grad_input,
+          grad_grid,
+          params,
+          uint3(w, d_h, thread_index.z));
     }
   }
 }
@@ -979,21 +995,24 @@ kernel void grid_sampler_3d_backward(
   REGISTER_GRID_SAMPLER_3D_INTERP_IDX(DTYPE, INTERP, INAME, int, "i32") \
   REGISTER_GRID_SAMPLER_3D_INTERP_IDX(DTYPE, INTERP, INAME, long, "i64")
 
-#define REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, IDX_T, INAME_IDX)        \
-  template [[host_name("grid_sampler_3d_backward_" INAME_IDX "_" #DTYPE)]] \
-  kernel void grid_sampler_3d_backward<DTYPE, IDX_T>(                      \
-      constant DTYPE * grad_output [[buffer(0)]],                          \
-      constant DTYPE * input [[buffer(1)]],                                \
-      constant DTYPE * grid [[buffer(2)]],                                 \
-      device AtomicType_t<DTYPE> * grad_input [[buffer(3)]],               \
-      device DTYPE * grad_grid [[buffer(4)]],                              \
-      constant GridSamplerBackwardParams<5, IDX_T> & params [[buffer(5)]], \
-      uint3 thread_index [[thread_position_in_grid]],                      \
-      uint3 threads_per_grid [[threads_per_grid]]);
+#define REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, IDX_T, INAME_IDX, SERIAL) \
+  template[                                                                 \
+      [host_name("grid_sampler_3d_backward_" INAME_IDX                      \
+                 "_" #DTYPE C10_METAL_SERIAL_SUFFIX(SERIAL))]] kernel void  \
+  grid_sampler_3d_backward<DTYPE, IDX_T, SERIAL>(                           \
+      constant DTYPE * grad_output [[buffer(0)]],                           \
+      constant DTYPE * input [[buffer(1)]],                                 \
+      constant DTYPE * grid [[buffer(2)]],                                  \
+      device AtomicType_t<DTYPE> * grad_input [[buffer(3)]],                \
+      device DTYPE * grad_grid [[buffer(4)]],                               \
+      constant GridSamplerBackwardParams<5, IDX_T> & params [[buffer(5)]],  \
+      uint3 thread_index [[thread_position_in_grid]]);
 
-#define REGISTER_GRID_SAMPLER_BACKWARD(DTYPE)           \
-  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, int, "i32") \
-  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, long, "i64")
+#define REGISTER_GRID_SAMPLER_BACKWARD(DTYPE)                   \
+  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, int, "i32", false)  \
+  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, int, "i32", true)   \
+  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, long, "i64", false) \
+  REGISTER_GRID_SAMPLER_BACKWARD_IDX(DTYPE, long, "i64", true)
 
 #define REGISTER_GRID_SAMPLER_OPS(DTYPE)                         \
   REGISTER_GRID_SAMPLER_2D_INTERP(DTYPE, Bilinear2D, "bilinear") \
@@ -1106,13 +1125,13 @@ struct BackwardPreamble {
 
 // Bilinear backward kernel for grad_input
 template <typename T, typename idx_t>
-kernel void grid_sampler_2d_backward_bilinear_input(
-    device AtomicType_t<T>* grad_input [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
-    constant GridSamplerBackwardParams<4, idx_t>& params [[buffer(3)]],
-    uint tid [[thread_position_in_grid]],
-    uint threads_per_grid [[threads_per_grid]]) {
+void grid_sampler_2d_backward_bilinear_input_impl(
+    device AtomicType_t<T>* grad_input,
+    constant T* grad_output,
+    constant T* grid,
+    constant GridSamplerBackwardParams<4, idx_t>& params,
+    uint tid) {
+  BackwardPreamble<T, idx_t> p(grid, params, tid);
   auto C = params.forward.input_sizes[1];
   int2 inp_size = {
       static_cast<int32_t>(params.forward.input_sizes[3]),
@@ -1126,70 +1145,60 @@ kernel void grid_sampler_2d_backward_bilinear_input(
   auto gInp_sN = params.grad_input_strides[0];
   auto gInp_sC = params.grad_input_strides[1];
 
-  uint grid_numel = static_cast<uint>(params.forward.input_sizes[0]) *
-      params.forward.output_sizes[2] * params.forward.output_sizes[3];
-  // `thread_numel = 1` in default case. `thread_nume > 1` in the deterministic
-  // case, when dispatched with one thread per batch.
-  uint thread_numel = grid_numel / threads_per_grid;
+  float ix = compute_source(
+      p.x, inp_size.x, params.forward.align_corners, params.padding_mode);
+  float iy = compute_source(
+      p.y, inp_size.y, params.forward.align_corners, params.padding_mode);
 
-  for (uint pool_idx = 0; pool_idx < thread_numel; pool_idx++) {
-    BackwardPreamble<T, idx_t> p(grid, params, tid * thread_numel + pool_idx);
+  int32_t ix_nw = static_cast<int32_t>(floor(ix));
+  int32_t iy_nw = static_cast<int32_t>(floor(iy));
+  int32_t ix_ne = ix_nw + 1;
+  int32_t iy_ne = iy_nw;
+  int32_t ix_sw = ix_nw;
+  int32_t iy_sw = iy_nw + 1;
+  int32_t ix_se = ix_nw + 1;
+  int32_t iy_se = iy_nw + 1;
 
-    float ix = compute_source(
-        p.x, inp_size.x, params.forward.align_corners, params.padding_mode);
-    float iy = compute_source(
-        p.y, inp_size.y, params.forward.align_corners, params.padding_mode);
+  float nw = (ix_se - ix) * (iy_se - iy);
+  float ne = (ix - ix_sw) * (iy_sw - iy);
+  float sw = (ix_ne - ix) * (iy - iy_ne);
+  float se = (ix - ix_nw) * (iy - iy_nw);
 
-    int32_t ix_nw = static_cast<int32_t>(floor(ix));
-    int32_t iy_nw = static_cast<int32_t>(floor(iy));
-    int32_t ix_ne = ix_nw + 1;
-    int32_t iy_ne = iy_nw;
-    int32_t ix_sw = ix_nw;
-    int32_t iy_sw = iy_nw + 1;
-    int32_t ix_se = ix_nw + 1;
-    int32_t iy_se = iy_nw + 1;
+  auto gOut_ptr_NCHW =
+      grad_output + p.n * gOut_sN + p.h * gOut_sH + p.w * gOut_sW;
+  long NC_offset = p.n * gInp_sN;
 
-    float nw = (ix_se - ix) * (iy_se - iy);
-    float ne = (ix - ix_sw) * (iy_sw - iy);
-    float sw = (ix_ne - ix) * (iy - iy_ne);
-    float se = (ix - ix_nw) * (iy - iy_nw);
-
-    auto gOut_ptr_NCHW =
-        grad_output + p.n * gOut_sN + p.h * gOut_sH + p.w * gOut_sW;
-    long NC_offset = p.n * gInp_sN;
-
-    for (int32_t c = 0; c < C;
-         ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
-      opmath_t<T> gOut = static_cast<opmath_t<T>>(*gOut_ptr_NCHW);
-      safe_add_2d_atomic<T>(
-          grad_input,
-          {ix_nw, iy_nw},
-          gInp_stride,
-          inp_size,
-          nw * gOut,
-          NC_offset);
-      safe_add_2d_atomic<T>(
-          grad_input,
-          {ix_ne, iy_ne},
-          gInp_stride,
-          inp_size,
-          ne * gOut,
-          NC_offset);
-      safe_add_2d_atomic<T>(
-          grad_input,
-          {ix_sw, iy_sw},
-          gInp_stride,
-          inp_size,
-          sw * gOut,
-          NC_offset);
-      safe_add_2d_atomic<T>(
-          grad_input,
-          {ix_se, iy_se},
-          gInp_stride,
-          inp_size,
-          se * gOut,
-          NC_offset);
-    }
+  for (int32_t c = 0; c < C;
+       ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
+    opmath_t<T> gOut = static_cast<opmath_t<T>>(*gOut_ptr_NCHW);
+    safe_add_2d_atomic<T>(
+        grad_input,
+        {ix_nw, iy_nw},
+        gInp_stride,
+        inp_size,
+        nw * gOut,
+        NC_offset);
+    safe_add_2d_atomic<T>(
+        grad_input,
+        {ix_ne, iy_ne},
+        gInp_stride,
+        inp_size,
+        ne * gOut,
+        NC_offset);
+    safe_add_2d_atomic<T>(
+        grad_input,
+        {ix_sw, iy_sw},
+        gInp_stride,
+        inp_size,
+        sw * gOut,
+        NC_offset);
+    safe_add_2d_atomic<T>(
+        grad_input,
+        {ix_se, iy_se},
+        gInp_stride,
+        inp_size,
+        se * gOut,
+        NC_offset);
   }
 }
 
@@ -1268,13 +1277,13 @@ kernel void grid_sampler_2d_backward_bilinear_grid(
 
 // Nearest backward kernel for grad_input
 template <typename T, typename idx_t>
-kernel void grid_sampler_2d_backward_nearest_input(
-    device AtomicType_t<T>* grad_input [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
-    constant GridSamplerBackwardParams<4, idx_t>& params [[buffer(3)]],
-    uint tid [[thread_position_in_grid]],
-    uint threads_per_grid [[threads_per_grid]]) {
+void grid_sampler_2d_backward_nearest_input_impl(
+    device AtomicType_t<T>* grad_input,
+    constant T* grad_output,
+    constant T* grid,
+    constant GridSamplerBackwardParams<4, idx_t>& params,
+    uint tid) {
+  BackwardPreamble<T, idx_t> p(grid, params, tid);
   int2 inp_size = {
       static_cast<int32_t>(params.forward.input_sizes[3]),
       static_cast<int32_t>(params.forward.input_sizes[2])};
@@ -1287,47 +1296,37 @@ kernel void grid_sampler_2d_backward_nearest_input(
   auto gInp_sN = params.grad_input_strides[0];
   auto gInp_sC = params.grad_input_strides[1];
 
-  uint grid_numel = static_cast<uint>(params.forward.input_sizes[0]) *
-      params.forward.output_sizes[2] * params.forward.output_sizes[3];
-  // `thread_numel = 1` in default case. `thread_nume > 1` in the deterministic
-  // case, when dispatched with one thread per batch.
-  uint thread_numel = grid_numel / threads_per_grid;
+  float ix = compute_source(
+      p.x, inp_size.x, params.forward.align_corners, params.padding_mode);
+  float iy = compute_source(
+      p.y, inp_size.y, params.forward.align_corners, params.padding_mode);
+  int2 nearest = {
+      static_cast<int32_t>(rint(ix)), static_cast<int32_t>(rint(iy))};
 
-  for (uint pool_idx = 0; pool_idx < thread_numel; pool_idx++) {
-    BackwardPreamble<T, idx_t> p(grid, params, tid * thread_numel + pool_idx);
-
-    float ix = compute_source(
-        p.x, inp_size.x, params.forward.align_corners, params.padding_mode);
-    float iy = compute_source(
-        p.y, inp_size.y, params.forward.align_corners, params.padding_mode);
-    int2 nearest = {
-        static_cast<int32_t>(rint(ix)), static_cast<int32_t>(rint(iy))};
-
-    auto gOut_ptr_NCHW =
-        grad_output + p.n * gOut_sN + p.h * gOut_sH + p.w * gOut_sW;
-    long NC_offset = p.n * gInp_sN;
-    for (int32_t c = 0; c < params.forward.input_sizes[1];
-         ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
-      safe_add_2d_atomic<T>(
-          grad_input,
-          nearest,
-          gInp_stride,
-          inp_size,
-          static_cast<opmath_t<T>>(*gOut_ptr_NCHW),
-          NC_offset);
-    }
+  auto gOut_ptr_NCHW =
+      grad_output + p.n * gOut_sN + p.h * gOut_sH + p.w * gOut_sW;
+  long NC_offset = p.n * gInp_sN;
+  for (int32_t c = 0; c < params.forward.input_sizes[1];
+       ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
+    safe_add_2d_atomic<T>(
+        grad_input,
+        nearest,
+        gInp_stride,
+        inp_size,
+        static_cast<opmath_t<T>>(*gOut_ptr_NCHW),
+        NC_offset);
   }
 }
 
 // Bicubic backward kernel for grad_input
 template <typename Pad, typename T, typename idx_t>
-kernel void grid_sampler_2d_backward_bicubic_input(
-    device AtomicType_t<T>* grad_input [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
-    constant T* grid [[buffer(2)]],
-    constant GridSamplerBackwardParams<4, idx_t>& params [[buffer(3)]],
-    uint tid [[thread_position_in_grid]],
-    uint threads_per_grid [[threads_per_grid]]) {
+void grid_sampler_2d_backward_bicubic_input_impl(
+    device AtomicType_t<T>* grad_input,
+    constant T* grad_output,
+    constant T* grid,
+    constant GridSamplerBackwardParams<4, idx_t>& params,
+    uint tid) {
+  BackwardPreamble<T, idx_t> p(grid, params, tid);
   auto C = params.forward.input_sizes[1];
   int2 inp_size = {
       static_cast<int32_t>(params.forward.input_sizes[3]),
@@ -1341,51 +1340,73 @@ kernel void grid_sampler_2d_backward_bicubic_input(
   auto gInp_sN = params.grad_input_strides[0];
   auto gInp_sC = params.grad_input_strides[1];
 
-  uint grid_numel = static_cast<uint>(params.forward.input_sizes[0]) *
-      params.forward.output_sizes[2] * params.forward.output_sizes[3];
-  // `thread_numel = 1` in default case. `thread_nume > 1` in the deterministic
-  // case, when dispatched with one thread per batch.
-  uint thread_numel = grid_numel / threads_per_grid;
+  float ix =
+      grid_sampler_unnormalize(p.x, inp_size.x, params.forward.align_corners);
+  float iy =
+      grid_sampler_unnormalize(p.y, inp_size.y, params.forward.align_corners);
 
-  for (uint pool_idx = 0; pool_idx < thread_numel; pool_idx++) {
-    BackwardPreamble<T, idx_t> p(grid, params, tid * thread_numel + pool_idx);
+  float ix_nw = floor(ix);
+  float iy_nw = floor(iy);
 
-    float ix =
-        grid_sampler_unnormalize(p.x, inp_size.x, params.forward.align_corners);
-    float iy =
-        grid_sampler_unnormalize(p.y, inp_size.y, params.forward.align_corners);
+  float x_coeffs[4], y_coeffs[4];
+  get_cubic_coefficients(x_coeffs, ix - ix_nw);
+  get_cubic_coefficients(y_coeffs, iy - iy_nw);
 
-    float ix_nw = floor(ix);
-    float iy_nw = floor(iy);
+  auto gOut_ptr_NCHW =
+      grad_output + p.n * gOut_sN + p.h * gOut_sH + p.w * gOut_sW;
+  long NC_offset = p.n * gInp_sN;
+  int32_t ix_nw_i = static_cast<int32_t>(ix_nw);
+  int32_t iy_nw_i = static_cast<int32_t>(iy_nw);
 
-    float x_coeffs[4], y_coeffs[4];
-    get_cubic_coefficients(x_coeffs, ix - ix_nw);
-    get_cubic_coefficients(y_coeffs, iy - iy_nw);
+  for (int32_t c = 0; c < C;
+       ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC) {
+    opmath_t<T> gOut = static_cast<opmath_t<T>>(*gOut_ptr_NCHW);
 
-    auto gOut_ptr_NCHW =
-        grad_output + p.n * gOut_sN + p.h * gOut_sH + p.w * gOut_sW;
-    long NC_offset = p.n * gInp_sN;
-    int32_t ix_nw_i = static_cast<int32_t>(ix_nw);
-    int32_t iy_nw_i = static_cast<int32_t>(iy_nw);
-
-    for (int32_t c = 0; c < C;
-         ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC) {
-      opmath_t<T> gOut = static_cast<opmath_t<T>>(*gOut_ptr_NCHW);
-
-      for (int32_t i = 0; i < 4; ++i) {
-        for (int32_t j = 0; j < 4; ++j) {
-          add_value_bounded_backward<Pad, T>(
-              grad_input,
-              ix_nw_i - 1 + i,
-              iy_nw_i - 1 + j,
-              inp_size,
-              gInp_stride,
-              gOut * x_coeffs[i] * y_coeffs[j],
-              params.forward.align_corners,
-              NC_offset);
-        }
+    for (int32_t i = 0; i < 4; ++i) {
+      for (int32_t j = 0; j < 4; ++j) {
+        add_value_bounded_backward<Pad, T>(
+            grad_input,
+            ix_nw_i - 1 + i,
+            iy_nw_i - 1 + j,
+            inp_size,
+            gInp_stride,
+            gOut * x_coeffs[i] * y_coeffs[j],
+            params.forward.align_corners,
+            NC_offset);
       }
     }
+  }
+}
+
+template <
+    typename T,
+    typename idx_t,
+    void (*impl)(
+        device AtomicType_t<T>*,
+        constant T*,
+        constant T*,
+        constant GridSamplerBackwardParams<4, idx_t>&,
+        uint),
+    bool serial>
+kernel void grid_sampler_2d_backward_input(
+    device AtomicType_t<T>* grad_input [[buffer(0)]],
+    constant T* grad_output [[buffer(1)]],
+    constant T* grid [[buffer(2)]],
+    constant GridSamplerBackwardParams<4, idx_t>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  if IF_CONSTEXPR (!serial) {
+    impl(grad_input, grad_output, grid, params, tid);
+    return;
+  }
+  const uint spatial_size =
+      params.forward.output_sizes[2] * params.forward.output_sizes[3];
+  for (uint spatial_idx = 0; spatial_idx < spatial_size; spatial_idx++) {
+    impl(
+        grad_input,
+        grad_output,
+        grid,
+        params,
+        tid * spatial_size + spatial_idx);
   }
 }
 
@@ -1465,16 +1486,29 @@ kernel void grid_sampler_2d_backward_bicubic_grid(
 // Bilinear/nearest _input and bilinear _grid kernels use runtime padding
 // dispatch (only templated on dtype). Bicubic keeps the Pad template because
 // padding affects its inner loop (16 bounded lookups per channel).
+#define REGISTER_GRID_SAMPLER_2D_BACKWARD_INPUT(                           \
+    NAME, DTYPE, IDX_T, IMPL, SERIAL)                                      \
+  template[[host_name(NAME C10_METAL_SERIAL_SUFFIX(SERIAL))]] kernel void  \
+  grid_sampler_2d_backward_input<DTYPE, IDX_T, IMPL, SERIAL>(              \
+      device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],               \
+      constant DTYPE * grad_output [[buffer(1)]],                          \
+      constant DTYPE * grid [[buffer(2)]],                                 \
+      constant GridSamplerBackwardParams<4, IDX_T> & params [[buffer(3)]], \
+      uint tid [[thread_position_in_grid]]);
+
 #define REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(DTYPE, INTERP, IDX_T, INAME_IDX) \
-  template [[host_name("grid_sampler_2d_backward_" #INTERP "_input_" INAME_IDX \
-                       "_" #DTYPE)]] kernel void                               \
-      grid_sampler_2d_backward_##INTERP##_input<DTYPE, IDX_T>(                 \
-          device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],               \
-          constant DTYPE * grad_output [[buffer(1)]],                          \
-          constant DTYPE * grid [[buffer(2)]],                                 \
-          constant GridSamplerBackwardParams<4, IDX_T> & params [[buffer(3)]], \
-          uint tid [[thread_position_in_grid]],                                \
-          uint threads_per_grid [[threads_per_grid]]);
+  REGISTER_GRID_SAMPLER_2D_BACKWARD_INPUT(                                     \
+      "grid_sampler_2d_backward_" #INTERP "_input_" INAME_IDX "_" #DTYPE,      \
+      DTYPE,                                                                   \
+      IDX_T,                                                                   \
+      (grid_sampler_2d_backward_##INTERP##_input_impl<DTYPE, IDX_T>),          \
+      false)                                                                   \
+  REGISTER_GRID_SAMPLER_2D_BACKWARD_INPUT(                                     \
+      "grid_sampler_2d_backward_" #INTERP "_input_" INAME_IDX "_" #DTYPE,      \
+      DTYPE,                                                                   \
+      IDX_T,                                                                   \
+      (grid_sampler_2d_backward_##INTERP##_input_impl<DTYPE, IDX_T>),          \
+      true)
 
 #define REGISTER_GRID_SAMPLER_2D_BACKWARD(DTYPE, INTERP)           \
   REGISTER_GRID_SAMPLER_2D_BACKWARD_IDX(DTYPE, INTERP, int, "i32") \
@@ -1482,15 +1516,20 @@ kernel void grid_sampler_2d_backward_bicubic_grid(
 
 #define REGISTER_GRID_SAMPLER_2D_BACKWARD_BICUBIC_IDX(                     \
     DTYPE, PAD, PNAME, IDX_T, INAME_IDX)                                   \
-  template [[host_name("grid_sampler_2d_backward_bicubic_input_" PNAME     \
-                       "_" INAME_IDX "_" #DTYPE)]] kernel void             \
-  grid_sampler_2d_backward_bicubic_input<PAD, DTYPE, IDX_T>(               \
-      device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],               \
-      constant DTYPE * grad_output [[buffer(1)]],                          \
-      constant DTYPE * grid [[buffer(2)]],                                 \
-      constant GridSamplerBackwardParams<4, IDX_T> & params [[buffer(3)]], \
-      uint tid [[thread_position_in_grid]],                                \
-      uint threads_per_grid [[threads_per_grid]]);                         \
+  REGISTER_GRID_SAMPLER_2D_BACKWARD_INPUT(                                 \
+      "grid_sampler_2d_backward_bicubic_input_" PNAME "_" INAME_IDX        \
+      "_" #DTYPE,                                                          \
+      DTYPE,                                                               \
+      IDX_T,                                                               \
+      (grid_sampler_2d_backward_bicubic_input_impl<PAD, DTYPE, IDX_T>),    \
+      false)                                                               \
+  REGISTER_GRID_SAMPLER_2D_BACKWARD_INPUT(                                 \
+      "grid_sampler_2d_backward_bicubic_input_" PNAME "_" INAME_IDX        \
+      "_" #DTYPE,                                                          \
+      DTYPE,                                                               \
+      IDX_T,                                                               \
+      (grid_sampler_2d_backward_bicubic_input_impl<PAD, DTYPE, IDX_T>),    \
+      true)                                                                \
   template [[host_name("grid_sampler_2d_backward_bicubic_grid_" PNAME      \
                        "_" INAME_IDX "_" #DTYPE)]] kernel void             \
   grid_sampler_2d_backward_bicubic_grid<PAD, DTYPE, IDX_T>(                \

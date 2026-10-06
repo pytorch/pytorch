@@ -296,7 +296,8 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
         auto input_name = interpolation_mode == GridSamplerInterpolation::Bicubic
             ? fmt::format("grid_sampler_2d_backward_bicubic_input_{}_{}_{}", pad_str, idx_str, type_str)
             : fmt::format("grid_sampler_2d_backward_{}_input_{}_{}", interp_str, idx_str, type_str);
-        auto input_pso = lib.getPipelineStateForFunc(input_name);
+        auto input_pso =
+            lib.getPipelineStateForFunc(input_name + (at::globalContext().deterministicAlgorithms() ? "_serial" : ""));
         getMPSProfiler().beginProfileKernel(
             input_pso, "grid_sampler_2d_backward_input", {grad_output, grid}, mpsStream);
         [computeEncoder setComputePipelineState:input_pso];
@@ -389,13 +390,14 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
   const auto idx_str = i32 ? "i32" : "i64";
 
   MPSStream* mpsStream = getCurrentMPSStream();
+  const bool serial = run_grad_input && at::globalContext().deterministicAlgorithms();
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      auto pso = lib.getPipelineStateForFunc(
-          fmt::format("grid_sampler_3d_backward_{}_{}", idx_str, scalarToMetalTypeString(input)));
+      auto pso = lib.getPipelineStateForFunc(fmt::format(
+          "grid_sampler_3d_backward_{}_{}{}", idx_str, scalarToMetalTypeString(input), serial ? "_serial" : ""));
 
       getMPSProfiler().beginProfileKernel(
           pso,
@@ -430,7 +432,7 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
       }
 
       MTLSize threadsPerGrid, threadsPerThreadgroup;
-      if (run_grad_input && at::globalContext().deterministicAlgorithms()) {
+      if (serial) {
         // See Note [Enabling Deterministic Operations]
         // The operation is normally nondeterministic because of atomic
         // accumulation across multiple threads. To make it deterministic,
