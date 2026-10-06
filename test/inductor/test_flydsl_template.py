@@ -2443,6 +2443,60 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(len(codes), 2)
         self.assertIn("mxfp8_wgrad_gfx950", codes[1])
 
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    def test_flydsl_mxfp8_wgrad_traps_on_invalid_offsets(self):
+        """Group offsets live on the device, so the kernel validates them: a
+        bound that splits a 32-element MX scale block, or one past M, aborts
+        the kernel instead of producing silently wrong gradients. The trap
+        takes the process down, so each case runs in its own subprocess."""
+        import subprocess
+        import sys
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        script = """
+import sys, torch
+import flydsl.compiler as flyc
+from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+    mxfp8_wgrad_gfx950 as W,
+)
+n, k, m = 256, 384, 512
+fp8, e8m0 = torch.float8_e4m3fn, torch.float8_e8m0fnu
+a = torch.zeros(n, m, device="cuda").to(fp8)
+b_t = torch.zeros(k, m, device="cuda").to(fp8)
+sa = torch.full((n, m // 32), 127, dtype=torch.uint8, device="cuda").view(e8m0)
+sb = torch.full((k, m // 32), 127, dtype=torch.uint8, device="cuda").view(e8m0)
+offs = torch.tensor(eval(sys.argv[1]), dtype=torch.int32, device="cuda")
+out = torch.empty(4, n, k, dtype=torch.bfloat16, device="cuda")
+param = W.make_mxfp8_wgrad_param(n, k, 4, sc_pair=True)
+W.launch_mxfp8_wgrad_gfx950(
+    out, a, b_t, sa, sb, offs, param, torch.cuda.current_stream(),
+    tensor_arg=lambda t: flyc.from_torch_tensor(t).mark_layout_dynamic(),
+)
+torch.cuda.synchronize()
+print("completed")
+"""
+
+        def run(offsets):
+            return subprocess.run(
+                [sys.executable, "-c", script, str(offsets)],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+
+        ok = run([128, 256, 384, 512])
+        self.assertEqual(ok.returncode, 0, ok.stderr[-2000:])
+        self.assertIn("completed", ok.stdout)
+        for bad in ([48, 256, 384, 512], [128, 256, 384, 640], [256, 128, 384, 512]):
+            proc = run(bad)
+            self.assertNotEqual(proc.returncode, 0, f"offsets {bad} did not trap")
+            self.assertNotIn("completed", proc.stdout)
+
     @classmethod
     def _make_mxfp8_wgrad_inputs(cls, group_sizes, n, k, device="cuda"):
         """A[N, M] and B[M, K] (M contiguous) with groups along M, and the

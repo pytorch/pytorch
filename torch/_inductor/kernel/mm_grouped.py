@@ -964,8 +964,8 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
 
     Group offsets must be multiples of 32, the MX scale block along M, as the
     per-group MXFP8 cast produces them: a scale block may not straddle two
-    groups. They live on the device, so this cannot be checked without a
-    sync; misaligned offsets give wrong results rather than an error.
+    groups. They live on the device, so the kernel validates them itself and
+    traps on a violation, as MSLK's CUDA path asserts.
     """
     if not is_nonzero or not use_flydsl_gemm_template(layout) or offs is None:
         return []

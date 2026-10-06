@@ -110,6 +110,18 @@ def _mfma_scale_agpr(a, b, sa, sb, acc):
     )
 
 
+def _trap_if(bad):
+    """Abort the kernel (s_trap 2, as __builtin_trap) when wave-uniform `bad`
+    is nonzero. The branch is skipped on the normal path."""
+    _llvm.inline_asm(
+        res=None,
+        operands_=[arith._to_raw(bad)],
+        asm_string="s_cmp_eq_u32 $0, 0\ns_cbranch_scc1 1f\ns_trap 2\n1:",
+        constraints="s",
+        has_side_effects=True,
+    )
+
+
 def _uniform(value):
     """Place a value known to be wave-uniform in an SGPR."""
     return fx.Int32(rocdl.readfirstlane(res=T.i32, src=arith._to_raw(value)))
@@ -279,6 +291,15 @@ def _compile(
         )
 
         g, m_start, m_end = slot_to_group(offs_rsrc, slot)
+        # Validate the device-resident offsets as MSLK's CUDA path does: group
+        # bounds must be multiples of the 32-element MX scale block (a block
+        # cannot straddle two groups), non-decreasing, and within M. The host
+        # cannot check them without a sync; a violation would otherwise give
+        # silently wrong gradients.
+        one_i32, zero_c = fx.Int32(1), fx.Int32(0)
+        misaligned = ((m_start | m_end) & fx.Int32(SCALE_BLOCK - 1)) != zero_c
+        out_of_range = (m_end > ArithValue(m_row)) | (m_end < m_start)
+        _trap_if(arith.select(misaligned | out_of_range, one_i32, zero_c))
 
         # -- The window: base rounded DOWN to 256, length rounded UP to an
         # even number of K-steps >= 4. See notes 1-3 in the file header. --
