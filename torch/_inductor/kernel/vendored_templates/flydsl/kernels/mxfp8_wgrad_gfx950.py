@@ -322,8 +322,10 @@ def _compile(
         b_div = fx.logical_divide(gB, fx.make_layout(1, 1))
 
         # Scale loads can overhang a row tile and the rounded contraction
-        # window. Bounded descriptors make both cases return zero instead of
-        # reading a neighboring row or an e8m0 NaN.
+        # window. Rows past the end are caught by the descriptor's range check,
+        # which is not guaranteed to include soffset, so the whole row offset is
+        # kept in the VGPR and those loads return zero. Window overhang stays
+        # inside the plane and is masked by window_ok below.
         sa_bytes = arith.index_cast(
             T.i64, arith.index_cast(T.index, fx.Int32(R) * sc_e8_row)
         )
@@ -359,10 +361,11 @@ def _compile(
         sb0_base = c_base + wave_j * fx.Int32(N_TILES_B * 16)
         sb1_base = c_base + fx.Int32(LDS_BLOCK_C) + wave_j * fx.Int32(N_TILES_B * 16)
 
-        # Half bases and K indices are wave-uniform and use the SGPR soffset.
-        sc_voff = lane_id * sc_i32_row
-        sc_sbase = [
-            (_rs, (_base * sc_i32_row + m_start_i32) * fx.Int32(4))
+        # Per-lane dword offset of this lane's scale row at the window start.
+        # It must all be in the VGPR offset: a row base in soffset may escape
+        # the range check and let the last row tile read past the plane.
+        sc_vbase = [
+            (_rs, (_base + lane_id) * sc_i32_row + m_start_i32)
             for _rs, _base in (
                 (sa_rsrc, sa0_base),
                 (sa_rsrc, sa1_base),
@@ -381,12 +384,10 @@ def _compile(
             Returns 2 raw i32 per operand-half, flat: [a0_lo, a0_hi, a1_lo, ...].
             """
             out = []
-            for _rs, _sb in sc_sbase:
-                soff = _uniform(_sb + k_i32 * fx.Int32(4))
+            for _rs, _vb in sc_vbase:
+                voff = _vb + k_i32
                 if SC_PAIR:
-                    v = buffer_ops.buffer_load(
-                        _rs, sc_voff, vec_width=2, dtype=T.i32, soffset_bytes=soff
-                    )
+                    v = buffer_ops.buffer_load(_rs, voff, vec_width=2, dtype=T.i32)
                     out.append(
                         buffer_ops.vec_extract(
                             v, static_position=[0], dynamic_position=[]
@@ -400,17 +401,11 @@ def _compile(
                 else:
                     # Two dwords handle an odd scale-row stride.
                     out.append(
-                        buffer_ops.buffer_load(
-                            _rs, sc_voff, vec_width=1, dtype=T.i32, soffset_bytes=soff
-                        )
+                        buffer_ops.buffer_load(_rs, voff, vec_width=1, dtype=T.i32)
                     )
                     out.append(
                         buffer_ops.buffer_load(
-                            _rs,
-                            sc_voff,
-                            vec_width=1,
-                            dtype=T.i32,
-                            soffset_bytes=soff + fx.Int32(4),
+                            _rs, voff + fx.Int32(1), vec_width=1, dtype=T.i32
                         )
                     )
             return out
