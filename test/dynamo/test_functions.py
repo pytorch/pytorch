@@ -5041,6 +5041,44 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
 
+    def test_operator_concat_iconcat_reduce(self):
+        # Regression test for the functools.reduce pattern reported in #116396.
+        def fn_concat(seqs):
+            return functools.reduce(operator.concat, seqs, [])
+
+        def fn_iconcat(seqs):
+            return functools.reduce(operator.iconcat, seqs, [])
+
+        seqs = [[1, 2], [3], [4, 5, 6]]
+        for fn in (fn_concat, fn_iconcat):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+                self.assertEqual(opt_fn(seqs), fn(seqs))
+
+    def test_operator_iconcat_inplace_mutation(self):
+        # operator.iconcat mutates its first argument in place and returns it.
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        a = [1, 2, 3]
+        b = [4, 5]
+        self.assertEqual(opt_fn(a, b), [1, 2, 3, 4, 5])
+        self.assertEqual(a, [1, 2, 3, 4, 5])
+
+    def test_operator_concat_iconcat_empty(self):
+        def fn_concat(a, b):
+            return operator.concat(a, b)
+
+        def fn_iconcat(a, b):
+            return operator.iconcat(a, b)
+
+        for fn in (fn_concat, fn_iconcat):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+                self.assertEqual(opt_fn([], [1, 2]), [1, 2])
+                self.assertEqual(opt_fn([1, 2], []), [1, 2])
+
     def test_attrgetter(self):
         for attrs in (
             ("shape",),
@@ -5857,6 +5895,86 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_builtin_dunder_attr_access(self):
+        # Introspection attributes on a builtin (BuiltinVariable) must resolve to
+        # real constants during tracing, and missing ones must raise
+        # AttributeError, mirroring CPython getattr semantics.
+        def fn(x):
+            if max.__name__ != "max":
+                raise AssertionError(max.__name__)
+            if max.__module__ != "builtins":
+                raise AssertionError(max.__module__)
+            if not max.__doc__.startswith("max("):
+                raise AssertionError(max.__doc__)
+            try:
+                max.__annotations__
+                missing = False
+            except AttributeError:
+                missing = True
+            if not missing:
+                raise AssertionError("expected AttributeError for max.__annotations__")
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_type_dunder_attr_access(self):
+        # A builtin type exposes constant introspection attributes (including
+        # __type_params__ as an empty tuple) that must resolve during tracing.
+        def fn(x):
+            if type.__name__ != "type":
+                raise AssertionError(type.__name__)
+            if not type.__doc__.startswith("type("):
+                raise AssertionError(type.__doc__)
+            if sys.version_info >= (3, 12):
+                if type.__type_params__ != ():
+                    raise AssertionError(type.__type_params__)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_update_wrapper_from_builtin(self):
+        # functools.update_wrapper copying WRAPPER_ASSIGNMENTS from a builtin
+        # onto a locally defined wrapper: __name__/__doc__ come from the builtin,
+        # __annotations__ stays {} because the builtin lacks that attribute.
+        def fn(x):
+            def wrapper():
+                pass
+
+            functools.update_wrapper(wrapper, max)
+            if wrapper.__name__ != "max":
+                raise AssertionError(wrapper.__name__)
+            if not wrapper.__doc__.startswith("max("):
+                raise AssertionError(wrapper.__doc__)
+            if wrapper.__annotations__ != {}:
+                raise AssertionError(wrapper.__annotations__)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_wraps_decorator_from_builtin(self):
+        # functools.wraps (which calls update_wrapper) applied with a builtin as
+        # the wrapped object.
+        def fn(x):
+            @functools.wraps(max)
+            def wrapper():
+                pass
+
+            if wrapper.__name__ != "max":
+                raise AssertionError(wrapper.__name__)
+            if not wrapper.__doc__.startswith("max("):
+                raise AssertionError(wrapper.__doc__)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_lru_cache_dunder_name_access(self):
         # Accessing __name__ on an lru_cache-wrapped function during tracing
         # should return the original function's name as a constant.
@@ -6075,6 +6193,24 @@ class GraphModule(torch.nn.Module):
             return isinstance(Foo.x, property)
 
         self.assertTrue(fn())
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_dynamic_class_attribute_raw_descriptor(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            class C:
+                def foo(self):
+                    return 1
+
+                foo.__isabstractmethod__ = True
+                foo = types.DynamicClassAttribute(foo)
+
+            descriptor = C.__dict__["foo"]
+            return descriptor.__isabstractmethod__, x + 1
+
+        is_abstract, out = fn(torch.tensor(1))
+        self.assertTrue(is_abstract)
+        self.assertEqual(out, torch.tensor(2))
 
     def test_tuplegetter_on_instance(self):
         from collections import namedtuple
@@ -6359,6 +6495,21 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(torch.compile(m, backend=cnt)(x), m(x))
         with self.assertRaises(Unsupported):
             torch.compile(m, backend="eager", fullgraph=True)(x)
+
+    def test_torch_function_metadata_attrs_constant(self):
+        def fn(x):
+            names = [
+                torch.mul.__name__,
+                torch.Tensor.add_.__name__,
+                torch.sin.__module__,
+            ]
+            if torch.Tensor.add_.__name__.endswith("_"):
+                x = x + 1
+            return x, names
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
 
 def udf_mul(x, y):
