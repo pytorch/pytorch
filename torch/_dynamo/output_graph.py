@@ -858,7 +858,9 @@ class OutputGraph(OutputGraphCommon):
         # Generators created while tracing this frame. Tracked here (not on
         # SideEffects) because SideEffects is cloned/swapped during HOP
         # speculation and graph-break restore; the OutputGraph is the single
-        # instance that lives for the whole frame. Closed in compile_subgraph.
+        # instance that lives for the whole frame. Closed in compile_subgraph,
+        # except for those created inside a HOP body, which are scoped to that
+        # body (see scoped_local_generators).
         self.local_generators: list[LocalGeneratorObjectVariable] = []
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
@@ -1032,12 +1034,40 @@ class OutputGraph(OutputGraphCommon):
     def track_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
         self.local_generators.append(gen)
 
-    def close_local_generators(self, tx: "InstructionTranslatorBase") -> None:
+    def close_local_generators(
+        self,
+        tx: "InstructionTranslatorBase",
+        gens: Sequence["LocalGeneratorObjectVariable"] | None = None,
+    ) -> None:
         from .symbolic_convert import temporarely_allow_writes_to_output_graph
 
         with temporarely_allow_writes_to_output_graph(tx):
-            for gen in list(self.local_generators):
+            for gen in list(self.local_generators if gens is None else gens):
                 gen.call_method(tx, "close", [], {})
+
+    @contextlib.contextmanager
+    def scoped_local_generators(
+        self, tx: "InstructionTranslatorBase"
+    ) -> Generator[None, None, None]:
+        """Scope the generators created while tracing a HOP body to that body.
+
+        These generators are local to the body, so the ones still open when it
+        returns are closed there, inside the subgraph, the same way CPython
+        finalizes them when the function returns. If tracing the body fails,
+        the subgraph is discarded and its generators are dropped without being
+        closed. Otherwise compile_subgraph would close them in the outer graph,
+        where their cleanup code references nodes from the subgraph.
+        """
+        outer = {id(gen) for gen in self.local_generators}
+        try:
+            yield
+            self.close_local_generators(
+                tx, [gen for gen in self.local_generators if id(gen) not in outer]
+            )
+        finally:
+            self.local_generators[:] = [
+                gen for gen in self.local_generators if id(gen) in outer
+            ]
 
     def get_replayed_side_effect_source_refs(
         self, *, populate_export_metadata: bool = False
