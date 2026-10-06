@@ -24,7 +24,6 @@
 
 #include <hip/hip_runtime.h>
 #include <algorithm>
-#include <atomic>
 #include <cstdlib>
 #include <vector>
 #include <ATen/ceil_div.h>
@@ -247,21 +246,61 @@ static int get_a2a_nblocks(size_t size, int world_size, bool intra_node) {
 // Fully device-driven, no host barrier. Each rank PUSHES its output into peers'
 // receive buffers with putmem (device-workgroup put sustains markedly higher
 // bandwidth than get on this fabric); cross-rank ordering is done in-kernel with
-// per-peer signals on the symmetric-memory signal pad, and a monotonically
-// increasing epoch makes each call self-contained (allToAllVComplete is a per-op
-// barrier, so back-to-back calls that reuse the buffers are safe). Signal-pad
-// layout (int64): [0,npes)=counts-ready, [npes,2npes)=offset-ready,
-// [2npes,3npes)=data-done, [3npes,4npes)=my write offset into each peer.
+// per-peer signals on the symmetric-memory signal pad, and a per-pad epoch
+// counter (incremented in-kernel by exchangeSplitAndOffset) makes each call
+// self-contained.
+//
+// Epoch lives in device memory (a single counter in the signal pad), NOT on the
+// host: exchangeSplitAndOffset does the increment in-kernel so each cudagraph
+// replay advances the token -- a host-side counter would freeze at its
+// capture-time value and every replay after the first would reuse a stale epoch,
+// degenerating the per-peer waits into no-ops. The counter is PER-PAD (it lives
+// in the signal pad of out_splits_offsets), matching the per-pad signal slots it
+// versions: every call to this pad bumps it, so it is strictly monotonic and a
+// stale signal from an earlier call never satisfies a later CMP_GE wait.
+//
+// PRECONDITION: because the epoch is a single per-pad counter, all ranks sharing
+// a pad must call the op in lockstep (the same number of times). In practice this
+// means one out_splits_offsets tensor per group: do NOT share one pad across
+// process groups of different membership. Different groups normally use different
+// tensors -- hence different pads and independent counters -- so this holds
+// automatically; only deliberately reusing one tensor across different-membership
+// groups would diverge, and that is unsupported.
+//
+// Completion semantics: allToAllVComplete is a per-op barrier over the RECEIVE
+// (data) buffer only. Once all_to_all_vdev returns, the local receive buffer is
+// fully written and safe to consume or reuse for a back-to-back call. It does
+// NOT order a peer's round-A write into `output_splits` (row 0 of
+// out_splits_offsets) for the *next* call against local consumers of *this*
+// call's out_splits_offsets: callers that read out_splits_offsets must
+// synchronize (e.g. copy it out or barrier) before issuing the next
+// all_to_all_vdev on the same handle. See test_all_to_all_vdev_repeat.
+//
+// Signal-pad layout: the op's int64 region is placed PAST the uint32 CAS-channel
+// range that barrier()/put_signal()/wait_signal() use (the first
+// `symm_max_nblocks * world_size` words; see check_channel in
+// CUDASymmetricMemory-inl.cuh) -- the op's slots never return to 0, so overlapping
+// them would make a later barrier() on this handle CAS-spin and trap(). Slots in
+// the offset region (int64): [0,npes)=counts-ready, [npes,2npes)=offset-ready,
+// [2npes,3npes)=data-done, [3npes,4npes)=my write offset into each peer,
+// [4npes]=per-pad epoch counter.
 
 // Exchange metadata for the push: send each peer our per-peer count, compute our
 // receive layout, and hand each source the offset at which it should write into us.
+//
+// Also owns the per-pad epoch: thread 0 loads the epoch slot (`sig + 4*npes`,
+// local to this rank), increments it, stores it back, and broadcasts the new
+// token to the block via shared memory. All three kernels of this call then wait
+// with CMP_GE(epoch). The slot is purely local (only this rank's blocks touch it,
+// single block here), so a plain load+store is race-free and cheaper than an
+// atomic.
 //   input_splits       : int64[npes] IN  - #elements this rank sends to each peer
 //   out_splits_offsets : int64[2,npes] OUT - row 0 = output splits (recv count from
 //                        each source), row 1 = output offsets (exclusive prefix sum)
-//   sig                : signal pad, int64[>=4*npes]
-//   epoch              : per-call token; peers signal with CMP_GE(epoch)
+//   sig                : op signal region (already offset past the CAS channels),
+//                        int64[>=4*npes+1]; slot 4*npes is the epoch counter
 //   team               : rocSHMEM team for this group
-__global__ void exchangeSplitAndOffset(int64_t* input_splits, int64_t* out_splits_offsets, int64_t* sig, int64_t epoch, rocshmem_team_t team) {
+__global__ void exchangeSplitAndOffset(int64_t* input_splits, int64_t* out_splits_offsets, int64_t* sig, rocshmem_team_t team) {
   int mype = rocshmem_team_my_pe(team);
   int npes = rocshmem_team_n_pes(team);
   auto output_splits = out_splits_offsets;
@@ -269,8 +308,17 @@ __global__ void exchangeSplitAndOffset(int64_t* input_splits, int64_t* out_split
   int64_t* sigA = sig;
   int64_t* sigB = sig + npes;
   int64_t* dest = sig + 3 * npes;
+  int64_t* epoch_slot = sig + 4 * npes;
   int tid = threadIdx.x;
   CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
+  // Advance the per-pad epoch in device memory and broadcast to the block. This
+  // is what makes each call (and each cudagraph replay) self-contained.
+  __shared__ int64_t epoch;
+  if (tid == 0) {
+    epoch = *epoch_slot + 1;
+    *epoch_slot = epoch;
+  }
+  __syncthreads();
   // Round A: tell each peer how many elements I send it (peer P, slot mype).
   if (tid < npes) {
     int pg = rocshmem_team_translate_pe(team, tid, ROCSHMEM_TEAM_WORLD);
@@ -299,15 +347,17 @@ __global__ void exchangeSplitAndOffset(int64_t* input_splits, int64_t* out_split
 //   send_data    : local send buffer (symmetric)
 //   recv_data    : peer receive buffer (symmetric-addressed on the target PE)
 //   input_splits : int64[npes] IN - #elements this rank sends to each peer
-//   sig          : signal pad; waits on offset-ready ([npes,2npes)) from exchange
-//   epoch        : per-call token
+//   sig          : op signal region; waits on offset-ready ([npes,2npes)) from
+//                  exchange. Epoch token is read from slot 4*npes, which
+//                  exchangeSplitAndOffset already advanced for this call.
 //   stride       : bytes per row (dim-0 element stride)
 //   team         : rocSHMEM team
-__global__ void allToAllVPush(void* send_data, void* recv_data, int64_t* input_splits, int64_t* sig, int64_t epoch, size_t stride, rocshmem_team_t team) {
+__global__ void allToAllVPush(void* send_data, void* recv_data, int64_t* input_splits, int64_t* sig, size_t stride, rocshmem_team_t team) {
   int mype = rocshmem_team_my_pe(team);
   int npes = rocshmem_team_n_pes(team);
   int64_t* sigB = sig + npes;
   int64_t* dest = sig + 3 * npes;
+  int64_t epoch = *(sig + 4 * npes);  // set by exchangeSplitAndOffset this call
   int bid = blockIdx.x, tid = threadIdx.x;
   int blocks_per_peer = max(gridDim.x / npes, 1);
   CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
@@ -332,13 +382,13 @@ __global__ void allToAllVPush(void* send_data, void* recv_data, int64_t* input_s
     rocshmem_putmem_nbi_wg(
         (char*)recv_data + dst_off, (char*)send_data + src_off, block_size, pg);
   }
-  rocshmem_quiet();  // finish this PE's puts (kernel boundary guarantees all blocks done)
+  rocshmem_quiet();  // finish this block's puts; the kernel boundary covers all blocks before Complete
 }
 
 // Per-op completion barrier: tell every peer our push to it is done, then wait
 // until every source has signalled us -> our receive buffer is fully written.
-//   sig   : signal pad; uses the data-done array ([2npes,3npes))
-//   epoch : per-call token
+//   sig   : op signal region; uses the data-done array ([2npes,3npes)). Epoch
+//           token is read from slot 4*npes.
 //   team  : rocSHMEM team
 //
 // Separate kernel on purpose: data to a peer is split across `blocks_per_peer`
@@ -347,10 +397,11 @@ __global__ void allToAllVPush(void* send_data, void* recv_data, int64_t* input_s
 // (another block might still be writing into P). allToAllVPush *finishing* on the
 // stream is the barrier that guarantees all blocks' puts + quiets are complete;
 // only then do we raise the per-peer completion signals here.
-__global__ void allToAllVComplete(int64_t* sig, int64_t epoch, rocshmem_team_t team) {
+__global__ void allToAllVComplete(int64_t* sig, rocshmem_team_t team) {
   int mype = rocshmem_team_my_pe(team);
   int npes = rocshmem_team_n_pes(team);
   int64_t* sigC = sig + 2 * npes;
+  int64_t epoch = *(sig + 4 * npes);  // set by exchangeSplitAndOffset this call
   int tid = threadIdx.x;
   if (tid < npes) {
     int pg = rocshmem_team_translate_pe(team, tid, ROCSHMEM_TEAM_WORLD);
@@ -387,22 +438,70 @@ void all_to_all_vdev(
   int64_t* in_splits_ptr = (int64_t*)(in_splits.const_data_ptr());
   int64_t* out_splits_offsets_ptr = (int64_t*)(out_splits_offsets.mutable_data_ptr());
 
-  TORCH_CHECK_EQ(input.device(), out.device());
+  // Input validation (mirrors all_to_all_vdev_2d). Without these, malformed
+  // inputs silently corrupt device memory: an out_splits_offsets smaller than
+  // [2, world_size] makes exchangeSplitAndOffset write out of bounds, and a
+  // non-contiguous input makes the push copy the wrong bytes.
+  TORCH_CHECK(input.is_contiguous() && out.is_contiguous()
+      && in_splits.is_contiguous() && out_splits_offsets.is_contiguous(),
+      "input, out, in_splits and out_splits_offsets must be contiguous");
+  TORCH_CHECK(input.dim() >= 1 && out.dim() >= 1,
+      "input and out must have at least 1 dimension");
+  TORCH_CHECK(input.dtype() == out.dtype()
+      && input.stride(0) == out.stride(0),
+      "input and out must have the same dtype and the same stride at dim 0");
+  TORCH_CHECK(in_splits.scalar_type() == at::kLong
+      && out_splits_offsets.scalar_type() == at::kLong,
+      "in_splits and out_splits_offsets must be int64");
+  TORCH_CHECK(in_splits.numel() == world_size,
+      "in_splits must have world_size (", world_size, ") elements, got ",
+      in_splits.numel());
+  auto oso_shape = out_splits_offsets.sizes();
+  TORCH_CHECK(oso_shape.size() == 2 && oso_shape[0] == 2
+      && oso_shape[1] == world_size,
+      "out_splits_offsets must have shape [2, world_size] = [2, ", world_size,
+      "], got ", oso_shape);
   auto device = input.device();
+  TORCH_CHECK(input.device() == out.device()
+      && in_splits.device() == device
+      && out_splits_offsets.device() == device,
+      "all tensor arguments must be on the same device");
   c10::cuda::CUDAGuard guard(device);
   auto& team_manager = TeamManager::get(device);
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   auto stream = at::cuda::getCurrentCUDAStream(device.index());
 
   int rank = out_splits_offsets_hdl->get_rank();
-  auto* sig_ptr = reinterpret_cast<int64_t*>(
+  auto* sig_pad_base = reinterpret_cast<char*>(
       out_splits_offsets_hdl->get_signal_pad_ptrs()[rank]);
+  auto sig_pad_size = out_splits_offsets_hdl->get_signal_pad_size();
+
+  // Place the op's int64 signaling region PAST the reserved uint32 CAS-channel
+  // range used by barrier()/put_signal()/wait_signal() (see check_channel in
+  // CUDASymmetricMemory-inl.cuh). Those primitives touch the first
+  // `symm_max_nblocks * world_size` uint32 words of the pad; the op's slots never
+  // return to 0, so overlapping them would make a later barrier() on this handle
+  // CAS-spin and trap(). Everything below is relative to this offset base.
+  constexpr size_t kU32 = sizeof(uint32_t);
+  const size_t cas_range_bytes =
+      (size_t)c10d::symmetric_memory::symm_max_nblocks * world_size * kU32;
+  // 4*npes signaling slots + 1 epoch slot, all int64.
+  const size_t op_region_bytes =
+      ((size_t)world_size * 4 + 1) * sizeof(int64_t);
+  // Align the op base to int64 (cas_range_bytes is a multiple of 4; round up to 8).
+  const size_t op_offset_bytes = (cas_range_bytes + alignof(int64_t) - 1) &
+      ~(size_t)(alignof(int64_t) - 1);
   TORCH_CHECK(
-      out_splits_offsets_hdl->get_signal_pad_size() >=
-          (size_t)world_size * 4 * sizeof(int64_t),
-      "signal pad too small for all_to_all_vdev signaling");
-  static std::atomic<int64_t> g_epoch{0};
-  int64_t epoch = ++g_epoch;
+      op_offset_bytes >= cas_range_bytes,
+      "all_to_all_vdev signaling region must start past the CAS channel range");
+  TORCH_CHECK(
+      sig_pad_size >= op_offset_bytes + op_region_bytes,
+      "signal pad too small for all_to_all_vdev signaling: need ",
+      op_offset_bytes + op_region_bytes,
+      " bytes (", op_offset_bytes, " reserved for CAS channels + ",
+      op_region_bytes, " for the op), have ", sig_pad_size,
+      ". Increase it via symm_mem.set_signal_pad_size().");
+  auto* sig_ptr = reinterpret_cast<int64_t*>(sig_pad_base + op_offset_bytes);
 
   auto input_size = input.numel() * input.element_size();
   int num_blocks = get_a2a_nblocks(
@@ -410,13 +509,13 @@ void all_to_all_vdev(
   size_t stride_bytes = input.stride(0) * input.element_size();
 
   exchangeSplitAndOffset<<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
-      in_splits_ptr, out_splits_offsets_ptr, sig_ptr, epoch, team);
+      in_splits_ptr, out_splits_offsets_ptr, sig_ptr, team);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   allToAllVPush<<<dim3(num_blocks), dim3(THREADS_PER_BLOCK), 0, stream>>>(
-      input_ptr, output_ptr, in_splits_ptr, sig_ptr, epoch, stride_bytes, team);
+      input_ptr, output_ptr, in_splits_ptr, sig_ptr, stride_bytes, team);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   allToAllVComplete<<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
-      sig_ptr, epoch, team);
+      sig_ptr, team);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
