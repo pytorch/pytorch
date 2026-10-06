@@ -547,6 +547,8 @@ def _make_fault_tolerance_test_class(backend):
 for backend in FAULT_TOLERANCE_BACKENDS:
     cls = _make_fault_tolerance_test_class(backend)
     globals()[cls.__name__] = cls
+# Unbound so the last class isn't collected a second time as `cls`.
+del cls
 
 
 class ReconfigureContractTest(TestCase):
