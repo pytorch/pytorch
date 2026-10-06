@@ -233,10 +233,6 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
                                                         int64_t _padding_mode,
                                                         bool align_corners,
                                                         std::array<bool, 2> output_mask) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic due to atomic_add
-  at::globalContext().alertNotDeterministic("grid_sampler_2d_backward_mps");
-
   check_grid_sampler_2d_backward(input, grid, grad_output);
 
   TORCH_CHECK(input.scalar_type() == grid.scalar_type(),
@@ -300,12 +296,19 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
         auto input_name = interpolation_mode == GridSamplerInterpolation::Bicubic
             ? fmt::format("grid_sampler_2d_backward_bicubic_input_{}_{}_{}", pad_str, idx_str, type_str)
             : fmt::format("grid_sampler_2d_backward_{}_input_{}_{}", interp_str, idx_str, type_str);
-        auto input_pso = lib.getPipelineStateForFunc(input_name);
+        // See Note [Enabling Deterministic Operations]
+        // The operation is normally nondeterministic because of atomic
+        // accumulation across multiple threads. To make it deterministic,
+        // dispatch only one thread per batch, so the accumulations are
+        // serialized.
+        bool serial = at::globalContext().deterministicAlgorithms();
+        auto input_pso = lib.getPipelineStateForFunc(input_name + (serial ? "_serial" : ""));
         getMPSProfiler().beginProfileKernel(
             input_pso, "grid_sampler_2d_backward_input", {grad_output, grid}, mpsStream);
         [computeEncoder setComputePipelineState:input_pso];
         set_args(computeEncoder, grad_input, grad_output, grid);
-        mtl_dispatch1DJob(computeEncoder, input_pso, num_threads);
+        auto numThreadsInput = serial ? N : num_threads;
+        mtl_dispatch1DJob(computeEncoder, input_pso, numThreadsInput);
         getMPSProfiler().endProfileKernel(input_pso, mpsStream);
       }
 
@@ -335,10 +338,6 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
                                                         bool align_corners,
                                                         std::array<bool, 2> output_mask) {
   using namespace mps;
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic due to atomic_add
-  at::globalContext().alertNotDeterministic("grid_sampler_3d_backward_mps");
-
   check_grid_sampler_3d_backward(input, grid, grad_output);
 
   TORCH_CHECK_NOT_IMPLEMENTED(interpolation_mode == 0 || interpolation_mode == 1,
@@ -391,13 +390,18 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
   const auto idx_str = i32 ? "i32" : "i64";
 
   MPSStream* mpsStream = getCurrentMPSStream();
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  const bool serial = run_grad_input && at::globalContext().deterministicAlgorithms();
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      auto pso = lib.getPipelineStateForFunc(
-          fmt::format("grid_sampler_3d_backward_{}_{}", idx_str, scalarToMetalTypeString(input)));
+      auto pso = lib.getPipelineStateForFunc(fmt::format(
+          "grid_sampler_3d_backward_{}_{}{}", idx_str, scalarToMetalTypeString(input), serial ? "_serial" : ""));
 
       getMPSProfiler().beginProfileKernel(
           pso,
@@ -431,8 +435,19 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
         dispatch(int64_t{});
       }
 
-      MTLSize threadsPerThreadgroup = MTLSizeMake(16, 16, 1);
-      MTLSize threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
+      MTLSize threadsPerGrid, threadsPerThreadgroup;
+      if (serial) {
+        // See Note [Enabling Deterministic Operations]
+        // The operation is normally nondeterministic because of atomic
+        // accumulation across multiple threads. To make it deterministic,
+        // dispatch only one thread per batch, so the accumulations are
+        // serialized.
+        threadsPerGrid = MTLSizeMake(1, 1, N);
+        threadsPerThreadgroup = MTLSizeMake(1, 1, std::clamp<NSUInteger>(N, 1, [pso maxTotalThreadsPerThreadgroup]));
+      } else {
+        threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
+        threadsPerThreadgroup = MTLSizeMake(16, 16, 1);
+      }
       [computeEncoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
 
       getMPSProfiler().endProfileKernel(pso, mpsStream);
