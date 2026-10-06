@@ -3,9 +3,14 @@
 import argparse
 import dataclasses
 import gc
+import json
 import re
+import subprocess
+import sys
+import tempfile
 import time
 import warnings
+from pathlib import Path
 
 from triton import runtime
 
@@ -154,13 +159,10 @@ def _generate_offsets(total, groups, device, mode="random", align=1):
     return torch.cumsum(counts, dim=0).to(dtype=torch.int32)
 
 
-_BENCH_SETTLE_SECONDS = 0.1
-
-
-def _do_bench_cuda(fn, warmup=10, rep=100, settle_seconds=_BENCH_SETTLE_SECONDS):
+def _do_bench_cuda(fn, warmup=10, rep=100, cooldown_seconds=1.0):
     """Benchmark `fn` with a fixed number of iterations, an L2 cache
-    clear before each measured call, and a settle delay before each
-    call to avoid thermal-throttling bias.
+    clear before each measured call, and a cooldown before the first
+    measured call to avoid thermal-throttling bias.
 
     triton.testing.do_bench's warmup/rep are milliseconds, not iteration
     counts: for slow (large-shape) calls this collapses to very few
@@ -169,31 +171,21 @@ def _do_bench_cuda(fn, warmup=10, rep=100, settle_seconds=_BENCH_SETTLE_SECONDS)
     tracking single-digit-percent speedups. Fixed iteration counts give
     every shape the same statistical power regardless of how long it
     takes to run.
-
-    Without a settle delay, back-to-back launches let the GPU heat up
-    over the course of the rep loop, so later iterations can run
-    measurably slower than earlier ones purely from clock throttling -
-    a directional bias, not just noise, and one that can differ by
-    backend depending on how much power each kernel draws. The delay
-    (and the synchronize before it, so it's genuine idle time rather
-    than the host stalling while queued work keeps running) gives the
-    GPU a chance to cool between measured calls.
     """
     di = runtime.driver.active.get_device_interface()
     cache = runtime.driver.active.get_empty_cache_for_benchmark()
 
     fn()
     di.synchronize()
+    time.sleep(cooldown_seconds)
 
     for _ in range(warmup):
-        time.sleep(settle_seconds)
         fn()
     di.synchronize()
 
     times_ms = []
     for _ in range(rep):
         runtime.driver.active.clear_cache(cache)
-        time.sleep(settle_seconds)
         start = di.Event(enable_timing=True)
         end = di.Event(enable_timing=True)
         start.record()
@@ -416,6 +408,98 @@ def _proton_profile_gluon(
     print(f"  Proton profile written to {path}")
 
 
+# (num_experts, hidden_size, expert intermediate size, top_k), from each
+# model's Hugging Face config.json. Each expert computes
+# (silu(x @ W_gate) * (x @ W_up)) @ W_down; as in torchtitan's GroupedLinear
+# (torchtitan/models/common/linear.py), W_gate and W_up are fused, giving one
+# up GEMM with N = 2 * intermediate, K = hidden and one down GEMM with
+# N = hidden, K = intermediate, over M = tokens * top_k routed rows.
+_MOE_MODELS = {
+    "Mixtral-8x7B": (8, 4096, 14336, 2),
+    "Llama-4-Scout": (16, 5120, 8192, 1),
+    "DeepSeek-V3": (256, 7168, 2048, 8),
+    "gpt-oss-120b": (128, 2880, 2880, 4),
+    "Qwen3-235B-A22B": (128, 4096, 1536, 8),
+}
+_MOE_TOKENS = (256, 16384)
+
+
+def _moe_model_gmnk():
+    gmnk = []
+    for experts, hidden, intermediate, top_k in _MOE_MODELS.values():
+        for tokens in _MOE_TOKENS:
+            m = tokens * top_k
+            gmnk.append([experts, m, 2 * intermediate, hidden])
+            gmnk.append([experts, m, hidden, intermediate])
+    return gmnk
+
+
+def _default_gmnk(a_dim, b_dim):
+    gmnk = _moe_model_gmnk()
+    if a_dim == 2 and b_dim == 2:
+        return [[g, n, k, m] for g, m, n, k in gmnk]
+    if a_dim == 3 and b_dim == 2:
+        return [[g, n, m, k] for g, m, n, k in gmnk]
+    if a_dim == 3 and b_dim == 3:
+        return [[g, m // g, n, k] for g, m, n, k in gmnk]
+    return gmnk
+
+
+def _first_call_seconds(fn, start):
+    fn()
+    torch.cuda.synchronize()
+    return time.perf_counter() - start
+
+
+def _save_progress(result_file, done, result):
+    if result_file is not None:
+        Path(result_file).write_text(json.dumps({"done": done, "result": result}))
+
+
+def _print_table(columns):
+    import pandas as pd
+
+    df = pd.DataFrame(columns)
+    floatfmt = tuple(
+        ".0f" if pd.api.types.is_integer_dtype(dt) else ".2f" for dt in df.dtypes
+    )
+    df = df.astype(object).where(df.notna(), None)
+    print(df.to_markdown(index=False, floatfmt=floatfmt, missingval=""))
+
+
+def _print_results(results):
+    if not results:
+        return
+    first = results[0]
+    print(
+        f"A: {first['A dim']}d {first['A layout']}, B: {first['B dim']}d {first['B layout']}"
+        " | us = median time, x = speedup over ATen"
+    )
+    names = ("ATen", "Triton", "CuTeDSL", "Gluon")
+    shape = {k: [r[k] for r in results] for k in ("G", "M", "N", "K")}
+    nan = float("nan")
+
+    perf = dict(shape)
+    for b in names:
+        if any(f"{b} (us)" in r for r in results):
+            perf[f"{b} us"] = [r.get(f"{b} (us)", nan) for r in results]
+            if b != "ATen":
+                perf[f"{b} x"] = [r.get(f"{b} speedup", nan) for r in results]
+    _print_table(perf)
+
+    timing = dict(shape)
+    for b in names:
+        if any(f"{b} compile (s)" in r for r in results):
+            timing[f"{b} compile s"] = [r.get(f"{b} compile (s)", nan) for r in results]
+        if any(f"{b} eager (us)" in r for r in results):
+            timing[f"{b} overhead us"] = [
+                r.get(f"{b} eager (us)", nan) - r.get(f"{b} (us)", nan) for r in results
+            ]
+    if len(timing) > len(shape):
+        print()
+        _print_table(timing)
+
+
 def benchmark_grouped_mm(
     gmnk=None,
     a_dim=2,
@@ -430,6 +514,7 @@ def benchmark_grouped_mm(
     backends=None,
     warmup=10,
     rep=100,
+    cooldown_seconds=1.0,
     grouping="random",
     proton_out=None,
     proton_buffer_size=0,
@@ -437,8 +522,15 @@ def benchmark_grouped_mm(
     proton_sample_warps="",
     proton_format="chrome_trace",
     proton_optimizations="clock32,time_shift",
+    result_file=None,
+    timing_details=False,
 ):
     torch.manual_seed(seed)
+    if timing_details:
+        from torch._inductor.async_compile import AsyncCompile
+
+        AsyncCompile.warm_pool()
+        AsyncCompile.wait_pool_ready()
     if backends is None:
         backends = BACKEND_CHOICES
 
@@ -448,35 +540,7 @@ def benchmark_grouped_mm(
     align = 16 // dtype.itemsize
 
     if gmnk is None:
-        gmnk = [
-            [2, 5, 16, 16],
-            [3, 13, 16, 32],
-            [8, 128, 16, 16],
-            [7, 253, 24, 24],
-            [8, 512, 32, 64],
-            [16, 1024, 256, 1024],
-            [32, 2048, 512, 256],
-            [32, 2048, 512, 2048],
-            [24, 4834, 5120, 1536],
-            [32, 8257, 5120, 1536],
-            [24, 32768, 6144, 2048],
-            [48, 32768, 6144, 2048],
-            [64, 32768, 6144, 2048],
-            [24, 65536, 6144, 2048],
-            [32, 65536, 6144, 2048],
-            [48, 65536, 6144, 2048],
-            [64, 65536, 6144, 2048],
-            [24, 131072, 6144, 2048],
-            [32, 131072, 6144, 2048],
-            [48, 131072, 6144, 2048],
-            [64, 131072, 6144, 2048],
-        ]
-        if a_dim == 2 and b_dim == 2:
-            gmnk = [[g, k, n, m] for g, m, n, k in gmnk]
-        elif a_dim == 3 and b_dim == 2:
-            gmnk = [[g, n, m, k] for g, m, n, k in gmnk]
-        elif a_dim == 3 and b_dim == 3:
-            gmnk = [[g, m // g, n, k] for g, m, n, k in gmnk]
+        gmnk = _default_gmnk(a_dim, b_dim)
 
     results = []
 
@@ -540,6 +604,7 @@ def benchmark_grouped_mm(
         }
 
         C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
+        done = []
 
         us_aten = None
         if "aten" in backends:
@@ -550,6 +615,7 @@ def benchmark_grouped_mm(
                 _maybe_wrap_cuda_graph(fn_aten, "aten", use_cuda_graphs),
                 warmup=warmup,
                 rep=rep,
+                cooldown_seconds=cooldown_seconds,
             )
             us_aten = bench_aten["median_us"]
             tflops_aten = flops * 1e-12 / (us_aten * 1e-6)
@@ -558,12 +624,19 @@ def benchmark_grouped_mm(
                 f"min={bench_aten['min_us']:.2f}, max={bench_aten['max_us']:.2f})"
             )
             result["ATen (us)"] = us_aten
+            if timing_details and use_cuda_graphs:
+                result["ATen eager (us)"] = _do_bench_cuda(
+                    fn_aten, warmup=warmup, rep=rep, cooldown_seconds=cooldown_seconds
+                )["median_us"]
             gc.collect()
             torch.cuda.empty_cache()
+            done.append("aten")
+            _save_progress(result_file, done, result)
 
         if "triton" in backends:
             try:
                 torch._dynamo.reset()
+                compile_start = time.perf_counter()
                 compiled_triton = torch.compile(
                     torch._grouped_mm,
                     options={
@@ -575,10 +648,13 @@ def benchmark_grouped_mm(
                 fn_triton = lambda: compiled_triton(  # noqa: E731
                     A, B.transpose(-2, -1), offs
                 )
+                if timing_details:
+                    result["Triton compile (s)"] = _first_call_seconds(fn_triton, compile_start)
                 bench_triton = _do_bench_cuda(
                     _maybe_wrap_cuda_graph(fn_triton, "triton", use_cuda_graphs),
                     warmup=warmup,
                     rep=rep,
+                    cooldown_seconds=cooldown_seconds,
                 )
                 us_triton = bench_triton["median_us"]
                 tflops_triton = flops * 1e-12 / (us_triton * 1e-6)
@@ -587,6 +663,10 @@ def benchmark_grouped_mm(
                     f"min={bench_triton['min_us']:.2f}, max={bench_triton['max_us']:.2f})"
                 )
                 result["Triton (us)"] = us_triton
+                if timing_details and use_cuda_graphs:
+                    result["Triton eager (us)"] = _do_bench_cuda(
+                        fn_triton, warmup=warmup, rep=rep, cooldown_seconds=cooldown_seconds
+                    )["median_us"]
                 if us_aten is not None:
                     result["Triton speedup"] = us_aten / us_triton
 
@@ -600,11 +680,14 @@ def benchmark_grouped_mm(
                 print(f"  Triton: Failed ({e})")
             gc.collect()
             torch.cuda.empty_cache()
+            done.append("triton")
+            _save_progress(result_file, done, result)
 
         if is_blackwell():
             if a_dim == 2 and b_dim == 3 and "cutedsl" in backends:
                 try:
                     torch._dynamo.reset()
+                    compile_start = time.perf_counter()
                     compiled_cutedsl = torch.compile(
                         torch._grouped_mm,
                         options={
@@ -616,10 +699,13 @@ def benchmark_grouped_mm(
                     fn_cutedsl = lambda: compiled_cutedsl(  # noqa: E731
                         A, B.transpose(-2, -1), offs
                     )
+                    if timing_details:
+                        result["CuTeDSL compile (s)"] = _first_call_seconds(fn_cutedsl, compile_start)
                     bench_cutedsl = _do_bench_cuda(
                         _maybe_wrap_cuda_graph(fn_cutedsl, "cutedsl", use_cuda_graphs),
                         warmup=warmup,
                         rep=rep,
+                        cooldown_seconds=cooldown_seconds,
                     )
                     us_cutedsl = bench_cutedsl["median_us"]
                     tflops_cutedsl = flops * 1e-12 / (us_cutedsl * 1e-6)
@@ -629,6 +715,10 @@ def benchmark_grouped_mm(
                         f"max={bench_cutedsl['max_us']:.2f})"
                     )
                     result["CuTeDSL (us)"] = us_cutedsl
+                    if timing_details and use_cuda_graphs:
+                        result["CuTeDSL eager (us)"] = _do_bench_cuda(
+                            fn_cutedsl, warmup=warmup, rep=rep, cooldown_seconds=cooldown_seconds
+                        )["median_us"]
                     if us_aten is not None:
                         result["CuTeDSL speedup"] = us_aten / us_cutedsl
 
@@ -644,10 +734,13 @@ def benchmark_grouped_mm(
                     print(f"  CuTeDSL: Failed ({e})")
                 gc.collect()
                 torch.cuda.empty_cache()
+                done.append("cutedsl")
+                _save_progress(result_file, done, result)
 
             if "gluon" in backends:
                 try:
                     torch._dynamo.reset()
+                    compile_start = time.perf_counter()
                     compiled_gluon = torch.compile(
                         torch._grouped_mm,
                         options={
@@ -659,10 +752,13 @@ def benchmark_grouped_mm(
                     fn_gluon = lambda: compiled_gluon(  # noqa: E731
                         A, B.transpose(-2, -1), offs
                     )
+                    if timing_details:
+                        result["Gluon compile (s)"] = _first_call_seconds(fn_gluon, compile_start)
                     bench_gluon = _do_bench_cuda(
                         _maybe_wrap_cuda_graph(fn_gluon, "gluon", use_cuda_graphs),
                         warmup=warmup,
                         rep=rep,
+                        cooldown_seconds=cooldown_seconds,
                     )
                     us_gluon = bench_gluon["median_us"]
                     tflops_gluon = flops * 1e-12 / (us_gluon * 1e-6)
@@ -671,6 +767,10 @@ def benchmark_grouped_mm(
                         f"min={bench_gluon['min_us']:.2f}, max={bench_gluon['max_us']:.2f})"
                     )
                     result["Gluon (us)"] = us_gluon
+                    if timing_details and use_cuda_graphs:
+                        result["Gluon eager (us)"] = _do_bench_cuda(
+                            fn_gluon, warmup=warmup, rep=rep, cooldown_seconds=cooldown_seconds
+                        )["median_us"]
                     if us_aten is not None:
                         result["Gluon speedup"] = us_aten / us_gluon
 
@@ -697,22 +797,45 @@ def benchmark_grouped_mm(
                     print(f"  Gluon: Failed ({e})")
                 gc.collect()
                 torch.cuda.empty_cache()
+                done.append("gluon")
+                _save_progress(result_file, done, result)
 
         results.append(result)
         print()
 
-    import pandas as pd
+    if result_file is None:
+        _print_results(results)
+    return results
 
-    df = pd.DataFrame(results)
-    floatfmt = tuple(
-        ".0f"
-        if pd.api.types.is_integer_dtype(dt)
-        else ".2f"
-        if pd.api.types.is_float_dtype(dt)
-        else ""
-        for dt in df.dtypes
-    )
-    print(df.to_markdown(index=False, floatfmt=floatfmt))
+
+def _benchmark_isolated(gmnk, backends, child_args, layout):
+    results = []
+    with tempfile.TemporaryDirectory() as tmp:
+        result_file = Path(tmp) / "result.json"
+        for shape in gmnk:
+            remaining = [b for b in BACKEND_CHOICES if b in backends]
+            merged = dict(zip(("G", "M", "N", "K"), shape)) | layout
+            while remaining:
+                result_file.unlink(missing_ok=True)
+                cmd = [sys.executable, __file__, *child_args, "--result-file", str(result_file)]
+                cmd += ["--gmnk", ",".join(map(str, shape)), "--backends", *remaining]
+                sys.stdout.flush()
+                rc = subprocess.run(cmd).returncode
+                done = []
+                if result_file.exists():
+                    progress = json.loads(result_file.read_text())
+                    done = progress["done"]
+                    merged.update(progress["result"])
+                remaining = [b for b in remaining if b not in done]
+                if rc == 0:
+                    break
+                if remaining:
+                    print(f"  {remaining.pop(0)}: crashed the benchmark process (exit {rc}), skipped\n", flush=True)
+            for b in ("Triton", "CuTeDSL", "Gluon"):
+                if "ATen (us)" in merged and f"{b} (us)" in merged:
+                    merged[f"{b} speedup"] = merged["ATen (us)"] / merged[f"{b} (us)"]
+            results.append(merged)
+    _print_results(results)
     return results
 
 
@@ -795,6 +918,15 @@ if __name__ == "__main__":
         help="Number of measured iterations per shape/backend.",
     )
     parser.add_argument(
+        "--cooldown-seconds",
+        type=float,
+        default=1.0,
+        help=(
+            "Idle time before each shape/backend measurement, so every "
+            "backend starts from the same thermal state."
+        ),
+    )
+    parser.add_argument(
         "--grouping",
         choices=["random", "balanced"],
         default="random",
@@ -868,11 +1000,59 @@ if __name__ == "__main__":
             "cost, which only the trace dump applies. Pass '' to disable."
         ),
     )
+    parser.add_argument(
+        "--isolate",
+        action="store_true",
+        help=(
+            "Run each shape in its own subprocess. If a backend crashes the "
+            "process (e.g. an illegal memory access poisoning the CUDA "
+            "context), it is recorded as failed and the remaining backends "
+            "are rerun in a fresh process."
+        ),
+    )
+    parser.add_argument(
+        "--timing-details",
+        action="store_true",
+        help=(
+            "Also record each compiled backend's compile time (torch.compile "
+            "through the end of the first call, including autotuning) and, "
+            "with --use-cuda-graphs, each backend's eager time, whose "
+            "difference from the graph time is the per-call host overhead."
+        ),
+    )
+    parser.add_argument("--result-file", dest="result_file", help=argparse.SUPPRESS)
     args = parser.parse_args()
     a_dim, a_k_major = args.a_spec
     b_dim, b_k_major = args.b_spec
     dtype = torch.bfloat16 if args.input_dtype == "bf16" else torch.float16
     gmnk = args.gmnk if args.gmnk is not None else None
+    if args.isolate:
+        if args.proton_out is not None:
+            parser.error("--isolate does not support --proton-out")
+        child_args = [
+            "--input-dtype", args.input_dtype,
+            "--seed", str(args.seed),
+            "--rtol", str(args.rtol),
+            "--atol", str(args.atol),
+            "--A", f"{a_dim}d:{_major_label(a_k_major, 'm')}",
+            "--B", f"{b_dim}d:{_major_label(b_k_major, 'n')}",
+            "--warmup", str(args.warmup),
+            "--iterations", str(args.iterations),
+            "--cooldown-seconds", str(args.cooldown_seconds),
+            "--grouping", args.grouping,
+        ]
+        if args.use_cuda_graphs:
+            child_args.append("--use-cuda-graphs")
+        if args.timing_details:
+            child_args.append("--timing-details")
+        layout = {
+            "A dim": a_dim,
+            "B dim": b_dim,
+            "A layout": _major_label(a_k_major, "m"),
+            "B layout": _major_label(b_k_major, "n"),
+        }
+        _benchmark_isolated(gmnk or _default_gmnk(a_dim, b_dim), args.backends, child_args, layout)
+        sys.exit(0)
     benchmark_grouped_mm(
         gmnk=gmnk,
         a_dim=a_dim,
@@ -887,6 +1067,7 @@ if __name__ == "__main__":
         backends=args.backends,
         warmup=args.warmup,
         rep=args.iterations,
+        cooldown_seconds=args.cooldown_seconds,
         grouping=args.grouping,
         proton_out=args.proton_out,
         proton_buffer_size=args.proton_buffer_size,
@@ -894,4 +1075,6 @@ if __name__ == "__main__":
         proton_sample_warps=args.proton_sample_warps,
         proton_format=args.proton_format,
         proton_optimizations=args.proton_optimizations,
+        result_file=args.result_file,
+        timing_details=args.timing_details,
     )

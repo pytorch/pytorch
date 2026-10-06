@@ -43,6 +43,7 @@ from .mm_common import (
     _is_static_problem,
     check_supported_striding,
     load_kernel_template,
+    persistent_gluon_grouped_mm_grid,
     persistent_grouped_mm_grid,
 )
 
@@ -121,16 +122,31 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     return pruned_configs
 
 
-def gluon_grouped_mm_configs(dtype_AB, k_is_varying):
-    from torch._inductor.heuristics.template.gluon import get_grouped_mm_configs
+def gluon_grouped_mm_configs(dtype_AB, g, m, n, k, a_is_2d, b_is_2d):
+    from torch._inductor.heuristics.template.gluon import (
+        get_grouped_mm_configs,
+        prune_grouped_mm_configs,
+    )
 
     gluon_configs = get_grouped_mm_configs(
         dtype_AB=dtype_AB,
-        k_is_varying=k_is_varying,
+        k_is_varying=a_is_2d and b_is_2d,
     )
+    if not has_free_symbols((g, m, n, k)):
+        gluon_configs = prune_grouped_mm_configs(
+            gluon_configs,
+            int(g),
+            int(m),
+            int(n),
+            int(k),
+            a_is_2d,
+            b_is_2d,
+            get_num_sms(),
+        )
 
     configs = []
     for gluon_config in gluon_configs:
+        num_ctas = 2 if gluon_config.USE_TWO_CTA else 1
         configs.append(
             Config(
                 kwargs={
@@ -142,10 +158,12 @@ def gluon_grouped_mm_configs(dtype_AB, k_is_varying):
                     "NUM_STORE_WARPS": gluon_config.NUM_STORE_WARPS,
                     "GROUP_SIZE_N": gluon_config.GROUP_SIZE_N,
                     "USE_TMA_STORE": gluon_config.USE_TMA_STORE,
-                    "NUM_SMS": get_num_sms(),
+                    "USE_TWO_CTA": gluon_config.USE_TWO_CTA,
+                    "NUM_PROGRAMS": get_num_sms() // num_ctas,
                 },
                 num_stages=1,  # Dummy value; NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS drive pipelining instead.
                 num_warps=gluon_config.NUM_STORE_WARPS,
+                num_ctas=num_ctas,
             ),
         )
 
@@ -154,7 +172,7 @@ def gluon_grouped_mm_configs(dtype_AB, k_is_varying):
 
 gluon_grouped_mm_template = GluonTemplate(
     name="gluon_grouped_mm",
-    grid=persistent_grouped_mm_grid,
+    grid=persistent_gluon_grouped_mm_grid,
     source=load_kernel_template(
         "gluon_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
     ),
@@ -754,8 +772,7 @@ def _tuned_grouped_mm_common(
         }
         can_use_tma_store = can_use_tma(output_layout=layout)
         for config in gluon_grouped_mm_configs(
-            dtype_AB=mat_a.get_dtype(),
-            k_is_varying=a_is_2d and b_is_2d,
+            mat_a.get_dtype(), g, m, n, k, a_is_2d, b_is_2d
         ):
             if config.kwargs["USE_TMA_STORE"] and not can_use_tma_store:
                 continue

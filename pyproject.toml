@@ -137,6 +137,7 @@ include = [
 ]
 exclude = [
     "**/.github/**",
+    ".agents/**",
     ".ci/**",
     ".claude/**",
     ".spin/**",
@@ -259,7 +260,6 @@ exclude = [
     "torch/distributed/checkpoint/examples/**",
     "torch/distributed/examples/**",
     "torch/distributed/tensor/examples/**",
-    "torch/fx/experimental/shape_inference/**",
     # Only the sparse/ sub-dir is leakage; legacy ships the rest of
     # torch/utils/benchmark/examples/.
     "torch/utils/benchmark/examples/sparse/**",
@@ -372,6 +372,7 @@ license-files = [
     "third_party/cpuinfo/deps/clog/LICENSE",
     "third_party/cudnn_frontend/LICENSE-MIT.txt",
     "third_party/cudnn_frontend/LICENSE.txt",
+    "third_party/cudnn_frontend/python/cudnn/moe_ep/_megamoe_backend/cutedsl_src/LICENSE.Apache-2.0",
     "third_party/cutlass/LICENSE.txt",
     "third_party/fbgemm/LICENSE",
     "third_party/fbgemm/external/asmjit/LICENSE.md",
@@ -747,6 +748,9 @@ package = 'torch'
 ]
 "Documentation" = [
   ".spin/cmds.py:docs",
+]
+"Test" = [
+  ".spin/cmds.py:test",
 ]
 "Type" = [
     ".spin/cmds.py:pyrefly",

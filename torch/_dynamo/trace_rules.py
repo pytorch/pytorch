@@ -59,6 +59,7 @@ from .utils import (
 )
 from .variables import (
     BuiltinVariable,
+    ByteArrayBuiltinVariable,
     DictBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
@@ -167,6 +168,7 @@ manual_torch_name_rule_map: dict[
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
+    "torch.overrides.handle_torch_function": TorchInGraphFunctionVariable,
     "torch._C._skip_one_hop_torch_function": TorchInGraphFunctionVariable,
     "torch.jit.is_scripting": TorchInGraphFunctionVariable,
     "torch.jit.is_tracing": TorchInGraphFunctionVariable,
@@ -4138,6 +4140,7 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES = {
+    bytearray: ByteArrayBuiltinVariable,
     dict: DictBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
     hasattr: HasAttrBuiltinVariable,

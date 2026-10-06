@@ -1282,6 +1282,7 @@ struct AllocParams {
   Block* block{nullptr};
   StatTypes stat_types = {false};
   cudaError_t err{cudaSuccess};
+  bool custom_allocator_failed{false};
   OomRejectionInfo oom_rejection_info;
 };
 
@@ -1418,6 +1419,7 @@ PrivatePoolState::PrivatePoolState(
 cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
+    p.custom_allocator_failed = *ptr == nullptr;
     return *ptr ? cudaSuccess : cudaErrorMemoryAllocation;
   } else {
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(ptr, size));
@@ -2096,7 +2098,13 @@ class DeviceCachingAllocator {
                 " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
                 " fragmentation.  See documentation for Memory Management "
                 " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)",
-          expandable_reserve_msg);
+          expandable_reserve_msg,
+          params.custom_allocator_failed
+              ? " The custom allocator backing this MemPool returned nullptr."
+                " Check preceding allocator warnings or logs for the underlying"
+                " cause. This can indicate an allocator-specific error or memory"
+                " constraint, even when device-wide free memory is available."
+              : "");
     }
 
     bool split_remainder = should_split(
@@ -3090,7 +3098,14 @@ class DeviceCachingAllocator {
       // in graph_pools and only return the blocks from it.
       auto pool = graph_pools.find(mempool_id);
       if (pool != graph_pools.end()) {
-        all_blocks = get_private_pool_head_blocks(pool->second.get());
+        // Not get_private_pool_head_blocks: in an expandable segment, a mapped
+        // run after an unmapped hole has a prev but is reported on its own.
+        const PrivatePool* pp = pool->second.get();
+        for (Block* b : get_all_blocks()) {
+          if (b->pool == &pp->small_blocks || b->pool == &pp->large_blocks) {
+            all_blocks.push_back(b);
+          }
+        }
       }
     } else {
       // When snapshot is called with non-default mempool_id, we return

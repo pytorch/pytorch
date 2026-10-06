@@ -22,6 +22,7 @@ from triton.experimental.gluon.language.nvidia.blackwell import (
     mbarrier,
     tcgen05_mma,
     tcgen05_commit,
+    tcgen05_mma_barrier_count,
     fence_async_shared,
 )
 
@@ -81,8 +82,9 @@ class PartitionArgs:
     BLOCK_M: gl.constexpr
     BLOCK_N: gl.constexpr
     BLOCK_K: gl.constexpr
-    NUM_BLOCKS: gl.constexpr
+    NUM_PROGRAMS: gl.constexpr
     GROUP_SIZE_N: gl.constexpr
+    USE_TWO_CTA: gl.constexpr
 
 
 @aggregate
@@ -103,7 +105,7 @@ class GroupIterator:
     has_started: gl.tensor
     BLOCK_M: gl.constexpr
     BLOCK_N: gl.constexpr
-    NUM_BLOCKS: gl.constexpr
+    NUM_PROGRAMS: gl.constexpr
 
     @gluon.jit
     def create(
@@ -111,7 +113,7 @@ class GroupIterator:
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         offs_ptr,
 {%- endif %}
-        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
+        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_PROGRAMS: gl.constexpr
     ):
         zero = gl.to_tensor(0)
         return GroupIterator(
@@ -122,7 +124,7 @@ class GroupIterator:
             zero, M, zero, N, zero, K,
             zero, gl.program_id(0),
             gl.to_tensor(False),
-            BLOCK_M, BLOCK_N, NUM_BLOCKS
+            BLOCK_M, BLOCK_N, NUM_PROGRAMS
         ).next()
 
     @gluon.jit
@@ -156,7 +158,7 @@ class GroupIterator:
 {%- endif %}
 
         tiles_processed = self.tiles_processed + (gl.cdiv(self.m_size, self.BLOCK_M) * gl.cdiv(self.n_size, self.BLOCK_N) if self.has_started else 0)
-        tile_idx = self.tile_idx + (gl.cdiv(tiles_processed - self.tile_idx, self.NUM_BLOCKS) * self.NUM_BLOCKS if self.has_started else 0)
+        tile_idx = self.tile_idx + (gl.cdiv(tiles_processed - self.tile_idx, self.NUM_PROGRAMS) * self.NUM_PROGRAMS if self.has_started else 0)
 
         return GroupIterator(
             self.G, g,
@@ -166,7 +168,7 @@ class GroupIterator:
             m_start_offset, m_size, n_start_offset, n_size, k_start_offset, k_size,
             tiles_processed, tile_idx,
             gl.to_tensor(True),
-            self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS
+            self.BLOCK_M, self.BLOCK_N, self.NUM_PROGRAMS
         )
 
 
@@ -187,14 +189,14 @@ class TileIterator:
     has_started: gl.tensor
     BLOCK_M: gl.constexpr
     BLOCK_N: gl.constexpr
-    NUM_BLOCKS: gl.constexpr
+    NUM_PROGRAMS: gl.constexpr
     GROUP_SIZE_N: gl.constexpr
 
     @gluon.jit
     def create(
         tile_idx,
         m_start_offset, m_size, n_start_offset, n_size,
-        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr,
+        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_PROGRAMS: gl.constexpr,
         GROUP_SIZE_N: gl.constexpr
     ):
         num_m_tiles = gl.cdiv(m_size, BLOCK_M)
@@ -206,7 +208,7 @@ class TileIterator:
             m_start_offset, m_size, n_start_offset, n_size,
             zero, zero, zero, zero,
             gl.to_tensor(False),
-            BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
+            BLOCK_M, BLOCK_N, NUM_PROGRAMS, GROUP_SIZE_N
         ).next()
 
     @gluon.jit
@@ -216,7 +218,7 @@ class TileIterator:
     @gluon.must_use_result
     @gluon.jit
     def next(self):
-        tile_idx = self.tile_idx + (self.NUM_BLOCKS if self.has_started else 0)
+        tile_idx = self.tile_idx + (self.NUM_PROGRAMS if self.has_started else 0)
         # Walk GROUP_SIZE_N tile columns at a time so concurrent CTAs
         # touch a 2D block rather than one column, improving L2 reuse.
         # GROUP_SIZE_N == 1 is plain m-fastest order.
@@ -237,7 +239,7 @@ class TileIterator:
             self.m_start_offset, self.m_size, self.n_start_offset, self.n_size,
             m_offset, n_offset, m_tile_offset, n_tile_offset,
             gl.to_tensor(True),
-            self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS, self.GROUP_SIZE_N
+            self.BLOCK_M, self.BLOCK_N, self.NUM_PROGRAMS, self.GROUP_SIZE_N
         )
 
 
@@ -275,8 +277,10 @@ def load_partition(pargs: PartitionArgs):
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
-    NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
+    NUM_PROGRAMS: gl.constexpr = pargs.NUM_PROGRAMS
     GROUP_SIZE_N: gl.constexpr = pargs.GROUP_SIZE_N
+    USE_TWO_CTA: gl.constexpr = pargs.USE_TWO_CTA
+    TILE_M: gl.constexpr = BLOCK_M * 2 if USE_TWO_CTA else BLOCK_M
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
@@ -287,7 +291,7 @@ def load_partition(pargs: PartitionArgs):
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         pargs.offs_ptr,
 {%- endif %}
-        BLOCK_M, BLOCK_N, NUM_BLOCKS
+        TILE_M, BLOCK_N, NUM_PROGRAMS
     )
     while group_iter.should_process():
 {%- if K_IS_VARYING %}
@@ -299,11 +303,11 @@ def load_partition(pargs: PartitionArgs):
 {%- if A_IS_K_MAJOR %}
             shape=[M, k_end],
             strides=[pargs.a_stride_outer, 1],
-            block_shape=[BLOCK_M, BLOCK_K],
+            block_shape=[TILE_M, BLOCK_K],
 {%- else %}
             shape=[k_end, M],
             strides=[pargs.a_stride_outer, 1],
-            block_shape=[BLOCK_K, BLOCK_M],
+            block_shape=[BLOCK_K, TILE_M],
 {%- endif %}
             layout=pargs.a_smem_layout,
         )
@@ -314,7 +318,7 @@ def load_partition(pargs: PartitionArgs):
             strides=[pargs.b_stride_outer, 1],
             block_shape=[BLOCK_N, BLOCK_K],
 {%- else %}
-            shape=[k_end, N],
+shape=[k_end, N],
             strides=[pargs.b_stride_outer, 1],
             block_shape=[BLOCK_K, BLOCK_N],
 {%- endif %}
@@ -327,7 +331,7 @@ def load_partition(pargs: PartitionArgs):
         tile_iter = TileIterator.create(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
-            BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
+            TILE_M, BLOCK_N, NUM_PROGRAMS, GROUP_SIZE_N
         )
         while tile_iter.should_process():
             for k in range(0, group_iter.k_size, BLOCK_K):
@@ -345,7 +349,7 @@ def load_partition(pargs: PartitionArgs):
                 _proton_enter_scope("load_work")
                 mbarrier.expect(
                     load_buf_full_bar,
-                    a_desc.block_type.nbytes + b_desc.block_type.nbytes,
+                    a_desc.nbytes_per_cta + b_desc.nbytes_per_cta,
                 )
 
                 tma.async_load(
@@ -365,7 +369,8 @@ def load_partition(pargs: PartitionArgs):
 {%- endif %}
 {%- endif %}
                     load_buf_full_bar,
-                    a_smem
+                    a_smem,
+                    multicast=USE_TWO_CTA
                 )
                 tma.async_load(
                     b_desc,
@@ -383,7 +388,8 @@ def load_partition(pargs: PartitionArgs):
 {%- endif %}
 {%- endif %}
                     load_buf_full_bar,
-                    b_smem
+                    b_smem,
+                    multicast=USE_TWO_CTA
                 )
                 _proton_exit_scope("load_work")
 
@@ -407,8 +413,10 @@ def compute_partition(pargs: PartitionArgs):
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
-    NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
+    NUM_PROGRAMS: gl.constexpr = pargs.NUM_PROGRAMS
     GROUP_SIZE_N: gl.constexpr = pargs.GROUP_SIZE_N
+    USE_TWO_CTA: gl.constexpr = pargs.USE_TWO_CTA
+    TILE_M: gl.constexpr = BLOCK_M * 2 if USE_TWO_CTA else BLOCK_M
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
@@ -423,13 +431,13 @@ def compute_partition(pargs: PartitionArgs):
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         pargs.offs_ptr,
 {%- endif %}
-        BLOCK_M, BLOCK_N, NUM_BLOCKS
+        TILE_M, BLOCK_N, NUM_PROGRAMS
     )
     while group_iter.should_process():
         tile_iter = TileIterator.create(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
-            BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
+            TILE_M, BLOCK_N, NUM_PROGRAMS, GROUP_SIZE_N
         )
         while tile_iter.should_process():
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
@@ -460,17 +468,25 @@ def compute_partition(pargs: PartitionArgs):
 {%- endif %}
 
                 tcgen05_mma(a_smem, b_smem, acc, use_acc=use_acc)
-                tcgen05_commit(load_buf_empty_bar)
+                tcgen05_commit(
+                    load_buf_empty_bar,
+                    descs=[pargs.a_smem_bufs.index(0), pargs.b_smem_bufs.index(0)] if USE_TWO_CTA else [],
+                )
                 _proton_exit_scope("compute_work")
 
                 use_acc = True
                 load_state = load_state.next()
 
+            _proton_enter_scope("compute_commit_acc")
             acc_buf_full_bar = acc_buf_full_bars.index(acc_state.index)
 
-            tcgen05_commit(acc_buf_full_bar)
+            tcgen05_commit(
+                acc_buf_full_bar,
+                descs=[pargs.a_smem_bufs.index(0), pargs.b_smem_bufs.index(0)] if USE_TWO_CTA else [],
+            )
 
             acc_state = acc_state.next()
+            _proton_exit_scope("compute_commit_acc")
 
             tile_iter = tile_iter.next()
 
@@ -489,8 +505,10 @@ def store_partition(pargs: PartitionArgs):
     K = pargs.K
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
-    NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
+    NUM_PROGRAMS: gl.constexpr = pargs.NUM_PROGRAMS
     GROUP_SIZE_N: gl.constexpr = pargs.GROUP_SIZE_N
+    USE_TWO_CTA: gl.constexpr = pargs.USE_TWO_CTA
+    TILE_M: gl.constexpr = BLOCK_M * 2 if USE_TWO_CTA else BLOCK_M
 
     acc_buf_empty_bars = pargs.acc_buf_empty_bars
     acc_buf_full_bars = pargs.acc_buf_full_bars
@@ -498,7 +516,7 @@ def store_partition(pargs: PartitionArgs):
 
 {%- if USE_TMA_STORE %}
     c_smem = gl.allocate_shared_memory(
-        pargs.output_dtype, [BLOCK_M, BLOCK_N], pargs.c_smem_layout
+        pargs.output_dtype, [TILE_M, BLOCK_N], pargs.c_smem_layout
     )
 {%- endif %}
 
@@ -507,7 +525,7 @@ def store_partition(pargs: PartitionArgs):
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         pargs.offs_ptr,
 {%- endif %}
-        BLOCK_M, BLOCK_N, NUM_BLOCKS
+        TILE_M, BLOCK_N, NUM_PROGRAMS
     )
     while group_iter.should_process():
 {%- if USE_TMA_STORE %}
@@ -528,7 +546,7 @@ def store_partition(pargs: PartitionArgs):
             shape=[M, group_iter.n_start_offset + group_iter.n_size],
 {%- endif %}
             strides=[pargs.c_stride_m, 1],
-            block_shape=[BLOCK_M, BLOCK_N],
+            block_shape=[TILE_M, BLOCK_N],
             layout=pargs.c_smem_layout,
         )
 {%- else %}
@@ -538,7 +556,7 @@ def store_partition(pargs: PartitionArgs):
         tile_iter = TileIterator.create(
             group_iter.tile_idx - group_iter.tiles_processed,
             group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
-            BLOCK_M, BLOCK_N, NUM_BLOCKS, GROUP_SIZE_N
+            TILE_M, BLOCK_N, NUM_PROGRAMS, GROUP_SIZE_N
         )
         while tile_iter.should_process():
             # FIXME: add epilogue here!
@@ -577,7 +595,7 @@ def store_partition(pargs: PartitionArgs):
             tma.async_store(c_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], c_smem)
 {%- endif %}
 {%- else %}
-            offs_m = gl.arange(0, BLOCK_M)
+            offs_m = gl.arange(0, TILE_M)
             offs_n = gl.arange(0, BLOCK_N)
 
             idx_m = (tile_iter.m_offset + offs_m).to({{ INDEX_DTYPE_EXPR }})
@@ -605,7 +623,9 @@ def store_partition(pargs: PartitionArgs):
         group_iter = group_iter.next()
 
 {%- if USE_TMA_STORE %}
+    _proton_enter_scope("store_final_tma_wait")
     tma.store_wait(pendings=0)
+    _proton_exit_scope("store_final_tma_wait")
 {%- endif %}
 
     _proton_exit_scope("store_partition")
@@ -619,9 +639,18 @@ def store_partition(pargs: PartitionArgs):
     input_dtype: gl.constexpr = {{ INPUT_DTYPE }}
     output_dtype: gl.constexpr = {{ OUTPUT_DTYPE }}
 
-    a_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([BLOCK_M, BLOCK_K] if A_IS_K_MAJOR else [BLOCK_K, BLOCK_M], input_dtype)
-    b_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([BLOCK_N, BLOCK_K] if B_IS_K_MAJOR else [BLOCK_K, BLOCK_N], input_dtype)
-    c_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([BLOCK_M, BLOCK_N], output_dtype)
+    TILE_M: gl.constexpr = BLOCK_M * 2 if USE_TWO_CTA else BLOCK_M
+    M_CGA_LAYOUT: gl.constexpr = [[1, 0]] if USE_TWO_CTA else []
+    A_CGA_LAYOUT: gl.constexpr = (
+        [[1, 0]] if A_IS_K_MAJOR else [[0, 1]]
+    ) if USE_TWO_CTA else []
+    B_CGA_LAYOUT: gl.constexpr = (
+        [[1, 0]] if B_IS_K_MAJOR else [[0, 1]]
+    ) if USE_TWO_CTA else []
+
+    a_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([TILE_M, BLOCK_K] if A_IS_K_MAJOR else [BLOCK_K, TILE_M], input_dtype, cga_layout=A_CGA_LAYOUT)
+    b_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([BLOCK_N, BLOCK_K] if B_IS_K_MAJOR else [BLOCK_K, BLOCK_N], input_dtype, cga_layout=B_CGA_LAYOUT)
+    c_smem_layout: gl.constexpr = gl.NVMMASharedLayout.get_default_for([TILE_M, BLOCK_N], output_dtype, cga_layout=M_CGA_LAYOUT)
 
     c_ptr = {{ get_output() }}
 
@@ -659,8 +688,6 @@ def store_partition(pargs: PartitionArgs):
     {{ assign_maybe_constexpr_gluon("c_stride_m", output_stride(-2)) }}
     {{ assign_maybe_constexpr_gluon("c_stride_n", output_stride(-1)) }}
 
-    NUM_BLOCKS: gl.constexpr = {{ NUM_SMS }}
-
     # Create tensor descriptors
     a_desc = tma.make_tensor_descriptor(
         a_ptr,
@@ -668,21 +695,21 @@ def store_partition(pargs: PartitionArgs):
 {%- if A_IS_K_MAJOR %}
         shape=[M, K],
         strides=[a_stride_m, a_stride_k],
-        block_shape=[BLOCK_M, BLOCK_K],
+        block_shape=[TILE_M, BLOCK_K],
 {%- else %}
         shape=[K, M],
         strides=[a_stride_k, a_stride_m],
-        block_shape=[BLOCK_K, BLOCK_M],
+        block_shape=[BLOCK_K, TILE_M],
 {%- endif %}
 {%- else %}
 {%- if A_IS_K_MAJOR %}
         shape=[G, M, K],
         strides=[a_stride_g, a_stride_m, a_stride_k],
-        block_shape=[1, BLOCK_M, BLOCK_K],
+        block_shape=[1, TILE_M, BLOCK_K],
 {%- else %}
         shape=[G, K, M],
         strides=[a_stride_g, a_stride_k, a_stride_m],
-        block_shape=[1, BLOCK_K, BLOCK_M],
+        block_shape=[1, BLOCK_K, TILE_M],
 {%- endif %}
 {%- endif %}
         layout=a_smem_layout,
@@ -719,7 +746,7 @@ def store_partition(pargs: PartitionArgs):
         c_ptr,
         shape=[G, M, N],
         strides=[c_stride_g, c_stride_m, c_stride_n],
-        block_shape=[1, BLOCK_M, BLOCK_N],
+        block_shape=[1, TILE_M, BLOCK_N],
         layout=c_smem_layout,
     )
 {%- endif %}
@@ -728,9 +755,9 @@ def store_partition(pargs: PartitionArgs):
     a_smem_bufs = gl.allocate_shared_memory(
         input_dtype,
 {%- if A_IS_K_MAJOR %}
-        [NUM_LOAD_BUFFERS, BLOCK_M, BLOCK_K],
+        [NUM_LOAD_BUFFERS, TILE_M, BLOCK_K],
 {%- else %}
-        [NUM_LOAD_BUFFERS, BLOCK_K, BLOCK_M],
+        [NUM_LOAD_BUFFERS, BLOCK_K, TILE_M],
 {%- endif %}
         a_smem_layout
     )
@@ -743,33 +770,31 @@ def store_partition(pargs: PartitionArgs):
 {%- endif %}
         b_smem_layout
     )
-    load_buf_empty_bars = gl.allocate_shared_memory(
-        gl.int64, [NUM_LOAD_BUFFERS, 1], mbarrier.MBarrierLayout()
+    mma_barrier_count: gl.constexpr = tcgen05_mma_barrier_count(
+        [a_smem_bufs.index(0), b_smem_bufs.index(0)], multicast=True, two_ctas=USE_TWO_CTA
     )
-    load_buf_full_bars = gl.allocate_shared_memory(
-        gl.int64, [NUM_LOAD_BUFFERS, 1], mbarrier.MBarrierLayout()
-    )
+    load_buf_empty_bars = mbarrier.allocate_mbarrier(batch=NUM_LOAD_BUFFERS)
+    load_buf_full_bars = mbarrier.allocate_mbarrier(batch=NUM_LOAD_BUFFERS, two_ctas=USE_TWO_CTA)
     for i in gl.static_range(NUM_LOAD_BUFFERS):
-        mbarrier.init(load_buf_empty_bars.index(i), count=1)
+        mbarrier.init(load_buf_empty_bars.index(i), count=mma_barrier_count)
         mbarrier.init(load_buf_full_bars.index(i), count=1)
 
     # Allocate tensor memory for accumulators
     tmem_layout: gl.constexpr = TensorMemoryLayout(
-        block=[BLOCK_M, BLOCK_N], col_stride=1
+        block=[BLOCK_M, BLOCK_N],
+        col_stride=1,
+        cga_layout=M_CGA_LAYOUT,
+        two_ctas=USE_TWO_CTA,
     )
     acc_tmem_bufs = allocate_tensor_memory(
-        gl.float32, [NUM_ACC_BUFFERS, BLOCK_M, BLOCK_N], tmem_layout
+        gl.float32, [NUM_ACC_BUFFERS, TILE_M, BLOCK_N], tmem_layout
     )
 
-    acc_buf_empty_bars = gl.allocate_shared_memory(
-        gl.int64, [NUM_ACC_BUFFERS, 1], mbarrier.MBarrierLayout()
-    )
-    acc_buf_full_bars = gl.allocate_shared_memory(
-        gl.int64, [NUM_ACC_BUFFERS, 1], mbarrier.MBarrierLayout()
-    )
+    acc_buf_empty_bars = mbarrier.allocate_mbarrier(batch=NUM_ACC_BUFFERS, two_ctas=USE_TWO_CTA)
+    acc_buf_full_bars = mbarrier.allocate_mbarrier(batch=NUM_ACC_BUFFERS)
     for i in gl.static_range(NUM_ACC_BUFFERS):
         mbarrier.init(acc_buf_empty_bars.index(i), count=1)
-        mbarrier.init(acc_buf_full_bars.index(i), count=1)
+        mbarrier.init(acc_buf_full_bars.index(i), count=mma_barrier_count)
 
     # Create partition arguments
     pargs = PartitionArgs(
@@ -819,8 +844,9 @@ def store_partition(pargs: PartitionArgs):
         BLOCK_M,
         BLOCK_N,
         BLOCK_K,
-        NUM_BLOCKS,
+        NUM_PROGRAMS,
         GROUP_SIZE_N,
+        USE_TWO_CTA,
     )
 
     # Launch warp-specialized kernel

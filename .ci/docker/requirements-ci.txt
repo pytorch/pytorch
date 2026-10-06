@@ -129,6 +129,9 @@ numba==0.64.0 ; python_version == "3.12" and platform_machine != "s390x" and pla
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
 #Pinned versions: 1.26.4
+#The riscv64 cross image (.ci/docker/ubuntu-cross-riscv/Dockerfile) pins the
+#Python 3.12 version by hand, because it installs into a cross environment
+#instead of from this file; bump both together.
 #test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
 #test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
 #test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,

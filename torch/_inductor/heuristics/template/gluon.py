@@ -1,4 +1,5 @@
 import itertools
+import math
 from dataclasses import dataclass
 
 
@@ -12,6 +13,7 @@ class GluonGroupedMMConfig:
     NUM_STORE_WARPS: int = 4
     GROUP_SIZE_N: int = 1
     USE_TMA_STORE: bool = False
+    USE_TWO_CTA: bool = False
 
 
 def compute_stage_variants_gluon(
@@ -22,6 +24,7 @@ def compute_stage_variants_gluon(
     tmem_max_columns: int = 512,
     max_configs: int = 1,
     uses_c_smem: bool = True,
+    use_two_cta: bool = False,
 ):
     """
     Compute valid (NUM_LOAD_BUFFERS, NUM_ACC_BUFFERS) pairs for the
@@ -40,6 +43,8 @@ def compute_stage_variants_gluon(
 
     a_bytes_per_stage = BLOCK_M * BLOCK_K * dtype_bytes
     b_bytes_per_stage = BLOCK_N * BLOCK_K * dtype_bytes
+    if use_two_cta:
+        b_bytes_per_stage //= 2
     c_bytes_per_stage = BLOCK_M * BLOCK_N * dtype_bytes if uses_c_smem else 0
     ab_bytes_per_stage = a_bytes_per_stage + b_bytes_per_stage
 
@@ -132,6 +137,7 @@ def get_grouped_mm_configs(
     NUM_STORE_WARP_vals = [8]
     GROUP_SIZE_N_vals = [1, 8]
     USE_TMA_STORE_vals = [False, True]
+    USE_TWO_CTA_vals = [False, True]
     buffer_configs_per_combo = 1
 
     configs = []
@@ -141,12 +147,14 @@ def get_grouped_mm_configs(
         num_store_warps,
         group_size_n,
         use_tma_store,
+        use_two_cta,
     ) in itertools.product(
         block_combos,
         BLOCK_K_vals,
         NUM_STORE_WARP_vals,
         GROUP_SIZE_N_vals,
         USE_TMA_STORE_vals,
+        USE_TWO_CTA_vals,
     ):
         buffer_variants = compute_stage_variants_gluon(
             BLOCK_M,
@@ -155,6 +163,7 @@ def get_grouped_mm_configs(
             dtype=dtype_AB,
             max_configs=buffer_configs_per_combo,
             uses_c_smem=use_tma_store,
+            use_two_cta=use_two_cta,
         )
 
         for num_load_buffers, num_acc_buffers in buffer_variants:
@@ -168,7 +177,46 @@ def get_grouped_mm_configs(
                     NUM_STORE_WARPS=num_store_warps,
                     GROUP_SIZE_N=group_size_n,
                     USE_TMA_STORE=use_tma_store,
+                    USE_TWO_CTA=use_two_cta,
                 )
             )
 
     return configs
+
+
+def prune_grouped_mm_configs(
+    configs: list[GluonGroupedMMConfig],
+    G: int,
+    M: int,
+    N: int,
+    K: int,
+    a_is_2d: bool,
+    b_is_2d: bool,
+    num_sms: int,
+) -> list[GluonGroupedMMConfig]:
+    # Average per-group extents; the ragged dimension is split across G.
+    m_g = M / G if a_is_2d and not b_is_2d else M
+    n_g = N / G if b_is_2d and not a_is_2d else N
+    k_g = K / G if a_is_2d and b_is_2d else K
+
+    min_m = min(c.BLOCK_M for c in configs)
+    # Padded N tiles up to 128 still win on tiny N, so they are never pruned.
+    min_n = max(min(c.BLOCK_N for c in configs), 128)
+    min_k = min(c.BLOCK_K for c in configs)
+    many_waves = m_g >= 128 and n_g >= 128 and (
+        G * math.ceil(m_g / 128) * math.ceil(n_g / 256) >= 4 * num_sms
+    )
+
+    def keep(c: GluonGroupedMMConfig) -> bool:
+        tile_m = c.BLOCK_M * (2 if c.USE_TWO_CTA else 1)
+        # A tile covering the extent even at half its size only adds padding.
+        if tile_m > min_m and m_g <= tile_m / 2:
+            return False
+        if c.BLOCK_N > min_n and n_g <= c.BLOCK_N / 2:
+            return False
+        if c.BLOCK_K > min_k and k_g <= c.BLOCK_K / 2:
+            return False
+        # With several full waves of work, small tiles only lose data reuse.
+        return not (many_waves and c.BLOCK_M * c.BLOCK_N < 128 * 128)
+
+    return [c for c in configs if keep(c)] or configs

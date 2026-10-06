@@ -289,7 +289,7 @@ def launch_build_group_ptrs_from_bases(
         (TILE_M, TILE_N), (CLUSTER_M, CLUSTER_N), bool(USE_2_CTA)
     )
 
-    total_num_clusters = int(compute_total_num_clusters(probs_t, cluster_tile_shape_mn))
+    total_num_clusters = max_active_clusters
 
     gemm_cache_key = get_gemm_cache_key(
         prep_cache_key, max_active_clusters, total_num_clusters
@@ -466,9 +466,7 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
     cluster_tile_shape_mn = compute_cluster_tile_shape(
         (TILE_M, TILE_N), (CLUSTER_M, CLUSTER_N), bool(USE_2_CTA),
     )
-    total_num_clusters = int(compute_total_num_clusters(
-        problem_sizes, cluster_tile_shape_mn,
-    ))
+    total_num_clusters = max_active_clusters
 
     gemm_cache_key = get_gemm_cache_key(
         prep_cache_key, max_active_clusters, total_num_clusters,
