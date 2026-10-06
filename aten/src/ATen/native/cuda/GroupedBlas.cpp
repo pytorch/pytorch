@@ -128,13 +128,17 @@ std::optional<CublasLtGroupedScaleSpec> get_cublaslt_grouped_scale_spec(
           "float32",
           "TensorWise"};
     case ScalingType::BlockWise1x32:
-      if (scale_dtype != at::kInt) {
-        return std::nullopt;
+      if (scale_dtype == at::kInt) {
+        return CublasLtGroupedScaleSpec{
+            CublasGroupedScaleLayout::Vec32MnK4UE8M0,
+            at::kInt,
+            "int32",
+            "BlockWise1x32"};
       }
       return CublasLtGroupedScaleSpec{
-          CublasGroupedScaleLayout::Vec32MnK4UE8M0,
-          at::kInt,
-          "int32",
+          CublasGroupedScaleLayout::Vec32UE8M0,
+          at::kFloat8_e8m0fnu,
+          "float8_e8m0fnu",
           "BlockWise1x32"};
     case ScalingType::BlockWise1x16:
       return CublasLtGroupedScaleSpec{
@@ -194,6 +198,9 @@ std::optional<ScalingType> get_cublaslt_grouped_scaling_type(
       scale.dim() == 1 &&
       scale.numel() == batchCount) {
     return ScalingType::TensorWise;
+  }
+  if (scale.scalar_type() == at::kFloat8_e8m0fnu) {
+    return ScalingType::BlockWise1x32;
   }
   return std::nullopt;
 }
@@ -332,13 +339,20 @@ bool should_use_scaled_cublaslt_grouped_gemm(
   check_cublaslt_grouped_scale_pair(*scaling_a, *scaling_b, scale_a, scale_b);
 
   const bool uses_mnk4 = scale_a.scalar_type() == at::kInt;
+  if (!uses_mnk4 && *scaling_a == ScalingType::BlockWise1x32 &&
+      !at::globalContext().preferCublasltGroupedGemm()) {
+    return false;
+  }
+
   const bool uses_hopper_block = !uses_mnk4 &&
       (*scaling_a == ScalingType::BlockWise1x128 || *scaling_a == ScalingType::BlockWise128x128);
   bool valid_sm;
   const auto dprops = at::cuda::getCurrentDeviceProperties();
   if (uses_hopper_block) {
     valid_sm = dprops->major == 9;
-  } else if (uses_mnk4 || *scaling_a == ScalingType::BlockWise1x16) {
+  } else if (uses_mnk4 ||
+      *scaling_a == ScalingType::BlockWise1x16 ||
+      *scaling_a == ScalingType::BlockWise1x32) {
     valid_sm = dprops->major == 10 || dprops->major == 11;
   } else {
     valid_sm = dprops->major >= 9 && dprops->major <= 11;
@@ -1122,13 +1136,17 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           scale_recipe_a_enum[0],
           scale_recipe_b_enum[0],
           batchCount64)) {
-    if (scale_recipe_a_enum[0] == ScalingType::BlockWise1x16) {
+    if (scale_recipe_a_enum[0] == ScalingType::BlockWise1x16 ||
+        (scale_recipe_a_enum[0] == ScalingType::BlockWise1x32 &&
+         scale_a[0].scalar_type() == at::kFloat8_e8m0fnu)) {
       TORCH_CHECK_VALUE(swizzle_a_enum.size() == scale_recipe_a_enum.size(),
           "swizzle_a must match the number of scale recipes");
       TORCH_CHECK_VALUE(swizzle_a_enum[0] == SwizzleType::SWIZZLE_32_4_4,
           "scale_a must be swizzled to SWIZZLE_32_4_4 format");
     }
-    if (scale_recipe_b_enum[0] == ScalingType::BlockWise1x16) {
+    if (scale_recipe_b_enum[0] == ScalingType::BlockWise1x16 ||
+        (scale_recipe_b_enum[0] == ScalingType::BlockWise1x32 &&
+         scale_b[0].scalar_type() == at::kFloat8_e8m0fnu)) {
       TORCH_CHECK_VALUE(swizzle_b_enum.size() == scale_recipe_b_enum.size(),
           "swizzle_b must match the number of scale recipes");
       TORCH_CHECK_VALUE(swizzle_b_enum[0] == SwizzleType::SWIZZLE_32_4_4,
