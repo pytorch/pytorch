@@ -7043,25 +7043,26 @@ Tensor layer_norm_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    const Tensor& saved_mean,
-    const Tensor& saved_invstd,
-    c10::SymIntArrayRef normalized_shape) {
+    c10::SymIntArrayRef normalized_shape,
+    double eps) {
   auto dims = std::vector<int64_t>{};
-  auto view_size = input_t.sizes().vec();
   auto view_size_affine = input_t.sizes().vec();
 
   int64_t numel = 1;
-  for (const auto i : c10::irange(view_size.size())) {
-    if (i < view_size.size() - normalized_shape.size()) {
+  for (const auto i : c10::irange(view_size_affine.size())) {
+    if (i < view_size_affine.size() - normalized_shape.size()) {
       view_size_affine[i] = 1;
     } else {
       numel *= input_t.size(static_cast<int64_t>(i));
-      view_size[i] = 1;
       dims.push_back(static_cast<int64_t>(i));
     }
   }
-  auto mean_p = saved_mean.view(view_size);
-  auto invstd_p = saved_invstd.view(view_size);
+  // As in batch_norm_jvp: save_mean/save_invstd are non-differentiable outputs
+  // and carry no tangent, so deriving the statistics from input_p is what keeps
+  // this formula composable under repeated differentiation.
+  auto [var_p, mean_p] = at::var_mean(
+      input_p, dims, /*correction=*/c10::Scalar(0), /*keepdim=*/true);
+  auto invstd_p = 1 / at::sqrt(var_p + at::Scalar(eps));
   auto result_t = _norm_jvp(input_p, input_t, mean_p, invstd_p, dims, numel);
 
   std::optional<Tensor> result_p = weight_p.defined()
