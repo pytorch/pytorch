@@ -6,6 +6,7 @@ import os
 import pathlib
 from typing import Any
 
+from torch._dynamo.utils import counters
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
@@ -312,14 +313,6 @@ class MultiKernel:
         pass
 
 
-class DroppedKernel:
-    """An optional sub-kernel whose compile failed, which MultiKernelCall leaves out."""
-
-    def __init__(self, kernel_name: str, error: Exception) -> None:
-        self.kernel_name = kernel_name
-        self.error = error
-
-
 class MultiKernelCall:
     """
     This class is called at run time to actually run the kernel
@@ -405,11 +398,15 @@ class MultiKernelCall:
         for i, kernel in enumerate(self._kernels):
             if isinstance(kernel, CodeCacheFuture):
                 self._kernels[i] = kernel.result()
-        if any(isinstance(kernel, DroppedKernel) for kernel in self._kernels):
+        # An optional sub-kernel that failed to compile comes back as its exception.
+        failed = [k for k in self._kernels if isinstance(k, Exception)]
+        if failed:
+            log.warning(
+                "Dropping sub-kernels of %s: %s", self.multi_kernel_name, failed
+            )
+            counters["inductor"]["multi_kernel_sub_kernel_dropped"] += len(failed)
             kept = [
-                i
-                for i, kernel in enumerate(self._kernels)
-                if not isinstance(kernel, DroppedKernel)
+                i for i, k in enumerate(self._kernels) if not isinstance(k, Exception)
             ]
             self._kernels = [self._kernels[i] for i in kept]
             self.arg_index = {new: self.arg_index[old] for new, old in enumerate(kept)}
