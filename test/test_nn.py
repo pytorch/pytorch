@@ -14657,6 +14657,21 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradcheck(F.pdist, (inp,)))
 
     @skipMPS
+    def test_pdist_zero_row_backward(self, device):
+        # https://github.com/pytorch/pytorch/issues/197099
+        # CPU backward used GRAIN_SIZE / (8 * n * n) and crashed for n == 0.
+        for d in (1, 4):
+            inp = torch.randn(
+                0, d, dtype=torch.double, device=device, requires_grad=True
+            )
+            out = F.pdist(inp)
+            self.assertEqual(out.shape, (0,))
+            out.sum().backward()
+            self.assertEqual(
+                inp.grad, torch.zeros(0, d, dtype=torch.double, device=device)
+            )
+
+    @skipMPS
     def test_pdist_empty_col(self, device):
         inp = torch.randn(4, 0, dtype=torch.double, device=device, requires_grad=True)
         self.assertTrue(gradcheck(F.pdist, (inp,)))
