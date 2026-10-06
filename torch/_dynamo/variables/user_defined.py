@@ -1242,6 +1242,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args[0],
                 init_args,
                 tx=tx,
+                init_kwargs=kwargs,
             )
         elif name == "__setattr__" and self.ban_mutation:
             unimplemented(
@@ -1347,6 +1348,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 [],
                 tx=tx,
+                init_kwargs=kwargs,
             )
             var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
             return var
@@ -1392,6 +1394,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self,
                 [],
                 tx=tx,
+                init_kwargs=kwargs,
             )
             result.call_method(tx, "__init__", list(args), kwargs)
             return result
@@ -1676,6 +1679,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     self,
                     list(args),
                     tx=tx,
+                    init_kwargs=kwargs,
                 )
             else:
                 # Namedtuple __new__ is a Python function that calls
@@ -1987,6 +1991,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
                 self,
                 list(args),
                 tx=tx,
+                init_kwargs=kwargs,
             )
             var.call_method(tx, "__init__", list(args), dict(kwargs))
             return var
@@ -5306,6 +5311,7 @@ class DefaultDictVariable(ConstDictVariable):
             VariableTracker.build(tx, collections.defaultdict),
             [],
             tx=tx,
+            init_kwargs={},
         )
         new.default_factory = self.default_factory  # type: ignore[missing-attribute]
         new.items.update(items)  # type: ignore[missing-attribute]
@@ -5376,6 +5382,7 @@ class DefaultDictVariable(ConstDictVariable):
             SourcelessBuilder.create(tx, collections.defaultdict),
             [],
             tx=tx,
+            init_kwargs={},
         )
         if not isinstance(new_dd, DefaultDictVariable):
             raise AssertionError(f"Expected DefaultDictVariable, got {type(new_dd)}")
