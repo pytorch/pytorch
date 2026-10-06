@@ -774,6 +774,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Hangs at 4 ranks on gfx950 CI distributed runners (per-test timeout,
+    # no JUnit row), like test_subgroup above; passes on the mi300 runners.
+    # Skipped until the runner P2P path is fixed.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(3)
     def test_rendezvous_after_strict_subgroup(self) -> None:
         """Rendezvous on a subgroup that leaves a rank out, then on the world.
@@ -811,6 +815,8 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Same gfx950 CI runner hang as test_rendezvous_after_strict_subgroup.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(3)
     def test_rendezvous_on_overlapping_subgroups(self) -> None:
         """Two subgroups sharing a rank, neither containing every rank.
