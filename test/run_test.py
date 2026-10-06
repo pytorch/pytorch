@@ -325,6 +325,12 @@ RUN_PARALLEL_BLOCKLIST = [
     "functorch/test_control_flow_cuda_initialization",
 ] + FSDP_TEST
 
+# Single-process distributed tests (fake/threaded PG, no ports) that may run in
+# the parallel pool even in distributed configs.
+DISTRIBUTED_PARALLEL_SAFE = [
+    "distributed/tensor/test_dtensor_ops",
+]
+
 # Test files that should always be run serially with other test files,
 # but it's okay if the tests inside them are run in parallel with each other.
 CI_SERIAL_LIST = [
@@ -1825,10 +1831,13 @@ def exclude_tests(
 def must_serial(file: str | ShardedTest) -> bool:
     if isinstance(file, ShardedTest):
         file = file.name
+    distributed = file not in DISTRIBUTED_PARALLEL_SAFE and (
+        DISTRIBUTED_TEST_PREFIX in os.getenv("TEST_CONFIG", "")
+        or DISTRIBUTED_TEST_PREFIX in file
+    )
     return (
         os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1"
-        or DISTRIBUTED_TEST_PREFIX in os.getenv("TEST_CONFIG", "")
-        or DISTRIBUTED_TEST_PREFIX in file
+        or distributed
         or file in CUSTOM_HANDLERS
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
@@ -2173,6 +2182,7 @@ def do_sharding(
         must_serial=(lambda _: True) if uses_xdist else must_serial,
         sort_by_time=sort_by_time,
         allow_pytest_sharding=not uses_xdist,
+        split_finely=lambda f: f in DISTRIBUTED_PARALLEL_SAFE,
     )
     return shards[which_shard - 1]
 
