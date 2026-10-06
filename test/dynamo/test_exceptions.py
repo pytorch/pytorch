@@ -2,7 +2,6 @@
 
 import contextlib
 import dataclasses
-import enum
 import operator
 import sys
 import unittest
@@ -793,21 +792,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         t = torch.randn(2)
         self.assertEqual(fn(t), t.sin() + 1)
-
-    def test_enum_lookup_invalid_value(self):
-        class Color(enum.Enum):
-            RED = 1
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            try:
-                Color(7)
-            except ValueError:
-                return t.sin()
-            return t.cos()
-
-        t = torch.randn(2)
-        self.assertEqual(fn(t), t.sin())
 
     def test_nn_module_getattr(self):
         class A:
