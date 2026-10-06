@@ -385,7 +385,7 @@ function install_cutlass_dsl() {
 function install_flydsl() {
   echo "Installing FlyDSL from PyPI..."
   # Require the published platform wheel instead of attempting an unsupported source build.
-  pip_install --only-binary=:all: flydsl==0.3.0
+  pip_install --only-binary=:all: flydsl==0.3.4.1
   echo "FlyDSL installation complete."
 }
 
