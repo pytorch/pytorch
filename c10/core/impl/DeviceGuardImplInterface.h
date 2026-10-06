@@ -21,22 +21,43 @@ class DataPtr;
 /**
  * Note [Flags defining the behavior of events]
  *
- * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
- * BACKEND_DEFAULT is what a particular backend would select if no
- * flags were given. PYTORCH_DEFAULT is the PyTorch's framework default
- * choice for events on that backend, which may not be the same.
+ * EventFlag is a bitmask where each bit controls one feature:
+ *   bit 0 (0x1): enable timing
+ *   bit 1 (0x2): CPU-blocking synchronize
+ *   bit 2 (0x4): IPC-shareable (interprocess)
+ *   bits 3-7:    reserved (used internally by legacy sentinel values)
+ *   PYTORCH_DEFAULT (0x0): no timing, no blocking, no interprocess
  *
- * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
- * backend implementation.
+ * BACKEND_DEFAULT (0x1), and INVALID (0xFF) are legacy sentinels preserved for
+ * backward compatibility. New code should compose bit flags directly, e.g.:
+ *
+ *   EventFlag::TIMING
+ *   EventFlag::TIMING | EventFlag::BLOCKING
+ *   EventFlag::BLOCKING | EventFlag::INTERPROCESS
+ *
+ * Backends that do not support a flag should ignore the corresponding bit.
  */
-enum class EventFlag {
-  // Disable timing
-  PYTORCH_DEFAULT,
-  // Enable timing
-  BACKEND_DEFAULT,
-  // FOR TESTING ONLY
-  INVALID
+enum class EventFlag : uint8_t {
+  // Bit flags -- combine with operator|.
+  PYTORCH_DEFAULT = 0x0, // no timing, no blocking, no interprocess
+  TIMING = 0x1, // enable timing
+  BLOCKING = 0x2, // CPU blocks in synchronize()
+  INTERPROCESS = 0x4, // event is IPC-shareable
+
+  // Legacy sentinels -- BC preserved
+  BACKEND_DEFAULT [[deprecated("Use EventFlag::TIMING instead")]] =
+      TIMING, // legacy CUDA default; alias to TIMING
+  INVALID [[deprecated("Not a valid EventFlag value")]] =
+      0xFF, // sentinel for testing; not a valid flag
 };
+
+constexpr EventFlag operator|(EventFlag a, EventFlag b) {
+  return static_cast<EventFlag>(
+      static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+}
+constexpr bool operator&(EventFlag a, EventFlag b) {
+  return static_cast<uint8_t>(a) & static_cast<uint8_t>(b);
+}
 
 namespace impl {
 
@@ -269,6 +290,32 @@ struct C10_API DeviceGuardImplInterface {
       void* /*event2*/,
       const DeviceIndex /*device_index*/) const {
     TORCH_CHECK(false, "Backend doesn't support elapsedTime.");
+  }
+
+  /**
+   * Return an IPC handle for the given event, lazily initializing the backend
+   * event if needed. The handle can be passed to
+   * reconstructEventFromIPCHandle() in another process to reconstruct the event
+   * there.
+   */
+  virtual std::string getEventIPCHandle(
+      void** /*event*/,
+      const DeviceIndex /*device_index*/,
+      const EventFlag /*flag*/) const {
+    TORCH_CHECK(false, "Backend doesn't support IPC events.");
+  }
+
+  /**
+   * Reconstruct a backend event from an IPC handle string on the given device.
+   * *event is set to a newly allocated backend event; it will be released via
+   * destroyEvent() when the owning Event is destroyed.
+   */
+  virtual void reconstructEventFromIPCHandle(
+      void** /*event*/,
+      const DeviceIndex /*device_index*/,
+      const std::string& /*handle_string*/) const {
+    TORCH_CHECK(
+        false, "Backend doesn't support reconstructing event from IPC handle.");
   }
 
   /**

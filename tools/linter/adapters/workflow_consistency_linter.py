@@ -126,11 +126,11 @@ def get_jobs_with_sync_tag(
     if "name" in job and "rocm" in job.get("name", ""):
         del job["name"]
 
-    # normalize needs: remove helper job-filter so comparisons ignore it
+    # Gate-only dependencies can differ without changing the synchronized job.
     needs = job.get("needs")
     if needs:
         needs_list = [needs] if isinstance(needs, str) else list(needs)
-        needs_list = [n for n in needs_list if n != "job-filter"]
+        needs_list = [n for n in needs_list if n not in {"job-filter", "check-ci"}]
         if not needs_list:
             job.pop("needs", None)
         elif len(needs_list) == 1:
