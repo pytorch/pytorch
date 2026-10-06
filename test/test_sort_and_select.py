@@ -1426,6 +1426,10 @@ class TestSortAndSelectCUDA(TestCase):
                 for _ in range(10):
                     rerun = torch.topk(x, k, largest=largest, sorted=sorted_)[1]
                     self.assertEqual(rerun, idx, msg=msg)
+                # Same slices with a non-unit stride within the slice.
+                xt = x.t().contiguous()
+                idx_t = torch.topk(xt, k, dim=0, largest=largest, sorted=sorted_)[1]
+                self.assertEqual(idx_t.t(), idx, msg=msg)
                 if not sorted_:
                     # Unsorted output is in gather order: indices strictly past the k-th value in
                     # ascending order, then the lowest indices equal to it.

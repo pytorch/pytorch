@@ -494,6 +494,17 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     uint32_t prefix[kMaxFields];
     orderedWarpOffset<F>(ballot, warpCounts[buf], total, prefix);
 
+    if constexpr (!kPhase2) {
+      // The per-write bound check of writeResult, hoisted to one block-uniform check per round ahead of the
+      // round's writes (phase 2 clips its writes explicitly).
+      IndexType roundTotal = 0;
+      #pragma unroll
+      for (int u = 0; u < U; ++u) {
+        roundTotal += total[u];
+      }
+      CUDA_KERNEL_ASSERT(writeIndex + roundTotal <= outputSliceSize);
+    }
+
     // total/prefix are wave-uniform: the running indices stay in scalar registers.
     IndexType running = writeIndex;
     IndexType eqRun = eqRunning;
@@ -536,11 +547,6 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     }
     writeIndex = running;
     eqRunning = eqRun;
-    if constexpr (!kPhase2) {
-      // Every phase-1 slot of this round is below the new writeIndex, so this is the per-write bound check of
-      // writeResult hoisted to one block-uniform check per round (phase 2 clips its writes explicitly).
-      CUDA_KERNEL_ASSERT(writeIndex <= outputSliceSize);
-    }
     buf ^= 1;
   };
 
