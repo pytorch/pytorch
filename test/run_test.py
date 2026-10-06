@@ -27,16 +27,16 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
-    get_report_path,
+    _get_test_report_path,
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
     isRocmArchAnyOf,
     retry_shell,
+    sanitize_test_filename,
     set_cwd,
     shell,
     TEST_CUDA,
-    TEST_SAVE_XML,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
@@ -589,6 +589,7 @@ def run_test(
         unittest_args.extend(
             get_pytest_args(
                 options,
+                test_file,
                 is_cpp_test=is_cpp_test,
                 is_distributed_test=is_distributed_test,
             )
@@ -720,13 +721,21 @@ def run_test(
                 label=test_label,
             )
 
-            # Pytest return code 5 means no test is collected. Exit code 4 is
-            # returned when the binary is not a C++ test executable, but 4 can
-            # also be returned if the file fails before running any tests. All
-            # binary files under build/bin that are not C++ test at the time of
-            # this writing have been excluded and new ones should be added to
-            # the list of exclusions in tools/testing/discover_tests.py
-            ret_code = 0 if ret_code == 5 else ret_code
+            # Pytest return code 5 means no test is collected, which is expected
+            # for a C++ test binary that defines no tests or whose tests are all
+            # deselected. pytest-cpp also collects nothing from a binary whose
+            # --help fails, e.g. on a missing shared library, so check for that.
+            if ret_code == 5:
+                ret_code = 0
+                if is_cpp_test:
+                    probe = subprocess.run(
+                        [argv[0], "--help"], env=env, capture_output=True, text=True
+                    )
+                    if probe.returncode != 0:
+                        print_to_stderr(
+                            f"{argv[0]} --help failed with exit code {probe.returncode}:\n{probe.stderr}"
+                        )
+                        ret_code = 1
 
     if options.pipe_logs and print_log:
         handle_log_file(
@@ -922,6 +931,68 @@ def run_test_retries(
     return ret_code, any(x > 0 for x in num_failures.values())
 
 
+def run_test_with_class_supervisors(test_module, test_directory, options, classes):
+    """Run each of ``classes`` in one process; other tests keep --subprocess."""
+    args = options.additional_args
+    # Only split plain full-file runs; other modes keep per-test isolation.
+    if (
+        not options.pytest
+        or not test_module.test.is_full_file()
+        or options.pytest_k_expr
+        or options.pytest_xdist_workers is not None
+        or options.continue_through_error
+        or options.coverage
+        or options.dynamo
+        or options.inductor
+        or RERUN_DISABLED_TESTS
+        or (args and not (len(args) == 2 and args[0] == "-m"))
+    ):
+        return run_test_with_subprocess(test_module, test_directory, options)
+
+    def subset(expression):
+        subset_options = copy.copy(options)
+        subset_options.pytest_k_expr = expression
+        return subset_options
+
+    for name in classes:
+        if result := run_test(test_module, test_directory, subset(name)):
+            return result
+    rest = subset(f"not ({' or '.join(classes)})")
+    return run_test_with_subprocess(test_module, test_directory, rest)
+
+
+def run_gloo_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        (
+            "ProcessGroupGlooTest",
+            "ProcessGroupGlooLazyInitTest",
+            "ProcessGroupGlooFRTest",
+        ),
+    )
+
+
+def run_common_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        (
+            "PythonProcessGroupExtensionTest",
+            "ProcessGroupWithDispatchedCollectivesTests",
+            "LocalRankTest",
+        ),
+    )
+
+
+def run_pg_wrapper_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module, test_directory, options, ("ProcessGroupGlooWrapperTest",)
+    )
+
+
 def run_test_with_subprocess(test_module, test_directory, options):
     return run_test(
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
@@ -1094,70 +1165,64 @@ def test_distributed(test_module, test_directory, options):
             continue
         if backend == "mpi" and not mpi_available:
             continue
-        for with_init_file in {True, False}:
-            if sys.platform == "win32" and not with_init_file:
-                continue
-            tmp_dir = tempfile.mkdtemp()
-            init_method = "file" if with_init_file else "env"
-            if options.verbose:
-                with_init = f"with {init_method} init_method"
-                print_to_stderr(
-                    f"Running distributed tests for the {backend} backend {with_init}"
+        # Both suites use FileStore; changing the report label does not test env://.
+        tmp_dir = tempfile.mkdtemp()
+        init_method = "file"
+        if options.verbose:
+            with_init = f"with {init_method} init_method"
+            print_to_stderr(
+                f"Running distributed tests for the {backend} backend {with_init}"
+            )
+        old_environ = dict(os.environ)
+        os.environ["TEMP_DIR"] = tmp_dir
+        os.environ["BACKEND"] = backend
+        os.environ.update(env_vars)
+        report_tag = f"dist-{backend}" if backend != "test" else ""
+        report_tag += f"-init-{init_method}"
+        os.environ["TEST_REPORT_SOURCE_OVERRIDE"] = report_tag
+        try:
+            os.mkdir(os.path.join(tmp_dir, "barrier"))
+            os.mkdir(os.path.join(tmp_dir, "test_dir"))
+            if backend == "mpi":
+                # test mpiexec for --noprefix option
+                with open(os.devnull, "w") as devnull:
+                    allowrunasroot_opt = (
+                        "--allow-run-as-root"
+                        if subprocess.call(
+                            'mpiexec --allow-run-as-root -n 1 bash -c ""',
+                            shell=True,
+                            stdout=devnull,
+                            stderr=subprocess.STDOUT,
+                        )
+                        == 0
+                        else ""
+                    )
+                    noprefix_opt = (
+                        "--noprefix"
+                        if subprocess.call(
+                            f'mpiexec {allowrunasroot_opt} -n 1 --noprefix bash -c ""',
+                            shell=True,
+                            stdout=devnull,
+                            stderr=subprocess.STDOUT,
+                        )
+                        == 0
+                        else ""
+                    )
+
+                mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
+
+                return_code = run_test(
+                    test_module, test_directory, options, launcher_cmd=mpiexec
                 )
-            old_environ = dict(os.environ)
-            os.environ["TEMP_DIR"] = tmp_dir
-            os.environ["BACKEND"] = backend
-            os.environ.update(env_vars)
-            report_tag = f"dist-{backend}" if backend != "test" else ""
-            report_tag += f"-init-{init_method}"
-            os.environ["TEST_REPORT_SOURCE_OVERRIDE"] = report_tag
-            try:
-                os.mkdir(os.path.join(tmp_dir, "barrier"))
-                os.mkdir(os.path.join(tmp_dir, "test_dir"))
-                if backend == "mpi":
-                    # test mpiexec for --noprefix option
-                    with open(os.devnull, "w") as devnull:
-                        allowrunasroot_opt = (
-                            "--allow-run-as-root"
-                            if subprocess.call(
-                                'mpiexec --allow-run-as-root -n 1 bash -c ""',
-                                shell=True,
-                                stdout=devnull,
-                                stderr=subprocess.STDOUT,
-                            )
-                            == 0
-                            else ""
-                        )
-                        noprefix_opt = (
-                            "--noprefix"
-                            if subprocess.call(
-                                f'mpiexec {allowrunasroot_opt} -n 1 --noprefix bash -c ""',
-                                shell=True,
-                                stdout=devnull,
-                                stderr=subprocess.STDOUT,
-                            )
-                            == 0
-                            else ""
-                        )
-
-                    mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
-
-                    return_code = run_test(
-                        test_module, test_directory, options, launcher_cmd=mpiexec
-                    )
-                else:
-                    return_code = run_test(
-                        test_module,
-                        test_directory,
-                        options,
-                        extra_unittest_args=["--subprocess"],
-                    )
-                if return_code != 0:
-                    return return_code
-            finally:
-                shutil.rmtree(tmp_dir)
-                os.environ.clear()
-                os.environ.update(old_environ)
+            else:
+                # No --subprocess: each test already spawns fresh rank processes.
+                return_code = run_test(test_module, test_directory, options)
+            if return_code != 0:
+                return return_code
+        finally:
+            shutil.rmtree(tmp_dir)
+            os.environ.clear()
+            os.environ.update(old_environ)
     return 0
 
 
@@ -1340,7 +1405,7 @@ def handle_log_file(
     print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
-def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
+def get_pytest_args(options, test_file, is_cpp_test=False, is_distributed_test=False):
     if is_distributed_test:
         # Distributed tests do not support rerun, see https://github.com/pytorch/pytorch/issues/162978
         rerun_options = ["-x", "--reruns=0"]
@@ -1374,11 +1439,17 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # is much slower than running them directly
         pytest_args.extend(["-n", str(NUM_PROCS)])
 
-        if TEST_SAVE_XML:
-            # Add the option to generate XML test report here as C++ tests
-            # won't go into common_utils
-            test_report_path = get_report_path(pytest=True)
-            pytest_args.extend(["--junit-xml-reruns", test_report_path])
+        if IS_CI:
+            # C++ tests don't go through common_utils.run_tests, which is what
+            # sets TEST_SAVE_XML, so build the pytest report path here.
+            # The path is relative to the test directory pytest runs in.
+            report_name = sanitize_test_filename(test_file)
+            report_path = os.path.join(
+                _get_test_report_path().replace("python-unittest", "python-pytest"),
+                report_name,
+                f"{report_name}-{os.urandom(8).hex()}.xml",
+            )
+            pytest_args.extend(["--junit-xml-reruns", report_path])
 
     if options.pytest_k_expr:
         pytest_args.extend(["-k", options.pytest_k_expr])
@@ -1414,17 +1485,13 @@ CUSTOM_HANDLERS = {
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/algorithms/quantization/test_quantization": test_distributed,
     "distributed/test_c10d_nccl": run_test_with_subprocess,
-    "distributed/test_c10d_gloo": run_test_with_subprocess,
+    "distributed/test_c10d_gloo": run_gloo_test,
     "distributed/test_c10d_ucc": run_test_with_subprocess,
-    "distributed/test_c10d_common": run_test_with_subprocess,
+    "distributed/test_c10d_common": run_common_test,
     "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
-    "distributed/test_c10d_spawn_nccl": run_test_with_subprocess,
     "distributed/test_c10d_spawn_ucc": run_test_with_subprocess,
-    "distributed/test_pg_wrapper": run_test_with_subprocess,
-    "distributed/rpc/test_faulty_agent": run_test_with_subprocess,
-    "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
+    "distributed/test_pg_wrapper": run_pg_wrapper_test,
     "distributed/rpc/test_share_memory": run_test_with_subprocess,
-    "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
     "functorch/test_control_flow_cuda_initialization": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
