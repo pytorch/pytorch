@@ -1068,9 +1068,8 @@ Tensor layer_norm_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    const Tensor& saved_mean,
-    const Tensor& saved_invstd,
-    c10::SymIntArrayRef normalized_shape);
+    c10::SymIntArrayRef normalized_shape,
+    double eps);
 
 Tensor rms_norm_jvp(
     const Tensor& input_p,

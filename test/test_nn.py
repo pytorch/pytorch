@@ -11121,6 +11121,23 @@ class TestNNDeviceType(NNTestCase):
         # unreachable here; forward over forward still exercises the jvp formula twice.
         self._test_norm_second_order_forward_ad(fn, device, dtype, check_rev_over_fwd=False)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    @parametrize_test("normalized_shape", [(5,), (3, 5)])
+    @parametrize_test("affine", [True, False])
+    def test_layernorm_second_order_forward_ad(self, device, dtype, normalized_shape, affine):
+        make = partial(torch.randn, dtype=dtype, device=device)
+        base, coef = make(4, 3, 5), make(4, 3, 5)
+        weight = make(normalized_shape) if affine else None
+        bias = make(normalized_shape) if affine else None
+
+        def fn(t):
+            x = base + t * coef + t * t * coef.flip(0)
+            y = F.layer_norm(x, normalized_shape, weight=weight, bias=bias, eps=0.25)
+            return (y * coef).sum()
+
+        self._test_norm_second_order_forward_ad(fn, device, dtype)
+
     @onlyAccelerator
     def test_layernorm_half_precision(self, device):
         width = 128
