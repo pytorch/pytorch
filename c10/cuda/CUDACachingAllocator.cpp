@@ -1519,10 +1519,9 @@ namespace Native {
 class DeviceCachingAllocator {
  private:
   using DeferredCustomFree = std::pair<std::shared_ptr<CUDAAllocator>, void*>;
-  using DeferredCustomFrees = std::vector<DeferredCustomFree>;
 
-  static void drain_deferred_custom_frees(DeferredCustomFrees& deferred_frees) {
-    DeferredCustomFrees frees = std::exchange(deferred_frees, {});
+  static void drain_deferred_custom_frees(
+      std::vector<DeferredCustomFree> frees) {
     std::exception_ptr first_exception;
     for (auto& [allocator, ptr] : frees) {
       try {
@@ -1539,9 +1538,9 @@ class DeviceCachingAllocator {
   }
 
   static void drain_deferred_custom_frees_noexcept(
-      DeferredCustomFrees& deferred_frees) noexcept {
+      std::vector<DeferredCustomFree> frees) noexcept {
     try {
-      drain_deferred_custom_frees(deferred_frees);
+      drain_deferred_custom_frees(std::move(frees));
     } catch (const std::exception& e) {
       LOG(ERROR) << "Exception while releasing a custom CUDA MemPool: "
                  << e.what();
@@ -1550,43 +1549,24 @@ class DeviceCachingAllocator {
     }
   }
 
-  static void drain_deferred_custom_frees_outside_lock(
-      DeferredCustomFrees& deferred_frees,
+  void drain_deferred_custom_frees_outside_lock(
       std::unique_lock<std::recursive_mutex>& lock) {
-    if (deferred_frees.empty()) {
+    auto frees = std::exchange(deferred_custom_frees_, {});
+    if (frees.empty()) {
       return;
     }
     auto relock = c10::make_scope_exit([&]() { lock.lock(); });
     lock.unlock();
-    drain_deferred_custom_frees_noexcept(deferred_frees);
+    drain_deferred_custom_frees_noexcept(std::move(frees));
   }
-
-  class DeferredCustomFreeGuard {
-   public:
-    explicit DeferredCustomFreeGuard(
-        DeferredCustomFrees& deferred_frees,
-        bool rethrow_exceptions)
-        : deferred_frees_(deferred_frees),
-          rethrow_exceptions_(rethrow_exceptions),
-          uncaught_exceptions_(std::uncaught_exceptions()) {}
-
-    ~DeferredCustomFreeGuard() noexcept(false) {
-      if (rethrow_exceptions_ &&
-          std::uncaught_exceptions() == uncaught_exceptions_) {
-        drain_deferred_custom_frees(deferred_frees_);
-      } else {
-        drain_deferred_custom_frees_noexcept(deferred_frees_);
-      }
-    }
-
-   private:
-    DeferredCustomFrees& deferred_frees_;
-    bool rethrow_exceptions_;
-    int uncaught_exceptions_;
-  };
 
   // lock around all operations
   mutable std::recursive_mutex mutex;
+
+  // Custom frees selected while holding mutex. A drain must exchange this into
+  // a local batch before unlocking so another thread cannot steal or append to
+  // the batch being freed.
+  std::vector<DeferredCustomFree> deferred_custom_frees_;
 
   // device statistics
   DeviceStats stats;
@@ -1894,11 +1874,17 @@ class DeviceCachingAllocator {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
-    DeferredCustomFrees deferred_frees;
-    DeferredCustomFreeGuard deferred_free_guard(
-        deferred_frees, /*rethrow_exceptions=*/false);
-
     std::unique_lock<std::recursive_mutex> lock(mutex);
+    // On exceptional exits, detach the pending queue while the mutex is still
+    // held, then invoke the external frees after unlocking.
+    auto deferred_free_cleanup = c10::make_scope_exit([&]() noexcept {
+      if (!lock.owns_lock()) {
+        return;
+      }
+      auto frees = std::exchange(deferred_custom_frees_, {});
+      lock.unlock();
+      drain_deferred_custom_frees_noexcept(std::move(frees));
+    });
 
     prepare_for_malloc(context, stream);
 
@@ -1933,8 +1919,8 @@ class DeviceCachingAllocator {
               allowed_memory_maximum.has_value() &&
               AcceleratorAllocatorConfig::garbage_collection_threshold() >
                   0.0)) {
-        garbage_collect_cached_blocks(context, deferred_frees);
-        drain_deferred_custom_frees_outside_lock(deferred_frees, lock);
+        garbage_collect_cached_blocks(context);
+        drain_deferred_custom_frees_outside_lock(lock);
       }
 
       // Attempt allocate
@@ -1957,11 +1943,7 @@ class DeviceCachingAllocator {
 
         // Free enough available cached blocks to satisfy alloc and retry.
         if (!block_found &&
-            release_available_cached_blocks(params, context, deferred_frees)) {
-          // The reclamation loop has finished, so it is safe to unlock while
-          // invoking custom frees. Drain before retrying so the external
-          // allocator can reuse the returned memory.
-          drain_deferred_custom_frees_outside_lock(deferred_frees, lock);
+            release_available_cached_blocks(params, context, lock)) {
           block_found = alloc_block(params, false, context, lock);
         }
 
@@ -1969,17 +1951,12 @@ class DeviceCachingAllocator {
         // during actual graph capture; user mempools should be able to reclaim
         // cached memory.
         if (!block_found && C10_LIKELY(!is_capture_context())) {
-          release_cached_blocks(context, {0, 0}, deferred_frees);
-          drain_deferred_custom_frees_outside_lock(deferred_frees, lock);
+          release_cached_blocks(context, {0, 0});
+          drain_deferred_custom_frees_outside_lock(lock);
           block_found = alloc_block(params, true, context, lock);
         }
       }
     }
-
-    // A partial reclamation can queue custom frees without leading to a retry
-    // above. Drain them before reporting OOM so cudaMemGetInfo and the OOM
-    // message reflect memory already returned by custom allocators.
-    drain_deferred_custom_frees_outside_lock(deferred_frees, lock);
 
     if (!block_found) {
       // For any error code other than cudaErrorMemoryAllocation,
@@ -2813,11 +2790,17 @@ class DeviceCachingAllocator {
   /** returns cached blocks to the system allocator **/
   void emptyCache(MempoolId_t mempool_id) {
     auto context = maybeGatherContext(RecordContext::ALL);
-    DeferredCustomFrees deferred_frees;
-    DeferredCustomFreeGuard deferred_free_guard(
-        deferred_frees, /*rethrow_exceptions=*/true);
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    release_cached_blocks(context, mempool_id, deferred_frees);
+    std::vector<DeferredCustomFree> frees;
+    try {
+      std::lock_guard<std::recursive_mutex> lock(mutex);
+      auto detach_deferred_frees = c10::make_scope_exit(
+          [&]() { frees = std::exchange(deferred_custom_frees_, {}); });
+      release_cached_blocks(context, mempool_id);
+    } catch (...) {
+      drain_deferred_custom_frees_noexcept(std::move(frees));
+      throw;
+    }
+    drain_deferred_custom_frees(std::move(frees));
   }
 
   /** Retrieves size of largest unused block held by the memory cache **/
@@ -4022,8 +4005,7 @@ class DeviceCachingAllocator {
   }
 
   void garbage_collect_cached_blocks(
-      const std::shared_ptr<GatheredContext>& context,
-      DeferredCustomFrees& deferred_frees) {
+      const std::shared_ptr<GatheredContext>& context) {
     // Free unused cached blocks to reclaim GPU memory.
     // Unlike release_cached_blocks(), this does not enforce synchronization and
     // therefore should be of less overheads.
@@ -4078,7 +4060,7 @@ class DeviceCachingAllocator {
           gc_reclaimed += block->size;
           total_age -= block->gc_count(); // Decrement the age
           freeable_block_count--; // One less block that can be freed
-          release_block(block, context, deferred_frees);
+          release_block(block, context);
         }
       }
     }
@@ -4259,7 +4241,12 @@ class DeviceCachingAllocator {
   bool release_available_cached_blocks(
       const AllocParams& p,
       const std::shared_ptr<GatheredContext>& context,
-      DeferredCustomFrees& deferred_frees) {
+      std::unique_lock<std::recursive_mutex>& lock) {
+    // Drain only after this function's traversal and all its iterators have
+    // finished. This also drains partial reclamation when the return value is
+    // false and drains safely on exceptional exits.
+    auto drain_deferred_frees = c10::make_scope_exit(
+        [&]() { drain_deferred_custom_frees_outside_lock(lock); });
     if (AcceleratorAllocatorConfig::max_split_size() ==
         std::numeric_limits<size_t>::max())
       return false;
@@ -4291,7 +4278,7 @@ class DeviceCachingAllocator {
         }
         if (!(*cur)->expandable_segment_) {
           totalReleased += (*cur)->size;
-          release_block(*cur, context, deferred_frees);
+          release_block(*cur, context);
         }
         if (is_first) {
           break;
@@ -4300,7 +4287,7 @@ class DeviceCachingAllocator {
       if (totalReleased < key.size)
         return false;
     } else {
-      release_block(*it, context, deferred_frees);
+      release_block(*it, context);
     }
     return true;
   }
@@ -4316,8 +4303,7 @@ class DeviceCachingAllocator {
    */
   bool release_cached_blocks(
       const std::shared_ptr<GatheredContext>& context,
-      MempoolId_t mempool_id,
-      DeferredCustomFrees& deferred_frees) {
+      MempoolId_t mempool_id) {
     if (mempool_id.first == 0 && mempool_id.second == 0 &&
         !is_capture_context()) {
       // If no graph capture is underway, we can release *all* default pool
@@ -4328,8 +4314,8 @@ class DeviceCachingAllocator {
       synchronize_and_free_events(context);
 
       // Free all non-split cached blocks to system allocator
-      release_blocks(large_blocks, context, deferred_frees);
-      release_blocks(small_blocks, context, deferred_frees);
+      release_blocks(large_blocks, context);
+      release_blocks(small_blocks, context);
     }
 
     for (auto it = graph_pools_freeable.begin();
@@ -4347,8 +4333,8 @@ class DeviceCachingAllocator {
       }
       // See notifyCaptureDestroy for the strategy here.
       TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
-      release_blocks(it->second->small_blocks, context, deferred_frees);
-      release_blocks(it->second->large_blocks, context, deferred_frees);
+      release_blocks(it->second->small_blocks, context);
+      release_blocks(it->second->large_blocks, context);
       if (it->second->cudaMalloc_count == 0) {
         auto erase_count = graph_pools.erase(it->first);
         TORCH_INTERNAL_ASSERT(erase_count == 1);
@@ -4377,8 +4363,7 @@ class DeviceCachingAllocator {
 
   void release_block(
       Block* block,
-      const std::shared_ptr<GatheredContext>& context,
-      DeferredCustomFrees& deferred_frees) {
+      const std::shared_ptr<GatheredContext>& context) {
     TORCH_INTERNAL_ASSERT(!block->expandable_segment_);
     stats.num_device_free++;
     record_trace(
@@ -4394,9 +4379,10 @@ class DeviceCachingAllocator {
     if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
       // Calling an arbitrary custom allocator while holding the caching
       // allocator mutex can deadlock against the callback's own locks (in
-      // particular, the Python GIL). Retain the allocator and invoke it after
-      // the outermost allocator operation has unlocked.
-      deferred_frees.emplace_back(
+      // particular, the Python GIL). Retain the allocator in the pending queue;
+      // the reclamation owner detaches that queue before unlocking and
+      // invoking the frees.
+      deferred_custom_frees_.emplace_back(
           pool->owner_PrivatePool->allocator_, block->ptr);
     } else {
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
@@ -4511,8 +4497,7 @@ class DeviceCachingAllocator {
   }
   void release_blocks(
       BlockPool& pool,
-      const std::shared_ptr<GatheredContext>& context,
-      DeferredCustomFrees& deferred_frees) {
+      const std::shared_ptr<GatheredContext>& context) {
     std::vector<Block*> to_unmap;
     // Frees all non-split blocks
     auto it = pool.blocks.begin();
@@ -4525,7 +4510,7 @@ class DeviceCachingAllocator {
         // to avoid invalidating the iterator
         to_unmap.push_back(block);
       } else if (!block->prev && !block->next) {
-        release_block(block, context, deferred_frees);
+        release_block(block, context);
       }
     }
     for (Block* block : to_unmap) {
