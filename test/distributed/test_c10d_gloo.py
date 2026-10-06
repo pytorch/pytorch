@@ -262,6 +262,51 @@ class RendezvousEnvTest(TestCase):
             for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
                 os.environ.pop(var, None)
 
+    @requires_gloo()
+    @retry_on_connect_failures
+    def test_device_id_cpu(self):
+        try:
+            os.environ["WORLD_SIZE"] = "1"
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(common.find_free_port())
+            os.environ["RANK"] = "0"
+
+            c10d.init_process_group(
+                backend="gloo", init_method="env://", device_id=torch.device("cpu:0")
+            )
+
+            self.assertTrue(c10d.is_initialized())
+
+            c10d.destroy_process_group()
+
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+            for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
+                os.environ.pop(var, None)
+
+    @requires_gloo()
+    @retry_on_connect_failures
+    def test_device_id_cpu_no_index(self):
+        try:
+            os.environ["WORLD_SIZE"] = "1"
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(common.find_free_port())
+            os.environ["RANK"] = "0"
+
+            with self.assertRaisesRegex(
+                ValueError, "must be a device with a valid index"
+            ):
+                c10d.init_process_group(
+                    backend="gloo", init_method="env://", device_id=torch.device("cpu")
+                )
+
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+            for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
+                os.environ.pop(var, None)
+
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
     @requires_gloo()
@@ -3282,6 +3327,39 @@ class ReducerTest(TestCase):
         for p_ref, p_bat in zip(model_ref.parameters(), model_bat.parameters()):
             self.assertEqual(p_ref.grad, p_bat.grad)
 
+    @requires_gloo()
+    def test_batched_grad_copy_batches_copy_out(self):
+        """batched_grad_copy also batches the bucket-to-grad copy-out."""
+        model = self._create_mixed_precision_model()
+
+        # Without batching: one copy_bucket_to_grad record per parameter.
+        reducer_ref = self._create_reducer(model)
+        reducer_ref.prepare_for_forward()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+        ) as prof_ref:
+            self._run_forward_backward(model, reducer_ref)
+        ref_events = [e.key for e in prof_ref.key_averages()]
+        self.assertIn("torch.distributed.ddp.reducer::copy_bucket_to_grad", ref_events)
+
+        # With batching: the per-parameter copy-out is replaced by a single
+        # batched _foreach_copy_ per bucket.
+        model_bat = copy.deepcopy(model)
+        reducer_bat = self._create_reducer(model_bat, batched_grad_copy=True)
+        reducer_bat.prepare_for_forward()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+        ) as prof_bat:
+            self._run_forward_backward(model_bat, reducer_bat)
+        bat_events = [e.key for e in prof_bat.key_averages()]
+        self.assertNotIn(
+            "torch.distributed.ddp.reducer::copy_bucket_to_grad", bat_events
+        )
+        self.assertIn(
+            "torch.distributed.ddp.reducer::copy_bucket_to_grad_batched",
+            bat_events,
+        )
+
 
 @skip_if_win32()
 class ProcessGroupGlooLazyInitTest(ProcessGroupGlooTest):
@@ -3558,22 +3636,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         c10d.destroy_process_group()
 
-    @skip_if_lt_x_gpu(1)
     @requires_gloo()
     def test_split_group_keeps_gloo_options(self):
-        # dist.split_group used to substitute a deep copy of the accelerator
-        # backend's options for every device. On a gloo world that raised
-        # "cannot pickle _Options" (ProcessGroupGloo._Options has no
-        # __deepcopy__), and on a "cpu:gloo,cuda:nccl" world the gloo leg
-        # rejected the nccl options and fell back to Options::create_default(),
-        # dropping the caller's timeout and group_name.
+        # A CPU-only Gloo parent selects its CPU backend without requiring a
+        # bound accelerator, and each child keeps independently cloned options.
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo",
             store=store,
             rank=self.rank,
             world_size=self.world_size,
-            device_id=torch.device("cuda", self.rank % torch.cuda.device_count()),
         )
         ranks = list(range(self.world_size))
         child = c10d.split_group(split_ranks=[ranks], timeout=timedelta(seconds=222))
@@ -3581,6 +3653,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(options._timeout, timedelta(seconds=222))
         self.assertEqual(options.group_name, child.group_name)
         self.assertEqual(options.global_ranks_in_group, ranks)
+        value = torch.tensor(float(self.rank + 1))
+        c10d.all_reduce(value, group=child)
+        self.assertEqual(value, torch.tensor(float(sum(rank + 1 for rank in ranks))))
         c10d.destroy_process_group()
 
 
