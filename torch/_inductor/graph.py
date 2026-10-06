@@ -3032,8 +3032,10 @@ class GraphLowering(torch.fx.Interpreter):
         files should be generated (to avoid biasing any benchmarks and pessimizing
         fusion decisions).
         """
+        from .debug import log_ir_post_lowering_pretty
         from .scheduler import Scheduler
 
+        log_ir_post_lowering_pretty(self.operations)
         with config.patch("triton.store_cubin", False):
             self.scheduler = Scheduler(self.operations)
 

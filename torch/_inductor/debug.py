@@ -55,6 +55,7 @@ RECORD_GRAPH_EXECUTION: bool = False
 GRAPH_COMPILE_IDS: dict[int, str | None] | None = None
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
+ir_post_lowering_pretty_log = getArtifactLogger(__name__, "ir_post_lowering_pretty")
 ir_pre_fusion_pretty_log = getArtifactLogger(__name__, "ir_pre_fusion_pretty")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
 SchedulerNodeList = list[Any]
@@ -797,6 +798,19 @@ def log_ir_pre_fusion(nodes: SchedulerNodeList) -> None:
         ir_pre_fusion_log.info("BEFORE FUSION\n%s", DebugFormatter._write_ir(nodes))
 
     V.debug.ir_pre_fusion(nodes)
+
+
+def log_ir_post_lowering_pretty(operations: list[Any]) -> None:
+    if not ir_post_lowering_pretty_log.isEnabledFor(logging.INFO):
+        return
+
+    from .pretty_print_ir import format_post_lowering_ir
+
+    try:
+        output = format_post_lowering_ir(operations)
+    except Exception as exc:
+        output = f"unimplemented post_lowering_ir({type(exc).__name__}: {exc})"
+    ir_post_lowering_pretty_log.info("POST-LOWERING PRETTY IR\n%s", output)
 
 
 def log_ir_pre_fusion_pretty(nodes: SchedulerNodeList) -> None:
