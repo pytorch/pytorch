@@ -10,6 +10,7 @@ import os
 import pickle
 import random
 import shutil
+import struct
 import unittest
 from collections.abc import Sequence
 from typing import Literal
@@ -3747,6 +3748,7 @@ class _MockEntryForPickleTest:
 
 
 @inductor_config.patch("fx_graph_cache", True)
+@instantiate_parametrized_tests
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     @property
     def device_type(self) -> str:
@@ -4326,6 +4328,43 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             AOTAutogradCachePickler(gm1).get_hash(gm1),
             AOTAutogradCachePickler(gm2).get_hash(gm2),
         )
+
+    @parametrize("arg_kind", ("args", "kwargs", "nested", "subgraph"))
+    @parametrize("scalar_type", ("float", "complex_real", "complex_imag"))
+    def test_graph_module_hash_preserves_nan_bits(self, arg_kind, scalar_type):
+        def make_gm(bits):
+            value = struct.unpack("!d", bytes.fromhex(bits))[0]
+            if scalar_type == "complex_real":
+                value = complex(value, 1.0)
+            elif scalar_type == "complex_imag":
+                value = complex(1.0, value)
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            if arg_kind == "kwargs":
+                y = graph.call_function(torch.full_like, (x,), {"fill_value": value})
+            elif arg_kind == "nested":
+                y = graph.call_function(torch.tensor, ([value],))
+            else:
+                y = graph.call_function(torch.full_like, (x, value))
+            graph.output(y)
+            gm = torch.fx.GraphModule({}, graph)
+            if arg_kind == "subgraph":
+                outer_graph = torch.fx.Graph()
+                x = outer_graph.placeholder("x")
+                outer_graph.output(outer_graph.call_module("subgraph", (x,)))
+                gm = torch.fx.GraphModule({"subgraph": gm}, outer_graph)
+            return gm
+
+        gm1 = make_gm("7ff0000000000001")
+        gm2 = make_gm("7ff8000000000000")
+        gm3 = make_gm("fff0000000000001")
+        gm1_again = make_gm("7ff0000000000001")
+        self.assertEqual(gm1.code, gm2.code)
+        self.assertEqual(gm1.code, gm3.code)
+        key1 = AOTAutogradCachePickler(gm1).get_hash(gm1)
+        self.assertNotEqual(key1, AOTAutogradCachePickler(gm2).get_hash(gm2))
+        self.assertNotEqual(key1, AOTAutogradCachePickler(gm3).get_hash(gm3))
+        self.assertEqual(key1, AOTAutogradCachePickler(gm1_again).get_hash(gm1_again))
 
     def test_sanitize_gm_for_cache(self):
         def fn(x):

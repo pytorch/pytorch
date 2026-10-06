@@ -1426,6 +1426,22 @@ class TritonOverrides(OpOverrides):
         else:
             out_dtype = triton_store_type(dtype)
 
+        if (
+            dtype == torch.bfloat16
+            and src_dtype is not None
+            and src_dtype in (torch.int32, torch.int64, torch.uint32, torch.uint64)
+            and TritonOverrides._strict_cuda_pointwise()
+        ):
+            # Eager converts through float32; preserve that rounding when narrowing.
+            convert = {
+                torch.int32: "int2float_rn",
+                torch.int64: "ll2float_rn",
+                torch.uint32: "uint2float_rn",
+                torch.uint64: "ull2float_rn",
+            }[src_dtype]
+            x = TritonOverrides._cast_libdevice_arg(x, src_dtype)
+            return f"libdevice.{convert}({x}).to({out_dtype})"
+
         # Triton cannot cast integers to any fp8 type directly, so go through float32.
         if (
             src_dtype is not None
