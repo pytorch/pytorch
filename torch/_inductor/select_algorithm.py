@@ -542,6 +542,30 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
 
 
+class _PartialReduction(NamedTuple):
+    """A reduction fused into a template epilogue as per-tile partials. Each
+    tile along the reduced dim stores size fp32 partials to the workspace at
+    byte offset; the wrapper reduces them with the torch op after the kernel
+    and writes buffer."""
+
+    node: Any
+    buffer: str
+    op: str
+    offset: int
+    tiles: int
+    size: int
+
+
+def _partials_finish(ws: str, reduction: _PartialReduction) -> str:
+    """The wrapper expression that reduces reduction's partials in workspace
+    tensor ws."""
+    end = reduction.offset + reduction.tiles * reduction.size * torch.float32.itemsize
+    return (
+        f"{ws}[{reduction.offset}:{end}].view(torch.float32)"
+        f".view({reduction.tiles}, {reduction.size}).{reduction.op}(dim=0)"
+    )
+
+
 class TritonTemplateKernel(TritonKernel):
     """
     A specialized kernel class for Triton templates that handles code generation
@@ -694,10 +718,9 @@ class TritonTemplateKernel(TritonKernel):
         self.output_tiles: dict[
             int, tuple[list[sympy.Symbol], tuple[int, int, int]]
         ] = {}
-        # Reductions fused into the epilogue as per-tile partials: (node, output
-        # buffer, finish op, workspace byte offset of the fp32 partials, tiles,
-        # partial size). The wrapper reduces the partials after the kernel.
-        self.partial_reductions: list[tuple[Any, str, str, int, int, int]] = []
+        # Reductions fused into the epilogue as per-tile partials, which the
+        # wrapper reduces after the kernel.
+        self.partial_reductions: list[_PartialReduction] = []
         # Epilogue nodes reading the finished partials, generated after them.
         self._unfused_epilogues: list[Any] = []
 
@@ -2015,16 +2038,15 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.generate_workspace_deallocation(self.workspace_arg)
 
     def _emit_post_kernel_code(self, wrapper, kernel_name: str) -> None:
-        """Hook for subclasses to emit code after kernel call, before workspace dealloc."""
+        """Finish reduction partials after the kernel call, before workspace
+        dealloc, then generate the epilogue nodes that read them."""
         if not self.partial_reductions:
             return
         if self.workspace_arg is None:
             raise AssertionError("reduction partials need a workspace")
         ws = self.workspace_arg.outer_name
-        for _, name, op, offset, tiles, size in self.partial_reductions:
-            end = offset + tiles * size * 4
-            partials = f"{ws}[{offset}:{end}].view(torch.float32).view({tiles}, {size})"
-            codegen_reduced_buffer(name, f"{partials}.{op}(dim=0)")
+        for reduction in self.partial_reductions:
+            codegen_reduced_buffer(reduction.buffer, _partials_finish(ws, reduction))
         from .scheduler import FusedSchedulerNode
 
         # Consecutive nodes over the same ranges run as one kernel.
@@ -2066,12 +2088,8 @@ class TritonTemplateKernel(TritonKernel):
             if isinstance(sig, WorkspaceArg)
             and sig.outer_name == self.workspace_arg.outer_name
         )
-        for _, _, op, offset, tiles, size in self.partial_reductions:
-            end = offset + tiles * size * 4
-            result.writeline(
-                f"args[{idx}][{offset}:{end}].view(torch.float32)"
-                f".view({tiles}, {size}).{op}(dim=0)"
-            )
+        for reduction in self.partial_reductions:
+            result.writeline(_partials_finish(f"args[{idx}]", reduction))
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         # Grid args are only used for benchmarking, not correctness
@@ -2281,17 +2299,29 @@ class TritonTemplateKernel(TritonKernel):
         ]
         # Stored tile values carry the template's symbolic shape; restate it as
         # the concrete tile so they broadcast against loads in the tile space.
-        store_cache = {}
-        for name, v in self.cse.store_cache.items():
-            if columns:
-                store_cache[name] = self.cse.newvar(
-                    v.bounds, v.dtype, (str(cols), str(rows))
-                )
-                self.body.writeline(f"{store_cache[name]} = tl.trans({v})")
-            else:
-                store_cache[name] = self.create_cse_var(
+        if columns:
+            # The transposes below read values that the nodes before them may
+            # have left in these buffers, so emit those first.
+            for buf in (self.indexing_code, self.loads, self.compute, self.stores):
+                self.body.splice(buf)
+                buf.clear()
+            read_names = OrderedSet(
+                dep.name for node in nodes for dep in node.read_writes.reads
+            )
+            store_cache = {}
+            for name, v in self.cse.store_cache.items():
+                if name in read_names:
+                    store_cache[name] = self.cse.newvar(
+                        v.bounds, v.dtype, (str(cols), str(rows))
+                    )
+                    self.body.writeline(f"{store_cache[name]} = tl.trans({v})")
+        else:
+            store_cache = {
+                name: self.create_cse_var(
                     str(v), v.bounds, v.dtype, (str(rows), str(cols))
                 )
+                for name, v in self.cse.store_cache.items()
+            }
 
         def store_partials(reduction_node, reduction_type, name, index, value):
             if reduction_node.node._split_size is not None:
@@ -2303,10 +2333,13 @@ class TritonTemplateKernel(TritonKernel):
                 tiles, size, tile = ceildiv(int(m), rows), int(n), (origin[0], rows)
             else:
                 tiles, size, tile = ceildiv(int(n), cols), int(m), (origin[1], cols)
-            nbytes = tiles * size * 4
+            nbytes = tiles * size * torch.float32.itemsize
             ws = next(
                 (w for w in self.args.workspace_args if w.inner_name == "ws_ptr"), None
             )
+            # Partials share ws_ptr with the template's workspace (e.g. TMA
+            # descriptors): align them to 16 bytes, and rebind workspace_arg to
+            # the joined arg so the wrapper allocates both.
             pad = -int(ws.count) % 16 if ws is not None else 0
             ws_ptr, ws_name, offset = self.args.workspace(pad + nbytes, False)
             self.workspace_arg = next(
@@ -2314,7 +2347,7 @@ class TritonTemplateKernel(TritonKernel):
             )
             offset += pad
             self.partial_reductions.append(
-                (
+                _PartialReduction(
                     reduction_node,
                     name,
                     PARTIAL_REDUCTION_OPS[reduction_type],
@@ -2335,6 +2368,10 @@ class TritonTemplateKernel(TritonKernel):
         load = self.load
 
         def tile_load(record, name, index):
+            # A load under a mask (e.g. one branch of a cat) is only valid
+            # where that mask holds, so neither record nor reuse it.
+            if self._load_mask is not None:
+                return load(name, index)
             key = index.xreplace({s: e.expr for s, e in self.range_tree_nodes.items()})
             if columns:
                 key = key.xreplace(dict(zip(tile_syms, tile_syms[::-1])))
