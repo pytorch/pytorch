@@ -104,11 +104,7 @@ def get_autotuned_amd_sqr_kernel():
         key=[],
     )(amd_sqr_kernel)
 
-
-@instantiate_parametrized_tests
-class TestTritonHeuristics(TestCase):
-    device_type = GPU_TYPE
-
+class TestTritonHeuristicsXPU(TestCase):
     def test_patch_triton_intel_launcher_binds_global_scratch(self):
         import textwrap
 
@@ -149,6 +145,11 @@ class TestTritonHeuristics(TestCase):
             "Intel Triton launcher source layout is not recognized",
         ):
             _patch_triton_intel_launcher(intel_driver)
+
+
+@instantiate_parametrized_tests
+class TestTritonHeuristics(TestCase):
+    device_type = GPU_TYPE
 
     def test_find_names_ignores_frame_locals(self):
         """
