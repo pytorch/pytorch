@@ -11191,6 +11191,35 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 self.assertEqual(a1, a2)
                 self.assertEqual(b1, b2)
 
+    def test_input_mutation_after_dtype_view_consumer(self):
+        # x and a dtype view of it (a fallback aten.view.dtype kernel whose
+        # output aliases x) share memory. A pending pointwise user of either one
+        # must be realized before a mutation of the other; Inductor used to
+        # materialize it *after* the mutation, i.e. from the mutated memory.
+        idx = torch.tensor([0, 2], device=self.device)
+        vals = torch.full((2, 12), 7, dtype=torch.int32, device=self.device)
+
+        def mutate_base(x):
+            y = x.view(torch.int32) * 2
+            y.sub_(-4)
+            x[:, 2:5] = 2
+            return y.view(torch.int64)
+
+        def mutate_alias(x):
+            y = x * 2
+            y.sub_(-4)
+            x.view(torch.int32).index_put_((idx,), vals)
+            return y.view(torch.int32)
+
+        x = torch.arange(-12, 12, dtype=torch.int64, device=self.device).reshape(4, 6)
+        for fn in (mutate_base, mutate_alias):
+            torch._dynamo.reset()
+            ref_x, opt_x = x.clone(), x.clone()
+            ref = fn(ref_x)
+            res = torch.compile(fn)(opt_x)
+            self.assertEqual(ref, res)
+            self.assertEqual(ref_x, opt_x)
+
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
