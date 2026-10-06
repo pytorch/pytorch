@@ -1129,6 +1129,11 @@ max_complex_pointwise_cat_inputs = 8
 # only fused when every input has a simple computation (op count <= 2).
 max_pointwise_cat_inputs = 8
 
+# max number of inputs per pointwise cat kernel when a cat above
+# max_pointwise_cat_inputs groups runs of its pointwise inputs.
+# None uses max_pointwise_cat_inputs; 0 or 1 disables grouping.
+pointwise_cat_chunk_size: int | None = None
+
 # force concat to be generated as a pointwise op with masked loads
 force_pointwise_cat = False
 
