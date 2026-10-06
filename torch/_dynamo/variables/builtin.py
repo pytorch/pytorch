@@ -102,6 +102,7 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
+    pydict_checkexact,
 )
 from .lists import (
     BaseListVariable,
@@ -155,7 +156,12 @@ from .object_protocol import (
     type_implements_sq_length,
     vt_identity_compare,
 )
-from .sets import FrozensetVariable, OrderedSetVariable, SetVariable
+from .sets import (
+    FrozensetVariable,
+    OrderedSetVariable,
+    pyanyset_checkexact,
+    SetVariable,
+)
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -3509,16 +3515,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         no_keywords(tx, "dict.fromkeys", kwargs)
-        if len(args) in (1, 2) and isinstance(
-            args[0],
-            (
-                variables.SetVariable,
-                variables.FrozensetVariable,
-                variables.DictKeySetVariable,
-                variables.OrderedSetVariable,
-                ConstDictVariable,
-            ),
-        ):
+        check_positional(tx, "fromkeys", len(args), 1, 2)
+        # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
+        if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
             value = args[1] if len(args) == 2 else ConstantVariable.create(None)
             return ConstDictVariable(
                 dict.fromkeys(args[0].items.keys(), value),  # type: ignore[arg-type]

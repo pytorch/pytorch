@@ -350,6 +350,107 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(actual, expected)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_ordered_dict_subclass_fromkeys(self):
+        class MyOrderedDict(OrderedDict):
+            pass
+
+        def fn(x):
+            return (
+                MyOrderedDict.fromkeys("ab", x + 1),
+                MyOrderedDict.fromkeys("cd", value=x + 2),
+                MyOrderedDict.fromkeys(iterable="ef", value=x + 3),
+                OrderedDict.fromkeys(iterable="gh", value=x + 4),
+            )
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual([type(d) for d in actual], [MyOrderedDict] * 3 + [OrderedDict])
+        self.assertEqual(actual, expected)
+
+    @parametrize("cls", [dict, SimpleDict, defaultdict])
+    def test_dict_fromkeys_bad_args(self, cls):
+        def fn(x):
+            msgs = []
+            for args, kwargs in (((), {}), (([1], x, x), {}), (([1],), {"value": x})):
+                try:
+                    cls.fromkeys(*args, **kwargs)
+                except TypeError as e:
+                    msgs.append(str(e))
+            return msgs
+
+        x = torch.randn(2)
+        expected = fn(x)
+        self.assertEqual(len(expected), 3)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+    def test_dict_fromkeys_iterable_subclass_iter(self):
+        class ReversedSet(set):
+            def __iter__(self):
+                return iter(sorted(super().__iter__(), reverse=True))
+
+        class KeysDict(dict):
+            def __iter__(self):
+                return iter(["z"])
+
+        def fn(x):
+            return (
+                dict.fromkeys(ReversedSet({1, 2, 3}), x),
+                dict.fromkeys(KeysDict(a=1, b=2), x),
+            )
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual([list(d) for d in actual], [list(d) for d in expected])
+        self.assertEqual(actual, expected)
+
+    def test_defaultdict_subclass_construct(self):
+        class MyDefaultDict(defaultdict):
+            pass
+
+        def fn(x):
+            d = MyDefaultDict(list)
+            d["a"].append(x + 1)
+            d["b"]
+            d.tag = "t"
+            return d
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), MyDefaultDict)
+        self.assertIs(actual.default_factory, list)
+        self.assertEqual(actual, expected)
+        self.assertEqual(vars(actual), vars(expected))
+
+    def test_defaultdict_subclass_construct_custom_init_missing(self):
+        class CountingDefaultDict(defaultdict):
+            def __init__(self, scale):
+                super().__init__(int)
+                self.scale = scale
+                self.misses = 0
+
+            def __missing__(self, key):
+                self.misses += 1
+                return super().__missing__(key) + self.scale
+
+        def fn(x):
+            d = CountingDefaultDict(3)
+            d["a"] += 1
+            d["b"]
+            return d, x + d["a"]
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual[0]), CountingDefaultDict)
+        self.assertIs(actual[0].default_factory, int)
+        self.assertEqual(actual, expected)
+        self.assertEqual(vars(actual[0]), vars(expected[0]))
+
     def test_dict_subclass_methods_fallback_mutation(self):
         def fn(sd, x):
             for value in sd.values():

@@ -1151,15 +1151,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif name == "fromkeys" and (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            or (
-                issubclass(self.value, dict)
-                and not issubclass(self.value, collections.OrderedDict)
-            )
-        ):
-            if self.value is not collections.OrderedDict:
+        elif name == "fromkeys" and issubclass(self.value, dict):
+            if not issubclass(self.value, collections.OrderedDict):
                 no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
+                check_positional(tx, "fromkeys", len(args), 1, 2)
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
                 tx, self, *args, **kwargs
             )
