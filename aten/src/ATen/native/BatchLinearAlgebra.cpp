@@ -2911,17 +2911,13 @@ TORCH_IMPL_FUNC(linalg_qr_piv_out)(
     geqp3_stub(A.device().type(), QR, tau, jpvt);
 
     // ----- Extract P -----
-    auto batch_size = at::native::batchCount(A);
-    auto P_ptr = const_cast<int64_t*>(P.data_ptr<int64_t>());
-    auto jpvt_ptr = jpvt.data_ptr<int>();
-
-    for (int64_t b = 0; b < batch_size; ++b) {
-        int* jpvt_b = jpvt_ptr + b * n;
-        int64_t* P_b = P_ptr + b * n;
-        for (int i = 0; i < n; ++i) {
-            P_b[i] = (m == 0) ? static_cast<int64_t>(i)
-                               : static_cast<int64_t>(jpvt_b[i] - 1);
-        }
+    // jpvt is 1-indexed. LAPACK's geqp3 quick-return path for m == 0 does not
+    // populate jpvt, so fall back to the identity permutation in that case.
+    if (m == 0) {
+        P.copy_(at::arange(n, P.options()));
+    } else {
+        P.copy_(jpvt);
+        P.sub_(1);
     }
 
     // ----- Extract R -----

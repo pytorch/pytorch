@@ -4192,9 +4192,27 @@ class TestLinalg(TestCase):
         def run_test(tensor_dims, mode):
             A = torch.randn(*tensor_dims, dtype=dtype, device=device)
             Q, R, P = torch.linalg.qr_piv(A, mode=mode)
+            m, n = tensor_dims[-2:]
+
+            if mode == 'r':
+                # Q is discarded in this mode; check it's empty and that R, P
+                # match the 'reduced'-mode computation on the same A (mode='r'
+                # only omits Q, the pivoting and R are otherwise identical).
+                self.assertEqual(Q.shape, (0,))
+                self.assertEqual(R.shape, (*tensor_dims[:-2], min(m, n), n))
+                _, R_ref, P_ref = torch.linalg.qr_piv(A, mode='reduced')
+                self.assertEqual(R, R_ref)
+                self.assertEqual(P, P_ref)
+
+                # Check with out=
+                Q_out = torch.empty(0, dtype=dtype, device=device)
+                R_out, P_out = torch.full_like(R, math.nan), torch.full_like(P, 0)
+                torch.linalg.qr_piv(A, mode=mode, out=(Q_out, R_out, P_out))
+                self.assertEqual(R, R_out)
+                self.assertEqual(P, P_out)
+                return
 
             # Check0: Q[-2:] = (m, n_columns), R[-2:] = (n_columns, n)
-            m, n = tensor_dims[-2:]
             n_columns = m if (mode != 'reduced') and m > n else min(m, n)
             self.assertEqual(Q.size(-2), m)
             self.assertEqual(R.size(-1), n)
@@ -4228,7 +4246,7 @@ class TestLinalg(TestCase):
                             (3, 5), (5, 5), (5, 3),  # Single matrix
                             (7, 3, 5), (7, 5, 5), (7, 5, 3),  # 3-dim Tensors
                             (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)]  # 4-dim Tensors
-        for tensor_dims, some in itertools.product(tensor_dims_list, ['reduced', 'complete']):
+        for tensor_dims, some in itertools.product(tensor_dims_list, ['reduced', 'complete', 'r']):
             run_test(tensor_dims, some)
 
     @skipCPUIfNoLapack
@@ -4343,35 +4361,39 @@ class TestLinalg(TestCase):
 
     @onlyCPU
     @skipCPUIfNoLapack
-    @dtypes(torch.float)
+    @dtypes(torch.double, torch.cdouble)
     def test_linalg_qr_piv_autograd(self, device, dtype):
         # Check differentiability for modes as specified in the docs.
         # Differentiability in all cases is only guaranteed if first k = min(m, n) columns are linearly independent.
         # Mode 'reduced' is always differentiable.
         # Mode 'r' is never differentiable.
         # Mode 'complete' is differentiable for m <= n.
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         for mode in 'complete', 'reduced', 'r':
             for m, n in [(5, 7), (7, 5)]:
-                # Random matrix inputs will effectively satisfy rank requirement of k = min(m, n) columns linearly
-                # independent.
-                inp = torch.randn((m, n), device=device, dtype=dtype, requires_grad=True)
-                q, r, p = torch.linalg.qr_piv(inp, mode=mode)
-                b = torch.sum(r)
+                # Distinct singular values keep the pivot pattern stable under the
+                # tiny perturbations gradcheck uses for its finite differences.
+                inp = make_fullrank(m, n, device=device, dtype=dtype, requires_grad=True)
                 if mode == 'complete' and m > n:
+                    q, r, p = torch.linalg.qr_piv(inp, mode=mode)
                     with self.assertRaisesRegex(RuntimeError,
                                                 "The pivoted QR decomposition is not differentiable when mode='complete' and "
                                                 "nrows > ncols"):
-                        b.backward()
+                        torch.sum(r.abs()).backward()
                 elif mode == 'r':
+                    q, r, p = torch.linalg.qr_piv(inp, mode=mode)
                     # torch.linalg.qr_piv(mode='r') returns only 'r' and 'p' and discards 'q', but
                     # without 'q' you cannot compute the backward pass. Check that
                     # linalg_qr_piv_backward complains cleanly in that case.
                     self.assertEqual(q.shape, (0,))  # empty tensor
                     with self.assertRaisesRegex(RuntimeError,
                                                 "The derivative of linalg.qr_piv depends on Q"):
-                        b.backward()
+                        torch.sum(r.abs()).backward()
                 else:
-                    b.backward()
+                    def fn(A, mode=mode):
+                        q, r, _ = torch.linalg.qr_piv(A, mode=mode)
+                        return q, r
+                    self.assertTrue(torch.autograd.gradcheck(fn, (inp,), check_undefined_grad=False, check_forward_ad=True))
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
@@ -4720,7 +4742,7 @@ class TestLinalg(TestCase):
 
     @onlyCPU
     @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_qr_piv_rank_revealing(self, device, dtype):
         # Adversarial matrix: planted singular values [1, 0.1, 1e-3], with the
         # near-null right-singular direction spread evenly across all columns
@@ -4728,17 +4750,66 @@ class TestLinalg(TestCase):
         # accurate here, but its R diagonal is not monotonically decreasing, so
         # it fails to reveal the rank deficiency -- exactly the rank-revealing
         # guarantee pivoting exists to provide.
+        real_dtype = torch.float64 if dtype in (torch.float64, torch.complex128) else torch.float32
         A = torch.tensor([
             [0.005634, -0.075095, 0.067838],
             [0.057165, -0.099936, 0.043364],
             [-0.218126, -0.566604, 0.784839],
-        ], dtype=dtype, device=device)
+        ], dtype=real_dtype, device=device)
 
-        _, R, _ = torch.linalg.qr_piv(A, mode='reduced')
+        # Stack a few distinct variants into a batch by right-multiplying by
+        # different unitary diagonals (complex phases, or +-1 signs for real
+        # dtypes) -- this preserves the planted singular values exactly on
+        # every batch entry while stressing the batched dispatch path
+        # (independent per-slice Q/R/P extraction).
+        if dtype.is_complex:
+            phase_sets = [[0.3, 1.1, 2.0], [1.5, -0.7, 3.0]]
+            A = torch.stack([
+                A.to(dtype) @ torch.diag(torch.exp(1j * torch.tensor(p, dtype=real_dtype, device=device)))
+                for p in phase_sets
+            ])
+        else:
+            sign_sets = [[1., 1., 1.], [-1., 1., -1.]]
+            A = torch.stack([
+                A @ torch.diag(torch.tensor(s, dtype=dtype, device=device))
+                for s in sign_sets
+            ])
+
+        Q, R, P = torch.linalg.qr_piv(A, mode='reduced')
         diagR = R.diagonal(dim1=-2, dim2=-1).abs()
 
         # The rank-revealing guarantee: |R_11| >= |R_22| >= ... >= |R_kk|.
-        self.assertTrue(torch.all(diagR[:-1] >= diagR[1:] - 1e-6))
+        self.assertTrue(torch.all(diagR[..., :-1] >= diagR[..., 1:] - 1e-6))
+
+        # The decomposition itself must still be correct, not just monotonic.
+        self.assertEqual(Q @ R, A.gather(-1, P.unsqueeze(-2).expand_as(A)))
+
+        # Rank-revealing bound: |R_kk| should be within a modest factor of
+        # sigma_min(A), not just the smallest diagonal entry by coincidence.
+        sigma_min = torch.linalg.svdvals(A)[..., -1]
+        self.assertTrue(torch.all(diagR[..., -1] / sigma_min < 10))
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_qr_piv_rank_deficient(self, device, dtype):
+        # Exactly rank-deficient input (rank r < k = min(m, n)), built as a
+        # low-rank product so the rank is exact rather than near-numerical.
+        # Checks the forward decomposition stays correct and that pivoting
+        # correctly reveals the exact rank via a zero trailing R block --
+        # complementary to test_qr_piv_rank_revealing's near-rank-deficient
+        # case, with genuinely independent random matrices per batch entry.
+        torch.manual_seed(0)
+        batch, m, n, r = (3,), 6, 5, 2
+        U = torch.randn(*batch, m, r, dtype=dtype, device=device)
+        V = torch.randn(*batch, r, n, dtype=dtype, device=device)
+        A = U @ V
+
+        Q, R, P = torch.linalg.qr_piv(A, mode='reduced')
+        self.assertEqual(Q @ R, A.gather(-1, P.unsqueeze(-2).expand_as(A)))
+
+        trailing = R[..., r:, r:]
+        self.assertEqual(trailing, torch.zeros_like(trailing))
 
     def _check_einsum(self, *args, np_args=None):
         if np_args is None:

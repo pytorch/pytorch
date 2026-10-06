@@ -19,6 +19,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     has_cusolver,
+    onlyCPU,
     skipCPUIfNoLapack,
     skipCUDAIfNoCusolver,
     skipXPU,
@@ -1191,6 +1192,35 @@ def sample_inputs_linalg_qr_geqrf(
         yield SampleInput(make_arg(*shape))
 
 
+def sample_inputs_linalg_qr_piv(op_info, device, dtype, requires_grad=False, **kwargs):
+    # QR is just well defined when the matrix is full rank
+    make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+    make_arg = partial(make_fullrank, dtype=dtype, device=device)
+
+    batches = [(), (0,), (2,), (1, 1)]
+    ns = [5, 2, 0]
+
+    for batch, (m, n) in product(batches, product(ns, ns)):
+        shape = batch + (m, n)
+        yield SampleInput(make_arg(*shape, requires_grad=requires_grad))
+
+        # mode='complete' is only differentiable for m <= n (see the warning
+        # on torch.linalg.qr_piv); skip the m > n case for the gradient-based
+        # OpInfo tests, since gradcheck requires at least one differentiable
+        # input and this path is documented to raise. The explicit error is
+        # covered directly by test_linalg_qr_piv_autograd.
+        if not requires_grad or m <= n:
+            yield SampleInput(
+                make_arg(*shape, requires_grad=requires_grad),
+                kwargs={"mode": "complete"},
+            )
+
+        # mode='r' discards Q and is never differentiable; only exercise it
+        # for the forward-value OpInfo tests.
+        if not requires_grad:
+            yield SampleInput(make_arg(*shape), kwargs={"mode": "r"})
+
+
 def sample_inputs_linalg_polar(op_info, device, dtype, requires_grad=False, **kwargs):
     # The polar decomposition A = U @ H is defined for m >= n (tall or square).
     # No zero-size dims here: they trip generic coverage suites (e.g. vmap can't
@@ -1968,6 +1998,18 @@ op_db: list[OpInfo] = [
         check_batched_gradgrad=False,
         sample_inputs_func=sample_inputs_linalg_qr_geqrf,
         decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
+    ),
+    OpInfo(
+        "linalg.qr_piv",
+        aten_name="linalg_qr_piv",
+        op=torch.linalg.qr_piv,
+        dtypes=floating_and_complex_types(),
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        # In-place ops
+        check_batched_gradgrad=False,
+        sample_inputs_func=sample_inputs_linalg_qr_piv,
+        decorators=[onlyCPU, skipCPUIfNoLapack],
     ),
     OpInfo(
         "linalg.polar",

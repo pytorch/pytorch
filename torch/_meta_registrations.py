@@ -1744,6 +1744,27 @@ def _parse_qr_mode(mode: str) -> tuple[bool, bool]:
     return compute_q, reduced  # type: ignore[possibly-undefined]
 
 
+def _parse_qr_piv_mode(mode: str) -> tuple[bool, bool]:
+    if mode == "reduced":
+        compute_q = True
+        reduced = True
+    elif mode == "complete":
+        compute_q = True
+        reduced = False
+    elif mode == "r":
+        compute_q = False
+        reduced = True  # this is actually irrelevant in this mode
+    else:
+        torch._check(
+            False,
+            lambda: (
+                f"qr_piv received unrecognized mode '{mode}' "
+                f"but expected one of 'reduced' (default), 'r', or 'complete'"
+            ),
+        )
+    return compute_q, reduced  # type: ignore[possibly-undefined]
+
+
 @register_meta([aten.linalg_qr.default, aten.linalg_qr.out])
 @out_wrapper("Q", "R")
 def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
@@ -1781,7 +1802,7 @@ def linalg_qr_piv_meta(
     checkIsMatrix(A, "linalg.qr_piv")
     checkFloatingOrComplex(A, "linalg.qr_piv")
 
-    compute_q, reduced_mode = _parse_qr_mode(mode)
+    compute_q, reduced_mode = _parse_qr_piv_mode(mode)
 
     m = A.shape[-2]
     n = A.shape[-1]
