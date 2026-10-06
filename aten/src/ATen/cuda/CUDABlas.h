@@ -17,6 +17,7 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
 #include <ATen/OpMathType.h>
+#include <optional>
 
 namespace at::cuda::blas {
 
@@ -195,6 +196,14 @@ void scaled_gemm(
     float alpha_multiplier = 1.0f,
     const Tensor* device_beta = nullptr);
 
+struct GroupedGemmScaleOptions {
+  const void* A_scale_ptr;
+  const void* B_scale_ptr;
+  bool use_fast_accum;
+  int A_scale_mode;
+  int B_scale_mode;
+};
+
 void grouped_gemm(
       char transa,
       char transb,
@@ -206,9 +215,10 @@ void grouped_gemm(
       int64_t avgK,
       const int64_t* alphaArrayDev,
       const float* alphaScalar,
-      ScalarType input_dtype,
+      ScalarType A_dtype,
       const int64_t* APtrArrayDev,
       const void* ldaArrayDev,
+      ScalarType B_dtype,
       const int64_t* BPtrArrayDev,
       const void* ldbArrayDev,
       const int64_t* betaArrayDev,
@@ -219,7 +229,8 @@ void grouped_gemm(
       int64_t* DPtrArrayDev,
       const void* lddArrayDev,
       int batchCount,
-      bool use_int64_dims);
+      bool use_int64_dims,
+      const std::optional<GroupedGemmScaleOptions>& scales = std::nullopt);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)  CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 
