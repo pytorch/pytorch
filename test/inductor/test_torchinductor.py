@@ -16167,6 +16167,42 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         deterministic=deterministic,
                     )
 
+    def test_empty_deterministic_fill(self):
+        # With torch.use_deterministic_algorithms(True) and fill_uninitialized_memory,
+        # eager fills new tensors from torch.empty and friends with NaN, the largest
+        # integer, or True. The compiled code must do the same.
+        def fn(x):
+            return (
+                torch.empty(4, 8, device=x.device),
+                torch.empty_like(x, dtype=torch.int32),
+                torch.empty_strided((4, 8), (1, 4), device=x.device, dtype=torch.half),
+                torch.empty_permuted((2, 3, 5), (1, 0, 2), device=x.device),
+                x.new_empty(3, 5, dtype=torch.bool),
+                x.new_empty_strided((3, 5), (1, 3), dtype=torch.int64),
+            )
+
+        x = torch.randn(4, 8, device=self.device)
+        with DeterministicGuard(True, fill_uninitialized_memory=True):
+            self.assertEqual(torch.compile(fn)(x), fn(x), equal_nan=True)
+
+    @requires_gpu()
+    def test_empty_deterministic_fill_skips_internal_allocations(self):
+        # Inductor's own allocations, such as the buffers flex attention computes
+        # into, are written before they are read, so they are not filled: the
+        # kernels are the same whether the fill is on or off.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("flex attention allocates its buffers on GPU")
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q = torch.randn(1, 2, 128, 16, device=self.device)
+        kernels = []
+        for fill in (False, True):
+            torch._dynamo.reset()
+            with DeterministicGuard(True, fill_uninitialized_memory=fill):
+                _, code = run_and_get_kernels(torch.compile(flex_attention), q, q, q)
+            kernels.append(code)
+        self.assertEqual(kernels[0], kernels[1])
+
     def test_inplace_resize_as(self):
         def fn(x, y):
             x.resize_as_(y)

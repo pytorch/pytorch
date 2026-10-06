@@ -4529,7 +4529,6 @@ def tensor_constructor(fill_value):
     return inner
 
 
-@register_lowering([torch.empty, aten.empty])
 def empty(
     *size,
     dtype=None,
@@ -4537,12 +4536,19 @@ def empty(
     device=None,
     pin_memory=None,
     memory_format=None,
+    fill_uninitialized=False,
 ):
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
     return empty_strided(
-        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        None,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        fill_uninitialized=fill_uninitialized,
     )
 
 
@@ -4573,7 +4579,7 @@ def constant_like(fill_value):
     return create_tensor_like(tensor_constructor(fill_value))
 
 
-empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
+empty_like = create_tensor_like(empty)
 ones_like = create_tensor_like(tensor_constructor(1))
 zeros_like = create_tensor_like(tensor_constructor(0))
 
@@ -4595,8 +4601,16 @@ def new_constant(fill_value):
     return _new_constant
 
 
-@register_lowering(aten.new_empty)
-def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None):
+def new_empty(
+    x,
+    size,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    fill_uninitialized=False,
+):
     if dtype is None:
         dtype = x.get_dtype()
     if device is None:
@@ -4608,13 +4622,48 @@ def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None)
         layout=layout,
         device=decode_device(device),
         pin_memory=pin_memory,
+        fill_uninitialized=fill_uninitialized,
     )
 
 
-@register_lowering(aten.empty_strided)
+def _uninitialized_fill_value(dtype: torch.dtype) -> float | int | bool | None:
+    """
+    The value eager mode fills a new tensor from torch.empty with when
+    torch.use_deterministic_algorithms(True) and
+    torch.utils.deterministic.fill_uninitialized_memory are set, or None if it
+    does not fill it.
+    """
+    if not (
+        torch.are_deterministic_algorithms_enabled()
+        and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+    ):
+        return None
+    if is_float_dtype(dtype):
+        return float("nan")
+    if dtype == torch.bool:
+        return True
+    if is_integer_dtype(dtype):
+        return torch.iinfo(dtype).max
+    return None
+
+
 def empty_strided(
-    size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
+    size,
+    stride,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    fill_uninitialized=False,
 ):
+    """
+    Allocates a buffer without computing anything into it. The lowerings of user
+    calls (torch.empty and friends) pass fill_uninitialized=True, so that the
+    buffer is filled the way eager mode fills it in deterministic mode. Inductor's
+    own allocations keep the default: they are always written before being read,
+    and filling them would only cost time.
+    """
     if not (isinstance(size, (list, tuple))):
         raise AssertionError("expected: isinstance(size, (list, tuple))")
     if not (isinstance(stride, (list, tuple, type(None)))):
@@ -4624,11 +4673,18 @@ def empty_strided(
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     device = decode_device(device)
-    pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
+    fill_value = _uninitialized_fill_value(dtype) if fill_uninitialized else None
+    pointwise = _full(
+        fill_value=0 if fill_value is None else fill_value,
+        device=device,
+        dtype=dtype,
+        size=size,
+    )
     pointwise.realize()
     buffer = pointwise.data.data
-    # explicitly set ranges to zeros in order to make a NopKernelSchedulerNode
-    buffer.data = dataclasses.replace(buffer.data, ranges=[0] * len(size))
+    if fill_value is None:
+        # explicitly set ranges to zeros in order to make a NopKernelSchedulerNode
+        buffer.data = dataclasses.replace(buffer.data, ranges=[0] * len(size))
     if not (isinstance(buffer, ir.ComputedBuffer)):
         raise AssertionError("expected: isinstance(buffer, ir.ComputedBuffer)")
     size = [sympy.expand(s) for s in size]
@@ -4647,9 +4703,16 @@ def empty_strided(
     return pointwise
 
 
-@register_lowering(aten.new_empty_strided)
 def new_empty_strided(
-    x, size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
+    x,
+    size,
+    stride,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    fill_uninitialized=False,
 ):
     if dtype is None:
         dtype = x.get_dtype()
@@ -4662,7 +4725,25 @@ def new_empty_strided(
         layout=layout,
         device=decode_device(device),
         pin_memory=pin_memory,
+        fill_uninitialized=fill_uninitialized,
     )
+
+
+# Lowerings of the user-facing ops: unlike Inductor's own allocations, these fill
+# the buffer when eager mode would (see empty_strided).
+register_lowering([torch.empty, aten.empty])(
+    functools.partial(empty, fill_uninitialized=True)
+)
+register_lowering(aten.empty_like)(
+    create_tensor_like(functools.partial(empty, fill_uninitialized=True))
+)
+register_lowering(aten.new_empty)(functools.partial(new_empty, fill_uninitialized=True))
+register_lowering(aten.empty_strided)(
+    functools.partial(empty_strided, fill_uninitialized=True)
+)
+register_lowering(aten.new_empty_strided)(
+    functools.partial(new_empty_strided, fill_uninitialized=True)
+)
 
 
 @register_lowering(prims.copy_strided.default)
