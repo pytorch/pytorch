@@ -148,6 +148,7 @@ c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
     auto result = c10::make_intrusive<NcclEpGroup>();
     result->group = ep_group;
     result->group_name = pg->getGroupName();
+    result->process_group = pg;
     return result;
 }
 
@@ -186,7 +187,7 @@ c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
     return c10::make_intrusive<NcclEpHandle>(
         ep_handle,
         layout,
-        group->group_name,
+        group,
         topk_idx,
         std::move(recv_total_counter));
 }

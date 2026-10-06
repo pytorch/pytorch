@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 
-import logging
+import importlib.util
 
 import torch
 import torch.distributed as dist
@@ -19,28 +19,20 @@ from torch.testing._internal.common_utils import (
 )
 
 
-log = logging.getLogger(__name__)
-
-
 def _nccl_ep_available() -> bool:
-    # The torch._nccl_ep extension is built only with USE_NCCL_EP, and a
-    # USE_SYSTEM_NCCL=ON build additionally needs the nccl4py wheel at runtime.
-    # Actually importing it is the real check: find_spec would only locate the
-    # extension without dlopening it, so it would miss a missing libnccl_ep.so.
     if not torch.cuda.is_available():
         return False
-    try:
-        _import_nccl_ep()
-    except Exception:
-        log.debug("torch._nccl_ep unavailable; skipping EP tests", exc_info=True)
+    if importlib.util.find_spec("torch._nccl_ep") is None:
         return False
+    # A built extension with missing native libraries or headers must fail tests.
+    _import_nccl_ep()
     return True
 
 
 def requires_nccl_ep():
     return skip_but_pass_in_sandcastle_if(
         not _nccl_ep_available(),
-        "Test requires a USE_NCCL_EP build (plus nccl4py for USE_SYSTEM_NCCL=ON)",
+        "Test requires a USE_NCCL_EP build with native NCCL EP and JIT headers",
     )
 
 
@@ -64,8 +56,6 @@ def _generate_topk(rank, world_size, num_tokens, top_k, device):
 
 @requires_nccl_ep()
 class TokenSwitchNCCLTest(MultiProcContinuousTest):
-    _cached_token_switch: TokenSwitchNCCL | None = None
-
     @classmethod
     def backend_str(cls):
         return "nccl"
@@ -76,20 +66,62 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
 
     @classmethod
     def get_token_switch(cls) -> TokenSwitchNCCL:
-        if cls._cached_token_switch is None:
-            pg = dist.distributed_c10d._get_default_group()
-            rank = dist.get_rank(pg)
-            world_size = dist.get_world_size(pg)
-            print(f"rank {rank} creating token switch")
-            dist.barrier(pg)
-            cls._cached_token_switch = TokenSwitchNCCL(
-                pg, world_size, NUM_TOKENS, world_size * NUM_TOKENS, TOKEN_SIZE_BYTES
-            )
-        return cls._cached_token_switch
+        # Test-local ownership releases EP before the worker destroys its PG.
+        pg = dist.distributed_c10d._get_default_group()
+        world_size = dist.get_world_size(pg)
+        dist.barrier(pg)
+        return TokenSwitchNCCL(
+            pg, world_size, NUM_TOKENS, world_size * NUM_TOKENS, TOKEN_SIZE_BYTES
+        )
 
     def _init(self):
         torch.cuda.set_device(self.device)
         dist.barrier()
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("layout", ["flat", "expert_major"])
+    def test_routing_keeps_group_alive(self, layout):
+        self._init()
+        pg = dist.distributed_c10d._get_default_group()
+        ep = _import_nccl_ep()
+        stream = torch.cuda.Stream(device=self.device)
+        for _ in range(NUM_MULTI_ROUND_DISPATCH_COMBINE):
+            with torch.cuda.stream(stream):
+                ts = TokenSwitchNCCL(
+                    pg,
+                    self.world_size,
+                    NUM_TOKENS,
+                    self.world_size * NUM_TOKENS,
+                    TOKEN_SIZE_BYTES,
+                )
+                topk_idx, weights = _generate_topk(
+                    self.rank, self.world_size, NUM_TOKENS, TOP_K, self.device
+                )
+                routing = ts.create_routing(topk_idx, layout=layout)
+                tokens = torch.ones(
+                    (NUM_TOKENS, HIDDEN), dtype=torch.bfloat16, device=self.device
+                )
+                out_tokens, out_weights, out_idx = ts._alloc_dispatch_outputs(
+                    routing,
+                    tokens,
+                    weights,
+                    self.world_size * NUM_TOKENS,
+                    HIDDEN,
+                    TOP_K,
+                )
+                del ts
+                ep._nccl_ep_dispatch(
+                    routing.handle, tokens, weights, out_tokens, out_weights, out_idx
+                )
+                num_recv = routing.handle.get_num_recv_tokens()
+                combined = torch.empty_like(tokens)
+                ep._nccl_ep_combine(
+                    routing.handle, out_tokens[:num_recv].contiguous(), combined
+                )
+            stream.synchronize()
+            del routing
+            # EP cleanup must leave the process group's host communicator usable.
+            dist.barrier(pg)
 
     @skip_if_lt_x_gpu(2)
     def test_create_routing(self):
@@ -645,8 +677,6 @@ instantiate_parametrized_tests(TokenSwitchNCCLTest)
 
 
 class TokenSwitchNCCL2Test(TokenSwitchNCCLTest):
-    _cached_token_switch: TokenSwitchNCCL | None = None
-
     @classmethod
     def backend_str(cls):
         return "nccl2"
