@@ -17,7 +17,16 @@ KERNEL_MODULE = "cutedsl_kernels.py"
 # against aten on Hopper and Blackwell.
 # Both spellings of each capability, since either can appear in TORCH_CUDA_ARCH_LIST
 # and they are distinct nvcc targets.
-ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a")
+ARCHS = (
+    "sm_90",
+    "sm_90a",
+    "sm_100",
+    "sm_100a",
+    "sm_103",
+    "sm_103a",
+    "sm_107",
+    "sm_107a",
+)
 
 _DTYPES = {"float32": "at::kFloat", "bfloat16": "at::kBFloat16"}
 _RADIX_KS = (64, 128, 256, 512, 1024)
