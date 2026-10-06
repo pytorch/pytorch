@@ -425,6 +425,24 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(target, x), x + 10
         )
 
+    def test_classmethod_descriptor_binds_autograd_function(self):
+        class Double(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        raw = torch._C._FunctionBase.__dict__["apply"]
+
+        def fn(x):
+            return raw.__get__(None, Double)(x)
+
+        x = torch.randn(3, requires_grad=True)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_bound_builtin_apply_stored_alias_guarded(self):
         class Function(torch.autograd.Function):
             @staticmethod

@@ -5136,7 +5136,7 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
                 f"'{self.descriptor.__objclass__.__name__}' needs a type, not a "
                 f"'{owner_type.__name__}' as arg 2",
             )
-        owner_value = owner.as_python_constant()
+        owner_value = owner.get_real_python_backed_value()
         if not issubclass(owner_value, self.descriptor.__objclass__):
             raise_type_error(
                 tx,
