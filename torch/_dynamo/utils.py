@@ -114,6 +114,7 @@ if typing.TYPE_CHECKING:
     )
 
     from torch._dynamo.bytecode_transformation import Instruction
+    from torch._dynamo.exc import FakeTensorObservedException
     from torch._dynamo.replay_record import ExecutionRecord
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
@@ -4234,6 +4235,23 @@ def get_fake_value(
         tx.output.bytecode_tracing_timings.get_fake_value_ns += time.time_ns() - _t0
 
 
+def _raise_observed_fake_tensor_exception(
+    exc_type: type[Exception],
+    observed_cls: type[FakeTensorObservedException],
+    tx: InstructionTranslatorBase,
+    node: torch.fx.Node,
+    msg: str,
+) -> NoReturn:
+    from .exc import ObservedException, raise_observed_exception
+
+    if not node.users:
+        tx.output.graph.erase_node(node)
+    try:
+        raise_observed_exception(exc_type, tx, args=[msg])
+    except ObservedException as e:
+        raise observed_cls(msg, real_stack=e.real_stack) from None
+
+
 def _get_fake_value_impl(
     node: torch.fx.Node,
     tx: InstructionTranslatorBase,
@@ -4465,18 +4483,20 @@ def _get_fake_value_impl(
                 from_exc=cause,
             )
         msg = get_concrete_sizes_from_symints(str(e), fake_mode)
-        from .exc import (
-            FakeTensorObservedException,
-            ObservedException,
-            raise_observed_exception,
-        )
+        from .exc import FakeTensorObservedException
 
-        if not node.users:
-            tx.output.graph.erase_node(node)
-        try:
-            raise_observed_exception(RuntimeError, tx, args=[msg])
-        except ObservedException as e:
-            raise FakeTensorObservedException(msg, real_stack=e.real_stack) from None
+        _raise_observed_fake_tensor_exception(
+            RuntimeError, FakeTensorObservedException, tx, node, msg
+        )
+    except IndexError as e:
+        # Observe tensor dim validation errors (e.g. canonicalize_dim) so user
+        # handlers see them; unhandled ones still reach the user as IndexError.
+        from .exc import FakeTensorObservedIndexError
+
+        msg = get_concrete_sizes_from_symints(str(e), fake_mode)
+        _raise_observed_fake_tensor_exception(
+            IndexError, FakeTensorObservedIndexError, tx, node, msg
+        )
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
