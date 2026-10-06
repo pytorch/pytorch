@@ -2096,12 +2096,15 @@ class TestFlyDSLTemplate(TestCase):
         "case",
         (
             "static",
+            "static_sympy_sizes",
             "dynamic_m",
             "dynamic_m_separate_symbols",
+            "dynamic_m_independent_scale_symbols",
             "dynamic_m_mismatched_b_rows",
             "dynamic_m_mismatched_scale",
             "b_not_m_major",
             "m_not_multiple_of_128",
+            "offs_strided",
         ),
     )
     def test_flydsl_mxfp8_wgrad_gate(self, case):
@@ -2110,10 +2113,16 @@ class TestFlyDSLTemplate(TestCase):
         enforced by the template at launch."""
         from torch._inductor.kernel import mm_grouped
 
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
         n, k, g = 256, 384, 4
         m = 512
-        s0 = sympy.Symbol("s0", positive=True, integer=True)
-        s1 = sympy.Symbol("s1", positive=True, integer=True)
+        # Token-dim symbols and the hints dynamo would give them for M = 512.
+        s0, s1, s2 = (
+            sympy.Symbol(f"s{i}", positive=True, integer=True) for i in range(3)
+        )
+        hints = {s0: m, s1: m, s2: m // 32}
         m_a = m_b = m
         m_sa = m_sb = m // 32
         if case.startswith("dynamic_m"):
@@ -2121,6 +2130,9 @@ class TestFlyDSLTemplate(TestCase):
             m_sa = m_sb = s0 // 32
         if case == "dynamic_m_separate_symbols":
             m_b, m_sa, m_sb = s1, s1 // 32, s1 // 32
+        elif case == "dynamic_m_independent_scale_symbols":
+            # What dynamo produces: the scale dim is its own symbol, hinting M/32.
+            m_sa = m_sb = s2
         elif case == "dynamic_m_mismatched_b_rows":
             m_b = s0 + 128
         elif case == "dynamic_m_mismatched_scale":
@@ -2128,6 +2140,9 @@ class TestFlyDSLTemplate(TestCase):
         elif case == "m_not_multiple_of_128":
             m_a = m_b = m + 32
             m_sa = m_sb = (m + 32) // 32
+        if case == "static_sympy_sizes":
+            # Real IR sizes are sympy Integers, not ints.
+            n, k, g = sympy.Integer(n), sympy.Integer(k), sympy.Integer(g)
 
         def node(size, stride, dtype, offset=0):
             return SimpleNamespace(
@@ -2135,6 +2150,7 @@ class TestFlyDSLTemplate(TestCase):
                 get_stride=lambda: stride,
                 get_dtype=lambda: dtype,
                 get_layout=lambda: SimpleNamespace(offset=offset),
+                freeze_layout=mock.Mock(),
             )
 
         fp8 = torch.float8_e4m3fn
@@ -2145,26 +2161,37 @@ class TestFlyDSLTemplate(TestCase):
             mat_b = node([m_b, k], [k, 1], fp8)
         scale_a = node([n, m_sa], [m_sa, 1], e8m0)
         scale_b = node([k, m_sb], [m_sb, 1], e8m0)
-        offs = node([g], [1], torch.int32)
+        offs = node([g], [2 if case == "offs_strided" else 1], torch.int32)
         # Not the current device, so the XCD count has to come from the layout.
         device = torch.device("cuda", 1)
+        out_stride = [n * k, k, 1]
         layout = SimpleNamespace(
-            stride=[n * k, k, 1], dtype=torch.bfloat16, size=[g, n, k], device=device
+            stride=tuple(out_stride) if case == "static_sympy_sizes" else out_stride,
+            dtype=torch.bfloat16,
+            size=[g, n, k],
+            device=device,
         )
 
-        def optimization_hint(expr):
-            # Every token-dim symbol hints as 512, as one real input would.
-            expr = sympy.sympify(expr)
-            return int(expr.subs(dict.fromkeys(expr.free_symbols, 512)))
+        def equals(x, y):
+            return sympy.simplify(sympy.sympify(x) - sympy.sympify(y)) == 0
 
         sizevars = SimpleNamespace(
-            statically_known_equals=lambda x, y: sympy.simplify(x - y) == 0,
+            statically_known_equals=equals,
+            statically_known_list_equals=lambda xs, ys: (
+                len(xs) == len(ys) and all(equals(x, y) for x, y in zip(xs, ys))
+            ),
             statically_known_multiple_of=lambda x, y: x % y == 0,
-            optimization_hint=optimization_hint,
+            optimization_hint=lambda e: int(sympy.sympify(e).subs(hints)),
+        )
+        graph = SimpleNamespace(
+            sizevars=sizevars,
+            _shape_env=SimpleNamespace(
+                _maybe_evaluate_static=lambda e: e if e.is_number else None
+            ),
         )
         props = mock.Mock(return_value=SimpleNamespace(multi_processor_count=128))
         with (
-            V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
+            V.set_graph_handler(graph),
             mock.patch.object(
                 mm_grouped, "use_flydsl_gemm_template", return_value=True
             ),
@@ -2174,14 +2201,27 @@ class TestFlyDSLTemplate(TestCase):
             kwargs = mm_grouped.get_flydsl_mxfp8_wgrad_template_kwargs(
                 mat_a, mat_b, scale_a, scale_b, offs, layout, True
             )
-        if case in ("static", "dynamic_m", "dynamic_m_separate_symbols"):
+        operands = (mat_a, mat_b, scale_a, scale_b)
+        accepted = (
+            "static",
+            "static_sympy_sizes",
+            "dynamic_m",
+            "dynamic_m_separate_symbols",
+            "dynamic_m_independent_scale_symbols",
+        )
+        if case in accepted:
             # A 128-CU partition has four of gfx950's 32-CU XCDs.
             self.assertEqual(
                 kwargs, [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": 4}]
             )
             props.assert_called_once_with(device.index)
+            # The strides the kernel relies on are pinned once it is chosen.
+            for operand in operands:
+                operand.freeze_layout.assert_called_once()
         else:
             self.assertEqual(kwargs, [])
+            for operand in operands:
+                operand.freeze_layout.assert_not_called()
 
     def test_flydsl_mxfp8_wgrad_launch_checks(self):
         """The launcher refuses an int32-overflowing contraction and any

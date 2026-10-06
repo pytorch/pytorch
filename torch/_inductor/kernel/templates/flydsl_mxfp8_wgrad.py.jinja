@@ -20,9 +20,6 @@ _mxfp8_wgrad_param_lock = threading.Lock()
 def _flydsl_mxfp8_wgrad(
     output, mat1, mat2, scale_a, scale_b, offs, stream, compile_only=False
 ):
-    if output.numel() == 0:
-        return output
-
     m = mat1.shape[1]
     # With a dynamic token dim the lowering cannot always prove these, and the
     # kernel would read past the end of a shorter operand without them.

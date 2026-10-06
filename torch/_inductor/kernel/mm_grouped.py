@@ -760,6 +760,16 @@ def _flydsl_grouped_shape(
     return m_hint, n_static, k_static, g_static
 
 
+def _flydsl_device_cu_count(device: torch.device) -> int:
+    """CU count of the device a FlyDSL kernel launches on.
+
+    An index-less device resolves to 0, as in use_flydsl_gemm_template.
+    """
+    return torch.cuda.get_device_properties(
+        device.index if device.index is not None else 0
+    ).multi_processor_count
+
+
 flydsl_mxfp8_grouped_mm_template = FlyDSLTemplate(
     name="mxfp8_grouped_gemm_flydsl",
     source=load_kernel_template("flydsl_mxfp8_grouped_mm"),
@@ -902,12 +912,8 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
     # The kernel addresses every operand through a 32-bit buffer descriptor.
     # `_row_windows` splits the token dim so the M-dependent operands always
     # fit, but the weight and its scales are not split and must fit outright.
-    # The tile is sized against the grid cap of the device the kernel launches
-    # on; resolve an index-less device the way use_flydsl_gemm_template does.
-    device = layout.device
-    num_cus = torch.cuda.get_device_properties(
-        device.index if device.index is not None else 0
-    ).multi_processor_count
+    # The tile is sized against the grid cap of the device the kernel launches on.
+    num_cus = _flydsl_device_cu_count(layout.device)
 
     weight_spans = (
         (g_static, n_static * k_static, n_static * k_static),
@@ -949,6 +955,11 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
     Offsets partition the shared contraction dimension, so each group computes
     ``mat_a[:, start:end] @ mat_b[start:end, :]``. This is the weight-gradient
     form used by MXFP8 MoE training.
+
+    Group offsets must be multiples of 32, the MX scale block along M, as the
+    per-group MXFP8 cast produces them: a scale block may not straddle two
+    groups. They live on the device, so this cannot be checked without a
+    sync; misaligned offsets give wrong results rather than an error.
     """
     if not is_nonzero or not use_flydsl_gemm_template(layout) or offs is None:
         return []
@@ -966,9 +977,16 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
         return []
     if offs.get_dtype() != torch.int32 or len(offs.get_size()) != 1:
         return []
+    sizevars = V.graph.sizevars
+    # The kernel reads offs[i] at byte 4 * i, so the offsets must be dense.
+    if not sizevars.statically_known_equals(offs.get_stride()[0], 1):
+        return []
+
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_grouped_gemm_gfx950 import (
+        _INT32_MAX,
+    )
 
     statically_known = PythonWrapperCodegen.statically_known_int_or_none
-    sizevars = V.graph.sizevars
     n = statically_known(mat_a.get_size()[0])
     k = statically_known(mat_b.get_size()[1])
     g = statically_known(offs.get_size()[0])
@@ -1008,7 +1026,7 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
             return []
         if sizevars.optimization_hint(scale.get_size()[1]) != scale_m:
             return []
-    if layout.stride != [n * k, k, 1]:
+    if not sizevars.statically_known_list_equals(layout.stride, [n * k, k, 1]):
         return []
 
     operands = (mat_a, mat_b, scale_a, scale_b)
@@ -1023,16 +1041,18 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
         return []
     # Operands go over as 1-D views whose element counts FlyDSL packs as int32.
     # The launcher re-checks the M-dependent ones against the real M.
-    if max(n * m, k * m, g * n * k) >= 2**31:
+    if max(n * m, k * m, g * n * k) > _INT32_MAX:
         return []
+
+    # The kernel reads every operand with the strides checked above, and
+    # FlyDSLTemplate does not freeze its inputs, so pin them now.
+    for node in operands:
+        node.freeze_layout()
 
     # gfx950 has 32 CUs per XCD; a partitioned part exposes fewer XCDs, and the
     # block swizzle should spread work over the ones this device actually has.
-    device = layout.device
-    num_cus = torch.cuda.get_device_properties(
-        device.index if device.index is not None else 0
-    ).multi_processor_count
-    return [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": max(1, num_cus // 32)}]
+    num_xcd = max(1, _flydsl_device_cu_count(layout.device) // 32)
+    return [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": num_xcd}]
 
 
 # The op takes recipes and swizzles as plain ints, and the pybind enums compare
