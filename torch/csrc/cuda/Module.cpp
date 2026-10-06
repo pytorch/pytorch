@@ -1126,12 +1126,18 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 
-// _CudaDeviceProperties objects are references into the per-device cache
-// behind at::cuda::getDeviceProperties, so the offset is the device index.
+// Only _get_device_properties hands these objects to Python, as references into
+// the per-device cache behind at::cuda::getDeviceProperties.
 static int devicePropertiesIndex(const cudaDeviceProp& prop) {
-  auto index = &prop - at::cuda::getDeviceProperties(0);
-  TORCH_INTERNAL_ASSERT(index >= 0 && index < c10::cuda::device_count());
-  return static_cast<int>(index);
+  auto count = c10::cuda::device_count();
+  c10::DeviceIndex index = 0;
+  while (index < count && at::cuda::getDeviceProperties(index) != &prop) {
+    index++;
+  }
+  TORCH_CHECK(
+      index < count,
+      "_CudaDeviceProperties was not returned by get_device_properties");
+  return index;
 }
 
 static void registerCudaDeviceProperties(PyObject* module) {

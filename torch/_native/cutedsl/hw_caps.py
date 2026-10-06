@@ -24,8 +24,7 @@ class HWCaps:
         self.smem_per_sm = p.shared_memory_per_multiprocessor
         self.l2_bytes = p.L2_cache_size
         # Divide last to avoid truncating non-byte-multiple bus widths.
-        mem_clock_khz = p.memory_clock_rate
-        self.peak_bw_bytes = p.memory_bus_width * mem_clock_khz * 1000 * 2 // 8
+        self.peak_bw_bytes = p.memory_bus_width * p.memory_clock_rate * 1000 * 2 // 8
 
     # --- derived quantities the launch heuristics reason in ---
     @property
