@@ -4660,7 +4660,7 @@ instantiate_device_type_tests(
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-class TestPythonChromeTraceExport(TestCase):
+class TestPythonChromeTraceExportDevice(TestCase):
     """Verify that the Python streaming exporter produces traces equivalent
     to the C++ Kineto save() path."""
 
@@ -4793,7 +4793,7 @@ class TestPythonChromeTraceExport(TestCase):
 
 
 instantiate_device_type_tests(
-    TestPythonChromeTraceExport, globals(), except_for=("cpu",)
+    TestPythonChromeTraceExportDevice, globals(), except_for=("cpu",)
 )
 
 
