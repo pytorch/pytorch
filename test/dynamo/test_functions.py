@@ -6797,6 +6797,29 @@ class GraphModule(torch.nn.Module):
             torch.compile(direct, backend="eager", fullgraph=True)(x), direct(x)
         )
 
+    def test_bound_builtin_method_reconstructed_after_graph_break(self):
+        class L(list):
+            def count(self, value):
+                return 99
+
+        class D(dict):
+            @classmethod
+            def fromkeys(cls, *args, **kwargs):
+                return "override"
+
+        obj = L([1, 1])
+        raw_fromkeys = dict.__dict__["fromkeys"]
+
+        def fn(x):
+            count = list.count.__get__(obj)
+            fromkeys = raw_fromkeys.__get__(None, D)
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + count(1), count.__self__ is obj, type(fromkeys(("a",)))
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
     def test_method_descriptor_preserves_polyfill_trace_rule(self):
         class C:
             def __init__(self, value):
