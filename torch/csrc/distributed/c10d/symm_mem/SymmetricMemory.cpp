@@ -81,13 +81,19 @@ class AllocatorMap {
   c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
       c10::DeviceType device_type) {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = map_.find(device_type);
-    TORCH_CHECK(
-        it != map_.end(),
-        "SymmetricMemory does not support device type ",
-        device_type);
+    auto allocator = find_allocator(device_type);
+    // The caller can bake the backend choice into an allocation or a
+    // rendezvous, so the backend can no longer be switched.
     in_use_ = true;
-    return it->second;
+    return allocator;
+  }
+
+  // Same lookup, for callers that only interrogate the allocator rather than
+  // allocate through it. Leaves the backend switchable.
+  c10::intrusive_ptr<SymmetricMemoryAllocator> peek_allocator(
+      c10::DeviceType device_type) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return find_allocator(device_type);
   }
 
   bool has_allocator(c10::DeviceType device_type) {
@@ -102,6 +108,17 @@ class AllocatorMap {
 
  private:
   AllocatorMap() = default;
+
+  // Caller must hold `mutex_`.
+  c10::intrusive_ptr<SymmetricMemoryAllocator> find_allocator(
+      c10::DeviceType device_type) {
+    auto it = map_.find(device_type);
+    TORCH_CHECK(
+        it != map_.end(),
+        "SymmetricMemory does not support device type ",
+        device_type);
+    return it->second;
+  }
 
   std::mutex mutex_;
   std::unordered_map<
@@ -299,7 +316,7 @@ TORCH_API bool is_symm_mem_tensor(const at::Tensor& tensor) {
   if (!has_allocator(tensor.device().type())) {
     return false;
   }
-  auto allocator = get_allocator(tensor.device().type());
+  auto allocator = AllocatorMap::get().peek_allocator(tensor.device().type());
   return allocator->has_allocation(tensor.storage().data_ptr().get());
 }
 
@@ -309,7 +326,7 @@ TORCH_API bool has_multicast_support(
   if (!has_allocator(device_type)) {
     return false;
   } else {
-    auto allocator = get_allocator(device_type);
+    auto allocator = AllocatorMap::get().peek_allocator(device_type);
     return allocator->has_multicast_support(device_idx);
   }
 }

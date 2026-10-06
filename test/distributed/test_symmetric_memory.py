@@ -221,6 +221,20 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         backend = symm_mem.get_backend(device_type)
         self.assertIsNotNone(backend)
 
+    @skipIfXpu(
+        msg="the XPU allocator is registered out of tree and may not publish availability"
+    )
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_set_backend_to_default(self) -> None:
+        """Every built backend registers for dynamic selection, including the
+        one the process started with, so re-selecting it is not an error."""
+        backend = symm_mem.get_backend(self.device)
+        symm_mem.set_backend(backend)
+        self.assertEqual(symm_mem.get_backend(self.device), backend)
+
     @skip_if_rocm_multiprocess
     @skipIf(device_type != "cuda", "NVLink DMA connectivity detection is CUDA-specific")
     @skip_if_lt_x_gpu(2)
