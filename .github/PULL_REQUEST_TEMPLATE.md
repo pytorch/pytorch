@@ -1,6 +1,4 @@
-# Pre-approved PR
-
-Use this template for PRs without a linked "actionable" issue, when the change was agreed on with a maintainer beforehand.
+Please open this PR as a draft and mark it ready for review once the description and code are ready to be looked at.
 
 Before submitting, please review:
 - [PR lifecycle](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#pr-lifecycle) in the contributing guide
@@ -14,10 +12,13 @@ Go through the following checklist
 
 ---
 
+## Linked issue or supporting maintainer
 
-## Supported by
+<!-- Keep the one line that applies and delete the others. Link an issue labeled "actionable", or name the maintainer who agreed to this change beforehand. PRs with neither will be automatically closed, unless the author has write access to the repo. -->
 
-Supported by @<!-- Maintainer handle who agreed to this PR. -->
+Fixes #<!-- Issue number -->
+Part of #<!-- Issue number -->
+Supported by @<!-- Handle of the maintainer who agreed to this PR -->
 
 ## BC-breaking?
 
