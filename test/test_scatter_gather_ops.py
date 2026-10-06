@@ -568,7 +568,10 @@ class TestScatterGatherDevice(TestCase):
                 self.assertEqual(input, expected_result)
 
     @onlyCUDA
-    @unittest.skipUnless(TEST_CUDA and torch.version.hip is None and SM80OrLater, "requires CUDA sm80+")
+    @unittest.skipUnless(
+        TEST_CUDA and (torch.version.hip is not None or SM80OrLater),
+        "requires CUDA sm80+",
+    )
     @dtypes(torch.float16, torch.bfloat16)
     def test_scatter_reduce_minmax_fastpath_edge_cases(self, device, dtype):
         def run(op, reduce, base, index, src, include_self):
