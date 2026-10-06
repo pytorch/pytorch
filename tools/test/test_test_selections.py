@@ -449,7 +449,7 @@ class TestCalculateShards(unittest.TestCase):
         self.assertEqual([test.get_time() for test in tests], list(test_times.values()))
 
     def test_split_finely(self) -> None:
-        test_times = {"test1": THRESHOLD * 2, "test2": THRESHOLD * 2}
+        test_times: dict[str, float] = {"test1": THRESHOLD * 2, "test2": THRESHOLD * 2}
         shards = calculate_shards(
             1,
             [TestRun(t) for t in test_times],
