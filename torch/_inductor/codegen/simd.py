@@ -526,7 +526,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     sexpr: Callable[[sympy.Expr], str] = pexpr
     kexpr: Callable[[sympy.Expr], str]
     allow_block_ptr: bool = False
-    # A choice its MultiKernel drops, rather than failing the compile, if it fails or adds nothing.
+    # Dropped from its MultiKernel instead of failing the compile if it fails, repeats a choice, or needs other args.
     optional: bool = False
     # pyrefly: ignore [bad-override]
     kernel_name: str
@@ -4389,6 +4389,7 @@ class SIMDScheduling(BaseScheduling):
             kernel.kernel_name = kernel_name
             kernel.code_hash = src_hash
         del kernel
+        # Kernel.__init__ also counted the choices dropped above.
         metrics.generated_kernel_count -= num_choices - len(kernels)
 
         final_kernel: SIMDKernel | MultiKernel

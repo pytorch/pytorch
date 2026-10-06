@@ -2619,7 +2619,6 @@ class TensorDescriptorPoolGateTest(InductorTestCase):
         )
         with config.patch({"triton.autotune_tensor_descriptor": "all"}):
             self.assertEqual(len(pins()), 3)
-        # A pick by measured time is banned under deterministic and batch_invariant, and the rest never look one up.
         for patches in (
             {"triton.autotune_tensor_descriptor": "off"},
             {"max_autotune_pointwise": False},

@@ -557,7 +557,7 @@ class AsyncCompile:
                 CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
                 if optional:
-                    # The FX graph cache bundles a dropped kernel too, so it is loaded here to be dropped again.
+                    # The FX graph cache bundles dropped kernels too; loading one here lets its failure be returned.
                     try:
                         return future.result()
                     except Exception as e:
@@ -622,26 +622,31 @@ class AsyncCompile:
             def get_result() -> CachingAutotuner | Exception:
                 try:
                     kernel, elapsed_us = task.result()
+                except SubprocException as e:
+                    if optional:
+                        return e.with_name(kernel_name)
+                    raise e.with_name(kernel_name) from e
+                except Exception as e:
+                    # Thread-mode workers raise their compile errors unwrapped.
+                    if optional:
+                        return e
+                    raise
 
-                    # Now that we've compiled, we should clear the future
-                    # so it can't be used again
-                    kernel.set_compile_info(compile_id, is_backward)
-                    CompiledTritonKernels.remove_future(source_code)
+                # Clear the future now that we've compiled
+                kernel.set_compile_info(compile_id, is_backward)
+                CompiledTritonKernels.remove_future(source_code)
 
-                    # Only restore after unpickle in process mode
-                    # Thread mode doesn't pickle, so kernel is already in correct state
-                    if not self.should_use_thread_workers():
-                        kernel.restore_after_unpickle(old_values=None)
+                # Only restore after unpickle in process mode
+                # Thread mode doesn't pickle, so kernel is already in correct state
+                if not self.should_use_thread_workers():
+                    kernel.restore_after_unpickle(old_values=None)
 
+                try:
                     kernel.precompile(
                         warm_cache_only=False,
                         reload_kernel=reload_kernel_in_parent,
                         static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                     )
-                except SubprocException as e:
-                    if optional:
-                        return e.with_name(kernel_name)
-                    raise e.with_name(kernel_name) from e
                 except Exception as e:
                     if optional:
                         return e
