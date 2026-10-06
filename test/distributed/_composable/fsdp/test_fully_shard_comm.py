@@ -1835,6 +1835,52 @@ class TestFullyShardPrefetch(FSDPTest):
             optim.step()
             self.assertEqual(ref_loss, loss)
 
+    @skip_if_lt_x_gpu(4)
+    def test_unused_backward_prefetch_with_post_forward_mesh(self):
+        """
+        Tests that a backward prefetch of a group that backward does not use,
+        which gathers over the post-forward mesh, is discarded when the group
+        reshards instead of being copied out by the next forward.
+        """
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin0, self.lin1, self.lin2 = (nn.Linear(16, 16) for _ in range(3))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                y = self.lin0(x)
+                self.lin1(y)  # does not reach the loss
+                return self.lin2(y)
+
+        torch.manual_seed(42)
+        model = Model().to(device_type)
+        ref_model = copy.deepcopy(model)
+        for lin in (model.lin0, model.lin1, model.lin2):
+            fully_shard(lin, reshard_after_forward=2)
+        fully_shard(model)
+        optim = torch.optim.SGD(model.parameters(), lr=1e-2)
+        ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
+        unused_group = model.lin1._get_fsdp_state()._fsdp_param_group
+        torch.manual_seed(42 + self.rank)
+        for _ in range(2):
+            # Gradient accumulation keeps the first backward from finalizing
+            for is_last_backward in (False, True):
+                model.set_is_last_backward(is_last_backward)
+                model.set_requires_gradient_sync(is_last_backward)
+                inp = torch.randn((4, 16), device=device_type.type)
+                losses = [ref_model(inp).sum(), model(inp).sum()]
+                for loss in losses:
+                    loss.backward()
+                self.assertEqual(losses[0], losses[1])
+                self.assertIsNone(unused_group._all_gather_result)
+            for param in ref_model.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+            for _optim in (ref_optim, optim):
+                _optim.step()
+                _optim.zero_grad()
+
     def _init_transformer(
         self,
         n_layers: int,
