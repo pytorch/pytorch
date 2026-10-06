@@ -7533,7 +7533,7 @@ def meta_quantize_tensor(
     scaling_algorithm: int,
     scaling_type: int,
     swizzle_type: int,
-    scaling_type_square_block_and_expand: bool = False,
+    scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
     from torch.nn.functional import SwizzleType
 
@@ -7562,12 +7562,12 @@ def meta_quantize_tensor(
         lambda: "dim-m quantization requires SWIZZLE_32_4_4",
     )
     torch._check_value(
-        not scaling_type_square_block_and_expand or (is_dim_k and is_scale_swizzled),
+        not scaling_type_use_square_block_size or (is_dim_k and is_scale_swizzled),
         lambda: "32x32 MXFP8 scaling requires dim-k and SWIZZLE_32_4_4",
     )
     if not is_dim_k:
         torch._check_value(rows % 16 == 0)
-    if scaling_type_square_block_and_expand:
+    if scaling_type_use_square_block_size:
         torch._check_value(rows % 32 == 0)
     if input.device.type not in ("cuda", "meta") or (
         input.device.type == "cuda" and torch.version.hip is not None
@@ -7592,7 +7592,7 @@ def meta_quantize_tensor_dual(
     scaling_algorithm: int,
     scaling_type: int,
     swizzle_type: int,
-    scaling_type_square_block_and_expand: bool = False,
+    scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
     from torch.nn.functional import SwizzleType
 
@@ -7619,7 +7619,7 @@ def meta_quantize_tensor_dual(
         lambda: "dual quantization requires SWIZZLE_32_4_4",
     )
     torch._check_value(
-        not scaling_type_square_block_and_expand,
+        not scaling_type_use_square_block_size,
         lambda: "dual quantization does not support 32x32 MXFP8 scaling",
     )
     if input.device.type not in ("cuda", "meta") or (

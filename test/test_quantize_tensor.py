@@ -232,7 +232,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             data_hp,
             **_MXFP8_KWARGS,
             swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-            scaling_type_square_block_and_expand=True,
+            scaling_type_use_square_block_size=True,
         )
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(
@@ -255,7 +255,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             data_hp,
             **_MXFP8_KWARGS,
             swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-            scaling_type_square_block_and_expand=True,
+            scaling_type_use_square_block_size=True,
         )
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(
@@ -310,7 +310,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             api_input,
             **_MXFP8_KWARGS,
             swizzle_type=swizzle_type,
-            scaling_type_square_block_and_expand=is_square_scaling,
+            scaling_type_use_square_block_size=is_square_scaling,
         )
         self.assertEqual(len(outputs), len(expected_shapes))
         for index, (output, expected_shape) in enumerate(
@@ -365,14 +365,14 @@ class TestMXFP8ReferenceNumerics(TestCase):
             F.quantize_tensor(
                 data,
                 **_MXFP8_NO_SWIZZLE_KWARGS,
-                scaling_type_square_block_and_expand=True,
+                scaling_type_use_square_block_size=True,
             )
         with self.assertRaisesRegex(ValueError, "32x32 MXFP8 scaling"):
             F.quantize_tensor(
                 data.t(),
                 **_MXFP8_KWARGS,
                 swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-                scaling_type_square_block_and_expand=True,
+                scaling_type_use_square_block_size=True,
             )
         with self.assertRaisesRegex(ValueError, "float8_e4m3fn"):
             F.quantize_tensor(
@@ -426,7 +426,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             F.quantize_tensor_dual(data, **_MXFP8_NO_SWIZZLE_KWARGS)
         with self.assertRaisesRegex(ValueError, "32x32 MXFP8 scaling"):
             F.quantize_tensor_dual(
-                data, **kwargs, scaling_type_square_block_and_expand=True
+                data, **kwargs, scaling_type_use_square_block_size=True
             )
         with self.assertRaisesRegex(ValueError, "contiguous input"):
             F.quantize_tensor_dual(data.t(), **kwargs)
@@ -507,7 +507,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
                 x,
                 **_MXFP8_KWARGS,
                 swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-                scaling_type_square_block_and_expand=square,
+                scaling_type_use_square_block_size=square,
             )
 
         expected = fn(api_input)
@@ -621,7 +621,7 @@ class TestQuantizeTensorMeta(TestCase):
             api_input,
             **_MXFP8_KWARGS,
             swizzle_type=swizzle,
-            scaling_type_square_block_and_expand=square,
+            scaling_type_use_square_block_size=square,
         )
         rows, cols = api_input.shape
         expected_scale_shape = (

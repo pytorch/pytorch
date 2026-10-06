@@ -12,7 +12,7 @@ std::vector<Tensor> _quantize_tensor_cuda(
     int64_t /*scaling_algorithm*/,
     int64_t /*scaling_type*/,
     int64_t /*swizzle_type*/,
-    bool /*scaling_type_square_block_and_expand*/) {
+    bool /*scaling_type_use_square_block_size*/) {
   TORCH_CHECK(
       false,
       "torch._quantize_tensor requires an NVIDIA GPU with CUDA compute "
@@ -27,7 +27,7 @@ std::vector<Tensor> _quantize_tensor_dual_cuda(
     int64_t /*scaling_algorithm*/,
     int64_t /*scaling_type*/,
     int64_t /*swizzle_type*/,
-    bool /*scaling_type_square_block_and_expand*/) {
+    bool /*scaling_type_use_square_block_size*/) {
   TORCH_CHECK(
       false,
       "torch._quantize_tensor_dual requires an NVIDIA GPU with CUDA compute "

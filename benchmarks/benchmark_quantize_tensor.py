@@ -78,7 +78,7 @@ def _benchmark_one(kernel, M, K, dtype):
             scaling_algorithm=F.ScalingAlgorithm.RCEIL_E8M0,
             scaling_type=F.ScalingType.BlockWise1x32,
             swizzle_type=swizzle_type,
-            scaling_type_square_block_and_expand=square,
+            scaling_type_use_square_block_size=square,
         )
 
     outputs = run()

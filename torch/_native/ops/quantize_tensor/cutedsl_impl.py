@@ -12,7 +12,7 @@ def _quantize_tensor_impl(
     scaling_algorithm: int,
     scaling_type: int,
     swizzle_type: int,
-    scaling_type_square_block_and_expand: bool = False,
+    scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
     from torch.nn.functional import ScalingAlgorithm, ScalingType, SwizzleType
 
@@ -43,7 +43,7 @@ def _quantize_tensor_impl(
         orientation = "dim_m"
     if orientation == "dim_m" and not is_scale_swizzled:
         raise ValueError("dim-m quantization requires SWIZZLE_32_4_4")
-    if scaling_type_square_block_and_expand and (
+    if scaling_type_use_square_block_size and (
         orientation != "dim_k" or not is_scale_swizzled
     ):
         raise ValueError("32x32 MXFP8 scaling requires dim-k and SWIZZLE_32_4_4")
@@ -60,7 +60,7 @@ def _quantize_tensor_impl(
         _blockscaled_tma_impl(
             source,
             orientation,
-            scaling_type_square_block_and_expand,
+            scaling_type_use_square_block_size,
             is_scale_swizzled,
         )
     )
@@ -72,7 +72,7 @@ def _quantize_tensor_dual_impl(
     scaling_algorithm: int,
     scaling_type: int,
     swizzle_type: int,
-    scaling_type_square_block_and_expand: bool = False,
+    scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
     from torch.nn.functional import ScalingAlgorithm, ScalingType, SwizzleType
 
@@ -92,7 +92,7 @@ def _quantize_tensor_dual_impl(
         raise ValueError("quantize_tensor_dual supports only BlockWise1x32 scaling")
     if swizzle_type != SwizzleType.SWIZZLE_32_4_4.value:
         raise ValueError("quantize_tensor_dual requires SWIZZLE_32_4_4")
-    if scaling_type_square_block_and_expand:
+    if scaling_type_use_square_block_size:
         raise ValueError("quantize_tensor_dual does not support 32x32 MXFP8 scaling")
     if input.device.type != "cuda" or torch.version.hip is not None:
         raise RuntimeError("quantize_tensor_dual requires an NVIDIA CUDA tensor")

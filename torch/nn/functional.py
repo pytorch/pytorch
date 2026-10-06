@@ -7254,9 +7254,9 @@ def quantize_tensor(
     scaling_algorithm: ScalingAlgorithm,
     scaling_type: ScalingType,
     swizzle_type: SwizzleType,
-    scaling_type_square_block_and_expand: bool = False,
+    scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor]:
-    r"""quantize_tensor(input, *, qdata_dtype, scaling_algorithm, scaling_type, swizzle_type, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor]
+    r"""quantize_tensor(input, *, qdata_dtype, scaling_algorithm, scaling_type, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
 
     Quantize a 2D tensor. Returns ``(qdata, scale)`` for use with
     :func:`scaled_mm`.  See the code samples at the bottom of this docblock
@@ -7281,7 +7281,7 @@ def quantize_tensor(
         scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.
         swizzle_type (SwizzleType): ``NO_SWIZZLE`` or ``SWIZZLE_32_4_4``.
           Dim-m and square-block scaling require ``SWIZZLE_32_4_4``.
-        scaling_type_square_block_and_expand (bool, optional): When ``True``,
+        scaling_type_use_square_block_size (bool, optional): When ``True``,
           compute one scale for each 32x32 block, then expand it into the
           GEMM-facing 1x32 swizzled layout. Only supported for dim-k with
           both dimensions divisible by 32. Default: ``False``.
@@ -7307,7 +7307,7 @@ def quantize_tensor(
         >>> qdata_m, scale_m = F.quantize_tensor(x.t(), **mx_kwargs)
         >>> # mxfp8 dim-k with scales shared over 32x32 blocks
         >>> qdata_square, scale_square = F.quantize_tensor(
-        ...     x, **mx_kwargs, scaling_type_square_block_and_expand=True
+        ...     x, **mx_kwargs, scaling_type_use_square_block_size=True
         ... )
         >>> # mxfp8 dim-k with compact, unswizzled scales
         >>> plain_kwargs = {**mx_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
@@ -7320,7 +7320,7 @@ def quantize_tensor(
         scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
         scaling_type=scaling_type.value,
         swizzle_type=swizzle_type.value,
-        scaling_type_square_block_and_expand=scaling_type_square_block_and_expand,
+        scaling_type_use_square_block_size=scaling_type_use_square_block_size,
     )
     return outputs[0], outputs[1]
 
@@ -7332,9 +7332,9 @@ def quantize_tensor_dual(
     scaling_algorithm: ScalingAlgorithm,
     scaling_type: ScalingType,
     swizzle_type: SwizzleType,
-    scaling_type_square_block_and_expand: bool = False,
+    scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    r"""quantize_tensor_dual(input, *, qdata_dtype, scaling_algorithm, scaling_type, swizzle_type, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
+    r"""quantize_tensor_dual(input, *, qdata_dtype, scaling_algorithm, scaling_type, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
     Quantize a contiguous 2D tensor along both dim-k and dim-m dimensions in one
     pass. See :func:`quantize_tensor` to quantize along one dimension.
@@ -7351,7 +7351,7 @@ def quantize_tensor_dual(
         scaling_algorithm (ScalingAlgorithm): Must be ``ScalingAlgorithm.RCEIL_E8M0``.
         scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.
         swizzle_type (SwizzleType): Must be ``SWIZZLE_32_4_4``.
-        scaling_type_square_block_and_expand (bool, optional): Square-block
+        scaling_type_use_square_block_size (bool, optional): Square-block
           scaling is not supported. Must be ``False``. Default: ``False``.
 
     Returns:
@@ -7380,7 +7380,7 @@ def quantize_tensor_dual(
         scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
         scaling_type=scaling_type.value,
         swizzle_type=swizzle_type.value,
-        scaling_type_square_block_and_expand=scaling_type_square_block_and_expand,
+        scaling_type_use_square_block_size=scaling_type_use_square_block_size,
     )
     return outputs[0], outputs[1], outputs[2], outputs[3]
 

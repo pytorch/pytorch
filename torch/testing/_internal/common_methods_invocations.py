@@ -7477,7 +7477,7 @@ def sample_inputs_cutedsl_quantize_tensor(op_info, device, dtype, requires_grad,
     yield SampleInput(input, kwargs=recipe)
     yield SampleInput(input.t(), kwargs={**recipe, "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4})
     yield SampleInput(input, kwargs={**recipe, "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4,
-                                     "scaling_type_square_block_and_expand": True})
+                                     "scaling_type_use_square_block_size": True})
 
 
 def sample_inputs_cutedsl_quantize_tensor_dual(op_info, device, dtype, requires_grad, **kwargs_unused):

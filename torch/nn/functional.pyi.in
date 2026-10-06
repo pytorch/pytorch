@@ -714,7 +714,7 @@ def quantize_tensor(
     scaling_algorithm: ScalingAlgorithm,
     scaling_type: ScalingType,
     swizzle_type: SwizzleType,
-    scaling_type_square_block_and_expand: bool = False,
+    scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor]: ...
 
 __all__ += ["quantize_tensor"]
@@ -726,7 +726,7 @@ def quantize_tensor_dual(
     scaling_algorithm: ScalingAlgorithm,
     scaling_type: ScalingType,
     swizzle_type: SwizzleType,
-    scaling_type_square_block_and_expand: bool = False,
+    scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]: ...
 
 __all__ += ["quantize_tensor_dual"]
