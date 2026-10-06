@@ -97,11 +97,13 @@ KNOWN_ARCHES = (
 # hardware -- "10.0a" (needed by tcgen05/wgmma) in native-aot.yml, plain "10.0"
 # in the manywheel lists -- and omitting either silently exports nothing there. Each
 # entry also costs another full set of compiled kernels in every wheel naming it, and
-# makes the DSL runtimes mandatory on a builder with that GPU. sm_103 (GB300) now
-# ships too: the GB300 smoke_b200 CI runner builds with TORCH_CUDA_ARCH_LIST=10.3 and
-# silently got no AOT kernels without this. sm_107 (Rubin) is added alongside it on
-# the same reasoning, ahead of dedicated Rubin CI, since it hits the identical gap
-# (export verified to compile cleanly for sm_107a).
+# makes the DSL runtimes mandatory on a builder with that GPU. sm_103 (GB300) and
+# sm_107 (Rubin) now ship too: the current nightly/release builds list plain "10.0"
+# (not "10.3"), so this alone does not yet export GB300/Rubin kernels in them, but it
+# unblocks any build whose TORCH_CUDA_ARCH_LIST does name 10.3/10.3a or 10.7/10.7a --
+# e.g. a native-aot.yml-style dedicated build added for either GPU -- from silently
+# exporting nothing. sm_107 added alongside sm_103 on the same reasoning, ahead of
+# dedicated Rubin CI (export verified to compile cleanly for sm_107a).
 EXPORTABLE_ARCHES = (
     "sm_90",
     "sm_90a",
