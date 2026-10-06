@@ -14,15 +14,17 @@ import torch.utils.dlpack
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
-from torch._subclasses.functional_tensor import (
-    defer_input_grad_casts,
-    FunctionalTensorMode,
-)
+from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .descriptors import AOTInput, BackwardTokenAOTInput
+from .descriptors import (
+    AOTInput,
+    BackwardTokenAOTInput,
+    GradAOTOutput,
+    SubclassGetAttrAOTOutput,
+)
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
@@ -481,6 +483,35 @@ def aot_dispatch_base_graph(
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
+_GRAD_CAST_OPS = (
+    torch.ops.aten._to_copy.default,
+    torch.ops.prims.convert_element_type.default,
+)
+
+
+def _narrowed_input_grad_dtypes(
+    fx_g: torch.fx.GraphModule, flat_args_descs: list[AOTInput]
+) -> dict[int, torch.dtype]:
+    # The autograd engine casts each input grad to the input's grad_dtype. Find the
+    # inputs where that cast narrows the grad; it carries no user stack trace.
+    narrowed = {}
+    out = fx_g.graph.find_nodes(op="output")[0]
+    for node, desc in zip(out.args[0], out.meta["desc"]):
+        while isinstance(desc, SubclassGetAttrAOTOutput):
+            desc = desc.base
+        if not isinstance(desc, GradAOTOutput) or not isinstance(node, torch.fx.Node):
+            continue
+        if node.target not in _GRAD_CAST_OPS or "stack_trace" in node.meta:
+            continue
+        src_node = node.args[0]
+        if not isinstance(src_node, torch.fx.Node):
+            continue
+        src, dst = src_node.meta["val"].dtype, node.meta["val"].dtype
+        if src.is_floating_point and dst.itemsize < src.itemsize:
+            narrowed[flat_args_descs.index(desc.grad_of)] = dst
+    return narrowed
+
+
 def aot_dispatch_autograd_graph(
     flat_fn: TraceFn,
     flat_args: list[Any],
@@ -540,14 +571,15 @@ def aot_dispatch_autograd_graph(
     # This destroys requires_grad/grad_fn information.  However, backends
     # beneath AOTAutograd are indifferent to this information, so it doesn't
     # matter.
-    # Exported joint graphs run without the autograd engine, so they keep the input grad casts.
-    with defer_input_grad_casts(enabled=not aot_config.is_export):
-        fx_g, saved_updated_joint_inputs = _create_graph_and_save_traced_inputs(
-            joint_fn_to_trace,
-            updated_joint_inputs,
-            updated_joint_inputs_descs,
-            aot_config=aot_config,
-        )
+    fx_g, saved_updated_joint_inputs = _create_graph_and_save_traced_inputs(
+        joint_fn_to_trace,
+        updated_joint_inputs,
+        updated_joint_inputs_descs,
+        aot_config=aot_config,
+    )
+
+    narrowed = _narrowed_input_grad_dtypes(fx_g, flat_args_descs)
+    fw_metadata.narrowed_input_grad_dtypes = narrowed
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.

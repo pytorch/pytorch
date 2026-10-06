@@ -4390,6 +4390,38 @@ def forward(self, tangents_1):
         self.assertEqual(ref.dtype, torch.float32)
         self.assertEqual(res, ref, atol=0, rtol=0)
 
+    def test_custom_autograd_grad_dtype_changed_before_backward(self):
+        # The compiled backward casts the custom fp32 grad to the bf16 grad_dtype seen
+        # at trace time. Widening grad_dtype before backward can't recover the
+        # precision, so it raises; narrowing still matches eager.
+        class MatmulWithFp32WeightGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x)
+                return x @ weight.T
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                (x,) = ctx.saved_tensors
+                return None, grad_out.float().T @ x.float()
+
+        def weight_grad(fn, grad_dtype_fwd, grad_dtype_bwd):
+            weight = torch.nn.Parameter(torch.ones(1, 1, dtype=torch.bfloat16))
+            weight.grad_dtype = grad_dtype_fwd
+            x = torch.full((1, 1), 1 + 2**-7, dtype=torch.bfloat16)
+            out = fn(x, weight)
+            weight.grad_dtype = grad_dtype_bwd
+            out.backward(x)
+            return weight.grad
+
+        fn = MatmulWithFp32WeightGrad.apply
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, "grad_dtype changed"):
+            weight_grad(compiled, torch.bfloat16, torch.float32)
+        ref = weight_grad(fn, torch.float32, torch.bfloat16)
+        res = weight_grad(compiled, torch.float32, torch.bfloat16)
+        self.assertEqual(res, ref, atol=0, rtol=0, exact_dtype=True)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_autocast_disable_guard(self):
         with torch._C._DisableAutocast():

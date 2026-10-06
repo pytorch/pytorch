@@ -18,7 +18,10 @@ import torch.nn as nn
 from torch._C import FileCheck
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import AotEagerAndRecordGraphs
-from torch._functorch._aot_autograd.autograd_cache import check_cacheable
+from torch._functorch._aot_autograd.autograd_cache import (
+    AOTAutogradCachePickler,
+    check_cacheable,
+)
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._guards import tracing
 from torch._inductor.utils import run_and_get_triton_code
@@ -270,8 +273,9 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(local.grad, torch.full_like(local, 2))
 
     def test_custom_autograd_grad_dtype(self):
-        # The custom backward returns an fp32 grad for a bf16 DTensor leaf with
-        # grad_dtype=fp32, so the compiled backward must not round the grad to bf16.
+        # The custom backward returns an fp32 grad for a bf16 DTensor leaf. The
+        # compiled backward must cast it to the leaf's grad_dtype, and reusing the
+        # compiled callable under a different grad_dtype must recompile.
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         class MatmulWithFp32WeightGrad(torch.autograd.Function):
@@ -289,19 +293,36 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             t = torch.full((1, 1), v, dtype=torch.bfloat16, device=self.device_type)
             return DTensor.from_local(t, mesh, [Replicate()], run_check=False)
 
-        def weight_grad(fn):
+        def weight_grad(fn, grad_dtype):
             weight = nn.Parameter(make(1.0))
-            weight.grad_dtype = torch.float32
+            weight.grad_dtype = grad_dtype
             # (1 + 2^-7)^2 is not representable in bf16.
             x = make(1 + 2**-7)
             fn(x, weight).backward(x)
             return weight.grad.to_local()
 
         fn = MatmulWithFp32WeightGrad.apply
-        ref = weight_grad(fn)
-        res = weight_grad(torch.compile(fn, backend="aot_eager", fullgraph=True))
-        self.assertEqual(ref.dtype, torch.float32)
-        self.assertEqual(res, ref, atol=0, rtol=0)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        for grad_dtype in (torch.bfloat16, torch.float32):
+            ref = weight_grad(fn, grad_dtype)
+            res = weight_grad(compiled, grad_dtype)
+            self.assertEqual(ref.dtype, grad_dtype)
+            self.assertEqual(res, ref, atol=0, rtol=0, exact_dtype=True)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_aot_cache_key_grad_dtype(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        local = torch.ones(2, 2, dtype=torch.bfloat16, device=self.device_type)
+        dt = DTensor.from_local(local, mesh, [Replicate()], run_check=False)
+        weight = nn.Parameter(dt)
+        gm = torch.fx.symbolic_trace(lambda x: x.sin())
+        pickler = AOTAutogradCachePickler(gm)
+        keys = set()
+        for grad_dtype in (torch.bfloat16, torch.float32, None):
+            weight.grad_dtype = grad_dtype
+            keys.add(pickler.dumps(weight))
+        self.assertEqual(len(keys), 3)
 
     def test_compile_waits_act_nested_in_dtensor_local_tensor(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180614.

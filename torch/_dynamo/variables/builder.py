@@ -3299,6 +3299,14 @@ class VariableBuilder:
                         GuardBuilder.EQUALS_MATCH
                     )
                 )
+                # The outer TENSOR_MATCH (which checks grad_dtype) is skipped for
+                # DTensor, and _local_tensor has its own autograd metadata.
+                if value.requires_grad:
+                    install_guard(
+                        AttrSource(self.source, "grad_dtype").make_guard(
+                            GuardBuilder.EQUALS_MATCH
+                        )
+                    )
             elif is_polymorphic_act:
                 # Guard only on the unwrapped inner tensor (inner_source below).
                 # Installing no type/metadata guard on the ACT wrapper is what

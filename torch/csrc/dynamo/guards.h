@@ -136,6 +136,10 @@ class TensorCheck {
   // since that rides in dispatch_key_.
   std::optional<c10::DeviceIndex> device_index_;
   bool requires_grad_;
+  // The compiled backward casts grads to the tensor's grad_dtype, so it is
+  // checked for tensors that require grad. Only set by the tensor constructor.
+  bool check_grad_dtype_;
+  std::optional<at::ScalarType> grad_dtype_;
   // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<c10::SymInt>> sizes_;
   std::vector<std::optional<c10::SymInt>> strides_;

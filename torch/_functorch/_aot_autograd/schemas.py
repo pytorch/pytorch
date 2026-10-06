@@ -591,6 +591,11 @@ class ViewAndMutationMeta:
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
 
+    # Inputs whose grad the traced backward narrows to the grad_dtype seen at trace
+    # time (input index -> that dtype). Widening grad_dtype before backward can't
+    # recover the lost precision, so the runtime checks it.
+    narrowed_input_grad_dtypes: dict[int, torch.dtype] = field(default_factory=dict)
+
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
