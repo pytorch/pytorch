@@ -19,6 +19,12 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
+from ._fsdp_collectives import (
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
+    AllGatherOutputFn,
+    PrepareReduceScatterInputsFn,
+)
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -876,6 +882,86 @@ class FSDPModule:
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
+
+    def set_all_gather_output_fn(
+        self, fn: AllGatherOutputFn | None, /, *, recurse: bool = True
+    ) -> None:
+        r"""Set the function that copies a parameter group's all-gather outputs.
+
+        .. warning::
+            This API is experimental. The callback signature and supported FSDP
+            internals may change without backward compatibility.
+
+        The function is called as
+        ``fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size)``.
+        ``all_gather_output`` is the flat rank-major collective buffer, and
+        ``outputs`` are the preallocated all-gather outputs of the parameter
+        group, viewed as ``uint8`` if the buffer is, in which case
+        ``split_sizes`` count bytes. For each output, ``split_sizes`` gives its
+        per-rank element count in the buffer and ``outer_sizes`` gives the
+        product of its dimensions before the concatenation dimension. Each
+        rank's slice is concatenated along that dimension into the output. A
+        tensor returned by ``fsdp_pre_all_gather`` may be smaller than its
+        cached output, which then has more than ``split_sizes[i] * world_size``
+        elements.
+        The function runs on the current stream after the collective completes
+        and must only write to ``outputs``. It is not called when the all-gather
+        buffer is empty or the group has a single rank, since FSDP then copies
+        the inputs directly.
+        See :mod:`torch.distributed.fsdp.experimental` for a native
+        implementation.
+
+        Args:
+            fn (Optional[Callable]): Copy-out function, or ``None`` to restore
+                the default.
+            recurse (bool): Whether to also set the function for all nested FSDP
+                modules. Defaults to ``True``.
+        """
+        fn = _default_all_gather_output_fn if fn is None else fn
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group._all_gather_output_fn = fn
+
+    def set_reduce_scatter_input_fn(
+        self, fn: PrepareReduceScatterInputsFn | None, /, *, recurse: bool = True
+    ) -> None:
+        r"""Set the function that prepares reduce-scatter inputs.
+
+        .. warning::
+            This API is experimental. The callback signature and supported FSDP
+            internals may change without backward compatibility.
+
+        The function is called as
+        ``copy_in = fn(unsharded_grads, shard_dims, world_size)`` before FSDP
+        allocates the reduce-scatter input and may replace entries of
+        ``unsharded_grads`` with reordered gradients. FSDP then calls
+        ``copy_in(reduce_scatter_input)``, which must fill the flat input
+        buffer with each rank's padded shards in rank-major order, converting
+        to the buffer's dtype. FSDP frees ``copy_in`` and the gradients right
+        after that call, so neither may be kept elsewhere. Gradients in a group
+        can have different dtypes, e.g. with per-parameter ``grad_dtype``.
+        ``world_size`` is 1 when no reduce-scatter is needed, and the function
+        is still called. Both calls run on the current stream. See
+        :mod:`torch.distributed.fsdp.experimental` for a native implementation.
+
+        Args:
+            fn (Optional[Callable]): Function returning the copy-in function, or
+                ``None`` to restore the default.
+            recurse (bool): Whether to also set the function for all nested FSDP
+                modules. Defaults to ``True``.
+        """
+        fn = _default_reduce_scatter_input_fn if fn is None else fn
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group._prepare_reduce_scatter_inputs = fn
 
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True
