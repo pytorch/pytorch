@@ -17,7 +17,7 @@ import logging
 import re
 import threading
 from collections import OrderedDict
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -1386,6 +1386,14 @@ def _compose_bias_into_epilogue(
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class NVGemmKernelArgument:
+    name: str
+    buffer_name: str | None
+    node: Buffer | ReinterpretView | None
+    kind: Literal["input", "output", "epilogue", "workspace"]
+
+
 class NVUniversalGemmKernel(Kernel):
     """
     Kernel implementation for NVIDIA Universal GEMM.
@@ -1456,11 +1464,22 @@ class NVUniversalGemmKernel(Kernel):
                     self.epilogue, bias_node.get_name()
                 )
 
-        self._template_input_args: list[tuple[str, Buffer]] = []
-
-        for i, input_node in enumerate(input_nodes):
-            param_name = f"in_ptr{i}"
-            self._template_input_args.append((param_name, input_node))
+    def ordered_arguments(self) -> tuple[NVGemmKernelArgument, ...]:
+        arguments = [
+            NVGemmKernelArgument(f"in_ptr{i}", node.get_name(), node, "input")
+            for i, node in enumerate(self.input_nodes)
+        ]
+        arguments.extend(
+            NVGemmKernelArgument(f"out_ptr{i}", name, None, "output")
+            for i, name in enumerate(self.ordered_output_buffers())
+        )
+        arguments.extend(
+            NVGemmKernelArgument(name, name, None, "epilogue")
+            for name in self.epilogue.reads
+        )
+        if self.workspace_size > 0:
+            arguments.append(NVGemmKernelArgument("workspace", None, None, "workspace"))
+        return tuple(arguments)
 
     def render(self) -> str:
         """Render the Python source for the NVGEMM kernel wrapper."""
@@ -1475,13 +1494,16 @@ class NVUniversalGemmKernel(Kernel):
             self.accumulator_type, "cutlass.Float32"
         )
 
-        input_tensor_names = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
-        output_buffers = self.ordered_output_buffers()
-        input_params = list(input_tensor_names)
-        input_params.extend(f"out_ptr{i}" for i in range(len(output_buffers)))
-        input_params.extend(self.epilogue.reads)
-        if self.workspace_size > 0:
-            input_params.append("workspace")
+        arguments = self.ordered_arguments()
+        input_tensor_names = [
+            argument.name for argument in arguments if argument.kind == "input"
+        ]
+        output_buffers = [
+            cast(str, argument.buffer_name)
+            for argument in arguments
+            if argument.kind == "output"
+        ]
+        input_params = [argument.name for argument in arguments]
         input_params.append("stream=None")
         params_str = ", ".join(input_params)
 
@@ -1852,54 +1874,43 @@ class NVUniversalGemmKernel(Kernel):
         raw_args: list[Buffer | ReinterpretView | None] = []
         raw_keys: list[str | None] = []
 
-        for param_name, input_node in self._template_input_args:
-            reinterpret_view = self._get_reinterpret_view(input_node)
-            if reinterpret_view is not None:
-                call_args.append(reinterpret_view.codegen_reference())
-                # Pass the ReinterpretView as raw_arg so autotune_at_compile_time
-                # can use it to generate example tensors
-                raw_args.append(reinterpret_view)
-            else:
-                call_args.append(input_node.get_name())
-                raw_args.append(input_node)
-            arg_types.append(V.graph.get_dtype(input_node.get_name()))
-            raw_keys.append(param_name)
-
-        # The kernel writes the epilogue's output store(s), not the GEMM buffer
-        # (which is removed via removed_buffers aliasing). out_ptr0 is the primary
-        # (`D`) output; a multi-store epilogue adds out_ptr1, ... in order.
-        for i, output_name in enumerate(self.ordered_output_buffers()):
-            call_args.append(output_name)
-            arg_types.append(V.graph.get_dtype(output_name))
-            raw_args.append(None)  # Output buffer is findable by name
-            raw_keys.append(f"out_ptr{i}")
-
-        for read_name in self.epilogue.reads:
-            call_args.append(read_name)
-            arg_types.append(V.graph.get_dtype(read_name))
-            buf = V.graph.get_buffer(read_name)
-            if buf is None:
-                # Epilogue may read model parameters/inputs (e.g. bias) that are
-                # graph inputs rather than computed buffers.
-                buf = V.graph.graph_inputs.get(read_name)
-            # pyrefly: ignore [bad-argument-type]
-            raw_args.append(buf)
-            raw_keys.append(read_name)
-
-        # Allocate workspace if needed
         ws: WorkspaceArg | None = None
-        if self.workspace_size > 0:
-            ws = WorkspaceArg(
-                count=self.workspace_size,
-                device=V.graph.get_current_device_or_throw(),
-                zero_mode=WorkspaceZeroMode.UNINITIALIZED,
-                outer_name=WorkspaceArg.unique_name(),
-            )
-            wrapper.generate_workspace_allocation(ws)
-            call_args.append(ws.outer_name)
-            arg_types.append(ws.dtype)
-            raw_args.append(None)
-            raw_keys.append(None)
+        for argument in self.ordered_arguments():
+            if argument.kind == "workspace":
+                ws = WorkspaceArg(
+                    count=self.workspace_size,
+                    device=V.graph.get_current_device_or_throw(),
+                    zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+                    outer_name=WorkspaceArg.unique_name(),
+                )
+                wrapper.generate_workspace_allocation(ws)
+                call_args.append(ws.outer_name)
+                arg_types.append(ws.dtype)
+                raw_args.append(None)
+                raw_keys.append(None)
+                continue
+
+            buffer_name = cast(str, argument.buffer_name)
+            call_args.append(buffer_name)
+            arg_types.append(V.graph.get_dtype(buffer_name))
+            raw_keys.append(argument.name)
+            if argument.kind == "output":
+                raw_args.append(None)
+                continue
+            if argument.kind == "input":
+                if argument.node is None:
+                    raise AssertionError("expected NVGEMM input argument node")
+                reinterpret_view = self._get_reinterpret_view(argument.node)
+                if reinterpret_view is not None:
+                    call_args[-1] = reinterpret_view.codegen_reference()
+                    raw_args.append(reinterpret_view)
+                else:
+                    raw_args.append(argument.node)
+                continue
+
+            node = V.graph.get_buffer(buffer_name)
+            # pyrefly: ignore [bad-argument-type]
+            raw_args.append(node)
 
         wrapper.generate_kernel_call(
             name,
