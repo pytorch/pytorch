@@ -6692,6 +6692,7 @@ class TestCudaAllocator(TestCase):
         _check_allocator_settings_on_tear_down(self)
 
     @unittest.skipIf(IS_WINDOWS, "expandable segment IPC is not supported on Windows")
+    @unittest.skipIf(EXPANDABLE_SEGMENTS, "sets its own allocator config")
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     def test_expandable_segment_ipc_handle_is_deterministic(self):
         # Sharing the same block must always give the same handle, since the

@@ -15,6 +15,7 @@ from typing import NamedTuple
 
 import torch
 import torch.cuda.comm as comm
+import torch.multiprocessing as mp
 from torch.nn.parallel import scatter_gather
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
@@ -28,12 +29,15 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_REMOTE_GPU,
     IS_SANDCASTLE,
+    IS_WINDOWS,
     NoTest,
+    parametrize,
     run_tests,
     serialTest,
     skipCUDANonDefaultStreamIf,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -45,6 +49,26 @@ TEST_CUDAMALLOCASYNC = TEST_CUDA and (
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
     TestCase = NoTest
+
+
+def _rebuild_on_peer_device(inq, outq):
+    # Rebuild tensors sharing one block on cuda:0 and then on cuda:1, by
+    # overriding the device argument like test/distributed/test_p2p_ipc.py.
+    (func, a), (_, b), (_, a_again) = inq.get(), inq.get(), inq.get()
+    try:
+        tensors = [
+            func(*a),
+            func(*b[:6], 1, *b[7:]),  # other offset: C++ mapping cache
+            func(*a_again[:6], 1, *a_again[7:]),  # same offset: Python storage cache
+        ]
+        outq.put(
+            (
+                [(str(t.device), t.sum().item()) for t in tensors],
+                tensors[2].data_ptr() - tensors[1].data_ptr(),
+            )
+        )
+    except RuntimeError as e:
+        outq.put(str(e))
 
 
 class TestCudaMultiGPU(TestCase):
@@ -1175,6 +1199,43 @@ t2.start()
 """,
             ]
         )
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @unittest.skipIf(IS_WINDOWS, "CUDA IPC is not supported on Windows")
+    @parametrize("expandable", [False, True])
+    def test_cuda_ipc_rebuild_on_peer_device(self, expandable):
+        # A block already opened on cuda:0 must also work when tensors from it
+        # are rebuilt on cuda:1 (#198305).
+        if expandable and TEST_WITH_ROCM:
+            self.skipTest("expandable_segments mode is not supported on ROCm")
+        if not torch.cuda.can_device_access_peer(1, 0):
+            self.skipTest("cuda:1 has no peer access to cuda:0")
+        ctx = mp.get_context("spawn")
+        inq, outq = ctx.Queue(), ctx.Queue()
+        p = ctx.Process(target=_rebuild_on_peer_device, args=(inq, outq))
+        p.start()
+        torch.cuda.memory._set_allocator_settings(f"expandable_segments:{expandable}")
+        torch.cuda.empty_cache()
+        try:
+            a = torch.full((5,), 1.0, device="cuda:0")
+            b = torch.full((5,), 2.0, device="cuda:0")
+            for t in (a, b, a):  # one reduction per rebuild keeps IPC refcounts exact
+                func, args = torch.multiprocessing.reductions.reduce_tensor(t)
+                self.assertEqual(args[7][1:2], b"e" if expandable else b"c")
+                inq.put((func, args))
+            result = outq.get(timeout=60)
+            p.join()
+        finally:
+            torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+        if isinstance(result, str):
+            # e.g. a container whose seccomp profile blocks pidfd_getfd
+            if "pidfd_getfd" in result:
+                self.skipTest(result)
+            self.fail(result)
+        result, ptr_delta = result
+        self.assertEqual(result, [("cuda:0", 5.0), ("cuda:1", 10.0), ("cuda:1", 5.0)])
+        # cuda:1 reuses its mapping of the block instead of opening it again
+        self.assertEqual(ptr_delta, a.data_ptr() - b.data_ptr())
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_device_as_key(self):
