@@ -4077,6 +4077,14 @@ Attributes:
             available parameters in the config. See
             https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
             for details.
+    split_from (ProcessGroupNCCL): optional parent process group whose NCCL
+            communicators are used to create this group's communicators via
+            ``ncclCommSplit`` instead of initializing them from scratch.
+            Default is None.
+    split_color (int): color passed to ``ncclCommSplit`` when ``split_from``
+            is set. A non-negative value places the rank in a group, ``-1``
+            (``NCCL_SPLIT_NOCOLOR``) leaves the rank out of the group. Must
+            fit in a C++ ``int``.
 
 Example::
     >>> import torch.distributed as dist
