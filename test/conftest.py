@@ -491,7 +491,18 @@ def _keep_for_rerun(item: Any, disabled_tests: dict[str, set[str]]) -> bool:
     """Keep GitHub-disabled tests and code skips that rerun mode executes."""
     parent = item.parent
     test_class = parent.name if parent is not None else ""
-    listed = test_class in disabled_tests and item.name in disabled_tests[test_class]
+    # Pytest 7 names a module node after its path relative to rootdir
+    # (`test/tmpX/foo.py`). The disabled JSON, and older pytest, use the
+    # file name. Match both so a module-level listing still collects.
+    parent_keys = {test_class, os.path.basename(test_class)}
+    cls = getattr(item, "cls", None)
+    if cls is not None:
+        parent_keys.add(cls.__name__)
+    listed = any(
+        key in disabled_tests and item.name in disabled_tests[key]
+        for key in parent_keys
+        if key
+    )
     unittest_skip = _enable_unconditional_unittest_skip(item)
     pytest_skip = _enable_unconditional_pytest_skip(item)
     return listed or unittest_skip or pytest_skip
