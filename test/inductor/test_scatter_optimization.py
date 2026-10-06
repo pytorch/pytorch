@@ -20,8 +20,11 @@ from torch._inductor.fx_passes.reduced_atomic_contention import (
 )
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import skipIfXpu
+from torch._inductor.utils import (
+    needs_fallback_due_to_atomic_add_limitations,
+    run_and_get_code,
+)
+from torch.testing._internal.common_utils import DeterministicGuard, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -326,6 +329,7 @@ class TestPartitionedScatterOpt(TestCase):
         )
         self.assertGreaterEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
 
+    @skipIfXpu(msg="embedding_dense_backward is not decomposed on XPU")
     def test_embedding_dense_backward(self):
         """Reaches the pass as _unsafe_masked_index_put_accumulate, not index_put."""
         torch.manual_seed(42)
@@ -344,6 +348,7 @@ class TestPartitionedScatterOpt(TestCase):
         self._check_accuracy(f, (grad, idx))
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
 
+    @skipIfXpu(msg="embedding_dense_backward is not decomposed on XPU")
     def test_embedding_dense_backward_scale_grad_by_freq(self):
         torch.manual_seed(42)
         B, T, num_weights, dim, padding_idx = 64, 128, 24, 16, 3
@@ -382,6 +387,29 @@ class TestPartitionedScatterOpt(TestCase):
 
         self._check_accuracy(f, (out, mask, idx, vals), atol=1e-3, rtol=1e-3)
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+
+    def test_masked_accumulate_broadcast_mask(self):
+        """Direct callers may pass a mask that only broadcasts against values,
+        which the decomposition never produces."""
+        torch.manual_seed(3)
+        n, A, B, D = 8, 64, 128, 4
+
+        def f(out, mask, idx, vals):
+            return torch.ops.aten._unsafe_masked_index_put_accumulate(
+                out, mask, [idx], vals
+            )
+
+        out = torch.zeros(n, D)
+        idx = torch.randint(0, n, (A, B), dtype=torch.int64)
+        vals = torch.randn(A, B, D)
+        for mask_shape in ((A, 1, 1), (B, 1), (D,)):
+            counters.clear()
+            torch._dynamo.reset()
+            mask = torch.rand(mask_shape) > 0.3
+            self._check_accuracy(f, (out, mask, idx, vals), atol=1e-3, rtol=1e-3)
+            self.assertEqual(
+                counters["inductor"]["partitioned_scatter_applied"], 1, str(mask_shape)
+            )
 
     def test_scatter_reduce_sum(self):
         """The scatter_reduce family reaches the same atomic_add, with an
@@ -454,7 +482,8 @@ class TestPartitionedScatterOpt(TestCase):
 
     def test_scatter_reduce_int32_index(self):
         """An int32 index is legal and must be widened before the partition
-        offset is added."""
+        offset is added. The offsets here are far too small to overflow, so the
+        widening is asserted on the iota that builds them."""
         torch.manual_seed(42)
         N, n, D = 8192, 8, 4
 
@@ -465,8 +494,20 @@ class TestPartitionedScatterOpt(TestCase):
         idx = torch.randint(0, 4, (N, D), dtype=torch.int32)
         vals = torch.randn(N, D, dtype=torch.float32)
 
-        self._check_accuracy(f, (out, idx, vals), atol=1e-3, rtol=1e-3)
+        iota_dtypes = []
+
+        def capture_iota(graph):
+            iota_dtypes.extend(
+                node.kwargs["dtype"]
+                for node in graph.find_nodes(
+                    op="call_function", target=torch.ops.prims.iota.default
+                )
+            )
+
+        with config.patch(post_grad_custom_post_pass=capture_iota):
+            self._check_accuracy(f, (out, idx, vals), atol=1e-3, rtol=1e-3)
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+        self.assertEqual(iota_dtypes, [torch.int64])
 
     @config.patch(partitioned_scatter_fp32_accumulation=True)
     def test_index_add_low_precision(self):
@@ -600,6 +641,7 @@ class TestPartitionedScatterOpt(TestCase):
         idx = torch.randint(0, n, (N,), dtype=torch.int64)
         vals = torch.randn(N, D, dtype=torch.bfloat16)
         out = torch.zeros(n, D, dtype=torch.bfloat16)
+        bf16_falls_back = needs_fallback_due_to_atomic_add_limitations(torch.bfloat16)
 
         for fp32_acc in (True, False):
             counters.clear()
@@ -612,8 +654,16 @@ class TestPartitionedScatterOpt(TestCase):
                 compiled = torch.compile(f, backend="inductor", fullgraph=True)
                 actual, code = run_and_get_code(compiled, out, idx, vals)
 
-            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
             self.assertEqual(expected, actual, atol=5e-1, rtol=1e-2)
+            if bf16_falls_back and not fp32_acc:
+                # bf16 partials would hit the same fallback, so the pass skips.
+                self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+                self.assertEqual(
+                    counters["inductor"]["partitioned_scatter_skipped_atomic_fallback"],
+                    1,
+                )
+                continue
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
 
             allocations = [
                 ln for ln in "\n".join(code).splitlines() if "= empty_strided" in ln
@@ -664,17 +714,27 @@ class TestPartitionedScatterOpt(TestCase):
                 actual = torch.compile(f, backend="inductor", fullgraph=True)(
                     out.bfloat16(), idx, vals.bfloat16()
                 )
-            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
             self.assertEqual(actual.dtype, torch.bfloat16)
             return ((actual.double() - reference).norm() / reference.norm()).item()
 
-        promoted, native = rel_error(True), rel_error(False)
+        promoted = rel_error(True)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+        self.assertLess(promoted, 1e-2)
+
+        native = rel_error(False)
+        if needs_fallback_due_to_atomic_add_limitations(torch.bfloat16):
+            # Without native bf16 atomics there are no bf16 partials to compare.
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+            self.assertEqual(
+                counters["inductor"]["partitioned_scatter_skipped_atomic_fallback"], 1
+            )
+            return
 
         # What promotion buys depends on whether the backend accumulates bf16
         # natively: 6.2e-1 against 2.1e-3 on MI308X, nothing where the partials
         # are already computed wider. It must never cost accuracy.
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
         self.assertLessEqual(promoted, native)
-        self.assertLess(promoted, 1e-2)
 
     def test_accuracy_int32_exact(self):
         """Integer scatter-add must be bit-for-bit identical to eager (addition is associative)."""
@@ -1002,16 +1062,11 @@ class TestPartitionedScatterOpt(TestCase):
         torch._dynamo.reset()
         out = torch.zeros(n, D)
         vals = torch.randn(N, D)
-        deterministic = torch.are_deterministic_algorithms_enabled()
-        torch.use_deterministic_algorithms(True)
-        try:
-            with torch.no_grad():
-                expected = f(out, idx, vals)
-                actual = torch.compile(f, backend="inductor", fullgraph=True)(
-                    out, idx, vals
-                )
-        finally:
-            torch.use_deterministic_algorithms(deterministic)
+        with DeterministicGuard(True), torch.no_grad():
+            expected = f(out, idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out, idx, vals
+            )
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
         self.assertGreater(
             counters["inductor"]["partitioned_scatter_skipped_atomic_fallback"], 0

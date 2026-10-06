@@ -234,6 +234,17 @@ def _evaluate_candidate(
         _record_skip(ctx, "no_meta", node_name)
         return None
 
+    if mask_node is not None:
+        mask_meta = _get_tensor_meta(mask_node)
+        if not mask_meta:
+            _record_skip(ctx, "no_meta", node_name)
+            return None
+        # The rewrite flattens the mask alongside values, so it must not
+        # broadcast values up to a larger shape.
+        if len(mask_meta["shape"]) > len(values_meta["shape"]):
+            _record_skip(ctx, "mask_shape", node_name)
+            return None
+
     # Only rewrite accelerator ops: the expanded-buffer trade-off targets GPU
     # atomic contention and is a pessimization on CPU. Matches the non-CPU
     # device_filter that the memory estimator uses.
@@ -718,7 +729,14 @@ def _create_replacement(
                 [num_operations] + list(values.shape[values_ndim:])
             )
             if mask is not None:
-                # Mask shares the index's leading dims, so flatten it the same way.
+                # The mask need only broadcast against values: right-align it and
+                # give it the index's leading shape so it flattens the same way.
+                mask = mask.reshape(
+                    [1] * (values.dim() - mask.dim()) + list(mask.shape)
+                )
+                mask = mask.expand(
+                    list(index_node.shape) + list(mask.shape[values_ndim:])
+                )
                 mask = mask.reshape([num_operations] + list(mask.shape[values_ndim:]))
         else:
             flat_index = index_node
