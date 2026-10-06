@@ -3995,11 +3995,9 @@ class SchedulerNode(BaseSchedulerNode):
         whole reduction; this node is left unchanged."""
         if not MixOrderReduction.is_split_reduction(self):
             return self
-        if not isinstance(self.node, ir.ComputedBuffer):
-            raise AssertionError("expected self.node to be an ir.ComputedBuffer")
         node = copy.copy(self)
-        with self.node.with_original_inner_fn():
-            node._compute_attrs()
+        node.cancel_reduction_split()
+        # cancel_reduction_split caches the unsplit body.
         self.node.get_default_sizes_body.clear_cache(self.node)
         return node
 
@@ -10912,19 +10910,7 @@ class Scheduler:
                 and node2.is_reduction()
                 and backend.can_fuse_template_reduction_epilogue(node1, node2)
             ):
-                # Reductions in a template epilogue read the output tile from
-                # registers, so they may traverse it in any loop order.
-                staged_matches = tuple(
-                    MemoryDepMatch(write, read)
-                    for write in node1.read_writes.writes
-                    for snode in node2.get_nodes()
-                    if snode.is_reduction()
-                    for read in snode.read_writes.reads
-                    if isinstance(write, MemoryDep)
-                    and isinstance(read, MemoryDep)
-                    and write.normalize_with_stride_order()
-                    == read.normalize_with_stride_order()
-                )
+                staged_matches = self._template_reduction_epilogue_matches(node1, node2)
             vertical_fusion_legal = (
                 self.can_fuse_vertical(node1, node2)
                 if staged_matches is None
@@ -10974,6 +10960,51 @@ class Scheduler:
         be scheduled before the fusion of node1 and node2.
         """
         return self._can_fuse_vertical_impl(node1, node2, ())
+
+    def _template_reduction_epilogue_matches(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> tuple[MemoryDepMatch, ...]:
+        """Matches of template node1's writes to the reads of node2's
+        reductions. Reductions in a template epilogue read the output tile from
+        registers, so they may traverse it in any loop order. A split reduction
+        is generated whole, so its stage-1 reads match only if the unsplit
+        reduction reads the whole write."""
+        matches = []
+        for snode in node2.get_nodes():
+            if not snode.is_reduction():
+                continue
+            unsplit = (
+                snode.unsplit_reduction() if isinstance(snode, SchedulerNode) else snode
+            )
+            reads = [
+                read.rename(self.mutation_renames) for read in snode.read_writes.reads
+            ]
+            unsplit_reads = [
+                read.rename(self.mutation_renames) for read in unsplit.read_writes.reads
+            ]
+            for write in node1.read_writes.writes:
+                if not isinstance(write, MemoryDep):
+                    continue
+                write = write.rename(self.mutation_renames)
+                normalized = write.normalize_with_stride_order()
+                if unsplit is not snode and not all(
+                    isinstance(read, MemoryDep)
+                    and read.normalize_with_stride_order() == normalized
+                    for read in unsplit_reads
+                    if read.name == write.name
+                ):
+                    continue
+                matches.extend(
+                    MemoryDepMatch(write, read)
+                    for read in reads
+                    if isinstance(read, MemoryDep)
+                    and (
+                        read.name == write.name
+                        if unsplit is not snode
+                        else read.normalize_with_stride_order() == normalized
+                    )
+                )
+        return tuple(matches)
 
     def _can_fuse_vertical_impl(
         self,
