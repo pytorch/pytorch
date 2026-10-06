@@ -419,6 +419,7 @@ static void initialize_nvshmem_with_store(
 
   is_initialized = true;
 
+#if !defined(USE_ROCM)
   // IBRC's atexit handler dlclose()s libmlx5 while its proxy progress thread
   // may still be polling inside it, which segfaults. nvshmem_finalize() stops
   // that thread; atexit is LIFO, so registering here runs it before IBRC's.
@@ -439,7 +440,6 @@ static void initialize_nvshmem_with_store(
   });
 
   // Print version
-#if !defined(USE_ROCM)
   int major, minor;
   ::nvshmem_info_get_version(&major, &minor);
   LOG(INFO) << "NVSHMEM is available, version: " << major << '.' << minor;
