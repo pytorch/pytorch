@@ -34,13 +34,13 @@ def _quantize_mxfp8_reference(
     input: torch.Tensor,
     *,
     qdata_dtype: torch.dtype,
-    inner_scale_calc: F.InnerScaleCalc,
+    scaling_algorithm: F.ScalingAlgorithm,
     scaling_type: F.ScalingType,
     swizzle_type: SwizzleType = SwizzleType.NO_SWIZZLE,
 ):
     if (
         qdata_dtype != torch.float8_e4m3fn
-        or inner_scale_calc != F.InnerScaleCalc.RCEIL_E8M0
+        or scaling_algorithm != F.ScalingAlgorithm.RCEIL_E8M0
         or scaling_type != F.ScalingType.BlockWise1x32
     ):
         raise ValueError("unsupported MXFP8 reference recipe")
@@ -57,7 +57,7 @@ _MXFP8_IMPLEMENTATIONS = (
 )
 _MXFP8_KWARGS = {
     "qdata_dtype": torch.float8_e4m3fn,
-    "inner_scale_calc": F.InnerScaleCalc.RCEIL_E8M0,
+    "scaling_algorithm": F.ScalingAlgorithm.RCEIL_E8M0,
     "scaling_type": F.ScalingType.BlockWise1x32,
 }
 _MXFP8_NO_SWIZZLE_KWARGS = {
@@ -380,7 +380,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             )
         with self.assertRaisesRegex(ValueError, "RCEIL_E8M0"):
             F.quantize_tensor(
-                data, **(_MXFP8_NO_SWIZZLE_KWARGS | {"inner_scale_calc": 1})
+                data, **(_MXFP8_NO_SWIZZLE_KWARGS | {"scaling_algorithm": 1})
             )
         with self.assertRaisesRegex(ValueError, "BlockWise1x32"):
             F.quantize_tensor(
@@ -466,7 +466,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata, scales = torch._quantize_tensor(  # pyrefly: ignore[missing-attribute]
             input,
             qdata_dtype=torch.float8_e4m3fn,
-            inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0.value,
+            scaling_algorithm=F.ScalingAlgorithm.RCEIL_E8M0.value,
             scaling_type=F.ScalingType.BlockWise1x32.value,
             swizzle_type=SwizzleType.SWIZZLE_32_4_4.value,
         )
@@ -484,7 +484,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         actual = torch.ops.aten._quantize_tensor_dual.default(
             input,
             qdata_dtype=torch.float8_e4m3fn,
-            inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0.value,
+            scaling_algorithm=F.ScalingAlgorithm.RCEIL_E8M0.value,
             scaling_type=F.ScalingType.BlockWise1x32.value,
             swizzle_type=SwizzleType.SWIZZLE_32_4_4.value,
         )
@@ -574,7 +574,7 @@ class TestQuantizeTensorMeta(TestCase):
     def test_meta_validates_arguments(self, quantize_fn, kwargs):
         input = torch.empty((32, 32), dtype=torch.bfloat16, device="meta")
         with self.assertRaisesRegex(ValueError, "RCEIL_E8M0"):
-            quantize_fn(input, **(kwargs | {"inner_scale_calc": 1}))
+            quantize_fn(input, **(kwargs | {"scaling_algorithm": 1}))
         with self.assertRaisesRegex(ValueError, "2D"):
             quantize_fn(input.flatten(), **kwargs)
         input.requires_grad_()
@@ -582,7 +582,7 @@ class TestQuantizeTensorMeta(TestCase):
         self.assertTrue(all(output.requires_grad for output in outputs))
 
     def test_quantize_tensor_argument_names(self):
-        self.assertEqual(F.InnerScaleCalc.RCEIL_E8M0.value, 0)
+        self.assertEqual(F.ScalingAlgorithm.RCEIL_E8M0.value, 0)
         public_names = tuple(inspect.signature(F.quantize_tensor).parameters)
         dual_names = tuple(inspect.signature(F.quantize_tensor_dual).parameters)
         native = torch.ops.aten._quantize_tensor.default._schema.arguments
@@ -664,7 +664,7 @@ class TestQuantizeTensorMeta(TestCase):
         qdata, scales = torch._quantize_tensor(  # pyrefly: ignore[missing-attribute]
             input,
             qdata_dtype=torch.float8_e4m3fn,
-            inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0.value,
+            scaling_algorithm=F.ScalingAlgorithm.RCEIL_E8M0.value,
             scaling_type=F.ScalingType.BlockWise1x32.value,
             swizzle_type=SwizzleType.SWIZZLE_32_4_4.value,
         )

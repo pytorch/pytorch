@@ -711,7 +711,7 @@ def quantize_tensor(
     input: Tensor,
     *,
     qdata_dtype: _dtype,
-    inner_scale_calc: InnerScaleCalc,
+    scaling_algorithm: ScalingAlgorithm,
     scaling_type: ScalingType,
     swizzle_type: SwizzleType,
     scaling_type_square_block_and_expand: bool = False,
@@ -723,7 +723,7 @@ def quantize_tensor_dual(
     input: Tensor,
     *,
     qdata_dtype: _dtype,
-    inner_scale_calc: InnerScaleCalc,
+    scaling_algorithm: ScalingAlgorithm,
     scaling_type: ScalingType,
     swizzle_type: SwizzleType,
     scaling_type_square_block_and_expand: bool = False,
@@ -841,10 +841,10 @@ class ScalingType(Enum):
 
 __all__ += ["ScalingType"]
 
-class InnerScaleCalc(IntEnum):
+class ScalingAlgorithm(IntEnum):
     RCEIL_E8M0 = 0
 
-__all__ += ["InnerScaleCalc"]
+__all__ += ["ScalingAlgorithm"]
 
 def selu(input: Tensor, inplace: bool = ...) -> Tensor: ...
 

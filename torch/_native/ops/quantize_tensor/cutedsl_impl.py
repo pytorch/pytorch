@@ -9,12 +9,12 @@ from .utils import _device_capability
 def _quantize_tensor_impl(
     input: torch.Tensor,
     qdata_dtype: torch.dtype,
-    inner_scale_calc: int,
+    scaling_algorithm: int,
     scaling_type: int,
     swizzle_type: int,
     scaling_type_square_block_and_expand: bool = False,
 ) -> list[torch.Tensor]:
-    from torch.nn.functional import InnerScaleCalc, ScalingType, SwizzleType
+    from torch.nn.functional import ScalingAlgorithm, ScalingType, SwizzleType
 
     if input.dim() != 2:
         raise ValueError("quantize_tensor requires a 2D input")
@@ -24,8 +24,8 @@ def _quantize_tensor_impl(
         raise ValueError("quantize_tensor supports only fp16, bf16, and fp32 input")
     if qdata_dtype != torch.float8_e4m3fn:
         raise ValueError("quantize_tensor supports only float8_e4m3fn qdata")
-    if inner_scale_calc != InnerScaleCalc.RCEIL_E8M0.value:
-        raise ValueError("quantize_tensor supports only RCEIL_E8M0 inner scales")
+    if scaling_algorithm != ScalingAlgorithm.RCEIL_E8M0.value:
+        raise ValueError("quantize_tensor requires scaling_algorithm=RCEIL_E8M0")
     if scaling_type != ScalingType.BlockWise1x32.value:
         raise ValueError("quantize_tensor supports only BlockWise1x32 scaling")
     if swizzle_type not in (
@@ -69,12 +69,12 @@ def _quantize_tensor_impl(
 def _quantize_tensor_dual_impl(
     input: torch.Tensor,
     qdata_dtype: torch.dtype,
-    inner_scale_calc: int,
+    scaling_algorithm: int,
     scaling_type: int,
     swizzle_type: int,
     scaling_type_square_block_and_expand: bool = False,
 ) -> list[torch.Tensor]:
-    from torch.nn.functional import InnerScaleCalc, ScalingType, SwizzleType
+    from torch.nn.functional import ScalingAlgorithm, ScalingType, SwizzleType
 
     if input.dim() != 2:
         raise ValueError("quantize_tensor_dual requires a 2D input")
@@ -86,8 +86,8 @@ def _quantize_tensor_dual_impl(
         raise ValueError("dual quantization supports only fp16, bf16, and fp32 input")
     if qdata_dtype != torch.float8_e4m3fn:
         raise ValueError("quantize_tensor_dual supports only float8_e4m3fn qdata")
-    if inner_scale_calc != InnerScaleCalc.RCEIL_E8M0.value:
-        raise ValueError("quantize_tensor_dual supports only RCEIL_E8M0 inner scales")
+    if scaling_algorithm != ScalingAlgorithm.RCEIL_E8M0.value:
+        raise ValueError("quantize_tensor_dual requires scaling_algorithm=RCEIL_E8M0")
     if scaling_type != ScalingType.BlockWise1x32.value:
         raise ValueError("quantize_tensor_dual supports only BlockWise1x32 scaling")
     if swizzle_type != SwizzleType.SWIZZLE_32_4_4.value:

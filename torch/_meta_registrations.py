@@ -7502,10 +7502,12 @@ def meta_scaled_mm(
 def _check_quantize_tensor_recipe(
     input: torch.Tensor,
     qdata_dtype: torch.dtype,
-    inner_scale_calc: int,
+    scaling_algorithm: int,
     scaling_type: int,
     op_name: str,
 ) -> None:
+    from torch.nn.functional import ScalingAlgorithm, ScalingType
+
     torch._check_value(
         input.dtype in (torch.float16, torch.bfloat16, torch.float32),
         lambda: f"{op_name} supports only fp16, bf16, and fp32 input",
@@ -7515,11 +7517,11 @@ def _check_quantize_tensor_recipe(
         lambda: f"{op_name} supports only float8_e4m3fn qdata",
     )
     torch._check_value(
-        inner_scale_calc == 0,
-        lambda: f"{op_name} supports only RCEIL_E8M0 inner scales",
+        scaling_algorithm == ScalingAlgorithm.RCEIL_E8M0.value,
+        lambda: f"{op_name} requires scaling_algorithm=RCEIL_E8M0",
     )
     torch._check_value(
-        scaling_type == 3,
+        scaling_type == ScalingType.BlockWise1x32.value,
         lambda: f"{op_name} supports only BlockWise1x32 scaling",
     )
 
@@ -7528,11 +7530,13 @@ def _check_quantize_tensor_recipe(
 def meta_quantize_tensor(
     input: torch.Tensor,
     qdata_dtype: torch.dtype,
-    inner_scale_calc: int,
+    scaling_algorithm: int,
     scaling_type: int,
     swizzle_type: int,
     scaling_type_square_block_and_expand: bool = False,
 ) -> list[torch.Tensor]:
+    from torch.nn.functional import SwizzleType
+
     torch._check_value(input.dim() == 2, lambda: "quantize_tensor requires a 2D input")
     rows, cols = input.shape
     torch._check_value(
@@ -7545,18 +7549,20 @@ def meta_quantize_tensor(
             lambda: "input must be contiguous or a transpose of contiguous",
         )
     _check_quantize_tensor_recipe(
-        input, qdata_dtype, inner_scale_calc, scaling_type, "quantize_tensor"
+        input, qdata_dtype, scaling_algorithm, scaling_type, "quantize_tensor"
     )
+    swizzled_value = SwizzleType.SWIZZLE_32_4_4.value
     torch._check_value(
-        swizzle_type in (0, 1),
+        swizzle_type in (SwizzleType.NO_SWIZZLE.value, swizzled_value),
         lambda: "unsupported swizzle type",
     )
+    is_scale_swizzled = swizzle_type == swizzled_value
     torch._check_value(
-        is_dim_k or swizzle_type == 1,
+        is_dim_k or is_scale_swizzled,
         lambda: "dim-m quantization requires SWIZZLE_32_4_4",
     )
     torch._check_value(
-        not scaling_type_square_block_and_expand or (is_dim_k and swizzle_type == 1),
+        not scaling_type_square_block_and_expand or (is_dim_k and is_scale_swizzled),
         lambda: "32x32 MXFP8 scaling requires dim-k and SWIZZLE_32_4_4",
     )
     if not is_dim_k:
@@ -7570,7 +7576,7 @@ def meta_quantize_tensor(
 
     scale_shape = (
         ((rows + 127) // 128, (cols + 127) // 128, 32, 16)
-        if swizzle_type == 1
+        if is_scale_swizzled
         else (rows, cols // 32)
     )
     return [
@@ -7583,11 +7589,13 @@ def meta_quantize_tensor(
 def meta_quantize_tensor_dual(
     input: torch.Tensor,
     qdata_dtype: torch.dtype,
-    inner_scale_calc: int,
+    scaling_algorithm: int,
     scaling_type: int,
     swizzle_type: int,
     scaling_type_square_block_and_expand: bool = False,
 ) -> list[torch.Tensor]:
+    from torch.nn.functional import SwizzleType
+
     torch._check_value(
         input.dim() == 2, lambda: "quantize_tensor_dual requires a 2D input"
     )
@@ -7604,10 +7612,11 @@ def meta_quantize_tensor_dual(
         input.is_contiguous(), lambda: "dual quantization requires contiguous input"
     )
     _check_quantize_tensor_recipe(
-        input, qdata_dtype, inner_scale_calc, scaling_type, "quantize_tensor_dual"
+        input, qdata_dtype, scaling_algorithm, scaling_type, "quantize_tensor_dual"
     )
     torch._check_value(
-        swizzle_type == 1, lambda: "dual quantization requires SWIZZLE_32_4_4"
+        swizzle_type == SwizzleType.SWIZZLE_32_4_4.value,
+        lambda: "dual quantization requires SWIZZLE_32_4_4",
     )
     torch._check_value(
         not scaling_type_square_block_and_expand,

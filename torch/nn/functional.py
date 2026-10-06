@@ -39,8 +39,8 @@ ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
 
 
-class InnerScaleCalc(enum.IntEnum):
-    r"""Method used to calculate block scales for :func:`quantize_tensor`."""
+class ScalingAlgorithm(enum.IntEnum):
+    r"""Algorithm used to compute and encode block scales for :func:`quantize_tensor`."""
 
     RCEIL_E8M0 = 0
 
@@ -7251,12 +7251,12 @@ def quantize_tensor(
     input: Tensor,
     *,
     qdata_dtype: torch.dtype,
-    inner_scale_calc: InnerScaleCalc,
+    scaling_algorithm: ScalingAlgorithm,
     scaling_type: ScalingType,
     swizzle_type: SwizzleType,
     scaling_type_square_block_and_expand: bool = False,
 ) -> tuple[Tensor, Tensor]:
-    r"""quantize_tensor(input, *, qdata_dtype, inner_scale_calc, scaling_type, swizzle_type, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor]
+    r"""quantize_tensor(input, *, qdata_dtype, scaling_algorithm, scaling_type, swizzle_type, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor]
 
     Quantize a 2D tensor. Returns ``(qdata, scale)`` for use with
     :func:`scaled_mm`.  See the code samples at the bottom of this docblock
@@ -7277,7 +7277,7 @@ def quantize_tensor(
           (dim-k), ``M`` must be divisible by 32. Both dimensions must fit in
           signed int32, and the data pointer must be 16-byte aligned.
         qdata_dtype (:class:`torch.dtype`): Must be ``torch.float8_e4m3fn``.
-        inner_scale_calc (InnerScaleCalc): Must be ``InnerScaleCalc.RCEIL_E8M0``.
+        scaling_algorithm (ScalingAlgorithm): Must be ``ScalingAlgorithm.RCEIL_E8M0``.
         scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.
         swizzle_type (SwizzleType): ``NO_SWIZZLE`` or ``SWIZZLE_32_4_4``.
           Dim-m and square-block scaling require ``SWIZZLE_32_4_4``.
@@ -7297,7 +7297,7 @@ def quantize_tensor(
         >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
         >>> mx_kwargs = dict(
         ...     qdata_dtype=torch.float8_e4m3fn,
-        ...     inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0,
+        ...     scaling_algorithm=F.ScalingAlgorithm.RCEIL_E8M0,
         ...     scaling_type=F.ScalingType.BlockWise1x32,
         ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
         ... )
@@ -7317,7 +7317,7 @@ def quantize_tensor(
     outputs = torch.ops.aten._quantize_tensor.default(
         input,
         qdata_dtype=qdata_dtype,
-        inner_scale_calc=getattr(inner_scale_calc, "value", inner_scale_calc),
+        scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
         scaling_type=scaling_type.value,
         swizzle_type=swizzle_type.value,
         scaling_type_square_block_and_expand=scaling_type_square_block_and_expand,
@@ -7329,12 +7329,12 @@ def quantize_tensor_dual(
     input: Tensor,
     *,
     qdata_dtype: torch.dtype,
-    inner_scale_calc: InnerScaleCalc,
+    scaling_algorithm: ScalingAlgorithm,
     scaling_type: ScalingType,
     swizzle_type: SwizzleType,
     scaling_type_square_block_and_expand: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    r"""quantize_tensor_dual(input, *, qdata_dtype, inner_scale_calc, scaling_type, swizzle_type, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
+    r"""quantize_tensor_dual(input, *, qdata_dtype, scaling_algorithm, scaling_type, swizzle_type, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
     Quantize a contiguous 2D tensor along both dim-k and dim-m dimensions in one
     pass. See :func:`quantize_tensor` to quantize along one dimension.
@@ -7348,7 +7348,7 @@ def quantize_tensor_dual(
           be divisible by 32 and fit in signed int32, and the data pointer must
           be 16-byte aligned.
         qdata_dtype (:class:`torch.dtype`): Must be ``torch.float8_e4m3fn``.
-        inner_scale_calc (InnerScaleCalc): Must be ``InnerScaleCalc.RCEIL_E8M0``.
+        scaling_algorithm (ScalingAlgorithm): Must be ``ScalingAlgorithm.RCEIL_E8M0``.
         scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.
         swizzle_type (SwizzleType): Must be ``SWIZZLE_32_4_4``.
         scaling_type_square_block_and_expand (bool, optional): Square-block
@@ -7367,7 +7367,7 @@ def quantize_tensor_dual(
         >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
         >>> mx_kwargs = dict(
         ...     qdata_dtype=torch.float8_e4m3fn,
-        ...     inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0,
+        ...     scaling_algorithm=F.ScalingAlgorithm.RCEIL_E8M0,
         ...     scaling_type=F.ScalingType.BlockWise1x32,
         ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
         ... )
@@ -7377,7 +7377,7 @@ def quantize_tensor_dual(
     outputs = torch.ops.aten._quantize_tensor_dual.default(
         input,
         qdata_dtype=qdata_dtype,
-        inner_scale_calc=getattr(inner_scale_calc, "value", inner_scale_calc),
+        scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
         scaling_type=scaling_type.value,
         swizzle_type=swizzle_type.value,
         scaling_type_square_block_and_expand=scaling_type_square_block_and_expand,
