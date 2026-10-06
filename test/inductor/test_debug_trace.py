@@ -10,9 +10,13 @@ from pathlib import Path
 
 import torch
 from torch._inductor import config, test_operators
+from torch._inductor.pretty_print_ir import (
+    format_post_lowering_ir,
+    format_pre_fusion_ir,
+)
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import skipIfWindows
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 
 
@@ -35,6 +39,754 @@ def filesize(filename: Path):
 
 @config.patch("trace.enabled", True)
 class TestDebugTrace(test_torchinductor.TestCase):
+    def _compile_pretty_ir(self, fn, *inputs):
+        """Compile fn and return its pretty IR log for each stage. Callers run on
+        GPU because post-fusion printing needs a SIMD backend."""
+        log_streams, ctx = multiple_logs_to_string(
+            "torch._inductor.debug",
+            "ir_post_lowering_pretty",
+            "ir_pre_fusion_pretty",
+            "ir_post_fusion_pretty",
+        )
+        with config.patch("force_disable_caches", True), ctx():
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+        self.assertEqual(actual, fn(*inputs))
+        return tuple(stream.getvalue().strip() for stream in log_streams)
+
+    def test_ir_pre_fusion_pretty_unsupported(self):
+        class UnsupportedNode:
+            @staticmethod
+            def get_name():
+                return "op0"
+
+        self.assertEqual(
+            format_pre_fusion_ir([UnsupportedNode()]),
+            "kernel op0:\n    unimplemented UnsupportedNode",
+        )
+
+    @requires_gpu()
+    def test_ir_pre_fusion_pretty(self):
+        def fn(a):
+            return torch.sin(a + 1), a.sum(dim=1)
+
+        inp = torch.randn(4, 8, device=GPU_TYPE)
+        post_lowering, pre_fusion, post_fusion = self._compile_pretty_ir(fn, inp)
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[p1 + 8*p0] = tmp3
+
+kernel op1(
+    arg0_1: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf1[p0] = acc_0""",
+        )
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[p1 + 8*p0] = tmp3
+
+kernel op1(
+    arg0_1: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf1[p0] = acc_0""",
+        )
+        self.assertExpectedInline(
+            post_fusion,
+            """\
+POST-FUSION PRETTY IR
+kernel op0_op1(
+    arg0_1: f32[4, 8]
+) -> (buf0: f32[4, 8], buf1: f32[4]):
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            # op0
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[r0 + 8*p0] = tmp3
+
+            # op1
+            tmp4: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp4
+        buf1[p0] = acc_0""",
+        )
+
+    @requires_gpu()
+    def test_ir_post_fusion_pretty(self):
+        def fn(x):
+            y = x.relu()
+            total = y.amax(dim=1) + y.sum(dim=1)
+            return y, total.sqrt(), y / total[:, None]
+
+        inp = torch.randn(4, 8, device=GPU_TYPE)
+        post_lowering, pre_fusion, post_fusion = self._compile_pretty_ir(fn, inp)
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = relu(tmp0)
+            buf0[p1 + 8*p0] = tmp1
+
+kernel op1(
+    buf0: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = -inf
+        for r0 in [0, 8):
+            tmp0: f32 = buf0[r0 + 8*p0]
+            acc_0 = max(acc_0, tmp0)
+        buf1[p0] = acc_0
+
+kernel op2(
+    buf0: f32[4, 8]
+) -> buf2: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = buf0[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf2[p0] = acc_0
+
+kernel op3(
+    buf1: f32[4],
+    buf2: f32[4]
+) -> buf3: f32[4]:
+    for p0 in [0, 4):
+        tmp0: f32 = buf1[p0]
+        tmp1: f32 = buf2[p0]
+        tmp2: f32 = tmp0 + tmp1
+        tmp3: f32 = sqrt(tmp2)
+        buf3[p0] = tmp3
+
+kernel op4(
+    buf0: f32[4, 8],
+    buf1: f32[4],
+    buf2: f32[4]
+) -> buf4: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = buf0[p1 + 8*p0]
+            tmp1: f32 = buf1[p0]
+            tmp2: f32 = buf2[p0]
+            tmp3: f32 = tmp1 + tmp2
+            tmp4: f32 = tmp0 / tmp3
+            buf4[p1 + 8*p0] = tmp4""",
+        )
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = relu(tmp0)
+            buf0[p1 + 8*p0] = tmp1
+
+kernel op1(
+    buf0: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = -inf
+        for r0 in [0, 8):
+            tmp0: f32 = buf0[r0 + 8*p0]
+            acc_0 = max(acc_0, tmp0)
+        buf1[p0] = acc_0
+
+kernel op2(
+    buf0: f32[4, 8]
+) -> buf2: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = buf0[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf2[p0] = acc_0
+
+kernel op3(
+    buf1: f32[4],
+    buf2: f32[4]
+) -> buf3: f32[4]:
+    for p0 in [0, 4):
+        tmp0: f32 = buf1[p0]
+        tmp1: f32 = buf2[p0]
+        tmp2: f32 = tmp0 + tmp1
+        tmp3: f32 = sqrt(tmp2)
+        buf3[p0] = tmp3
+
+kernel op4(
+    buf0: f32[4, 8],
+    buf1: f32[4],
+    buf2: f32[4]
+) -> buf4: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = buf0[p1 + 8*p0]
+            tmp1: f32 = buf1[p0]
+            tmp2: f32 = buf2[p0]
+            tmp3: f32 = tmp1 + tmp2
+            tmp4: f32 = tmp0 / tmp3
+            buf4[p1 + 8*p0] = tmp4""",
+        )
+        # op0 runs inside the first r0 loop, op1 and op2 share it, op4 reads
+        # their results in a second r0 loop, and op3 runs once per row.
+        self.assertExpectedInline(
+            post_fusion,
+            """\
+POST-FUSION PRETTY IR
+kernel op0_op1_op2_op4_op3(
+    arg0_1: f32[4, 8]
+) -> (buf0: f32[4, 8], buf4: f32[4, 8], buf3: f32[4]):
+    for p0 in [0, 4):
+        acc_0: f32 = -inf
+        acc_1: f32 = 0
+        for r0 in [0, 8):
+            # op0
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            tmp1: f32 = relu(tmp0)
+            buf0[r0 + 8*p0] = tmp1
+
+            # op1
+            tmp2: f32 = buf0[r0 + 8*p0]
+            acc_0 = max(acc_0, tmp2)
+
+            # op2
+            tmp3: f32 = buf0[r0 + 8*p0]
+            acc_1 = acc_1 + tmp3
+        buf1[p0] = acc_0
+        buf2[p0] = acc_1
+
+        for r0 in [0, 8):
+            # op4
+            tmp4: f32 = buf0[r0 + 8*p0]
+            tmp5: f32 = buf1[p0]
+            tmp6: f32 = buf2[p0]
+            tmp7: f32 = tmp5 + tmp6
+            tmp8: f32 = tmp4 / tmp7
+            buf4[r0 + 8*p0] = tmp8
+        # op3
+        tmp9: f32 = buf1[p0]
+        tmp10: f32 = buf2[p0]
+        tmp11: f32 = tmp9 + tmp10
+        tmp12: f32 = sqrt(tmp11)
+        buf3[p0] = tmp12""",
+        )
+
+    def test_ir_post_lowering_pretty_unsupported(self):
+        class UnsupportedOperation:
+            @staticmethod
+            def get_operation_name():
+                return "op0"
+
+        self.assertEqual(
+            format_post_lowering_ir([UnsupportedOperation()]),
+            "kernel op0:\n    unimplemented UnsupportedOperation",
+        )
+
+    @requires_gpu()
+    def test_ir_post_lowering_pretty(self):
+        def fn(a):
+            return torch.sin(a + 1), a.sum(dim=1), a.unsqueeze(1) * 2
+
+        inp = torch.randn(4, 8, device=GPU_TYPE)
+        post_lowering, pre_fusion, post_fusion = self._compile_pretty_ir(fn, inp)
+        # Post-lowering loops keep their lowered shape, including size-1 dims.
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[p1 + 8*p0] = tmp3
+
+kernel op1(
+    arg0_1: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf1[p0] = acc_0
+
+kernel op2(
+    arg0_1: f32[4, 8]
+) -> buf2: f32[4, 1, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 1):
+            for p2 in [0, 8):
+                tmp0: f32 = arg0_1[p2 + 8*p0]
+                tmp1: f32 = 2.0
+                tmp2: f32 = tmp0 * tmp1
+                buf2[p2 + 8*p0] = tmp2""",
+        )
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[p1 + 8*p0] = tmp3
+
+kernel op1(
+    arg0_1: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf1[p0] = acc_0
+
+kernel op2(
+    arg0_1: f32[4, 8]
+) -> buf2: f32[4, 1, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 2.0
+            tmp2: f32 = tmp0 * tmp1
+            buf2[p1 + 8*p0] = tmp2""",
+        )
+        self.assertExpectedInline(
+            post_fusion,
+            """\
+POST-FUSION PRETTY IR
+kernel op0_op2_op1(
+    arg0_1: f32[4, 8]
+) -> (buf0: f32[4, 8], buf2: f32[4, 1, 8], buf1: f32[4]):
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            # op0
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[r0 + 8*p0] = tmp3
+
+            # op2
+            tmp4: f32 = arg0_1[r0 + 8*p0]
+            tmp5: f32 = 2.0
+            tmp6: f32 = tmp4 * tmp5
+            buf2[r0 + 8*p0] = tmp6
+
+            # op1
+            tmp7: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp7
+        buf1[p0] = acc_0""",
+        )
+
+    @requires_gpu()
+    def test_ir_post_lowering_pretty_indirect(self):
+        def fn(idx, table):
+            return table[idx], torch.nn.functional.pad(table[idx], (1, 1))
+
+        idx = torch.tensor([2, -3, 1], device=GPU_TYPE)
+        table = torch.randn(3, 8, device=GPU_TYPE)
+        post_lowering, pre_fusion, post_fusion = self._compile_pretty_ir(fn, idx, table)
+        # Inside masked(), the indirect index is inlined into the load.
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+kernel op0(
+    arg0_1: i64[3],
+    arg1_1: f32[3, 8]
+) -> buf0: f32[3, 8]:
+    for p0 in [0, 3):
+        for p1 in [0, 8):
+            tmp0: i64 = arg0_1[p0]
+            tmp1: f32 = arg1_1[p1 + 8*wrap_neg(tmp0)]
+            buf0[p1 + 8*p0] = tmp1
+
+kernel op1(
+    arg0_1: i64[3],
+    arg1_1: f32[3, 8]
+) -> buf1: f32[3, 10]:
+    for p0 in [0, 3):
+        for p1 in [0, 10):
+            tmp0: i64 = (-1) + p1
+            tmp1: i64 = 0
+            tmp2: bool = tmp0 >= tmp1
+            tmp3: i64 = (-1) + p1
+            tmp4: i64 = 8
+            tmp5: bool = tmp3 < tmp4
+            tmp6: bool = tmp2 & tmp5
+            tmp7: f32 = where(tmp6, arg1_1[(-1) + p1 + 8*wrap_neg(arg0_1[p0])], 0.0)
+            buf1[p1 + 10*p0] = tmp7""",
+        )
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+kernel op0(
+    arg0_1: i64[3],
+    arg1_1: f32[3, 8]
+) -> buf0: f32[3, 8]:
+    for p0 in [0, 3):
+        for p1 in [0, 8):
+            tmp0: i64 = arg0_1[p0]
+            tmp1: f32 = arg1_1[p1 + 8*wrap_neg(tmp0)]
+            buf0[p1 + 8*p0] = tmp1
+
+kernel op1(
+    arg0_1: i64[3],
+    arg1_1: f32[3, 8]
+) -> buf1: f32[3, 10]:
+    for p0 in [0, 3):
+        for p1 in [0, 10):
+            tmp0: i64 = (-1) + p1
+            tmp1: i64 = 0
+            tmp2: bool = tmp0 >= tmp1
+            tmp3: i64 = (-1) + p1
+            tmp4: i64 = 8
+            tmp5: bool = tmp3 < tmp4
+            tmp6: bool = tmp2 & tmp5
+            tmp7: f32 = where(tmp6, arg1_1[(-1) + p1 + 8*wrap_neg(arg0_1[p0])], 0.0)
+            buf1[p1 + 10*p0] = tmp7""",
+        )
+        self.assertExpectedInline(
+            post_fusion,
+            """\
+POST-FUSION PRETTY IR
+kernel op0(
+    arg0_1: i64[3],
+    arg1_1: f32[3, 8]
+) -> buf0: f32[3, 8]:
+    for p0 in [0, 3):
+        for p1 in [0, 8):
+            tmp0: i64 = arg0_1[p0]
+            tmp1: f32 = arg1_1[p1 + 8*wrap_neg(tmp0)]
+            buf0[p1 + 8*p0] = tmp1
+
+kernel op1(
+    arg0_1: i64[3],
+    arg1_1: f32[3, 8]
+) -> buf1: f32[3, 10]:
+    for p0 in [0, 3):
+        for p1 in [0, 10):
+            tmp0: i64 = (-1) + p1
+            tmp1: i64 = 0
+            tmp2: bool = tmp0 >= tmp1
+            tmp3: i64 = (-1) + p1
+            tmp4: i64 = 8
+            tmp5: bool = tmp3 < tmp4
+            tmp6: bool = tmp2 & tmp5
+            tmp7: f32 = where(tmp6, arg1_1[(-1) + p1 + 8*wrap_neg(arg0_1[p0])], 0.0)
+            buf1[p1 + 10*p0] = tmp7""",
+        )
+
+    @requires_gpu()
+    def test_ir_pretty_extern_kernel(self):
+        def fn(x, w):
+            return (x @ w).relu()
+
+        x, w = torch.randn(4, 8, device=GPU_TYPE), torch.randn(8, 8, device=GPU_TYPE)
+        post_lowering, pre_fusion, post_fusion = self._compile_pretty_ir(fn, x, w)
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+extern_kernel op0(  # extern_kernels.mm
+    arg1_1: f32[4, 8],
+    arg0_1: f32[8, 8]
+) -> buf0: f32[4, 8]
+
+kernel op1(
+    buf0: f32[4, 8]
+) -> buf1: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = buf0[p1 + 8*p0]
+            tmp1: f32 = relu(tmp0)
+            buf1[p1 + 8*p0] = tmp1""",
+        )
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+extern_kernel op0(  # extern_kernels.mm
+    arg1_1: f32[4, 8],
+    arg0_1: f32[8, 8]
+) -> buf0: f32[4, 8]
+
+kernel op1(
+    buf0: f32[4, 8]
+) -> buf1: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = buf0[p1 + 8*p0]
+            tmp1: f32 = relu(tmp0)
+            buf1[p1 + 8*p0] = tmp1""",
+        )
+        self.assertExpectedInline(
+            post_fusion,
+            """\
+POST-FUSION PRETTY IR
+extern_kernel op0(  # extern_kernels.mm
+    arg1_1: f32[4, 8],
+    arg0_1: f32[8, 8]
+) -> buf0: f32[4, 8]
+
+kernel op1(
+    buf0: f32[4, 8]
+) -> buf1: f32[4, 8]:
+    for p0 in [0, 32):
+        tmp0: f32 = buf0[p0]
+        tmp1: f32 = relu(tmp0)
+        buf1[p0] = tmp1""",
+        )
+
+    @requires_gpu()
+    def test_ir_pretty_extern_kernel_multi_output(self):
+        def fn(x):
+            values, indices = torch.kthvalue(x, 2)
+            return values + 1, indices
+
+        inp = torch.randn(4, 5, device=GPU_TYPE)
+        post_lowering, pre_fusion, post_fusion = self._compile_pretty_ir(fn, inp)
+        # The MultiOutput selectors op1 and op2 are folded into op0's outputs.
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+extern_kernel op0(  # torch.ops.aten.kthvalue.default
+    arg0_1: f32[4, 5]
+) -> (buf1: f32[4], buf2: i64[4])
+
+kernel op3(
+    buf1: f32[4]
+) -> buf3: f32[4]:
+    for p0 in [0, 4):
+        tmp0: f32 = buf1[p0]
+        tmp1: f32 = 1.0
+        tmp2: f32 = tmp0 + tmp1
+        buf3[p0] = tmp2""",
+        )
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+extern_kernel op0(  # torch.ops.aten.kthvalue.default
+    arg0_1: f32[4, 5]
+) -> (buf1: f32[4], buf2: i64[4])
+
+kernel op3(
+    buf1: f32[4]
+) -> buf3: f32[4]:
+    for p0 in [0, 4):
+        tmp0: f32 = buf1[p0]
+        tmp1: f32 = 1.0
+        tmp2: f32 = tmp0 + tmp1
+        buf3[p0] = tmp2""",
+        )
+        self.assertExpectedInline(
+            post_fusion,
+            """\
+POST-FUSION PRETTY IR
+extern_kernel op0(  # torch.ops.aten.kthvalue.default
+    arg0_1: f32[4, 5]
+) -> (buf1: f32[4], buf2: i64[4])
+
+kernel op3(
+    buf1: f32[4]
+) -> buf3: f32[4]:
+    for p0 in [0, 4):
+        tmp0: f32 = buf1[p0]
+        tmp1: f32 = 1.0
+        tmp2: f32 = tmp0 + tmp1
+        buf3[p0] = tmp2""",
+        )
+
+    @requires_gpu()
+    def test_ir_pretty_mutation(self):
+        def fn(x, idx):
+            out = torch.zeros(3, 8, device=x.device).index_add_(0, idx, x.tanh())
+            return out * 2, out.sum(1)
+
+        x = torch.randn(4, 8, device=GPU_TYPE)
+        idx = torch.tensor([0, 2, 2, 1], device=GPU_TYPE)
+        post_lowering, pre_fusion, post_fusion = self._compile_pretty_ir(fn, x, idx)
+        # index_add_ writes into buf0 in place; later reads see the mutated buf0.
+        self.assertExpectedInline(
+            post_lowering,
+            """\
+POST-LOWERING PRETTY IR
+kernel op0() -> buf0: f32[3, 8]:
+    for p0 in [0, 3):
+        for p1 in [0, 8):
+            tmp0: f32 = 0.0
+            buf0[p1 + 8*p0] = tmp0
+
+kernel op1(
+    buf0: mutate f32[3, 8],
+    arg0_1: i64[4],
+    arg1_1: f32[4, 8]
+):
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: i64 = arg0_1[p0]
+            tmp1: f32 = arg1_1[p1 + 8*p0]
+            tmp2: f32 = tanh(tmp1)
+            buf0[p1 + 8*wrap_neg(tmp0)] += tmp2
+
+kernel op2(
+    buf0: f32[3, 8]
+) -> buf2: f32[3, 8]:
+    for p0 in [0, 3):
+        for p1 in [0, 8):
+            tmp0: f32 = buf0[p1 + 8*p0]
+            tmp1: f32 = 2.0
+            tmp2: f32 = tmp0 * tmp1
+            buf2[p1 + 8*p0] = tmp2
+
+kernel op3(
+    buf0: f32[3, 8]
+) -> buf3: f32[3]:
+    for p0 in [0, 3):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = buf0[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf3[p0] = acc_0""",
+        )
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+kernel op0() -> buf0: f32[3, 8]:
+    for p0 in [0, 3):
+        for p1 in [0, 8):
+            tmp0: f32 = 0.0
+            buf0[p1 + 8*p0] = tmp0
+
+kernel op1(
+    buf0: mutate f32[3, 8],
+    arg0_1: i64[4],
+    arg1_1: f32[4, 8]
+):
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: i64 = arg0_1[p0]
+            tmp1: f32 = arg1_1[p1 + 8*p0]
+            tmp2: f32 = tanh(tmp1)
+            buf0[p1 + 8*wrap_neg(tmp0)] += tmp2
+
+kernel op2(
+    buf0: f32[3, 8]
+) -> buf2: f32[3, 8]:
+    for p0 in [0, 3):
+        for p1 in [0, 8):
+            tmp0: f32 = buf0[p1 + 8*p0]
+            tmp1: f32 = 2.0
+            tmp2: f32 = tmp0 * tmp1
+            buf2[p1 + 8*p0] = tmp2
+
+kernel op3(
+    buf0: f32[3, 8]
+) -> buf3: f32[3]:
+    for p0 in [0, 3):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = buf0[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf3[p0] = acc_0""",
+        )
+        self.assertExpectedInline(
+            post_fusion,
+            """\
+POST-FUSION PRETTY IR
+kernel op0() -> buf0: f32[3, 8]:
+    for p0 in [0, 24):
+        tmp0: f32 = 0.0
+        buf0[p0] = tmp0
+
+kernel op1(
+    buf0: mutate f32[3, 8],
+    arg0_1: i64[4],
+    arg1_1: f32[4, 8]
+):
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: i64 = arg0_1[p0]
+            tmp1: f32 = arg1_1[p1 + 8*p0]
+            tmp2: f32 = tanh(tmp1)
+            buf0[p1 + 8*wrap_neg(tmp0)] += tmp2
+
+kernel op2_op3(
+    buf0: f32[3, 8]
+) -> (buf2: f32[3, 8], buf3: f32[3]):
+    for p0 in [0, 3):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            # op2
+            tmp0: f32 = buf0[r0 + 8*p0]
+            tmp1: f32 = 2.0
+            tmp2: f32 = tmp0 * tmp1
+            buf2[r0 + 8*p0] = tmp2
+
+            # op3
+            tmp3: f32 = buf0[r0 + 8*p0]
+            acc_0 = acc_0 + tmp3
+        buf3[p0] = acc_0""",
+        )
+
     def test_debug_trace(self):
         @torch.compile
         def fn(a, b):
