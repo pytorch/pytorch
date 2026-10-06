@@ -50,18 +50,6 @@ runs:
   using: composite
   steps:
     # ── ARC-only steps ──────────────────────────────────────────────────
-    - name: Fix workspace permissions
-      if: ${{ inputs.use-arc == 'true' }}
-      shell: bash
-      run: |
-        # GH runner image has switched to uid 1001 https://github.com/actions/runner-images/issues/10936
-        # while current PyTorch CI image are still using uid 1000 (ec2-user). We
-        # can update the uid to 1001 eventually when everything migrates to ARC.
-        # In the meantime, this is a quick fix to ensure that CI has the permission
-        # to use the GITHUB_WORKSPACE while still allowing the GH hook (uid 1001,
-        # gid 1001) to clean up the directory after the job
-        sudo chmod -R 777 "$GITHUB_WORKSPACE"
-
     - name: Ack Git cache ownership
       if: ${{ inputs.use-arc == 'true' }}
       shell: bash
