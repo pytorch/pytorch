@@ -114,8 +114,7 @@ struct InlineEvent final {
         DeviceTypeName(other.device_type()),
         ".");
     TORCH_CHECK_VALUE(
-        (flag_ == EventFlag::BACKEND_DEFAULT) &&
-            (other.flag_ == EventFlag::BACKEND_DEFAULT),
+        (flag_ & EventFlag::TIMING) && (other.flag_ & EventFlag::TIMING),
         "Both events must be created with argument 'enable_timing=True'.");
     TORCH_CHECK_VALUE(
         was_marked_for_recording() && other.was_marked_for_recording(),
