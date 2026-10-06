@@ -2475,6 +2475,45 @@ class TestTestParametrization(TestCase):
             raise RuntimeError('Boom')
 
 
+class TestOmitSkippedTests(TestCase):
+    def test_skipped_tests_are_omitted(self):
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", True):
+
+            class TestOmitted(TestCase):
+                def test_runs(self):
+                    pass
+
+                @unittest.skip("never runs here")
+                def test_skipped(self):
+                    pass
+
+                @unittest.skip("never runs here")
+                @parametrize("x", [1, 2])
+                def test_skipped_parametrized(self, x):
+                    pass
+
+                @parametrize("x", [subtest(1, decorators=[unittest.skip("never runs here")]), 2])
+                def test_partly_skipped(self, x):
+                    pass
+
+            instantiate_parametrized_tests(TestOmitted)
+
+        self.assertEqual(
+            _get_test_names_for_test_class(TestOmitted),
+            ['TestOmitted.test_partly_skipped_x_2', 'TestOmitted.test_runs'],
+        )
+
+    def test_skipped_tests_are_kept_by_default(self):
+        with unittest.mock.patch("torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False):
+
+            class TestKept(TestCase):
+                @unittest.skip("never runs here")
+                def test_skipped(self):
+                    pass
+
+        self.assertEqual(_get_test_names_for_test_class(TestKept), ['TestKept.test_skipped'])
+
+
 class TestTestParametrizationDeviceType(TestCase):
     def test_unparametrized_names(self, device):
         # This test exists to protect against regressions in device / dtype test naming
@@ -2983,6 +3022,11 @@ class TestImports(TestCase):
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_general",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_rowtile",  # depends on cutlass
+                           "torch._native.ops.reductions.tile",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_xcta",  # depends on cutlass
+                           "torch._native.ops.reductions.kernel_coltile",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._native.ops.quantize_tensor.blockscaled_tma",  # depends on cutlass
