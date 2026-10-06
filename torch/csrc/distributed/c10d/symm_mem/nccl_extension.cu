@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
@@ -190,6 +191,7 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
+  GroupStreamGuard stream_guard("0");
 
   // Always use device-side kernel because this function waits for a SPECIFIC signal value.
   // ncclWaitSignal only synchronizes on a channel without checking values, so it's not
@@ -213,6 +215,7 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
   // TODO: rendezvous should remember the group name
   auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
   c10::cuda::CUDAGuard guard(tensor.device());
+  GroupStreamGuard stream_guard("0");
   auto stream = at::cuda::getCurrentCUDAStream();
 
   // Always use device-side kernel because this function writes a SPECIFIC signal value.
@@ -369,6 +372,7 @@ void nccl_put_signal(at::Tensor& tensor, const c10::intrusive_ptr<SymmetricMemor
 
   // Get window etc
   auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
+  TORCH_CHECK(nccl_hdl != nullptr, "nccl_put_signal requires an NCCL handle");
   auto window = nccl_hdl->get_window();
   TORCH_CHECK(window != nullptr, "window is nullptr");
   auto offset = nccl_hdl->get_window_offset();
@@ -403,6 +407,7 @@ void nccl_wait_signal(const c10::intrusive_ptr<SymmetricMemory>& hdl, int64_t pe
 
   // Get the NCCL handle
   auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
+  TORCH_CHECK(nccl_hdl != nullptr, "nccl_wait_signal requires an NCCL handle");
   // Get the NCCL communicator
   auto& manager = NCCLDevCommManager::get(device);
   ncclComm_t comm = manager.get_comm(nccl_hdl->get_group_name());

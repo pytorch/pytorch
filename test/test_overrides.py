@@ -9,7 +9,6 @@ import pprint
 import pickle
 import collections
 import unittest
-import os
 
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -49,8 +48,7 @@ from torch.utils._pytree import tree_map
 
 Tensor = torch.Tensor
 
-if os.getenv("ATEN_CPU_CAPABILITY") in ("default", "avx2"):
-    # This test is not supported on ARM
+if torch.version.cuda and not torch.cuda.is_available():
     print(
         "Skipping due to failing when cuda build runs on non cuda machine, "
         + "see https://github.com/pytorch/pytorch/pull/150059 for example"
