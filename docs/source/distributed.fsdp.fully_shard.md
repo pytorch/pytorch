@@ -161,32 +161,6 @@ Compared to PyTorch FSDP1 (`FullyShardedDataParallel`):
   details.
 
 
-### Custom All-Gather Backends
-
-Use `set_custom_all_gather` to replace an FSDP module's all-gather backend:
-
-```python
-from my_backend import MyAllGather
-from torch.distributed.fsdp import fully_shard
-
-for module in [*model.layers, model]:
-    fully_shard(module)
-    module.set_custom_all_gather(MyAllGather())
-```
-
-For custom all-gather backends, create a separate stateful instance for each
-FSDP parameter group, as shown above. Sharing storage through a backend pool does
-not permit sharing a stateful instance. The stateless default layout has no
-ownership restriction.
-Install the backend before the first unshard. Replacement is rejected while an
-all-gather is pending, while parameters are unsharded, or after they adopt backend-owned output storage;
-those parameters must keep their original storage owner and reuse coordination.
-
-Custom backends may retain registered output storage after reshard. Consult the
-backend's documentation for its memory usage, supported execution modes, and
-compatibility requirements. Backend authoring interfaces remain private and
-experimental; they are not part of the public FSDP API.
-
 ```{eval-rst}
 .. currentmodule:: torch.distributed.fsdp
 ```
@@ -253,3 +227,15 @@ The frontend API is `fully_shard` that can be called on a `module`:
 .. autoclass:: torch.distributed.fsdp.experimental.AllGatherInput
 .. autoclass:: torch.distributed.fsdp.experimental.DefaultAllGatherLayout
 ```
+
+A custom all-gather backend whose collective writes its own output layout, e.g.
+parameter-contiguous output, provides an all-gather layout bound to its comm and
+is installed per module with a single `set_all_gather_layout` call, which also
+installs the comm. Create a separate stateful backend instance for each FSDP
+module and install it before the first unshard. FSDP owns the buffers behind the
+unsharded parameters, as with the default layout: it frees them on reshard and
+re-allocates them for the next unshard. Only backends whose layout explicitly
+opts into backend-owned storage keep output storage allocated after reshard;
+consult their documentation for memory usage and supported execution modes. The
+layout authoring interfaces are private and may change without backward
+compatibility.
