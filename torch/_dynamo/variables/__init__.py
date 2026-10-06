@@ -80,6 +80,7 @@ from .exception import (
 from .functions import (
     BaseUserFunctionVariable,
     BoundBuiltinMethodVariable,
+    BoundCallableMethodVariable,
     ClassMethodDescriptorVariable,
     ClassMethodVariable,
     CollectionsNamedTupleFunction,
