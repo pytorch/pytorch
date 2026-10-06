@@ -95,6 +95,7 @@ from .utils import (
     is_gpu,
     is_nvidia_sm100_or_later,
     is_pointwise_use,
+    is_strict_cuda_triton,
     is_triton_fp8_dtype_supported,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
@@ -8790,8 +8791,103 @@ logical_xor = register_pointwise(
     convert_input_to_bool=True,
     override_return_dtype=torch.bool,
 )
-maximum = register_pointwise(aten.maximum)
-minimum = register_pointwise(aten.minimum)
+
+
+def _strict_minmax(a, b, fn, dtype):
+    int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[dtype.itemsize]
+
+    def inner(x, y):
+        # Keep NaN selection in the logical dtype across shared opmath casts.
+        xb = ops.to_dtype_bitcast(x, int_dtype, src_dtype=dtype)
+        yb = ops.to_dtype_bitcast(y, int_dtype, src_dtype=dtype)
+        finite = ops.to_dtype_bitcast(fn(x, y), int_dtype, src_dtype=dtype)
+        bits = ops.where(ops.isnan(x), xb, ops.where(ops.isnan(y), yb, finite))
+        return ops.to_dtype_bitcast(bits, dtype, src_dtype=int_dtype)
+
+    return make_pointwise(inner)(a, b)
+
+
+def _register_minmax(aten_fn):
+    pointwise = register_pointwise(aten_fn)
+    prim = getattr(prims, aten_fn.__name__)
+    fn = ops_wrapper(aten_fn.__name__)
+    selects_nan = aten_fn in (aten.minimum, aten.maximum)
+
+    @register_lowering(
+        [aten_fn, *aten_fn.op_overloads(), prim, *prim.op_overloads()],
+        type_promotion_kind=None,
+    )
+    def inner(a, b):
+        if not any(
+            isinstance(x, TensorBox) and is_strict_cuda_triton(x.get_device())
+            for x in (a, b)
+        ):
+            if not selects_nan:
+                return fallback_handler(aten_fn.default, add_to_fallback_set=False)(
+                    a, b
+                )
+            return pointwise(a, b)
+        dtype = get_promoted_dtype(
+            a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        )
+        if dtype not in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            return pointwise(a, b)
+        for scalar, tensor in ((a, b), (b, a)):
+            if not (
+                isinstance(scalar, TensorBox)
+                and isinstance(tensor, TensorBox)
+                and scalar.get_device_or_error().type == "cpu"
+                and not scalar.get_size()
+            ):
+                continue
+            scalar_dtype = scalar.get_dtype()
+            scalar = to_dtype(scalar, dtype)
+            if not selects_nan:
+                scalar.realize()
+                a, b = tensor, scalar
+                break
+            int_dtype = {2: torch.int16, 4: torch.int32, 8: torch.int64}[dtype.itemsize]
+            # Extract integer bits so the wrapper's .item() preserves scalar NaNs.
+            raw = clone(to_dtype_bitcast(scalar, int_dtype))
+            raw.realize()
+            if (
+                dtype == torch.float16
+                and scalar_dtype.is_floating_point
+                and scalar_dtype != dtype
+            ):
+                # scalar_value<Half> canonicalizes NaNs during the host cast.
+                raw = where(
+                    gt(bitwise_and(raw, 0x7FFF), 0x7C00),
+                    bitwise_or(bitwise_and(raw, -0x8000), 0x7E00),
+                    raw,
+                )
+            scalar = to_dtype_bitcast(raw, dtype)
+            # Eager's symmetric scalar kernel makes the CPU scalar win NaN ties.
+            a, b = scalar, tensor
+            break
+        if (
+            not selects_nan
+            and dtype == torch.float64
+            and a.get_dtype() != b.get_dtype()
+            and a.get_device_or_error().type == b.get_device_or_error().type == "cuda"
+        ):
+            # CUDA's mixed-dtype FP64 kernel takes the first NaN when both are NaN.
+            a, b = b, a
+        args, _ = transform_args(
+            [a, b], {}, True, ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, False
+        )
+        if selects_nan:
+            return _strict_minmax(args[0], args[1], fn, dtype)
+        return make_pointwise(fn)(*args)
+
+    # Keep the existing helper semantics for foreach and clamp callers.
+    return pointwise
+
+
+maximum = _register_minmax(aten.maximum)
+minimum = _register_minmax(aten.minimum)
+fmax = _register_minmax(aten.fmax)
+fmin = _register_minmax(aten.fmin)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
 register_op_dtype_propagation_rules(

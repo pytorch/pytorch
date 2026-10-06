@@ -914,11 +914,15 @@ def lift(self: torch.Tensor) -> torch.Tensor:
 
 @register_decomposition([aten.fmin, prims.fmin])
 def fmin(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
+    if is_strict_cuda_triton(self.device) or is_strict_cuda_triton(other.device):
+        return NotImplemented
     return torch.where(torch.isnan(other) | (other > self), self, other)
 
 
 @register_decomposition([aten.fmax, prims.fmax])
 def fmax(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
+    if is_strict_cuda_triton(self.device) or is_strict_cuda_triton(other.device):
+        return NotImplemented
     return torch.where(torch.isnan(other) | (other < self), self, other)
 
 
