@@ -36,7 +36,9 @@ import cutlass.cute._tvm_ffi_args_spec_converter as _converter_module  # noqa
 _original_convert_single_arg = _converter_module._convert_single_arg
 
 
-def _patched_convert_single_arg(arg, arg_name, arg_type, ctx):
+def _patched_convert_single_arg(arg, arg_name, arg_type, ctx, *, is_constexpr: bool = False):
+    if is_constexpr:
+        return _original_convert_single_arg(arg, arg_name, arg_type, ctx, is_constexpr=True)
     if arg_type is not None and get_origin(arg_type) is cutlass.Constexpr:
         return spec.ConstNone(arg_name)
     # If arg is a NamedTuple but arg_type doesn't have _fields (e.g. annotated as tuple),
