@@ -12,12 +12,17 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
+from ._all_gather_layout import AllGatherLayout, DEFAULT_ALL_GATHER_LAYOUT
 from ._fsdp_api import (
     AllGather,
     DataParallelMeshDims,
     MixedPrecisionPolicy,
     OffloadPolicy,
     ReduceScatter,
+)
+from ._fsdp_collectives import (
+    _default_reduce_scatter_input_fn,
+    PrepareReduceScatterInputsFn,
 )
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
@@ -31,6 +36,7 @@ from ._fsdp_init import (
     _validate_mesh,
     _validate_module,
 )
+from ._fsdp_param_group import _GradientReductionState
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
@@ -44,6 +50,7 @@ if TYPE_CHECKING:
 __all__ = [
     "fully_shard",
     "FSDPModule",
+    "GradientReductionHandle",
     "UnshardHandle",
     "register_fsdp_forward_method",
     "get_cls_to_fsdp_cls",
@@ -130,6 +137,14 @@ def fully_shard(
     on ``module`` frees them (if needed). Similar backward hooks all-gather
     parameters and later free parameters and reduce-scatter gradients.
 
+    Parameter dtypes and ``grad_dtype`` may change (e.g. ``module.bfloat16()``)
+    until lazy initialization at the first forward or
+    :meth:`FSDPModule.unshard`; later changes are unsupported. An explicit
+    ``grad_dtype`` survives dtype conversions and is inherited by a parameter
+    that ``load_state_dict(assign=True)`` registers without one. Device moves
+    preserve sharded gradient dtypes and leave pending gradients on their
+    original device.
+
     Since grouping multiple tensors together for one collective is critical for
     communication efficiency, this implementation makes this grouping first
     class. Calling :meth:`fully_shard` on ``module`` constructs one group that
@@ -197,10 +212,12 @@ def fully_shard(
             - After forward, the parameters registered to the module depend on
               to this: The registered parameters are the sharded parameters if
               ``True``; unsharded parameters if ``False``; and the parameters
-              resharded to the smaller mesh otherwise. To modify the parameters
-              between forward and backward, the registered parameters must be
-              the sharded parameters. For ``False`` or an ``int``, this can be
-              done by manually resharding via :meth:`reshard`.
+              resharded to the smaller mesh otherwise. For ``False`` or an
+              ``int``, the sharded parameters can be registered by manually
+              resharding via :meth:`reshard`.
+            - Modifying the parameters between forward and backward is not
+              supported: the backward all-gather is not ordered after such
+              writes, so backward may see the old values.
         shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard | BlockShard | ShardPlacementResult]]]):
             This callable can be used to override the sharding placement and/or
             mesh for a parameter. It can return:
@@ -300,6 +317,24 @@ def fully_shard(
     return arg_module
 
 
+def _check_all_gather_replaceable(fsdp_param_group: FSDPParamGroup) -> None:
+    # Unsharded parameters and pending results depend on the current backend's
+    # outputs, and outputs that view a custom layout's buffers keep their owner
+    if (
+        fsdp_param_group._all_gather_result is not None
+        or fsdp_param_group.is_unsharded
+        or any(
+            fsdp_param._keep_all_gather_output_storage
+            for fsdp_param in fsdp_param_group.fsdp_params
+        )
+    ):
+        raise ValueError(
+            "cannot replace an all-gather backend or layout with pending work, "
+            "unsharded parameters, or outputs that view a custom layout's "
+            "buffers; install it before the first unshard"
+        )
+
+
 def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     raise AssertionError(
         "FSDP does not support deepcopy. Please use state dict for serialization."
@@ -338,13 +373,37 @@ class FSDPModule:
 
     def reshard(self) -> None:
         """
-        Reshards the module's parameters, freeing the unsharded parameters if
-        they are allocated and registering the sharded parameters to the
-        module. This method is *not* recursive.
+        Reshards the module's parameters and registers the sharded parameters
+        to the module. This method is *not* recursive. By default, this frees
+        the unsharded parameter storage; call :meth:`set_keep_unsharded_storage`
+        to preserve it.
         """
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.reshard()
+
+    def set_keep_unsharded_storage(self, keep: bool, *, recurse: bool = True) -> None:
+        """
+        Sets whether to keep the unsharded parameter storage after resharding.
+        Keeping the storage preserves its data pointers across reshard and
+        unshard, which is useful for CUDA graph capture, at the cost of higher
+        memory usage. By default, FSDP frees the unsharded parameter storage
+        when resharding.
+
+        Args:
+            keep (bool): Whether to keep the unsharded parameter storage after
+                resharding.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    for fsdp_param in fsdp_param_group.fsdp_params:
+                        fsdp_param.keep_unsharded_storage = keep
 
     def unshard(self, async_op: bool = False) -> UnshardHandle | None:
         """
@@ -396,6 +455,12 @@ class FSDPModule:
         accumulation should treat the microbatch sequence as invalidated
         and restart it.
 
+        Reset invalidates an outstanding :class:`GradientReductionHandle`
+        that owns this module's shared communication context. Calling
+        :meth:`GradientReductionHandle.wait` on that handle raises
+        ``RuntimeError``. Reset from a different FSDP root sharing that context
+        raises until the owning root waits or resets.
+
         Must be called on the root FSDP module — i.e. the module the
         top-level ``fully_shard`` was applied to, equivalently the
         module first forwarded. Calling on a non-root module raises
@@ -414,6 +479,148 @@ class FSDPModule:
         state = self._get_fsdp_state()
         state._state_ctx.is_last_backward = is_last_backward
 
+    def set_manual_backward_finalization(self, enabled: bool) -> None:
+        """
+        Set whether the caller must finalize backward.
+
+        This must be called on the root FSDP module. When enabled, manual
+        finalization supersedes :meth:`set_is_last_backward`. Call
+        :meth:`finalize_backward` after all backward passes in the logical
+        backward operation and before reading or clearing gradients. Otherwise,
+        gradients may remain unreduced and backward iteration state is retained.
+        Gradient synchronization and parameter resharding follow their current
+        settings.
+
+        Set this before backward. The mode cannot change after backward starts
+        until the backward iteration is finalized or reset.
+        """
+        state = self._get_fsdp_state()
+        if state._is_root is False:
+            raise RuntimeError(
+                "set_manual_backward_finalization must be called on the root "
+                f"{state._state_name} module"
+            )
+        if (
+            enabled != state._state_ctx.manual_backward_finalization
+            and torch._C._current_graph_task_id() != -1
+        ):
+            raise RuntimeError(
+                "set_manual_backward_finalization cannot change mode during backward"
+            )
+        active_mode = state._state_ctx.manual_backward_finalization_active
+        if active_mode is not None and enabled != active_mode:
+            raise RuntimeError(
+                "set_manual_backward_finalization cannot change mode after backward starts"
+            )
+        state._state_ctx.manual_backward_finalization = enabled
+
+    @overload
+    def finalize_backward(self, *, async_op: Literal[False] = False) -> None: ...
+
+    @overload
+    def finalize_backward(
+        self, *, async_op: Literal[True]
+    ) -> GradientReductionHandle: ...
+
+    @overload
+    def finalize_backward(
+        self, *, async_op: bool
+    ) -> GradientReductionHandle | None: ...
+
+    @_dynamo_disable
+    def finalize_backward(
+        self, *, async_op: bool = False
+    ) -> GradientReductionHandle | None:
+        r"""
+        Finalize backward on the calling thread.
+
+        Enable manual finalization before forward, then call this after all
+        backward passes in the logical backward operation. This completes
+        pending gradient reduction and resharding according to their current
+        settings. Calling this before the root module's first forward is a no-op.
+        It is also safe after a completed backward that did not reach any
+        FSDP-managed parameters. Do not call it between forward and backward.
+
+        If several backward passes precede one finalization, disable gradient
+        synchronization for those backward passes and re-enable it before
+        finalization.
+
+        Manual finalization lets callers choose a finalization point that is
+        separate from any backward call. This supports schedules that represent
+        gradient reduction as a separate action. CUDA graph capture does not
+        support CPU gradient offload or an outstanding asynchronous unshard.
+
+        Partial gradient reduction for ``replicate()`` and HSDP is not
+        supported. Enable all-reduce before finalization.
+
+        Finalization follows these call paths::
+
+            automatic final backward
+              -> FSDPState._root_post_backward_final_callback()
+                -> FSDPState.wait_for_gradient_reduction()
+                  -> FSDPState._end_backward_iteration()
+                    -> FSDPParamGroup.finalize_backward()
+
+            FSDPModule.finalize_backward(async_op=False)
+              -> FSDPState.finalize_backward(wait_for_gradient_reduction=True)
+                -> FSDPState.wait_for_gradient_reduction()
+                  -> FSDPState._end_backward_iteration()
+                    -> FSDPParamGroup.finalize_backward()
+
+            FSDPModule.finalize_backward(async_op=True)
+              -> FSDPState.finalize_backward(wait_for_gradient_reduction=False)
+              -> GradientReductionHandle.wait()
+                -> FSDPState.wait_for_gradient_reduction()
+                  -> FSDPState._end_backward_iteration()
+                    -> FSDPParamGroup.finalize_backward()
+
+        Args:
+            async_op (bool): If ``True``, return a
+                :class:`GradientReductionHandle` without waiting for gradient
+                reduction. The caller must call :meth:`wait` before using the
+                gradients or starting more work on this FSDP module or another
+                FSDP root that shares its communication context. If ``False``,
+                wait before returning.
+        """
+        state = self._get_fsdp_state()
+        if state._is_root is None:
+            return _GradientReductionHandleImpl(None, None) if async_op else None
+        if state._state_ctx.gradient_reduction_pending:
+            raise RuntimeError(
+                "The previous gradient reduction must be waited on before "
+                "finalizing backward again"
+            )
+        if state._comm_ctx.active_gradient_reduction is not None:
+            raise RuntimeError(
+                "Another gradient reduction sharing this communication context "
+                "must be waited on before finalizing backward"
+            )
+        if not async_op:
+            state.finalize_backward()
+            return None
+        state._validate_finalize_backward()
+        param_groups = [
+            group
+            for fsdp_state in state._state_ctx.all_states
+            for group in fsdp_state._fsdp_param_groups
+        ]
+        param_group_set = set(param_groups)
+        if any(
+            reduction.param_group not in param_group_set
+            for reduction in state._comm_ctx.reduce_scatter_states
+        ) or any(
+            group not in param_group_set for group in state._comm_ctx.post_forward_order
+        ):
+            raise RuntimeError(
+                "Asynchronous gradient finalization cannot overlap work from "
+                "another FSDP root sharing the communication context"
+            )
+        reduction = _GradientReductionState(state._state_ctx)
+        state._comm_ctx.active_gradient_reduction = reduction
+        state.finalize_backward(wait_for_gradient_reduction=False)
+        state._state_ctx.gradient_reduction_pending = True
+        return _GradientReductionHandleImpl(state, reduction)
+
     def set_requires_gradient_sync(
         self, requires_gradient_sync: bool, *, recurse: bool = True
     ) -> None:
@@ -422,6 +629,19 @@ class FSDPModule:
         gradient accumulation *without communication*. For HSDP, this controls
         both reduce-scatter and all-reduce together. This is the equivalence of
         `no_sync` in FSDP1.
+
+        Unsynchronized gradients accumulate on unsharded parameters in
+        ``MixedPrecisionPolicy.reduce_dtype`` if set, and otherwise as the
+        parameter's ``grad_dtype`` specifies (the original dtype if unset). Sharded gradients and HSDP
+        buffers awaiting all-reduce remain separate. CPU offload moves only
+        fully reduced sharded gradients to CPU.
+
+        ``zero_grad()`` clears only the currently registered parameters' gradients,
+        leaving other parameter copies and pending all-reduce buffers intact.
+
+        Before gradient clipping or an optimizer step, enable the required
+        reductions and call ``set_is_last_backward(True)`` for the final backward.
+        Reshard before updating parameters.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
@@ -500,6 +720,9 @@ class FSDPModule:
         reduced communication since the unsharded parameters do not need to be
         re-all-gathered before the next forward.
 
+        Call :meth:`reshard` on each FSDP module on every rank before updating
+        its sharded parameters.
+
         Args:
             reshard_after_backward (bool): Whether to reshard parameters after
                 backward.
@@ -560,6 +783,13 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
+        This sets only the comm and keeps the installed all-gather layout. A
+        layout that requires a specific comm is installed with it by
+        :meth:`set_all_gather_layout`; while such a layout is installed, any
+        other comm is rejected. Install the comm before the first unshard:
+        replacement is rejected while an all-gather is pending, while parameters
+        are unsharded, or after they adopt output storage from a custom layout.
+
         Args:
             comm (AllGather): Custom all-gather communication.
         """
@@ -571,6 +801,15 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
+            bound_comm = fsdp_param_group._all_gather_layout.comm
+            if bound_comm is not None and comm is not bound_comm:
+                raise ValueError(
+                    "cannot install a different all-gather comm while the "
+                    "installed layout is bound to its comm; install another layout "
+                    "with set_all_gather_layout first"
+                )
+            if comm is not fsdp_param_group._all_gather_comm:
+                _check_all_gather_replaceable(fsdp_param_group)
             fsdp_param_group._all_gather_comm = comm
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
@@ -681,6 +920,90 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
+    def set_all_gather_layout(
+        self, layout: AllGatherLayout | None, /, *, recurse: bool = True
+    ) -> None:
+        r"""Set the layout that packs and finalizes a parameter group's all-gather.
+
+        .. warning::
+            This API is experimental. The layout contract and supported FSDP
+            internals may change without backward compatibility.
+
+        The layout packs the group's all-gather inputs before the collective and
+        turns the collective output into the parameters' all-gather outputs
+        after it completes.
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`
+        packs rank-major input and copies the output with its ``output_fn``,
+        e.g. ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)``
+        for the native copy; it works with any comm that produces rank-major
+        output. This is the only way to install a layout. A layout whose
+        ``comm`` is set, e.g. one whose collective writes parameter-contiguous
+        output, requires that collective: installing the layout installs its
+        comm too, and the group then rejects any other comm, including from
+        :meth:`set_custom_all_gather`, until another layout is installed. A
+        layout that keeps per-call state must not be shared across parameter
+        groups, so install such a layout on each module with ``recurse=False``.
+        Set layouts before the first unshard.
+
+        Args:
+            layout (Optional[AllGatherLayout]): Layout, or ``None`` to restore
+                the default.
+            recurse (bool): Whether to also set the layout for all nested FSDP
+                modules. Defaults to ``True``.
+        """
+        layout = DEFAULT_ALL_GATHER_LAYOUT if layout is None else layout
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    comm = layout.comm or fsdp_param_group._all_gather_comm
+                    if (
+                        layout is not fsdp_param_group._all_gather_layout
+                        or comm is not fsdp_param_group._all_gather_comm
+                    ):
+                        _check_all_gather_replaceable(fsdp_param_group)
+                    fsdp_param_group._all_gather_layout = layout
+                    fsdp_param_group._all_gather_comm = comm
+
+    def set_reduce_scatter_input_fn(
+        self, fn: PrepareReduceScatterInputsFn | None, /, *, recurse: bool = True
+    ) -> None:
+        r"""Set the function that prepares reduce-scatter inputs.
+
+        .. warning::
+            This API is experimental. The callback signature and supported FSDP
+            internals may change without backward compatibility.
+
+        The function is called as
+        ``copy_in = fn(unsharded_grads, shard_dims, world_size)`` before FSDP
+        allocates the reduce-scatter input and may replace entries of
+        ``unsharded_grads`` with reordered gradients. FSDP then calls
+        ``copy_in(reduce_scatter_input)``, which must fill the flat input
+        buffer with each rank's padded shards in rank-major order, converting
+        to the buffer's dtype. FSDP frees ``copy_in`` and the gradients right
+        after that call, so neither may be kept elsewhere. Gradients in a group
+        can have different dtypes, e.g. with per-parameter ``grad_dtype``.
+        ``world_size`` is 1 when no reduce-scatter is needed, and the function
+        is still called. Both calls run on the current stream. See
+        :mod:`torch.distributed.fsdp.experimental` for a native implementation.
+
+        Args:
+            fn (Optional[Callable]): Function returning the copy-in function, or
+                ``None`` to restore the default.
+            recurse (bool): Whether to also set the function for all nested FSDP
+                modules. Defaults to ``True``.
+        """
+        fn = _default_reduce_scatter_input_fn if fn is None else fn
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group._prepare_reduce_scatter_inputs = fn
+
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True
     ) -> None:
@@ -691,6 +1014,10 @@ class FSDPModule:
         multi-modal models, mixture of experts), causing mismatched
         reduce-scatter collectives. Similar to DDP's
         ``find_unused_parameters``.
+
+        Parameters requiring gradients with explicit ``grad_dtype=None``
+        require a non-``None`` ``reduce_dtype`` so zero gradients have the
+        same dtype on every rank; otherwise, backward raises an error.
 
         Args:
             reduce_scatter_unused_params (bool): Whether to include zero
@@ -887,20 +1214,68 @@ class FSDPModule:
             raise AssertionError(f"No FSDP state found on {self}")
         return state
 
-    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+    def _apply(
+        self, fn: Callable[[torch.Tensor], torch.Tensor], recurse: bool = True
+    ) -> Any:
         # Reshard to ensure that sharded parameters are registered
         self.reshard()
-        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
         state = self._get_fsdp_state()
-        if not state._fsdp_param_groups:
-            return ret
-        # TODO: Remove this padding logic once DTensor pads the local tensor:
-        # https://github.com/pytorch/pytorch/issues/113045
+        fsdp_params = [
+            param for group in state._fsdp_param_groups for param in group.fsdp_params
+        ]
+        saved_grads = {}
+        for fsdp_param in fsdp_params:
+            param = fsdp_param.sharded_param
+            # Module._apply swaps in parameters without grad_dtype.
+            fsdp_param._capture_grad_dtype_policy(param)
+            grad = param.grad
+            if grad is not None and fsdp_param._has_sharded_grad_dtype_override:
+                # Explicit grad_dtype, not the parameter dtype, owns this
+                # gradient's dtype. Module._apply would convert it with the
+                # parameter and attach it before FSDP restores grad_dtype.
+                saved_grads[fsdp_param] = grad
+                param.grad = None
+        ret = super()._apply(fn, recurse=recurse)  # type: ignore[misc]
         with torch.no_grad():
-            for fsdp_param_group in state._fsdp_param_groups:
-                for fsdp_param in fsdp_param_group.fsdp_params:
-                    fsdp_param.reset_sharded_param()
+            for fsdp_param in fsdp_params:
+                fsdp_param.reset_sharded_param()
+                if (grad := saved_grads.get(fsdp_param)) is not None:
+                    param = fsdp_param.sharded_param
+                    param.grad = grad.to(device=param.device).requires_grad_(
+                        grad.requires_grad
+                    )
         return ret
+
+
+class GradientReductionHandle:
+    """A handle for asynchronous backward finalization."""
+
+    def wait(self) -> None:
+        """Wait for gradient reduction and release its retained buffers.
+
+        Raises:
+            RuntimeError: If :meth:`FSDPModule.reset_iter_state` invalidated
+                this handle.
+        """
+        return
+
+
+class _GradientReductionHandleImpl(GradientReductionHandle):
+    def __init__(
+        self,
+        state: FSDPState | None,
+        reduction: _GradientReductionState | None,
+    ):
+        self._state: FSDPState | None = state
+        self._reduction: _GradientReductionState | None = reduction
+
+    def wait(self) -> None:
+        if self._state is not None and self._reduction is not None:
+            state = self._state
+            reduction = self._reduction
+            state.wait_for_gradient_reduction(reduction)
+            self._state = None
+            self._reduction = None
 
 
 class UnshardHandle:

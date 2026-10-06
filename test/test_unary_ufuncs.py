@@ -24,6 +24,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     complex_types,
+    float8_types_and,
     floating_and_complex_types_and,
     floating_types_and,
     get_all_math_dtypes,
@@ -1562,6 +1563,19 @@ class TestUnaryUfuncs(TestCase):
                 RuntimeError, "does not support non-boolean outputs"
             ):
                 torch_op(t, out=out)
+
+    @dtypes(*float8_types_and(torch.float8_e8m0fnu))
+    def test_isinf_isfinite_float8(self, device, dtype):
+        # Float8_e5m2 is the only fp8 dtype that can encode infinity; for the
+        # rest isinf is trivially false and isfinite reduces to "not NaN".
+        vals = [1.0, inf, -inf, nan] if dtype is torch.float8_e5m2 else [1.0, nan]
+        ref = torch.tensor(vals, device=device)
+        t = ref.to(dtype)
+
+        self.assertEqual(t.isinf(), ref.isinf())
+        if dtype is not torch.float8_e8m0fnu:
+            # isfinite reports every Float8_e8m0fnu value as finite, NaN included
+            self.assertEqual(t.isfinite(), ref.isfinite())
 
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):

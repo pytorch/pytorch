@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
-from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -13,7 +12,13 @@ from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
 )
 from torch.distributed.fsdp import DataParallelMeshDims, fully_shard
-from torch.distributed.fsdp._fully_shard import _fsdp_collectives
+from torch.distributed.fsdp._fully_shard._all_gather_layout import (
+    _default_all_gather_output_fn,
+)
+from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_reduce_scatter_input_fn,
+)
+from torch.distributed.fsdp.experimental import DefaultAllGatherLayout
 from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
@@ -190,18 +195,25 @@ class TestFullyShardBlockShard(FSDPTestContinuous):
         # BlockShard all-gather and reduce-scatter use the dim-0 path, so no
         # chunk-cat reassembly or gradient reordering is needed.
         model, _ = self._init_models()
-        reassembled = []
-        orig_reassemble = _fsdp_collectives._reassemble_all_gather_outputs
+        outer_sizes, grad_shapes, shard_dims = [], [], []
 
-        def reassemble(shard_i_copy_infos, world_size):
-            reassembled.extend(shard_i_copy_infos)
-            return orig_reassemble(shard_i_copy_infos, world_size)
+        def output_fn(out, outputs, split_sizes, sizes, world_size):
+            outer_sizes.extend(sizes)
+            _default_all_gather_output_fn(out, outputs, split_sizes, sizes, world_size)
 
-        with mock.patch.object(
-            _fsdp_collectives, "_reassemble_all_gather_outputs", reassemble
-        ):
-            model(torch.randn(4, DIM, device=device_type)).sum().backward()
-        self.assertEqual(reassembled, [])
+        def reduce_scatter_input_fn(grads, dims, world_size):
+            grad_shapes.extend(grad.shape for grad in grads)
+            shard_dims.extend(dims)
+            return _default_reduce_scatter_input_fn(grads, dims, world_size)
+
+        model.experts.set_all_gather_layout(DefaultAllGatherLayout(output_fn))
+        model.experts.set_reduce_scatter_input_fn(reduce_scatter_input_fn)
+        model(torch.randn(4, DIM, device=device_type)).sum().backward()
+        self.assertEqual(set(outer_sizes), {1})
+        # Reduce-scatter input functions get each gradient as merged rows
+        self.assertEqual(shard_dims, [0, 0])
+        merged = [(NUM_EXPERTS * HIDDEN, DIM), (NUM_EXPERTS * DIM, HIDDEN)]
+        self.assertEqual(grad_shapes, merged)
 
     @skip_if_lt_x_gpu(4)
     def test_state_dict_round_trip(self):
