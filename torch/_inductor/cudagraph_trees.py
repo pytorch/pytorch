@@ -2498,6 +2498,10 @@ class CUDAGraphTreeManager:
 
         self.id_to_mode: dict[FunctionID, CompilationMode] = {}
         self.id_to_compile_id: dict[FunctionID, CompileId | None] = {}
+        # Whether the current run() executes in the tree (warmup, recording or
+        # replay) rather than falling back to the eager model. Only a forward
+        # run in the tree leaves outputs here that its backward still needs.
+        self.ran_in_tree = False
         self.has_live_user_visible_output_cloning = False
 
         # Note: [Backward Generation Handling]
@@ -2530,11 +2534,15 @@ class CUDAGraphTreeManager:
             raise AssertionError("Running CUDAGraph after shutdown")
         self.mode = self.id_to_mode[function_id]
         self.compile_id = self.id_to_compile_id[function_id]
+        self.ran_in_tree = False
         out = self._run(new_inputs, function_id)
 
-        # The forwards are only pending following invocation, not before
+        # The forwards are only pending following invocation, not before, and
+        # only if they ran in the tree: a forward run eagerly left nothing here
+        # for a new generation to overwrite before its backward.
         if self.mode == CompilationMode.FORWARD:
-            self.running_forwards_with_pending_backwards = True
+            if self.ran_in_tree:
+                self.running_forwards_with_pending_backwards = True
         elif self.mode == CompilationMode.BACKWARD:
             self.running_forwards_with_pending_backwards = False
 
@@ -2845,11 +2853,15 @@ class CUDAGraphTreeManager:
         self.roots = None  # type: ignore[assignment]
         self.current_node = None
 
+    def _note_tree_run(self, function_id: FunctionID) -> None:
+        self.ran_in_tree = True
+
     def record_function(
         self, new_inputs: list[InputType], function_id: FunctionID
     ) -> OutputType:
         if isinstance(self.current_node, CUDAWarmupNode):
             raise AssertionError("expected current_node to not be a CUDAWarmupNode")
+        self._note_tree_run(function_id)
         with torch._dynamo.callback_handler.install_callbacks(
             CallbackTrigger.CUDAGRAPH_RECORDING, str(self.compile_id)
         ):
@@ -2890,6 +2902,7 @@ class CUDAGraphTreeManager:
     def execute_node(
         self, node: CUDAGraphNode, new_inputs: list[InputType]
     ) -> OutputType:
+        self._note_tree_run(node.wrapped_function.id)
         self.current_node = node
         self.path_state = ExecutionState.EXECUTION
         self.update_generation()
@@ -2900,6 +2913,7 @@ class CUDAGraphTreeManager:
     ) -> OutputType:
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
+        self._note_tree_run(function_id)
         already_warm = function_id in self.warmed_up_functions
         func_name = self.get_func_name(function_id)
         if not already_warm:

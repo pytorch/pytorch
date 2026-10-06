@@ -5640,6 +5640,26 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertFalse(compiles.forward_is_cudagraph_partitioned)
 
+        def test_eager_fallback_alone_leaves_manager_free(self):
+            # A forward the tree runs eagerly leaves nothing pending, so a model
+            # whose forward falls back does not block later generations even
+            # though its uncaptured backward never signals.
+            weight = torch.randn(16, 16, device="cuda", requires_grad=True)
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=False)
+            def mutating(y, counter):
+                counter.add_(1)
+                return (y @ weight).sum()
+
+            compiled = torch.compile(mutating, mode="reduce-overhead")
+            counter = torch.zeros(1, device="cuda")
+            y = torch.randn(8, 16, device="cuda", requires_grad=True)
+            compiled(y, counter).backward()
+            self.assertEqual(counter.item(), 1)
+            manager = self.get_manager()
+            self.assertIsNotNone(manager)
+            self.assertFalse(manager.running_forwards_with_pending_backwards)
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):
             class Mod(torch.nn.Module):
