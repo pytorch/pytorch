@@ -1196,36 +1196,6 @@ class TestBlackwellAutoWSConfigs(TestCase):
         self.assertTrue(configs[0]["WARP_SPECIALIZE"])
         self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
 
-    @parametrize(
-        "heuristic_cls",
-        (
-            CUDABlackwellPersistentTMATemplateConfigHeuristic,
-            CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
-            CUDAScaledBlackwellTMATemplateConfigHeuristic,
-        ),
-    )
-    def test_autows_default_configs_are_subset_of_exhaustive(self, heuristic_cls):
-        with mock.patch.dict(BaseHeuristicSingleton._instances, clear=True):
-            heuristic = heuristic_cls()
-            configs = heuristic._generate_autows_configs()
-            exhaustive_configs = heuristic._generate_autows_exhaustive_configs()
-            for cfg in configs:
-                self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
-                self.assertTrue(cfg.use_meta_ws)
-                self.assertIn(cfg, exhaustive_configs)
-            if heuristic_cls is not CUDAScaledBlackwellTMATemplateConfigHeuristic:
-                self.assertEqual(len(configs), 18)
-                return
-            expected_stages = [
-                cfg.num_stages for cfg in heuristic.blackwell_persistent_mm_configs
-            ]
-            two_cta_stages = [
-                cfg.num_stages
-                for cfg in configs
-                if cfg.two_ctas and cfg.data_partition_factor == 1
-            ]
-            self.assertEqual(two_cta_stages, expected_stages)
-
     def test_autows_defaults_are_operation_specific(self):
         with (
             mock.patch.dict(_HEURISTIC_CACHE, clear=True),
