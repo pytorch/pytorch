@@ -5,19 +5,15 @@ name: Auto PR Triage
 # that plan. Separate calls can observe different moments, later changes are
 # ignored for this run, and stale effects are bounded and recoverable.
 
-# auto-pr-triage-request.yml admits entry events from the PR's base branch.
-# workflow_run always runs this workflow from main, so its code, its policy, and
-# the bedrock environment never depend on a ghstack base branch.
 on:
-  workflow_run:
-    workflows: [Auto PR Triage Request]
-    types: [completed]
+  pull_request_target:
+    types: [labeled, ready_for_review]
 
 # GitHub keeps one pending run per group, so a burst of label events would let
 # an unrelated label's run replace the pending `open source` run and then skip.
-# Only admitted requests share the per-PR group, keyed by the PR head.
+# Only entry events share the per-PR group.
 concurrency:
-  group: auto-pr-triage-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}-${{ github.event.workflow_run.conclusion == 'success' && 'entry' || github.run_id }}
+  group: auto-pr-triage-${{ github.event.pull_request.number }}-${{ ((github.event.action == 'labeled' && github.event.label.name == 'open source') || github.event.action == 'ready_for_review') && 'entry' || github.run_id }}
   cancel-in-progress: false
 
 env:
@@ -29,14 +25,17 @@ jobs:
   analyze:
     if: >-
       github.repository_owner == 'pytorch' &&
-      github.event.workflow_run.event == 'pull_request_target' &&
-      github.event.workflow_run.conclusion == 'success'
+      github.event.pull_request.state == 'open' &&
+      !github.event.pull_request.draft &&
+      ((github.event.action == 'labeled' &&
+        github.event.label.name == 'open source') ||
+       (github.event.action == 'ready_for_review' &&
+        contains(github.event.pull_request.labels.*.name, 'open source')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: bedrock
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
-      pr-number: ${{ steps.request.outputs.pr-number }}
       should-run: ${{ steps.history.outputs.should-run }}
       action-plan-json: ${{ steps.auto-pr-triage.outputs.action-plan-json }}
     permissions:
@@ -51,22 +50,12 @@ jobs:
           [[ "$AUTO_PR_TRIAGE_MODE" == "shadow" || "$AUTO_PR_TRIAGE_MODE" == "live" ]] || exit 1
           echo "mode=$AUTO_PR_TRIAGE_MODE" >> "$GITHUB_OUTPUT"
 
-      - name: Read the request
-        id: request
-        env:
-          REQUEST_TITLE: ${{ github.event.workflow_run.display_title }}
-        run: |
-          REQUEST_RE='^Auto PR Triage Request #([1-9][0-9]*) (labeled|ready_for_review)$'
-          [[ "$REQUEST_TITLE" =~ $REQUEST_RE ]] || exit 1
-          echo "pr-number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-          echo "event-action=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
-
       - name: Admit the label event or the first ready event after it
         id: history
         env:
-          EVENT_ACTION: ${{ steps.request.outputs.event-action }}
+          EVENT_ACTION: ${{ github.event.action }}
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ steps.request.outputs.pr-number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
         run: |
           [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || exit 1
@@ -145,7 +134,7 @@ jobs:
         uses: ./.github/actions/auto-pr-triage
         with:
           output-dir: ${{ steps.paths.outputs.output-dir }}
-          pr-number: ${{ steps.request.outputs.pr-number }}
+          pr-number: ${{ github.event.pull_request.number }}
           repository: ${{ github.repository }}
           run-attempt: ${{ github.run_attempt }}
           workflow-sha: ${{ github.sha }}
@@ -161,7 +150,7 @@ jobs:
           steps.auto-pr-triage.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: auto-pr-triage-human-review-${{ steps.request.outputs.pr-number }}-${{ github.run_attempt }}
+          name: auto-pr-triage-human-review-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
           path: |
             ${{ steps.paths.outputs.output-dir }}/action-failure.json
             ${{ steps.paths.outputs.output-dir }}/error.json
@@ -180,7 +169,7 @@ jobs:
           steps.auto-pr-triage.outcome != 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: auto-pr-triage-human-review-${{ steps.request.outputs.pr-number }}-${{ github.run_attempt }}
+          name: auto-pr-triage-human-review-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
           path: |
             ${{ steps.paths.outputs.output-dir }}/action-failure.json
             ${{ steps.paths.outputs.output-dir }}/error.json
@@ -215,7 +204,7 @@ jobs:
       - name: Apply Auto PR Triage plan
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ needs.analyze.outputs.pr-number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           ACTION_PLAN_JSON: ${{ needs.analyze.outputs.action-plan-json }}
@@ -246,7 +235,7 @@ jobs:
       - name: Record unexpected Auto PR Triage failure
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ needs.analyze.outputs.pr-number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
         run: |
           if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
