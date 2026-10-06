@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/ceil_div.h>
 #include <c10/macros/Macros.h>
 
 #include <cstdint>
@@ -13,18 +14,6 @@ enum class CublasGroupedScaleLayout : uint8_t {
   Vec128F32,
   Block128x128F32,
 };
-
-C10_HOST_DEVICE inline int64_t cublas_grouped_ceil_div(
-    int64_t value,
-    int64_t divisor) {
-  return (value + divisor - 1) / divisor;
-}
-
-C10_HOST_DEVICE inline int64_t cublas_grouped_round_up(
-    int64_t value,
-    int64_t multiple) {
-  return cublas_grouped_ceil_div(value, multiple) * multiple;
-}
 
 C10_HOST_DEVICE inline bool cublas_grouped_scale_uses_pointer_array(
     CublasGroupedScaleLayout layout) {
@@ -53,13 +42,13 @@ C10_HOST_DEVICE inline int64_t cublas_grouped_scale_size_bytes(
     case CublasGroupedScaleLayout::PerBatchScalar:
       return sizeof(float);
     case CublasGroupedScaleLayout::Vec16UE4M3:
-      return cublas_grouped_round_up(outer, 128) *
-          cublas_grouped_round_up(cublas_grouped_ceil_div(inner, 16), 4);
+      return at::round_up(outer, int64_t{128}) *
+          at::round_up(at::ceil_div(inner, int64_t{16}), int64_t{4});
     case CublasGroupedScaleLayout::Vec128F32:
-      return outer * cublas_grouped_ceil_div(inner, 128) * sizeof(float);
+      return outer * at::ceil_div(inner, int64_t{128}) * sizeof(float);
     case CublasGroupedScaleLayout::Block128x128F32:
-      return cublas_grouped_round_up(cublas_grouped_ceil_div(inner, 128), 4) *
-          cublas_grouped_ceil_div(outer, 128) * sizeof(float);
+      return at::round_up(at::ceil_div(inner, int64_t{128}), int64_t{4}) *
+          at::ceil_div(outer, int64_t{128}) * sizeof(float);
   }
   return 0;
 }
