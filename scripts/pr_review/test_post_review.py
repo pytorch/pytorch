@@ -77,8 +77,11 @@ class FakeGitHub(GitHub):
         labels=(),
         reviews=(),
         refuse_inline=False,
+        replies=(),
     ):
         super().__init__("token", "o/r")
+        # Ids of review comments someone has replied to.
+        self.replies = set(replies)
         self.head = head
         self.labels = [{"name": n} for n in labels]
         self.reviews = list(reviews)
@@ -86,12 +89,24 @@ class FakeGitHub(GitHub):
         self.refuse_inline = refuse_inline
         self.calls: list[tuple] = []
 
-    def request(self, method, path, body=None):
+    def request(self, method, path, body=None, idempotent=None):
         self.calls.append((method, path, body))
         if method == "GET" and path == "/repos/o/r/pulls/1":
             return {"head": {"sha": self.head}}
         if method == "GET" and path.startswith("/repos/o/r/issues/1/labels"):
             return self.labels
+        if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments?"):
+            pr_comments = [
+                {"id": 10_000 + i, "in_reply_to_id": c}
+                for i, c in enumerate(self.replies)
+            ]
+            return pr_comments if page(path) == 1 else []
+        if method == "PUT" and path.endswith("/dismissals"):
+            rid = int(path.split("/")[7])
+            for r in self.reviews:
+                if r["id"] == rid:
+                    r["state"] = "DISMISSED"
+            return {}
         if method == "GET" and re.match(
             r"/repos/o/r/pulls/1/reviews/\d+/comments", path
         ):
@@ -111,6 +126,28 @@ class FakeGitHub(GitHub):
             }
             self.reviews.append(new)
             return new
+        if method == "POST" and path == "/graphql" and "reviewThreads" in body["query"]:
+            nodes = [
+                {
+                    "id": f"T{c['id']}",
+                    "isResolved": False,
+                    "comments": {"nodes": [{"databaseId": c["id"]}]},
+                }
+                for cs in self.review_comments.values()
+                for c in cs
+            ]
+            return {
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                "nodes": nodes,
+                            }
+                        }
+                    }
+                }
+            }
         if method == "POST" and path == "/graphql":
             return {"data": {}}
         return None
@@ -308,7 +345,7 @@ class TestWhatIsPosted(unittest.TestCase):
 
     def test_a_refused_request_changes_falls_back_to_a_comment(self):
         class NoRequestChanges(FakeGitHub):
-            def request(self, method, path, body=None):
+            def request(self, method, path, body=None, idempotent=None):
                 if body and body.get("event") == "REQUEST_CHANGES":
                     self.calls.append((method, path, body))
                     raise GitHubError(422, "cannot request changes")
@@ -409,7 +446,7 @@ class TestStandingChangeRequestsAreWithdrawn(unittest.TestCase):
 
     def test_a_newer_runs_request_is_not_withdrawn_by_a_failed_run(self):
         class NewerRunPosts(FakeGitHub):
-            def request(self, method, path, body=None):
+            def request(self, method, path, body=None, idempotent=None):
                 out = super().request(method, path, body)
                 if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews?"):
                     self.head = "b" * 40  # the newer head's review is in this list
@@ -428,6 +465,190 @@ class TestStandingChangeRequestsAreWithdrawn(unittest.TestCase):
         go(gh)
         self.assertEqual(self.dismissed(gh), ["5"])
         self.assertEqual(gh.posted(), [])
+
+
+class TestACleanVerdictLeavesNoChangeRequest(unittest.TestCase):
+    def clean(self):
+        return row(verdict="ready_for_human_review", findings=[])
+
+    def test_a_failed_takedown_dismissal_is_retried_by_the_clean_check(self):
+        class FailOnce(FakeGitHub):
+            failed = False
+
+            def request(self, method, path, body=None, idempotent=None):
+                if path.endswith("/dismissals") and not self.failed:
+                    self.failed = True
+                    self.calls.append((method, path, body))
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = FailOnce(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        self.assertEqual(go(gh, self.clean()), 0)
+        self.assertEqual(gh.reviews[0]["state"], "DISMISSED")
+
+    def test_a_request_that_cannot_be_dismissed_fails_the_step(self):
+        class NeverDismiss(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if path.endswith("/dismissals"):
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = NeverDismiss(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        self.assertEqual(go(gh, self.clean()), 1)
+
+    def test_a_failed_post_still_withdraws_on_a_clean_verdict(self):
+        class PostDown(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "POST" and path.endswith("/reviews"):
+                    raise GitHubError(500, "down")
+                return super().request(method, path, body)
+
+        gh = PostDown(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        self.assertEqual(go(gh, self.clean()), 0)
+        self.assertEqual(gh.reviews[0]["state"], "DISMISSED")
+
+    def test_a_failed_post_and_failed_dismissal_still_fail_the_step(self):
+        class AllDown(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "POST" and path.endswith("/reviews"):
+                    raise GitHubError(500, "down")
+                if path.endswith("/dismissals"):
+                    raise GitHubError(403, "forbidden")
+                return super().request(method, path, body)
+
+        gh = AllDown(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        self.assertEqual(go(gh, self.clean()), 1)
+
+    def test_a_newer_runs_request_on_the_same_commit_is_left_alone(self):
+        newer = old_review(1000, state="CHANGES_REQUESTED", commit=SHA)
+        gh = FakeGitHub(reviews=[newer])
+        self.assertEqual(go(gh, self.clean()), 0)
+        self.assertEqual(newer["state"], "CHANGES_REQUESTED")
+
+    def test_a_head_that_moves_before_the_final_check_reports_nothing(self):
+        class NoDismissThenMove(FakeGitHub):
+            lists = 0
+
+            def request(self, method, path, body=None, idempotent=None):
+                if path.endswith("/dismissals"):
+                    raise GitHubError(403, "forbidden")
+                out = super().request(method, path, body)
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews?"):
+                    self.lists += 1
+                    if self.lists == 3:  # the final check's listing
+                        self.head = "b" * 40
+                return out
+
+        gh = NoDismissThenMove(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        self.assertEqual(go(gh, self.clean()), 0)
+
+    def test_a_changes_requested_verdict_does_not_run_the_clean_check(self):
+        gh = FakeGitHub(reviews=[old_review(5, state="CHANGES_REQUESTED")])
+        self.assertEqual(go(gh), 0)
+
+
+class TestCleanupFailuresKeepTheNewReviewId(unittest.TestCase):
+    def test_a_failed_listing_after_posting_still_clears_older_requests(self):
+        class ListingDown(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments?"):
+                    raise GitHubError(503, "unavailable")
+                return super().request(method, path, body)
+
+        old = old_review(5, state="CHANGES_REQUESTED", commit=SHA)
+        gh = ListingDown(reviews=[old])
+        clean = row(verdict="ready_for_human_review", findings=[])
+        self.assertEqual(go(gh, clean), 0)
+        self.assertEqual(old["state"], "DISMISSED")
+
+
+class TestRepliedThreadsAreKept(unittest.TestCase):
+    def test_replies_are_read_again_for_each_earlier_review(self):
+        gh = FakeGitHub(reviews=[old_review(5), old_review(6)])
+        go(gh)
+        reads = [c for c in gh.calls if c[1].startswith("/repos/o/r/pulls/1/comments?")]
+        self.assertEqual(len(reads), 2)
+
+    def test_a_replied_comment_is_resolved_not_deleted(self):
+        gh = FakeGitHub(reviews=[old_review(5), old_review(6)], replies=[50])
+        go(gh)
+        writes = gh.writes()
+        self.assertNotIn(("DELETE", "/repos/o/r/pulls/comments/50", None), writes)
+        self.assertIn(("DELETE", "/repos/o/r/pulls/comments/60", None), writes)
+        resolves = [
+            w[2]["variables"]
+            for w in writes
+            if w[1] == "/graphql" and "resolveReviewThread" in w[2]["query"]
+        ]
+        self.assertEqual(resolves, [{"id": "T50"}])
+
+
+class TestRetries(unittest.TestCase):
+    def test_a_rate_limit_waits_as_asked_and_a_plain_403_does_not_retry(self):
+        import email.message
+        import urllib.error
+
+        def http_error(code, headers):
+            msg = email.message.Message()
+            for k, v in headers.items():
+                msg[k] = v
+            return urllib.error.HTTPError("u", code, "x", msg, None)
+
+        ok = mock.MagicMock()
+        ok.__enter__.return_value.read.return_value = b"{}"
+        gh = GitHub("token", "o/r")
+        with mock.patch("post_review._sleep") as sleep:
+            with mock.patch(
+                "urllib.request.urlopen",
+                side_effect=[http_error(403, {"Retry-After": "30"}), ok],
+            ):
+                self.assertEqual(gh.request("PUT", "/x", {}), {})
+            sleep.assert_called_once_with(30)
+            with mock.patch(
+                "urllib.request.urlopen", side_effect=[http_error(403, {}), ok]
+            ) as urlopen:
+                with self.assertRaises(GitHubError):
+                    gh.request("PUT", "/x", {})
+                self.assertEqual(urlopen.call_count, 1)
+
+    def test_graphql_errors_inside_a_200_are_retried(self):
+        gh = GitHub("token", "o/r")
+        answers = [{"errors": [{"type": "INTERNAL"}]}, {"data": {"ok": 1}}]
+        with mock.patch("post_review._sleep"):
+            with mock.patch.object(gh, "request", side_effect=answers) as request:
+                self.assertEqual(gh.graphql("query", {}), {"ok": 1})
+        self.assertEqual(request.call_count, 2)
+
+    def test_graphql_gives_up_after_the_retries(self):
+        gh = GitHub("token", "o/r")
+        with mock.patch("post_review._sleep"):
+            with mock.patch.object(
+                gh, "request", return_value={"errors": [{"type": "FORBIDDEN"}]}
+            ) as request:
+                with self.assertRaises(GitHubError):
+                    gh.graphql("query", {})
+        self.assertEqual(request.call_count, 3)
+
+    def test_idempotent_calls_retry_and_review_posts_do_not(self):
+        import urllib.error
+
+        ok = mock.MagicMock()
+        ok.__enter__.return_value.read.return_value = b"{}"
+        gh = GitHub("token", "o/r")
+        with mock.patch("post_review._sleep"):
+            with mock.patch(
+                "urllib.request.urlopen",
+                side_effect=[urllib.error.URLError("reset"), ok],
+            ) as urlopen:
+                self.assertEqual(gh.request("GET", "/x"), {})
+                self.assertEqual(urlopen.call_count, 2)
+            with mock.patch(
+                "urllib.request.urlopen",
+                side_effect=[urllib.error.URLError("reset"), ok],
+            ) as urlopen:
+                with self.assertRaises(GitHubError):
+                    gh.request("POST", "/repos/o/r/pulls/1/reviews", {})
+                self.assertEqual(urlopen.call_count, 1)
 
 
 class TestTheEarlierReviewIsReplaced(unittest.TestCase):
@@ -462,7 +683,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
 
     def test_a_failed_dismissal_leaves_the_review_whole(self):
         class NoDismiss(FakeGitHub):
-            def request(self, method, path, body=None):
+            def request(self, method, path, body=None, idempotent=None):
                 if path.endswith("/dismissals"):
                     self.calls.append((method, path, body))
                     raise GitHubError(403, "forbidden")
@@ -511,7 +732,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
 
     def test_one_failed_takedown_does_not_stop_the_others(self):
         class Flaky(FakeGitHub):
-            def request(self, method, path, body=None):
+            def request(self, method, path, body=None, idempotent=None):
                 if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews/8/"):
                     raise GitHubError(503, "unavailable")
                 return super().request(method, path, body)
@@ -522,7 +743,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
 
     def test_a_head_that_moves_while_posting_retracts_this_review(self):
         class Moves(FakeGitHub):
-            def request(self, method, path, body=None):
+            def request(self, method, path, body=None, idempotent=None):
                 out = super().request(method, path, body)
                 if method == "POST" and path == "/repos/o/r/pulls/1/reviews":
                     self.head = "b" * 40  # the newer commit's run already posted
@@ -538,7 +759,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
         reviews.append(old_review(101))
 
         class Paged(FakeGitHub):
-            def request(self, method, path, body=None):
+            def request(self, method, path, body=None, idempotent=None):
                 if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews?"):
                     self.calls.append((method, path, body))
                     return reviews[(page(path) - 1) * 100 : page(path) * 100]
@@ -550,7 +771,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
 
     def test_a_failed_post_leaves_the_earlier_review_alone(self):
         class Down(FakeGitHub):
-            def request(self, method, path, body=None):
+            def request(self, method, path, body=None, idempotent=None):
                 if method == "POST" and path.endswith("/reviews"):
                     raise GitHubError(500, "down")
                 return super().request(method, path, body)
@@ -566,7 +787,8 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
 class TestTransportFailuresAreGitHubErrors(unittest.TestCase):
     """The per-review isolation catches GitHubError, so nothing else may escape."""
 
-    def test_connection_failure_and_bad_json(self):
+    @mock.patch("post_review._sleep")
+    def test_connection_failure_and_bad_json(self, _sleep):
         import urllib.error
         from unittest import mock
 

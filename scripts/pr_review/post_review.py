@@ -26,8 +26,10 @@ its own accounts, so a review body line starting `@pytorchbot merge` would run.
 The sanitizer already defuses every mention in model prose; `defuse_bot_commands`
 is the last pass over the text this script assembles, paths and framing included.
 
-Never fails the job: the telemetry row is already written, and a red publish job
-on every GitHub hiccup would teach people to ignore it. Problems are `::warning::`.
+An API failure never fails the job: the telemetry row is already written, and a
+red publish job on every GitHub hiccup would teach people to ignore it. Problems
+are `::warning::`, and idempotent calls are retried. The one exit 1 is a change
+request still standing after a clean verdict, which nothing else would clear.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -58,6 +61,9 @@ from extract_verdict import (
 MARKER = "<!-- hardened-pr-review -->"
 SUPERSEDED_MARKER = "<!-- hardened-pr-review superseded -->"
 DEFAULT_AUTHOR = "github-actions[bot]"
+RETRIES = 3
+MAX_WAIT = 60  # longest rate-limit wait honoured; the job has a 10-minute budget
+_sleep = time.sleep
 API = "https://api.github.com"
 
 # pytorch-bot's command pattern is `^ *@pytorch(merge|)bot .+$`. Matched more
@@ -87,9 +93,29 @@ def unescape_path(path: str) -> str:
 
 
 class GitHubError(Exception):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, retry_after: int | None = None):
         super().__init__(f"HTTP {status}: {message}")
         self.status = status
+        # Seconds GitHub asked us to wait; set only on a rate-limit response.
+        self.retry_after = retry_after
+
+
+def _retry_after(headers) -> int | None:
+    """The wait a rate-limit response asks for, or None if it is not one."""
+    if headers is None:
+        return None
+    value = headers.get("Retry-After")
+    if value is not None:
+        try:
+            return max(0, int(value))
+        except ValueError:
+            return None
+    if headers.get("X-RateLimit-Remaining") == "0":
+        try:
+            return max(0, int(headers.get("X-RateLimit-Reset", "")) - int(time.time()))
+        except ValueError:
+            return None
+    return None
 
 
 class GitHub:
@@ -99,7 +125,30 @@ class GitHub:
         self.token = token
         self.repo = repo
 
-    def request(self, method: str, path: str, body: dict | None = None):
+    def request(
+        self, method: str, path: str, body: dict | None = None, idempotent=None
+    ):
+        """One API call. Idempotent calls are retried on transient failures.
+
+        GET, PUT and DELETE are idempotent, and so is every GraphQL call made
+        here; creating a review is not, so a failed POST is never repeated.
+        """
+        if idempotent is None:
+            idempotent = method in ("GET", "PUT", "DELETE")
+        for attempt in range(RETRIES if idempotent else 1):
+            try:
+                return self._once(method, path, body)
+            except GitHubError as exc:
+                # A secondary rate limit arrives as a 403 carrying Retry-After;
+                # a plain 403 is a permission answer and is not retried.
+                throttled = exc.retry_after is not None
+                transient = exc.status in (0, 429) or exc.status >= 500 or throttled
+                if not transient or attempt == RETRIES - 1 or not idempotent:
+                    raise
+                wait = min(exc.retry_after, MAX_WAIT) if throttled else 0
+                _sleep(max(2**attempt, wait))
+
+    def _once(self, method: str, path: str, body: dict | None):
         url = path if path.startswith("https://") else f"{API}{path}"
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method=method)
@@ -116,7 +165,7 @@ class GitHub:
                 detail = exc.read().decode("utf-8", "replace")[:500]
             except (OSError, http.client.HTTPException):
                 detail = repr(exc)
-            raise GitHubError(exc.code, detail) from exc
+            raise GitHubError(exc.code, detail, _retry_after(exc.headers)) from exc
         # URLError, timeouts, resets and truncated bodies carry no HTTP status.
         # They must still be a GitHubError, which is what callers isolate.
         except (OSError, http.client.HTTPException) as exc:
@@ -127,10 +176,21 @@ class GitHub:
             raise GitHubError(0, f"unparsable response: {exc}") from exc
 
     def graphql(self, query: str, variables: dict) -> dict:
-        out = self.request("POST", "/graphql", {"query": query, "variables": variables})
-        if not isinstance(out, dict) or out.get("errors"):
-            raise GitHubError(200, json.dumps((out or {}).get("errors"))[:500])
-        return out.get("data") or {}
+        """One GraphQL call, retried like an idempotent REST call.
+
+        GraphQL reports most failures inside an HTTP 200, which `request`'s
+        retry never sees; every query and mutation sent here is idempotent.
+        """
+        for attempt in range(RETRIES):
+            out = self.request(
+                "POST", "/graphql", {"query": query, "variables": variables}, True
+            )
+            if isinstance(out, dict) and not out.get("errors"):
+                return out.get("data") or {}
+            if attempt == RETRIES - 1:
+                raise GitHubError(200, json.dumps((out or {}).get("errors"))[:500])
+            _sleep(2**attempt)
+        return {}
 
     def paged(self, path: str) -> list:
         items: list = []
@@ -422,12 +482,20 @@ def take_down(gh: GitHub, pr: int, review: dict, new_url: str) -> None:
             # publication retries it.
             warn(f"could not dismiss review {rid}; leaving it in place: {exc}")
             return
+    # Read per review, right before its comments, so a reply posted while
+    # earlier reviews were being taken down is seen.
+    replies = replied_to(gh, pr)
     for c in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}/comments"):
         try:
-            gh.request("DELETE", f"/repos/{gh.repo}/pulls/comments/{c['id']}")
+            if c["id"] in replies:
+                # Someone answered this finding. Deleting it would leave their
+                # reply answering nothing, so the thread stays and is resolved.
+                resolve_thread(gh, pr, c["id"])
+            else:
+                gh.request("DELETE", f"/repos/{gh.repo}/pulls/comments/{c['id']}")
         except GitHubError as exc:
             if exc.status != 404:
-                warn(f"could not delete comment {c['id']} of review {rid}: {exc}")
+                warn(f"could not take down comment {c['id']} of review {rid}: {exc}")
     body = f"{SUPERSEDED_MARKER}\nSuperseded by a newer automated review: {new_url}"
     try:
         if not review.get("body", "").startswith(SUPERSEDED_MARKER):
@@ -440,14 +508,78 @@ def take_down(gh: GitHub, pr: int, review: dict, new_url: str) -> None:
         warn(f"could not mark review {rid} superseded: {exc}")
 
 
+def replied_to(gh: GitHub, pr: int) -> set[int]:
+    """Ids of the PR's review comments that have at least one reply."""
+    comments = gh.paged(f"/repos/{gh.repo}/pulls/{pr}/comments")
+    return {c["in_reply_to_id"] for c in comments if c.get("in_reply_to_id")}
+
+
+_THREADS = """query($o: String!, $r: String!, $n: Int!, $c: String) {
+  repository(owner: $o, name: $r) { pullRequest(number: $n) {
+    reviewThreads(first: 100, after: $c) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id isResolved comments(first: 1) { nodes { databaseId } } }
+    } } } }"""
+_RESOLVE = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { clientMutationId } }"
+
+
+def resolve_thread(gh: GitHub, pr: int, comment_id: int) -> None:
+    """Resolve the review thread that `comment_id` starts, if it is open."""
+    owner, name = gh.repo.split("/")
+    cursor = None
+    while True:
+        data = gh.graphql(_THREADS, {"o": owner, "r": name, "n": pr, "c": cursor})
+        threads = data["repository"]["pullRequest"]["reviewThreads"]
+        for node in threads["nodes"]:
+            first = node["comments"]["nodes"]
+            if first and first[0]["databaseId"] == comment_id:
+                if not node["isResolved"]:
+                    gh.graphql(_RESOLVE, {"id": node["id"]})
+                return
+        if not threads["pageInfo"]["hasNextPage"]:
+            return
+        cursor = threads["pageInfo"]["endCursor"]
+
+
 def head_sha(gh: GitHub, pr: int):
     return (
         (gh.request("GET", f"/repos/{gh.repo}/pulls/{pr}") or {}).get("head") or {}
     ).get("sha")
 
 
-def withdraw(gh: GitHub, pr: int, author: str, message: str, keep_commit=None):
-    """Dismiss this workflow's standing change requests, except on `keep_commit`.
+def standing_requests(gh: GitHub, pr: int, author: str) -> list[dict]:
+    """This workflow's reviews that still show changes requested."""
+    return [
+        r
+        for r in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
+        if r.get("state") == "CHANGES_REQUESTED"
+        and (r.get("user") or {}).get("login") == author
+        and (r.get("body") or "").startswith((MARKER, SUPERSEDED_MARKER))
+    ]
+
+
+def in_scope(review: dict, keep_commit=None, older_than=None) -> bool:
+    """Whether a standing request is one this run may take back.
+
+    `keep_commit` spares requests on that commit; `older_than` spares any
+    review at or above that id, so an overlapping run's newer request on the
+    same commit is never touched.
+    """
+    if keep_commit and review.get("commit_id") == keep_commit:
+        return False
+    return older_than is None or review["id"] < older_than
+
+
+def withdraw(
+    gh: GitHub,
+    pr: int,
+    author: str,
+    message: str,
+    head=None,
+    keep_commit=None,
+    older_than=None,
+):
+    """Dismiss this workflow's standing change requests that are in scope.
 
     A REQUEST_CHANGES review stays until it is dismissed, and only a write user
     can dismiss it, so a request the pipeline will not replace has to be taken
@@ -455,16 +587,13 @@ def withdraw(gh: GitHub, pr: int, author: str, message: str, keep_commit=None):
     """
     standing = [
         r
-        for r in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
-        if r.get("state") == "CHANGES_REQUESTED"
-        and (r.get("user") or {}).get("login") == author
-        and (r.get("body") or "").startswith((MARKER, SUPERSEDED_MARKER))
-        and not (keep_commit and r.get("commit_id") == keep_commit)
+        for r in standing_requests(gh, pr, author)
+        if in_scope(r, keep_commit, older_than)
     ]
     # LIST, THEN RE-READ THE HEAD. A run for a newer head may have posted a
     # change request on that head; if it did so before this read, the head has
     # moved and nothing is dismissed. If it posts after, it is not in the list.
-    if keep_commit and standing and head_sha(gh, pr) != keep_commit:
+    if head and standing and head_sha(gh, pr) != head:
         print("head moved while withdrawing; leaving change requests alone")
         return
     for r in standing:
@@ -504,15 +633,90 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
             author,
             f"Withdrawn: the automated review of {sha[:12]} did not complete, "
             "and this request was about an earlier commit.",
+            head=sha,
             keep_commit=sha,
         )
         return 0
     verdict, summary, findings = review
+    clean = verdict == "ready_for_human_review"
+    try:
+        new_id = publish(gh, pr, sha, author, verdict, summary, findings)
+    except GitHubError as exc:
+        if not clean:
+            raise
+        warn(f"automated review not posted: {exc}")
+        # No review of ours to measure age against: spare this commit's
+        # requests, which an overlapping run may have just posted.
+        return clear_after_clean(gh, pr, sha, author, keep_commit=sha)
+    if new_id is RETRACTED or not clean:
+        return 0
+    if new_id is None:
+        return clear_after_clean(gh, pr, sha, author, keep_commit=sha)
+    return clear_after_clean(gh, pr, sha, author, older_than=new_id)
+
+
+def clear_after_clean(
+    gh: GitHub, pr: int, sha: str, author: str, keep_commit=None, older_than=None
+) -> int:
+    """After a clean verdict, no earlier change request from this workflow may remain.
+
+    A clean verdict moves the PR to `ready for review`, after which ordinary
+    pushes trigger no review, so nothing would come back to withdraw a request
+    left standing by a failed post or dismissal. Withdraw them now; if one
+    still stands, fail the step naming it, so it reaches a maintainer. Only
+    requests in scope (see `in_scope`) count, both times.
+    """
+    withdraw(
+        gh,
+        pr,
+        author,
+        f"Withdrawn: the automated review of {sha[:12]} found nothing blocking.",
+        head=sha,
+        keep_commit=keep_commit,
+        older_than=older_than,
+    )
+    left = [
+        r
+        for r in standing_requests(gh, pr, author)
+        if in_scope(r, keep_commit, older_than)
+    ]
+    # Same order as `withdraw`: list, then re-read the head. A moved head means
+    # a newer run owns the PR now, and any request it posted is not stale.
+    if not left or head_sha(gh, pr) != sha:
+        return 0
+    for r in left:
+        print(
+            f"::error::change request {r.get('html_url', r['id'])} still stands "
+            "after a clean verdict; dismiss it by hand"
+        )
+    return 1 if left else 0
+
+
+RETRACTED = object()
+
+
+def publish(gh, pr, sha, author, verdict, summary, findings):
+    """Post the review and take earlier ones down.
+
+    Returns the new review's id, None if GitHub returned none, or RETRACTED
+    when the head moved while posting and the review was taken back.
+    """
     new = post(gh, pr, sha, verdict, summary, findings[:MAX_FINDINGS])
     print(f"posted automated review {new.get('id')}: {new.get('html_url')}")
     if not isinstance(new.get("id"), int):
         warn("GitHub returned no review id; leaving earlier reviews in place")
-        return 0
+        return None
+    # Once the review exists, its id is what scopes the clean-verdict check,
+    # so nothing after this point may lose it by raising.
+    try:
+        return replace_earlier(gh, pr, sha, author, new)
+    except GitHubError as exc:
+        warn(f"posted review {new['id']}, but cleanup failed: {exc}")
+        return new["id"]
+
+
+def replace_earlier(gh, pr, sha, author, new):
+    """Retract `new` if the head moved, else take earlier reviews down."""
     # CHECKED AGAIN AFTER POSTING. If the head moved between the check above and
     # the post, a run for the newer commit may already have published, with a
     # SMALLER review id, and the id rule below would take the current review
@@ -523,7 +727,7 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
     if current != sha:
         print(f"head moved {sha} -> {current} while posting; retracting this review")
         take_down(gh, pr, new, f"https://github.com/{gh.repo}/pull/{pr}")
-        return 0
+        return RETRACTED
     # Newest first, and each one isolated: the review being replaced matters
     # more than retrying leftovers on long-superseded ones, and one failed call
     # must not stop the rest.
@@ -533,7 +737,7 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
             take_down(gh, pr, old, new.get("html_url", ""))
         except GitHubError as exc:
             warn(f"could not take down review {old['id']}: {exc}")
-    return 0
+    return new["id"]
 
 
 def main() -> int:
@@ -551,7 +755,7 @@ def main() -> int:
             os.environ.get("OPT_OUT_LABEL", "no automated review"),
             os.environ.get("REVIEW_AUTHOR", DEFAULT_AUTHOR),
         )
-    except Exception as exc:  # noqa: BLE001 - never fail the publish job
+    except Exception as exc:  # noqa: BLE001 - an API failure never fails the job
         warn(f"automated review not posted: {exc!r}")
         return 0
 
