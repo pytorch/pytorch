@@ -215,7 +215,7 @@ jobs:
       - name: Setup Linux rootless
         if: inputs.rootless-setup
         id: setup-linux-rootless
-        uses: arjkesh/pytorch/.github/actions/setup-linux@975ec45c34432277556f6521b22f5aa3efd7abad
+        uses: ./.github/actions/setup-linux
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}

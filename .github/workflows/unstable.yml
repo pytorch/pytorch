@@ -90,14 +90,11 @@ jobs:
       - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.build-environment }}
-      # This runner uses the public equivalent of the build's CI image.
       docker-image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
-      force-keep-going: true
       force-no-td: true
       python-version: "3.12"
       rootless-setup: true
       test-matrix: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.test-matrix }}
-      tests-to-include: inductor/test_nv_universal_gemm python_native/test_native_aot
       timeout-minutes: 120
       compiler: gcc13
       cuda-version: "13.2"
