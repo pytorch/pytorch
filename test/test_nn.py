@@ -10212,6 +10212,22 @@ class TestNNDeviceType(NNTestCase):
                         mask = mask.cuda()
                     self._test_masked_softmax_helper(input, dim, mask, mask_type)
 
+    @skipMPS  # aten::_masked_softmax is not implemented for MPS
+    def test_masked_softmax_empty_dim(self, device):
+        # https://github.com/pytorch/pytorch/issues/199937
+        # CPU host_softmax used GRAIN_SIZE / dim_size and crashed for dim_size == 0.
+        cases = [
+            ((2, 0), -1),
+            ((0, 3), 0),
+        ]
+        for shape, dim in cases:
+            inp = torch.randn(shape, device=device, requires_grad=True)
+            mask = torch.zeros(shape, dtype=torch.bool, device=device)
+            out = torch._masked_softmax(inp, mask, dim)
+            self.assertEqual(out.shape, shape)
+            out.sum().backward()
+            self.assertEqual(inp.grad, torch.zeros(shape, device=device))
+
     # In this test, the forward pass is expected to produce nan's because when dim=0, we only have unspecified values
     def test_masked_softmax_forward_with_nans(self, device):
         dim = 0

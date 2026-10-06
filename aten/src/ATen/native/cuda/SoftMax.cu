@@ -1505,6 +1505,12 @@ Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const std:
   // If mask_type == 2, then mask_.sizes() must equal input_.sizes()
   TORCH_CHECK(mask_.sizes() == input_.sizes() || is_BxT_mask || is_TxT_mask, "Mask shape should match input. mask: ", mask_.sizes(), " input: ", input_.sizes());
 
+  // Empty inputs make softmax_elements == 0, so batch_count = numel /
+  // softmax_elements divides by zero before the kernel. See #199937.
+  if (input_.numel() == 0) {
+    return output;
+  }
+
   auto input = input_.dim() == 0 ? input_.view(1) : input_;
   auto mask = mask_.dim() == 0 ? mask_.view(1) : mask_;
   if (is_TxT_mask) {
