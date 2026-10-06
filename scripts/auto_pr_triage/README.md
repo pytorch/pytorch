@@ -135,10 +135,17 @@ input step logs each skipped line; a skipped line's owners get no provenance.
   earlier shadow runs are not handled state.
 - **Rerunning.** Later PR activity never triggers another run. To reevaluate a
   PR, remove its outcome labels (`triaged` and `bot-triaged`, with `missing
-  actionable issue` if present, or `bot-triage-error`) and rerun all jobs;
-  rerunning only the apply job is rejected because its plan may be stale. A
-  rerun never marks a PR as missing an actionable issue: only the first attempt
-  can, and a rerun leaves an unadmitted PR for a human.
+  actionable issue` if present, or `bot-triage-error`), then remove and re-add
+  `open source`. Every `open source` label event starts a new run; while an
+  outcome label is present, the run is a no-op. Rerunning all jobs of an
+  earlier run also works, but rerunning only the apply job is rejected because
+  its plan may be stale. A rerun never marks a PR as missing an actionable
+  issue: only the first attempt of a run can, and a rerun leaves an unadmitted
+  PR for a human.
+- **Opting out.** A PR labeled `no automated triage` is left as is: a run that
+  starts while the label is present is a no-op and the PR stays in the manual
+  triage queue. Adding the label mid-run does not cancel that run. To triage
+  the PR later, remove the label and follow the rerunning steps above.
 - **Failures in shadow mode** are visible only as a failed workflow run and its
   artifacts. In live mode the error-reporting job adds `bot-triage-error` on a
   best-effort basis.
