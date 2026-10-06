@@ -6,6 +6,7 @@ tensors and modules.
 import numpy as np
 import torch
 from torch import Tensor
+from torch.nn.functional import SwizzleType
 from contextlib import contextmanager
 from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS, IS_ARM64
 
@@ -653,13 +654,34 @@ def _e8m0_scale_to_reciprocal_fp32(
     ).to(torch.uint8)
     return reciprocal_e8m0_biased.view(torch.float8_e8m0fnu).to(torch.float32)
 
+
+# RCEIL
+def _to_mx_rceil(
+    data_hp: torch.Tensor,
+    max_abs: torch.Tensor,
+    max_pos: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # copied from
+    # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/torchao/prototype/mx_formats/mx_tensor.py#L160
+
+    descale = max_abs * (1.0 / max_pos)
+    exponent = _f32_to_e8m0_rceil(descale)
+    rcp_fp32 = _e8m0_scale_to_reciprocal_fp32(exponent)
+    # Scale the data
+    data_lp = data_hp * rcp_fp32
+    return exponent, data_lp
+
+
 # This function is extracted from https://github.com/pytorch/ao/blob/v0.12.0/torchao/prototype/mx_formats/mx_tensor.py#L142
 def to_mxfp(
     data_hp: torch.Tensor,
     block_size: int = 32,
     format: str = "mxfp8",
+    swizzle_type: SwizzleType = SwizzleType.NO_SWIZZLE,
 ):
-    if data_hp.dtype not in (torch.bfloat16, torch.float):
+    if swizzle_type not in (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4):
+        raise ValueError(f"unsupported MXFP swizzle type: {swizzle_type}")
+    if data_hp.dtype not in (torch.bfloat16, torch.float16, torch.float):
         raise AssertionError(f"{data_hp.dtype} is not supported yet")
     if data_hp.shape[-1] % block_size != 0:
         raise AssertionError(
@@ -685,22 +707,6 @@ def to_mxfp(
         F4E2M1_MAX = 6.
         max_pos = F4E2M1_MAX
 
-    # RCEIL
-    def _to_mx_rceil(
-        data_hp: torch.Tensor,
-        max_abs: torch.Tensor,
-        max_pos: float,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        # copied from
-        # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/torchao/prototype/mx_formats/mx_tensor.py#L160
-
-        descale = max_abs * (1.0 / max_pos)
-        exponent = _f32_to_e8m0_rceil(descale)
-        rcp_fp32 = _e8m0_scale_to_reciprocal_fp32(exponent)
-        # Scale the data
-        data_lp = data_hp * rcp_fp32
-        return exponent, data_lp
-
     scale_e8m0_biased, data_lp = _to_mx_rceil(data_hp, max_abs, max_pos)
 
     # cast to target dtype
@@ -716,7 +722,41 @@ def to_mxfp(
 
     scale_e8m0_biased = scale_e8m0_biased.view(torch.float8_e8m0fnu)
     scale_e8m0_biased = scale_e8m0_biased.squeeze(-1)
+    if swizzle_type == SwizzleType.SWIZZLE_32_4_4:
+        if scale_e8m0_biased.dim() != 2:
+            raise ValueError("swizzled MXFP scales require a 2D input")
+        scale_e8m0_biased = to_blocked(scale_e8m0_biased)
     return scale_e8m0_biased, data_lp
+
+
+def mxfp8_32x32_swizzle_f(x):
+    *lead, d1, d2 = x.shape
+    n1, n2 = d1 // 32, d2 // 32
+    x_b = (
+        x.reshape(*lead, n1, 32, n2, 32)
+        .transpose(-3, -2)
+        .contiguous()
+        .reshape(*lead, n1, n2, 32 * 32)
+    )
+    x_b = x_b.to(torch.float32)
+    amax = x_b.abs().amax(dim=-1, keepdim=True)  # (..., n1, n2, 1)
+
+    F8E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max  # 448.0
+    scale_e8m0, qdata_b = _to_mx_rceil(x_b, amax, F8E4M3_MAX)
+    qdata_b = qdata_b.to(torch.float8_e4m3fn)
+
+    qdata = (
+        qdata_b.reshape(*lead, n1, n2, 32, 32)
+        .transpose(-3, -2)
+        .contiguous()
+        .reshape(*lead, d1, d2)
+    )
+
+    # expand and swizzle scale
+    scale_e8m0 = scale_e8m0.squeeze(-1).repeat_interleave(32, dim=0)
+    scale_e8m0 = to_blocked(scale_e8m0)
+
+    return qdata, scale_e8m0
 
 # Source: https://github.com/pytorch/ao/blob/568c1932a16ae9f30d48da214a88dc0013e98ed8/torchao/prototype/moe_training/utils.py#L310
 def generate_jagged_offs(E, M, multiple_of=16, dtype=torch.int32, device="cuda"):
