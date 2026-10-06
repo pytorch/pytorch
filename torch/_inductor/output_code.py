@@ -919,10 +919,12 @@ class CompiledFxGraph(OutputCode):
             boxed_forward_device_index = graph_kwargs.get(
                 "boxed_forward_device_index", None
             )
-        forward_cudagraphs_enabled = (
-            boxed_forward_device_index is not None
-            and boxed_forward_device_index.value is not None
-        )
+        forward_cudagraphs_enabled = graph_kwargs.get("cudagraphs_forward_enabled")
+        if forward_cudagraphs_enabled is None:
+            forward_cudagraphs_enabled = (
+                boxed_forward_device_index is not None
+                and boxed_forward_device_index.value is not None
+            )
 
         # When a CUDAGraphPolicy is set and it says not to wrap this
         # inner CompiledFxGraph (e.g. because wrapping happens at the
@@ -946,6 +948,13 @@ class CompiledFxGraph(OutputCode):
                     )
                 else:
                     counters["inductor"]["cudagraph_skips"] += 1
+                BoxedBool.disable(cudagraphs)
+            elif self.cudagraph_info is None:
+                # Compiled with cudagraphs off, so there is no capture metadata
+                # to replay with. A cache hit lands here when this graph's setting
+                # differs from the one the caller's box carries (a backward-specific
+                # or region-local opt-out).
+                counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
             else:
                 if partitioned and policy is None:

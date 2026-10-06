@@ -11897,7 +11897,10 @@ class Scheduler:
             )
             if cudagraphs_override is False:
                 return "invoke_subgraph opts out of cudagraphs"
-            if V.graph.cudagraphs_top_level:
+            if cudagraphs_override is True or (
+                not V.graph.cudagraph_partition_only_regions
+                and V.graph.cudagraphs_top_level
+            ):
                 # invoke_subgraph is opaque to the outer scheduler, so the
                 # cudagraph checks run over the body, not the call node.
                 with config.patch(patches or {}):
@@ -11914,6 +11917,9 @@ class Scheduler:
                         skip_reason,
                     )
                 return skip_reason
+
+        if V.graph.cudagraph_partition_only_regions:
+            return "partitioning is limited to annotated invoke_subgraph regions"
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings

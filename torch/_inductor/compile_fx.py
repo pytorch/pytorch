@@ -707,6 +707,10 @@ def _iter_subgraph_cudagraph_overrides(
                 yield bool(patches["triton.cudagraphs"])
 
 
+def _any_subgraph_enables_cudagraphs(gm: GraphModule) -> bool:
+    return any(_iter_subgraph_cudagraph_overrides(gm))
+
+
 def _any_subgraph_cudagraphs_preference_differs(
     gm: GraphModule, enclosing_cudagraphs: bool
 ) -> bool:
@@ -1063,6 +1067,9 @@ class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
     cudagraphs_region_aware: bool
     cudagraphs_top_level: bool
+    # Whether a backward graph must transition an existing forward CUDA graph.
+    cudagraphs_forward_enabled: bool
+    cudagraph_partition_only_regions: bool
     # Graph partitioning was turned on only to isolate a nested region.
     cudagraph_region_forced_partition: bool
     static_input_idxs: Sequence[int]
@@ -1083,12 +1090,17 @@ def _cudagraph_compile_kwargs(
     region_aware: bool,
     forced_region_partition: bool,
     top_level: bool,
+    forward_enabled: bool | None = None,
 ) -> _CompileFxKwargs:
     kwargs: _CompileFxKwargs = {"cudagraphs_top_level": top_level}
     if region_aware:
         kwargs["cudagraphs_region_aware"] = True
+    if forward_enabled is not None:
+        kwargs["cudagraphs_forward_enabled"] = forward_enabled
     if forced_region_partition:
         kwargs["cudagraph_region_forced_partition"] = True
+        if not top_level:
+            kwargs["cudagraph_partition_only_regions"] = True
     return kwargs
 
 
@@ -1246,7 +1258,9 @@ def _compile_fx_inner(
     if graph_kwargs.get("cudagraphs") is None:
         graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
     # Graph partition does not support cpp_wrapper/aot_mode, so a region-local
-    # cudagraph request cannot be isolated there.
+    # cudagraph request cannot be isolated there. This has to happen here, in the
+    # parent process: graph_kwargs is pickled for out-of-process compiles, so a
+    # box mutated inside fx_codegen_and_compile never makes it back.
     if (graph_kwargs.get("cpp_wrapper", False) or aot_mode) and graph_kwargs.get(
         "cudagraphs_region_aware", False
     ):
@@ -1259,6 +1273,14 @@ def _compile_fx_inner(
                 "cannot exclude a nested compile region from cudagraphs: "
                 "graph partition is unsupported under cpp_wrapper/aot_mode"
             )
+        elif graph_kwargs["cudagraphs"] is not None:
+            # Capture was requested only by the region, so without partitioning it
+            # would widen to the whole graph. Drop it instead.
+            log_cudagraph_skip_and_bump_counter(
+                "skipping cudagraphs requested by a nested compile region: "
+                "graph partition is unsupported under cpp_wrapper/aot_mode"
+            )
+            BoxedBool.disable(graph_kwargs["cudagraphs"])
     if config.save_args:
         save_args_for_compile_fx_inner(
             gm,
@@ -1939,6 +1961,9 @@ class _InProcessFxCompile(FxCompile):
                     ),
                     cudagraphs_top_level=graph_kwargs.get(
                         "cudagraphs_top_level", config.triton.cudagraphs
+                    ),
+                    cudagraph_partition_only_regions=graph_kwargs.get(
+                        "cudagraph_partition_only_regions", False
                     ),
                     cudagraph_region_forced_partition=region_forced_partition,
                 )
@@ -2707,7 +2732,12 @@ def fw_compiler_freezing(
         if tracing_context.fw_metadata:
             static_input_idxs = tracing_context.fw_metadata.static_input_indices
 
-    with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+    with (
+        mock.patch.object(fake_mode, "allow_non_fake_inputs", True),
+        _cudagraph_config_patch_context(
+            top_level_cudagraphs=compiler_config_extra.top_level_cudagraphs,
+        ),
+    ):
         optimized_function = inner_compile(
             opt_model,
             aot_example_inputs,
@@ -2862,14 +2892,14 @@ def get_num_model_outputs(model: GraphModule) -> int:
     return len(model_outputs)
 
 
-def cudagraph_annotation_context(
-    cudagraphs: BoxedBool,
+def _cudagraph_config_patch_context(
+    *,
+    top_level_cudagraphs: bool,
 ) -> contextlib.AbstractContextManager[None]:
-    # When an annotation force-enables cudagraphs but the global config has them
-    # off, patch config.triton.cudagraphs for the duration of compilation,
-    # so existing codepaths that access config.triton.cudagraphs work
-    if cudagraphs.value and not config.triton.cudagraphs:
-        return config.patch({"triton.cudagraphs": True})
+    # Keep the ambient setting aligned with the effective top-level setting.
+    # Region-local overrides are applied while inspecting each region.
+    if top_level_cudagraphs != config.triton.cudagraphs:
+        return config.patch({"triton.cudagraphs": top_level_cudagraphs})
     return contextlib.nullcontext()
 
 
@@ -2878,6 +2908,8 @@ class CompilerConfigExtra:
     cudagraphs: BoxedBool
     top_level_cudagraphs: bool
     backward_top_level_cudagraphs: bool
+    forward_cudagraphs_requested: bool
+    has_regional_cudagraphs: bool
     forward_has_regional_cudagraphs: bool
     enable_forward_region_graph_partition: bool
     graph_id: int
@@ -2946,8 +2978,12 @@ def create_compiler_config_extra(
             pre_aot_graph, top_level_cudagraphs
         )
     )
+    has_regional_cudagraphs = forward_has_regional_cudagraphs
 
-    cudagraphs = BoxedBool(top_level_cudagraphs)
+    forward_cudagraphs_requested = top_level_cudagraphs or bool(
+        pre_aot_graph is not None and _any_subgraph_enables_cudagraphs(pre_aot_graph)
+    )
+    cudagraphs = BoxedBool(forward_cudagraphs_requested)
 
     enable_forward_region_graph_partition = (
         not config.graph_partition and forward_has_regional_cudagraphs
@@ -2971,6 +3007,8 @@ def create_compiler_config_extra(
         cudagraphs=cudagraphs,
         top_level_cudagraphs=top_level_cudagraphs,
         backward_top_level_cudagraphs=backward_top_level_cudagraphs,
+        forward_cudagraphs_requested=forward_cudagraphs_requested,
+        has_regional_cudagraphs=has_regional_cudagraphs,
         forward_has_regional_cudagraphs=forward_has_regional_cudagraphs,
         enable_forward_region_graph_partition=enable_forward_region_graph_partition,
         graph_id=graph_id,
@@ -3111,7 +3149,9 @@ def compile_fx_forward(
     # original strides
     _recursive_record_user_visible_output_idxs(gm)
 
-    with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
+    with _cudagraph_config_patch_context(
+        top_level_cudagraphs=compiler_config_extra.top_level_cudagraphs,
+    ):
         result = inner_compile(
             gm,
             example_inputs,
@@ -3177,10 +3217,24 @@ def compile_fx_backward(
                 gm, backward_top_level_cudagraphs
             )
         )
-        # Check if cudagraphs should be overridden for backward via annotation
-        cudagraphs = compiler_config_extra.cudagraphs
-        if compiler_config_extra.cudagraphs_bwd_override is not None:
-            cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
+        if not compiler_config_extra.has_regional_cudagraphs:
+            cudagraphs = compiler_config_extra.cudagraphs
+            if compiler_config_extra.cudagraphs_bwd_override is not None:
+                cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
+        else:
+            backward_cudagraphs_requested = (
+                backward_top_level_cudagraphs or _any_subgraph_enables_cudagraphs(gm)
+            )
+            if (
+                compiler_config_extra.forward_cudagraphs_requested
+                and not compiler_config_extra.cudagraphs
+            ):
+                backward_cudagraphs_requested = False
+            cudagraphs = BoxedBool(backward_cudagraphs_requested)
+
+        forward_cudagraphs_enabled = (
+            compiler_config_extra.forward_device_index.value is not None
+        )
 
         enable_backward_region_graph_partition = (
             not config.graph_partition and backward_region_preference_differs
@@ -3216,7 +3270,9 @@ def compile_fx_backward(
                 if config.cpp_wrapper
                 else contextlib.nullcontext()
             ),
-            cudagraph_annotation_context(cudagraphs),
+            _cudagraph_config_patch_context(
+                top_level_cudagraphs=backward_top_level_cudagraphs,
+            ),
         ):
             return inner_compile(
                 gm,
@@ -3230,6 +3286,7 @@ def compile_fx_backward(
                     region_aware=backward_region_preference_differs,
                     forced_region_partition=enable_backward_region_graph_partition,
                     top_level=backward_top_level_cudagraphs,
+                    forward_enabled=forward_cudagraphs_enabled,
                 ),
             )
 
