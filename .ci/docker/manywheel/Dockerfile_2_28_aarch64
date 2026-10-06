@@ -81,7 +81,13 @@ RUN python3.9 -m pip install scons==4.7.0
 RUN ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin
 COPY ./common/install_acl.sh install_acl.sh
 RUN bash ./install_acl.sh && rm install_acl.sh
+
+FROM base as llvm
+COPY ./common/install_llvm_tools.sh install_llvm_tools.sh
+RUN bash ./install_llvm_tools.sh && rm install_llvm_tools.sh
+
 FROM base as final
+COPY --from=llvm /llvm/install/ /usr/local/
 
 # remove unnecessary python versions
 COPY --from=openblas     /opt/OpenBLAS/  /opt/OpenBLAS/
