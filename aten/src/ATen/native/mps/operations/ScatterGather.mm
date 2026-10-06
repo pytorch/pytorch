@@ -200,6 +200,12 @@ static void scatter_reduce_metal(const Tensor& self,
   const int64_t output_dim_size = self.size(dim);
   const int64_t total = index.numel();
   const bool use_dense = can_use_dense_scatter(self, index, dim) && src.is_contiguous() && src.sizes() == index.sizes();
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  const bool serial = at::globalContext().deterministicAlgorithms();
+  const int64_t dispatch_total = serial ? total / index.size(dim) : total;
   // Signed int64 amin/amax needs an encode/decode bracket so signed ordering
   // maps onto the unsigned atomic_min/max Metal exposes. Requires contiguous
   // self so we can sweep it as a flat ulong buffer. The ulong atomic_min/max
@@ -219,10 +225,13 @@ static void scatter_reduce_metal(const Tensor& self,
       if (use_dense) {
         const int64_t inner_size = dense_inner_size(self, dim);
         const int64_t index_dim_size = index.size(dim);
-        auto pso = lib.getPipelineStateForFunc(
-            fmt::format("scatter_{}_dense_{}_{}", op, scalarToMetalTypeString(self), scalarToMetalTypeString(index)));
+        auto pso = lib.getPipelineStateForFunc(fmt::format("scatter_{}_dense_{}_{}{}",
+                                                           op,
+                                                           scalarToMetalTypeString(self),
+                                                           scalarToMetalTypeString(index),
+                                                           serial ? "_serial" : ""));
         [encoder setComputePipelineState:pso];
-        dispatch_chunked(encoder, pso, total, [&](int64_t tid_offset) {
+        dispatch_chunked(encoder, pso, dispatch_total, [&](int64_t tid_offset) {
           mtl_setArgs(encoder,
                       self,
                       src,
@@ -236,10 +245,13 @@ static void scatter_reduce_metal(const Tensor& self,
       } else {
         auto sizes = index.sizes();
         c10::metal::vec3<uint32_t> ndim_dim = {ndim, static_cast<uint32_t>(dim), 0};
-        auto pso = lib.getPipelineStateForFunc(
-            fmt::format("scatter_{}_strided_{}_{}", op, scalarToMetalTypeString(self), scalarToMetalTypeString(index)));
+        auto pso = lib.getPipelineStateForFunc(fmt::format("scatter_{}_strided_{}_{}{}",
+                                                           op,
+                                                           scalarToMetalTypeString(self),
+                                                           scalarToMetalTypeString(index),
+                                                           serial ? "_serial" : ""));
         [encoder setComputePipelineState:pso];
-        dispatch_chunked(encoder, pso, total, [&](int64_t tid_offset) {
+        dispatch_chunked(encoder, pso, dispatch_total, [&](int64_t tid_offset) {
           mtl_setArgs(encoder,
                       self,
                       src,
@@ -441,14 +453,6 @@ static void scatter_reduce_dispatch(const Tensor& self,
                                     const ReductionType& reduce) {
   if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) {
     return;
-  }
-  // sum/prod/mean accumulate via atomics so order matters for floating/complex
-  // dtypes (fp add/mul are non-associative). Integer arithmetic is associative
-  // and stays deterministic
-  const auto dtype = self.scalar_type();
-  if ((reduce == ReductionType::SUM || reduce == ReductionType::PROD || reduce == ReductionType::MEAN) &&
-      (at::isFloatingType(dtype) || at::isComplexType(dtype))) {
-    at::globalContext().alertNotDeterministic("scatter_reduce_mps");
   }
   // Match CPU: scatter_reduce(mean) isn't defined for bool.
   TORCH_CHECK(reduce != ReductionType::MEAN || self.scalar_type() != ScalarType::Bool,

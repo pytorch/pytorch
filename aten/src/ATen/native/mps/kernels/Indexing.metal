@@ -299,19 +299,18 @@ struct IndexReduceOp {
 };
 
 template <typename T, typename IT, T (*ReduceOp)(T, T)>
-kernel void index_reduce(
-    device AtomicType_t<T>* self [[buffer(0)]],
-    device IT* index [[buffer(1)]],
-    device T* source [[buffer(2)]],
-    constant IndexReduceParams<>& params [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  uint32_t tid_ = tid;
+inline void index_reduce_impl(
+    device AtomicType_t<T>* self,
+    device IT* index,
+    device T* source,
+    constant IndexReduceParams<>& params,
+    uint32_t source_idx) {
   long source_offset = 0;
   long self_offset = 0;
 
   for (int32_t dim = params.ndim - 1; dim >= 0; dim--) {
     auto source_size = params.source_sizes[dim];
-    auto dim_idx = tid_ % source_size;
+    auto dim_idx = source_idx % source_size;
 
     source_offset += dim_idx * params.source_strides[dim];
 
@@ -323,7 +322,7 @@ kernel void index_reduce(
       self_offset += dim_idx * params.self_strides[dim];
     }
 
-    tid_ /= source_size;
+    source_idx /= source_size;
   }
 
   T source_elem = source[source_offset];
@@ -331,14 +330,43 @@ kernel void index_reduce(
   AtomicType<T>::atomic_binary_op(self, self_offset, source_elem, ReduceOp);
 }
 
-#define REGISTER_INDEX_REDUCE_OP(ReduceOp, T, IT)                  \
-  template [[host_name("index_reduce_" #ReduceOp "_" #T "_" #IT)]] \
-  kernel void index_reduce<T, IT, IndexReduceOp::ReduceOp<T>>(     \
-      device AtomicType_t<T> * self [[buffer(0)]],                 \
-      device IT * index [[buffer(1)]],                             \
-      device T * source [[buffer(2)]],                             \
-      constant IndexReduceParams<> & params [[buffer(3)]],         \
+template <typename T, typename IT, T (*ReduceOp)(T, T), bool serial>
+kernel void index_reduce(
+    device AtomicType_t<T>* self [[buffer(0)]],
+    device IT* index [[buffer(1)]],
+    device T* source [[buffer(2)]],
+    constant IndexReduceParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  if IF_CONSTEXPR (!serial) {
+    index_reduce_impl<T, IT, ReduceOp>(self, index, source, params, tid);
+    return;
+  }
+  uint32_t inner_size = 1;
+  for (int32_t dim = params.reduce_dim + 1; dim < params.ndim; dim++) {
+    inner_size *= params.source_sizes[dim];
+  }
+  const uint32_t reduce_size = params.source_sizes[params.reduce_dim];
+  const uint32_t source_idx_base =
+      (tid / inner_size) * (inner_size * reduce_size) + (tid % inner_size);
+  for (uint32_t pos = 0; pos < reduce_size; pos++) {
+    index_reduce_impl<T, IT, ReduceOp>(
+        self, index, source, params, source_idx_base + pos * inner_size);
+  }
+}
+
+#define REGISTER_INDEX_REDUCE_OP_SERIAL(ReduceOp, T, IT, SERIAL)             \
+  template[[host_name("index_reduce_" #ReduceOp "_" #T                       \
+                      "_" #IT C10_METAL_SERIAL_SUFFIX(SERIAL))]] kernel void \
+  index_reduce<T, IT, IndexReduceOp::ReduceOp<T>, SERIAL>(                   \
+      device AtomicType_t<T> * self [[buffer(0)]],                           \
+      device IT * index [[buffer(1)]],                                       \
+      device T * source [[buffer(2)]],                                       \
+      constant IndexReduceParams<> & params [[buffer(3)]],                   \
       uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_INDEX_REDUCE_OP(ReduceOp, T, IT)          \
+  REGISTER_INDEX_REDUCE_OP_SERIAL(ReduceOp, T, IT, false); \
+  REGISTER_INDEX_REDUCE_OP_SERIAL(ReduceOp, T, IT, true);
 
 #define REGISTER_INDEX_REDUCE_OP_ALL_REDUCE_TYPES(T, IT) \
   REGISTER_INDEX_REDUCE_OP(amax, T, IT);                 \
