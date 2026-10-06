@@ -56,6 +56,10 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
     _uninstall_threaded_pg,
     ProcessLocalGroup,
 )
+from torch.testing._internal.rerun_code_skip import (
+    rerun_code_skip,
+    rocm_message_is_known_bug,
+)
 
 
 TORCHCOMM_HAS_GLOO = False
@@ -633,7 +637,12 @@ PLATFORM_SUPPORTS_SYMM_MEM: bool = LazyVal(
 
 def skip_if_rocm_multiprocess(func):
     """Skips a test for ROCm multiprocess UTs"""
-    return unittest.skipIf(TEST_WITH_ROCM, TEST_SKIPS["skipIfRocm"].message)(func)
+    msg = TEST_SKIPS["skipIfRocm"].message
+    if not TEST_WITH_ROCM:
+        return func
+    if rocm_message_is_known_bug(msg):
+        return rerun_code_skip(msg)(func)
+    return unittest.skipIf(True, msg)(func)
 
 
 def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
@@ -646,7 +655,9 @@ def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
             if prop in arch:
                 reason = f"skip_if_rocm_arch_multiprocess: test skipped on {arch}"
 
-        return unittest.skipIf(reason is not None, reason)(func)
+        if reason is None:
+            return func
+        return rerun_code_skip(reason)(func)
 
     return decorator
 
@@ -692,7 +703,9 @@ def skip_if_rocm_ver_atleast_multiprocess(version=None):
             if version is not None and rocm_version_tuple >= tuple(version):
                 reason = f"skip_if_rocm_ver_atleast_multiprocess: known failure on ROCm {rocm_version_tuple} (>= {version})"
 
-        return unittest.skipIf(reason is not None, reason)(func)
+        if reason is None:
+            return func
+        return rerun_code_skip(reason)(func)
 
     return decorator
 

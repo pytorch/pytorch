@@ -92,6 +92,13 @@ from torch.testing._comparison import (
     TensorLikePair,
 )
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.rerun_code_skip import (
+    has_rerun_skip_stamp,
+    RERUN_CODE_SKIP_ATTR,
+    rerun_code_skip,
+    rocm_message_is_known_bug,
+    stamp_rerun_device_skip,
+)
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 from torch.utils import cpp_extension
@@ -2041,7 +2048,10 @@ requires_accelerator = lazy_skip_if(
 
 
 def skipIfCrossRef(fn):
-    return lazy_skip_if(lambda: TEST_WITH_CROSSREF, "test doesn't currently with crossref")(fn)
+    reason = "test doesn't currently with crossref"
+    if TEST_WITH_CROSSREF:
+        return rerun_code_skip(reason)(fn)
+    return fn
 
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -2089,7 +2099,7 @@ if TEST_WITH_TORCHDYNAMO:
 def xpassIfTorchDynamo_np(func):
     # numpy 2.0+ is causing issues
     if TEST_WITH_TORCHDYNAMO and np.__version__[0] == '2':
-        return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
+        return rerun_code_skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
 
@@ -2189,7 +2199,9 @@ def xfailIfNoAcceleratorTriton(test_func):
 def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
     if not isinstance(msg, str):
         raise AssertionError("Are you using skipIfFreeThreaded correctly?")
-    return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
+    if sysconfig.get_config_var("Py_GIL_DISABLED") == 1:
+        return rerun_code_skip(msg)
+    return unittest.skipIf(False, msg)
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
@@ -2203,21 +2215,8 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
         raise AssertionError("Are you using skipIfTorchDynamo correctly?")
 
     def decorator(fn):
-        if not isinstance(fn, type):
-            @wraps(fn)
-            def wrapper(*args, **kwargs):
-                if TEST_WITH_TORCHDYNAMO:
-                    raise unittest.SkipTest(msg)
-                else:
-                    fn(*args, **kwargs)
-            return wrapper
-
-        if not isinstance(fn, type):
-            raise AssertionError(f"expected fn to be a type, got {type(fn)}")
         if TEST_WITH_TORCHDYNAMO:
-            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-            fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
-
+            return rerun_code_skip(msg)(fn)
         return fn
 
     return decorator
@@ -2225,21 +2224,8 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
 def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
                         condition=TEST_WITH_TORCHINDUCTOR):
     def decorator(fn):
-        if not isinstance(fn, type):
-            @wraps(fn)
-            def wrapper(*args, **kwargs):
-                if condition:
-                    raise unittest.SkipTest(msg)
-                else:
-                    fn(*args, **kwargs)
-            return wrapper
-
-        if not isinstance(fn, type):
-            raise AssertionError(f"expected fn to be a type, got {type(fn)}")
         if condition:
-            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-            fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
-
+            return rerun_code_skip(msg)(fn)
         return fn
 
     return decorator
@@ -2324,25 +2310,19 @@ def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor 
 
 def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT executor"):
     def decorator(fn):
-        if not isinstance(fn, type):
-            @wraps(fn)
-            def wrapper(*args, **kwargs):
-                if not GRAPH_EXECUTOR:
-                    raise AssertionError("GRAPH_EXECUTOR must be set")
-                if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
-                    raise unittest.SkipTest(msg)
-                else:
-                    fn(*args, **kwargs)
-            return wrapper
-
-        if not isinstance(fn, type):
-            raise AssertionError(f"expected fn to be a type, got {type(fn)}")
         if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
-            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-            fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
+            return rerun_code_skip(msg)(fn)
+        if isinstance(fn, type):
+            return fn
 
-        return fn
-
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if not GRAPH_EXECUTOR:
+                raise AssertionError("GRAPH_EXECUTOR must be set")
+            if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+                raise unittest.SkipTest(msg)
+            return fn(*args, **kwargs)
+        return wrapper
 
     return decorator
 
@@ -2459,35 +2439,32 @@ def skipIfNNModuleInlined(
     condition=True,
 ):
     def decorator(fn):
-        if not isinstance(fn, type):
-
-            @wraps(fn)
-            def wrapper(*args, **kwargs):
-                if condition:
-                    raise unittest.SkipTest(msg)
-                else:
-                    fn(*args, **kwargs)
-
-            return wrapper
-
-        if not isinstance(fn, type):
-            raise AssertionError(f"expected fn to be a type, got {type(fn)}")
         if condition:
-            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-            fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
-
+            return rerun_code_skip(msg)(fn)
         return fn
 
     return decorator
 
+def _skip_if_rocm_decorator(msg):
+    reason = f"skipIfRocm: {msg}"
+    if rocm_message_is_known_bug(msg):
+        def decorator(fn):
+            if TEST_WITH_ROCM:
+                return rerun_code_skip(reason)(fn)
+            return fn
+        return decorator
+    return lazy_skip_if(lambda: TEST_WITH_ROCM, reason)
+
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
-    decorator = lazy_skip_if(lambda: TEST_WITH_ROCM, f"skipIfRocm: {msg}")
+    decorator = _skip_if_rocm_decorator(msg)
     return decorator(func) if func is not None else decorator
 
 def skipIfRocm_BUGGY(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     """Old skipIfRocm that silently drops classes from discovery. Migrate to skipIfRocm."""
     def dec_fn(fn):
         reason = f"skipIfRocm: {msg}"
+        if rocm_message_is_known_bug(msg) and TEST_WITH_ROCM:
+            return rerun_code_skip(reason)(fn)
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -2510,10 +2487,14 @@ def isRocmArchAnyOf(arch: tuple[str, ...]):
     return any(x in rocmArch for x in arch)
 
 def skipIfRocmArch(arch: tuple[str, ...]):
-    return lazy_skip_if(
-        lambda: TEST_WITH_ROCM and isRocmArchAnyOf(arch),
-        f"skipIfRocm: test skipped on {arch}",
-    )
+    reason = f"skipIfRocm: test skipped on {arch}"
+
+    def decorator(fn):
+        if TEST_WITH_ROCM and isRocmArchAnyOf(arch):
+            return rerun_code_skip(reason)(fn)
+        return fn
+
+    return decorator
 
 def runOnRocm(fn):
     @wraps(fn)
@@ -2547,13 +2528,21 @@ def xfailIf(condition):
     return wrapper
 
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
-    decorator = lazy_skip_if(lambda: TEST_XPU, f"skipIfXpu: {msg}")
+    reason = f"skipIfXpu: {msg}"
+
+    def decorator(fn):
+        if TEST_XPU:
+            return rerun_code_skip(reason)(fn)
+        return fn
+
     return decorator(func) if func is not None else decorator
 
 def skipIfXpu_BUGGY(func=None, *, msg="test doesn't currently work on the XPU stack"):
     """Old skipIfXpu that silently drops classes from discovery. Migrate to skipIfXpu."""
     def dec_fn(fn):
         reason = f"skipIfXpu: {msg}"
+        if TEST_XPU:
+            return rerun_code_skip(reason)(fn)
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -2572,8 +2561,7 @@ def skipIfMPS(fn):
     # below inspects args[0].device_type, which is only available per-method.
     if isinstance(fn, type):
         if TEST_MPS:
-            fn.__unittest_skip__ = True  # type: ignore[attr-defined]
-            fn.__unittest_skip_why__ = reason  # type: ignore[attr-defined]
+            return rerun_code_skip(reason)(fn)
         return fn
 
     sig = inspect.signature(fn)
@@ -2585,34 +2573,41 @@ def skipIfMPS(fn):
             "Consider using device-generic tests with instantiate_device_type_tests instead.",
             stacklevel=2,
         )
+        if TEST_MPS:
+            return rerun_code_skip(reason)(fn)
+        return fn
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if has_device_arg:
-            # For device-generic tests, only skip when actually running on MPS
-            slf = args[0] if args else None
-            if slf is not None:
-                device_type = getattr(slf, "device_type", None) or getattr(
-                    slf, "device", None
-                )
-                if isinstance(device_type, str) and device_type == "mps":
-                    raise unittest.SkipTest(reason)
-        elif TEST_MPS:
-            raise unittest.SkipTest(reason)
+        # For device-generic tests, only skip when actually running on MPS.
+        slf = args[0] if args else None
+        if slf is not None:
+            device_type = getattr(slf, "device_type", None) or getattr(
+                slf, "device", None
+            )
+            if isinstance(device_type, str) and device_type == "mps":
+                raise unittest.SkipTest(reason)
         return fn(*args, **kwargs)
 
-    return wrapper
+    return stamp_rerun_device_skip(wrapper, "mps")
 
 
 def skipIfHpu(fn):
-    return lazy_skip_if(lambda: TEST_HPU, "test doesn't currently work with HPU")(fn)
+    reason = "test doesn't currently work with HPU"
+    if TEST_HPU:
+        return rerun_code_skip(reason)(fn)
+    return fn
 
 def skipIfHpu_BUGGY(fn):
     """Old skipIfHpu that silently drops classes from discovery. Migrate to skipIfHpu."""
+    reason = "test doesn't currently work with HPU"
+    if TEST_HPU:
+        return rerun_code_skip(reason)(fn)
+
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if TEST_HPU:
-            raise unittest.SkipTest("test doesn't currently work with HPU")
+            raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -2639,25 +2634,31 @@ def skipIfRocmVersionLessThan(version=None):
 # e.g. skipIfRocmVersionAtLeast([7, 14]) skips on 7.14+ but runs on 7.2.x.
 # Built on lazy_skip_if so it works on both test methods and test classes.
 def skipIfRocmVersionAtLeast(version=None):
-    def _should_skip():
-        if not TEST_WITH_ROCM:
-            return False
+    reason = f"ROCm version at least {version}: known failure"
+
+    def decorator(fn):
+        if not TEST_WITH_ROCM or version is None:
+            return fn
         rocm_version_tuple = getRocmVersion()
-        return (
-            rocm_version_tuple is not None
-            and version is not None
-            and rocm_version_tuple >= tuple(version)
-        )
-    return lazy_skip_if(_should_skip, f"ROCm version at least {version}: known failure")
+        if rocm_version_tuple is not None and rocm_version_tuple >= tuple(version):
+            return rerun_code_skip(reason)(fn)
+        return fn
+
+    return decorator
 
 # Skips a test on ROCm when the version is in [first_bad, first_good), for a
 # regression introduced in one release and fixed in a later one. The window
 # lives only here, so the skip reason cannot drift from the version check.
 def skipIfRocmVersionInRange(first_bad, first_good, reason):
-    def _should_skip():
-        return TEST_WITH_ROCM and tuple(first_bad) <= getRocmVersion() < tuple(first_good)
     window = f"ROCm >= {'.'.join(map(str, first_bad))}, < {'.'.join(map(str, first_good))}"
-    return lazy_skip_if(_should_skip, f"{reason} ({window})")
+    full_reason = f"{reason} ({window})"
+
+    def decorator(fn):
+        if TEST_WITH_ROCM and tuple(first_bad) <= getRocmVersion() < tuple(first_good):
+            return rerun_code_skip(full_reason)(fn)
+        return fn
+
+    return decorator
 
 def skipIfNotMiopenSuggestNHWC(fn):
     return lazy_skip_if(
@@ -2666,13 +2667,23 @@ def skipIfNotMiopenSuggestNHWC(fn):
     )(fn)
 
 def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows stack"):
-    decorator = lazy_skip_if(lambda: IS_WINDOWS, f"skipIfWindows: {msg}")
+    reason = f"skipIfWindows: {msg}"
+
+    def decorator(fn):
+        if IS_WINDOWS:
+            return rerun_code_skip(reason)(fn)
+        return fn
+
     return decorator(func) if func is not None else decorator
 
 def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windows stack"):
-    decorator = lazy_skip_if(
-        lambda: IS_WINDOWS and torch.xpu.is_available(), f"skipIfWindowsXPU: {msg}"
-    )
+    reason = f"skipIfWindowsXPU: {msg}"
+
+    def decorator(fn):
+        if IS_WINDOWS and torch.xpu.is_available():
+            return rerun_code_skip(reason)(fn)
+        return fn
+
     return decorator(func) if func is not None else decorator
 
 requires_cuda_python_bindings = unittest.skipUnless(TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)")
@@ -2935,7 +2946,7 @@ def skipIfNotRegistered(op_name, message):
         @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
             This will check if 'MyOp' is in the caffe2.python.core
     """
-    return unittest.skip("Pytorch is compiled without Caffe2")
+    return rerun_code_skip("Pytorch is compiled without Caffe2")
 
 def skipIfNoSciPy(fn):
     return lazy_skip_if(lambda: not TEST_SCIPY, "test require SciPy, but SciPy not found")(fn)
@@ -3517,10 +3528,15 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest(skip_msg)
 
         if not should_skip and RERUN_DISABLED_TESTS:
-            # Probably test has disable issue but not for this platform
-            skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
-                " disabled tests are run"
-            raise unittest.SkipTest(skip_msg)
+            # A stamp means this process already skipped the test for a known
+            # failure, so rerun mode executes the body. Capability skips and
+            # tests missing from the disabled-test JSON stay skipped.
+            method = getattr(test, test._testMethodName, None)
+            func = getattr(method, "__func__", method)
+            if not has_rerun_skip_stamp(func, type(test)):
+                skip_msg = "Test is enabled but --rerun-disabled-tests verification mode is set, so only" \
+                    " disabled tests are run"
+                raise unittest.SkipTest(skip_msg)
 
     if TEST_SKIP_FAST:
         if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
@@ -6088,6 +6104,10 @@ def skip_but_pass_in_sandcastle(reason):
         if not IS_SANDCASTLE:
             func.__unittest_skip__ = True
             func.__unittest_skip_why__ = reason
+            try:
+                setattr(func, RERUN_CODE_SKIP_ATTR, True)
+            except (AttributeError, TypeError):
+                pass
             return func
 
         @wraps(func)
