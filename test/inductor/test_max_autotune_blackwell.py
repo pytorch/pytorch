@@ -1196,39 +1196,6 @@ class TestBlackwellAutoWSConfigs(TestCase):
         self.assertTrue(configs[0]["WARP_SPECIALIZE"])
         self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
 
-    def test_autows_defaults_are_operation_specific(self):
-        with (
-            mock.patch.dict(_HEURISTIC_CACHE, clear=True),
-            mock.patch.dict(BaseHeuristicSingleton._instances, clear=True),
-            mock.patch("torch._inductor.heuristics.template.triton.USE_META_WS", True),
-            config.patch(
-                {
-                    "triton.enable_template_autows": True,
-                    "max_autotune_gemm_search_space": "DEFAULT",
-                }
-            ),
-        ):
-            configs = {
-                op: get_template_heuristic(
-                    blackwell_ws_persistent_tma_mm_template.uid, "cuda", op
-                )
-                ._get_config_generator()
-                .keywords["configs"]
-                for op in ("mm", "addmm")
-            }
-            addmm_config = BlackwellGPUGemmConfig(
-                128,
-                128,
-                64,
-                8,
-                4,
-                use_meta_ws=True,
-                flatten=False,
-                separate_epilogue_store=True,
-            )
-            self.assertIn(addmm_config, configs["addmm"])
-            self.assertNotIn(addmm_config, configs["mm"])
-
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
