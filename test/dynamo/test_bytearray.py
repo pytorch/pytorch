@@ -366,6 +366,17 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(bytearray(b"abcabc")), (1, -1, 4))
         self.assertEqual(fn(bytearray(b"xyz")), (-1, 2, -1))
 
+    def test_input_bytearray_find_rfind_dynamic_start(self):
+        # Non-constant start (SymInt) must take the non-const fallback: Dynamo
+        # declines tracing bytearray.find/rfind and graph-breaks cleanly instead
+        # of inlining the C method descriptor (internal AttributeError).
+        @torch.compile(backend="eager", dynamic=True)
+        def fn(ba, n):
+            return ba.find(b"i", n), ba.rfind(b"i", n)
+
+        self.assertEqual(fn(bytearray(b"mississippi"), 5), (7, 10))
+        self.assertEqual(fn(bytearray(b"mississippi"), -3), (10, 10))
+
     def test_inplace_concat_arg_mutation(self):
         # Regression: missing sq_inplace_concat fell back to constant-folding
         # operator.iadd on the live bytearray, then skip-to-eager ran += again.

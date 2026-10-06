@@ -2369,17 +2369,17 @@ class ByteArrayVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
         check_positional(tx, "find", len(args), 1, 3)
         no_keywords(tx, "find", kwargs)
         try:
             const_args = [arg.as_python_constant() for arg in args]
         except AsPythonConstantNotImplementedError:
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, bytearray.find),
-                [self] + list(args),
-                kwargs,
-            )
+            # bytearray.find is a C method descriptor without a code object;
+            # inlining it raises an internal AttributeError instead of a graph
+            # break. Decline so dispatch falls through to unimplemented()
+            # (same as bytearray_hex/decode above).
+            return None
         try:
             result = self.data.find(*const_args)
         except (TypeError, ValueError) as e:
@@ -2391,17 +2391,14 @@ class ByteArrayVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
         check_positional(tx, "rfind", len(args), 1, 3)
         no_keywords(tx, "rfind", kwargs)
         try:
             const_args = [arg.as_python_constant() for arg in args]
         except AsPythonConstantNotImplementedError:
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, bytearray.rfind),
-                [self] + list(args),
-                kwargs,
-            )
+            # See bytearray_find: decline instead of inlining the C descriptor.
+            return None
         try:
             result = self.data.rfind(*const_args)
         except (TypeError, ValueError) as e:
