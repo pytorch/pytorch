@@ -479,16 +479,16 @@ class ApplyMainTest(unittest.TestCase):
         )
         for artifact in ARTIFACTS:
             self.assertEqual(workflow.count(f"/{artifact}"), 2, artifact)
-        self.assertEqual(action.count("continue-on-error: true"), 2)
+        self.assertEqual(action.count("continue-on-error: true"), 3)
         self.assertIn("always() &&", action)
 
-    def test_workflow_admits_only_first_eligible_entry_event(self) -> None:
+    def test_workflow_admits_label_events_and_first_ready_event(self) -> None:
         workflow = (
             REPOSITORY_ROOT / ".github/workflows/auto-pr-triage.yml"
         ).read_text()
         lines = workflow.splitlines()
         step_index = lines.index(
-            "      - name: Admit the first eligible label or ready event"
+            "      - name: Admit the label event or the first ready event after it"
         )
         run_index = lines.index("        run: |", step_index)
         script_lines = []
@@ -504,7 +504,8 @@ class ApplyMainTest(unittest.TestCase):
         ready = {"__typename": "ReadyForReviewEvent"}
         cases = (
             ("labeled", [label], False, "true"),
-            ("labeled", [label, label], False, "false"),
+            ("labeled", [label, label], False, "true"),
+            ("labeled", [label], True, "true"),
             ("ready_for_review", [ready, label, ready], False, "true"),
             ("ready_for_review", [label, ready, ready], False, "false"),
             ("ready_for_review", [ready], False, "false"),
