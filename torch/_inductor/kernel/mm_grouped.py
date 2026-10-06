@@ -14,7 +14,7 @@ from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils._triton import has_triton
 
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import ChoiceCaller, is_unaligned, Layout, TensorBox
+from ..ir import ChoiceCaller, FlexibleLayout, is_unaligned, Layout, TensorBox
 from ..lowering import fallback_handler, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -760,6 +760,12 @@ def _flydsl_grouped_shape(
     return m_hint, n_static, k_static, g_static
 
 
+# FlyDSL's CABI packs each operand's shape as int32, and the MXFP8 kernels pass
+# operands as 1-D views, so this bounds an operand's element count (it mirrors
+# _INT32_MAX in the vendored kernels, which import FlyDSL).
+_FLYDSL_INT32_MAX = (1 << 31) - 1
+
+
 def _flydsl_device_cu_count(device: torch.device) -> int:
     """CU count of the device a FlyDSL kernel launches on.
 
@@ -982,10 +988,6 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
     if not sizevars.statically_known_equals(offs.get_stride()[0], 1):
         return []
 
-    from torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_grouped_gemm_gfx950 import (
-        _INT32_MAX,
-    )
-
     statically_known = PythonWrapperCodegen.statically_known_int_or_none
     n = statically_known(mat_a.get_size()[0])
     k = statically_known(mat_b.get_size()[1])
@@ -1041,13 +1043,15 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
         return []
     # Operands go over as 1-D views whose element counts FlyDSL packs as int32.
     # The launcher re-checks the M-dependent ones against the real M.
-    if max(n * m, k * m, g * n * k) > _INT32_MAX:
+    if max(n * m, k * m, g * n * k) > _FLYDSL_INT32_MAX:
         return []
 
     # The kernel reads every operand with the strides checked above, and
-    # FlyDSLTemplate does not freeze its inputs, so pin them now.
+    # FlyDSLTemplate does not freeze its inputs, so pin a flexible layout to
+    # exactly those strides; a plain freeze could pad them.
     for node in operands:
-        node.freeze_layout()
+        if isinstance(node.get_layout(), FlexibleLayout):
+            node.freeze_layout_with_exact_strides(node.get_stride())
 
     # gfx950 has 32 CUs per XCD; a partitioned part exposes fewer XCDs, and the
     # block swizzle should spread work over the ones this device actually has.
@@ -1121,12 +1125,14 @@ def tuned_scaled_grouped_mm_v2(
         )
         _, is_nonzero = _is_static_problem(mm_layout)
         scale_a_real, scale_b_real = realize_inputs(scale_a[0], scale_b[0])
+        # The gates validate the same offsets node the kernel is handed.
+        offs_real = realize_inputs(offs)
         input_nodes: list[Any] = [
             mat_a,
             mat_b,
             scale_a_real,
             scale_b_real,
-            realize_inputs(offs),
+            offs_real,
         ]
 
         choices: list[ChoiceCaller] = []
@@ -1135,7 +1141,7 @@ def tuned_scaled_grouped_mm_v2(
             mat_b,
             scale_a_real,
             scale_b_real,
-            offs,
+            offs_real,
             mm_layout,
             is_nonzero,
         ):
@@ -1150,7 +1156,7 @@ def tuned_scaled_grouped_mm_v2(
             mat_b,
             scale_a_real,
             scale_b_real,
-            offs,
+            offs_real,
             mm_layout,
             is_nonzero,
         ):

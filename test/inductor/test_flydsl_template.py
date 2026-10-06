@@ -2111,10 +2111,8 @@ class TestFlyDSLTemplate(TestCase):
         """M (the contraction, i.e. the token count) may be dynamic; N, K, G
         may not. Cross-operand M relations are matched by hint here and
         enforced by the template at launch."""
+        from torch._inductor.ir import FlexibleLayout
         from torch._inductor.kernel import mm_grouped
-
-        if not flydsl_utils.runtime_available():
-            self.skipTest("FlyDSL runtime unavailable")
 
         n, k, g = 256, 384, 4
         m = 512
@@ -2145,12 +2143,14 @@ class TestFlyDSLTemplate(TestCase):
             n, k, g = sympy.Integer(n), sympy.Integer(k), sympy.Integer(g)
 
         def node(size, stride, dtype, offset=0):
+            # A computed input: its layout is still flexible when the gate runs.
+            flexible = FlexibleLayout(torch.device("cuda", 1), dtype, size)
             return SimpleNamespace(
                 get_size=lambda: size,
                 get_stride=lambda: stride,
                 get_dtype=lambda: dtype,
-                get_layout=lambda: SimpleNamespace(offset=offset),
-                freeze_layout=mock.Mock(),
+                get_layout=lambda: flexible,
+                freeze_layout_with_exact_strides=mock.Mock(),
             )
 
         fp8 = torch.float8_e4m3fn
@@ -2215,13 +2215,16 @@ class TestFlyDSLTemplate(TestCase):
                 kwargs, [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": 4}]
             )
             props.assert_called_once_with(device.index)
-            # The strides the kernel relies on are pinned once it is chosen.
+            # The strides the kernel relies on are pinned exactly (no padding)
+            # once it is chosen.
             for operand in operands:
-                operand.freeze_layout.assert_called_once()
+                operand.freeze_layout_with_exact_strides.assert_called_once_with(
+                    operand.get_stride()
+                )
         else:
             self.assertEqual(kwargs, [])
             for operand in operands:
-                operand.freeze_layout.assert_not_called()
+                operand.freeze_layout_with_exact_strides.assert_not_called()
 
     def test_flydsl_mxfp8_wgrad_launch_checks(self):
         """The launcher refuses an int32-overflowing contraction and any
@@ -2301,6 +2304,17 @@ class TestFlyDSLTemplate(TestCase):
             with self.assertRaisesRegex(ValueError, "disagree on the contraction"):
                 namespace["kernel_main"](**args, output=output, stream=0)
         launch.assert_not_called()
+        # No routed tokens: zeros, without handing FlyDSL empty operands.
+        output.fill_(1.0)
+        empty = (
+            torch.empty(n, 0),
+            torch.empty(0, k),
+            torch.empty(n, 0),
+            torch.empty(k, 0),
+        )
+        namespace["kernel_main"](*empty, offs, output, stream=0)
+        self.assertEqual(output, torch.zeros_like(output))
+        launch.assert_not_called()
         namespace["kernel_main"](mat1, mat2, scale_a, scale_b, offs, output, stream=0)
         launch.assert_called_once()
 
@@ -2352,6 +2366,38 @@ class TestFlyDSLTemplate(TestCase):
 
         def fn(a, b, a_scale, b_scale, offs):
             return self._scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, offs)
+
+        result, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor"), a, b, a_scale, b_scale, offs
+        )
+        self.assertIn("mxfp8_wgrad_gfx950", code)
+        self.assertEqual(result.float(), reference, atol=6e-2, rtol=6e-2)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    def test_flydsl_mxfp8_wgrad_offs_view_e2e(self):
+        """Offsets that arrive as a view (here, group ends sliced off a [0, ...]
+        prefix-sum) are validated and passed as the realized node."""
+        from torch._inductor.utils import run_and_get_code
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        if _get_flydsl_device_arch(torch.cuda.current_device()) != "gfx950":
+            self.skipTest("requires gfx950")
+
+        a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_wgrad_inputs(
+            [128, 256, 0, 384], 256, 384
+        )
+
+        def fn(a, b, a_scale, b_scale, offs):
+            # Computed in the graph and then sliced: the gate sees a view node.
+            bounds = torch.cat([offs.new_zeros(1), offs])
+            return self._scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, bounds[1:])
 
         result, (code,) = run_and_get_code(
             torch.compile(fn, backend="inductor"), a, b, a_scale, b_scale, offs

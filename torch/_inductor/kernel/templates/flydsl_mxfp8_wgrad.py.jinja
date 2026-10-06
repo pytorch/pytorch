@@ -33,6 +33,10 @@ def _flydsl_mxfp8_wgrad(
             f"{tuple(mat1.shape)}, mat2 {tuple(mat2.shape)}, scale_a "
             f"{tuple(scale_a.shape)}, scale_b {tuple(scale_b.shape)}"
         )
+    if m == 0:
+        # No routed tokens: every group's gradient is zero. Skip the launch
+        # rather than hand FlyDSL zero-element operands.
+        return output.zero_()
     sc_pair = m % 256 == 0
     param = _mxfp8_wgrad_params.get(sc_pair)
     if param is None:
