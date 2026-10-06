@@ -225,7 +225,7 @@ class FSDPParamGroup:
                 post_forward_mesh_info,
                 device,
                 shard_placement_fn,
-                mp_policy,
+                mp_policy._resolve_for_param(param),
                 offload_policy,
             )
             for param, module_info in zip(params, param_module_infos)
@@ -234,7 +234,6 @@ class FSDPParamGroup:
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.device_handle = _get_device_handle(device.type)
-        self.mp_policy = mp_policy
         self.offload_policy = offload_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
@@ -330,7 +329,7 @@ class FSDPParamGroup:
     # Initialization #
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:
-            fsdp_param.init_dtype_attrs(self.mp_policy)
+            fsdp_param.init_dtype_attrs(fsdp_param.mp_policy)
         trainable_params: list[FSDPParam] = [
             p for p in self.fsdp_params if p.sharded_param.requires_grad
         ]
@@ -546,6 +545,10 @@ class FSDPParamGroup:
                     if not tensor.is_inference()
                     else contextlib.nullcontext()
                 ):
+                    # Like the world_size > 1 path, copy a byte payload bytewise
+                    # into a cached output of another dtype
+                    if all_gather_input.dtype == torch.uint8:
+                        tensor = tensor.view(torch.uint8)
                     tensor.copy_(all_gather_input)
 
         else:
@@ -895,7 +898,7 @@ class FSDPParamGroup:
             # If there was a mistargeted unshard without a corresponding wait,
             # then we wait here and clear the unshard
             if (event := self._all_gather_result.all_gather_event) is not None:
-                torch.accelerator.current_stream().wait_event(event)
+                self.device_handle.current_stream().wait_event(event)
             work = self._all_gather_result.all_gather_work
             if isinstance(work, dist.distributed_c10d.Work):
                 work.wait()

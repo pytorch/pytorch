@@ -236,6 +236,12 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
+
+# FX metadata marking a compiler-created ``_scaled_mm(..., scale_result=...)``
+# that represents an explicit post-GEMM scalar multiply.  Unlike the public
+# operator argument, this scale must still be applied for BF16 output.
+FOLDED_SCALED_MM_OUTPUT_SCALE = "inductor_folded_scaled_mm_output_scale"
+
 # Scanned exactly once, when this module is imported. Safe because both
 # registration paths precede any import of inductor: autoloaded out-of-tree
 # backends register during `import torch` (TORCH_DEVICE_BACKEND_AUTOLOAD, end
@@ -2227,6 +2233,17 @@ def _use_autotune_backend(backend: str) -> bool:
     return backend.upper() in [
         x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
     ]
+
+
+def _is_only_autotune_backend(backend: str) -> bool:
+    """Return whether ``backend`` is the only configured GEMM autotune backend."""
+    return OrderedSet(
+        [
+            x.strip()
+            for x in config.max_autotune_gemm_backends.upper().split(",")
+            if x.strip()
+        ]
+    ) == OrderedSet([backend.upper()])
 
 
 def _use_conv_autotune_backend(backend: str) -> bool:
@@ -4427,7 +4444,9 @@ def device_need_guard(device: str) -> bool:
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
-    if dtype == torch.bfloat16 and torch.cuda.is_available():
+    if dtype == torch.bfloat16 and torch.version.hip:
+        return True
+    elif dtype == torch.bfloat16 and torch.cuda.is_available():
         return torch.cuda.get_device_capability() < (9, 0)
     elif dtype == torch.bfloat16 and torch.xpu.is_available():
         return True
