@@ -78,6 +78,7 @@ from torch._subclasses.fake_tensor import (
     is_fake,
     is_fake_tensor,
     maybe_get_fake_mode,
+    maybe_get_item_memo,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch._utils_internal import justknobs_check
@@ -5287,8 +5288,8 @@ def _wrap_to_fake_tensor_and_record_impl(
             _wire_tensor_spec_dims(tensor_spec, fake_e)
         if (
             source is not None
-            and isinstance(fake_e, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-            and (sym_val := fake_e.item_memo) is not None
+            and is_fake_tensor(fake_e)
+            and (sym_val := maybe_get_item_memo(fake_e)) is not None
         ):
             # Match the peephole in FakeTensorConverter.from_real_tensor that
             # strips FloatTensorSource before calling create_symbol.  Without
@@ -5299,6 +5300,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             else:
                 item_source = CallMethodItemSource(source)
             tx.output.tracked_fakes.append(
+                # pyrefly: ignore[bad-argument-type]
                 TrackedFake(sym_val, item_source, symbolic_context)
             )
 
