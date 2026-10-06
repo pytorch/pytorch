@@ -1164,15 +1164,24 @@ batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 numerics: Literal["default", "strict_pointwise", "strict_reduction", "strict"] = Config(
     default=os.environ.get("TORCHINDUCTOR_NUMERICS", "default"),
     implies={
-        mode: {
+        "strict_pointwise": {"strict_pointwise": True},
+        "strict_reduction": {"strict_reduction": True},
+        "strict": {"strict_pointwise": True, "strict_reduction": True},
+    },
+)
+
+strict_pointwise: bool = Config(
+    default=False,
+    implies={
+        True: {
             "eager_numerics.disable_ftz": True,
             "eager_numerics.division_rounding": True,
             "emulate_precision_casts": True,
         }
-        for mode in ("strict_pointwise", "strict")
     },
 )
 
+strict_reduction: bool = False
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
