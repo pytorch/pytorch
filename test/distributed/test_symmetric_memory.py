@@ -2612,6 +2612,7 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_alloc_and_first_rendezvous_during_capture_raise(self) -> None:
         self._init_process()
         if symm_mem.get_backend(self.device) != "CUDA":
@@ -2640,6 +2641,7 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_collective_cuda_graph_replay(self) -> None:
         """Warm up a collective eagerly on a rendezvoused buffer, capture it,
         replay several times and check the last replay. Inside the graph the
