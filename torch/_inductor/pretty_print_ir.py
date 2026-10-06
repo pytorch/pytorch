@@ -371,6 +371,48 @@ def _tensor_declaration(name: str, mutable: bool = False) -> str:
     return f"{name}: {'mutate ' if mutable else ''}{tensor_type}"
 
 
+def _view_suffix(name: str) -> str:
+    """` = base[...]` for a buffer stored inside another buffer, e.g. a
+    ConcatKernel input that is computed straight into its slice of the output."""
+    from torch._inductor import ir
+
+    buffer = V.graph.try_get_buffer(name)
+    layout = buffer.get_output_spec() if buffer is not None else None
+    if not isinstance(layout, ir.NonOwningLayout):
+        return ""
+    base, view = layout.view.data, layout.view.get_layout()
+    if (slices := _slices(view, base)) is not None:
+        return f" = {base.get_name()}[{slices}]"
+    size, stride = _render(list(view.size)), _render(list(view.stride))
+    offset = _render(view.offset)
+    return f" = as_strided({base.get_name()}, {size}, {stride}, {offset})"
+
+
+def _slices(view, base) -> str | None:
+    """`start:end, ...` if a static view shares its base's strides."""
+    try:
+        size, stride, base_size, base_stride = (
+            [int(x) for x in xs]
+            for xs in (view.size, view.stride, base.get_size(), base.get_stride())
+        )
+        offset = int(view.offset)
+    except TypeError:  # symbolic
+        return None
+    if stride != base_stride:
+        return None
+    # Unravel the offset into per-dim starts, outermost dim first.
+    starts = [0] * len(size)
+    for dim in sorted(range(len(size)), key=lambda d: -stride[d]):
+        if stride[dim]:
+            starts[dim], offset = divmod(offset, stride[dim])
+    bounds = list(zip(starts, size, base_size))
+    if offset or any(start + n > full for start, n, full in bounds):
+        return None
+    return ", ".join(
+        ":" if n == full else f"{start}:{start + n}" for start, n, full in bounds
+    )
+
+
 def _format_loop_body(
     name: str,
     written_names: OrderedSet[str],
@@ -427,7 +469,9 @@ def _signature(
         for read in OrderedSet([*mutated_names, *read_names])
         if read not in written_names
     ]
-    outputs = ", ".join(_tensor_declaration(output) for output in output_names)
+    outputs = ", ".join(
+        _tensor_declaration(output) + _view_suffix(output) for output in output_names
+    )
     if len(output_names) > 1:
         outputs = f"({outputs})"
     arrow = f" -> {outputs}" if outputs else ""
@@ -454,6 +498,17 @@ def _format_extern_kernel(name: str, kernel) -> str:
             "extern_kernel", name, read_names, written_names, _extern_callee(kernel)
         )
     )
+
+
+def _format_nop_kernel(name: str, kernel) -> str:
+    # A ConcatKernel only owns the output: its inputs were already computed
+    # into their slices of it, as their `= buf[...]` declarations show.
+    from torch._inductor import ir
+
+    keyword = "concat_kernel" if isinstance(kernel, ir.ConcatKernel) else "nop_kernel"
+    read_names = [dep.name for dep in kernel.get_read_writes().reads]
+    written_names = OrderedSet(output.get_name() for output in kernel.get_outputs())
+    return "\n".join(_signature(keyword, name, read_names, written_names))
 
 
 def _multi_outputs(kernel) -> list[Any]:
@@ -495,11 +550,17 @@ def _extern_callee(kernel) -> str | None:
 
 def format_scheduler_node(node) -> str:
     from torch._inductor import ir
-    from torch._inductor.scheduler import ExternKernelSchedulerNode, SchedulerNode
+    from torch._inductor.scheduler import (
+        ExternKernelSchedulerNode,
+        NopKernelSchedulerNode,
+        SchedulerNode,
+    )
 
     name = node.get_name()
     if isinstance(node, ExternKernelSchedulerNode):
         return _format_extern_kernel(name, node.node)
+    if isinstance(node, NopKernelSchedulerNode) and isinstance(node.node, ir.NopKernel):
+        return _format_nop_kernel(name, node.node)
     if not isinstance(node, SchedulerNode) or not isinstance(
         node.node, ir.ComputedBuffer
     ):
@@ -619,6 +680,8 @@ def format_computed_buffer(buffer) -> str:
     name = buffer.get_operation_name()
     if isinstance(buffer, ir.ExternKernel):
         return _format_extern_kernel(name, buffer)
+    if isinstance(buffer, ir.NopKernel):
+        return _format_nop_kernel(name, buffer)
     if not isinstance(buffer, ir.ComputedBuffer):
         return f"kernel {name}:\n    unimplemented {type(buffer).__name__}"
 
