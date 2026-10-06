@@ -1,11 +1,13 @@
 r"""Experimental FSDP2 customization APIs.
 
 FSDP copies nonzero-dimension shards through intermediate buffers by default.
-Register the ``with_native_copy`` callbacks to copy directly between parameter
+Use the ``with_native_copy`` functions to copy directly between parameter
 layouts and collective buffers. Each direction can be selected independently
 on a fully sharded model::
 
-    model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
+    model.set_all_gather_layout(
+        DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+    )
     model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
 
 The native CUDA copies can improve performance for wide contiguous tensors with
@@ -27,22 +29,27 @@ to reconstruct the parameter. Existing hooks returning tensors remain supported.
 from collections.abc import Callable
 
 import torch
+from torch.distributed.fsdp._fully_shard._all_gather_layout import (
+    _default_all_gather_output_fn,
+    AllGatherOutputFn,
+    DefaultAllGatherLayout,
+)
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
-    AllGatherOutputFn,
     PrepareReduceScatterInputsFn,
 )
 
 
 __all__ = [
     "AllGatherInput",
+    "DefaultAllGatherLayout",
     "all_gather_output_fn_with_native_copy",
     "reduce_scatter_input_fn_with_native_copy",
 ]
 
 AllGatherInput.__module__ = "torch.distributed.fsdp.experimental"
+DefaultAllGatherLayout.__module__ = "torch.distributed.fsdp.experimental"
 
 
 def all_gather_output_fn_with_native_copy(
@@ -54,8 +61,7 @@ def all_gather_output_fn_with_native_copy(
 ) -> None:
     r"""Copy gathered payloads directly into their final layout.
 
-    Register with
-    :meth:`torch.distributed.fsdp.FSDPModule.set_all_gather_output_fn`.
+    Use as the ``output_fn`` of :class:`DefaultAllGatherLayout`.
     See the module documentation for the performance tradeoffs. Groups with a
     tensor payload smaller than its cached output use the default copy-out.
     """
