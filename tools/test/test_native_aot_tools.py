@@ -694,9 +694,12 @@ class TestArch(unittest.TestCase):
         # Both spellings of a CC are separate nvcc targets, and both are
         # exportable: CI passes "10.0a", the wheel builds pass "10.0".
         self.assertEqual(f("10.0"), ["sm_100"])
-        # 10.3 stays unexportable -- nothing names it, so shipping it would
-        # only grow wheels (the gate itself is major.minor and would be safe).
-        self.assertEqual(f("Hopper 10.3a"), [])
+        # 10.3 (GB300) and 10.7 (Rubin) are exportable too: the GB300
+        # smoke_b200 CI runner builds with TORCH_CUDA_ARCH_LIST=10.3.
+        self.assertEqual(f("Hopper 10.3a"), ["sm_103a"])
+        self.assertEqual(f("10.7a"), ["sm_107a"])
+        # A hypothetical future capability nothing names yet still drops out.
+        self.assertEqual(f("11.0a"), [])
 
     def test_archs_from_cuda_arch_list_dedups(self):
         # "10.0;10.0+PTX" names one arch twice; a repeated entry would read as
