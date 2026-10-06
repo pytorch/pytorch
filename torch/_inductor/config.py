@@ -705,13 +705,10 @@ bmm_shared_a: bool = Config(
 )
 
 
-# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
-# in max_autotune. Default 10: a sweep over GDN2/attn/MoE + FLUX shapes (bf16 and
-# nvfp4, M=1..4096) showed the heuristic's ranked winner sits in the top ~5 for
-# small/large M and for all nvfp4, but for mid-M (~512) bf16 the best config can
-# rank much deeper -- capping at 5 there lost up to ~11%, while cap 10 recovered
-# nearly all of it (diminishing returns beyond 10). Set to 0, None, or env var
-# "none"/"all" to tune all configs.
+# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM)
+# heuristic-ranked configs to profile per kernel family in max_autotune.
+# Explicitly supplemental, shape-scoped configs may be added after this cap.
+# Set to 0, None, or env var "none"/"all" to tune all configs.
 def _nvgemm_max_profiling_configs_default() -> int | None:
     env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10")
     if env_val.lower() in ("none", "all"):
@@ -719,6 +716,9 @@ def _nvgemm_max_profiling_configs_default() -> int | None:
     return int(env_val)
 
 
+# BF16 medium-M shapes can require a deeper heuristic pool; a sweep over
+# GDN2/attention/MoE and FLUX shapes found that 10 recovered nearly all of the
+# available performance while lower caps lost up to 11%.
 nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default()
 
 # When enabled, adds supplement kernel configs that nvMatmulHeuristics
@@ -729,11 +729,21 @@ nvgemm_supplement_configs: bool = (
     os.environ.get("TORCHINDUCTOR_NVGEMM_SUPPLEMENT_CONFIGS", "0") == "1"
 )
 
-# When enabled, adds swap_ab NVGEMM choices that swap A/B operands so the
-# large N dimension goes on the M-axis. Improves tile utilization for
-# small-M decode shapes typical in LLM inference (M << N).
+# Force swap_ab NVGEMM choices outside the automatically selected NVFP4
+# decode regime. Swapping A/B puts the large N dimension on the well-tiled
+# M-axis; NVFP4 shapes with M <= 256 and N >= 1024 enable it automatically.
 nvgemm_swap_ab: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_SWAP_AB", "0") == "1"
 
+# Control programmatic dependent launch for the vendored SM100 block-scaled
+# NVGEMM kernel: "0" disables it, "auto" applies the measured NVFP4 shape
+# policy, and "1" forces it for every eligible NVFP4 GEMM. Every thread waits
+# before accessing global memory. All threads execute the common release at the
+# kernel tail, so non-epilogue warps can let the dependent grid launch while
+# the epilogue stores continue to drain.
+# Eligible scheduler-adjacent same-stream Triton consumers also continue the
+# PDL chain. Workspace-backed and composite launches are excluded; deferred
+# alignment copies remain ordered on the same stream before the consumer.
+nvgemm_pdl: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PDL", "auto")
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
 _conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
@@ -1154,15 +1164,24 @@ batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 numerics: Literal["default", "strict_pointwise", "strict_reduction", "strict"] = Config(
     default=os.environ.get("TORCHINDUCTOR_NUMERICS", "default"),
     implies={
-        mode: {
+        "strict_pointwise": {"strict_pointwise": True},
+        "strict_reduction": {"strict_reduction": True},
+        "strict": {"strict_pointwise": True, "strict_reduction": True},
+    },
+)
+
+strict_pointwise: bool = Config(
+    default=False,
+    implies={
+        True: {
             "eager_numerics.disable_ftz": True,
             "eager_numerics.division_rounding": True,
             "emulate_precision_casts": True,
         }
-        for mode in ("strict_pointwise", "strict")
     },
 )
 
+strict_reduction: bool = False
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
