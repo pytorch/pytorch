@@ -678,13 +678,12 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], nodes)
 
-    @parametrize("alpha", [0.5, 2, 0])
-    def test_addmm_add_alpha(self, alpha):
+    def test_addmm_add_alpha(self):
         # https://github.com/pytorch/pytorch/issues/199698
         def fn(a, b, c):
             return (
-                torch.add(a, torch.mm(b, c), alpha=alpha),
-                torch.add(torch.mm(b, c), a, alpha=alpha),
+                torch.add(a, torch.mm(b, c), alpha=0.5),
+                torch.add(torch.mm(b, c), a, alpha=0.5),
             )
 
         args = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(3)]
@@ -692,8 +691,39 @@ class TestPatternMatcher(TestCase):
         a1, a2 = torch.compile(fn)(*args)
         torch.testing.assert_close(a1, e1)
         torch.testing.assert_close(a2, e2)
-        count = 0 if alpha == 0 else 2
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
+        # the addmm patterns don't declare alpha, so they must not match
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+
+    def test_undeclared_non_default_kwarg_blocks_match(self):
+        undeclared = CallFunction(torch.ops.aten.add, KeywordArg("x"), KeywordArg("y"))
+        declared = CallFunction(
+            torch.ops.aten.add, KeywordArg("x"), KeywordArg("y"), alpha=KeywordArg("a")
+        )
+
+        def matches(pattern, **kwargs):
+            gm = make_fx(lambda x, y: torch.ops.aten.add(x, y, **kwargs))(
+                torch.randn(2), torch.randn(2)
+            )
+            add = next(n for n in gm.graph.nodes if n.op == "call_function")
+            return bool(pattern.match(add))
+
+        self.assertTrue(matches(undeclared))
+        self.assertTrue(matches(undeclared, alpha=1))
+        self.assertFalse(matches(undeclared, alpha=2))
+        self.assertTrue(matches(declared, alpha=2))
+
+    def test_addcdiv_fma_keeps_add_alpha(self):
+        # https://github.com/pytorch/pytorch/issues/199839
+        args = [torch.randn(8, device=GPU_TYPE) for _ in range(3)]
+        for alpha, fuses in ((1, True), (0.1, False)):
+
+            def fn(m, t1, t2):
+                return torch.add(m, t1 / t2 * 0.01, alpha=alpha)
+
+            torch._dynamo.reset()
+            counters.clear()
+            torch.testing.assert_close(torch.compile(fn)(*args), fn(*args))
+            self.assertEqual(counters["inductor"]["addcdiv_fma_fused"], int(fuses))
 
     def test_addmm_symbolic_scalar(self):
         def fn(m1, m2):

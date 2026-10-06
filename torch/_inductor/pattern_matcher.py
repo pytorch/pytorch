@@ -923,6 +923,37 @@ _SimpleSpec = tuple[Any, ...]
 _NodeMeta = tuple[Sequence["torch.SymInt | int"], torch.dtype, torch.device]
 
 
+@functools.cache
+def _schema_defaults(op: torch._ops.OpOverload) -> dict[str, Any]:
+    return {
+        a.name: a.default_value for a in op._schema.arguments if a.has_default_value()
+    }
+
+
+def _has_undeclared_non_default_kwarg(
+    target: Any, kwargs: Mapping[str, Any], declared: Mapping[str, Any]
+) -> bool:
+    # Patterns don't bind kwargs they don't declare, so matching a node that sets
+    # one (e.g. add's alpha) would silently drop it from the replacement. layout
+    # and pin_memory are exempt: graphs set them to strided/False, which is
+    # equivalent to their None default for the dense tensors inductor handles.
+    # Patterns must declare any other kwarg they accept (dtype, memory_format, ...).
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+    defaults = _schema_defaults(target)
+    return any(
+        k not in declared
+        and k not in ("layout", "pin_memory")
+        and (
+            k not in defaults
+            # comparing a symbolic value to the default would install a guard
+            or isinstance(v, (torch.SymInt, torch.SymFloat, torch.SymBool))
+            or v != defaults[k]
+        )
+        for k, v in kwargs.items()
+    )
+
+
 class _TargetArgsExpr(_TargetExpr):
     """
     Base class for filtering match by node.{target,args,kwargs}
@@ -1037,16 +1068,13 @@ class _TargetArgsExpr(_TargetExpr):
 
             if normalized_args_and_kwargs is None:
                 return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
-            else:
-                _args, _kwargs = normalized_args_and_kwargs
-                if len(_args) == len(self.args) and len(_kwargs) >= len(self.kwargs):
-                    _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
-                else:
-                    return FailedMatch(
-                        "function_mismatch: node={}, pattern={}", node, self
-                    )
-        else:
-            _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+            _args, _kwargs = normalized_args_and_kwargs
+            if len(_args) != len(self.args) or len(_kwargs) < len(self.kwargs):
+                return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
+
+        if _has_undeclared_non_default_kwarg(node.target, _kwargs, self.kwargs):
+            return FailedMatch("undeclared_kwarg: node={}, pattern={}", node, self)
+        _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
 
         node_items, node_spec = self.flatten(_args, _kwargs)
         self_items, self_spec = self.flat_args_kwargs
