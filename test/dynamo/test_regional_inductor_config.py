@@ -1453,6 +1453,94 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         # inner's forward body, then its backward body inside outer's backward.
         self.assertEqual(region_max_autotune, [True, False])
 
+    @torch._inductor.config.patch("triton.cudagraphs", False)
+    @parametrize(
+        "outer_bw,inner_fw,inner_bw",
+        # The forwards conflict, with each backward reusing its forward config,
+        # or the forwards agree and only the backwards conflict.
+        ((None, False, None), (True, True, False)),
+    )
+    def test_nested_region_rejects_conflicting_cudagraph_configs(
+        self, outer_bw, inner_fw, inner_bw
+    ):
+        from torch._inductor.compile_fx import create_compiler_config_extra
+
+        def options(fw, bw):
+            bw_patches = None if bw is None else {"triton.cudagraphs": bw}
+            return get_invoke_subgraph_compile_options(
+                fw_inductor_config_patches={"triton.cudagraphs": fw},
+                bw_inductor_config_patches=bw_patches,
+            )
+
+        inner = self._configured_region_graph_module(options(inner_fw, inner_bw))
+        gm = self._configured_region_graph_module(options(True, outer_bw), inner)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "nested compile regions cannot have conflicting cudagraph configs",
+        ):
+            create_compiler_config_extra(gm)
+
+    @torch._inductor.config.patch("triton.cudagraphs", False)
+    def test_nested_region_cudagraph_rejects_dynamo_override(self):
+        from torch._inductor import _CudagraphAnnotation
+        from torch._inductor.compile_fx import create_compiler_config_extra
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": False}
+        )
+        gm = self._configured_region_graph_module(nested_config)
+        gm.meta["cudagraph_annotation"] = _CudagraphAnnotation(fwd=True, bwd=None)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "override_cudagraphs.*cannot be combined.*nested compile-region",
+        ):
+            create_compiler_config_extra(gm)
+
+    @parametrize(
+        "top_level,annotation_fwd,annotation_bwd,region_cudagraphs",
+        ((True, True, None, False), (False, None, False, True)),
+    )
+    def test_no_op_dynamo_override_allows_regional_cudagraphs(
+        self, top_level, annotation_fwd, annotation_bwd, region_cudagraphs
+    ):
+        """An annotation that restates the ambient config is not a conflict."""
+        from torch._inductor import _CudagraphAnnotation
+        from torch._inductor.compile_fx import create_compiler_config_extra
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": region_cudagraphs}
+        )
+        gm = self._configured_region_graph_module(nested_config)
+        gm.meta["cudagraph_annotation"] = _CudagraphAnnotation(
+            fwd=annotation_fwd, bwd=annotation_bwd
+        )
+
+        with torch._inductor.config.patch("triton.cudagraphs", top_level):
+            compiler_config = create_compiler_config_extra(gm)
+
+        self.assertTrue(compiler_config.has_regional_cudagraphs)
+        self.assertEqual(compiler_config.top_level_cudagraphs, top_level)
+        self.assertIsNone(compiler_config.cudagraphs_bwd_override)
+
+    @torch._inductor.config.patch("triton.cudagraphs", False)
+    def test_redundant_cudagraph_override_is_not_regional(self):
+        from torch._inductor import _CudagraphAnnotation
+        from torch._inductor.compile_fx import create_compiler_config_extra
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": True},
+            bw_inductor_config_patches={"triton.cudagraphs": True},
+        )
+        gm = self._configured_region_graph_module(nested_config)
+        gm.meta["cudagraph_annotation"] = _CudagraphAnnotation(fwd=True, bwd=True)
+
+        compiler_config = create_compiler_config_extra(gm)
+
+        self.assertFalse(compiler_config.has_regional_cudagraphs)
+        self.assertTrue(compiler_config.top_level_cudagraphs)
+
 
 if __name__ == "__main__":
     run_tests()

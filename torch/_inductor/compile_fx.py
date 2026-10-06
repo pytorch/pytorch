@@ -734,6 +734,87 @@ def _any_subgraph_enables_cudagraphs(gm: GraphModule) -> bool:
     return any(_iter_subgraph_cudagraph_overrides(gm))
 
 
+def _validate_nested_region_cudagraphs(
+    gm: GraphModule,
+    *,
+    enclosing_forward: bool,
+    enclosing_backward: bool,
+    validate_forward: bool = True,
+    validate_backward: bool = True,
+) -> None:
+    def visit(
+        current_gm: GraphModule,
+        enclosing_forward: bool,
+        enclosing_backward: bool,
+        first_level: bool,
+    ) -> None:
+        invoke_subgraph_module_ids: OrderedSet[int] = OrderedSet()
+        for node in current_gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        ):
+            nested_config = node.meta.get("custom", {}).get("nested_region_config")
+            forward_patches = (
+                nested_config.inductor_config_patches if nested_config else None
+            )
+            backward_patches = (
+                nested_config.bw_inductor_config_patches
+                if nested_config
+                and nested_config.bw_inductor_config_patches is not None
+                else forward_patches
+            )
+            forward_override = (
+                bool(forward_patches["triton.cudagraphs"])
+                if forward_patches is not None
+                and "triton.cudagraphs" in forward_patches
+                else None
+            )
+            backward_override = (
+                bool(backward_patches["triton.cudagraphs"])
+                if backward_patches is not None
+                and "triton.cudagraphs" in backward_patches
+                else None
+            )
+            if not first_level and (
+                (
+                    validate_forward
+                    and forward_override is not None
+                    and forward_override != enclosing_forward
+                )
+                or (
+                    validate_backward
+                    and backward_override is not None
+                    and backward_override != enclosing_backward
+                )
+            ):
+                raise RuntimeError(
+                    "nested compile regions cannot have conflicting cudagraph configs"
+                )
+
+            subgraph = _get_invoke_subgraph_graph_module(current_gm, node)
+            if subgraph is not None:
+                invoke_subgraph_module_ids.add(id(subgraph))
+                visit(
+                    subgraph,
+                    (
+                        enclosing_forward
+                        if forward_override is None
+                        else forward_override
+                    ),
+                    (
+                        enclosing_backward
+                        if backward_override is None
+                        else backward_override
+                    ),
+                    False,
+                )
+
+        for child in _iter_graph_referenced_submodules(current_gm):
+            if id(child) not in invoke_subgraph_module_ids:
+                visit(child, enclosing_forward, enclosing_backward, first_level)
+
+    visit(gm, enclosing_forward, enclosing_backward, True)
+
+
 def _any_subgraph_cudagraphs_preference_differs(
     gm: GraphModule, enclosing_cudagraphs: bool, *, backward: bool = False
 ) -> bool:
@@ -3005,6 +3086,27 @@ def create_compiler_config_extra(
     has_regional_cudagraphs = (
         forward_has_regional_cudagraphs or backward_has_regional_cudagraphs
     )
+    # Only an annotation that actually moves a top-level value conflicts; one
+    # that restates the ambient config leaves the region intent unambiguous.
+    annotation_changes_setting = (
+        top_level_cudagraphs != config.triton.cudagraphs
+        or cudagraphs_bwd_override is not None
+    )
+    if has_regional_cudagraphs and annotation_changes_setting:
+        raise RuntimeError(
+            "torch._dynamo.override_cudagraphs cannot be combined with "
+            "conflicting triton.cudagraphs nested compile-region options"
+        )
+    if has_regional_cudagraphs:
+        if pre_aot_graph is None:
+            raise AssertionError(
+                "regional cudagraph configuration requires an FX graph"
+            )
+        _validate_nested_region_cudagraphs(
+            pre_aot_graph,
+            enclosing_forward=top_level_cudagraphs,
+            enclosing_backward=backward_top_level_cudagraphs,
+        )
 
     forward_cudagraphs_requested = top_level_cudagraphs or bool(
         pre_aot_graph is not None and _any_subgraph_enables_cudagraphs(pre_aot_graph)
