@@ -17,6 +17,7 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.trace_rules import is_callable_allowed
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
@@ -36,7 +37,13 @@ def tensor_constant_result():
     return torch.tensor([4.0])
 
 
+class CodelessCallPartial(functools.partial):
+    pass
+
+
 class DecoratorTests(PytreeRegisteringTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -636,6 +643,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="constant")
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -932,6 +940,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="symbolic")
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -1343,6 +1352,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         wrapped = torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
 
+        unregister = torch._dynamo.decorators._unregister_substitute_in_graph
+        self.addCleanup(unregister, binascii.b2a_base64)
+
         cnts = torch._dynamo.testing.CompileCounter()
         fn = binascii.b2a_base64
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -1538,8 +1550,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
         if compile_outer:
 
             class Foo:
-                @compile_decorator
                 @staticmethod
+                @compile_decorator
                 def bar(x):
                     return x.sin()
 
@@ -1566,8 +1578,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
         cnt = torch._dynamo.testing.CompileCounter()
 
         class Foo:
-            @torch.compile(backend=cnt)
             @staticmethod
+            @torch.compile(backend=cnt)
             def bar(x):
                 return x.sin()
 
@@ -1576,6 +1588,32 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(Foo.bar(x), expected)
         self.assertEqual(Foo().bar(x), expected)
         self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_compile_class_caching_precompile(self):
+        # Regression: @torch.compile on a class under caching_precompile=True
+        # crashed in _TorchDynamoContext.__call__ before reaching the isclass
+        # branch — the caching_precompile block accessed fn.__code__ on the
+        # class and raised `AttributeError: type object 'Foo' has no attribute
+        # '__code__'` at decoration time. Third-party libs decorate autograd
+        # Function subclasses this way at import.
+        from torch._dynamo.package import DynamoCache
+
+        DynamoCache.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        class Foo:
+            def __call__(self, x):
+                return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo()(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+        CompiledPartial = torch.compile(backend="eager")(CodelessCallPartial)
+        self.assertEqual(CompiledPartial(torch.sin)(x), expected)
 
     def test_class_methods(self):
         class A:
@@ -2986,6 +3024,50 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         # invoked again and the first-compile annotation sticks.
         callee(torch.randn(4))
         self.assertEqual(annotations, [])
+
+    def test_nonstrict_trace_bound_method_in_region(self):
+        # `nonstrict_trace` applied to a bound method inside the compiled
+        # region must keep the receiver bound, matching what decorating the
+        # bound method outside the region already does.
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def m(self, x):
+                torch._dynamo.graph_break()
+                return x + self.bias
+
+        obj = Counter(10)
+
+        def fn(x):
+            return torch._dynamo.nonstrict_trace(obj.m)(x)
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_nonstrict_trace_bound_method_matches_decorated(self):
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def m(self, x):
+                return x + self.bias
+
+        obj = Counter(10)
+        decorated = torch._dynamo.nonstrict_trace(obj.m)
+
+        def inside(x):
+            return torch._dynamo.nonstrict_trace(obj.m)(x)
+
+        def outside(x):
+            return decorated(x)
+
+        x = torch.randn(3)
+        a = torch.compile(inside, fullgraph=True, backend="aot_eager")(x)
+        b = torch.compile(outside, fullgraph=True, backend="aot_eager")(x)
+        self.assertEqual(a, b)
+        self.assertEqual(a, obj.m(x))
 
 
 instantiate_parametrized_tests(DecoratorTests)
