@@ -22,9 +22,9 @@ TF32_ADVISORY = "TensorFloat32 tensor cores for float32 matrix multiplication av
 
 
 def _has_cuda_sm80() -> bool:
+    # The TF32 advisory uses capability >= (8, 0) on both CUDA and ROCm.
     return (
         torch.cuda.is_available()
-        and torch.version.hip is None
         and torch.cuda.get_device_capability() >= (8, 0)
     )
 
@@ -73,6 +73,11 @@ class InductorWarningTests(TestCase):
 
     @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
     @recover_orig_fp32_precision
+    @(
+        torch._inductor.config.patch(fx_graph_cache=False, fx_graph_remote_cache=False)
+        if torch.version.hip is not None
+        else lambda fn: fn
+    )
     def test_trivial_matmul_compile_no_user_warning(self):
         # recover_orig_fp32_precision restores the per-backend flags; the
         # legacy enum still needs the set_float32_matmul_precision below.
