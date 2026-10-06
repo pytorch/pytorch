@@ -11,9 +11,6 @@ from torch._C import (
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ._compile_with_safe_names import _compile_with_safe_names
-from .scaled_grouped_mm_prepare_metadata import (
-    _compile_scaled_grouped_mm_prepare_metadata,
-)
 
 
 class _KernelConfig(NamedTuple):
@@ -527,11 +524,12 @@ def _select_kernel_config_fp4(M: int, N: int, K: int) -> _KernelConfig:
     # Port of MSLK f4f4bf16_grouped::get_kernel_via_heuristics().  The
     # FP4 kernel family carries its K-tiling in the compiled
     # dtype-specific kernel, so the MSLK 256x256x128 vs 256x256x256
-    # distinction collapses to a single 256x256 choice here.
+    # distinction collapses to a single 256x256 choice here.  Unlike
+    # MSLK, groups of up to 128 rows are transposed onto the N tile,
+    # as in the FP8 heuristic.
     cfg_128_64 = _KernelConfig((128, 64), (1, 1), True)
     cfg_256_64 = _KernelConfig((256, 64), (2, 1), True)
-    cfg_128_128 = _KernelConfig((128, 128), (1, 1), False)
-    cfg_256_128 = _KernelConfig((256, 128), (2, 1), False)
+    cfg_256_128_ba = _KernelConfig((256, 128), (2, 1), True)
     cfg_256_256 = _KernelConfig((256, 256), (2, 1), False)
 
     M = int(M)
@@ -555,9 +553,7 @@ def _select_kernel_config_fp4(M: int, N: int, K: int) -> _KernelConfig:
             return cfg_256_64
         return cfg_256_64
     if M <= 128:
-        if N <= 8192:
-            return cfg_256_128
-        return cfg_256_128 if K <= 8192 else cfg_128_128
+        return cfg_256_128_ba
     return cfg_256_256
 
 
@@ -589,7 +585,6 @@ def _allocate_output(
 
 @instrumented_cutedsl_cache("aten::_scaled_grouped_mm_v2")
 def _compile_scaled_grouped_mm_blockscaled(
-    sm_count: int,
     max_active_clusters: int,
     uniform_mn_groups: bool,
     mma_tile_mn: tuple[int, int],
@@ -674,12 +669,13 @@ def _compile_scaled_grouped_mm_blockscaled(
     fake_tensormap = make_fake_tensor(
         cutlass.Int64,
         (
-            sm_count,
+            g,
             Sm100GroupedBlockScaledGemmKernel.num_tensormaps,
             Sm100GroupedBlockScaledGemmKernel.bytes_per_tensormap // 8,
         ),
         stride=(tensormap_stride0, tensormap_stride1, 1),
     )
+    fake_offs = make_fake_tensor(cutlass.Int32, (g,), stride=(1,))
     fake_stream = make_fake_stream(use_tvm_ffi_env_stream=True)
 
     grouped_gemm = Sm100GroupedBlockScaledGemmKernel(
@@ -707,6 +703,13 @@ def _compile_scaled_grouped_mm_blockscaled(
             estimate_total_num_clusters=cutlass.Int32(1),
             total_num_clusters=fake_total_clusters,
             tensormap_cute_tensor=fake_tensormap,
+            offs=fake_offs,
+            dims_mnk=(cute.sym_int(32), cute.sym_int(32), cute.sym_int(32)),
+            base_ptrs=tuple(cute.sym_int(64) for _ in range(6)),
+            strides=tuple(
+                tuple(cute.sym_int(64) for _ in range(rank))
+                for rank in (2, 3, 2, 3, 2, 2, 2)
+            ),
             max_active_clusters=max_active_clusters,
             stream=fake_stream,
             options="--enable-assertions --enable-tvm-ffi",
@@ -728,12 +731,6 @@ def _get_schedule_meta(cluster_size: int, device_id: int) -> tuple[int, int]:
     sm_count = hw.get_max_active_clusters(1)
     max_active_clusters = hw.get_max_active_clusters(cluster_size)
     return sm_count, max_active_clusters
-
-
-@functools.cache
-def _get_max_threads_per_block(device_id: int) -> int:
-    props = torch.cuda.get_device_properties(device_id)
-    return int(getattr(props, "max_threads_per_block", 1024))
 
 
 def _ceil_div_int(a: int, b: int) -> int:
@@ -791,7 +788,9 @@ def _estimate_total_clusters_for_launch(
 @functools.cache
 def _alloc_aux_tensors(
     device_index: int, cap: int
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    from .scaled_grouped_mm_blockscaled_kernel import Sm100GroupedBlockScaledGemmKernel
+
     device = torch.device("cuda", device_index)
     ptrs_abc = torch.empty((cap, 3), device=device, dtype=torch.int64)
     ptrs_scale = torch.empty((cap, 2), device=device, dtype=torch.int64)
@@ -799,6 +798,15 @@ def _alloc_aux_tensors(
     problem_sizes = torch.empty((cap, 4), device=device, dtype=torch.int32)
     strides_abc = torch.empty((cap, 3, 2), device=device, dtype=torch.int64)
     total_num_clusters = torch.empty((1,), device=device, dtype=torch.int32)
+    tensormaps = torch.empty(
+        (
+            cap,
+            Sm100GroupedBlockScaledGemmKernel.num_tensormaps,
+            Sm100GroupedBlockScaledGemmKernel.bytes_per_tensormap // 8,
+        ),
+        device=device,
+        dtype=torch.int64,
+    )
     return (
         ptrs_abc,
         ptrs_scale,
@@ -806,12 +814,13 @@ def _alloc_aux_tensors(
         problem_sizes,
         strides_abc,
         total_num_clusters,
+        tensormaps,
     )
 
 
 def _get_aux_tensors(
     ngroups: int, device: torch.device
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     # Re-allocated when ngroups exceeds current capacity (rounded to
     # next power of 2).
     cap = max(64, 1 << (ngroups - 1).bit_length())
@@ -825,6 +834,7 @@ def _get_aux_tensors(
         problem_sizes,
         strides_abc,
         total_num_clusters,
+        tensormaps,
     ) = _alloc_aux_tensors(device_index, cap)
     return (
         ptrs_abc[:ngroups],
@@ -833,6 +843,7 @@ def _get_aux_tensors(
         problem_sizes[:ngroups],
         strides_abc[:ngroups],
         total_num_clusters,
+        tensormaps[:ngroups],
     )
 
 
@@ -848,26 +859,6 @@ def _get_unit_global_scales(ngroups: int, device: torch.device) -> Tensor:
         device.index if device.index is not None else torch.cuda.current_device()
     )
     return _alloc_unit_global_scales(device_index, cap)[:ngroups]
-
-
-@functools.cache
-def _alloc_tensormap(device_index: int, sm_count: int) -> Tensor:
-    from .scaled_grouped_mm_blockscaled_kernel import Sm100GroupedBlockScaledGemmKernel
-
-    device = torch.device("cuda", device_index)
-    shape = (
-        sm_count,
-        Sm100GroupedBlockScaledGemmKernel.num_tensormaps,
-        Sm100GroupedBlockScaledGemmKernel.bytes_per_tensormap // 8,
-    )
-    return torch.empty(shape, device=device, dtype=torch.int64)
-
-
-def _get_tensormap(sm_count: int, device: torch.device) -> Tensor:
-    device_index = (
-        device.index if device.index is not None else torch.cuda.current_device()
-    )
-    return _alloc_tensormap(device_index, sm_count)
 
 
 def scaled_grouped_mm_blockscaled(
@@ -987,10 +978,6 @@ def scaled_grouped_mm_blockscaled(
     device_id = (
         device.index if device.index is not None else torch.cuda.current_device()
     )
-    max_threads = _get_max_threads_per_block(device_id)
-    threads_per_block = min(ngroups, max_threads)
-    num_blocks = (ngroups + threads_per_block - 1) // threads_per_block
-
     m_for_heuristic = mat_a_m if b_is_2d else (mat_a_m // max(ngroups, 1))
     k_for_heuristic = logical_k_a // max(ngroups, 1) if b_is_2d else logical_k_a
     if fmt.name in ("mxfp4", "nvfp4"):
@@ -999,7 +986,7 @@ def scaled_grouped_mm_blockscaled(
         config = _select_kernel_config_fp8(m_for_heuristic, mat_b_n, k_for_heuristic)
 
     cluster_size = config.cluster_shape_mn[0] * config.cluster_shape_mn[1]
-    sm_count, max_active_clusters = _get_schedule_meta(cluster_size, device_id)
+    _, max_active_clusters = _get_schedule_meta(cluster_size, device_id)
     cluster_tile_m, cluster_tile_n = _get_cluster_tile_shape_mn(
         config.mma_tile_mn, config.cluster_shape_mn
     )
@@ -1015,7 +1002,6 @@ def scaled_grouped_mm_blockscaled(
     )
 
     scaled_grouped_mm_blockscaled_compiled = _compile_scaled_grouped_mm_blockscaled(
-        sm_count,
         max_active_clusters,
         b_is_2d,
         config.mma_tile_mn,
@@ -1034,27 +1020,11 @@ def scaled_grouped_mm_blockscaled(
         problem_sizes,
         strides_abc,
         total_num_clusters,
+        tensormaps,
     ) = _get_aux_tensors(ngroups, device)
 
     scale_a0 = scale_a[0]
     scale_b0 = scale_b[0]
-    mat_a_element_size = mat_a.element_size()
-    scale_a_element_size = scale_a0.element_size()
-    out_element_size = out.element_size()
-    scaled_grouped_mm_prepare_metadata_compiled = (
-        _compile_scaled_grouped_mm_prepare_metadata(
-            a_is_2d,
-            b_is_2d,
-            threads_per_block,
-            fmt.logical_vals_per_elem,
-            fmt.scale_ab_vec_size,
-            mat_a_element_size,
-            scale_a_element_size,
-            out_element_size,
-            4,
-        )
-    )
-
     if global_scales is None:
         global_scales = _get_unit_global_scales(ngroups, device)
 
@@ -1080,17 +1050,7 @@ def scaled_grouped_mm_blockscaled(
     else:
         stride_b_logical = mat_b_stride
 
-    scaled_grouped_mm_prepare_metadata_compiled(
-        (ngroups, mat_a_m, mat_b_n, logical_k_a),
-        (
-            mat_a_ptr,
-            mat_b_ptr,
-            out_ptr,
-            scale_a_ptr,
-            scale_b_ptr,
-            global_scale_ptr,
-        ),
-        offs,
+    metadata_strides = (
         mat_a_stride,
         (0, mat_b_stride[0], mat_b_stride[1]) if b_is_2d else mat_b_stride,
         (
@@ -1109,19 +1069,7 @@ def scaled_grouped_mm_blockscaled(
             else scale_a_stride
         ),
         scale_b_stride,
-        int(config.transpose_ab),
-        cluster_tile_m,
-        cluster_tile_n,
-        problem_sizes,
-        ptrs_abc,
-        ptrs_scale,
-        ptrs_global_scale,
-        strides_abc,
-        total_num_clusters,
-        num_blocks,
     )
-
-    tensormap = _get_tensormap(sm_count, device)
 
     scaled_grouped_mm_blockscaled_compiled(
         _with_l_dim(mat_a),
@@ -1141,7 +1089,18 @@ def scaled_grouped_mm_blockscaled(
         ptrs_scale,
         estimate_total_num_clusters,
         total_num_clusters,
-        tensormap,
+        tensormaps,
+        offs,
+        (mat_a_m, mat_b_n, logical_k_a),
+        (
+            mat_a_ptr,
+            mat_b_ptr,
+            out_ptr,
+            scale_a_ptr,
+            scale_b_ptr,
+            global_scale_ptr,
+        ),
+        metadata_strides,
     )
     return out
 

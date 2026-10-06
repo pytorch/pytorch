@@ -724,6 +724,8 @@ def _2d_grouped_tensor_to_blocked_scaled(t, MN, G, offs, format='mxfp8'):
                     t_scale_slice
                 )  # (round_up(M, 128), round_up(K_group//32, 4))
             t_blocked_scale_list.append(t_scale_slice_blocked)
+        elif format == 'nvfp4':
+            t_global_scale_list.append(torch.ones((), dtype=torch.float32, device=t.device))
 
     # Assemble the full XQ and WQ
     tq = torch.cat(t_list, dim=1).contiguous()
@@ -1037,12 +1039,22 @@ class TestFP8Matmul(TestCase):
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     @parametrize("use_out", [False, True])
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_out, device):
+        offs = generate_jagged_offs(G, K, multiple_of=32, device=device)
+        self._run_scaled_grouped_mm_2d_2d(G, M, N, K, format, use_out, device, offs)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    def test_scaled_grouped_mm_2d_2d_empty_groups(self, format, device):
+        # Groups with no K rows must produce zeros, also when the CTA ran a
+        # non-empty tile before, so there are more tiles than SMs.
+        offs = torch.tensor([128, 128, 256, 256, 384, 384, 512, 512], dtype=torch.int32, device=device)
+        self._run_scaled_grouped_mm_2d_2d(8, 2048, 2048, 512, format, False, device, offs)
+
+    def _run_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_out, device, input_group_end_offsets):
         torch.manual_seed(42)
 
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
-        input_group_end_offsets = generate_jagged_offs(
-            G, total_K, multiple_of=32, device=device
-        )
         X = torch.randn((M, total_K), dtype=torch.bfloat16, device=device) * 0.1
         W = torch.randn((N, total_K), dtype=torch.bfloat16, device=device) * 0.01
 
