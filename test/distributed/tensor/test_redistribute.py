@@ -1555,40 +1555,23 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             rng = random.Random(42)
             rng.shuffle(shard_orders)
             with use_min_cost_redistribution_plan(enabled=True):
+                # Only specs are needed, so distribute each order once.
+                specs = [
+                    _distribute_tensor(
+                        input_data.clone(), mesh, placements=None, shard_order=order
+                    )._spec
+                    for order in shard_orders
+                ]
                 for i in range(0, len(shard_orders), 2):
                     src_order, dst_order = shard_orders[i : i + 2]
-                    # prepare SRC DTensorSpec
-                    src_dtensor = _distribute_tensor(
-                        input_data.clone(),
-                        mesh,
-                        placements=None,
-                        shard_order=src_order,
-                    )
-                    # prepare DST DTensorSpec
-                    dst_dtensor = _distribute_tensor(
-                        input_data.clone(),
-                        mesh,
-                        placements=None,
-                        shard_order=dst_order,
-                    )
-                    src_to_dst_cost = redistribute_cost(
-                        src_dtensor._spec, dst_dtensor._spec
-                    )
+                    src_spec, dst_spec = specs[i : i + 2]
+                    src_to_dst_cost = redistribute_cost(src_spec, dst_spec)
                     # chose every two to reduce the number of tests
-                    for intermediate_order in shard_orders[::2]:
-                        # prepare INT DTensorSpec
-                        intermediate_dtensor = _distribute_tensor(
-                            input_data.clone(),
-                            mesh,
-                            placements=None,
-                            shard_order=intermediate_order,
-                        )
-                        src_to_int_cost = redistribute_cost(
-                            src_dtensor._spec, intermediate_dtensor._spec
-                        )
-                        int_to_dst_cost = redistribute_cost(
-                            intermediate_dtensor._spec, dst_dtensor._spec
-                        )
+                    for intermediate_order, int_spec in zip(
+                        shard_orders[::2], specs[::2]
+                    ):
+                        src_to_int_cost = redistribute_cost(src_spec, int_spec)
+                        int_to_dst_cost = redistribute_cost(int_spec, dst_spec)
                         self.assertTrue(
                             src_to_dst_cost <= src_to_int_cost + int_to_dst_cost,
                             lambda msg: f"{msg}\n{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",

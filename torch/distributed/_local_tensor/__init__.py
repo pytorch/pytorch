@@ -291,6 +291,32 @@ def _combine_int_rank_results(rank_results: dict[int, int]) -> int | torch.SymIn
     return torch.SymInt(LocalIntNode(rank_results))
 
 
+def _local_tensor_metadata(func: Any, args: tuple[Any, ...]) -> Any:
+    """
+    Answers metadata queries on a LocalTensor without running them per rank.
+    Returns NotImplemented for anything else.
+    """
+    if not args or not isinstance(args[0], LocalTensor):
+        return NotImplemented
+    t = args[0]
+    if func is torch.ops.aten.dim.default:
+        return len(t._size)
+    if func is torch.ops.aten.sym_size.default:
+        return tuple(t._size)
+    if func is torch.ops.aten.sym_stride.default:
+        return tuple(
+            _combine_any_rank_results(
+                {r: lt.stride(d) for r, lt in t._local_tensors.items()}
+            )
+            for d in range(len(t._size))
+        )
+    if func is torch.ops.aten.sym_storage_offset.default:
+        return _combine_any_rank_results(
+            {r: lt.storage_offset() for r, lt in t._local_tensors.items()}
+        )
+    return NotImplemented
+
+
 def _combine_any_rank_results(rank_results: dict[int, Any]) -> Any:
     any_v = next(iter(rank_results.values()))
 
@@ -347,6 +373,7 @@ def _for_each_rank_run_func(
     kwargs: dict[str, Any],
     *,
     alias: bool = True,
+    uses_rng: bool = True,
 ) -> Any:
     flat_args, args_spec = pytree.tree_flatten((args, kwargs))
     flat_args = [
@@ -354,9 +381,16 @@ def _for_each_rank_run_func(
     ]
 
     lm = enabled_local_tensor_mode()
-    use_per_rank_rng = lm is not None and len(lm._per_rank_rng_states) > 0
+    # Saving/restoring CPU and accelerator RNG state dominates the per-op cost,
+    # so skip it for aten ops that don't consume RNG and for callers that opt out.
+    uses_rng = uses_rng and not (
+        isinstance(func, OpOverload)
+        and func.namespace == "aten"
+        and torch.Tag.nondeterministic_seeded not in func.tags
+    )
+    use_per_rank_rng = uses_rng and lm is not None and len(lm._per_rank_rng_states) > 0
 
-    global_rng_state = None if use_per_rank_rng else _get_rng_state()
+    global_rng_state = _get_rng_state() if uses_rng and not use_per_rank_rng else None
 
     flat_rank_rets = {}
 
@@ -367,9 +401,7 @@ def _for_each_rank_run_func(
                 raise AssertionError
             if r in lm._per_rank_rng_states:
                 _set_rng_state(*lm._per_rank_rng_states[r])
-        else:
-            if global_rng_state is None:
-                raise AssertionError
+        elif global_rng_state is not None:
             _set_rng_state(*global_rng_state)
 
         rank_flat_args = [_map_to_rank_local_val(a, r) for a in flat_args]
@@ -1054,6 +1086,13 @@ class LocalTensor(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
+        # Avoid entering a new LocalTensorMode for metadata queries, e.g. the
+        # size/stride/offset reads in return_and_correct_aliasing.
+        if not kwargs:
+            ret = _local_tensor_metadata(func, args)
+            if ret is not NotImplemented:
+                return ret
+
         # This is horribly inefficient
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
         local_tensor = None
@@ -1391,6 +1430,11 @@ class LocalTensorMode(TorchDispatchMode):
             return len(args[0]._size)
         if func.overloadpacket == torch.ops.aten.sym_size:
             return tuple(args[0]._size)
+        if not kwargs and func in (
+            torch.ops.aten.sym_stride.default,
+            torch.ops.aten.sym_storage_offset.default,
+        ):
+            return _local_tensor_metadata(func, args)
 
         if func.namespace == "c10d":
             if func is torch.ops.c10d.allreduce_.default:
@@ -1835,9 +1879,9 @@ def maybe_run_for_local_tensor(func: Callable[_P, _R]) -> Callable[_P, _R]:
     as those requiring rank specific actions. For example, a function that computes
     offset into input tensor based on rank.
 
-    Note that the function being decorated must not have any side effects and
-    contain operations for a single rank only. For example, wrapping a function
-    that performs a collective operation will not work.
+    Note that the function being decorated must not have any side effects
+    (including consuming RNG) and contain operations for a single rank only. For
+    example, wrapping a function that performs a collective operation will not work.
 
     Args:
         func (Callable[..., Any]): The function to be decorated.
@@ -1852,7 +1896,9 @@ def maybe_run_for_local_tensor(func: Callable[_P, _R]) -> Callable[_P, _R]:
             return func(*args, **kwargs)
         ret = None
         with lm.disable():
-            ret = _for_each_rank_run_func(func, lm.ranks, args, kwargs, alias=False)
+            ret = _for_each_rank_run_func(
+                func, lm.ranks, args, kwargs, alias=False, uses_rng=False
+            )
 
         return ret
 
