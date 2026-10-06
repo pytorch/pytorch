@@ -107,7 +107,7 @@ jobs:
       image: ghcr.io/actions/actions-runner:latest
     steps:
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@gh/huydhn/68/head
         with:
           use-arc: true
           submodules: false
