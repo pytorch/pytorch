@@ -120,15 +120,15 @@ _REDUCTION_IDENTITIES = {
     "prod": "1",
 }
 
-_REDUCTION_OPERATORS = {
-    "sum": "+=",
-    "dot": "+=",
-    "xor_sum": "^=",
-    "any": "or=",
-    "prod": "*=",
-    "max": "max=",
-    "fmax": "max=",
-    "min": "min=",
+_REDUCTION_COMBINES = {
+    "sum": "{acc} + {value}",
+    "dot": "{acc} + {value}",
+    "xor_sum": "{acc} ^ {value}",
+    "any": "{acc} | {value}",
+    "prod": "{acc} * {value}",
+    "max": "max({acc}, {value})",
+    "fmax": "fmax({acc}, {value})",
+    "min": "min({acc}, {value})",
 }
 
 
@@ -246,6 +246,7 @@ class _PrettyOpsHandler(DefaultHandler):
         return self._bind(_render(value), dtype)
 
     def load(self, name: str, index: sympy.Expr):
+        name = _real_name(name)
         self.reads.add(name)
         return self._bind(
             f"{name}[{_render(index)}]",
@@ -258,10 +259,11 @@ class _PrettyOpsHandler(DefaultHandler):
 
     def store(self, name, index, value, mode=None):
         operator = "+=" if mode == "atomic_add" else "="
-        self.body.append(f"{name}[{_render(index)}] {operator} {_render(value)}")
+        index, value = _render(index), _render(value)
+        self.body.append(f"{_real_name(name)}[{index}] {operator} {value}")
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        if reduction_type not in _REDUCTION_OPERATORS:
+        if reduction_type not in _REDUCTION_COMBINES:
             raise _Unsupported(f"reduction {reduction_type}")
 
         name = f"acc_{self._accumulator_count}"
@@ -279,13 +281,13 @@ class _PrettyOpsHandler(DefaultHandler):
         else:
             identity = _REDUCTION_IDENTITIES[reduction_type]
         self.initializers.append(f"{name}: {_dtype_name(dtype)} = {identity}")
-        self.body.append(
-            f"{name} {_REDUCTION_OPERATORS[reduction_type]} {_render(value)}"
-        )
+        combine = _REDUCTION_COMBINES[reduction_type]
+        self.body.append(f"{name} = {combine.format(acc=name, value=_render(value))}")
         return _Value(name, dtype)
 
     def store_reduction(self, name, index, value):
-        self.finalizers.append(f"{name}[{_render(index)}] = {_render(value)}")
+        index, value = _render(index), _render(value)
+        self.finalizers.append(f"{_real_name(name)}[{index}] = {value}")
 
     def where(self, condition, input, other):
         dtype = self._dtypes.where(condition, input, other)
@@ -346,15 +348,27 @@ def _make_variables(prefix: str, ranges: Sequence[sympy.Expr]):
     return [sympy_index_symbol(f"{prefix}{index}") for index in range(len(ranges))]
 
 
-def _tensor_declaration(name: str, aliases: Sequence[str] = ()) -> str:
-    label = " == ".join([name, *aliases])
+def _real_name(name: str) -> str:
+    """The buffer that owns `name`'s storage. A mutation output (e.g. with a
+    MutationLayoutSHOULDREMOVE) has none: codegen writes it through to the buffer
+    it mutates, as Scheduler.mutation_real_name records."""
+    while (buffer := V.graph.try_get_buffer(name)) is not None and (
+        mutated := buffer.get_mutation_names()
+    ):
+        name = mutated[0]
+    return name
+
+
+def _tensor_declaration(name: str, mutable: bool = False) -> str:
     value = V.graph.try_get_buffer(name)
     if value is None:
         value = V.graph.graph_inputs.get(name)
     if value is None or not value.has_tensor_output():
-        return f"{label}: ?[?]"
-    shape = ", ".join(_render(sympy.sympify(size)) for size in value.get_size())
-    return f"{label}: {_dtype_name(value.get_dtype())}[{shape}]"
+        tensor_type = "?[?]"
+    else:
+        shape = ", ".join(_render(sympy.sympify(size)) for size in value.get_size())
+        tensor_type = f"{_dtype_name(value.get_dtype())}[{shape}]"
+    return f"{name}: {'mutate ' if mutable else ''}{tensor_type}"
 
 
 def _format_loop_body(
@@ -400,38 +414,32 @@ def _signature(
     written_names: OrderedSet[str],
     comment: str | None = None,
 ) -> list[str]:
-    # A mutating output writes into its target's storage, so the target is an
-    # input even though the loop body never loads it.
-    mutations = {
-        written: buffer.get_mutation_names()
-        for written in written_names
-        if (buffer := V.graph.try_get_buffer(written)) is not None
-        and buffer.get_mutation_names()
-    }
-    mutated_names = OrderedSet(name for names in mutations.values() for name in names)
-    if mutations:
-        keyword = f"mutate_{keyword}"
+    # A mutation output is written into the buffer it mutates, so that buffer
+    # is a `mutate` input instead, even if the loop body never loads it.
+    real_names = {written: _real_name(written) for written in written_names}
+    mutated_names = OrderedSet(
+        real for written, real in real_names.items() if real != written
+    )
+    output_names = [written for written, real in real_names.items() if real == written]
     suffix = f"  # {comment}" if comment else ""
     inputs = [
-        _tensor_declaration(read)
+        _tensor_declaration(read, mutable=read in mutated_names)
         for read in OrderedSet([*mutated_names, *read_names])
         if read not in written_names
     ]
-    outputs = ", ".join(
-        _tensor_declaration(output, mutations.get(output, ()))
-        for output in written_names
-    )
-    if len(written_names) > 1:
+    outputs = ", ".join(_tensor_declaration(output) for output in output_names)
+    if len(output_names) > 1:
         outputs = f"({outputs})"
+    arrow = f" -> {outputs}" if outputs else ""
     if not inputs:
-        return [f"{keyword} {name}() -> {outputs}{suffix}"]
+        return [f"{keyword} {name}(){arrow}{suffix}"]
     return [
         f"{keyword} {name}({suffix}",
         *(
             f"    {value}{',' if index + 1 < len(inputs) else ''}"
             for index, value in enumerate(inputs)
         ),
-        f") -> {outputs}",
+        f"){arrow}",
     ]
 
 
