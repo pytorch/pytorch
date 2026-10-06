@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import logging
 import os
 from typing import Any, TYPE_CHECKING
@@ -34,6 +35,13 @@ log = logging.getLogger(__name__)
 
 def inductor_quack_cache_dir() -> str:
     """Return the Inductor-owned QuACK cache root for generated FlexGEMM."""
+    # Avoid per-launch cache_dir()/os.makedirs; QuACK creates dirs before writes.
+    # Key memoization on TORCHINDUCTOR_CACHE_DIR so fresh_cache() still works.
+    return _quack_cache_dir(os.environ.get("TORCHINDUCTOR_CACHE_DIR"))
+
+
+@functools.cache
+def _quack_cache_dir(_inductor_cache_dir_env: str | None) -> str:
     return os.path.join(cache_dir(), "quack")
 
 
