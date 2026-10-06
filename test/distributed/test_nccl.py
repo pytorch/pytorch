@@ -1648,6 +1648,73 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
 
     @parametrize("backend_name", ["nccl", "nccl-legacy"])
     @skip_if_lt_x_gpu(2)
+    def test_stale_handle_rejected_across_same_name_restart(
+        self, backend_name: str
+    ) -> None:
+        symm_mem.set_backend("NCCL")
+        self._init_process_group(backend_name, "")
+        old_pg = c10d.distributed_c10d._get_default_group()
+        pg_backend = old_pg._get_backend(self.device)
+        expected_backend_type = (
+            c10d.ProcessGroupNCCL2 if backend_name == "nccl" else c10d.ProcessGroupNCCL
+        )
+        self.assertIsInstance(pg_backend, expected_backend_type)
+        old_group_name = old_pg.group_name
+
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        tensor = symm_mem.empty(4096, dtype=torch.float32, device=self.device)
+        old_handle = symm_mem.rendezvous(tensor, group=old_group_name)
+        torch.cuda.synchronize(self.device)
+        c10d.destroy_process_group()
+        self._assert_stale(old_handle)
+
+        try:
+            self._init_process_group(backend_name, "_successor")
+            new_pg = c10d.distributed_c10d._get_default_group()
+            self.assertEqual(new_pg.group_name, old_group_name)
+            c10d.all_reduce(torch.ones(1, device=self.device))
+            successor_tensor = symm_mem.empty(
+                4096, dtype=torch.float32, device=self.device
+            ).fill_(self.rank)
+            new_handle = symm_mem.rendezvous(successor_tensor, group=old_group_name)
+            torch.cuda.synchronize(self.device)
+            c10d.barrier()
+            peer = (self.rank + 1) % self.world_size
+
+            # The old handle's group name now resolves to the successor's
+            # communicator, so the one-sided ops must reject the handle too.
+            stale = "stale because its RCCL communicator was destroyed"
+            with self.assertRaisesRegex(RuntimeError, stale):
+                old_handle.barrier()
+            with self.assertRaisesRegex(RuntimeError, stale):
+                symm_mem.put_signal(tensor, old_handle, peer)
+            with self.assertRaisesRegex(RuntimeError, stale):
+                symm_mem.wait_signal(old_handle, peer)
+            with self.assertRaisesRegex(RuntimeError, "Free the tensor"):
+                symm_mem.rendezvous(tensor, group=old_group_name)
+
+            # The predecessor's delayed teardown must leave the successor
+            # usable. pg_backend goes too, or its destructor never runs.
+            old_pg_ref = weakref.ref(old_pg)
+            del old_pg, pg_backend
+            gc.collect()
+            self.assertIsNone(old_pg_ref())
+            del old_handle, tensor
+            gc.collect()
+            torch.cuda.synchronize(self.device)
+            c10d.barrier()
+            self.assertEqual(
+                new_handle.get_buffer(
+                    peer, successor_tensor.shape, successor_tensor.dtype
+                ),
+                torch.full_like(successor_tensor, peer),
+            )
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+
+    @parametrize("backend_name", ["nccl", "nccl-legacy"])
+    @skip_if_lt_x_gpu(2)
     def test_retained_handle_rejected_after_abort(self, backend_name: str) -> None:
         # Aborting invalidates the comm through NCCLComm::abort() rather than
         # destroy(). Both backends are covered because only "nccl-legacy"
@@ -1677,8 +1744,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             RuntimeError, "stale because its RCCL communicator was destroyed"
         ):
             handle.barrier()
-        # No successor process group here, so the recovery path has nothing to
-        # rebind to and reports staleness instead.
+        # Re-rendezvous does not rebuild a stale handle either.
         with self.assertRaisesRegex(
             RuntimeError, "stale because its RCCL communicator was destroyed"
         ):

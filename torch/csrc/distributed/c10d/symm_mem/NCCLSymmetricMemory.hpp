@@ -83,7 +83,6 @@ class TORCH_API NCCLSymmetricMemory : public SymmetricMemory {
 #ifdef USE_ROCM
   friend class NCCLSymmetricMemoryAllocator;
 
-  bool has_successor_comm() const;
   void check_liveness() const;
 #endif
 

@@ -414,26 +414,14 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         .comm_registration_is_live(group_name_, comm_, comm_generation_);
   }
 
-  // Some registration other than this one is live for this group, so this
-  // handle can be rebuilt against it. Strictly narrower than `!is_live()`: with
-  // no communicator at all there is nothing to rebuild against, every rank sees
-  // the same thing, and the staleness check reports it instead of starting a
-  // collective window registration only some ranks would enter. "Other than
-  // this one" compares pointer and generation, as `is_live` does, so a
-  // successor at a recycled address still counts as a successor.
-  bool has_successor_comm() const {
-    auto& manager = NCCLDevCommManager::get(
-        c10::Device(c10::DeviceType::CUDA, device_idx_));
-    return manager.find_comm(group_name_).has_value() && !is_live();
-  }
-
   void check_liveness() const {
     TORCH_CHECK(
         is_live(),
         "NCCL symmetric-memory handle for group '",
         group_name_,
         "' is stale because its RCCL communicator was destroyed or replaced. "
-        "Rendezvous again after initializing the successor process group.");
+        "Free the tensor and allocate a new one after initializing the "
+        "successor process group.");
   }
 
   void check_peer_pointers() const {
@@ -490,10 +478,6 @@ NCCLSymmetricMemory::NCCLSymmetricMemory(
 // teardown, not use that races a concurrent abort. The hazard itself is not
 // ROCm-specific; extending the gating to CUDA is left as a follow-up so this
 // change cannot alter CUDA behavior.
-bool NCCLSymmetricMemory::has_successor_comm() const {
-  return pai_->has_successor_comm();
-}
-
 void NCCLSymmetricMemory::check_liveness() const {
   pai_->check_liveness();
 }
@@ -889,25 +873,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       std::lock_guard<std::mutex> lock(mutex_);
       auto it = symm_mems_.find(key);
 #ifdef USE_ROCM
-      // A cached handle whose communicator was replaced cannot be revived, but
-      // the caller can be. Drop it and fall through to rebuild against the
-      // successor. Raising here instead would make restart-after-error
-      // unrecoverable for any tensor that had already rendezvoused, since
-      // nothing else evicts this entry while the allocation is alive.
-      //
-      // Recovery is per-rendezvous and the rebuild below is collective, so it
-      // is only safe when every rank re-rendezvouses the same tensors in the
-      // same order. Gating on a successor rather than on staleness is what
-      // keeps that true: a group whose communicator was retired with nothing
-      // put in its place has no rebuild to enter, and every rank sees that
-      // identically, so it reports staleness here instead.
+      // Not rebuilt against a successor communicator: that would start a
+      // collective window registration from rank-local registry state.
       if (it != symm_mems_.end()) {
-        if (it->second->has_successor_comm()) {
-          symm_mems_.erase(it);
-          it = symm_mems_.end();
-        } else {
-          it->second->check_liveness();
-        }
+        it->second->check_liveness();
       }
 #endif
       if (it != symm_mems_.end()) {
@@ -933,16 +902,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto& peer_alloc_infos = allocation->peer_alloc_infos_;
     auto& pai = peer_alloc_infos[*group_name];
 #ifdef USE_ROCM
-    // The window this holds was registered against the predecessor, so it has
-    // to be rebuilt too. Releasing it here is what makes the dropped handle
-    // above replaceable rather than merely absent. Its destructor skips
-    // deregistration precisely because the registration is no longer live.
+    // Another pointer into this allocation misses the handle cache above but
+    // would still reuse this group's window.
     if (pai) {
-      if (pai->has_successor_comm()) {
-        pai.reset();
-      } else {
-        pai->check_liveness();
-      }
+      pai->check_liveness();
     }
 #endif
     if (!pai) {
