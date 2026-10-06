@@ -583,6 +583,7 @@ def tile_fits_reduction_epilogue(
     # Meta automatic warp specialization can hoist a subtile's tmem_load above
     # the accumulator-ready wait when the epilogue reduces over subtiles, which
     # gives wrong, nondeterministic results.
+    # TODO: drop once facebookexperimental/triton#3803 lands.
     if reductions and tile[2] > 1 and meta_ws_enabled():
         return False
     axes = [template_reduction_axis(node, template, produced) for node in reductions]
@@ -624,21 +625,19 @@ def tile_fits_reduction_epilogue(
             return False
         if first_row == len(epilogue_nodes):
             return True
-    if not V.graph.sizevars.statically_known_geq(tile[1] * tile[2], n):
+    if tile[2] == 1 or not V.graph.sizevars.statically_known_geq(tile[1] * tile[2], n):
         return True
     # Across subtiles, a reduction is only complete after the last one, so
     # nothing over (rows, cols) may read a reduction result.
     after_reduction: OrderedSet[str] = OrderedSet()
     for node in epilogue_nodes:
         over_cols = node.group[1] != (m, sympy.S.One)
-        if tile[2] > 1 and over_cols and node.used_buffer_names() & after_reduction:
+        if over_cols and node.used_buffer_names() & after_reduction:
             return False
         # A looped multi-output reduction (e.g. welford) finishes with a
         # multi-result tl.reduce, which automatic warp specialization rejects.
-        if (
-            tile[2] > 1
-            and isinstance(node.node, ir.ComputedBuffer)
-            and isinstance(node.node.data, ir.MultiOutputReduction)
+        if isinstance(node.node, ir.ComputedBuffer) and isinstance(
+            node.node.data, ir.MultiOutputReduction
         ):
             return False
         if node.is_reduction() or not over_cols:
