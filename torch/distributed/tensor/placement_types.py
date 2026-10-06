@@ -2121,8 +2121,8 @@ class BlockShard(Placement):
             ``block_numels`` entry, each >= 1. ``None`` means all ones.
 
     .. warning:: ``BlockShard`` is experimental. It is meant for FSDP2 storage:
-        only ops that elementwise optimizers and gradient clipping need are
-        supported on it.
+        only the ops that elementwise optimizers, gradient clipping, state dicts,
+        and ``trunc_normal_`` init use are supported on it.
     """
 
     block_numels: tuple[int, ...]
