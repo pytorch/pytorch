@@ -888,8 +888,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         Reduce the tensor to a stable key for caching.
         """
         metadata = extract_tensor_metadata_for_cache_key(t)
-        grad_dtype = t.grad_dtype if t.requires_grad else t.dtype
-        return (_ident, ((metadata, grad_dtype),))
+        return (_ident, (metadata,))
 
 
 @contextlib.contextmanager

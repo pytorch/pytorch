@@ -50,6 +50,17 @@ struct LocalState {
     }
   }
 
+  // C++ FakeTensors carry Fake; masking it lets guards built from fakes match
+  // real tensors. Explicit DispatchKeySet values go through apply() instead,
+  // since programs can branch on whether they contain Fake.
+  at::DispatchKeySet apply_for_tensor(at::DispatchKeySet ks) const {
+    auto result = apply(ks);
+    if (override_dispatch_key_set.empty() && should_mask_python_keys) {
+      result = result - c10::DispatchKeySet(c10::DispatchKey::Fake);
+    }
+    return result;
+  }
+
   LocalState()
       : dispatch_modifier(c10::impl::tls_local_dispatch_key_set()),
         override_dispatch_key_set(c10::BackendComponent::InvalidBit),
@@ -125,10 +136,6 @@ class TensorCheck {
   // since that rides in dispatch_key_.
   std::optional<c10::DeviceIndex> device_index_;
   bool requires_grad_;
-  // The compiled backward casts grads to the tensor's grad_dtype, so it is
-  // checked for tensors that require grad. Only set by the tensor constructor.
-  bool check_grad_dtype_;
-  std::optional<at::ScalarType> grad_dtype_;
   // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<c10::SymInt>> sizes_;
   std::vector<std::optional<c10::SymInt>> strides_;

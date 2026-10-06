@@ -3098,7 +3098,14 @@ class DeviceCachingAllocator {
       // in graph_pools and only return the blocks from it.
       auto pool = graph_pools.find(mempool_id);
       if (pool != graph_pools.end()) {
-        all_blocks = get_private_pool_head_blocks(pool->second.get());
+        // Not get_private_pool_head_blocks: in an expandable segment, a mapped
+        // run after an unmapped hole has a prev but is reported on its own.
+        const PrivatePool* pp = pool->second.get();
+        for (Block* b : get_all_blocks()) {
+          if (b->pool == &pp->small_blocks || b->pool == &pp->large_blocks) {
+            all_blocks.push_back(b);
+          }
+        }
       }
     } else {
       // When snapshot is called with non-default mempool_id, we return
@@ -3354,6 +3361,20 @@ class DeviceCachingAllocator {
   void markCaptureEnd() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     capture_tracker_.captureEnd();
+  }
+
+  // Public entry to is_capture_context() for callers outside the allocator
+  // that must refuse host-blocking work under capture (e.g. symmetric
+  // memory allocation). Cheap when no capture is active on this device.
+  bool isCaptureContext() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (C10_LIKELY(!capture_tracker_.hasActiveCaptures())) {
+      return false;
+    }
+    // The default stream's handle is nullptr, which the driver resolves
+    // against the current device, so select this device for the query.
+    c10::cuda::CUDAGuard guard(device_id);
+    return is_capture_context();
   }
 
   // Called by CUDAGraph::reset and MemPool::~MemPool()
@@ -5251,6 +5272,14 @@ class NativeCachingAllocator : public CUDAAllocator {
   void markCaptureEnd(c10::DeviceIndex device) override {
     assertValidDevice(device);
     device_allocator[device]->markCaptureEnd();
+  }
+
+  bool isCaptureContext(c10::DeviceIndex device) override {
+    // Before init() no CUDAGraph can have begun a capture.
+    if (device < 0 || static_cast<size_t>(device) >= device_allocator.size()) {
+      return false;
+    }
+    return device_allocator[device]->isCaptureContext();
   }
 
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) override {

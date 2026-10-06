@@ -14,7 +14,10 @@ import torch.utils.dlpack
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
-from torch._subclasses.functional_tensor import FunctionalTensorMode
+from torch._subclasses.functional_tensor import (
+    defer_input_grad_casts,
+    FunctionalTensorMode,
+)
 from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
@@ -537,12 +540,14 @@ def aot_dispatch_autograd_graph(
     # This destroys requires_grad/grad_fn information.  However, backends
     # beneath AOTAutograd are indifferent to this information, so it doesn't
     # matter.
-    fx_g, saved_updated_joint_inputs = _create_graph_and_save_traced_inputs(
-        joint_fn_to_trace,
-        updated_joint_inputs,
-        updated_joint_inputs_descs,
-        aot_config=aot_config,
-    )
+    # Exported joint graphs run without the autograd engine, so they keep the input grad casts.
+    with defer_input_grad_casts(enabled=not aot_config.is_export):
+        fx_g, saved_updated_joint_inputs = _create_graph_and_save_traced_inputs(
+            joint_fn_to_trace,
+            updated_joint_inputs,
+            updated_joint_inputs_descs,
+            aot_config=aot_config,
+        )
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.

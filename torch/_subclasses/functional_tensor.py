@@ -117,13 +117,34 @@ def _conversion_method_template(**extra_kwargs: Any) -> Callable[..., Any]:
     return _
 
 
+_defer_input_grad_casts = False
+
+
+@contextlib.contextmanager
+def defer_input_grad_casts(enabled: bool = True) -> Generator[None, None, None]:
+    # While tracing a joint graph that runs under the eager autograd engine, leave input
+    # grads uncast: the engine casts them to each input's live grad_dtype at runtime, as
+    # in eager, so the graph doesn't bake in the grad_dtype seen at trace time.
+    global _defer_input_grad_casts
+    prev, _defer_input_grad_casts = _defer_input_grad_casts, enabled
+    try:
+        yield
+    finally:
+        _defer_input_grad_casts = prev
+
+
 def copy_grad_dtype_override(src: torch.Tensor, dst: torch.Tensor) -> None:
     # The autograd engine casts grads flowing into a tensor to its grad_dtype, which defaults
-    # to its own dtype. When tracing through a wrapper of a leaf (functional tensor, rebuilt
-    # subclass), copy the leaf's override (e.g. fp32 grads for a bf16 param) so the traced
-    # backward doesn't cast to the param dtype. src may itself be such a wrapper, whose
-    # grad_dtype then comes from its grad_fn. Must run before dst gets a grad_fn.
-    if src.requires_grad and src.grad_dtype != src.dtype:
+    # to its own dtype. When tracing through a wrapper of an input (functional tensor, rebuilt
+    # subclass), the wrapper would otherwise cast to the input's dtype. Under
+    # defer_input_grad_casts, accept any grad dtype; otherwise copy the input's override
+    # (e.g. fp32 grads for a bf16 param). src may itself be such a wrapper, whose grad_dtype
+    # then comes from its grad_fn. Must run before dst gets a grad_fn.
+    if not src.requires_grad:
+        return
+    if _defer_input_grad_casts:
+        dst.grad_dtype = None
+    elif src.grad_dtype != src.dtype:
         dst.grad_dtype = src.grad_dtype
 
 
