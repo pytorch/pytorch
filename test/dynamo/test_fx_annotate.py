@@ -7,7 +7,7 @@ import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils.checkpoint
 from torch._dynamo.test_case import run_tests
-from torch._dynamo.testing import AotEagerAndRecordGraphs
+from torch._dynamo.testing import AotEagerAndRecordGraphs, EagerAndRecordGraphs
 from torch.nn.attention.flex_attention import (
     _dense_to_ordered,
     create_block_mask,
@@ -232,6 +232,58 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         x = torch.randn(10, requires_grad=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_graph_break_float_annotation_resumes(self):
+        def fn(x):
+            with fx_traceback.annotate({"ac.knob": 0.5}):
+                x = torch.sin(x)
+                with fx_traceback.annotate({"ac.inner": 2.0}):
+                    x = x * 3
+                    torch._dynamo.graph_break()
+                    x = torch.cos(x)
+                x = torch.tan(x)
+            return x + 1
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.randn(10, requires_grad=True)
+        self.assertEqual(fn(x), opt_fn(x))
+        opt_fn(x).sum().backward()
+
+        metadata = [fx_traceback._get_custom_metadata(g) for g in backend.fw_graphs]
+        self.assertExpectedInline(
+            "\n\n".join(metadata),
+            """\
+('call_function', 'sin', {'ac.knob': 0.5})
+('call_function', 'mul', {'ac.knob': 0.5, 'ac.inner': 2.0})
+
+('call_function', 'cos', {'ac.knob': 0.5, 'ac.inner': 2.0})
+('call_function', 'tan', {'ac.knob': 0.5})
+('call_function', 'detach', {'ac.knob': 0.5})
+('call_function', 'detach_1', {'ac.knob': 0.5})""",
+        )
+
+    def test_annotate_specializes_dynamic_float(self):
+        def fn(x, knob):
+            with fx_traceback.annotate({"ac.knob": knob}):
+                return x.sin()
+
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend)
+        x = torch.randn(3)
+        for knob in (0.5, 0.25, 0.75):
+            self.assertEqual(fn(x, knob), opt_fn(x, knob))
+
+        self.assertExpectedInline(
+            "\n".join(fx_traceback._get_custom_metadata(g) for g in backend.graphs),
+            """\
+('placeholder', 'l_x_', {'ac.knob': 0.5})
+('call_method', 'sin', {'ac.knob': 0.5})
+('placeholder', 'l_x_', {'ac.knob': 0.25})
+('call_method', 'sin', {'ac.knob': 0.25})
+('placeholder', 'l_x_', {'ac.knob': 0.75})
+('call_method', 'sin', {'ac.knob': 0.75})""",
+        )
 
     def test_annotation_on_runtime_asserts(self):
         class M(torch.nn.Module):

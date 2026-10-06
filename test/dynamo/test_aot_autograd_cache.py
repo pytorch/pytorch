@@ -3655,6 +3655,36 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_float_annotation_graph_break_cache(self):
+        """Float annotations survive a graph break and are part of the cache key,
+        since custom joint passes may read them."""
+
+        def make_fn(knob):
+            def fn(x):
+                with torch.fx.traceback.annotate({"ac.knob": knob}):
+                    x = (x + 1).relu()
+                    torch._dynamo.graph_break()
+                    return (x * 2).relu()
+
+            return fn
+
+        def run(knob):
+            self._clear_dynamo_and_codecache()
+            compiled = torch.compile(make_fn(knob), backend="inductor")
+            compiled(torch.randn(10, 10, requires_grad=True)).sum().backward()
+            return (
+                counters["aot_autograd"]["autograd_cache_miss"],
+                counters["aot_autograd"]["autograd_cache_hit"],
+            )
+
+        with fresh_cache():
+            self.assertEqual(run(0.3), (2, 0))
+            self.assertEqual(run(0.8), (4, 0))
+            self.assertEqual(run(0.3), (4, 2))
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_region_activation_memory_budget_graph_break_cache(self):
         """With graph breaks, changing one graph's budget causes a miss for
         that graph but a hit for the unchanged graph."""

@@ -94,6 +94,7 @@ from ..utils import (
     no_positional,
     product,
     proxy_args_kwargs,
+    specialize_symnode,
     unpack_iterable,
     unwrap_if_wrapper,
 )
@@ -191,8 +192,8 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback.annotate,
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
-        torch.fx.traceback._dynamo_region_activation_memory_budget,
-        torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
+        torch.fx.traceback._dynamo_resume_annotate,
+        torch.fx.traceback._dynamo_resume_annotate.__wrapped__,  # type: ignore[attr-defined]
         # We'll let Dynamo inline into the contextlib part of these context
         # manager instances, all the way till it invokes the wrapped function
         # itself (at which point we wrap it back to special context manager
@@ -800,27 +801,25 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 raise AssertionError(
                     f"torch.fx.traceback.annotate expects no kwargs, got {len(kwargs)}"
                 )
-            return FxTracebackAnnotateVariable(
-                args[0].as_python_constant(), source=self.source
-            )
+            annotation = args[0]
+            if isinstance(annotation, variables.ConstDictVariable):
+                # Specialize symbolic values (e.g. an automatically dynamic
+                # float), since node.meta holds Python constants.
+                annotation_dict = {
+                    k.vt.as_python_constant(): specialize_symnode(
+                        v.realize()
+                    ).as_python_constant()
+                    for k, v in annotation.items.items()
+                }
+            else:
+                annotation_dict = annotation.as_python_constant()
+            return FxTracebackAnnotateVariable(annotation_dict, source=self.source)
         elif self.value in (
-            torch.fx.traceback._dynamo_region_activation_memory_budget,
-            torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
+            torch.fx.traceback._dynamo_resume_annotate,
+            torch.fx.traceback._dynamo_resume_annotate.__wrapped__,  # type: ignore[attr-defined]
         ):
-            if len(args) != 1 or kwargs:
-                raise AssertionError(
-                    "_dynamo_region_activation_memory_budget expects "
-                    "one positional argument"
-                )
-            budget = guard_if_dyn(args[0])
-            if type(budget) is not float:
-                raise AssertionError(
-                    f"expected a float budget, got {type(budget).__name__}"
-                )
-            return FxTracebackAnnotateVariable(
-                {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget},
-                source=self.source,
-            )
+            annotation = dict(args[0].as_python_constant())
+            return FxTracebackAnnotateVariable(annotation, source=self.source)
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 

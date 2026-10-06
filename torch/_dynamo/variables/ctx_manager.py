@@ -1665,12 +1665,11 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
     ) -> None:
         self.annotation = annotation
-        budget = annotation.get(torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY)
-        target_values = (
-            (budget,) if len(annotation) == 1 and type(budget) is float else ()
-        )
+        # Non-empty target_values marks the annotation as resumable: it is
+        # reconstructed as _dynamo_resume_annotate(pairs) after a graph break.
+        resumable = torch.fx.traceback._resumable_annotation(annotation)
         super().__init__(
-            target_values=target_values,
+            target_values=() if resumable is None else (resumable,),
             initial_values=initial_values,
             **kwargs,
         )
@@ -1692,7 +1691,7 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
 
     def fn_name(self) -> str:
         if self.target_values:
-            return "_dynamo_region_activation_memory_budget"
+            return "_dynamo_resume_annotate"
         return "annotate"
 
     def python_type(self) -> type:
@@ -1704,7 +1703,8 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
-            explanation="Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
+            explanation="Dynamo only supports graph breaks under torch.fx.traceback.annotate "
+            "when the annotation is a dict of str keys to float values.",
             hints=[
                 *graph_break_hints.SUPPORTABLE,
             ],

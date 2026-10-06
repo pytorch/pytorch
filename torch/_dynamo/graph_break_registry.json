@@ -4832,6 +4832,14 @@
     {
       "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
       "Context": "str(self)",
+      "Explanation": "Dynamo only supports graph breaks under torch.fx.traceback.annotate when the annotation is a dict of str keys to float values.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "torch.fx.traceback.annotate escaped from compiled region",
+      "Context": "str(self)",
       "Explanation": "Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
