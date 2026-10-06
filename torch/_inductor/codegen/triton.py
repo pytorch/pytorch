@@ -1340,14 +1340,6 @@ class TritonOverrides(OpOverrides):
     _LOG_2_E = math.log2(math.e)
 
     @staticmethod
-    def _strict_cuda_pointwise() -> bool:
-        return (
-            config.strict_pointwise
-            and torch.version.hip is None
-            and V.graph.get_current_device_or_throw().type == "cuda"
-        )
-
-    @staticmethod
     @override
     def to_dtype(
         x,
@@ -1404,7 +1396,7 @@ class TritonOverrides(OpOverrides):
         if (
             dtype in (torch.uint8, torch.int8, torch.int16)
             and (src_dtype is None or src_dtype.is_floating_point)
-            and TritonOverrides._strict_cuda_pointwise()
+            and utils.is_strict_cuda_triton()
         ):
             # CUDA narrows through int32; c10 routes uint8 through int64 instead.
             intermediate = "tl.int64" if dtype == torch.uint8 else "tl.int32"
@@ -1425,6 +1417,22 @@ class TritonOverrides(OpOverrides):
             out_dtype = triton_compute_type(dtype)
         else:
             out_dtype = triton_store_type(dtype)
+
+        if (
+            dtype == torch.bfloat16
+            and src_dtype is not None
+            and src_dtype in (torch.int32, torch.int64, torch.uint32, torch.uint64)
+            and utils.is_strict_cuda_triton()
+        ):
+            # Eager converts through float32; preserve that rounding when narrowing.
+            convert = {
+                torch.int32: "int2float_rn",
+                torch.int64: "ll2float_rn",
+                torch.uint32: "uint2float_rn",
+                torch.uint64: "ull2float_rn",
+            }[src_dtype]
+            x = TritonOverrides._cast_libdevice_arg(x, src_dtype)
+            return f"libdevice.{convert}({x}).to({out_dtype})"
 
         # Triton cannot cast integers to any fp8 type directly, so go through float32.
         if (
@@ -1613,6 +1621,10 @@ class TritonOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + 1"
         elif bug is None:
+            if utils.is_strict_cuda_triton():
+                # Eager preserves the input's negative zero and NaN payload.
+                zero = ops.constant(0, torch.int32)
+                return ops.where(ops.lt(x, zero), zero, x)
             return ops.maximum(ops.constant(0, torch.int32), x)
         else:
             raise AssertionError(
@@ -2292,7 +2304,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sigmoid(x):
-        if TritonOverrides._strict_cuda_pointwise():
+        if utils.is_strict_cuda_triton():
             # CUDA eager uses exp and correctly rounded division at opmath precision.
             return f"libdevice.rcp_rn(1.0 + libdevice.exp(-({x})))"
         return f"tl.sigmoid({x})"
