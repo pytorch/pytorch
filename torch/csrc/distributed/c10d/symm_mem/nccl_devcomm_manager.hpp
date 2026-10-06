@@ -109,17 +109,6 @@ class TORCH_API NCCLDevCommManager {
   }
 
 #ifdef USE_ROCM
-  // Non-throwing lookup for rendezvous recovery, where the group may have no
-  // communicator registered or a different one.
-  std::optional<ncclComm_t> find_comm(const std::string& group_name) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = group_to_comm_.find(group_name);
-    if (it == group_to_comm_.end()) {
-      return std::nullopt;
-    }
-    return it->second;
-  }
-
   uint64_t get_comm_generation(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto comm_it = group_to_comm_.find(group_name);

@@ -369,12 +369,10 @@ TEST(NCCLDevCommManagerTest, IdentitySafeUnregisterPreservesSuccessor) {
       group_name, successor_comm, successor_generation));
 
   manager.unregister_comm(group_name, first_comm);
-  auto current = manager.find_comm(group_name);
-  ASSERT_TRUE(current.has_value());
-  EXPECT_EQ(*current, successor_comm);
+  EXPECT_EQ(manager.get_comm(group_name), successor_comm);
 
   manager.unregister_comm(group_name, successor_comm);
-  EXPECT_FALSE(manager.find_comm(group_name).has_value());
+  EXPECT_THROW(manager.get_comm(group_name), c10::Error);
 
   EXPECT_EQ(ncclCommDestroy(first_comm), ncclSuccess);
   EXPECT_EQ(ncclCommDestroy(successor_comm), ncclSuccess);
@@ -410,7 +408,7 @@ TEST(NCCLDevCommManagerTest, SamePointerReregistrationKeepsGeneration) {
 
   // Identity-safe removal still matches the twice-registered communicator.
   manager.unregister_comm(group_name, comm);
-  EXPECT_FALSE(manager.find_comm(group_name).has_value());
+  EXPECT_THROW(manager.get_comm(group_name), c10::Error);
   EXPECT_FALSE(manager.comm_registration_is_live(group_name, comm, generation));
 
   EXPECT_EQ(ncclCommDestroy(comm), ncclSuccess);
@@ -441,7 +439,7 @@ TEST(NCCLDevCommManagerTest, ReregistrationAfterUnregisterAdvancesGeneration) {
   const auto stale_generation = manager.get_comm_generation(group_name, comm);
 
   manager.unregister_comm(group_name, comm);
-  ASSERT_FALSE(manager.find_comm(group_name).has_value());
+  ASSERT_THROW(manager.get_comm(group_name), c10::Error);
 
   // Same pointer value, but a new registration lifetime.
   manager.register_comm(group_name, comm);
