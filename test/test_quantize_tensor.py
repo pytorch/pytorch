@@ -48,7 +48,7 @@ def _quantize_mxfp8_reference(
     return qdata, scales
 
 
-_NVIDIA_SM100_OR_LATER = torch.version.hip is None and bool(SM100OrLater)
+_NVIDIA_SM100_OR_LATER = torch.version.rocm is None and bool(SM100OrLater)
 
 
 _MXFP8_IMPLEMENTATIONS = (

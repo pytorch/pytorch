@@ -6,16 +6,21 @@ import cuda.bindings.driver as cuda
 
 import cutlass
 import cutlass.cute as cute
-import cutlass.utils as utils
 from cutlass.cute.nvgpu import cpasync, tcgen05
 
 import torch
 from torch._native.cutedsl.dtypes import torch2cute
 from torch._native.instrumentation import instrumented_cutedsl_cache
+from torch._vendor.packaging.version import Version
+
+
+if Version(cutlass.__version__) >= Version("4.8.0"):
+    from cutlass.memory import SmemAllocator
+else:
+    from cutlass.utils import SmemAllocator
 
 from .utils import (
     _blockscaled_quantize_group,
-    _ceil_div,
     _store_swizzled_scale_groups_as_uint,
     _store_unswizzled_scale_groups_as_uint,
 )
@@ -131,7 +136,7 @@ class _BlockscaledTma:
             K = cute.assume(K, divby=32)
 
         # create smem scratchpad
-        smem = utils.SmemAllocator()
+        smem = SmemAllocator()
         input_storage = smem.allocate_array(
             input_element_type, tile_m_size * tile_k_size, byte_alignment=1024
         )
@@ -325,7 +330,7 @@ class _BlockscaledTma:
                     for group in cutlass.range_constexpr(scale_groups_m):
                         if scale_col_m + group < M // scale_group_size:
                             rScaleMPadded[group] = rScaleM[group]
-                scale_row_m_in_bounds = output_row_m < _ceil_div(K, 128) * 128
+                scale_row_m_in_bounds = output_row_m < cute.ceil_div(K, 128) * 128
                 if scale_row_m_in_bounds:
                     _store_swizzled_scale_groups_as_uint(
                         mScaleMLogical,
@@ -475,8 +480,8 @@ class _BlockscaledTma:
                     )
 
                 if cutlass.const_expr(needs_boundary_masking and is_scale_swizzled):
-                    s_num_col_blk_k = _ceil_div(K, scale_group_size * 4)
-                    grid_n = _ceil_div(K, tile_k_size)
+                    s_num_col_blk_k = cute.ceil_div(K, scale_group_size * 4)
+                    grid_n = cute.ceil_div(K, tile_k_size)
                     covered_groups = grid_n * groups_per_row_k
                     if covered_groups < s_num_col_blk_k * 4:
                         if tile_k_idx == grid_n - 1:
@@ -649,8 +654,8 @@ class _BlockscaledTma:
             )
 
             if cutlass.const_expr(is_scale_swizzled):
-                s_num_row_blk_k = _ceil_div(M, 128)
-                s_num_col_blk_k = _ceil_div(K, scale_group_size * 4)
+                s_num_row_blk_k = cute.ceil_div(M, 128)
+                s_num_col_blk_k = cute.ceil_div(K, scale_group_size * 4)
                 scale_k_row_block_stride = cutlass.Int64(s_num_col_blk_k) * 32 * 16
                 scale_k_layout = cute.make_layout(
                     ((32, 4, s_num_row_blk_k), (4, s_num_col_blk_k)),
@@ -765,8 +770,8 @@ class _BlockscaledTma:
                 (tile_k_size, tile_m_size),
             )
 
-            s_num_row_blk_m = _ceil_div(K, 128)
-            s_num_col_blk_m = _ceil_div(M, scale_group_size * 4)
+            s_num_row_blk_m = cute.ceil_div(K, 128)
+            s_num_col_blk_m = cute.ceil_div(M, scale_group_size * 4)
             scale_m_row_block_stride = cutlass.Int64(s_num_col_blk_m) * 32 * 16
             scale_m_layout = cute.make_layout(
                 ((32, 4, s_num_row_blk_m), (4, s_num_col_blk_m)),

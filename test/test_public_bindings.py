@@ -372,6 +372,10 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass.operators
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950",  # depends on flydsl
             "torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_scheduling",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_buffer_ops",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_gemm_utils",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_grouped_gemm_gfx950",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
@@ -402,9 +406,7 @@ class TestPublicBindings(TestCase):
             "torch.ao.pruning._experimental.data_sparsifier.lightning.tests.test_callbacks",
             "torch.csrc.jit.tensorexpr.scripts.bisect",
             "torch.csrc.lazy.test_mnist",
-            "torch.distributed._shard.checkpoint._fsspec_filesystem",
             "torch.distributed._tensor.examples.visualize_sharding_example",
-            "torch.distributed.checkpoint._fsspec_filesystem",
             "torch.distributed.examples.memory_tracker_example",
             "torch.testing._internal.distributed.rpc.fb.thrift_rpc_agent_test_fixture",
             "torch.utils._cxx_pytree",
@@ -430,6 +432,11 @@ class TestPublicBindings(TestCase):
                 "torch._native.ops.polar.",
                 "torch._native.ops.quantize_tensor.blockscaled_tma.",
                 "torch._native.ops.reductions.inner_tree_kernel",
+                "torch._native.ops.reductions.kernel_general",
+                "torch._native.ops.reductions.kernel_rowtile",
+                "torch._native.ops.reductions.tile",
+                "torch._native.ops.reductions.kernel_xcta",
+                "torch._native.ops.reductions.kernel_coltile",
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
                 "torch._inductor.kernel.flex_gemm.quack_ops.",
