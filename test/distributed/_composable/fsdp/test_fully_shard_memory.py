@@ -5,6 +5,7 @@ import functools
 import gc
 import math
 import unittest
+import weakref
 from unittest import mock
 
 import torch
@@ -326,6 +327,40 @@ class TestFullyShardMemory(FSDPTest):
         mem_mb = self._get_curr_active_memory_mb()
         self.assertEqual(mem_mb, base_mem_mb)
 
+    @skip_if_lt_x_gpu(2)
+    def test_unsharded_grads_freed_after_copy_in(self):
+        from torch.distributed.fsdp._fully_shard import _fsdp_collectives
+
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 32)).to(device_type)
+        fully_shard(model)
+        copy_in = _fsdp_collectives.foreach_reduce_scatter_copy_in
+        cast_and_view = _fsdp_collectives._cast_and_view_sharded_grads
+        grad_refs: list[weakref.ref] = []
+        num_alive_grads: list[int] = []
+
+        def recording_copy_in(grads, *args, **kwargs):
+            grad_refs[:] = [weakref.ref(grad) for grad in grads]
+            copy_in(grads, *args, **kwargs)
+
+        def counting_cast_and_view(*args):
+            num_alive_grads.append(sum(ref() is not None for ref in grad_refs))
+            return cast_and_view(*args)
+
+        with (
+            mock.patch.object(
+                _fsdp_collectives, "foreach_reduce_scatter_copy_in", recording_copy_in
+            ),
+            mock.patch.object(
+                _fsdp_collectives,
+                "_cast_and_view_sharded_grads",
+                counting_cast_and_view,
+            ),
+        ):
+            model(torch.randn(4, 16, device=device_type)).sum().backward()
+        # Clearing foreach_reduce's list after the copy-in must free the
+        # unsharded gradients before the reduce allocates its outputs
+        self.assertEqual(num_alive_grads, [0])
+
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
         # HPU uses different memory stat keys.
@@ -499,6 +534,108 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
                         f"(see PR #140044, PR #180900)."
                     ),
                 )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "HSDP sync correctness test is CUDA-only")
+    def test_partial_repack_after_slow_all_reduce(self):
+        # No input requires grad, so both post-backwards run in the final
+        # callback. layer's finalize_backward releases its fp32 all-reduce
+        # buffer (its bf16 sharded grads are casts), then aux repacks its
+        # pending partial because aux.second first gets a gradient. The repack
+        # must not reuse that buffer while the slowed all-reduce still uses it.
+        class TwoLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.first = nn.Linear(32, 32, bias=False)
+                self.second = nn.Linear(32, 32, bias=False)
+
+            def forward(self, inp, use_second=True):
+                output = self.first(inp)
+                return output + self.second(inp) if use_second else output
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = TwoLinear()
+                self.aux = TwoLinear()
+
+            def forward(self, inp, use_layer):
+                output = self.aux(inp, use_second=use_layer)
+                return output + self.layer(inp) if use_layer else output
+
+        model = Model().to(device_type, torch.bfloat16)
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        for module in (model.layer, model.aux, model):
+            fully_shard(module, mesh=mesh, mp_policy=mp_policy)
+        orig_all_reduce = dist.all_reduce
+
+        def slow_all_reduce(*args, **kwargs):
+            torch.cuda._sleep(int(200 * get_cycles_per_ms()))
+            return orig_all_reduce(*args, **kwargs)
+
+        with mock.patch.object(dist, "all_reduce", slow_all_reduce):
+            for use_layer, value in ((False, 2.0), (True, 3.0)):
+                model.set_requires_all_reduce(use_layer)
+                inp = torch.full((1, 32), value, device=device_type).bfloat16()
+                model(inp, use_layer).sum().backward()
+        for module, expected in ((model.layer, (3, 3)), (model.aux, (5, 3))):
+            for param, value in zip(module.parameters(), expected):
+                actual = param.grad.full_tensor()
+                self.assertEqual(actual, torch.full_like(actual, value))
+
+
+class TestFullyShardAllReduceHookSyncCorrectness(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, torch.get_device_module(device_type).device_count())
+
+    # This test is CUDA-specific because it relies on torch.cuda._sleep.
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "all-reduce hook sync test is CUDA-only")
+    def test_all_reduce_hook_buffer_lifetime_mixed_dtype(self):
+        # Without native HSDP, the all-reduce hook and the cast to orig_dtype
+        # read the RS output on the hook stream. If nothing holds it past the
+        # cast, the next RS (for the first linear) can reuse its block before
+        # the slow hook finishes, and the last linear's grad reads that data.
+        torch.manual_seed(0)
+        dim = 512
+        model = nn.Sequential(
+            nn.Linear(dim, dim, bias=False),
+            nn.ReLU(),
+            nn.Linear(dim, dim, bias=False),
+        ).to(device_type)
+        # bf16 reduce with fp32 params, so the cast drops the last RS output ref
+        mp = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        linears = [layer for layer in model if isinstance(layer, nn.Linear)]
+        for linear in linears:
+            fully_shard(linear, mp_policy=mp)
+        fully_shard(model, mp_policy=mp)
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn(4, dim, device=device_type)
+
+        model(inp).sum().backward()
+        ref_grads = [param.grad.to_local().clone() for param in model.parameters()]
+        model.zero_grad()
+
+        sleep_cycles = int(200 * get_cycles_per_ms())
+
+        def slow_hook(output: torch.Tensor) -> None:
+            torch.get_device_module(device_type)._sleep(sleep_cycles)
+
+        for linear in linears:
+            linear.set_all_reduce_hook(slow_hook)
+        model(inp).sum().backward()
+        for param, ref_grad in zip(model.parameters(), ref_grads):
+            self.assertEqual(param.grad.to_local(), ref_grad)
 
 
 if __name__ == "__main__":
