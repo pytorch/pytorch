@@ -5234,6 +5234,7 @@ def _wrap_to_fake_tensor_and_record_impl(
         if source is None:
             raise AssertionError("source must not be None for tensor wrapping")
         _coor_check_tensor_device(e, source)
+        # pyrefly: ignore [missing-attribute]
         if e.requires_grad:
             # The traced backward casts grads to the input's (effective) grad_dtype.
             grad_dtype_source = AttrSource(source, "grad_dtype")

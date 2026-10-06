@@ -397,6 +397,8 @@ class SubclassCreationMeta:
             # has correct autograd metadata, since we'll be tracing through the autograd engine with the subclass.
             # We don't trace through the autograd engine at runtime though, so no need
             # to compute this extra metadata then!
+            if self.original_subclass is None:
+                raise AssertionError("original_subclass must not be None at trace time")
             copy_grad_dtype_override(self.original_subclass, rebuilt)
             torch._mirror_autograd_meta_to(self.original_subclass, rebuilt)  # type: ignore[attr-defined]
 
