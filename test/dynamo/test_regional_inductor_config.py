@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import importlib
 import unittest
 from dataclasses import FrozenInstanceError
 from unittest import mock
@@ -1136,6 +1137,321 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             {call.kwargs["is_backward"] for call in cudagraphify_mock.call_args_list},
             {False},
         )
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": False,
+            "triton.cudagraphs": False,
+        }
+    )
+    @parametrize(
+        "forward_cudagraphs,backward_cudagraphs",
+        ((False, False), (False, True), (True, False), (True, True)),
+    )
+    def test_nested_region_inductor_config_cudagraphs_forces_partition(
+        self, forward_cudagraphs, backward_cudagraphs
+    ):
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": forward_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return (torch.cos(x) + region(x)).sum()
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        with torch.no_grad():
+            expected = fn(x)
+
+        from torch._inductor.output_code import cudagraph_partition_post_compile
+
+        with mock.patch(
+            "torch._inductor.output_code.cudagraph_partition_post_compile",
+            wraps=cudagraph_partition_post_compile,
+        ) as partition_post_compile:
+            result, codes = run_fw_bw_and_get_code(lambda: compiled_fn(x))
+
+        self.assertEqual(result, expected)
+        self.assertEqual(len(codes), 2)
+        self.assertEqual(
+            partition_post_compile.call_count,
+            int(forward_cudagraphs) + int(backward_cudagraphs),
+        )
+        for code, subgraph_name, use_cudagraphs in zip(
+            codes,
+            ("partitioned_fw_subgraph_0_0(", "partitioned_bw_subgraph_0_0("),
+            (forward_cudagraphs, backward_cudagraphs),
+        ):
+            if use_cudagraphs:
+                partition = self._generated_fn_body(code, "def partition_0(args):")
+                self.assertIn(subgraph_name, partition)
+            else:
+                self.assertNotIn("def partition_0(args):", code)
+
+    @torch._inductor.config.patch(
+        {"graph_partition": False, "triton.cudagraphs": False}
+    )
+    def test_backward_only_regional_cudagraph_can_enable(self):
+        from torch._higher_order_ops.invoke_subgraph import (
+            get_backward_nested_region_config,
+        )
+        from torch._inductor.compile_fx import (
+            compile_fx_backward,
+            create_compiler_config_extra,
+        )
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": False},
+            bw_inductor_config_patches={"triton.cudagraphs": True},
+        )
+        compiler_config = create_compiler_config_extra(
+            self._configured_region_graph_module(nested_config)
+        )
+        backward_config = get_backward_nested_region_config(nested_config)
+        if backward_config is None:
+            raise AssertionError("expected a backward region config")
+        captured_kwargs = {}
+
+        def inner_compile(gm, example_inputs, **kwargs):
+            captured_kwargs.update(kwargs)
+            return mock.sentinel.compiled
+
+        compile_fx_backward(
+            self._configured_region_graph_module(backward_config),
+            [],
+            compiler_config,
+            inner_compile,
+        )
+
+        self.assertTrue(captured_kwargs["cudagraphs"])
+        self.assertFalse(captured_kwargs["cudagraphs_forward_enabled"])
+
+    def test_backward_config_specialization_reaches_child_graph_modules(self):
+        from torch._higher_order_ops.invoke_subgraph import (
+            _specialize_nested_region_configs_for_backward,
+        )
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": True},
+            bw_inductor_config_patches={"triton.cudagraphs": False},
+        )
+        child = self._configured_region_graph_module(nested_config)
+        root = torch.nn.Module()
+        root.add_module("child", child)
+        graph = torch.fx.Graph()
+        graph.call_module("child")
+        graph.output(())
+        gm = torch.fx.GraphModule(root, graph)
+
+        _specialize_nested_region_configs_for_backward(gm)
+
+        region = gm.child.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        )[0]
+        backward_config = region.meta["custom"]["nested_region_config"]
+        self.assertFalse(backward_config.inductor_config_patches["triton.cudagraphs"])
+        self.assertIsNone(backward_config.bw_inductor_config_patches)
+
+    @parametrize("get_container", (False, True))
+    def test_backward_config_specialization_copies_modules_it_changes(
+        self, get_container
+    ):
+        """A nested module the forward also reaches is copied, not edited."""
+        from torch._higher_order_ops.invoke_subgraph import (
+            _specialize_nested_region_configs_for_backward,
+        )
+        from torch._inductor.compile_fx import _get_invoke_subgraph_graph_module
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": True},
+            bw_inductor_config_patches={"triton.cudagraphs": False},
+        )
+        body = self._empty_graph_module()
+        body.meta["nested_region_config"] = nested_config
+        shared = self._configured_region_graph_module(nested_config, body)
+        root = torch.nn.Module()
+        root.add_module("submod", torch.nn.Module())
+        root.submod.add_module("shared", shared)
+
+        def calls_shared():
+            graph = torch.fx.Graph()
+            if get_container:
+                # Getting the container whole makes FX install it by reference,
+                # so the graphs share the container too, not just the module.
+                graph.get_attr("submod")
+            graph.call_function(
+                torch.ops.higher_order.invoke_subgraph,
+                (graph.get_attr("submod.shared"),),
+            )
+            graph.output(())
+            return torch.fx.GraphModule(root, graph)
+
+        def region(gm):
+            return gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.invoke_subgraph
+            )[0]
+
+        def region_body(gm):
+            return _get_invoke_subgraph_graph_module(gm, region(gm))
+
+        # Both graphs reach the same nested module, like a region body the proxy
+        # dispatch cache handed to the forward and the backward.
+        forward, backward = calls_shared(), calls_shared()
+        self.assertIs(region_body(forward), region_body(backward))
+        self.assertEqual(forward.submod is backward.submod, get_container)
+
+        _specialize_nested_region_configs_for_backward(backward)
+
+        self.assertIs(forward.submod.shared, shared)
+        self.assertIs(region_body(forward), shared)
+        forward_config = region(shared).meta["custom"]["nested_region_config"]
+        self.assertIs(forward_config, nested_config)
+        self.assertIs(body.meta["nested_region_config"], nested_config)
+        backward_shared = region_body(backward)
+        self.assertIsNot(backward_shared, shared)
+        for config in (
+            region(backward_shared).meta["custom"]["nested_region_config"],
+            region_body(backward_shared).meta["nested_region_config"],
+        ):
+            self.assertFalse(config.inductor_config_patches["triton.cudagraphs"])
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": True,
+            "triton.cudagraphs": True,
+        }
+    )
+    def test_backward_lowers_under_its_own_patches_with_stale_mirror(self):
+        """The HOP node meta wins over the subgraph module's config mirror.
+
+        A mirror is seeded with setdefault, first writer wins, so a module the
+        forward and the backward both reach can still hold the forward's
+        config when the backward is lowered. Simulate that by restoring the
+        forward config on every region body after the backward is specialized.
+        """
+        from torch._higher_order_ops.invoke_subgraph import (
+            _specialize_nested_region_configs_for_backward as specialize,
+        )
+        from torch._inductor.compile_fx import _get_invoke_subgraph_graph_module
+
+        options = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": True},
+            bw_inductor_config_patches={"triton.cudagraphs": False},
+        )
+
+        def specialize_then_stale_mirror(gm):
+            specialize(gm)
+            # gm is the partitioned backward body; leave the forward config on
+            # its mirror, which is what a module shared with the forward looks
+            # like by the time the backward is lowered.
+            gm.meta["nested_region_config"] = options
+            for module in gm.modules():
+                if not isinstance(module, torch.fx.GraphModule):
+                    continue
+                for node in module.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.higher_order.invoke_subgraph,
+                ):
+                    body = _get_invoke_subgraph_graph_module(module, node)
+                    if body is not None:
+                        body.meta["nested_region_config"] = options
+
+        @torch.compiler.nested_compile_region(options=options)
+        def region(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return (torch.cos(x) + region(x)).sum()
+
+        x = torch.randn(16, 16, device="cuda", requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        # Patch the module object, not the dotted string: the package re-exports
+        # the HOP under the submodule's own name, so on Python < 3.12 mock's
+        # getattr-first resolution of "torch._higher_order_ops.invoke_subgraph"
+        # lands on InvokeSubgraphHOP and the patch fails with AttributeError.
+        invoke_subgraph_module = importlib.import_module(
+            "torch._higher_order_ops.invoke_subgraph"
+        )
+        with mock.patch.object(
+            invoke_subgraph_module,
+            "_specialize_nested_region_configs_for_backward",
+            specialize_then_stale_mirror,
+        ):
+            result, codes = run_fw_bw_and_get_code(lambda: compiled_fn(x))
+
+        expected_x = x.detach().clone().requires_grad_()
+        expected = fn(expected_x)
+        expected.backward()
+        self.assertEqual(result, expected)
+        self.assertEqual(x.grad, expected_x.grad)
+        self.assertEqual(len(codes), 2)
+        # The forward agrees with the top-level setting, so its region is
+        # captured inside a partition; the backward opts out, so its region has
+        # to stay in call() no matter what the stale mirror says.
+        forward_partition = self._generated_fn_body(codes[0], "def partition_0(args):")
+        self.assertIn("partitioned_fw_subgraph_0_0(", forward_partition)
+        partition_index = 0
+        while (signature := f"def partition_{partition_index}(args):") in codes[1]:
+            self.assertNotIn(
+                "partitioned_bw_subgraph_0_0(",
+                self._generated_fn_body(codes[1], signature),
+            )
+            partition_index += 1
+        self.assertGreater(partition_index, 0)
+        self.assertIn("partitioned_bw_subgraph_0_0(", codes[1])
+
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._functorch.config.patch(enable_autograd_cache=False)
+    @torch._inductor.config.patch(
+        {"fx_graph_cache": False, "fx_graph_remote_cache": False}
+    )
+    def test_nested_region_backward_passes_run_under_backward_patches(self):
+        from torch._inductor.compile_fx import post_grad_passes
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"max_autotune": True},
+            bw_inductor_config_patches={"max_autotune": False},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def inner(x):
+            return x.sin()
+
+        @torch.compiler.nested_compile_region
+        def outer(x):
+            return inner(x) * x
+
+        def fn(x):
+            return outer(x).sum()
+
+        region_max_autotune = []
+
+        def record_region_config(gm, *args, **kwargs):
+            if "nested_region_config" in gm.meta:
+                region_max_autotune.append(torch._inductor.config.max_autotune)
+            return post_grad_passes(gm, *args, **kwargs)
+
+        x = torch.randn(4, requires_grad=True)
+        with mock.patch(
+            "torch._inductor.compile_fx.post_grad_passes", record_region_config
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(x).backward()
+
+        # inner's forward body, then its backward body inside outer's backward.
+        self.assertEqual(region_max_autotune, [True, False])
 
 
 if __name__ == "__main__":

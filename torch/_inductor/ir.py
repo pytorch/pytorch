@@ -11232,13 +11232,13 @@ class InvokeSubgraph(ExternKernel):
         # pyrefly: ignore [bad-assignment]
         operands = new_operands
 
-        if subgraph.inductor_config_patches is None:
-            nested_config = current_node.meta.get("custom", {}).get(
-                "nested_region_config"
-            )
-            subgraph.inductor_config_patches = getattr(
-                nested_config, "inductor_config_patches", None
-            )
+        # The HOP node meta is the source of truth. The subgraph module can be
+        # shared between the forward and the backward graph, so the meta mirror
+        # GraphLowering.get_attr read may still carry the other direction's config.
+        nested_config = current_node.meta.get("custom", {}).get("nested_region_config")
+        node_config_patches = getattr(nested_config, "inductor_config_patches", None)
+        if node_config_patches is not None:
+            subgraph.inductor_config_patches = node_config_patches
 
         if subgraph.graph is None:
             # create and lower subgraphs
