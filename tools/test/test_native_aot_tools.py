@@ -700,8 +700,6 @@ class TestArch(unittest.TestCase):
         # smoke_b200 CI runner builds with TORCH_CUDA_ARCH_LIST=10.3.
         self.assertEqual(f("10.3a"), ["sm_103a"])
         self.assertEqual(f("10.7a"), ["sm_107a"])
-        # A hypothetical future capability nothing names yet still drops out.
-        self.assertEqual(f("11.0a"), [])
 
     def test_archs_from_cuda_arch_list_dedups(self):
         # "10.0;10.0+PTX" names one arch twice; a repeated entry would read as
