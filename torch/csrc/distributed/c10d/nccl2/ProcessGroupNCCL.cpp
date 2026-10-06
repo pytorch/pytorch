@@ -105,8 +105,14 @@ void waitForNcclChildComm(
         deadline - now);
   };
   try {
+    // A nonblocking split/shrink returns ncclSuccess while the child is still
+    // initializing; its failure is only reported via the parent's async error.
     waitForNcclCompletion(
-        nccl_api, parent_comm, status, remaining(), operation);
+        nccl_api,
+        parent_comm,
+        status == ncclSuccess ? ncclInProgress : status,
+        remaining(),
+        operation);
     if (!expect_child) {
       return;
     }
@@ -388,6 +394,9 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
         "NCCL split failed");
   } catch (...) {
     comm_state_ = CommState::ERROR;
+    // The failed call may have aborted the parent; drop its symmetric-memory
+    // registration while nccl_comm_ still names it.
+    retireComm();
     nccl_comm_ = nullptr;
     throw;
   }
@@ -400,6 +409,8 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   auto childOpts = Options::create(ncclOpts->is_high_priority_stream);
   childOpts->timeout = ncclOpts->timeout;
   childOpts->config = config;
+  // Do not inherit enable_reconfigure: reconfigure() performs blocking
+  // rendezvous on this shared Store connection.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
   // commName above borrows `name`, which belongs to the Options handed to
   // split() -- a clone that dies with the caller's frame. Every consumer of a
@@ -521,6 +532,7 @@ void ProcessGroupNCCL::finalize() {
   // timeout, which is a teardown result to report to the caller, not a reason
   // to terminate the process.
   stopWatchdog();
+  drainRetiredGraphWork();
 
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();
@@ -629,6 +641,13 @@ void ProcessGroupNCCL::abortProcess(const std::string& reason) {
   TC_LOG(ERROR, this) << "Aborting process on rank " << rank_ << " due to "
                       << reason;
   runAbortHooks();
+  const auto waitMs =
+      getCvarInt(::c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000);
+  TC_LOG(ERROR, this)
+      << "Waiting " << waitMs
+      << "ms for health check and flight recorder dump before aborting";
+  // NOLINTNEXTLINE(facebook-hte-BadCall-sleep_for)
+  std::this_thread::sleep_for(std::chrono::milliseconds(waitMs));
   ::abort();
 }
 
@@ -670,6 +689,7 @@ void ProcessGroupNCCL::handleBlockingWaitFailure(
   if (options_c10d_->enable_reconfigure) {
     revokeNcclComm();
   } else {
+    runAbortHooks();
     abortNcclComm();
   }
 }
