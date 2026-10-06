@@ -19,6 +19,7 @@ from torch._inductor.codegen.simd import (
     _PointwiseRemapHandler,
     _SubParentValueResolver,
     SIMDScheduling,
+    tile_fits_reduction_epilogue,
 )
 from torch._inductor.codegen.simd_kernel_features import (
     DisableReduction,
@@ -757,6 +758,171 @@ class TestScheduler(TestCase):
             template, expected, speedup, fused_nodes
         )
 
+    @parametrize("template_reduction_epilogue", (False, True))
+    def test_pending_template_fusion_skips_operand_fused_with_reduction(
+        self, template_reduction_epilogue
+    ):
+        scheduler = object.__new__(Scheduler)
+        template = self._mock_base_snode("template")
+        retired = self._mock_base_snode("retired")
+        current = self._mock_base_snode("current")
+        template.is_template.return_value = True
+        template.get_template_node.return_value = None
+        current.is_reduction.return_value = True
+        scheduler.name_to_fused_node = {
+            "template": template,
+            "retired": current,
+            "current": current,
+        }
+        scheduler._fusion_memory_state = None
+        scheduler.fuse_if_speedup = Mock(return_value=False)
+        speedup = Mock(return_value=True)
+        pending = PendingFusion(speedup, template, retired)
+        fused_nodes = OrderedSet([template, current])
+
+        with inductor_config.patch(
+            {"triton.template_reduction_epilogue": template_reduction_epilogue}
+        ):
+            scheduler._evaluate_pending_template_fusions(
+                {retired: [pending]}, fused_nodes
+            )
+
+        if template_reduction_epilogue:
+            # The speedup was benchmarked without the reduction retired fused
+            # with since, so its template choice may not fit it.
+            scheduler.fuse_if_speedup.assert_not_called()
+        else:
+            scheduler.fuse_if_speedup.assert_called_once_with(
+                template, retired, speedup, fused_nodes
+            )
+
+    def test_defer_template_reduction_epilogues(self):
+        scheduler = object.__new__(Scheduler)
+        scheduler.get_backend = Mock(
+            return_value=Mock(can_fuse_reduction_epilogue=Mock(return_value=False))
+        )
+        template = self._mock_base_snode("template")
+        template.is_template.return_value = True
+        template.get_template_node.return_value = object.__new__(ir.MultiTemplateBuffer)
+        reduction = self._mock_base_snode("reduction")
+        reduction.is_reduction.return_value = True
+        pointwise = self._mock_base_snode("pointwise")
+        pointwise.get_template_node.return_value = None
+        fusions = [(template, reduction), (template, pointwise), (reduction, pointwise)]
+
+        with inductor_config.patch(
+            {
+                "benchmark_template_fusion": True,
+                "triton.template_reduction_epilogue": True,
+            }
+        ):
+            # Only the template reduction epilogue waits.
+            scheduler._defer_template_reduction_epilogues = True
+            self.assertEqual(
+                scheduler._defer_benchmarked_template_reductions(fusions),
+                fusions[1:],
+            )
+            self.assertTrue(scheduler._deferred_template_reduction_epilogues)
+
+            scheduler._defer_template_reduction_epilogues = False
+            self.assertEqual(
+                scheduler._defer_benchmarked_template_reductions(fusions), fusions
+            )
+            self.assertFalse(scheduler._deferred_template_reduction_epilogues)
+
+    def test_fuse_nodes_runs_deferred_template_reduction_epilogues_last(self):
+        """A GEMM followed by sum, rsqrt and mul, as in RMSNorm: rsqrt has to
+        fuse with sum before mul can join them, so the template reduction
+        epilogue waits for both rounds. It's then tried once with deferral off."""
+        scheduler = object.__new__(Scheduler)
+        rounds = []
+        # Node counts after each round, while deferred and then not.
+        lengths = iter([3, 2, 2, 2])
+
+        def fuse_nodes_once(nodes, is_reorder_round):
+            defer = scheduler._defer_template_reduction_epilogues
+            rounds.append(defer)
+            scheduler._deferred_template_reduction_epilogues = defer
+            return [Mock()] * next(lengths)
+
+        scheduler.fuse_nodes_once = fuse_nodes_once
+        with inductor_config.patch(
+            loop_ordering_after_fusion=False, loop_index_inversion_in_fusion=False
+        ):
+            nodes = scheduler.fuse_nodes([Mock()] * 4)
+        self.assertEqual(len(nodes), 2)
+        self.assertEqual(rounds, [True, True, True, False])
+        self.assertFalse(scheduler._defer_template_reduction_epilogues)
+
+    def test_choice_supports_reduction_epilogue(self):
+        template = self._mock_base_snode("template")
+        template.is_template.return_value = True
+        reduction = self._mock_base_snode("reduction")
+        reduction.is_reduction.return_value = True
+        epilogue = ir.ReductionEpilogue(template, reduction)
+        self.assertEqual(epilogue.nodes, [reduction])
+
+        extern = ir.ChoiceCaller("extern", [], Mock(), "")
+        self.assertFalse(extern.supports_reduction_epilogue(epilogue))
+
+        # Triton choices are judged by their output tiles, once per tile.
+        tiles = [(128, 256, 1), (128, 256, 1), (128, 128, 1)]
+        choices = [ir.TritonTemplateCallerBase("triton", [], Mock(), "") for _ in tiles]
+        for choice, tile in zip(choices, tiles):
+            choice.output_tile = tile
+        with (
+            patch(
+                "torch._inductor.codegen.triton.template_reduction_epilogue_supported",
+                return_value=True,
+            ) as supported,
+            patch(
+                "torch._inductor.codegen.simd.tile_fits_reduction_epilogue",
+                side_effect=lambda tile, template, nodes: tile[1] >= 256,
+            ) as fits,
+        ):
+            self.assertEqual(
+                [choice.supports_reduction_epilogue(epilogue) for choice in choices],
+                [True, True, False],
+            )
+        supported.assert_called_once()
+        self.assertEqual(fits.call_count, 2)
+
+    def test_tile_fits_reduction_epilogue(self):
+        M = N = 64
+        x, r = sympy.symbols("x r", integer=True, nonnegative=True)
+        template = Mock()
+        template.get_size.return_value = [sympy.Integer(M), sympy.Integer(N)]
+        template.get_name.return_value = "buf0"
+
+        def reduction(index, group=(M, N)):
+            node = self._mock_base_snode("buf1")
+            node.is_reduction.return_value = True
+            node.group = ("cuda", group)
+            node.read_writes.reads = OrderedSet(
+                [MemoryDep("buf0", index, (x, r), (M, N))]
+            )
+            return node
+
+        row = reduction(N * x + r)
+        cases = [
+            (None, row, False),
+            # Across epilogue subtiles.
+            ((128, 32, 2), row, False),
+            # Across column tiles.
+            ((128, 32, 1), row, False),
+            # A column read: (M, N) matches (N, M), but the read isn't row-major.
+            ((128, N, 1), reduction(x + N * r), False),
+            ((128, N, 1), reduction(N * x + r, group=(M * N, 1)), False),
+            ((128, N, 1), row, True),
+        ]
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            for tile, node, expected in cases:
+                self.assertEqual(
+                    tile_fits_reduction_epilogue(tile, template, [node]),
+                    expected,
+                    (tile, node.read_writes.reads),
+                )
+
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
         node1 = self._mock_base_snode("node1")
@@ -1029,6 +1195,7 @@ class TestScheduler(TestCase):
 
         scheduler.name_to_fused_node = {"node1": node1, "node2": node2}
         scheduler._fusion_memory_state = None
+        scheduler._defer_template_reduction_epilogues = False
         scheduler._can_fuse_impl = Mock(return_value=True)
         scheduler.will_fusion_create_cycle = Mock(return_value=True)
         scheduler.unfusable_node = Mock(return_value=False)
