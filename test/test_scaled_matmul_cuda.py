@@ -69,6 +69,7 @@ from torch.testing._internal.common_quantized import (
     _floatx_unpacked_to_f32,
     ceil_div, to_blocked,
     to_mxfp,
+    compute_error,
     data_to_nvfp4_scale,
     from_blocked_format,
     generate_jagged_offs,
@@ -476,21 +477,6 @@ def make_cublas_block_scale(
         else (outer // 128, round_up(k // 128, 4))
     )
     return torch.ones(shape, device=device).t()
-
-
-def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    """Computes the error between two tensors in dB.
-
-    For more details see:
-        https://en.wikipedia.org/wiki/Signal-to-noise_ratio
-
-    Args:
-        x: The original tensor.
-        y: The tensor to compare to the original tensor.
-    """
-    Ps = torch.norm(x)
-    Pn = torch.norm(x - y)
-    return 20 * torch.log10(Ps / Pn)
 
 
 # largest power of 2 representable in `torch.float8_e4m3fn`
