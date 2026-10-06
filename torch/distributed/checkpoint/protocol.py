@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Protocol, runtime_checkable, TypeGuard
 
 import torch
@@ -19,6 +20,12 @@ class CheckpointableTensor(Protocol):
     these fields is enough for DCP to map one or more slices of that tensor
     into a logical global tensor.
 
+    The local tensor may have fewer dims than ``global_shape`` when it stores
+    rows of a view that merges leading dims, e.g. ``[rows, *shape[k:]]`` for
+    merged ``shape[:k]``. Each shard then spans the local tensor's dims after
+    the first, and is the run of local rows starting at its local offset,
+    viewed as its local size.
+
     Attributes:
         global_shape: Full logical tensor shape to write into checkpoint
             metadata; needed because ``tensor.size()`` is only the local buffer
@@ -27,9 +34,11 @@ class CheckpointableTensor(Protocol):
             name checkpoint chunks and match load requests by global offset.
         local_offsets: Start coordinate for each local shard inside the local
             tensor; needed when one tensor stores multiple shards or includes
-            padding.
+            padding. With merged leading dims, only the row may be nonzero.
         local_sizes: Shape of each local shard; needed to build checkpoint
-            chunks and slice the local tensor during load.
+            chunks and slice the local tensor during load. With merged leading
+            dims, it has ``global_shape``'s dims, and its trailing dims match
+            the local tensor's dims after the first.
     """
 
     global_shape: tuple[int, ...]
@@ -104,6 +113,10 @@ def _get_checkpointable_tensor_shard(
     if not isinstance(tensor, torch.Tensor):
         raise TypeError("CheckpointableTensor must also be a torch.Tensor")
     local_tensor = tensor
+    if local_tensor.dim() < len(local_size):
+        # The shard's leading dims are merged into rows of the local tensor
+        rows = math.prod(local_size[: len(local_size) - local_tensor.dim() + 1])
+        return local_tensor.narrow(0, local_offset[0], rows).view(local_size)
     if not local_offset:
         return local_tensor
     return local_tensor[
@@ -145,7 +158,8 @@ def _validate_checkpointable_tensor_metadata(tensor: CheckpointableTensor) -> No
             raise ValueError(
                 f"local_sizes[{idx}] must have {len(global_shape)} dimensions"
             )
-        if len(local_size) != len(tensor_shape):
+        # Fewer local dims means merged rows, which need a local row dim
+        if len(local_size) < len(tensor_shape) or (local_size and not tensor_shape):
             raise ValueError(
                 f"local_sizes[{idx}] must have {len(tensor_shape)} local dimensions"
             )
@@ -157,6 +171,20 @@ def _validate_checkpointable_tensor_metadata(tensor: CheckpointableTensor) -> No
                 raise ValueError(
                     f"global shard {idx} dimension {dim} is outside global_shape"
                 )
+
+        if len(local_size) > len(tensor_shape):
+            # Leading dims merged into local rows
+            num_merged = len(local_size) - len(tensor_shape) + 1
+            if tuple(local_size[num_merged:]) != tensor_shape[1:]:
+                raise ValueError(
+                    f"local_sizes[{idx}] must end with the local dims {tensor_shape[1:]}"
+                )
+            if any(local_offset[1:]):
+                raise ValueError(f"local_offsets[{idx}] may only offset local rows")
+            rows = math.prod(local_size[:num_merged])
+            if local_offset[0] < 0 or local_offset[0] + rows > tensor_shape[0]:
+                raise ValueError(f"local shard {idx} rows are outside tensor shape")
+            continue
 
         for dim, (offset, size, local_dim) in enumerate(
             zip(local_offset, local_size, tensor_shape, strict=True)

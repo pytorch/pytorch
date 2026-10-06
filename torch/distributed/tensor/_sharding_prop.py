@@ -363,31 +363,16 @@ def _select_min_cost_strategy(
     return strategy.strategies[selected_strategy_index]
 
 
-# Besides pointwise-tagged and foreach/fused ops, the ops supported on
-# BlockShard DTensors: what optimizers, gradient clipping, state dicts, and
-# parameter init use on FSDP2 storage. None of them has dim or size arguments.
+# Besides pointwise-tagged and foreach/fused ops, the ops FSDP2 storage uses on
+# BlockShard DTensors: optimizer state init (zeros_like), state dict save and
+# load (detach, copy_), and trunc_normal_ init (empty_like, normal_, any).
 _BLOCK_SHARD_OPS: set[OpOverload] = {
-    aten._amp_foreach_non_finite_check_and_unscale_.default,
-    aten._to_copy.default,
-    aten.all.default,
     aten.any.default,
     aten.copy_.default,
     aten.detach.default,
     aten.empty_like.default,
-    aten.fill_.Scalar,
-    aten.full_like.default,
-    aten.linalg_vector_norm.default,
-    aten.ones_like.default,
-    aten.rand_like.default,
-    aten.randn_like.default,
-    aten.zero_.default,
-    aten.zeros_like.default,
-    aten.bernoulli_.float,
-    aten.exponential_.default,
-    aten.geometric_.default,
-    aten.log_normal_.default,
     aten.normal_.default,
-    aten.uniform_.default,
+    aten.zeros_like.default,
 }
 
 
@@ -1095,17 +1080,14 @@ class ShardingPropagator:
         """Propagate an op whose operands use BlockShard.
 
         BlockShard is FSDP2 storage, so only elementwise ops, foreach ops, and
-        full norms are supported, with every non-scalar operand on the same
-        BlockShard spec (per list index for foreach ops). They run as Shard(0)
-        on the merged view, and the outputs map back to the BlockShard spec.
+        ``_BLOCK_SHARD_OPS`` are supported, with every non-scalar operand on the
+        same BlockShard spec (per list index for foreach ops). They run as
+        Shard(0) on the merged view, and the outputs map back to the BlockShard
+        spec.
         """
         op = op_schema.op
         foreach = op._schema.name.startswith(("aten::_foreach_", "aten::_fused_"))
         supported = torch.Tag.pointwise in op.tags or foreach or op in _BLOCK_SHARD_OPS
-        if op is aten.linalg_vector_norm.default:
-            args = op_schema.args_schema
-            dim = op_schema.kwargs_schema.get("dim", args[2] if len(args) > 2 else None)
-            supported = dim is None
         if not supported:
             raise NotImplementedError(
                 f"{op} is not supported on BlockShard DTensors; redistribute them "
