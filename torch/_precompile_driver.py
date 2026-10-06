@@ -510,8 +510,8 @@ def _build_multigraph_forward():
     # Only names Dynamo minted while tracing are bound into it (every backend id
     # of the artifact, plus that module's import aliases and builtins key),
     # never the artifact's own, so nothing here shadows a user global. A module
-    # is opened only for a frame with variants; a record with none is dead and
-    # never imports its module.
+    # is opened only for a frame the driver serves; a dead record never imports
+    # its module.
     scopes = {}
 
     def _scope(frame):
@@ -536,6 +536,18 @@ def _build_multigraph_forward():
                 f"{list(target.co_freevars)!r}, which a self-contained artifact "
                 f"cannot rebuild. Regenerate it from a module-level function."
             )
+        if frame["trivial"] and not is_entry:
+            # Dynamo compiled nothing of this continuation, so it ran as plain
+            # Python during capture; rebuild it as one.
+            # Its module is opened for the globals the bytecode reads.
+            scope = _scope(frame)
+
+            def _plain(closure):
+                return types.FunctionType(target, scope, target.co_name, None, closure)
+
+            if target.co_freevars:
+                return _plain
+            return _plain(None)
         if not frame["variants"]:
             # Nothing to dispatch, for one of two reasons the coverage-gap
             # error below would misdiagnose: adding examples fixes neither.
@@ -673,7 +685,8 @@ def _build_multigraph_forward():
     opened = set()
     for _frame in frames:
         module = _frame["python_module"]
-        if _frame["variants"]:
+        # The frames _make_dispatcher opens a scope for.
+        if _frame["variants"] or (_frame["trivial"] and not _frame["is_entry"]):
             opened.add(module)
         for _name in _frame["resume_names"] if module in opened else ():
             existing = vars(_import(module)).get(_name)
@@ -700,8 +713,8 @@ def _build_multigraph_forward():
         # under its parent's module, except under config.nested_graph_breaks
         # (default False), where an inlined frame's continuation is recorded
         # under the inlined function's module while the root frame's bytecode
-        # does the LOAD_GLOBAL. A dead record whose module no live frame opened
-        # has no frame left to name it, so it binds nothing.
+        # does the LOAD_GLOBAL. A dead record whose module no served frame
+        # opened has no frame left to name it, so it binds nothing.
         scope = scopes.get(_frame["python_module"])
         if scope is not None:
             for _name in _frame["resume_names"]:
