@@ -174,6 +174,14 @@ class TestAttentionFusionDeviceHooks(TestCase):
                 self.assertTrue(CudaInterface.should_warn_tf32_disabled())
             with mock.patch.object(torch.cuda, "is_available", lambda: False):
                 self.assertFalse(CudaInterface.should_warn_tf32_disabled())
+            # CUDA rejects the fp32-upcast-softmax patterns (25-27) and keeps
+            # pattern 16 on the math path; ROCm shares CudaInterface but opts
+            # into fused SDPA for pattern 16, so gate on torch.version.hip.
+            self.assertFalse(CudaInterface.is_fp32_softmax_attention_fusion_safe())
+            self.assertEqual(
+                CudaInterface.keep_attention_on_math_path(),
+                torch.version.hip is None,
+            )
         finally:
             matmul.fp32_precision = saved
 
