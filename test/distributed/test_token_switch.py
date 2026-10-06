@@ -119,6 +119,7 @@ class TokenSwitchNCCLTest(MultiProcContinuousTest):
                     routing.handle, out_tokens[:num_recv].contiguous(), combined
                 )
             stream.synchronize()
+            self.assertEqual(combined, tokens)
             del routing
             # EP cleanup must leave the process group's host communicator usable.
             dist.barrier(pg)

@@ -15,26 +15,20 @@ if(NOT __NCCL_EP_INCLUDED)
 
   # Reuse PyTorch's architecture expansion, including named GPUs and +PTX.
   torch_cuda_get_nvcc_gencode_flag(__nccl_ep_gencode)
-  set(__NCCL_EP_ARCHS "")
+  set(__NCCL_EP_NVCC_FLAGS "")
   foreach(__flag IN LISTS __nccl_ep_gencode)
     if(__flag MATCHES "code=(sm|compute)_([0-9]+)([af]?)$")
-      set(__kind "${CMAKE_MATCH_1}")
-      set(__arch "${CMAKE_MATCH_2}${CMAKE_MATCH_3}")
       if(CMAKE_MATCH_2 GREATER_EQUAL 90)
-        if(__kind STREQUAL "sm")
-          list(APPEND __NCCL_EP_ARCHS "${__arch}-real")
-        else()
-          list(APPEND __NCCL_EP_ARCHS "${__arch}-virtual")
-        endif()
+        list(APPEND __NCCL_EP_NVCC_FLAGS "-gencode=${__flag}")
       endif()
     endif()
   endforeach()
-  if(NOT __NCCL_EP_ARCHS)
+  if(NOT __NCCL_EP_NVCC_FLAGS)
     message(FATAL_ERROR "NCCL EP requires a TORCH_CUDA_ARCH_LIST with SM90 or newer")
   endif()
-  list(REMOVE_DUPLICATES __NCCL_EP_ARCHS)
-  # ExternalProject must preserve a multi-architecture value as one argument.
-  list(JOIN __NCCL_EP_ARCHS "|" __nccl_ep_arch_arg)
+  list(REMOVE_DUPLICATES __NCCL_EP_NVCC_FLAGS)
+  # Supported CMake versions cannot represent every architecture NVCC accepts.
+  list(JOIN __NCCL_EP_NVCC_FLAGS " " __nccl_ep_nvcc_arg)
 
   set(__NCCL_EP_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl_ep")
   set(__NCCL_EP_OUTPUT_DIR "${__NCCL_EP_BUILD_DIR}/artifacts")
@@ -62,7 +56,6 @@ if(NOT __NCCL_EP_INCLUDED)
   ExternalProject_Add(nccl_ep_external
     SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/nccl_ep_build"
     BINARY_DIR "${__NCCL_EP_BUILD_DIR}"
-    LIST_SEPARATOR |
     CMAKE_ARGS
       "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
       "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
@@ -70,7 +63,8 @@ if(NOT __NCCL_EP_INCLUDED)
       "-DCMAKE_CUDA_HOST_COMPILER=${CMAKE_CUDA_HOST_COMPILER}"
       "-DCUDAToolkit_ROOT=${CUDA_TOOLKIT_ROOT_DIR}"
       -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared
-      "-DCMAKE_CUDA_ARCHITECTURES=${__nccl_ep_arch_arg}"
+      -DCMAKE_CUDA_ARCHITECTURES=OFF
+      "-DCMAKE_CUDA_FLAGS=${__nccl_ep_nvcc_arg}"
       "-DNCCL_INCLUDE_DIR=${NCCL_INCLUDE_DIRS}"
       "-DNCCL_LIBRARY=${NCCL_LIBRARIES}"
       "-DNCCL_EP_BUILDDIR=${__NCCL_EP_OUTPUT_DIR}"
