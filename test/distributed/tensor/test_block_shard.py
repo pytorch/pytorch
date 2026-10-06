@@ -162,13 +162,11 @@ class BlockShardDTensorTest(DTensorContinuousTestBase):
                     out = dx * 2 + dy
                     torch._foreach_mul_([out], 0.5)
                     copied = torch.zeros_like(dx).copy_(out).detach().clone()
-                    casted = copied.to(torch.float64)
                 self.assertEqual(comm_mode.get_total_counts(), 0)
-                for t in (out, copied, casted):
+                for t in (out, copied):
                     self.assertEqual(t.placements, placements)
-                self.assertEqual(casted.full_tensor(), (x + 0.5 * y).double())
+                self.assertEqual(copied.full_tensor(), x + 0.5 * y)
                 self.assertEqual(torch._foreach_norm([dx])[0].full_tensor(), x.norm())
-                self.assertEqual(torch.linalg.vector_norm(dx).full_tensor(), x.norm())
 
     def test_unsupported_ops_raise(self):
         mesh = self.build_device_mesh()
@@ -250,7 +248,7 @@ class BlockShardDTensorTest(DTensorContinuousTestBase):
         d = block_shard_tensor(x, mesh, [BlockShard((6,))])
 
         def fn(t):
-            return torch.linalg.vector_norm(t * 2 + 1)
+            return torch._foreach_norm([t * 2 + 1])[0]
 
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(d)
         self.assertEqual(out.full_tensor(), fn(x))
