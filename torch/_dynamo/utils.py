@@ -6198,6 +6198,10 @@ def is_pybind11_enum_member(value: object) -> bool:
     a C++ function returning an enum may construct a new Python wrapper), so
     we check by name membership rather than identity.
     """
+    # A class is never a member. For a Python Enum class, type(value) is
+    # EnumType, whose __members__ is a property object, not a mapping.
+    if isinstance(value, type):
+        return False
     t = type(value)
     members = getattr(t, "__members__", None)
     if members is None:
