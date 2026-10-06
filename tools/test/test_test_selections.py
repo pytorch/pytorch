@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import math
 import random
 import sys
 import unittest
@@ -16,6 +17,7 @@ try:
     from tools.testing.test_selections import (
         calculate_shards,
         get_job_base_name,
+        NUM_PROCS_FOR_SHARDING_CALC,
         THRESHOLD,
     )
 except ModuleNotFoundError:
@@ -445,6 +447,24 @@ class TestCalculateShards(unittest.TestCase):
         tests = [test for _, shard in shards for test in shard]
         self.assertEqual([test.num_shards for test in tests], [1, 1])
         self.assertEqual([test.get_time() for test in tests], list(test_times.values()))
+
+    def test_split_finely(self) -> None:
+        test_times: dict[str, float] = {"test1": THRESHOLD * 2, "test2": THRESHOLD * 2}
+        shards = calculate_shards(
+            1,
+            [TestRun(t) for t in test_times],
+            test_times,
+            gen_class_times(test_times),
+            must_serial=lambda t: t != "test1",
+            split_finely=lambda t: t == "test1",
+        )
+
+        tests = [test for _, shard in shards for test in shard]
+        expected = math.ceil(THRESHOLD * 2 / (THRESHOLD / NUM_PROCS_FOR_SHARDING_CALC))
+        self.assertEqual(
+            sorted({test.name: test.num_shards for test in tests}.items()),
+            [("test1", expected), ("test2", 2)],
+        )
 
     def test_zero_tests(self) -> None:
         self.assertListEqual([(0.0, []), (0.0, [])], calculate_shards(2, [], {}, None))

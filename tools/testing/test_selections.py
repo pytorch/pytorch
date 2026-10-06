@@ -98,14 +98,20 @@ def get_with_pytest_shard(
     test_class_times: dict[str, dict[str, float]] | None,
     *,
     allow_pytest_sharding: bool = True,
+    split_finely: Callable[[str], bool] | None = None,
 ) -> list[ShardedTest]:
     sharded_tests: list[ShardedTest] = []
 
     for test in tests:
         duration = get_duration(test, test_file_times, test_class_times or {})
+        # Pieces of a long file in the parallel pool should be no longer than
+        # a proc's share so they don't stretch the shard's critical path.
+        threshold = THRESHOLD
+        if split_finely is not None and split_finely(test.test_file):
+            threshold = THRESHOLD / NUM_PROCS_FOR_SHARDING_CALC
 
-        if allow_pytest_sharding and duration and duration > THRESHOLD:
-            num_shards = math.ceil(duration / THRESHOLD)
+        if allow_pytest_sharding and duration and duration > threshold:
+            num_shards = math.ceil(duration / threshold)
             for i in range(num_shards):
                 sharded_tests.append(
                     ShardedTest(test, i + 1, num_shards, duration / num_shards)
@@ -220,6 +226,7 @@ def calculate_shards(
     must_serial: Callable[[str], bool] | None = None,
     sort_by_time: bool = True,
     allow_pytest_sharding: bool = True,
+    split_finely: Callable[[str], bool] | None = None,
 ) -> list[tuple[float, list[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
     test_class_times = test_class_times or {}
@@ -239,6 +246,7 @@ def calculate_shards(
                 test_file_times,
                 test_class_times,
                 allow_pytest_sharding=allow_pytest_sharding,
+                split_finely=split_finely,
             ),
             key=lambda j: j.get_time(),
             reverse=True,
@@ -247,6 +255,7 @@ def calculate_shards(
             test_file_times,
             test_class_times,
             allow_pytest_sharding=allow_pytest_sharding,
+            split_finely=split_finely,
         )
     else:
         pytest_sharded_tests = get_with_pytest_shard(
@@ -254,6 +263,7 @@ def calculate_shards(
             test_file_times,
             test_class_times,
             allow_pytest_sharding=allow_pytest_sharding,
+            split_finely=split_finely,
         )
     del tests
 
