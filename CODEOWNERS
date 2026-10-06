@@ -8,8 +8,10 @@
 # - Active rules name one or more owners; commented rules mark paths whose
 #   ownership is still to be determined.
 # - Sections are ordered from broad defaults to narrower overrides.
-# - A "# label: <name>" line names the GitHub issue/PR label for the paths
-#   below it, up to the next "# label:" line or the end of the section. Paths
+# - A "# label:" line names the GitHub issue/PR labels for the paths below
+#   it, up to the next "# label:" line or the end of the section. Labels are
+#   listed oncall queue first, then broader module, then narrower module; a
+#   narrower module is kept only when its cc list or owners add people. Paths
 #   before the first "# label:" line in a section have no single label.
 #
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
@@ -52,13 +54,13 @@
 # /torch/csrc/functorch/
 # /torch/func/
 /test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
-# label: module: vmap
+# label: module: functorch, module: vmap
 /test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 #
 # [compiler_autograd]
-# label: module: compiled autograd
+# label: oncall: pt2, module: compiled autograd
 # /test/compiled_autograd_skips/
-# label: module: aotdispatch
+# label: oncall: pt2, module: aotdispatch
 # /test/functorch/test_aot_joint_with_descriptors.py
 /test/functorch/test_aotdispatch.py @ezyang @Chillee
 # /test/functorch/test_codegen_backward_epilogue.py
@@ -80,7 +82,7 @@
 # /torch/_functorch/compilers.py
 # /torch/_functorch/partitioners.py
 /torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
-# label: module: complex
+# label: oncall: pt2, module: aotdispatch, module: complex
 /torch/_functorch/_aot_autograd/complex_decomposition.py @hameerabbasi @amjames
 #
 # [core_aten_linalg]
@@ -106,14 +108,13 @@
 /test/test_linalg.py @lezcano @nikitaved
 # /test/test_matmul_cuda.py
 /torch/linalg/ @lezcano @nikitaved
-# label: module: distance functions
 # /aten/src/ATen/native/Distance.cpp
 # /aten/src/ATen/native/Distance.h
 # label: module: fft
 # /aten/src/ATen/native/SpectralOps.cpp
 # /aten/src/ATen/native/SpectralOpsUtils.h
 # /test/test_spectral_ops.py
-# label: module: floatx (formerly float8)
+# label: module: linear algebra, module: floatx (formerly float8)
 # /aten/src/ATen/native/ScaledBlas.cpp
 # /aten/src/ATen/native/ScaledBlasUtils.cpp
 # /aten/src/ATen/native/ScaledBlasUtils.h
@@ -615,7 +616,7 @@
 /test/python_native/test_linear_cross_entropy_override.py @slayton58 @pearu
 # label: module: mta
 /test/test_foreach.py @janeyx99
-# label: module: higher order operators
+# label: oncall: pt2, module: higher order operators
 /test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
 # label: module: autograd
 /test/test_ops_fwd_gradients.py @soulitzer
@@ -648,13 +649,13 @@
 /torch/cuda/ @eqy @syed-ahmed @Aidyn-A
 /c10/cuda/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/native/cuda/GroupedBlas.cpp @drisspg @slayton58
-# label: module: cublas
+# label: module: cuda, module: cublas
 /aten/src/ATen/native/cuda/Blas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
-# label: module: floatx (formerly float8)
+# label: module: cuda, module: floatx (formerly float8)
 /aten/src/ATen/native/cuda/ScaledBlas.cpp @drisspg @slayton58
-# label: module: cudnn
+# label: module: cuda, module: cudnn
 /torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/native/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/cudnn/ @eqy @syed-ahmed @Aidyn-A
@@ -693,7 +694,7 @@
 /aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
 #
 # [backend_vulkan]
-# label: module: vulkan
+# label: oncall: mobile, module: vulkan
 # /aten/src/ATen/native/vulkan/
 #
 # [python_core_api]
@@ -775,7 +776,7 @@
 /torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
 # label: module: complex
 /torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
-# label: module: fakeTensor
+# label: oncall: pt2, module: fakeTensor
 /torch/_subclasses/fake_tensor.py @aorenste
 /torch/_subclasses/fake_utils.py @aorenste
 # label: module: abi
@@ -791,7 +792,7 @@
 # label: module: nn
 /torch/nn/ @albanD @jbschlosser
 /torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
-# label: module: nn.utils.parametrize
+# label: module: nn, module: nn.utils.parametrize
 /torch/nn/utils/parametriz*.py @lezcano
 # label: module: flex attention
 /torch/nn/attention/flex_attention.py @drisspg
@@ -954,7 +955,7 @@
 # /torch/csrc/jit/mobile/
 #
 # [mobile_android]
-# label: module: android
+# label: oncall: mobile, module: android
 # /android/
 # /test/mobile/custom_build/
 #
@@ -970,14 +971,14 @@
 # [infra_ci]
 # label: module: ci
 /.ci/ @pytorch/pytorch-dev-infra
-# label: module: rocm
+# label: module: ci, module: rocm
 /.ci/docker/ubuntu-rocm/ @jeffdaily
 /.ci/docker/common/install_roc*.sh @jeffdaily
 /.ci/docker/common/install_amdsmi.sh @jeffdaily
 /.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
-# label: module: inductor
+# label: oncall: pt2, module: ci, module: inductor
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
-# label: module: xpu
+# label: module: ci, module: xpu
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 #
 # [infra_github_automation]
@@ -1044,7 +1045,7 @@
 # /third_party/xnnpack_buck_shim.bzl
 # /third_party/xnnpack_src_defs.bzl
 # /third_party/xnnpack_wrapper_defs.bzl
-# label: module: xpu
+# label: module: third_party, module: xpu
 /third_party/xpu.txt @EikanWang @gujinghui
 #
 # [third_party_serialization_schema]
@@ -1065,22 +1066,22 @@
 # /torch/csrc/distributed/
 # /torch/distributed/
 /torch/distributed/optim/ @weifengpy
-# label: module: tensorpipe
+# label: oncall: distributed, module: tensorpipe
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @lw
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @lw
-# label: module: c10d
+# label: oncall: distributed, module: c10d
 /torch/csrc/distributed/c10d/ @d4l3k @fduwjj @kapilsh
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 /torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
-# label: module: fsdp
+# label: oncall: distributed, module: fsdp
 /torch/distributed/_composable/fsdp/ @weifengpy
 /torch/distributed/_composable/replicate_with_fsdp.py @weifengpy
 /torch/distributed/fsdp/ @weifengpy
-# label: module: ddp
+# label: oncall: distributed, module: ddp
 /torch/distributed/_composable/replicate.py @weifengpy
 /torch/nn/parallel/ @weifengpy
-# label: module: dtensor
+# label: oncall: distributed, module: dtensor
 /torch/distributed/tensor/placement_types.py @weifengpy
 /torch/distributed/tensor/_ops/_view_ops.py @weifengpy
 /torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
@@ -1123,7 +1124,7 @@
 # /tools/linter/
 #
 # [infra_codegen]
-# label: module: autograd
+# label: module: codegen, module: autograd
 /tools/autograd/ @albanD @soulitzer
 # label: module: codegen
 # /torchgen/
@@ -1150,7 +1151,7 @@
 # /torch/testing/_internal/common_methods_invocations.py
 # /torch/testing/_internal/common_device_type.py
 /test/run_test.py @pytorch/pytorch-dev-infra
-# label: module: higher order operators
+# label: oncall: pt2, module: testing, module: higher order operators
 /torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
 #
 # [benchmark_operator_runtime]
@@ -1210,18 +1211,18 @@
 # /test/test_fx_reinplace_pass.py
 # /torch/fx/
 /torch/fx/proxy.py @zou3519
-# label: module: higher order operators
+# label: oncall: pt2, module: higher order operators
 # /test/higher_order_ops/
 /torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
-# label: module: dynamic shapes
+# label: oncall: pt2, module: dynamic shapes
 /torch/fx/experimental/symbolic_shapes.py @laithsakka
 /torch/fx/experimental/sym_node.py @laithsakka
 /torch/fx/experimental/recording.py @laithsakka
-# label: module: ProxyTensor
+# label: oncall: pt2, module: ProxyTensor
 /torch/fx/experimental/proxy_tensor.py @aorenste
 #
 # [compiler_dynamo]
-# label: module: dynamo
+# label: oncall: pt2, module: dynamo
 # /test/distributed/test_dynamo_distributed.py
 # /test/dynamo/
 # /test/dynamo_expected_failures/
@@ -1232,17 +1233,17 @@
 # /torch/_dynamo/
 # /torch/csrc/dynamo/
 /torch/_dynamo/backends/tvm.py @guan404ming
-# label: module: complex
+# label: oncall: pt2, module: dynamo, module: complex
 /test/dynamo/test_complex.py @hameerabbasi @amjames
-# label: module: onnx
+# label: oncall: pt2, module: dynamo, module: onnx
 /torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
-# label: module: higher order operators
+# label: oncall: pt2, module: dynamo, module: higher order operators
 /torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
-# label: module: pytree
+# label: oncall: pt2, module: dynamo, module: pytree
 /torch/_dynamo/polyfills/pytree.py @XuehaiPan
 #
 # [compiler_inductor]
-# label: module: inductor
+# label: oncall: pt2, module: inductor
 # /test/distributed/test_inductor_collectives.py
 # /test/distributed/test_inductor_compile_collectives.py
 # /test/inductor/
@@ -1255,7 +1256,7 @@
 # /torch/_precompile_driver.py
 # /torch/csrc/inductor/
 # /torch/utils/_indented_buffer.py
-# label: module: flex attention
+# label: oncall: pt2, module: inductor, module: flex attention
 /torch/_higher_order_ops/flex_attention.py @drisspg
 /torch/_inductor/kernel/flex/ @drisspg
 /torch/_inductor/codegen/cpp_flex_attention_template.py @drisspg
@@ -1297,9 +1298,9 @@
 # label: module: docs
 # /docs/
 /docs/source/conf.py @albanD
-# label: module: higher order operators
+# label: oncall: pt2, module: docs, module: higher order operators
 /docs/source/higher_order_ops/ @bohnstingl
-# label: module: xpu
+# label: module: docs, module: xpu
 /docs/source/notes/get_start_xpu.md @EikanWang @gujinghui
 #
 # [protected_codeownership]
