@@ -61,6 +61,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
+    set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
     TEST_PRIVATEUSE1,
@@ -762,6 +763,8 @@ class LocalDTensorContinuousTestBase(DTensorContinuousTestBase):
     def setUp(self):
         unittest.TestCase.setUp(self)
         self.__class__._ensure_processes_spawned()
+        # Match MultiProcContinuousTest, which reseeds before every test.
+        set_rng_seed()
         torch.autograd._enable_record_function(False)
 
     def tearDown(self):
