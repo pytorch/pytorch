@@ -11,6 +11,8 @@ import unittest
 os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
 
 import torch
+from torch._dynamo.testing import CompileCounterWithBackend
+from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
@@ -280,12 +282,22 @@ class StrictNumericsCompileTest(TestCase):
         self.assertNotIn("tl.sigmoid", code)
 
     @ops(
-        [op for op in op_db if op.name == "nn.functional.relu"],
+        [
+            op
+            for op in op_db
+            if op.name
+            in (
+                "clamp",
+                "nn.functional.relu",
+                "nn.functional.relu6",
+                "nn.functional.hardtanh",
+            )
+        ],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
     )
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
-    def test_relu_shared_predicate(self, device, dtype, op, numerics, upcast):
+    def test_clamp_shared_predicate(self, device, dtype, op, numerics, upcast):
         if dtype in (torch.float16, torch.bfloat16):
             x = _exhaustive_16bit(dtype, device)
         elif dtype == torch.float32:
@@ -308,10 +320,24 @@ class StrictNumericsCompileTest(TestCase):
             )
             x = torch.cat((bits, bits | torch.iinfo(torch.int64).min)).view(dtype)
 
-        def fn(x):
-            return op.op(x), x < 0
+        bounds = torch.tensor([-1.0, 0.0, 1.0, 6.0], device=device, dtype=dtype)
+        x = torch.cat(
+            (
+                x,
+                bounds,
+                torch.nextafter(bounds, torch.full_like(bounds, -float("inf"))),
+                torch.nextafter(bounds, torch.full_like(bounds, float("inf"))),
+            )
+        )
 
-        (result, negative), codes = run_and_get_code(
+        x.requires_grad_()
+        lower = -1 if op.name in ("clamp", "nn.functional.hardtanh") else 0
+
+        def fn(x):
+            result = op.op(x, -1, 1) if op.name == "clamp" else op.op(x)
+            return result, x < lower
+
+        (result, below_lower), codes = run_and_get_code(
             torch.compile(
                 fn,
                 fullgraph=True,
@@ -322,11 +348,408 @@ class StrictNumericsCompileTest(TestCase):
             ),
             x,
         )
-        expected, expected_negative = fn(x)
+        expected, expected_below_lower = fn(x)
         int_dtype = _BIT_VIEW[dtype]
         self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
-        self.assertEqual(negative, expected_negative)
+        self.assertEqual(below_lower, expected_below_lower)
         self.assertIn("tl.where", "\n".join(codes))
+        expected_grad = torch.autograd.grad(expected, x, torch.ones_like(x))[0]
+        result_grad = torch.autograd.grad(result, x, torch.ones_like(x))[0]
+        self.assertEqual(result_grad.view(int_dtype), expected_grad.view(int_dtype))
+
+    @config.patch(
+        numerics="strict_pointwise", max_fusion_size=1, realize_opcount_threshold=0
+    )
+    @ops(
+        [
+            op
+            for op in op_db
+            if op.name in ("clamp", "nn.functional.hardtanh", "nn.functional.relu6")
+        ],
+        allowed_dtypes=(torch.float16, torch.bfloat16),
+    )
+    def test_clamp_materialized_opmath(self, device, dtype, op):
+        def fn(x):
+            return op.op(x, -1, 1) if op.name == "clamp" else op.op(x)
+
+        x = _exhaustive_16bit(dtype, device)
+        metrics.reset()
+        result = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(result.view(torch.int16), fn(x).view(torch.int16))
+        self.assertGreater(metrics.generated_kernel_count, 1)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("bound_kind", ("min", "max", "both", "clamp_min", "clamp_max"))
+    def test_clamp_tensor_bounds(self, device, dtype, numerics, bound_kind):
+        values = torch.tensor(
+            [-float("inf"), -1.0, -0.0, 0.0, 1.0, float("inf")],
+            device=device,
+            dtype=dtype,
+        )
+        int_dtype = _BIT_VIEW[dtype]
+        nan_bits = values[-1:].view(int_dtype) | 1
+        nan_bits = torch.cat((nan_bits, nan_bits + 1))
+        nan_bits = torch.cat((nan_bits, nan_bits | torch.iinfo(int_dtype).min))
+        values = torch.cat((values, nan_bits.view(dtype)))
+        x = values[:, None, None].clone().requires_grad_()
+        lo = values[None, :, None].clone().requires_grad_()
+        hi = values[None, None, :].clone().requires_grad_()
+
+        def fn(x, lo, hi):
+            if bound_kind == "clamp_min":
+                result = torch.clamp_min(x, lo)
+            elif bound_kind == "clamp_max":
+                result = torch.clamp_max(x, hi)
+            else:
+                result = torch.clamp(
+                    x,
+                    min=None if bound_kind == "max" else lo,
+                    max=None if bound_kind == "min" else hi,
+                )
+            return result, x < lo, hi < x
+
+        expected, *expected_masks = fn(x, lo, hi)
+        result, *masks = torch.compile(
+            fn, fullgraph=True, options={"numerics": numerics}
+        )(x, lo, hi)
+        self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+        self.assertEqual(masks, expected_masks)
+        expected_grads = torch.autograd.grad(
+            expected, (x, lo, hi), torch.ones_like(expected), allow_unused=True
+        )
+        result_grads = torch.autograd.grad(
+            result, (x, lo, hi), torch.ones_like(result), allow_unused=True
+        )
+        for actual, wanted in zip(result_grads, expected_grads):
+            if wanted is None:
+                self.assertIsNone(actual)
+            else:
+                self.assertEqual(actual.view(int_dtype), wanted.view(int_dtype))
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("zero_dim", (False, True))
+    @parametrize("op", ("clamp", "clamp_min", "clamp_max"))
+    def test_clamp_mixed_tensor_dtypes(self, device, dtype, zero_dim, op):
+        def fn(x, lo, hi):
+            if op == "clamp":
+                return torch.clamp(x, lo, hi)
+            return getattr(torch, op)(x, hi)
+
+        x = _exhaustive_16bit(dtype, device)
+        lo = torch.tensor(-1.0, dtype=torch.float32, device=device)
+        midpoint = torch.tensor(
+            1.0 + torch.finfo(dtype).eps / 2, dtype=torch.float64, device=device
+        )
+        above_mid = torch.nextafter(midpoint, torch.full_like(midpoint, float("inf")))
+        nan = torch.tensor(0x7FF0000000000001, dtype=torch.int64, device=device)
+        negative_nan = nan | torch.iinfo(torch.int64).min
+        bounds = (
+            above_mid,
+            nan.view(torch.float64),
+            negative_nan.view(torch.float64),
+        )
+        if not zero_dim:
+            lo = lo[None]
+        compiled = torch.compile(
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
+        )
+        for hi in bounds:
+            if not zero_dim:
+                hi = hi[None]
+            expected = fn(x, lo, hi)
+            result = compiled(x, lo, hi)
+            int_dtype = _BIT_VIEW[expected.dtype]
+            self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+
+    @dtypes(torch.int32, torch.int64, torch.uint32, torch.uint64)
+    @parametrize("upcast", (False, True))
+    def test_clamp_integer_to_bfloat16(self, device, dtype, upcast):
+        limits = torch.iinfo(dtype)
+        values = [0, 1, limits.max]
+        for exponent in range(24, limits.bits - int(dtype.is_signed)):
+            for offset in (1, 3):
+                midpoint = 2**exponent + offset * 2 ** (exponent - 8)
+                values.extend(midpoint + delta for delta in (-1, 0, 1))
+        if dtype.is_signed:
+            values = [*values, *(-v for v in values), limits.min]
+        x = torch.tensor(values, dtype=dtype, device=device)
+        lo = torch.tensor([-float("inf")], dtype=torch.bfloat16, device=device)
+        hi = -lo
+
+        def fn(x, lo, hi):
+            return (
+                torch.clamp(x, lo, hi),
+                torch.clamp(lo, x, hi),
+                torch.clamp(hi, lo, x),
+                torch.clamp_min(x, lo),
+                torch.clamp_min(lo, x),
+                torch.clamp_max(x, hi),
+                torch.clamp_max(hi, x),
+                x.to(torch.bfloat16),
+            )
+
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": "strict_pointwise",
+                "triton.codegen_upcast_to_fp32": upcast,
+            },
+        )(x, lo, hi)
+        expected = fn(x, lo, hi)
+        self.assertEqual(
+            tuple(t.view(torch.int16) for t in actual),
+            tuple(t.view(torch.int16) for t in expected),
+        )
+
+    @dtypes(torch.float32)
+    @parametrize("op", ("argmax", "argmin"))
+    @parametrize("upcast", (False, True))
+    def test_computed_index_to_bfloat16(self, device, dtype, op, upcast):
+        def fn(x):
+            return getattr(x, op)(-1).to(torch.bfloat16)
+
+        x = torch.randn((16, 16), device=device, dtype=dtype)
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": "strict_pointwise",
+                "triton.codegen_upcast_to_fp32": upcast,
+            },
+        )(x)
+        self.assertEqual(actual.view(torch.int16), fn(x).view(torch.int16))
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("bound_kind", ("min", "max"))
+    @parametrize("standalone", (False, True))
+    def test_clamp_scalar_single_bound(self, device, dtype, bound_kind, standalone):
+        op = getattr(torch, f"clamp_{bound_kind}") if standalone else torch.clamp
+
+        def fn(x, bound):
+            return op(x, **{bound_kind: bound})
+
+        x = torch.tensor(
+            [-float("inf"), -1.0, -0.0, 0.0, 1.0, float("inf"), float("nan")],
+            device=device,
+            dtype=dtype,
+        )
+        compiled = torch.compile(
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
+        )
+        for bound in (-0.0, 0.7, 1e-42, float("nan")):
+            self.assertEqual(
+                compiled(x, bound).view(_BIT_VIEW[dtype]),
+                fn(x, bound).view(_BIT_VIEW[dtype]),
+            )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True, specialize_float=False)
+    @config.patch(
+        numerics="strict_pointwise",
+        _use_fp64_for_unbacked_floats=False,
+        force_disable_caches=False,
+    )
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("op", ("clamp_min", "clamp_max"))
+    @parametrize("bound_source", ("python", "cpu", "cuda"))
+    def test_clamp_single_nan_bound(self, device, dtype, op, bound_source):
+        def fn(x, bound):
+            return getattr(torch, op)(
+                x, bound if bound_source == "python" else bound.item()
+            )
+
+        x = torch.tensor(
+            [-1.0, -0.0, 0.0, 1.0, float("nan")], device=device, dtype=dtype
+        )
+        bits = torch.tensor(
+            [
+                0x3FE6666666666666,
+                0x7FF0000000000001,
+                0x7FF8000000000000,
+                0x7FFABCDE12345678,
+            ],
+            dtype=torch.int64,
+            device=device if bound_source == "cuda" else "cpu",
+        )
+        bits = torch.cat((bits, bits | torch.iinfo(torch.int64).min))
+        bounds = bits.view(torch.float64)
+        compiled = torch.compile(fn, fullgraph=True)
+        for bound in bounds:
+            if bound_source == "python":
+                bound = bound.item()
+            self.assertEqual(
+                compiled(x, bound).view(_BIT_VIEW[dtype]),
+                fn(x, bound).view(_BIT_VIEW[dtype]),
+            )
+
+        if bound_source == "python":
+            hits = counters["aot_autograd"]["autograd_cache_hit"]
+            torch._dynamo.reset()
+            bound = bounds[1].item()
+            self.assertEqual(
+                compiled(x, bound).view(_BIT_VIEW[dtype]),
+                fn(x, bound).view(_BIT_VIEW[dtype]),
+            )
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits + 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @config.patch(numerics="strict_pointwise", _use_fp64_for_unbacked_floats=False)
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("op", ("clamp_min", "clamp_max"))
+    @parametrize("layout", ("transpose", "channels_last"))
+    def test_clamp_nan_fill_layout(self, device, dtype, op, layout):
+        if layout == "transpose":
+            x = torch.arange(6, device=device, dtype=dtype).reshape(2, 3).t()
+            permutation = (1, 0)
+        else:
+            x = (
+                torch.arange(120, device=device, dtype=dtype)
+                .reshape(2, 3, 4, 5)
+                .contiguous(memory_format=torch.channels_last)
+            )
+            permutation = (0, 2, 3, 1)
+
+        def fn(x, bound):
+            value = float("nan") if bound is None else bound.item()
+            result = getattr(torch, op)(x, value)
+            return result, result.permute(permutation).view(-1)
+
+        nan = torch.tensor(0x7FFABCDE12345678, dtype=torch.int64).view(torch.float64)
+        compiled = torch.compile(fn, fullgraph=True)
+        for bound in (None, torch.tensor(0.7, dtype=torch.float64), nan):
+            expected = fn(x, bound)
+            actual = compiled(x, bound)
+            self.assertEqual(actual[0].stride(), expected[0].stride())
+            self.assertEqual(
+                tuple(t.view(_BIT_VIEW[dtype]) for t in actual),
+                tuple(t.view(_BIT_VIEW[dtype]) for t in expected),
+            )
+
+    @ops(
+        [op for op in op_db if op.name in ("clamp", "nn.functional.hardtanh")],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize(
+        "bounds",
+        (
+            (-0.7, 0.7),
+            (-0.0, 0.0),
+            (0.0, -0.0),
+            (1e-42, 1.0),
+            (-1.0, -1e-42),
+        ),
+    )
+    def test_clamp_bounds(self, device, dtype, op, numerics, bounds):
+        def fn(x):
+            return op.op(x, *bounds)
+
+        x = torch.tensor(
+            [-float("inf"), -1.0, -0.0, 0.0, 1.0, float("inf"), float("nan"), *bounds],
+            device=device,
+            dtype=dtype,
+        )
+        x = torch.cat(
+            (
+                x,
+                torch.nextafter(x[-2:], torch.full_like(x[-2:], -float("inf"))),
+                torch.nextafter(x[-2:], torch.full_like(x[-2:], float("inf"))),
+            )
+        ).requires_grad_()
+        result = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"numerics": numerics},
+        )(x)
+        expected = fn(x)
+        self.assertEqual(result.view(_BIT_VIEW[dtype]), expected.view(_BIT_VIEW[dtype]))
+        expected_grad = torch.autograd.grad(expected, x, torch.ones_like(x))[0]
+        result_grad = torch.autograd.grad(result, x, torch.ones_like(x))[0]
+        self.assertEqual(
+            result_grad.view(_BIT_VIEW[dtype]), expected_grad.view(_BIT_VIEW[dtype])
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True, specialize_float=False)
+    @config.patch(numerics="strict_pointwise", _use_fp64_for_unbacked_floats=False)
+    @ops(
+        [op for op in op_db if op.name in ("clamp", "nn.functional.hardtanh")],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    @parametrize("bound_source", ("python_float", "python_int", "tensor"))
+    @parametrize("bound_kind", ("lower", "upper"))
+    def test_clamp_symbolic_bounds(self, device, dtype, op, bound_source, bound_kind):
+        from_tensor = bound_source == "tensor"
+        # The functional wrapper validates bounds in Python, which needs concrete values.
+        fn_op = op.op
+        if from_tensor and op.name == "nn.functional.hardtanh":
+            fn_op = torch.ops.aten.hardtanh.default
+
+        def fn(x, bound):
+            if from_tensor:
+                bound = bound.item()
+            if bound_kind == "lower":
+                return fn_op(x, bound, 6)
+            return fn_op(x, 0, bound)
+
+        x = torch.tensor(
+            [-float("inf"), -1.0, -0.0, 0.0, 1.0, 5.0, 6.0, 7.0, float("inf")],
+            device=device,
+            dtype=dtype,
+        )
+        int_dtype = _BIT_VIEW[dtype]
+        nan_bits = x[-1:].view(int_dtype) | 1
+        nan_bits = torch.cat((nan_bits, nan_bits | torch.iinfo(int_dtype).min))
+        x = torch.cat((x, nan_bits.view(dtype)))
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        if bound_source == "python_int":
+            bounds = (1, 2, 257, 2049, 16777217, 9007199254740993, 1)
+            if bound_kind == "lower":
+                bounds = tuple(-bound for bound in bounds)
+        else:
+            bounds = (-0.0, -1.0) if bound_kind == "lower" else (6.0, 5.0)
+            bounds = (*bounds, 0.7, 0.1, 1e-42, bounds[0])
+        if from_tensor:
+            bounds = (*bounds, float("nan"), bounds[0])
+        for bound in bounds:
+            with self.subTest(bound=bound):
+                if from_tensor:
+                    bound = torch.tensor(bound, dtype=torch.float64)
+                expected = fn(x, bound)
+                result = compiled(x, bound)
+                self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+        # Python bounds generalize once; tensor bounds recompile once for NaN.
+        self.assertEqual(counter.frame_count, 2)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @ops(
+        [op for op in op_db if op.name in ("clamp", "nn.functional.hardtanh")],
+        allowed_dtypes=(torch.float32,),
+    )
+    @parametrize("from_tensor", (False, True))
+    @parametrize("bounds", ((float("nan"), 1e100), (-1e100, float("nan"))))
+    def test_clamp_nan_bound_before_conversion(
+        self, device, dtype, op, from_tensor, bounds
+    ):
+        fn_op = op.op
+        if from_tensor and op.name == "nn.functional.hardtanh":
+            fn_op = torch.ops.aten.hardtanh.default
+
+        def fn(x, lo, hi):
+            if from_tensor:
+                return fn_op(x, lo.item(), hi.item())
+            return fn_op(x, lo, hi)
+
+        x = torch.tensor(
+            [-1.0, -0.0, 0.0, 1.0, float("nan")], device=device, dtype=dtype
+        )
+        if from_tensor:
+            bounds = tuple(torch.tensor(b, dtype=torch.float64) for b in bounds)
+        result = torch.compile(
+            fn, fullgraph=True, options={"numerics": "strict_pointwise"}
+        )(x, *bounds)
+        self.assertEqual(result.view(torch.int32), fn(x, *bounds).view(torch.int32))
 
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
@@ -890,15 +1313,6 @@ POINTWISE_XFAIL = frozenset(
         ("angle", "bfloat16"),
         ("angle", "float16"),
         ("angle", "float32"),
-        ("clamp", "bfloat16"),
-        ("clamp", "float16"),
-        ("clamp", "float32"),
-        ("clamp_max", "bfloat16"),
-        ("clamp_max", "float16"),
-        ("clamp_max", "float32"),
-        ("clamp_min", "bfloat16"),
-        ("clamp_min", "float16"),
-        ("clamp_min", "float32"),
         ("copysign", "bfloat16"),
         ("copysign", "float16"),
         ("div_floor_rounding", "bfloat16"),
@@ -955,12 +1369,6 @@ POINTWISE_XFAIL = frozenset(
         ("neg", "float16"),
         ("neg", "float32"),
         ("nn_functional_gelu", "float32"),
-        ("nn_functional_hardtanh", "bfloat16"),
-        ("nn_functional_hardtanh", "float16"),
-        ("nn_functional_hardtanh", "float32"),
-        ("nn_functional_relu6", "bfloat16"),
-        ("nn_functional_relu6", "float16"),
-        ("nn_functional_relu6", "float32"),
         ("nn_functional_softplus", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),
