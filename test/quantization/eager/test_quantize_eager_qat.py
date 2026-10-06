@@ -793,6 +793,9 @@ class TestQuantizeEagerQAT(_DeviceAwareMixin, QuantizationTestCase):
 
 
 class TestQuantizeEagerQATNumerics(_DeviceAwareMixin, QuantizationTestCase):
+    def setUp(self):
+        self.test_device = self._resolve_test_device()
+
     def _test_activation_convert_numerics_impl(self, Act, data):
         class M(torch.nn.Module):
             def __init__(self) -> None:
