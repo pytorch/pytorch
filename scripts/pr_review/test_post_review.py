@@ -77,11 +77,8 @@ class FakeGitHub(GitHub):
         labels=(),
         reviews=(),
         refuse_inline=False,
-        replies=(),
     ):
         super().__init__("token", "o/r")
-        # Ids of review comments someone has replied to.
-        self.replies = set(replies)
         self.head = head
         self.labels = [{"name": n} for n in labels]
         self.reviews = list(reviews)
@@ -95,12 +92,6 @@ class FakeGitHub(GitHub):
             return {"head": {"sha": self.head}}
         if method == "GET" and path.startswith("/repos/o/r/issues/1/labels"):
             return self.labels
-        if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments?"):
-            pr_comments = [
-                {"id": 10_000 + i, "in_reply_to_id": c}
-                for i, c in enumerate(self.replies)
-            ]
-            return pr_comments if page(path) == 1 else []
         if method == "PUT" and path.endswith("/dismissals"):
             rid = int(path.split("/")[7])
             for r in self.reviews:
@@ -176,6 +167,15 @@ def old_review(
         "state": state,
         "commit_id": commit,
     }
+
+
+def resolved(gh):
+    """Thread ids this run resolved, in order."""
+    return [
+        w[2]["variables"]["id"]
+        for w in gh.writes()
+        if w[1] == "/graphql" and "resolveReviewThread" in w[2]["query"]
+    ]
 
 
 def go(gh, r=None):
@@ -551,7 +551,7 @@ class TestCleanupFailuresKeepTheNewReviewId(unittest.TestCase):
     def test_a_failed_listing_after_posting_still_clears_older_requests(self):
         class ListingDown(FakeGitHub):
             def request(self, method, path, body=None, idempotent=None):
-                if method == "GET" and path.startswith("/repos/o/r/pulls/1/comments?"):
+                if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews/5/"):
                     raise GitHubError(503, "unavailable")
                 return super().request(method, path, body)
 
@@ -562,25 +562,39 @@ class TestCleanupFailuresKeepTheNewReviewId(unittest.TestCase):
         self.assertEqual(old["state"], "DISMISSED")
 
 
-class TestRepliedThreadsAreKept(unittest.TestCase):
-    def test_replies_are_read_again_for_each_earlier_review(self):
+class TestNothingIsDeleted(unittest.TestCase):
+    def test_earlier_findings_are_resolved_never_deleted(self):
         gh = FakeGitHub(reviews=[old_review(5), old_review(6)])
         go(gh)
-        reads = [c for c in gh.calls if c[1].startswith("/repos/o/r/pulls/1/comments?")]
-        self.assertEqual(len(reads), 2)
+        self.assertEqual(gh.writes("DELETE"), [])
+        self.assertEqual(sorted(resolved(gh)), ["T50", "T60"])
 
-    def test_a_replied_comment_is_resolved_not_deleted(self):
-        gh = FakeGitHub(reviews=[old_review(5), old_review(6)], replies=[50])
+    def test_the_original_body_stays_under_the_superseded_line(self):
+        gh = FakeGitHub(reviews=[old_review(5, body=MARKER + "\nThe old findings.")])
         go(gh)
-        writes = gh.writes()
-        self.assertNotIn(("DELETE", "/repos/o/r/pulls/comments/50", None), writes)
-        self.assertIn(("DELETE", "/repos/o/r/pulls/comments/60", None), writes)
-        resolves = [
-            w[2]["variables"]
-            for w in writes
-            if w[1] == "/graphql" and "resolveReviewThread" in w[2]["query"]
+        (put,) = gh.writes("PUT")
+        body = put[2]["body"]
+        self.assertTrue(body.startswith(SUPERSEDED_MARKER + "\n**Superseded by"))
+        self.assertIn(NEW_URL, body)
+        self.assertTrue(body.endswith(MARKER + "\nThe old findings."))
+
+    def test_a_failed_resolve_skips_the_line_so_the_next_run_retries(self):
+        class NoResolve(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if path == "/graphql" and "resolveReviewThread" in body["query"]:
+                    raise GitHubError(500, "down")
+                return super().request(method, path, body)
+
+        gh = NoResolve(reviews=[old_review(5)])
+        with mock.patch("post_review._sleep"):
+            go(gh)
+        self.assertEqual(gh.writes("PUT"), [])
+        minimized = [
+            w
+            for w in gh.writes()
+            if w[1] == "/graphql" and "minimizeComment" in w[2]["query"]
         ]
-        self.assertEqual(resolves, [{"id": "T50"}])
+        self.assertEqual(len(minimized), 1)
 
 
 class TestRetries(unittest.TestCase):
@@ -660,12 +674,14 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
         self.assertEqual(
             [w[:2] for w in writes[1:]],
             [
-                ("DELETE", "/repos/o/r/pulls/comments/50"),
+                ("POST", "/graphql"),  # list the review threads
+                ("POST", "/graphql"),  # resolve T50
                 ("PUT", "/repos/o/r/pulls/1/reviews/5"),
-                ("POST", "/graphql"),
+                ("POST", "/graphql"),  # minimize
             ],
         )
-        put, minimize = writes[2][2], writes[3][2]
+        self.assertEqual(resolved(gh), ["T50"])
+        put, minimize = writes[3][2], writes[4][2]
         self.assertTrue(put["body"].startswith(SUPERSEDED_MARKER))
         self.assertIn(NEW_URL, put["body"])
         self.assertIn("minimizeComment", minimize["query"])
@@ -720,14 +736,18 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
             [w for w in gh.writes() if w[1] != "/repos/o/r/pulls/1/reviews"], []
         )
 
-    def test_a_superseded_review_gets_its_leftover_comments_retried(self):
+    def test_a_superseded_review_is_only_minimized_again(self):
+        # Its threads were resolved when it was superseded; one reopened since
+        # is left open.
         gh = FakeGitHub(
             reviews=[old_review(7, body=SUPERSEDED_MARKER + "\nx")],
         )
         go(gh)
-        self.assertIn(("DELETE", "/repos/o/r/pulls/comments/70", None), gh.writes())
+        self.assertEqual(resolved(gh), [])
+        self.assertEqual(gh.writes("PUT"), [], "a superseded body is rewritten")
         self.assertEqual(
-            gh.writes("PUT"), [], "an already-superseded body is rewritten"
+            [w[2]["variables"] for w in gh.writes() if w[1] == "/graphql"],
+            [{"id": "N7"}],
         )
 
     def test_one_failed_takedown_does_not_stop_the_others(self):
@@ -739,7 +759,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
 
         gh = Flaky(reviews=[old_review(5), old_review(8)])
         go(gh)
-        self.assertIn(("DELETE", "/repos/o/r/pulls/comments/50", None), gh.writes())
+        self.assertIn("T50", resolved(gh))
 
     def test_a_head_that_moves_while_posting_retracts_this_review(self):
         class Moves(FakeGitHub):
@@ -767,7 +787,7 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
 
         gh = Paged(reviews=[old_review(101)])
         go(gh)
-        self.assertIn(("DELETE", "/repos/o/r/pulls/comments/1010", None), gh.writes())
+        self.assertEqual(resolved(gh), ["T1010"])
 
     def test_a_failed_post_leaves_the_earlier_review_alone(self):
         class Down(FakeGitHub):

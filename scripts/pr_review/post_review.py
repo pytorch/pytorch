@@ -16,9 +16,9 @@ succeeded are the earlier automated reviews taken down, so a failed post never
 leaves the PR with no review at all. GitHub cannot delete a SUBMITTED review
 (GraphQL `deletePullRequestReview` answers "Can not delete a non-pending pull
 request review"; measured on pytorch/ciforge, 2026-10-05), so taking one down is
-the most the API allows: dismiss it if it requested changes, delete its inline
-comments, replace its body with a pointer to the new review, and minimize it as
-outdated.
+the most the API allows, and it deletes nothing: dismiss it if it requested
+changes, resolve its inline threads, put a "Superseded by" line above its body,
+and minimize it as outdated.
 
 `@pytorchbot` IS DEFUSED IN EVERYTHING POSTED. pytorch-bot parses submitted and
 edited review bodies for commands (torchci/lib/bot/pytorchBot.ts) and only skips
@@ -461,11 +461,18 @@ _MINIMIZE = "mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classi
 
 
 def take_down(gh: GitHub, pr: int, review: dict, new_url: str) -> None:
-    """Remove an earlier automated review from the PR as far as GitHub allows.
+    """Retire an earlier automated review, keeping everything it said.
 
-    A REQUEST_CHANGES review is DISMISSED first, so the PR stops showing changes
-    requested even if a later step fails; dismissal is what GitHub offers for
-    taking back a review, and the timeline keeps a "dismissed" entry.
+    Nothing is deleted. A REQUEST_CHANGES review is DISMISSED first, so the PR
+    stops showing changes requested even if a later step fails. Then its inline
+    threads are resolved, a "Superseded by" line is put above its body, and
+    the review is minimized as outdated. Each step is something GitHub lets a
+    reader undo: expand the review, show the resolved thread.
+
+    The threads are resolved once, when the review is first superseded; the
+    superseded line then marks it done, so a thread someone reopens to keep
+    discussing is left open. If a resolve fails the line is not added, and the
+    next publication tries again.
     """
     rid = review["id"]
     if review.get("state") == "CHANGES_REQUESTED":
@@ -482,36 +489,32 @@ def take_down(gh: GitHub, pr: int, review: dict, new_url: str) -> None:
             # publication retries it.
             warn(f"could not dismiss review {rid}; leaving it in place: {exc}")
             return
-    # Read per review, right before its comments, so a reply posted while
-    # earlier reviews were being taken down is seen.
-    replies = replied_to(gh, pr)
-    for c in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}/comments"):
+    body = review.get("body") or ""
+    if not body.startswith(SUPERSEDED_MARKER):
         try:
-            if c["id"] in replies:
-                # Someone answered this finding. Deleting it would leave their
-                # reply answering nothing, so the thread stays and is resolved.
-                resolve_thread(gh, pr, c["id"])
-            else:
-                gh.request("DELETE", f"/repos/{gh.repo}/pulls/comments/{c['id']}")
+            ids = {
+                c["id"]
+                for c in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}/comments")
+            }
+            resolved = resolve_threads(gh, pr, ids)
         except GitHubError as exc:
-            if exc.status != 404:
-                warn(f"could not take down comment {c['id']} of review {rid}: {exc}")
-    body = f"{SUPERSEDED_MARKER}\nSuperseded by a newer automated review: {new_url}"
+            warn(f"could not resolve the threads of review {rid}: {exc}")
+            resolved = False
+        if resolved:
+            note = f"{SUPERSEDED_MARKER}\n**Superseded by a newer automated review:** {new_url}\n\n"
+            try:
+                gh.request(
+                    "PUT",
+                    f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}",
+                    {"body": note + body},
+                )
+            except GitHubError as exc:
+                warn(f"could not mark review {rid} superseded: {exc}")
     try:
-        if not review.get("body", "").startswith(SUPERSEDED_MARKER):
-            gh.request(
-                "PUT", f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}", {"body": body}
-            )
         gh.graphql(_MINIMIZE, {"id": review["node_id"]})
         print(f"superseded earlier automated review {rid}")
     except GitHubError as exc:
-        warn(f"could not mark review {rid} superseded: {exc}")
-
-
-def replied_to(gh: GitHub, pr: int) -> set[int]:
-    """Ids of the PR's review comments that have at least one reply."""
-    comments = gh.paged(f"/repos/{gh.repo}/pulls/{pr}/comments")
-    return {c["in_reply_to_id"] for c in comments if c.get("in_reply_to_id")}
+        warn(f"could not minimize review {rid}: {exc}")
 
 
 _THREADS = """query($o: String!, $r: String!, $n: Int!, $c: String) {
@@ -523,22 +526,37 @@ _THREADS = """query($o: String!, $r: String!, $n: Int!, $c: String) {
 _RESOLVE = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { clientMutationId } }"
 
 
-def resolve_thread(gh: GitHub, pr: int, comment_id: int) -> None:
-    """Resolve the review thread that `comment_id` starts, if it is open."""
+def resolve_threads(gh: GitHub, pr: int, comment_ids: set[int]) -> bool:
+    """Resolve every open thread started by one of `comment_ids`.
+
+    True when each of those threads was found and is now resolved. Threads are
+    listed once per call, not once per comment.
+    """
+    if not comment_ids:
+        return True
     owner, name = gh.repo.split("/")
+    found: set[int] = set()
+    ok = True
     cursor = None
     while True:
         data = gh.graphql(_THREADS, {"o": owner, "r": name, "n": pr, "c": cursor})
         threads = data["repository"]["pullRequest"]["reviewThreads"]
         for node in threads["nodes"]:
             first = node["comments"]["nodes"]
-            if first and first[0]["databaseId"] == comment_id:
-                if not node["isResolved"]:
-                    gh.graphql(_RESOLVE, {"id": node["id"]})
-                return
+            if not first or first[0]["databaseId"] not in comment_ids:
+                continue
+            found.add(first[0]["databaseId"])
+            if node["isResolved"]:
+                continue
+            try:
+                gh.graphql(_RESOLVE, {"id": node["id"]})
+            except GitHubError as exc:
+                warn(f"could not resolve thread {node['id']}: {exc}")
+                ok = False
         if not threads["pageInfo"]["hasNextPage"]:
-            return
+            break
         cursor = threads["pageInfo"]["endCursor"]
+    return ok and found == comment_ids
 
 
 def head_sha(gh: GitHub, pr: int):
