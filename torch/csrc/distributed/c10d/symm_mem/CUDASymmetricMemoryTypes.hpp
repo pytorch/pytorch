@@ -35,7 +35,7 @@ constexpr size_t default_signal_pad_size =
     symm_max_nblocks * max_cuda_p2p_domain_size * sizeof(uint32_t);
 
 // The data buffer starts past the signal pad (on the CUDA backend, past the
-// pad and the barrier state that shadows it), at an offset rounded up to this
+// pad and the multimem barrier's state), at an offset rounded up to this
 // alignment to keep the data buffer aligned. 16 bytes is the correctness floor;
 // 128 bytes targets best performance.
 constexpr size_t signal_pad_alignment = 128;

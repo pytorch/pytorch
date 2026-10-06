@@ -195,7 +195,9 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
   GroupStreamGuard stream_guard(pai_->group_name_, pg);
-  if (get_multicast_ptr() != nullptr) {
+  // The barrier state holds counters for groups of two or more ranks; see
+  // alloc().
+  if (get_multicast_ptr() != nullptr && world_size_ > 1) {
     const auto state_offset = pai_->barrier_state_offset_;
     multimem_barrier_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
         reinterpret_cast<uint32_t*>(
@@ -329,25 +331,39 @@ Block::Block(
 namespace {
 using Expandable_Segments_Handle_Type =
     c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type;
+
+// The region in front of the data buffer: the signal pad, then the multimem
+// barrier's state with one arrival counter per channel. The group, and with it
+// the channel count, is not known until rendezvous, but barrier() only uses
+// this state for groups of two or more ranks, which have at most pad / 8
+// channels, so half the pad holds every counter. The pad takes two units of
+// half its size and the state one.
+size_t front_region_size(size_t signal_pad_size) {
+  return 3 * at::round_up((signal_pad_size + 1) / 2, signal_pad_alignment);
 }
 
+// The barrier state's offset follows from the front region's size alone, which
+// rendezvous checks is the same on every rank.
+size_t barrier_state_offset(size_t buffer_offset) {
+  TORCH_INTERNAL_ASSERT(buffer_offset % 3 == 0);
+  return buffer_offset / 3 * 2;
+}
+} // namespace
+
 // Allocates a symmetric-memory region laid out as
-// [signal pad | barrier state | data buffer]: the signal pad and the multimem
-// barrier's state each take half of [0, buffer_offset), and the user data
-// buffer starts at buffer_offset. Returns the data buffer pointer
-// (alloc_base + buffer_offset), NOT the allocation base -- the signal pad stays
-// hidden in front, and free()/rendezvous() key off this returned data pointer.
+// [signal pad | barrier state | data buffer]: the signal pad takes the first
+// two thirds of [0, buffer_offset) and the multimem barrier's state the last
+// third, and the user data buffer starts at buffer_offset. Returns the data
+// buffer pointer (alloc_base + buffer_offset), NOT the allocation base -- the
+// signal pad stays hidden in front, and free()/rendezvous() key off this
+// returned data pointer.
 void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
     const std::optional<std::string>& group_name) {
-  // The barrier state shadows the signal pad: channel c's arrival counter is
-  // at the index of its src-0 slot, so the state is as large as the pad.
   // Kernels outside PyTorch index the pad as world_size * channel + src, so
-  // PyTorch's own state stays out of it. The halves are rounded so the data
-  // buffer stays aligned to signal_pad_alignment.
-  size_t buffer_offset =
-      2 * at::round_up(get_signal_pad_size(), signal_pad_alignment / 2);
+  // PyTorch's own barrier state stays out of it; see front_region_size().
+  const size_t buffer_offset = front_region_size(get_signal_pad_size());
   size_t block_size = buffer_offset + at::round_up(size, 16UL);
   c10::cuda::CUDAGuard guard(device_idx);
   device_idx = static_cast<int>(guard.current_device().index());
@@ -1061,8 +1077,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       std::move(buffers),
       std::move(signal_pads),
       mc_signal_pad_addr,
-      // alloc() splits [0, buffer_offset) into the pad and the barrier state.
-      block->buffer_offset / 2,
+      barrier_state_offset(block->buffer_offset),
       mc_handle,
       mc_buffer_addr,
       block->buffer_size,
