@@ -88,6 +88,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
+    recover_orig_fp32_precision,
     skipIfRocm,
     skipIfTorchInductor,
     TEST_WITH_ROCM,
@@ -5730,6 +5731,34 @@ class TestPrologueFusion(TestCase):
         out, code = run_and_get_code(torch.compile(foo), x, y, z)
         self.assertEqual(out, out_eager, atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @parametrize("operand", ("a", "b"))
+    @recover_orig_fp32_precision
+    def test_prologue_per_row_load_unaligned_size(self, operand):
+        # M (resp. N) is not a multiple of BLOCK_M (resp. BLOCK_N), so the last
+        # tile's offsets wrap around. A prologue that loads a per-row (resp.
+        # per-col) tensor must not be vectorized as if they were contiguous.
+        torch.set_float32_matmul_precision("highest")
+        size, K = 257, 64
+
+        def foo(x, mean, rstd, y):
+            if operand == "a":
+                return ((x - mean) * rstd) @ y
+            return y @ ((x - mean) * rstd)
+
+        if operand == "a":
+            x = torch.randn([size, K], device=GPU_TYPE)
+            mean = torch.randn([size, 1], device=GPU_TYPE)
+            rstd = torch.randn([size, 1], device=GPU_TYPE)
+        else:
+            x = torch.randn([K, size], device=GPU_TYPE)
+            mean = torch.randn([1, size], device=GPU_TYPE)
+            rstd = torch.randn([1, size], device=GPU_TYPE)
+        y = torch.randn([K, K], device=GPU_TYPE)
+
+        out, code = run_and_get_code(torch.compile(foo), x, mean, rstd, y)
+        self.assertEqual(out, foo(x, mean, rstd, y), atol=1e-5, rtol=1e-5)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=None)
 
     def test_storage_offset_prologue(self):
         def foo(a):
