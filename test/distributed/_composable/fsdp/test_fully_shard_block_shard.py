@@ -226,7 +226,7 @@ class TestFullyShardBlockShard(FSDPTestContinuous):
         new_model, _ = self._init_models()
         with torch.no_grad():
             for param in new_model.parameters():
-                param.zero_()
+                param.to_local().zero_()
         new_model.load_state_dict(state_dict)
         for param, ref_param in zip(new_model.parameters(), ref_model.parameters()):
             self.assertEqual(param.full_tensor(), ref_param)
@@ -238,7 +238,7 @@ class TestFullyShardBlockShard(FSDPTestContinuous):
         model, ref_model = self._init_models()
         with torch.no_grad():
             for param in model.parameters():
-                param.zero_()
+                param.to_local().zero_()
         full_state_dict = ref_model.state_dict() if self.rank == 0 else {}
         set_model_state_dict(
             model,
@@ -262,7 +262,7 @@ class TestFullyShardBlockShard(FSDPTestContinuous):
         new_model, _ = self._init_models()
         with torch.no_grad():
             for param in new_model.parameters():
-                param.zero_()
+                param.to_local().zero_()
         state_dict = get_model_state_dict(new_model)
         dcp.load(state_dict, checkpoint_id=self.temp_dir)
         set_model_state_dict(new_model, state_dict)
@@ -382,7 +382,7 @@ class TestFullyShardBlockShardExpertParallel(FSDPTestContinuous):
         new_model, _ = self._init_models(mesh)
         with torch.no_grad():
             for param in new_model.parameters():
-                param.zero_()
+                param.to_local().zero_()
         state_dict = get_model_state_dict(new_model)
         dcp.load(state_dict, checkpoint_id=self.temp_dir)
         set_model_state_dict(new_model, state_dict)
@@ -391,7 +391,7 @@ class TestFullyShardBlockShardExpertParallel(FSDPTestContinuous):
 
         with torch.no_grad():
             for param in new_model.parameters():
-                param.zero_()
+                param.to_local().zero_()
         full_state_dict = ref_model.state_dict() if self.rank == 0 else {}
         set_model_state_dict(
             new_model,
