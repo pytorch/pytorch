@@ -122,14 +122,7 @@ if triton is not None:
                 "global_scratch compatibility fix."
             )
 
-    def _patch_triton_intel_launcher(intel_driver: Any | None = None) -> None:
-        if intel_driver is None:
-            try:
-                import triton.backends.intel.driver as intel_driver  # type: ignore[import-not-found]
-            except ImportError:
-                # Intel Triton is not available in this environment.
-                return
-
+    def _patch_triton_intel_launcher(intel_driver: Any) -> None:
         make_launcher = getattr(intel_driver, "make_launcher", None)
         if make_launcher is None:
             # Older or unexpected Intel Triton builds may not expose this hook.
@@ -167,7 +160,12 @@ if triton is not None:
         patched_make_launcher._torch_patched_global_scratch = True  # type: ignore[attr-defined]
         intel_driver.make_launcher = patched_make_launcher
 
-    _patch_triton_intel_launcher()
+    try:
+        import triton.backends.intel.driver as intel_driver  # type: ignore[import-not-found]
+
+        _patch_triton_intel_launcher(intel_driver)
+    except ImportError:
+        pass
 
     builtins_use_semantic_kwarg = (
         "_semantic" in inspect.signature(triton.language.core.view).parameters
