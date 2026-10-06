@@ -20941,12 +20941,15 @@ if RUN_GPU or HAS_MPS:
                         zero_weight,
                     ),
                 )
-                check(
-                    lambda bias, x, weight: torch.addmm(
-                        bias, x, weight.t(), beta=0.0, alpha=0.1
-                    ),
-                    (torch.full((8,), float("nan"), device=self.device), x, weight),
-                )
+                # alpha == 0 zero-fills without autotuning; this case needs
+                # Triton GEMM choices, which only big GPUs get.
+                if IS_BIG_GPU:
+                    check(
+                        lambda bias, x, weight: torch.addmm(
+                            bias, x, weight.t(), beta=0.0, alpha=0.1
+                        ),
+                        (torch.full((8,), float("nan"), device=self.device), x, weight),
+                    )
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
