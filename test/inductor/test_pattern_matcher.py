@@ -695,22 +695,25 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
 
     def test_undeclared_non_default_kwarg_blocks_match(self):
-        undeclared = CallFunction(torch.ops.aten.add, KeywordArg("x"), KeywordArg("y"))
-        declared = CallFunction(
-            torch.ops.aten.add, KeywordArg("x"), KeywordArg("y"), alpha=KeywordArg("a")
-        )
+        add, div = torch.ops.aten.add, torch.ops.aten.div
+        undeclared = CallFunction(add, KeywordArg("x"), KeywordArg("y"))
+        declared = CallFunction(add, KeywordArg("x"), KeywordArg("y"), alpha=Arg())
+        div_pattern = CallFunction(div, KeywordArg("x"), KeywordArg("y"))
 
-        def matches(pattern, **kwargs):
-            gm = make_fx(lambda x, y: torch.ops.aten.add(x, y, **kwargs))(
+        def matches(pattern, op, **kwargs):
+            gm = make_fx(lambda x, y: op(x, y, **kwargs))(
                 torch.randn(2), torch.randn(2)
             )
-            add = next(n for n in gm.graph.nodes if n.op == "call_function")
-            return bool(pattern.match(add))
+            node = next(n for n in gm.graph.nodes if n.op == "call_function")
+            return bool(pattern.match(node))
 
-        self.assertTrue(matches(undeclared))
-        self.assertTrue(matches(undeclared, alpha=1))
-        self.assertFalse(matches(undeclared, alpha=2))
-        self.assertTrue(matches(declared, alpha=2))
+        self.assertTrue(matches(undeclared, add))
+        self.assertTrue(matches(undeclared, add, alpha=1))
+        self.assertFalse(matches(undeclared, add, alpha=2))
+        self.assertTrue(matches(declared, add, alpha=2))
+        # rounding_mode is Optional with no schema default, so None is the default
+        self.assertTrue(matches(div_pattern, div, rounding_mode=None))
+        self.assertFalse(matches(div_pattern, div, rounding_mode="floor"))
 
     def test_addcdiv_fma_keeps_add_alpha(self):
         # https://github.com/pytorch/pytorch/issues/199839

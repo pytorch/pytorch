@@ -925,8 +925,11 @@ _NodeMeta = tuple[Sequence["torch.SymInt | int"], torch.dtype, torch.device]
 
 @functools.cache
 def _schema_defaults(op: torch._ops.OpOverload) -> dict[str, Any]:
+    # an Optional arg without a default (e.g. div's rounding_mode) defaults to None
     return {
-        a.name: a.default_value for a in op._schema.arguments if a.has_default_value()
+        a.name: a.default_value if a.has_default_value() else None
+        for a in op._schema.arguments
+        if a.has_default_value() or isinstance(a.type, torch.OptionalType)
     }
 
 
