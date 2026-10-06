@@ -718,6 +718,22 @@ class TestPatternMatcher(TestCase):
         # rounding_mode is Optional with no schema default, so None is the default
         self.assertTrue(matches(div_pattern, div, rounding_mode=None))
         self.assertFalse(matches(div_pattern, div, rounding_mode="floor"))
+        # strided layout and unpinned memory are equivalent to their None default
+        empty_op = torch.ops.aten.empty.memory_format
+        empty = CallFunction(empty_op, Arg())
+        for k, v, ok in (
+            ("layout", torch.strided, True),
+            ("layout", torch.sparse_coo, False),
+            ("pin_memory", False, True),
+            ("pin_memory", True, False),
+        ):
+            node = graph.call_function(empty_op, ([2],), {k: v})
+            self.assertEqual(bool(empty.match(node)), ok)
+        # without a schema, any undeclared kwarg blocks the match
+        torch_add = CallFunction(torch.add, KeywordArg("x"), KeywordArg("y"))
+        self.assertTrue(torch_add.match(graph.call_function(torch.add, (x, y))))
+        node = graph.call_function(torch.add, (x, y), {"alpha": 1})
+        self.assertFalse(torch_add.match(node))
 
     def test_addcdiv_fma_keeps_add_alpha(self):
         # https://github.com/pytorch/pytorch/issues/199839

@@ -923,39 +923,44 @@ _SimpleSpec = tuple[Any, ...]
 _NodeMeta = tuple[Sequence["torch.SymInt | int"], torch.dtype, torch.device]
 
 
+def _canonical_kwarg(k: str, v: Any) -> Any:
+    # A strided layout and unpinned memory are equivalent to their None default.
+    if k == "layout" and v is torch.strided or k == "pin_memory" and v is False:
+        return None
+    return v
+
+
 @functools.cache
 def _schema_defaults(op: torch._ops.OpOverload) -> dict[str, Any]:
     # An Optional arg without a default (e.g. div's rounding_mode) defaults to None.
     # Enum defaults (dtype, memory_format, layout) come back as ints, so a node that
     # explicitly passes one is conservatively treated as non-default.
-    return {
-        a.name: a.default_value if a.has_default_value() else None
-        for a in op._schema.arguments
-        if a.has_default_value() or isinstance(a.type, torch.OptionalType)
-    }
+    defaults = {}
+    for a in op._schema.arguments:
+        if a.has_default_value():
+            defaults[a.name] = _canonical_kwarg(a.name, a.default_value)
+        elif isinstance(a.type, torch.OptionalType):
+            defaults[a.name] = None
+    return defaults
 
 
 def _has_undeclared_non_default_kwarg(
     target: Any, kwargs: Mapping[str, Any], declared: Mapping[str, Any]
 ) -> bool:
     # Patterns don't bind kwargs they don't declare, so matching a node that sets
-    # one (e.g. add's alpha) would silently drop it from the replacement. layout
-    # and pin_memory are exempt: graphs set them to strided/False, which is
-    # equivalent to their None default for the dense tensors inductor handles.
-    # Patterns must declare any other kwarg they accept (dtype, memory_format, ...).
+    # one (e.g. add's alpha) would silently drop it from the replacement.
+    # Patterns must declare any kwarg they accept (dtype, memory_format, ...).
+    undeclared = [(k, v) for k, v in kwargs.items() if k not in declared]
     if not isinstance(target, torch._ops.OpOverload):
-        return False
+        # without a schema we can't tell which values are defaults
+        return bool(undeclared)
     defaults = _schema_defaults(target)
     return any(
-        k not in declared
-        and k not in ("layout", "pin_memory")
-        and (
-            k not in defaults
-            # comparing a symbolic value to the default would install a guard
-            or isinstance(v, (torch.SymInt, torch.SymFloat, torch.SymBool))
-            or v != defaults[k]
-        )
-        for k, v in kwargs.items()
+        k not in defaults
+        # comparing a symbolic value to the default would install a guard
+        or isinstance(v, (torch.SymInt, torch.SymFloat, torch.SymBool))
+        or _canonical_kwarg(k, v) != defaults[k]
+        for k, v in undeclared
     )
 
 
@@ -1077,7 +1082,8 @@ class _TargetArgsExpr(_TargetExpr):
             if len(_args) != len(self.args) or len(_kwargs) < len(self.kwargs):
                 return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
-        if _has_undeclared_non_default_kwarg(node.target, _kwargs, self.kwargs):
+        # raw kwargs, since normalization fills in every default
+        if _has_undeclared_non_default_kwarg(node.target, node.kwargs, self.kwargs):
             return FailedMatch("undeclared_kwarg: node={}, pattern={}", node, self)
         _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
 
