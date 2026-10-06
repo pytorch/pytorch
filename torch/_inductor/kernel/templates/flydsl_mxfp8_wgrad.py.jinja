@@ -24,6 +24,18 @@ def _flydsl_mxfp8_wgrad(
         return output
 
     m = mat1.shape[1]
+    # With a dynamic token dim the lowering cannot always prove these, and the
+    # kernel would read past the end of a shorter operand without them.
+    if (
+        mat2.shape[0] != m
+        or tuple(scale_a.shape) != (mat1.shape[0], m // 32)
+        or tuple(scale_b.shape) != (mat2.shape[1], m // 32)
+    ):
+        raise ValueError(
+            f"MXFP8 wgrad operands disagree on the contraction: mat1 "
+            f"{tuple(mat1.shape)}, mat2 {tuple(mat2.shape)}, scale_a "
+            f"{tuple(scale_a.shape)}, scale_b {tuple(scale_b.shape)}"
+        )
     sc_pair = m % 256 == 0
     param = _mxfp8_wgrad_params.get(sc_pair)
     if param is None:
@@ -31,7 +43,7 @@ def _flydsl_mxfp8_wgrad(
             param = _mxfp8_wgrad_params.get(sc_pair)
             if param is None:
                 param = make_mxfp8_wgrad_param(
-                    GEMM_N, GEMM_K, GEMM_G, sc_pair=sc_pair
+                    GEMM_N, GEMM_K, GEMM_G, sc_pair=sc_pair, num_xcd=NUM_XCD
                 )
                 _mxfp8_wgrad_params[sc_pair] = param
 

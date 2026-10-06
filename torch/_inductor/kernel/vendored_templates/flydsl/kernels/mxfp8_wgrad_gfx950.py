@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+# Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
+#
 # Vendored from ROCm/AMD-TorchTitan-Ops amd_titan/_ops/mxwgrad/_kernel_v1.py.
 """Ragged MXFP8 weight-gradient grouped GEMM for gfx950.
 
@@ -31,6 +33,7 @@ import torch
 from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
 
 from . import mxfp8_buffer_ops as buffer_ops
+from .mxfp8_grouped_gemm_gfx950 import _compile_gfx950, _INT32_MAX
 from .mxfp8_gemm_utils import (
     compute_global_swizzle,
     G2SLoader,
@@ -51,6 +54,8 @@ LPT_MAX_E = 32
 ORDER_MODES = ("id", "idsel", "lpt")
 _INTERLEAVE = True
 _IDSEL_MIN_BLOCKS = 1024
+# XCDs on a full MI350X/MI355X; partitioned parts expose fewer, so callers that
+# know the device pass its count to make_mxfp8_wgrad_param.
 _XCD_COUNT = 8
 _SUPERTILE_TARGET = 4
 
@@ -75,12 +80,12 @@ def _pick_supertile(n_r: int, n_c: int) -> tuple[int, int]:
     return best_r, best_c
 
 
-def _swizzle_params(n: int, k: int) -> tuple[int, int, int]:
+def _swizzle_params(n: int, k: int, num_xcd: int) -> tuple[int, int, int]:
     """Return the XCD gather count and rectangular output-tile dimensions."""
     n_r = ceildiv(n, BLOCK_R)
     n_c = ceildiv(k, BLOCK_C)
     group_r, group_c = _pick_supertile(n_r, n_c)
-    xcd_count = _XCD_COUNT if (n_r * n_c) % _XCD_COUNT == 0 else 1
+    xcd_count = num_xcd if num_xcd > 1 and (n_r * n_c) % num_xcd == 0 else 1
     return xcd_count, group_r, group_c
 
 
@@ -760,7 +765,7 @@ class MXFP8WgradParam:
 
 
 def make_mxfp8_wgrad_param(
-    n: int, k: int, group_count: int, *, sc_pair: bool
+    n: int, k: int, group_count: int, *, sc_pair: bool, num_xcd: int = _XCD_COUNT
 ) -> MXFP8WgradParam:
     if n <= 0 or k <= 0 or group_count <= 0:
         raise NotImplementedError(
@@ -771,12 +776,19 @@ def make_mxfp8_wgrad_param(
         raise NotImplementedError(
             f"MXFP8 wgrad needs N and K divisible by 16; got N={n}, K={k}"
         )
+    # The output is passed whole as a 1-D view, whose element count FlyDSL packs
+    # as int32. The M-dependent operands are checked at launch, where M is known.
+    if group_count * n * k > _INT32_MAX:
+        raise NotImplementedError(
+            f"MXFP8 wgrad output (G={group_count}, N={n}, K={k}) exceeds the "
+            f"int32 operand limit {_INT32_MAX}"
+        )
     blocks = group_count * ceildiv(n, BLOCK_R) * ceildiv(k, BLOCK_C)
     if blocks >= _IDSEL_MIN_BLOCKS:
         order = "idsel"
     else:
         order = "lpt" if group_count <= LPT_MAX_E else "id"
-    xcd_count, group_r, group_c = _swizzle_params(n, k)
+    xcd_count, group_r, group_c = _swizzle_params(n, k, num_xcd)
     return MXFP8WgradParam(
         n, k, group_count, sc_pair, order, xcd_count, group_r, group_c
     )
@@ -808,6 +820,14 @@ def launch_mxfp8_wgrad_gfx950(
         raise NotImplementedError(
             f"MXFP8 wgrad row stride must be divisible by {BLOCK_M}; got {m}"
         )
+    # M is the contraction, so A and B cannot be split into windows the way the
+    # forward splits rows: the windows would share partial sums. Refuse clearly
+    # instead of letting FlyDSL's int32 shape packing fail inside the dispatch.
+    if max(n, k) * m > _INT32_MAX:
+        raise NotImplementedError(
+            f"MXFP8 wgrad operand ({max(n, k)} x {m}) exceeds the int32 operand "
+            f"limit {_INT32_MAX}"
+        )
     if tuple(out.shape) != (param.group_count, n, k):
         raise AssertionError(
             f"output shape {tuple(out.shape)} != {(param.group_count, n, k)}"
@@ -838,12 +858,12 @@ def launch_mxfp8_wgrad_gfx950(
 
     launch = cached_launch(*param.key())
     if compile_only:
-        flyc.compile(launch, *compile_args_factory())
+        _compile_gfx950(launch, *compile_args_factory())
         return out
     run_cached_flydsl(
         launch,
         constexpr_param=param,
-        compiler=flyc.compile,
+        compiler=_compile_gfx950,
         dispatch_args=dispatch_args,
         compile_args_factory=compile_args_factory,
     )

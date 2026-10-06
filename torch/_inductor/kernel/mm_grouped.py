@@ -968,27 +968,46 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
         return []
 
     statically_known = PythonWrapperCodegen.statically_known_int_or_none
+    sizevars = V.graph.sizevars
     n = statically_known(mat_a.get_size()[0])
-    m = statically_known(mat_a.get_size()[1])
     k = statically_known(mat_b.get_size()[1])
     g = statically_known(offs.get_size()[0])
-    if n is None or m is None or k is None or g is None:
+    if n is None or k is None or g is None:
         return []
-    if m != statically_known(mat_b.get_size()[0]):
+    # M is the contraction -- the routed token count -- so it is dynamic in MoE
+    # training, and dynamo gives each operand its own symbol for it. It is
+    # never compiled in: the kernel reads it at launch and the template checks
+    # that the operands agree, so only the hints have to match here.
+    m_a, m_b = mat_a.get_size()[1], mat_b.get_size()[0]
+    m = sizevars.optimization_hint(m_a)
+    if sizevars.optimization_hint(m_b) != m:
         return []
     if m <= 0 or m % 128 != 0 or n % 16 != 0 or k % 16 != 0:
         return []
-
-    sizevars = V.graph.sizevars
     scale_m = m // 32
-    if mat_a.get_stride() != [m, 1]:
+
+    def is_row_major(node: TensorBox) -> bool:
+        size, stride = node.get_size(), node.get_stride()
+        return sizevars.statically_known_equals(
+            stride[0], size[1]
+        ) and sizevars.statically_known_equals(stride[1], 1)
+
+    # A is [N, M] row-major; B is [M, K] with M contiguous, i.e. a row-major
+    # [K, M] buffer; each scale is a row-major [rows, M // 32] plane.
+    if not is_row_major(mat_a):
         return []
-    if mat_b.get_stride() != [1, m]:
+    if not (
+        sizevars.statically_known_equals(mat_b.get_stride()[0], 1)
+        and sizevars.statically_known_equals(mat_b.get_stride()[1], m_b)
+    ):
         return []
-    if scale_a.get_size() != [n, scale_m] or scale_a.get_stride() != [scale_m, 1]:
-        return []
-    if scale_b.get_size() != [k, scale_m] or scale_b.get_stride() != [scale_m, 1]:
-        return []
+    for scale, rows in ((scale_a, n), (scale_b, k)):
+        if len(scale.get_size()) != 2 or not is_row_major(scale):
+            return []
+        if statically_known(scale.get_size()[0]) != rows:
+            return []
+        if sizevars.optimization_hint(scale.get_size()[1]) != scale_m:
+            return []
     if layout.stride != [n * k, k, 1]:
         return []
 
@@ -1002,10 +1021,18 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
         for node in operands
     ):
         return []
+    # Operands go over as 1-D views whose element counts FlyDSL packs as int32.
+    # The launcher re-checks the M-dependent ones against the real M.
     if max(n * m, k * m, g * n * k) >= 2**31:
         return []
 
-    return [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g}]
+    # gfx950 has 32 CUs per XCD; a partitioned part exposes fewer XCDs, and the
+    # block swizzle should spread work over the ones this device actually has.
+    device = layout.device
+    num_cus = torch.cuda.get_device_properties(
+        device.index if device.index is not None else 0
+    ).multi_processor_count
+    return [{"GEMM_N": n, "GEMM_K": k, "GEMM_G": g, "NUM_XCD": max(1, num_cus // 32)}]
 
 
 # The op takes recipes and swizzles as plain ints, and the pybind enums compare
