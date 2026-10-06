@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from .convert_frame import ConvertFrameReturn
     from .hooks import Hooks
     from .package import _BackendId, _DynamoCacheEntry
+    from .precompile_context import BackendCacheArtifact
     from .repro.after_dynamo import WrapBackendDebug
     from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
     from .variables.builder import FrameStateSizeEntry
@@ -1628,7 +1629,7 @@ class PrecompileSession(Generic[_P, _R]):
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
         self._capture_errors: list[str] = []
-        self._backend_artifacts: dict[_BackendId, Any] = {}
+        self._backend_artifacts: dict[_BackendId, BackendCacheArtifact[Any]] = {}
         self._package = CompilePackage(fn)
         self._guard_filter_fn = self._recording_filter(
             default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
@@ -1765,14 +1766,14 @@ class PrecompileSession(Generic[_P, _R]):
                 if artifact is not None:
                     self._backend_artifacts[backend_id] = artifact
 
-    def _collect_backends(self) -> dict[str, Any]:
+    def _collect_backends(self) -> dict[str, BackendCacheArtifact[Any]]:
         """The compiled subgraphs this capture produced, keyed by backend id."""
         from torch._dynamo.output_graph import noop_graph_call
         from torch._dynamo.precompile_context import EagerCacheArtifact
 
         self._take_backend_artifacts()
         entry = self._package.cache_entry()
-        collected: dict[str, Any] = {}
+        collected: dict[str, BackendCacheArtifact[Any]] = {}
         missing: list[_BackendId] = []
         for backend_id in sorted(entry.backend_ids):
             artifact = self._backend_artifacts.get(backend_id)

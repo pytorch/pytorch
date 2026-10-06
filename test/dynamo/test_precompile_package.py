@@ -2487,6 +2487,16 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         self.assertEqual((blob["backend"], blob["tracer"]), (backend, "dynamo"))
+
+    def test_precompile_session_snapshot_refuses_behind_the_gates(self):
+        from torch._precompile import _parse_artifact_metadata
+
+        def step(model, x):
+            y = model(x)
+            torch._dynamo.graph_break()
+            return y.sum(dim=0) + y.shape[0]
+
+        model = torch.nn.Linear(4, 4)
         # A session that never ran its callable has nothing to render, and one
         # whose call raised is refused as incomplete unless the caller accepts it.
         empty = precompile_package.precompile_capture(step, backend="eager")
