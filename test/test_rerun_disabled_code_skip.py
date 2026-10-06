@@ -256,6 +256,189 @@ class TestRerunDisabledCodeSkip(TestCase):
         self.assertEqual("known" in plain_marks, True, msg=plain_out)
         self.assertEqual("ptx" in plain_marks, True, msg=plain_out)
 
+    def test_real_skipifrocmarch_on_this_gpu(self) -> None:
+        # Uses this machine's GPU. skipIfRocmArch reads gcnArchName through
+        # isRocmArchAnyOf; the test names the arch, the decorator does not.
+        try:
+            import torch
+        except ImportError:
+            raise unittest.SkipTest("torch is not installed") from None
+        if torch.version.hip is None or not torch.cuda.is_available():
+            raise unittest.SkipTest("a ROCm GPU is required")
+
+        from torch.testing._internal.common_utils import getRocmArchName
+
+        arch_name = getRocmArchName()
+        family = arch_name.split(":")[0]
+        if not family:
+            raise AssertionError(f"empty arch from {arch_name!r}")
+        other = "gfx942" if family != "gfx942" else "gfx950"
+
+        child_src = textwrap.dedent(
+            """\
+            import importlib.util
+            import os
+            import sys
+
+            repo = os.path.abspath(os.environ["PYTORCH_REPO_ROOT"])
+            cleaned = []
+            for p in sys.path:
+                abs_p = os.path.abspath(p or os.getcwd())
+                if abs_p == repo:
+                    continue
+                cleaned.append(p)
+            sys.path = cleaned
+            for key in list(sys.modules):
+                if key == "torch" or key.startswith("torch."):
+                    del sys.modules[key]
+            import torch
+            import torch.testing._internal as testing_internal
+
+            def _load(name, path):
+                full = testing_internal.__name__ + "." + name
+                spec = importlib.util.spec_from_file_location(full, path)
+                if spec is None or spec.loader is None:
+                    raise RuntimeError("could not load " + path)
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[full] = mod
+                spec.loader.exec_module(mod)
+                return mod
+
+            if torch.version.hip is None:
+                raise RuntimeError("child expected a ROCm torch")
+
+            _internal = os.environ["PYTORCH_TESTING_INTERNAL"]
+            _load("rerun_code_skip", os.path.join(_internal, "rerun_code_skip.py"))
+            cu = _load("common_utils", os.path.join(_internal, "common_utils.py"))
+            skipIfRocm = cu.skipIfRocm
+            skipIfRocmArch = cu.skipIfRocmArch
+
+            def _ran(name):
+                with open(os.environ["RERUN_SKIP_MARKER"], "a", encoding="utf-8") as fh:
+                    fh.write(name + "\\n")
+
+            family = os.environ["RERUN_GPU_ARCH"]
+            other = os.environ["RERUN_GPU_OTHER_ARCH"]
+
+            @skipIfRocmArch((family,))
+            def test_matching_arch():
+                _ran("matching")
+
+            @skipIfRocmArch((other,))
+            def test_other_arch():
+                _ran("other")
+
+            @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
+            def test_rocm_issue_url():
+                _ran("issue")
+
+            @skipIfRocm(msg="PTX atan codegen is CUDA-specific")
+            def test_rocm_ptx_api():
+                _ran("ptx")
+
+            @skipIfRocm(msg="not supported by hipBLAS")
+            def test_rocm_hipblas_api():
+                _ran("hipblas")
+
+            @skipIfRocm(msg="NVIDIA-only API")
+            def test_rocm_nvidia_only():
+                _ran("nvidia")
+            """
+        )
+
+        test_dir = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory(dir=test_dir) as tmp:
+            tmp_path = Path(tmp)
+            child = tmp_path / "test_rerun_gpu_child.py"
+            child.write_text(child_src, encoding="utf-8")
+            disabled = tmp_path / "disabled.json"
+            base = child.name
+            disabled.write_text(
+                json.dumps(
+                    {
+                        f"test_rocm_ptx_api (mod.{base})": [
+                            "https://github.com/pytorch/pytorch/issues/1",
+                            [],
+                        ],
+                        f"test_rocm_hipblas_api (mod.{base})": [
+                            "https://github.com/pytorch/pytorch/issues/1",
+                            [],
+                        ],
+                        f"test_rocm_nvidia_only (mod.{base})": [
+                            "https://github.com/pytorch/pytorch/issues/1",
+                            [],
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def run(rerun: bool) -> tuple[int, str, list[str]]:
+                marker = str(tmp_path / f"ran-{int(rerun)}.txt")
+                env = os.environ.copy()
+                env["DISABLED_TESTS_FILE"] = str(disabled)
+                env["RERUN_SKIP_MARKER"] = marker
+                env["PYTORCH_TESTING_INTERNAL"] = str(
+                    _REPO / "torch" / "testing" / "_internal"
+                )
+                env["PYTORCH_REPO_ROOT"] = str(_REPO)
+                env["RERUN_GPU_ARCH"] = family
+                env["RERUN_GPU_OTHER_ARCH"] = other
+                env["PYTHONDONTWRITEBYTECODE"] = "1"
+                if rerun:
+                    env["PYTORCH_TEST_RERUN_DISABLED_TESTS"] = "1"
+                else:
+                    env.pop("PYTORCH_TEST_RERUN_DISABLED_TESTS", None)
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pytest",
+                        str(child),
+                        "-vv",
+                        "--tb=short",
+                        "-p",
+                        "no:cacheprovider",
+                    ],
+                    cwd=_REPO,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+                return proc.returncode, proc.stdout + proc.stderr, _marks(marker)
+
+            on_code, on_out, on_marks = run(True)
+            off_code, off_out, off_marks = run(False)
+
+        self.assertEqual(on_code, 0, msg=on_out + f"\narch={arch_name} family={family}")
+        self.assertEqual(_outcome(on_out, "test_matching_arch"), "PASSED", msg=on_out)
+        self.assertEqual(_outcome(on_out, "test_other_arch"), None, msg=on_out)
+        self.assertEqual(_outcome(on_out, "test_rocm_issue_url"), "PASSED", msg=on_out)
+        self.assertEqual(_outcome(on_out, "test_rocm_ptx_api"), "SKIPPED", msg=on_out)
+        self.assertEqual(
+            _outcome(on_out, "test_rocm_hipblas_api"), "SKIPPED", msg=on_out
+        )
+        self.assertEqual(
+            _outcome(on_out, "test_rocm_nvidia_only"), "SKIPPED", msg=on_out
+        )
+        self.assertEqual("matching" in on_marks, True, msg=on_out)
+        self.assertEqual("issue" in on_marks, True, msg=on_out)
+        self.assertEqual("other" in on_marks, False, msg=on_out)
+        self.assertEqual("ptx" in on_marks, False, msg=on_out)
+        self.assertEqual("hipblas" in on_marks, False, msg=on_out)
+        self.assertEqual("nvidia" in on_marks, False, msg=on_out)
+
+        self.assertEqual(off_code, 0, msg=off_out)
+        self.assertEqual(
+            _outcome(off_out, "test_matching_arch"), "SKIPPED", msg=off_out
+        )
+        self.assertEqual("matching" in off_marks, False, msg=off_out)
+        self.assertEqual(
+            _outcome(off_out, "test_rocm_issue_url"), "SKIPPED", msg=off_out
+        )
+        self.assertEqual(_outcome(off_out, "test_other_arch"), "PASSED", msg=off_out)
+        self.assertEqual("other" in off_marks, True, msg=off_out)
+
     def test_device_instantiation_stamp_runs_only_matching_device(self) -> None:
         # Pytest collection of a TestCase imports torch. This machine has no
         # build, so call the same helper the collection hook uses.
