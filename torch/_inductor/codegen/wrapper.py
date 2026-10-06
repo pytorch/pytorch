@@ -2420,9 +2420,7 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_inputs()
 
             # avoid duplicating asserts for both partition functions and
-            # the call function when using cudagraph partition. Read the decision
-            # off the graph: with a regional cudagraph request the ambient
-            # triton.cudagraphs stays off while partitions are still emitted.
+            # the call function when using cudagraph partition
             if not (
                 V.graph.use_cudagraph_partition
                 and (not is_codegen_graph_partition_subgraph(self))

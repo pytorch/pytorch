@@ -8,6 +8,7 @@ import itertools
 import os
 import re
 import sys
+import tempfile
 import unittest
 import warnings
 from collections import defaultdict
@@ -5658,6 +5659,194 @@ if HAS_CUDA_AND_TRITON:
             x = torch.randn(16, 16, device="cuda", requires_grad=True)
             compiled_model(x).backward()
 
+            manager = self.get_manager()
+            self.assertIsNotNone(manager)
+            self.assertFalse(manager.running_forwards_with_pending_backwards)
+
+        @config.patch(fx_graph_cache=True)
+        @torch._functorch.config.patch(enable_autograd_cache=True)
+        def test_loaded_artifact_backward_keeps_other_forward_pending(self):
+            # A standalone_compile artifact never captures its forward, so its
+            # backward must not transition the manager holding another model's
+            # forward until that model's own backward runs.
+            linear = torch.nn.Linear(16, 16, device="cuda")
+            captured = {}
+
+            def capture(gm, example_inputs):
+                captured["gm"], captured["args"] = gm, example_inputs
+                return gm
+
+            torch.compile(linear, backend=capture, fullgraph=True)(
+                torch.randn(8, 16, device="cuda")
+            )
+            with tempfile.TemporaryDirectory() as path:
+                artifact = torch._inductor.standalone_compile(
+                    captured["gm"], captured["args"]
+                )
+                artifact.save(path=path, format="unpacked")
+                loaded = torch._inductor.CompiledArtifact.load(
+                    path=path, format="unpacked"
+                )
+
+            mod = nn.Sequential(nn.Linear(16, 16), nn.ReLU()).cuda()
+            compiled = torch.compile(mod, mode="reduce-overhead")
+            for _ in range(3):
+                mod.zero_grad(set_to_none=True)
+                x = torch.randn(8, 16, device="cuda", requires_grad=True)
+                compiled(x).sum().backward()
+
+            x = torch.randn(8, 16, device="cuda", requires_grad=True)
+            out = compiled(x)
+            loaded(*captured["args"])[0].sum().backward()
+            self.assertTrue(self.get_manager().running_forwards_with_pending_backwards)
+            # Had the loaded backward cleared it, this call would start a new
+            # generation and overwrite out.
+            compiled(torch.randn(8, 16, device="cuda", requires_grad=True))
+            self.assertEqual(out, mod(x))
+
+        def test_excluded_size_backward_keeps_other_forward_pending(self):
+            # A forward at a size outside cudagraph_capture_sizes runs uncaptured,
+            # so its backward must not transition the manager holding another
+            # model's forward until that model's own backward runs.
+            mod = nn.Sequential(nn.Linear(16, 16), nn.ReLU()).cuda()
+            compiled = torch.compile(mod, mode="reduce-overhead")
+            for _ in range(3):
+                mod.zero_grad(set_to_none=True)
+                x = torch.randn(8, 16, device="cuda", requires_grad=True)
+                compiled(x).sum().backward()
+
+            # A capturable forward with an uncaptured backward, which is the
+            # backward that signals CUDA Graph Trees itself.
+            other = torch._dynamo.override_cudagraphs(fwd=True, bwd=False)(
+                nn.Linear(16, 16).cuda()
+            )
+            compiled_other = torch.compile(other, mode="reduce-overhead")
+            y = torch.randn(8, 16, device="cuda", requires_grad=True)
+            torch._dynamo.mark_dynamic(y, 0)
+
+            x = torch.randn(8, 16, device="cuda", requires_grad=True)
+            out = compiled(x)
+            with config.patch("triton.cudagraph_capture_sizes", (4,)):
+                compiled_other(y).sum().backward()
+            self.assertTrue(self.get_manager().running_forwards_with_pending_backwards)
+            # Had that backward cleared it, this call would start a new
+            # generation and overwrite out.
+            compiled(torch.randn(8, 16, device="cuda", requires_grad=True))
+            self.assertEqual(out, mod(x))
+
+        @staticmethod
+        def _batch_dynamic_input(batch):
+            x = torch.randn(batch, 16, device="cuda", requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            return x
+
+        @config.patch("triton.cudagraph_capture_sizes", (4,))
+        def test_uncaptured_call_backward_keeps_captured_call_pending(self):
+            # An excluded-size call, then a captured call of the same graph: the
+            # first call's backward must not transition the second one's
+            # generation.
+            mod = torch._dynamo.override_cudagraphs(fwd=True, bwd=False)(
+                nn.Linear(16, 16).cuda()
+            )
+            compiled = torch.compile(mod, mode="reduce-overhead")
+
+            uncaptured_out = compiled(self._batch_dynamic_input(8))
+            x = self._batch_dynamic_input(4)
+            captured_out = compiled(x)
+            uncaptured_out.sum().backward()
+            self.assertTrue(self.get_manager().running_forwards_with_pending_backwards)
+            # Had that backward cleared it, this call would start a new
+            # generation and overwrite captured_out.
+            compiled(self._batch_dynamic_input(4))
+            self.assertEqual(captured_out, mod(x))
+
+        @config.patch("triton.cudagraph_capture_sizes", (4,))
+        def test_captured_call_backward_transitions_after_uncaptured_call(self):
+            # A captured call, then an excluded-size call of the same graph: the
+            # first call's backward still has to transition its generation.
+            mod = torch._dynamo.override_cudagraphs(fwd=True, bwd=False)(
+                nn.Linear(16, 16).cuda()
+            )
+            compiled = torch.compile(mod, mode="reduce-overhead")
+
+            captured_out = compiled(self._batch_dynamic_input(4))
+            compiled(self._batch_dynamic_input(8))
+            self.assertTrue(self.get_manager().running_forwards_with_pending_backwards)
+            captured_out.sum().backward()
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+
+        def test_retained_backward_transitions_once(self):
+            # A captured forward call is owed one transition. Rerunning its
+            # retained backward after another call's forward must leave that
+            # call pending.
+            mod = nn.Linear(16, 16).cuda()
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=False)
+            def loss(x):
+                return mod(x).sum()
+
+            compiled = torch.compile(loss, mode="reduce-overhead")
+
+            # backward() on the loss itself never reads its (CUDA graph owned)
+            # data, so the retained graph can still run after a new generation.
+            first = compiled(torch.randn(8, 16, device="cuda", requires_grad=True))
+            first.backward(retain_graph=True)
+            self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+            second = compiled(torch.randn(8, 16, device="cuda", requires_grad=True))
+            self.assertTrue(self.get_manager().running_forwards_with_pending_backwards)
+            first.backward()
+            self.assertTrue(self.get_manager().running_forwards_with_pending_backwards)
+            del second
+
+        def test_eager_fallback_backward_keeps_other_forward_pending(self):
+            # The tree can still run a dispatched call eagerly, here because it
+            # mutates an input the tree does not manage. That call left no
+            # generation to transition, so its backward must not clear another
+            # model's pending forward.
+            mod = nn.Sequential(nn.Linear(16, 16), nn.ReLU()).cuda()
+            compiled = torch.compile(mod, mode="reduce-overhead")
+            for _ in range(3):
+                mod.zero_grad(set_to_none=True)
+                x = torch.randn(8, 16, device="cuda", requires_grad=True)
+                compiled(x).sum().backward()
+
+            weight = torch.randn(16, 16, device="cuda", requires_grad=True)
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=False)
+            def mutating(y, counter):
+                counter.add_(1)
+                return (y @ weight).sum()
+
+            compiled_mutating = torch.compile(mutating, mode="reduce-overhead")
+            counter = torch.zeros(1, device="cuda")
+
+            x = torch.randn(8, 16, device="cuda", requires_grad=True)
+            out = compiled(x)
+            y = torch.randn(8, 16, device="cuda", requires_grad=True)
+            compiled_mutating(y, counter).backward()
+            self.assertEqual(counter.item(), 1)
+            self.assertTrue(self.get_manager().running_forwards_with_pending_backwards)
+            # Had that backward cleared it, this call would start a new
+            # generation and overwrite out.
+            compiled(torch.randn(8, 16, device="cuda", requires_grad=True))
+            self.assertEqual(out, mod(x))
+
+        def test_eager_fallback_alone_leaves_manager_free(self):
+            # A forward the tree runs eagerly leaves nothing pending, so a model
+            # whose forward falls back does not block later generations even
+            # though its uncaptured backward never signals.
+            weight = torch.randn(16, 16, device="cuda", requires_grad=True)
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=False)
+            def mutating(y, counter):
+                counter.add_(1)
+                return (y @ weight).sum()
+
+            compiled = torch.compile(mutating, mode="reduce-overhead")
+            counter = torch.zeros(1, device="cuda")
+            y = torch.randn(8, 16, device="cuda", requires_grad=True)
+            compiled(y, counter).backward()
+            self.assertEqual(counter.item(), 1)
             manager = self.get_manager()
             self.assertIsNotNone(manager)
             self.assertFalse(manager.running_forwards_with_pending_backwards)
