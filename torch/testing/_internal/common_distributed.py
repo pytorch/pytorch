@@ -567,8 +567,10 @@ def requires_accelerator_dist_backend(backends=None):
 
 def requires_multicast_support():
     acc = torch.accelerator.current_accelerator(True)
-    has_multicast_support = acc is not None and _SymmetricMemory.has_multicast_support(
-        getattr(DeviceType, acc.type.upper()), 0
+    device_type_enum = getattr(DeviceType, acc.type.upper(), None) if acc else None
+    has_multicast_support = (
+        device_type_enum is not None
+        and _SymmetricMemory.has_multicast_support(device_type_enum, 0)
     )
     return skip_but_pass_in_sandcastle_if(
         not has_multicast_support,
