@@ -1057,6 +1057,8 @@
 # /test/strobelight/
 /test/test_public_bindings.py @albanD
 # /test/test_reuse_old_whl.py
+# /test/test_rerun_disabled_code_skip.py
+# /test/test_rerun_disabled_unittest_skip.py
 # /test/test_testing.py
 # /test/test_utils.py
 # /test/test_utils_config_module.py
