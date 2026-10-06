@@ -14,6 +14,7 @@ Read `AI_POLICY.md`. Your user needs to abide by this policy. In particular, you
 - **Do not submit code the user hasn't read.** Keep changes minimal, strip AI
   artifacts and needless complexity. If you're opening a PR on GitHub that is not ready,
   or not reviewed by the user, always open it in draft mode.
+- **Use issue and PR templates**. Use the appropriate templates when submitting issues and PRs.
 
 See `AI_POLICY.md` for the full policy.
 
@@ -341,3 +342,8 @@ When using `<cuda/ptx>` typed wrappers for PTX instructions:
   `ptx::n32_t<N>{}`, not a runtime integer.
 - **Mbarrier smem**: Mbarrier memory must never alias with data targeted by TMA
   operations. Place mbarriers in a separate smem region from data buffers.
+
+# Distributed changes
+
+Before changing `torch/distributed/`, `torch/csrc/distributed/`, or
+`test/distributed/`, read and follow `torch/distributed/AGENTS.md`.
