@@ -712,6 +712,35 @@ auto handle_torch_function(
 
 auto handle_torch_function(
     PythonArgs& r,
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames,
+    PyObject* torch_api,
+    const char* module_name,
+    const char* func_name_override) -> PyObject* {
+  py::tuple positional_args(nargs);
+  for (const auto index : c10::irange(nargs)) {
+    positional_args[index] = py::reinterpret_borrow<py::object>(args[index]);
+  }
+  py::dict kwargs;
+  const Py_ssize_t nkw = kwnames ? PyTuple_GET_SIZE(kwnames) : 0;
+  for (const auto index : c10::irange(nkw)) {
+    kwargs[py::handle(PyTuple_GET_ITEM(kwnames, index))] =
+        py::reinterpret_borrow<py::object>(args[nargs + index]);
+  }
+  return handle_torch_function(
+      r,
+      self,
+      positional_args.ptr(),
+      kwargs.size() == 0 ? nullptr : kwargs.ptr(),
+      torch_api,
+      module_name,
+      func_name_override);
+}
+
+auto handle_torch_function(
+    PythonArgs& r,
     PyObject* args,
     PyObject* kwargs,
     PyObject* torch_api,
@@ -1541,6 +1570,131 @@ std::string FunctionSignature::toString() const {
   return std::move(ss).str();
 }
 
+namespace {
+
+// Adapts legacy tuple/dictionary arguments to the parser's common input
+// interface.
+class TupleDictInput {
+ public:
+  TupleDictInput(PyObject* args, PyObject* kwargs)
+      : args_(args), kwargs_(kwargs) {}
+
+  Py_ssize_t num_positional_args() const {
+    return args_ ? PyTuple_GET_SIZE(args_) : 0;
+  }
+
+  Py_ssize_t num_kwargs() const {
+    return kwargs_ ? PyDict_Size(kwargs_) : 0;
+  }
+
+  PyObject* positional_arg(Py_ssize_t index) const {
+    return PyTuple_GET_ITEM(args_, index);
+  }
+
+  PyObject* kwarg(PyObject* name) const {
+    if (!kwargs_) {
+      return nullptr;
+    }
+    // This is NoGil safe because kwargs_ is local to the current call.
+    return PyDict_GetItem(kwargs_, name);
+  }
+
+  PyObject* varargs_intlist(
+      int broadcast_size,
+      py::object* failed_item,
+      std::vector<PyObject*>* overloaded_args) const {
+    return is_int_or_symint_list(
+               args_, broadcast_size, failed_item, overloaded_args)
+        ? args_
+        : nullptr;
+  }
+
+  PyObject* next_kwarg_name(Py_ssize_t& pos) const {
+    PyObject* key = nullptr;
+    PyObject* value = nullptr;
+    TORCH_INTERNAL_ASSERT(PyDict_Next(kwargs_, &pos, &key, &value));
+    return key;
+  }
+
+ private:
+  PyObject* args_;
+  PyObject* kwargs_;
+};
+
+// Adapts vectorcall's argument array and keyword names to the parser's common
+// input interface without materializing Python containers.
+class VectorcallInput {
+ public:
+  VectorcallInput(PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames)
+      : args_(args), nargs_(nargs), kwnames_(kwnames) {}
+
+  Py_ssize_t num_positional_args() const {
+    return nargs_;
+  }
+
+  Py_ssize_t num_kwargs() const {
+    return kwnames_ ? PyTuple_GET_SIZE(kwnames_) : 0;
+  }
+
+  PyObject* positional_arg(Py_ssize_t index) const {
+    return args_[index];
+  }
+
+  PyObject* kwarg(PyObject* name) const {
+    const Py_ssize_t nkw = num_kwargs();
+    for (const auto index : c10::irange(nkw)) {
+      PyObject* kwname = PyTuple_GET_ITEM(kwnames_, index);
+      if (kwname == name) {
+        return args_[nargs_ + index];
+      }
+      const int matches = PyObject_RichCompareBool(kwname, name, Py_EQ);
+      if (matches < 0) {
+        // @allow-raw-throw: raises the error left set by the failed comparison
+        throw python_error();
+      }
+      if (matches) {
+        return args_[nargs_ + index];
+      }
+    }
+    return nullptr;
+  }
+
+  PyObject* varargs_intlist(
+      int,
+      py::object*,
+      std::vector<PyObject*>*) const {
+    return nullptr;
+  }
+
+  PyObject* next_kwarg_name(Py_ssize_t& pos) const {
+    return PyTuple_GET_ITEM(kwnames_, pos++);
+  }
+
+  py::tuple materialize_positional_args() const {
+    py::tuple result(nargs_);
+    for (const auto index : c10::irange(nargs_)) {
+      result[index] = py::reinterpret_borrow<py::object>(args_[index]);
+    }
+    return result;
+  }
+
+  py::dict materialize_kwargs() const {
+    py::dict result;
+    for (const auto index : c10::irange(num_kwargs())) {
+      result[py::handle(PyTuple_GET_ITEM(kwnames_, index))] =
+          py::reinterpret_borrow<py::object>(args_[nargs_ + index]);
+    }
+    return result;
+  }
+
+ private:
+  PyObject* const* args_;
+  Py_ssize_t nargs_;
+  PyObject* kwnames_;
+};
+
+} // namespace
+
 [[noreturn]] static void extra_args(
     const FunctionSignature& signature,
     Py_ssize_t nargs) {
@@ -1608,17 +1762,13 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   return -1;
 }
 
+template <typename Input>
 [[noreturn]] static void extra_kwargs(
     FunctionSignature& signature,
-    PyObject* kwargs,
+    const Input& input,
     Py_ssize_t num_pos_args) {
-  PyObject* key = nullptr;
-  PyObject* value = nullptr;
-  Py_ssize_t pos = 0;
-
-  // Note that this dict traversal is NoGil safe as the kwargs dict is only
-  // accessible within this thread.
-  while (PyDict_Next(kwargs, &pos, &key, &value)) {
+  for (Py_ssize_t index = 0, pos = 0; index < input.num_kwargs(); index++) {
+    PyObject* key = input.next_kwarg_name(pos);
     if (!THPUtils_checkString(key)) {
       TORCH_CHECK_TYPE(false, "keywords must be strings");
     }
@@ -1647,17 +1797,18 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   TORCH_CHECK_TYPE(false, "invalid keyword arguments");
 }
 
+template <typename Input>
 bool FunctionSignature::parse(
     PyObject* self,
-    PyObject* args,
-    PyObject* kwargs,
+    const Input& input,
     PyObject* dst[], // NOLINT
     std::vector<PyObject*>& overloaded_args,
     bool raise_exception) {
-  Py_ssize_t nargs = args ? PyTuple_GET_SIZE(args) : 0;
-  auto remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
+  const Py_ssize_t nargs = input.num_positional_args();
+  const auto num_kwargs = input.num_kwargs();
+  auto remaining_kwargs = num_kwargs;
   size_t arg_pos = 0;
-  bool allow_varargs_intlist = false;
+  PyObject* varargs_intlist = nullptr;
 
   // if there is a single positional IntArrayRef argument, i.e. expand(..),
   // view(...), allow a var-args style IntArrayRef, so expand(5,3) behaves as
@@ -1665,11 +1816,14 @@ bool FunctionSignature::parse(
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
        params[0].type_ == ParameterType::SYM_INT_LIST)) {
-    allow_varargs_intlist = is_int_or_symint_list(
-        args, params[0].size, /*failed_item=*/nullptr, &overloaded_args);
+    varargs_intlist = input.varargs_intlist(
+        params[0].size,
+        /*failed_item=*/nullptr,
+        &overloaded_args);
   }
 
-  if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {
+  if (static_cast<size_t>(nargs) > max_pos_args &&
+      varargs_intlist == nullptr) {
     if (raise_exception) {
       // foo() takes 2 positional arguments but 3 were given
       extra_args(*this, nargs);
@@ -1692,22 +1846,21 @@ bool FunctionSignature::parse(
         }
         return false;
       }
-      obj = PyTuple_GET_ITEM(args, arg_pos);
-    } else if (kwargs) {
-      // Note that this call is NoGil safe as it works on kwargs which are local
-      // to the current function call.
-      obj = PyDict_GetItem(kwargs, param.python_name);
+      obj = input.positional_arg(arg_pos);
+    } else if (num_kwargs != 0) {
+      obj = input.kwarg(param.python_name);
       for (PyObject* numpy_name : param.numpy_python_names) {
         if (obj) {
           break;
         }
-        obj = PyDict_GetItem(kwargs, numpy_name);
+        obj = input.kwarg(numpy_name);
       }
       is_kwd = true;
     }
 
     py::object failed_item;
-    bool varargs_eligible = allow_varargs_intlist && arg_pos == 0 && !is_kwd;
+    bool varargs_eligible =
+        varargs_intlist != nullptr && arg_pos == 0 && !is_kwd;
     if ((!obj && param.optional) || (Py_IsNone(obj) && param.allow_none)) {
       dst[i++] = nullptr;
     } else if (!obj) {
@@ -1723,11 +1876,11 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         varargs_eligible &&
-        (is_int_or_symint_list(
-            args, param.size, &failed_item, &overloaded_args))) {
+        (varargs_intlist = input.varargs_intlist(
+             param.size, &failed_item, &overloaded_args))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
-      dst[i++] = args;
+      dst[i++] = varargs_intlist;
       arg_pos = nargs;
       continue;
     } else if (raise_exception) {
@@ -1781,11 +1934,44 @@ bool FunctionSignature::parse(
   if (remaining_kwargs > 0) {
     if (raise_exception) {
       // foo() got an unexpected keyword argument "b"
-      extra_kwargs(*this, kwargs, nargs);
+      extra_kwargs(*this, input, nargs);
     }
     return false;
   }
   return true;
+}
+
+bool FunctionSignature::parse(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs,
+    PyObject* dst[], // NOLINT
+    std::vector<PyObject*>& overloaded_args,
+    bool raise_exception) {
+  return parse(
+      self,
+      TupleDictInput(args, kwargs),
+      dst,
+      overloaded_args,
+      raise_exception);
+}
+
+// Parses vectorcall arguments directly, avoiding tuple and dictionary
+// materialization on the normal path.
+bool FunctionSignature::parse(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames,
+    PyObject* dst[], // NOLINT
+    std::vector<PyObject*>& overloaded_args,
+    bool raise_exception) {
+  return parse(
+      self,
+      VectorcallInput(args, nargs, kwnames),
+      dst,
+      overloaded_args,
+      raise_exception);
 }
 
 PythonArgParser::PythonArgParser(
@@ -1868,6 +2054,62 @@ PythonArgs PythonArgParser::raw_parse(
   }
 
   print_error(self, args, kwargs, parsed_args);
+}
+
+// Matches and binds vectorcall arguments directly, materializing legacy
+// containers only when needed to report an overload error.
+PythonArgs PythonArgParser::raw_parse(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames,
+    PyObject* parsed_args[]) { // NOLINT
+  if (signatures_.size() == 1) {
+    auto& signature = signatures_[0];
+    std::vector<PyObject*> overloaded_args;
+    signature.parse(
+        self,
+        args,
+        nargs,
+        kwnames,
+        parsed_args,
+        overloaded_args,
+        true);
+    check_deprecated(signature);
+    return PythonArgs(
+        traceable,
+        signature,
+        parsed_args,
+        std::move(overloaded_args));
+  }
+
+  for (auto& signature : signatures_) {
+    std::vector<PyObject*> overloaded_args;
+    if (signature.parse(
+            self,
+            args,
+            nargs,
+            kwnames,
+            parsed_args,
+            overloaded_args,
+            false)) {
+      check_deprecated(signature);
+      return PythonArgs(
+          traceable,
+          signature,
+          parsed_args,
+          std::move(overloaded_args));
+    }
+  }
+
+  const VectorcallInput input(args, nargs, kwnames);
+  py::tuple positional_args_tuple = input.materialize_positional_args();
+  py::dict kwargs = input.materialize_kwargs();
+  print_error(
+      self,
+      positional_args_tuple.ptr(),
+      kwargs.size() == 0 ? nullptr : kwargs.ptr(),
+      parsed_args);
 }
 
 void PythonArgParser::print_error(

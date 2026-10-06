@@ -195,6 +195,18 @@ struct FunctionSignature {
       std::vector<PyObject*>& overloaded_args,
       bool raise_exception);
 
+  // Parses vectorcall arguments directly without first creating a tuple and
+  // dictionary.
+  bool parse(
+      PyObject* self,
+      PyObject* const* args,
+      Py_ssize_t nargs,
+      PyObject* kwnames,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      PyObject* dst[],
+      std::vector<PyObject*>& overloaded_args,
+      bool raise_exception);
+
   std::string toString() const;
 
   std::string name;
@@ -205,6 +217,16 @@ struct FunctionSignature {
   int index;
   bool hidden{false};
   bool deprecated{false};
+
+ private:
+  template <typename Input>
+  bool parse(
+      PyObject* self,
+      const Input& input,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      PyObject* dst[],
+      std::vector<PyObject*>& overloaded_args,
+      bool raise_exception);
 };
 
 // A PythonArgParser contains a list of valid signatures. Instances are
@@ -225,6 +247,16 @@ struct PYBIND11_EXPORT PythonArgParser {
   template <int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
 
+  // Parses vectorcall arguments directly without first creating a tuple and
+  // dictionary.
+  template <int N>
+  inline PythonArgs parse(
+      PyObject* self,
+      PyObject* const* args,
+      Py_ssize_t nargs,
+      PyObject* kwnames,
+      ParsedArgs<N>& dst);
+
   inline PythonArgs parse(PyObject* self, ParsedArgs<0>& dst);
 
   // Formatted strings of non-hidden signatures
@@ -242,6 +274,16 @@ struct PYBIND11_EXPORT PythonArgParser {
       PyObject* self,
       PyObject* args,
       PyObject* kwargs,
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      PyObject* parsed_args[]);
+
+  // Matches and binds vectorcall arguments without materializing legacy
+  // containers on the normal path.
+  PythonArgs raw_parse(
+      PyObject* self,
+      PyObject* const* args,
+      Py_ssize_t nargs,
+      PyObject* kwnames,
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
       PyObject* parsed_args[]);
 
@@ -380,6 +422,23 @@ inline PythonArgs PythonArgParser::parse(
 
 inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
   return parse(self, nullptr, nullptr, dst);
+}
+
+template <int N>
+inline PythonArgs PythonArgParser::parse(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames,
+    ParsedArgs<N>& dst) {
+  TORCH_CHECK_VALUE(
+      N >= max_args,
+      "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
+      max_args,
+      " (got ",
+      N,
+      ")");
+  return raw_parse(self, args, nargs, kwnames, dst.args);
 }
 
 inline bool PythonArgs::has_torch_function() {
@@ -1208,6 +1267,16 @@ auto handle_torch_function(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs,
+    PyObject* torch_api,
+    const char* module_name,
+    const char* func_name_override = nullptr) -> PyObject*;
+
+auto handle_torch_function(
+    PythonArgs& r,
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs,
+    PyObject* kwnames,
     PyObject* torch_api,
     const char* module_name,
     const char* func_name_override = nullptr) -> PyObject*;

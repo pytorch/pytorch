@@ -7361,6 +7361,19 @@ def disable_gc():
 class TestTorch(TestCase):
     exact_dtype = True
 
+    def test_python_binding_argument_parsing(self):
+        x = torch.arange(6).view(2, 3)
+
+        self.assertEqual(torch.sum(input=x, dim=1), torch.tensor([3, 12]))
+        self.assertEqual(torch.sum(x, axis=1, keepdims=True), torch.tensor([[3], [12]]))
+        self.assertEqual(x.sum(dim=1), torch.tensor([3, 12]))
+        self.assertEqual(x.view(3, 2), torch.tensor([[0, 1], [2, 3], [4, 5]]))
+
+        with self.assertRaisesRegex(TypeError, "received an invalid combination of arguments"):
+            torch.sum(x, input=x)
+        with self.assertRaisesRegex(TypeError, "received an invalid combination of arguments"):
+            torch.sum(x, unexpected=True)
+
     def test_dir(self):
         dir(torch)
 
