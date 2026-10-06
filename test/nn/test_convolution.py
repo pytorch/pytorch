@@ -1152,7 +1152,13 @@ class TestConvolutionNN(NNTestCase):
             )
             self.assertEqual(
                 conv_input(
-                    zero_padded.shape, weight, grad_output, stride, padding, dilation, groups
+                    zero_padded.shape,
+                    weight,
+                    grad_output,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
                 ),
                 zero_padded,
             )

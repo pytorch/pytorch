@@ -72,7 +72,6 @@ def _conv_input(
     return grad_input
 
 
-
 def conv1d_input(
     input_size,
     weight,
