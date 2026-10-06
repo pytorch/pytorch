@@ -2551,7 +2551,12 @@ def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
 @clear_on_fresh_cache
 class CudaKernelParamCache:
     cache: dict[str, dict[str, Any]] = {}
-    cache_clear = staticmethod(cache.clear)
+    _instance_cache: dict[tuple[str, Any], dict[str, Any]] = {}
+
+    @classmethod
+    def cache_clear(cls) -> None:
+        cls.cache.clear()
+        cls._instance_cache.clear()
 
     @classmethod
     def set(
@@ -2639,13 +2644,50 @@ class CudaKernelParamCache:
         params["asm"] = asm_path
         cls.cache[key] = params
 
+        # Also index by composite key to prevent collisions when multiple distinct
+        # kernels share the same generated kernel_name (e.g. across graphs).
+        triton_meta = params.get("triton_meta")
+        if isinstance(triton_meta, dict) and "signature" in triton_meta:
+            sig = triton_meta["signature"]
+            if isinstance(sig, dict):
+                sig_key = tuple(sorted(sig.items()))
+                cls._instance_cache[(key, sig_key)] = params
+
+        kernel_hash = params.get("kernel_hash")
+        if kernel_hash:
+            cls._instance_cache[(key, kernel_hash)] = params
+
     @classmethod
-    def get(cls, key: str) -> dict[str, Any] | None:
-        return cls.cache.get(key, None)
+    def get(
+        cls,
+        key: str,
+        signature: dict[str, Any] | None = None,
+        kernel_hash: str | None = None,
+    ) -> dict[str, Any] | None:
+        if signature is not None:
+            sig_key = tuple(sorted(signature.items()))
+            if (key, sig_key) in cls._instance_cache:
+                return cls._instance_cache[(key, sig_key)]
+        if kernel_hash is not None:
+            if (key, kernel_hash) in cls._instance_cache:
+                return cls._instance_cache[(key, kernel_hash)]
+
+        params = cls.cache.get(key, None)
+        if params is not None:
+            if signature is not None:
+                entry_sig = (params.get("triton_meta") or {}).get("signature")
+                if entry_sig is not None and entry_sig != signature:
+                    return None
+            if kernel_hash is not None:
+                entry_hash = params.get("kernel_hash")
+                if entry_hash is not None and entry_hash != kernel_hash:
+                    return None
+        return params
 
     @classmethod
     def get_keys(cls) -> KeysView[str]:
         return cls.cache.keys()
+
 
 
 @clear_on_fresh_cache
