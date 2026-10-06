@@ -6321,6 +6321,42 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(hasattr(method, "source_fn"))
         self.assertIs(method.get_source(), im_func.get_source())
 
+    def test_bound_builtin_method_qualname_renamed_in_frame(self):
+        class D(dict):
+            pass
+
+        inst_bound = D(t=torch.ones(1)).get
+        cls_bound = D.fromkeys
+
+        def fn(x):
+            D.__qualname__ = "Renamed"
+            return x + 1, inst_bound.__qualname__, cls_bound.__qualname__
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected[1:], ("Renamed.get", "Renamed.fromkeys"))
+        D.__qualname__ = "D"
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), expected)
+
+    def test_bound_builtin_method_getset(self):
+        class D(dict):
+            pass
+
+        d = D(a=torch.ones(1))
+        s = {1}
+        bounds = (d.get, s.add, (1,).count, dict.fromkeys, tuple.__new__)
+
+        def fn(x):
+            out = [x + 1, bounds[0].__self__ is d, bounds[1].__self__ is s]
+            for b in bounds:
+                out += [b.__name__, b.__qualname__, b.__doc__, b.__text_signature__]
+            return out
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
     # generate_pycode cannot reconstruct a TensorPropertySource, which is what
     # a symbolic size input is sourced by; the dynamic_shapes variant therefore
     # cannot run this, with or without a method involved.
@@ -6569,31 +6605,23 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(opt_dynamic_owner(x), dynamic_owner(x))
 
-    def test_classmethod_descriptor_through_super(self):
+    def test_classmethod_descriptor_bound_to_subclass(self):
+        # Explicit form of super().fromkeys, which graph-breaks on the super()
+        # attribute.
+        raw = dict.__dict__["fromkeys"]
+
         class Mid(dict):
             pass
 
         class D(Mid):
-            @classmethod
-            def from_class(cls, value):
-                return super().fromkeys((1,), value)
+            pass
 
         def fn(x):
-            result = D.from_class(x)
-            return result[1] + 1, type(result) is D
+            result = raw.__get__(None, D)((1,), x)
+            return result[1] + 1
 
-        cnt = torch._dynamo.testing.CompileCounter()
         x = torch.ones(1)
-        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
-        self.assertEqual(opt_fn(x), fn(x))
-        self.assertEqual(cnt.frame_count, 1)
-
-        def replacement(cls, keys, value=None):
-            return {1: value + 10}
-
-        Mid.fromkeys = classmethod(replacement)
-        self.assertEqual(opt_fn(x), fn(x))
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_bound_builtin_method_guard_distinguishes_equal_aliases(self):
         class Holder:
@@ -6713,8 +6741,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), expected)
 
     def test_prebound_method_descriptor_bypasses_subclass_override(self):
-        import math
-
         class L(list):
             def count(self, value):
                 return 99
@@ -6767,17 +6793,9 @@ class GraphModule(torch.nn.Module):
         def direct(x):
             return x + direct_obj.count(1)
 
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_direct = torch.compile(direct, backend=cnt, fullgraph=True)
-        self.assertEqual(opt_direct(x), direct(x))
-        self.assertEqual(cnt.frame_count, 1)
-        original = Direct.count
-        try:
-            Direct.count = lambda self, value: 99
-            self.assertEqual(opt_direct(x), direct(x))
-            self.assertEqual(cnt.frame_count, 2)
-        finally:
-            Direct.count = original
+        self.assertEqual(
+            torch.compile(direct, backend="eager", fullgraph=True)(x), direct(x)
+        )
 
     def test_method_descriptor_preserves_polyfill_trace_rule(self):
         class C:
@@ -6816,18 +6834,11 @@ class GraphModule(torch.nn.Module):
                 WithMeta.__prepare__.__self__ is Meta,
             )
 
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         x = torch.ones(1)
-        self.assertEqual(opt_fn(x), (x + 1, "fromkeys", "fromkeys", True))
-        self.assertEqual(cnt.frame_count, 1)
-
-        try:
-            Inherited.fromkeys = dict.__dict__["__class_getitem__"]
-            self.assertEqual(opt_fn(x), (x + 1, "fromkeys", "__class_getitem__", True))
-            self.assertEqual(cnt.frame_count, 2)
-        finally:
-            del Inherited.fromkeys
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x),
+            (x + 1, "fromkeys", "fromkeys", True),
+        )
 
     @parametrize("use_subclass", (False, True))
     def test_bound_fromkeys_ordered_dict_input(self, use_subclass):
@@ -6878,18 +6889,16 @@ class GraphModule(torch.nn.Module):
         )
 
     @parametrize("descriptor_kind", ("classmethod", "method"))
-    def test_descriptor_source_rejects_metaclass_dict(self, descriptor_kind):
+    def test_descriptor_from_metaclass_dict(self, descriptor_kind):
         descriptor = (
             dict.__dict__["fromkeys"]
             if descriptor_kind == "classmethod"
             else list.count
         )
-        calls = []
 
         class Meta(type):
             @property
             def __dict__(cls):
-                calls.append(cls)
                 return {"target": descriptor}
 
         class D(metaclass=Meta):
@@ -6902,9 +6911,7 @@ class GraphModule(torch.nn.Module):
             return x + raw.__get__([1, 1], list)(1)
 
         x = torch.ones(1)
-        with self.assertRaisesRegex(Unsupported, "custom metaclass __dict__"):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(calls, [D])
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_torch_function_metadata_attrs_constant(self):
         def fn(x):

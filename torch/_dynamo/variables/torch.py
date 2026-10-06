@@ -112,7 +112,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import pynumber_index, vt_is_iterable
+from .object_protocol import mro_lookup, pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -1859,12 +1859,38 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if tf_state.skip_next:
                 tf_state.skip_next = False
                 return VariableTracker.build(tx, False)
+            # Mirrors check_has_torch_function in C++: an active torch
+            # function mode makes every argument "have" a torch function.
+            if (
+                tf_state.torch_function_mode_enabled
+                and tf_state.in_torch_function_mode()
+            ):
+                return VariableTracker.build(tx, True)
             elems = (
                 unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
                 else args
             )
             return VariableTracker.build(tx, any(has_torch_function(x) for x in elems))
+
+        @register(torch.overrides.handle_torch_function)
+        def handle_handle_torch_function(
+            self,
+            tx: "InstructionTranslatorBase",
+            public_api: VariableTracker,
+            relevant_args: VariableTracker,
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .torch_function import dispatch_torch_function
+
+            return dispatch_torch_function(
+                tx,
+                public_api,
+                list(args),
+                kwargs,
+                relevant_args=unpack_iterable(tx, relevant_args),
+            )
 
         @register(torch._C._skip_one_hop_torch_function)
         def handle_skip_one_hop_torch_function(
@@ -3802,7 +3828,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     args=list(exc.args),
                 )
 
-        if self.is_tensor_method():
+        # call_tensor_method records `x.<name>(...)`, which resolves on type(x)
+        # when the graph runs. If a tensor subclass overrides the method, fall
+        # through so the graph calls the descriptor itself.
+        if self.is_tensor_method() and not (
+            args
+            and args[0].is_tensor()
+            and mro_lookup(args[0].python_type(), self.value.__name__)
+            is not mro_lookup(torch.Tensor, self.value.__name__)
+        ):
             name = self.value.__name__
             # Guard against inplace view op on input tensor (not supported)
             if args and args[0].is_tensor():

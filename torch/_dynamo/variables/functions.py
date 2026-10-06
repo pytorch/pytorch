@@ -87,6 +87,7 @@ from ..utils import (
     is_function,
     is_lru_cache_wrapper_trace_without_warning_allowed,
     is_tensor_base_attr_getter,
+    is_torch_class,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -4937,6 +4938,8 @@ class BoundBuiltinMethodVariable(VariableTracker):
         #
         #    Otherwise return type(m.__self__).__qualname__ + '.' + m.__name__
         #    (e.g. [].append.__qualname__ == 'list.append')
+        from .object_protocol import generic_getattr
+
         name = self.descriptor.__name__
         obj = self.obj
         obj_type = obj.python_type()
@@ -4952,7 +4955,8 @@ class BoundBuiltinMethodVariable(VariableTracker):
             else:
                 owner_source = obj.source and TypeSource(obj.source)
             owner = VariableTracker.build(tx, obj_type, owner_source)
-        owner_qualname = owner.tp_getattro_impl(tx, "__qualname__")
+        # PyObject_GetAttr, so a __qualname__ assigned earlier in the frame is seen.
+        owner_qualname = generic_getattr(tx, owner.realize(), "__qualname__")
         return ConstantVariable.create(f"{owner_qualname.as_python_constant()}.{name}")
 
     tp_getset = {
@@ -5026,22 +5030,29 @@ class BoundBuiltinMethodVariable(VariableTracker):
 
         # Handles calls like `list.append(L_subclass, item)`
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L60-L90
+        # In CPython, builtin_function_or_method receives the fn pointer to call
+        # Dynamo diverges a bit as we compute the correct fn/slot/method to call
+        # here
         name = self.descriptor.__name__
-        obj = self.obj
+        obj = self.obj.realize()
         descriptor = self.descriptor
         args = list(args)
         if isinstance(descriptor, types.ClassMethodDescriptorType):
             # PyCMethod_New bound the C function to the class in obj; the class
             # VT models the classmethod with itself as receiver.
-            return obj.realize().call_method(tx, name, list(args), kwargs)
+            return obj.call_method(tx, name, list(args), kwargs)
         if not isinstance(descriptor, types.MethodDescriptorType):
             # METH_STATIC C functions stored directly in a type dict, e.g.
             # tuple.__new__; the receiver is the class itself.
             return obj.call_method(tx, name, args, kwargs)
+        if is_torch_class(descriptor.__objclass__):
+            # TorchInGraphFunctionVariable records the descriptor itself in the
+            # graph, so a tensor subclass override never runs.
+            fn = VariableTracker.build(tx, descriptor)
+            return fn.call_function(tx, [obj, *args], kwargs)
         if mro_lookup(obj.python_type(), name) is descriptor:
             # Nothing overrides it, so name lookup reaches the same C method.
             return obj.call_method(tx, name, args, kwargs)
-        obj = obj.realize()
         if isinstance(obj, UserDefinedObjectVariable):
             base_methods = obj._base_methods
             if base_methods is not None and descriptor in base_methods:
