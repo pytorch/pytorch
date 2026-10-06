@@ -678,6 +678,23 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], nodes)
 
+    @parametrize("alpha", [0.5, 2, 0])
+    def test_addmm_add_alpha(self, alpha):
+        # https://github.com/pytorch/pytorch/issues/199698
+        def fn(a, b, c):
+            return (
+                torch.add(a, torch.mm(b, c), alpha=alpha),
+                torch.add(torch.mm(b, c), a, alpha=alpha),
+            )
+
+        args = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(3)]
+        e1, e2 = fn(*args)
+        a1, a2 = torch.compile(fn)(*args)
+        torch.testing.assert_close(a1, e1)
+        torch.testing.assert_close(a2, e2)
+        count = 0 if alpha == 0 else 2
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
+
     def test_addmm_symbolic_scalar(self):
         def fn(m1, m2):
             bias = m1.size(0)
@@ -1048,13 +1065,10 @@ class TestPatternMatcher(TestCase):
         def unbacked(x):
             return torch.full((2,), x.item(), dtype=dtype).cumsum(0).sum()
 
-        x = torch.tensor(3)
+        x = torch.tensor(0)
         result, (code,) = run_and_get_code(torch.compile(unbacked, fullgraph=True), x)
         self.assertEqual(result, unbacked(x))
-        if dtype == torch.bool:
-            self.assertNotIn("aten.cumsum", code)  # exempt, so this one still folds
-        else:
-            self.assertIn("aten.cumsum", code)
+        self.assertIn("aten.cumsum", code)
 
         def make(fill):
             def fn():
