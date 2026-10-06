@@ -4929,6 +4929,8 @@ class BoundBuiltinMethodVariable(VariableTracker):
         #
         #    Otherwise return type(m.__self__).__qualname__ + '.' + m.__name__
         #    (e.g. [].append.__qualname__ == 'list.append')
+        from .object_protocol import generic_getattr
+
         name = self.descriptor.__name__
         obj = self.obj
         obj_type = obj.python_type()
@@ -4944,7 +4946,8 @@ class BoundBuiltinMethodVariable(VariableTracker):
             else:
                 owner_source = obj.source and TypeSource(obj.source)
             owner = VariableTracker.build(tx, obj_type, owner_source)
-        owner_qualname = owner.tp_getattro_impl(tx, "__qualname__")
+        # PyObject_GetAttr, so a __qualname__ assigned earlier in the frame is seen.
+        owner_qualname = generic_getattr(tx, owner.realize(), "__qualname__")
         return ConstantVariable.create(f"{owner_qualname.as_python_constant()}.{name}")
 
     tp_getset = {
