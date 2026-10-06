@@ -12627,6 +12627,155 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Lower bound should be less than or equal to the upper bound"):
             F.rrelu(x, lower=0.5, upper=0.3)
 
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("transpose", [False, True])
+    def test_prelu_memory_format(self, device, dtype, memory_format, transpose):
+        cpu_x = torch.randn(4, 6, 8, 8, dtype=dtype).to(memory_format=memory_format)
+        if transpose:
+            cpu_x = cpu_x.transpose(-1, -2)
+        cpu_x.requires_grad_()
+        cpu_w = torch.randn(6, dtype=dtype).requires_grad_()
+        x = cpu_x.detach().to(device).clone().requires_grad_()
+        w = cpu_w.detach().to(device).clone().requires_grad_()
+        expected = F.prelu(cpu_x, cpu_w)
+        actual = F.prelu(x, w)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+        grad = torch.randn_like(expected)
+        expected.backward(grad)
+        actual.backward(grad.to(device))
+        self.assertEqual(x.grad, cpu_x.grad)
+        self.assertEqual(w.grad, cpu_w.grad)
+        self.assertEqual(x.grad.stride(), cpu_x.grad.stride())
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("case", [
+        "scalar_transposed", "scalar_channels_last", "scalar_permuted_5d", "scalar_offset_transposed",
+        "scalar_narrowed", "scalar_0d", "channel_3d", "channel_5d", "channel_degenerate", "channel_offset",
+        "channel_strided_weight", "channel_2d", "empty",
+    ])
+    def test_prelu_layouts(self, device, dtype, case):
+        def view(base, shape, offset=0):
+            return base[offset:offset + math.prod(shape)].view(shape)
+
+        layouts = {
+            "scalar_transposed": (lambda x: view(x, (4, 6, 8, 8)).transpose(-1, -2), lambda w: view(w, (1,))),
+            "scalar_channels_last": (
+                lambda x: view(x, (4, 6, 8, 8)).contiguous(memory_format=torch.channels_last), lambda w: view(w, (1,))),
+            "scalar_permuted_5d": (lambda x: view(x, (2, 3, 4, 5, 6)).permute(0, 2, 4, 1, 3), lambda w: view(w, (1,))),
+            "scalar_offset_transposed": (lambda x: view(x, (4, 6, 5, 7), 1).transpose(-1, -2), lambda w: view(w, (1,), 1)),
+            "scalar_narrowed": (lambda x: view(x, (4, 6, 8, 8))[..., :5], lambda w: view(w, (1,))),
+            "scalar_0d": (lambda x: view(x, ()), lambda w: view(w, (1,))),
+            "channel_3d": (lambda x: view(x, (4, 6, 33)), lambda w: view(w, (6,))),
+            "channel_5d": (lambda x: view(x, (2, 6, 3, 5, 7)), lambda w: view(w, (6,))),
+            "channel_degenerate": (lambda x: view(x, (1, 6, 1, 1)), lambda w: view(w, (6,))),
+            "channel_offset": (lambda x: view(x, (4, 6, 5, 7), 1), lambda w: view(w, (6,), 1)),
+            "channel_strided_weight": (lambda x: view(x, (4, 6, 5, 7)), lambda w: w[:12:2]),
+            "channel_2d": (lambda x: view(x, (5, 6)), lambda w: view(w, (6,))),
+            "empty": (lambda x: view(x, (0, 6, 4, 4)), lambda w: view(w, (6,))),
+        }
+        x_layout, w_layout = layouts[case]
+        x_base = torch.randn(1 + 4 * 6 * 8 * 8, dtype=dtype)
+        w_base = torch.randn(13, dtype=dtype)
+        cpu_x, cpu_w = x_layout(x_base), w_layout(w_base)
+        x, w = x_layout(x_base.to(device)), w_layout(w_base.to(device))
+        expected = F.prelu(cpu_x, cpu_w)
+        actual = F.prelu(x, w)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("layout", ["transposed", "channels_last", "permuted", "singleton_stride"])
+    @parametrize_test("offset", [0, 1])
+    def test_prelu_kernel_scalar_broadcast_output(self, device, dtype, layout, offset):
+        layouts = {
+            "transposed": ((4, 3), (1, 4)),
+            "channels_last": ((2, 3, 4, 5), (60, 1, 15, 3)),
+            "permuted": ((5, 2, 3), (1, 15, 5)),
+            "singleton_stride": ((3, 1, 4), (1, 29, 3)),
+        }
+        shape, strides = layouts[layout]
+        storage = ((torch.arange(math.prod(shape) + offset) % 7) - 3).to(dtype) * 0.125
+        weight_storage = torch.full((offset + 1,), 0.25, dtype=dtype)
+        cpu_x = storage.as_strided(shape, strides, offset)
+        x = storage.to(device).as_strided(shape, strides, offset)
+        # An extra unit dimension resizes the output without changing its element count.
+        weight_shape = (1,) * (len(shape) + 1)
+        cpu_w = weight_storage[offset:].reshape(weight_shape)
+        w = weight_storage.to(device)[offset:].reshape(weight_shape)
+        op = torch.ops.aten._prelu_kernel.default
+        warning = "An output with one or more elements was resized"
+        with self.assertWarnsOnceRegex(UserWarning, warning):
+            expected = op(cpu_x, cpu_w)
+        with self.assertWarnsOnceRegex(UserWarning, warning):
+            actual = op(x, w)
+        self.assertEqual(actual, expected, rtol=0, atol=0)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("layout", [
+        "scalar_input", "scalar_weight", "channel", "transposed", "expanded_input", "strided_weight",
+        "scalar_0d", "channels_last", "narrowed",
+    ])
+    @parametrize_test("grad_layout", ["contiguous", "transposed", "expanded"])
+    def test_prelu_storage_offsets(self, device, dtype, layout, grad_layout):
+        layouts = {
+            "scalar_input": (lambda x: x[1:9].view(2, 4), lambda w: w[:1]),
+            "scalar_weight": (lambda x: x[:8].view(2, 4), lambda w: w[1:2]),
+            "channel": (lambda x: x[1:841].view(4, 6, 5, 7), lambda w: w[1:7]),
+            "transposed": (lambda x: x[1:25].view(6, 4).t(), lambda w: w[1:2]),
+            "expanded_input": (lambda x: x[1:5].view(1, 4).expand(3, 4), lambda w: w[1:2]),
+            "strided_weight": (lambda x: x[:24].view(2, 3, 4), lambda w: w[1:7:2]),
+            "scalar_0d": (lambda x: x[1:2].view(()), lambda w: w[1:2]),
+            "channels_last": (lambda x: x[1:841].view(4, 5, 7, 6).permute(0, 3, 1, 2), lambda w: w[1:7]),
+            "narrowed": (lambda x: x[1:841].view(4, 6, 5, 7)[..., :5], lambda w: w[1:7]),
+        }
+        x_layout, w_layout = layouts[layout]
+        x_base = ((torch.arange(841) % 7) - 3).to(dtype) * 0.125
+        w_base = ((torch.arange(13) % 5) - 2).to(dtype) * 0.25
+        cpu_x = x_layout(x_base).detach().requires_grad_()
+        cpu_w = w_layout(w_base).detach().requires_grad_()
+        x = x_layout(x_base.to(device)).detach().requires_grad_()
+        w = w_layout(w_base.to(device)).detach().requires_grad_()
+        grad_base = ((torch.arange(cpu_x.numel() + 1) % 5) - 2).to(dtype) * 0.125
+
+        def grad_view(base):
+            if grad_layout == "expanded":
+                return base[1:2].view((1,) * cpu_x.dim()).expand(cpu_x.shape)
+            if grad_layout == "transposed" and cpu_x.dim() >= 2:
+                return base[1:].view(*cpu_x.shape[:-2], cpu_x.size(-1), cpu_x.size(-2)).transpose(-1, -2)
+            return base[1:].view(cpu_x.shape)
+
+        expected = F.prelu(cpu_x, cpu_w)
+        actual = F.prelu(x, w)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+        expected.backward(grad_view(grad_base))
+        actual.backward(grad_view(grad_base.to(device)))
+        self.assertEqual(x.grad, cpu_x.grad)
+        self.assertEqual(w.grad, cpu_w.grad)
+        self.assertEqual(x.grad.stride(), cpu_x.grad.stride())
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("ndim", [16, 17])
+    def test_prelu_backward_many_dimensions(self, device, dtype, ndim):
+        shape = (2,) * ndim
+        base = ((torch.arange(1 + 2**ndim) % 7) - 3).to(dtype) * 0.125
+        grad_base = torch.ones(2**ndim, dtype=dtype)
+        weight = torch.tensor(0.25, dtype=dtype)
+
+        def view(t):
+            return t[1:].view(shape).permute(tuple(reversed(range(ndim))))
+
+        op = torch.ops.aten._prelu_kernel_backward.default
+        x, grad, w = view(base.to(device)), grad_base.to(device).view(shape), weight.to(device)
+        if torch.device(device).type == "mps" and ndim > 16:
+            with self.assertRaisesRegex(RuntimeError, "MPS PReLU.*16.*17"):
+                op(grad, x, w)
+            return
+        expected = op(grad_base.view(shape), view(base), weight)
+        self.assertEqual(op(grad, x, w), expected)
+
     def test_threshold_inplace_overlap(self, device):
         # Inplace threshold is okay, because it is idempotent
         x = torch.randn((1, 6), device=device).expand((6, 6))
@@ -15343,7 +15492,6 @@ class TestNNDeviceType(NNTestCase):
             # Check that backward does not cause a hard error
             outs[0].sum().backward()
 
-    @skipMPS
     def test_PReLU_backward_requires_grad_false(self, device):
         m = nn.PReLU().to(device)
         x = torch.randn(2, 3, 4, 5, device=device, requires_grad=False)

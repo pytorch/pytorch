@@ -102,6 +102,145 @@ REGISTER_BINARY_OP(hardswish_backward, float, float);
 REGISTER_BINARY_OP(hardswish_backward, half, half);
 REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
 
+struct prelu_functor {
+  template <typename T>
+  inline T operator()(const T self, const T weight) {
+    return self > T(0) ? self : static_cast<T>(float(weight) * float(self));
+  }
+};
+
+struct prelu_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad_output, const T self, const T weight) {
+    return self > T(0) ? grad_output
+                       : static_cast<T>(float(weight) * float(grad_output));
+  }
+};
+
+struct prelu_weight_backward_functor {
+  template <typename T>
+  inline T operator()(const T grad_output, const T self) {
+    return self > T(0) ? T(0)
+                       : static_cast<T>(float(self) * float(grad_output));
+  }
+};
+
+REGISTER_BINARY_OP(prelu, float, float);
+REGISTER_BINARY_OP(prelu, half, half);
+REGISTER_BINARY_OP(prelu, bfloat, bfloat);
+REGISTER_TERNARY_OP(prelu_backward, float, float);
+REGISTER_TERNARY_OP(prelu_backward, half, half);
+REGISTER_TERNARY_OP(prelu_backward, bfloat, bfloat);
+REGISTER_BINARY_OP(prelu_weight_backward, float, float);
+REGISTER_BINARY_OP(prelu_weight_backward, half, half);
+REGISTER_BINARY_OP(prelu_weight_backward, bfloat, bfloat);
+
+// Shared binary/ternary kernels read inputs from the constant address space,
+// whose buffer offsets must be 4-byte aligned. These strided variants read
+// through device pointers so half/bfloat views can start at a 2-byte offset.
+template <typename T, typename F>
+kernel void prelu_unaligned_binary(
+    device void* output [[buffer(0)]],
+    device const void* a [[buffer(1)]],
+    device const void* b [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* a_strides [[buffer(5)]],
+    constant long* b_strides [[buffer(6)]],
+    constant uint& ndim [[buffer(7)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim);
+  ref_at_offs<T>(output, offset_from_coord(pos, output_strides, ndim)) =
+      f(val_at_offs<T>(a, offset_from_coord(pos, a_strides, ndim)),
+        val_at_offs<T>(b, offset_from_coord(pos, b_strides, ndim)));
+}
+
+template <typename T, typename F>
+kernel void prelu_unaligned_ternary(
+    device void* output [[buffer(0)]],
+    device const void* a [[buffer(1)]],
+    device const void* b [[buffer(2)]],
+    device const void* c [[buffer(3)]],
+    constant long* sizes [[buffer(4)]],
+    constant long* output_strides [[buffer(5)]],
+    constant long* a_strides [[buffer(6)]],
+    constant long* b_strides [[buffer(7)]],
+    constant long* c_strides [[buffer(8)]],
+    constant uint& ndim [[buffer(9)]],
+    uint index [[thread_position_in_grid]]) {
+  F f;
+  int pos[max_ndim];
+  pos_from_thread_index(int(index), pos, sizes, ndim);
+  ref_at_offs<T>(output, offset_from_coord(pos, output_strides, ndim)) =
+      f(val_at_offs<T>(a, offset_from_coord(pos, a_strides, ndim)),
+        val_at_offs<T>(b, offset_from_coord(pos, b_strides, ndim)),
+        val_at_offs<T>(c, offset_from_coord(pos, c_strides, ndim)));
+}
+
+#define REGISTER_PRELU_UNALIGNED_BINARY(NAME, DTYPE)             \
+  template [[host_name(#NAME "_unaligned_" #DTYPE)]] kernel void \
+  prelu_unaligned_binary<DTYPE, NAME##_functor>(                 \
+      device void* output [[buffer(0)]],                         \
+      device const void* a [[buffer(1)]],                        \
+      device const void* b [[buffer(2)]],                        \
+      constant long* sizes [[buffer(3)]],                        \
+      constant long* output_strides [[buffer(4)]],               \
+      constant long* a_strides [[buffer(5)]],                    \
+      constant long* b_strides [[buffer(6)]],                    \
+      constant uint& ndim [[buffer(7)]],                         \
+      uint index [[thread_position_in_grid]])
+
+#define REGISTER_PRELU_UNALIGNED_TERNARY(NAME, DTYPE)            \
+  template [[host_name(#NAME "_unaligned_" #DTYPE)]] kernel void \
+  prelu_unaligned_ternary<DTYPE, NAME##_functor>(                \
+      device void* output [[buffer(0)]],                         \
+      device const void* a [[buffer(1)]],                        \
+      device const void* b [[buffer(2)]],                        \
+      device const void* c [[buffer(3)]],                        \
+      constant long* sizes [[buffer(4)]],                        \
+      constant long* output_strides [[buffer(5)]],               \
+      constant long* a_strides [[buffer(6)]],                    \
+      constant long* b_strides [[buffer(7)]],                    \
+      constant long* c_strides [[buffer(8)]],                    \
+      constant uint& ndim [[buffer(9)]],                         \
+      uint index [[thread_position_in_grid]])
+
+REGISTER_PRELU_UNALIGNED_BINARY(prelu, half);
+REGISTER_PRELU_UNALIGNED_BINARY(prelu, bfloat);
+REGISTER_PRELU_UNALIGNED_BINARY(prelu_weight_backward, half);
+REGISTER_PRELU_UNALIGNED_BINARY(prelu_weight_backward, bfloat);
+REGISTER_PRELU_UNALIGNED_TERNARY(prelu_backward, half);
+REGISTER_PRELU_UNALIGNED_TERNARY(prelu_backward, bfloat);
+
+// Device pointers allow two-byte storage offsets in half and bfloat tensor
+// views. Grid axes encode inner, channel and outer coordinates without
+// division.
+template <typename T>
+kernel void prelu_dense_3d(
+    device T* output [[buffer(0)]],
+    device const T* input [[buffer(1)]],
+    device const T* weight [[buffer(2)]],
+    uint3 pos [[thread_position_in_grid]],
+    uint3 grid [[threads_per_grid]]) {
+  const auto offs = (pos.z * grid.y + pos.y) * grid.x + pos.x;
+  output[offs] = prelu_functor{}(input[offs], weight[pos.y]);
+}
+
+#define REGISTER_PRELU_DENSE_3D_OP(DTYPE)                      \
+  template [[host_name("prelu_dense_3d_" #DTYPE)]] kernel void \
+  prelu_dense_3d<DTYPE>(                                       \
+      device DTYPE * output [[buffer(0)]],                     \
+      device const DTYPE* input [[buffer(1)]],                 \
+      device const DTYPE* weight [[buffer(2)]],                \
+      uint3 pos [[thread_position_in_grid]],                   \
+      uint3 grid [[threads_per_grid]])
+
+REGISTER_PRELU_DENSE_3D_OP(float);
+REGISTER_PRELU_DENSE_3D_OP(half);
+REGISTER_PRELU_DENSE_3D_OP(bfloat);
+
 struct elu_functor {
   template <typename T>
   inline T operator()(const T self_, const ELUParams<T> params) {

@@ -5125,16 +5125,14 @@
 
 - func: _prelu_kernel(Tensor self, Tensor weight) -> Tensor
   dispatch:
-    CPU, CUDA, XPU: _prelu_kernel
+    CPU, CUDA, MPS, XPU: _prelu_kernel
     QuantizedCPU: _prelu_kernel_quantized_cpu
     MkldnnCPU: mkldnn_prelu
-    MPS: prelu_mps
 
 - func: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   dispatch:
-    CPU, CUDA, XPU: _prelu_kernel_backward
+    CPU, CUDA, MPS, XPU: _prelu_kernel_backward
     MkldnnCPU: mkldnn_prelu_backward
-    MPS: prelu_backward_mps
 
 - func: gelu.out(Tensor self, *, str approximate='none', Tensor(a!) out) -> Tensor(a!)
   structured: True

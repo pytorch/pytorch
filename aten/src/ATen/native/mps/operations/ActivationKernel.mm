@@ -35,6 +35,114 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/ActivationKernel_metallib.h>
 #endif
 
+// See prelu_unaligned_binary in ActivationKernel.metal.
+static void exec_prelu_kernel(TensorIteratorBase& iter, const std::string& name) {
+  using namespace mps;
+  if (iter.numel() == 0) {
+    return;
+  }
+  TORCH_CHECK(iter.ndim() <= c10::metal::max_ndim,
+              "MPS PReLU supports iterators with up to ",
+              c10::metal::max_ndim,
+              " dimensions, but got ",
+              iter.ndim(),
+              ".");
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto&& sub_iter : iter.with_32bit_indexing()) {
+      exec_prelu_kernel(sub_iter, name);
+    }
+    return;
+  }
+  const auto ntensors = iter.ntensors();
+  bool aligned = true;
+  for (const auto idx : c10::irange(iter.noutputs(), ntensors)) {
+    aligned = aligned && iter_tensor_offset(iter, idx) % 4 == 0;
+  }
+  if (aligned) {
+    if (ntensors == 3) {
+      lib.exec_binary_kernel(iter, name);
+    } else {
+      lib.exec_ternary_kernel(iter, name);
+    }
+    return;
+  }
+  // A 0-d iterator has no dims to bind; give the kernel one unit dim.
+  const int64_t one = 1, zero = 0;
+  const bool scalar = iter.ndim() == 0;
+  const auto shape = scalar ? IntArrayRef(one) : iter.shape();
+  const auto strides = [&](int64_t idx) { return scalar ? IntArrayRef(zero) : iter.strides(idx); };
+  const auto ndim = static_cast<uint32_t>(std::max(iter.ndim(), 1));
+  auto mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = mpsStream->commandEncoder();
+      auto pso =
+          lib.getPipelineStateForFunc(fmt::format("{}_unaligned_{}", name, scalarToMetalTypeString(iter.dtype())));
+      getMPSProfiler().beginProfileKernel(pso, name, {iter.tensor(1)}, mpsStream);
+      [computeEncoder setComputePipelineState:pso];
+      bind_iter_tensors(computeEncoder, iter);
+      if (ntensors == 3) {
+        mtl_setArgs<3>(computeEncoder, shape, strides(0), strides(1), strides(2), ndim);
+      } else {
+        mtl_setArgs<4>(computeEncoder, shape, strides(0), strides(1), strides(2), strides(3), ndim);
+      }
+      mtl_dispatch1DJob(computeEncoder, pso, iter.numel());
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
+    }
+  });
+}
+
+static void prelu_kernel(TensorIterator& iter) {
+  using namespace mps;
+  const auto& out = iter.output(0);
+  const auto& self = iter.input(0);
+  const auto& weight = iter.input(1);
+  const auto dtype = self.scalar_type();
+  // empty_like and TensorIterator preserve the physical order of dense scalar-weight inputs.
+  // Contiguous input with a scalar weight already uses the shared dense scalar kernel.
+  const bool layout_ok = weight.numel() == 1
+      ? !self.is_contiguous() && self.is_non_overlapping_and_dense()
+      : self.dim() >= 3 && self.is_contiguous() && out.is_contiguous() && weight.is_contiguous() &&
+          weight.dim() == self.dim() && weight.size(1) == self.size(1) && weight.numel() == self.size(1);
+  if (!layout_ok || self.numel() == 0 || !iter.can_use_32bit_indexing() ||
+      !(dtype == kFloat || dtype == kHalf || dtype == kBFloat16)) {
+    exec_prelu_kernel(iter, "prelu");
+    return;
+  }
+  const int64_t channels = weight.numel() == 1 ? 1 : self.size(1);
+  const int64_t outer = weight.numel() == 1 ? 1 : self.size(0);
+  const int64_t inner = self.numel() / (channels * outer);
+  auto mpsStream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = mpsStream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("prelu_dense_3d_{}", scalarToMetalTypeString(self)));
+      getMPSProfiler().beginProfileKernel(pso, "prelu_dense_3d", {self, weight}, mpsStream);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, out, self, weight);
+      mtl_dispatch3DJob(computeEncoder, pso, inner, channels, outer);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
+    }
+  });
+}
+
+static void prelu_backward_kernel(TensorIterator& iter) {
+  auto input_iter = TensorIteratorConfig()
+                        .add_output(iter.output(0))
+                        .add_const_input(iter.input(2))
+                        .add_const_input(iter.input(0))
+                        .add_const_input(iter.input(1))
+                        .build();
+  exec_prelu_kernel(input_iter, "prelu_backward");
+  // Autograd reduces this per-element gradient to the weight shape.
+  auto weight_iter = TensorIteratorConfig()
+                         .add_output(iter.output(1))
+                         .add_const_input(iter.input(2))
+                         .add_const_input(iter.input(0))
+                         .build();
+  exec_prelu_kernel(weight_iter, "prelu_weight_backward");
+}
+
 static void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
   lib.exec_unary_kernel(iter, "hardshrink", lambda);
 }
@@ -342,6 +450,8 @@ Tensor log_sigmoid_backward_mps(const Tensor& grad_output, const Tensor& self, c
 }
 
 REGISTER_DISPATCH(hardshrink_stub, hardshrink_kernel);
+REGISTER_DISPATCH(prelu_stub, prelu_kernel);
+REGISTER_DISPATCH(prelu_backward_stub, prelu_backward_kernel);
 REGISTER_DISPATCH(softshrink_stub, softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, shrink_backward_kernel);
 REGISTER_DISPATCH(hardsigmoid_stub, hardsigmoid_kernel);
