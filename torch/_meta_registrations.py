@@ -2651,6 +2651,16 @@ def meta__fused_moving_avg_obs_fq_helper(
         ch_axis < self.dim(),
         lambda: "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()",
     )
+    if per_row_fake_quant and running_min.numel() == 0:
+        # The real CPU/CUDA kernels resize the mutated observer state to the
+        # channel count on first use (fresh per-channel observer), so the meta
+        # function must model that resize to keep fake/functional outputs in
+        # sync with eager. See aten/src/ATen/native/quantized/cpu/fused_obs_fake_quant.cpp.
+        num_channels = self.size(ch_axis)
+        running_min.resize_(num_channels)
+        running_max.resize_(num_channels)
+        scale.resize_(num_channels)
+        zero_point.resize_(num_channels)
     mask = torch.empty_like(self, dtype=torch.bool)
     return (torch.empty_like(self), mask)
 
