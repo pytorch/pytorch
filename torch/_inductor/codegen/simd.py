@@ -471,15 +471,23 @@ def finishes_from_partials(
 ) -> bool:
     """Whether reduction node over an (m, n) template output can store fp32
     per-tile partials. Python wrapper code finishes them, so buffer sizes must
-    be static."""
+    be static; SizeHintMultiKernel never emits that code."""
     return (
         not V.graph.cpp_wrapper
+        and not config.multi_kernel_hints
         and isinstance(m, sympy.Integer)
         and isinstance(n, sympy.Integer)
         and isinstance(node.node, ir.ComputedBuffer)
         and node.node.get_reduction_type() in PARTIAL_REDUCTION_OPS
         and node.node.get_dtype() in (torch.float32, torch.bfloat16, torch.float16)
     )
+
+
+def is_row_major_read(dep: MemoryDep, numel: sympy.Expr) -> bool:
+    """Whether dep reads all numel elements of a buffer in row-major order.
+    Loop merging may have collapsed a contiguous read to a single var."""
+    dep = dep.normalize()
+    return dep.is_contiguous() and dep.get_numel() == numel
 
 
 def template_reduction_axis(
@@ -500,17 +508,14 @@ def template_reduction_axis(
             if dep.name in produced
         )
 
-    # Loop merging may have collapsed a contiguous read to a single var.
-    def row_major(dep):
-        dep = dep.normalize()
-        return dep.is_contiguous() and dep.get_numel() == m * n
-
     def col_major(dep):
         return len(dep.var_names) == 2 and dep.index == sympy_dot(
             (1, dep.size[0]), dep.var_names
         )
 
-    if node.group[1] == (m, n) and reads(node, row_major):
+    if node.group[1] == (m, n) and reads(
+        node, functools.partial(is_row_major_read, numel=m * n)
+    ):
         return 0
     if not (isinstance(node, scheduler.SchedulerNode) and node.is_reduction()):
         return None
@@ -606,6 +611,16 @@ def tile_fits_reduction_epilogue(
             for node in columns
             for dep in node.read_writes.reads
         ) or any(node.group[1] != (m * n, 1) for node in epilogue_nodes[:first_row]):
+            return False
+        # The column pass transposes the stored tile, so the other nodes must
+        # read it and the nodes before the row reductions in place.
+        if not all(
+            isinstance(dep, MemoryDep) and is_row_major_read(dep, m * n)
+            for node in epilogue_nodes
+            if not node.is_reduction()
+            for dep in node.read_writes.reads
+            if dep.name in available
+        ):
             return False
         if first_row == len(epilogue_nodes):
             return True
@@ -3686,9 +3701,53 @@ class SIMDScheduling(BaseScheduling):
         )
         return converted_nodes, SIMDKernelFeatures(node_schedule, numel, rnumel)
 
+    def _benchmark_mix_order_kernel(
+        self, kernel_features, split_size
+    ) -> tuple[float, str]:
+        kernel = self._create_kernel_for_mix_order_reduction(
+            kernel_features, split_size
+        )
+        _, src_code = self._generate_kernel_code_for_mix_order_reduction(
+            kernel, for_benchmark=True
+        )
+        return self.benchmark_codegened_module(PyCodeCache.load(src_code))
+
+    def _tuned_mix_order_split_size(self, kernel_features, initial_split_size):
+        """The split size codegen_mix_order_reduction uses: initial_split_size,
+        autotuned when enabled."""
+        kernel = self._create_kernel_for_mix_order_reduction(
+            kernel_features, initial_split_size
+        )
+
+        # The autotuning is skipped in deterministic mode
+        if (
+            not torch._inductor.config.deterministic
+            and config.triton.mix_order_reduction_split_size is None
+            and not kernel.fixed_config
+            and (
+                config.triton.mix_order_reduction_autotune_split_size
+                or config.max_autotune
+                or config.coordinate_descent_tuning
+            )
+        ):
+
+            def _bench(candidate_split_size):
+                ms, _ = self._benchmark_mix_order_kernel(
+                    kernel_features, candidate_split_size
+                )
+                return ms
+
+            kernel.rsplit_size = CoordescTuner.autotune_single_field(
+                _bench,
+                kernel.rsplit_size,
+                8,
+            )
+        return kernel.rsplit_size
+
     def benchmark_mix_order_reduction(self, node) -> tuple[float, str] | None:
-        """Time the kernel codegen_mix_order_reduction would emit for node,
-        leaving node's loops unchanged. None if node2 has epilogue nodes."""
+        """Time the kernel codegen_mix_order_reduction would emit for node, at
+        the split size it would pick, leaving node's loops unchanged. None if
+        node2 has epilogue nodes."""
         node1, node2 = node.node1, node.node2
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
         node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
@@ -3701,18 +3760,15 @@ class SIMDScheduling(BaseScheduling):
             _, kernel_features = self._mix_order_kernel_features(
                 node1, node2_reductions, numel, rnumel
             )
-            kernel = self._create_kernel_for_mix_order_reduction(
+            split_size = self._tuned_mix_order_split_size(
                 kernel_features, self._mix_order_split_size(node1, numel)
             )
-            _, src_code = self._generate_kernel_code_for_mix_order_reduction(
-                kernel, for_benchmark=True
-            )
+            return self._benchmark_mix_order_kernel(kernel_features, split_size)
         finally:
             snapshot.restore()
             for subnode in node2_reductions:
                 # cancel_reduction_split caches the unsplit body.
                 subnode.node.get_default_sizes_body.clear_cache(subnode.node)
-        return self.benchmark_codegened_module(PyCodeCache.load(src_code))
 
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
@@ -3731,38 +3787,9 @@ class SIMDScheduling(BaseScheduling):
         )
         node_schedule = kernel_features.node_schedule
         kernel = self._create_kernel_for_mix_order_reduction(
-            kernel_features, initial_split_size
+            kernel_features,
+            self._tuned_mix_order_split_size(kernel_features, initial_split_size),
         )
-
-        # The autotuning is skipped in deterministic mode
-        if (
-            not torch._inductor.config.deterministic
-            and config.triton.mix_order_reduction_split_size is None
-            and not kernel.fixed_config
-            and (
-                config.triton.mix_order_reduction_autotune_split_size
-                or config.max_autotune
-                or config.coordinate_descent_tuning
-            )
-        ):
-
-            def _bench(candidate_split_size):
-                candidate_kernel = self._create_kernel_for_mix_order_reduction(
-                    kernel_features, candidate_split_size
-                )
-                _, src_code = self._generate_kernel_code_for_mix_order_reduction(
-                    candidate_kernel,
-                    for_benchmark=True,
-                )
-                mod = PyCodeCache.load(src_code)
-                ms, _ = self.benchmark_codegened_module(mod)
-                return ms
-
-            kernel.rsplit_size = CoordescTuner.autotune_single_field(
-                _bench,
-                kernel.rsplit_size,
-                8,
-            )
 
         ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel,
