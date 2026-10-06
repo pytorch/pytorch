@@ -25,6 +25,38 @@ TESTCASE_TAG = "testcase"
 SEPARATOR = ";"
 
 
+def _merge_code_skip(stats: dict[str, Any], reason: str) -> None:
+    if not reason:
+        return
+    prev = stats.get("code_skip")
+    stats["code_skip"] = reason if not prev else f"{prev}\n{reason}"
+
+
+def _property_values(parsed_test_case: dict[str, Any], prop_name: str) -> list[str]:
+    """Values of one JUnit <property name="..."> written by record_property."""
+    props = parsed_test_case.get("properties")
+    if isinstance(props, dict):
+        nodes: list[Any] = [props]
+    elif isinstance(props, list):
+        nodes = props
+    else:
+        return []
+    values: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        raw = node.get("property")
+        entries = raw if isinstance(raw, list) else [raw]
+        for entry in entries:
+            if not isinstance(entry, dict) or entry.get("name") != prop_name:
+                continue
+            value = entry.get("value")
+            if value is None or value == "":
+                continue
+            values.append(str(value))
+    return values
+
+
 def process_report(
     report: Path,
 ) -> dict[str, dict[str, Any]]:
@@ -58,7 +90,8 @@ def process_report(
         # Skips whose message carries num_red are the enabled-test accounting
         # skip. Any other JUnit skip is a code skip: keep the reason text and
         # do not count it as a pass. A bypassed test that then passes or fails
-        # is not a JUnit skip, so it still follows the green/red path below.
+        # is not a JUnit skip. record_property("code_skip", reason) shows up
+        # as a <property> on that case: keep the reason and still count it.
         skipped = parsed_test_case.get("skipped", None)
 
         # NB: Regular ONNX tests could return a list of subskips here where each item in the
@@ -86,10 +119,7 @@ def process_report(
         if isinstance(skipped, dict):
             skip_message = skipped.get("message", "")
         if skipped and "num_red" not in skip_message:
-            prev = all_tests[disabled_test_id].get("code_skip")
-            all_tests[disabled_test_id]["code_skip"] = (
-                skip_message if not prev else f"{prev}\n{skip_message}"
-            )
+            _merge_code_skip(all_tests[disabled_test_id], skip_message)
             continue
 
         # Check if the test is a failure
@@ -110,6 +140,12 @@ def process_report(
             all_tests[disabled_test_id]["num_red"] += 1
         else:
             all_tests[disabled_test_id]["num_green"] += 1
+
+        # Accounting skips stay the JSON counts. A pass or fail that still
+        # carries the original code-skip reason is counted above and kept.
+        if not skipped:
+            for reason in _property_values(parsed_test_case, "code_skip"):
+                _merge_code_skip(all_tests[disabled_test_id], reason)
 
     return all_tests
 
@@ -178,17 +214,58 @@ def prepare_record(
     return key, record
 
 
+def _code_skip_text(stats: dict[str, Any]) -> str:
+    reason = stats.get("code_skip")
+    if not isinstance(reason, str):
+        return ""
+    return reason
+
+
+def prepare_code_skip_record(
+    workflow_id: int,
+    workflow_run_attempt: int,
+    name: str,
+    classname: str,
+    filename: str,
+    num_green: int,
+    num_red: int,
+    code_skip: str,
+) -> dict[str, Any]:
+    """Code-skip row. No flaky key; ClickHouse reads that on the other collection."""
+    return {
+        "workflow_id": workflow_id,
+        "workflow_run_attempt": workflow_run_attempt,
+        "name": name,
+        "classname": classname,
+        "filename": filename,
+        "num_green": num_green,
+        "num_red": num_red,
+        "code_skip": code_skip,
+    }
+
+
 def save_results(
     workflow_id: int,
     workflow_run_attempt: int,
     all_tests: dict[str, dict[str, Any]],
 ) -> None:
     """
-    Save the result to S3, which then gets put into the HUD backend database
+    Save the result to S3, which then gets put into the HUD backend database.
+
+    Rows with a code_skip reason go to rerun_disabled_code_skips and are not
+    mixed into rerun_disabled_tests. A still-skipped code skip is 0/0; putting
+    that in the flaky collection blocks the flaky bot.
     """
+    counted_tests = {
+        name: stats for name, stats in all_tests.items() if not _code_skip_text(stats)
+    }
+    code_skip_tests = {
+        name: stats for name, stats in all_tests.items() if _code_skip_text(stats)
+    }
+
     should_be_enabled_tests = {
         name: stats
-        for name, stats in all_tests.items()
+        for name, stats in counted_tests.items()
         if "num_green" in stats
         and stats["num_green"]
         and "num_red" in stats
@@ -196,15 +273,15 @@ def save_results(
     }
     still_flaky_tests = {
         name: stats
-        for name, stats in all_tests.items()
+        for name, stats in counted_tests.items()
         if name not in should_be_enabled_tests
     }
 
     records = {}
-    for test_id, stats in all_tests.items():
+    for test_id, stats in counted_tests.items():
         num_green = stats.get("num_green", 0)
         num_red = stats.get("num_red", 0)
-        disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
+        name, classname, filename = get_disabled_test_name(test_id)[1:]
 
         key, record = prepare_record(
             workflow_id=workflow_id,
@@ -217,6 +294,33 @@ def save_results(
             num_red=num_red,
         )
         records[key] = record
+
+    code_records = []
+    n_passed = 0
+    n_failed = 0
+    n_still_skipped = 0
+    for test_id, stats in code_skip_tests.items():
+        num_green = stats.get("num_green", 0)
+        num_red = stats.get("num_red", 0)
+        name, classname, filename = get_disabled_test_name(test_id)[1:]
+        code_records.append(
+            prepare_code_skip_record(
+                workflow_id=workflow_id,
+                workflow_run_attempt=workflow_run_attempt,
+                name=name,
+                classname=classname,
+                filename=filename,
+                num_green=num_green,
+                num_red=num_red,
+                code_skip=_code_skip_text(stats),
+            )
+        )
+        if num_green > 0 and num_red == 0:
+            n_passed += 1
+        elif num_red > 0:
+            n_failed += 1
+        else:
+            n_still_skipped += 1
 
     # Log the results
     print(f"The following {len(should_be_enabled_tests)} tests should be re-enabled:")
@@ -234,12 +338,26 @@ def save_results(
             f"  {disabled_test_name} from {filename}, failing {num_red}/{num_red + num_green}"
         )
 
-    upload_workflow_stats_to_s3(
-        workflow_id,
-        workflow_run_attempt,
-        "rerun_disabled_tests",
-        list(records.values()),
+    print(
+        "rerun_disabled_code_skips:"
+        f" {n_passed} passed, {n_failed} failed, {n_still_skipped} still skipped"
     )
+
+    rerun_docs = list(records.values())
+    if rerun_docs:
+        upload_workflow_stats_to_s3(
+            workflow_id,
+            workflow_run_attempt,
+            "rerun_disabled_tests",
+            rerun_docs,
+        )
+    if code_records:
+        upload_workflow_stats_to_s3(
+            workflow_id,
+            workflow_run_attempt,
+            "rerun_disabled_code_skips",
+            code_records,
+        )
 
 
 def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
@@ -268,11 +386,8 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
                 all_tests[name]["num_green"] += stats.get("num_green", 0)
                 all_tests[name]["num_red"] += stats.get("num_red", 0)
                 extra = stats.get("code_skip")
-                if extra:
-                    prev = all_tests[name].get("code_skip")
-                    all_tests[name]["code_skip"] = (
-                        extra if not prev else f"{prev}\n{extra}"
-                    )
+                if isinstance(extra, str):
+                    _merge_code_skip(all_tests[name], extra)
 
     save_results(
         workflow_run_id,
