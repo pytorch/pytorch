@@ -115,6 +115,11 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::s
   TORCH_CHECK(root < team_size, "root must be smaller than group size");
 
   auto stream = at::cuda::getCurrentCUDAStream();
+  // Sync the team before the collective. Unlike NVSHMEM, rocSHMEM's broadcast
+  // does not implicitly ensure all PEs' symmetric buffers are consistent first,
+  // so a broadcast issued right after a (re)allocation -- e.g. a recycled MemPool
+  // buffer -- can land no data on non-root PEs. See test_mempool_tensor_factory.
+  rocshmem_barrier_on_stream(team, stream);
   rocshmem_broadcastmem_on_stream(team, buffer_ptr, buffer_ptr, buffer_size, root, stream);
   return input;
 }
