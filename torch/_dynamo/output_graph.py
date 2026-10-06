@@ -166,6 +166,7 @@ from .utils import (
     nn_module_proxy,
     same,
     set_example_value,
+    temporarily_clear_torch_function_mode_stack,
 )
 from .variables.builder import (
     BackwardStateGraphArg,
@@ -184,7 +185,7 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
-from .variables.user_defined import UserDefinedDictVariable
+from .variables.user_defined import RandomCallOnSource, UserDefinedDictVariable
 
 
 if TYPE_CHECKING:
@@ -344,9 +345,17 @@ class GraphCompileReason:
             graph_break_reasons.append(self)
 
 
-def _get_gen_rand_values_fn(random_calls: Any) -> Callable[[], list[Any]]:
-    def _gen_rand_values() -> list[Any]:
-        return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
+def _get_gen_rand_values_fn(random_calls: Any) -> Callable[..., list[Any]]:
+    # replay_objs holds the runtime random.Random objects for the
+    # RandomCallOnSource entries, in random_calls order.
+    def _gen_rand_values(*replay_objs: Any) -> list[Any]:
+        objs = iter(replay_objs)
+        values = []
+        for fn, args, kwargs in random_calls:
+            if isinstance(fn, RandomCallOnSource):
+                fn = getattr(next(objs), fn.method_name)
+            values.append(fn(*args, **kwargs))
+        return values
 
     return _gen_rand_values
 
@@ -922,8 +931,8 @@ class OutputGraph(OutputGraphCommon):
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
 
-        # Used to wrap the compiled graph at runtime with
-        # DisableTorchFunctionSubclass to prevent double dispatch.
+        # Used to prevent inlined subclass __torch_function__ dispatch from
+        # running again when the compiled graph executes.
         self.torch_function_subclass_inlined = False
 
         # Tracks if the output graph has a user defined allowed function in the
@@ -964,7 +973,11 @@ class OutputGraph(OutputGraphCommon):
         # random_calls tracks calls to random() and random_values_var stores the name of
         # the variable that stores __gen_rand_values results.
         self.random_calls: list[
-            tuple[Callable[..., object], tuple[object, ...], dict[str, object]]
+            tuple[
+                Callable[..., object] | RandomCallOnSource,
+                tuple[object, ...],
+                dict[str, object],
+            ]
         ] = []
         self.random_values_var: Any = None
 
@@ -1052,13 +1065,11 @@ class OutputGraph(OutputGraphCommon):
                         var.value, _ExportModuleSpecTrackerDict
                     ):
                         if populate_export_metadata:
-                            if var._base_vt is None:
-                                raise AssertionError("var._base_vt must not be None")
                             for (
                                 k,
                                 v,
                             ) in (
-                                var._base_vt.items.items()  # pyrefly: ignore[missing-attribute]
+                                var.items.items()  # pyrefly: ignore[missing-attribute]
                             ):
                                 # pyrefly: ignore [implicit-any]
                                 specs = {}
@@ -2207,7 +2218,17 @@ class OutputGraph(OutputGraphCommon):
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
             )
-            random_calls_instructions.extend(create_call_function(0, False))
+            replay_sources = [
+                fn.source
+                for fn, _, _ in self.random_calls
+                if isinstance(fn, RandomCallOnSource)
+            ]
+            for source in replay_sources:
+                codegen(source)
+            random_calls_instructions.extend(codegen.get_instructions())
+            random_calls_instructions.extend(
+                create_call_function(len(replay_sources), False)
+            )
             random_calls_instructions.append(
                 codegen.create_store(self.random_values_var),
             )
@@ -3111,19 +3132,28 @@ class OutputGraph(OutputGraphCommon):
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 
-            # If __torch_function__ subclass dispatch was inlined during
-            # tracing, wrap the compiled graph to disable __torch_function__
-            # at runtime, preventing double dispatch (the C++ dispatcher
-            # would otherwise re-trigger __torch_function__ on subclass
-            # inputs that the graph already handles).
+            # Clear the compile-time mode stack while running the graph so its
+            # effects are not applied twice. Keep mode dispatch enabled because
+            # the backend may install its own modes while the graph runs.
+            if self.torch_function_mode_stack:
+                mode_compiled_fn = compiled_fn
+
+                def _clear_modes_wrapper(*args, **kwargs):
+                    with temporarily_clear_torch_function_mode_stack():
+                        return mode_compiled_fn(*args, **kwargs)
+
+                compiled_fn = _clear_modes_wrapper
+
             if self.torch_function_subclass_inlined:
-                real_compiled_fn = compiled_fn
+                # Subclass inputs would otherwise re-trigger the override that
+                # the graph already handles.
+                subclass_compiled_fn = compiled_fn
 
-                def _tf_disabled_wrapper(*args, **kwargs):
+                def _tf_subclass_disabled_wrapper(*args, **kwargs):
                     with torch._C.DisableTorchFunctionSubclass():
-                        return real_compiled_fn(*args, **kwargs)
+                        return subclass_compiled_fn(*args, **kwargs)
 
-                compiled_fn = _tf_disabled_wrapper
+                compiled_fn = _tf_subclass_disabled_wrapper
 
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
@@ -3212,7 +3242,7 @@ class OutputGraph(OutputGraphCommon):
                 )
 
                 tmp_vars = []
-                for constructor in index_to_bytecode_constructor.values():
+                for constructor in index_to_bytecode_constructor:
                     constructor(cg)
                     var_name = (
                         self.new_var()

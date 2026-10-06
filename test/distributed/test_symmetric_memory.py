@@ -10,7 +10,7 @@ import sys
 import tempfile
 import textwrap
 from contextlib import contextmanager, nullcontext
-from unittest import skipIf, skipUnless
+from unittest import mock, skipIf, skipUnless
 
 import torch
 import torch.distributed as dist
@@ -57,7 +57,10 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    getRocmVersion,
     instantiate_parametrized_tests,
+    isRocmArchAnyOf,
+    lazy_skip_if,
     MI350_ARCH,
     parametrize,
     requires_cuda,
@@ -728,6 +731,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Hangs at 4 ranks on gfx950 CI distributed runners (file timeout / SIGINT,
+    # no JUnit row). Same P2P/symm_mem family as the AsyncTPTest MI350 skip;
+    # not a min-gpus filter bug. Skipped until the runner P2P path is fixed.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_subgroup(self) -> None:
         self._init_process()
@@ -993,6 +1000,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             t.fill_(self.rank + 10.0)
 
         torch.cuda.synchronize()
+        # The fill follows the last barrier, so nothing orders a peer's fill
+        # against this rank's read below. Local synchronize only covers this
+        # device.
+        dist.barrier()
         buf = hdl.get_buffer(peer, (64,), torch.float32)
         expected = torch.full((64,), peer + 10.0, device="cuda")
         self.assertEqual(buf, expected)
@@ -1035,6 +1046,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             t.fill_(self.rank + 100.0)
 
         torch.cuda.synchronize()
+        # wait_signal only shows that prev_peer sent its signal, which precedes
+        # its fill, so nothing orders that fill against this rank's read below.
+        # Local synchronize only covers this device.
+        dist.barrier()
         buf = hdl.get_buffer(prev_peer, (64,), torch.float32)
         expected = torch.full((64,), prev_peer + 100.0, device="cuda")
         self.assertEqual(buf, expected)
@@ -1424,11 +1439,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
-# The first AsyncTPTest case to execute hangs in its subprocess on the gfx950
-# CI distributed runners (whichever test that is), while the whole class passes
-# locally on gfx950 at world sizes 2/4/8 and on the mi300 CI shard with the same
-# ROCm image; skipped on that arch until it can be investigated on those runners.
-@skip_if_rocm_arch_multiprocess(MI350_ARCH)
+@lazy_skip_if(
+    lambda: TEST_WITH_ROCM
+    and isRocmArchAnyOf(MI350_ARCH)
+    and getRocmVersion() < (10, 1),
+    "symmetric memory hangs on MI350 CI runners before ROCm 10.1",
+)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
@@ -1442,6 +1458,19 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.use_deterministic_algorithms(True)
         torch.set_deterministic_debug_mode("warn")
         torch.utils.deterministic.fill_uninitialized_memory = True
+
+    def _assert_matmul_accuracy(self, out, baseline, A, B):
+        # Two GEMMs that sum K in different orders legitimately differ near zero,
+        # so bound each output's float64 error by the baseline's plus the fp32
+        # accumulation error bound sqrt(K) * eps * (|A| @ |B|).
+        A, B = A.double(), B.double()
+        reference = A @ B
+        slack = A.shape[1] ** 0.5 * torch.finfo(torch.float32).eps * (A.abs() @ B.abs())
+        out_err = (out.double() - reference).abs()
+        baseline_err = (baseline.double() - reference).abs()
+        excess = out_err - baseline_err - slack
+        worst = divmod(excess.argmax().item(), excess.shape[1])
+        self.assertLessEqual(excess.max().item(), 0.0, f"at index {worst}")
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -1486,7 +1515,6 @@ class AsyncTPTest(MultiProcContinuousTest):
                     f"Expected mm_output_0.stride() to be truthy, got {mm_output_0.stride()}"
                 )
 
-    @skip_if_rocm_multiprocess  # this requires async_input_mm support
     @skipIf(
         not SM90OrLater,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
@@ -1498,10 +1526,10 @@ class AsyncTPTest(MultiProcContinuousTest):
         SM100OrLater,
         "https://github.com/pytorch/pytorch/issues/162917",
     )
+    @mock.patch.dict(os.environ, {"TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP": "1"})
     def test_fused_all_gather_matmul_native(
         self, symm_mem_input: bool, is_b_row_major: bool
     ) -> None:
-        os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "1"
         self._init_process()
 
         # See _should_use_fused_all_gather_matmul_native() for the algo
@@ -1534,6 +1562,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         )
         with torch.profiler.profile(
             activities=[
+                torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA,
             ],
         ) as prof:
@@ -1541,13 +1570,58 @@ class AsyncTPTest(MultiProcContinuousTest):
                 A_shard, [B], gather_dim=0, group_name=group_name
             )
 
-        self.assertTrue(
-            any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
+        # The ROCm profiler can drop the GEMM's kernel record, so check for the
+        # op's CPU event instead.
+        event_name = (
+            "symm_mem::_async_input_mm"
+            if TEST_WITH_ROCM
+            else "PersistentAsyncInputScheduler"
         )
+        self.assertTrue(any(event_name in event.key for event in prof.events()))
 
         torch.testing.assert_close(ag_target, ag_baseline)
-        torch.testing.assert_close(mm_target[0], mm_baseline[0])
-        os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "0"
+        self._assert_matmul_accuracy(mm_target[0], mm_baseline[0], ag_baseline, B)
+
+    @skipIf(not TEST_WITH_ROCM, "Native graph capture is only validated on ROCm")
+    @skip_if_lt_x_gpu(2)
+    @mock.patch.dict(os.environ, {"TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP": "1"})
+    def test_fused_all_gather_matmul_native_graph_capture(self) -> None:
+        self._init_process()
+
+        M = 4096
+        N = 1024
+        K = 1024
+        group_name = dist.group.WORLD.group_name
+        torch.manual_seed(42 + self.rank)
+        A_shard = torch.rand(
+            M // self.world_size, K, dtype=torch.bfloat16, device=self.device
+        )
+        B = torch.rand(K, N, dtype=torch.bfloat16, device=self.device)
+        self.assertTrue(
+            symm_mem._should_use_fused_all_gather_matmul_native(
+                A_shard, [B], 0, group_name
+            )
+        )
+
+        ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
+            A_shard, [B], gather_dim=0, group_name=group_name
+        )
+        # Allocates the symmetric memory workspace, which capture cannot do.
+        torch.ops.symm_mem.fused_all_gather_matmul(
+            A_shard, [B], gather_dim=0, group_name=group_name
+        )
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
+                A_shard, [B], gather_dim=0, group_name=group_name
+            )
+        for _ in range(3):
+            ag_target.zero_()
+            mm_target[0].zero_()
+            graph.replay()
+            torch.cuda.synchronize()
+            torch.testing.assert_close(ag_target, ag_baseline)
+            self._assert_matmul_accuracy(mm_target[0], mm_baseline[0], ag_baseline, B)
 
     @skip_if_lt_x_gpu(2)
     @requires_multicast_support()
@@ -1746,7 +1820,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.testing.assert_close(output_0, output_2, rtol=1e-2, atol=1e-2)
         self.assertEqual(output_0.stride(), output_2.stride())
 
-    @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
     @parametrize("scatter_dim", [0, 1])
@@ -2355,6 +2428,10 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Hangs at 4 ranks on gfx950 CI distributed runners (recorded fail ~1201s).
+    # Same P2P/symm_mem family as the AsyncTPTest MI350 skip; not a min-gpus
+    # filter bug. Skipped until the runner P2P path is fixed.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_reduce_scatter(self) -> None:
         self._init_process()

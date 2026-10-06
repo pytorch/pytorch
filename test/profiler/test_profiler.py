@@ -3460,7 +3460,9 @@ class TestExperimentalUtils(TestCase):
         )
 
         self.assertEqual(event.metadata, typed_metadata)
-        self.assertEqual(event.event_metadata.grid, [1, 2, 3])
+        with self.assertWarnsRegex(FutureWarning, "event_metadata.*metadata"):
+            event_metadata = event.event_metadata
+        self.assertEqual(event_metadata.grid, [1, 2, 3])
 
 
 class TestExperimentalUtilsDevice(TestCase):

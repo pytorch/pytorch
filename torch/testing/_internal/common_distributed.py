@@ -71,6 +71,7 @@ if _TORCHCOMM_AVAILABLE:
         ("gloo", "TORCHCOMM_HAS_GLOO"),
         ("xccl", "TORCHCOMM_HAS_XCCL"),
         ("nccl", "TORCHCOMM_HAS_NCCL"),
+        ("rccl", "TORCHCOMM_HAS_RCCL"),
         ("rcclx", "TORCHCOMM_HAS_RCCLX"),
         ("ncclx", "TORCHCOMM_HAS_NCCLX"),
     ]:
@@ -263,6 +264,8 @@ def require_n_gpus_for_nccl_backend(n, backend):
             else:
                 return func(*args, **kwargs)
 
+        if backend == "nccl":
+            wrapper._min_gpus_required = n
         return wrapper
 
     return decorator
@@ -318,6 +321,9 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
+        # Record the accelerator requirement so the collection-time GPU-count
+        # resolver (test/conftest.py) can read it without running the test.
+        wrapper._min_gpus_required = x
         return wrapper
 
     return decorator
@@ -381,6 +387,8 @@ def nccl_skip_if_lt_x_gpu(backend, x):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
+        if backend == "nccl":
+            wrapper._min_gpus_required = x
         return wrapper
 
     return decorator
@@ -1948,8 +1956,11 @@ class MultiProcContinuousTest(TestCase):
         # Ensure all the ranks use the same seed.
         common_utils.set_rng_seed()
 
-        # Run the test function
-        test_fn(**kwargs)
+        # Workers call the test directly, so unittest won't run cleanups.
+        try:
+            test_fn(**kwargs)
+        finally:
+            self.doCleanups()
 
     @classmethod
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
@@ -2304,6 +2315,8 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
             "rcclx": TORCHCOMM_HAS_RCCLX,
         }
         backend_name = self.backend(device)
+        if TEST_WITH_ROCM and backend_name == "nccl":
+            backend_name = "rccl"
         if backend_name in backend_flags and not backend_flags[backend_name]:
             self.skipTest(f"torchcomms {backend_name} backend is not available")
 
