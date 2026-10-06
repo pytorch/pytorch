@@ -558,8 +558,7 @@ Tensor isinf(const Tensor& self) {
 
 Tensor isfinite(const Tensor& self) {
   // Note: Integral tensor values are always finite
-  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true) ||
-      self.scalar_type() == kFloat8_e8m0fnu) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
 
