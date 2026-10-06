@@ -971,3 +971,7 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
       get_torch_exception_what_without_backtrace()
           .c_str();
 }
+
+AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled() {
+  return c10::WarningUtils::get_warnAlways();
+}

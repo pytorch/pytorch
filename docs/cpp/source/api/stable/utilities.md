@@ -115,6 +115,47 @@ STD_CUDA_KERNEL_LAUNCH_CHECK();
 
 Minimum compatible version: PyTorch 2.10.
 ```
+
+## Warning Macros
+
+These macros provide stable ABI equivalents of `TORCH_WARN` and
+`TORCH_WARN_ONCE`, with arguments streamed into the message like
+`STD_TORCH_CHECK`. On PyTorch 2.15 and later the warning reaches Python
+as a `UserWarning`; earlier versions print it to stderr.
+
+### STD_TORCH_WARN
+
+```{c:macro} STD_TORCH_WARN(...)
+
+Emits a warning with the given message.
+
+**Example:**
+
+```cpp
+STD_TORCH_WARN("my_op got n=", n, ", which may be slow");
+```
+
+Minimum compatible version: PyTorch 2.10.
+Build time minimum version: PyTorch 2.16.
+```
+### STD_TORCH_WARN_ONCE
+
+```{c:macro} STD_TORCH_WARN_ONCE(...)
+
+Emits a warning the first time the call site is reached. Extensions
+targeting PyTorch 2.16 or later also honor `torch.set_warn_always(True)`
+like `TORCH_WARN_ONCE`; earlier targets ignore it.
+
+**Example:**
+
+```cpp
+STD_TORCH_WARN_ONCE("my_op is deprecated, use my_new_op instead");
+```
+
+Minimum compatible version: PyTorch 2.10.
+Build time minimum version: PyTorch 2.16.
+```
+
 ## Header-Only Utilities
 
 The `torch::headeronly` namespace provides header-only versions of common
