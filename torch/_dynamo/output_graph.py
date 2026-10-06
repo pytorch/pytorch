@@ -4865,15 +4865,17 @@ class SubgraphTracer(fx.Tracer):
         # so aliased inputs are only safe if none of them is written.
         placeholders = self.graph.find_nodes(op="placeholder")
         storages: dict[int, set[StorageWeakRef]] = {}
+        storage_counts: collections.Counter[StorageWeakRef] = collections.Counter()
         for idx, node in enumerate(placeholders):
             example_value = _collect_fake_inputs([node])[0]
             if isinstance(example_value, torch.Tensor):
                 storages[idx] = get_tensor_storages(example_value)
+                storage_counts.update(storages[idx])
 
         mutated_indices = tuple(
             i
             for i in self.has_input_mutation().mutated_input_indices
-            if any(storages[i] & s for j, s in storages.items() if j != i)
+            if any(storage_counts[s] > 1 for s in storages[i])
         )
         if mutated_indices:
             mutated_nodes = [placeholders[i] for i in mutated_indices]
