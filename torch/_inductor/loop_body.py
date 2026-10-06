@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import collections
+import copy
 import functools
 import itertools
 import re
@@ -153,13 +154,28 @@ class LoopBody:
         meta = node.args[-1]
         return meta["num_reduction_dims"]
 
-    def extract_pw_from_reduction(self):
-        self.root_block = self.root_block.extract_pw_from_reduction()
-        self.has_partial_accumulate = True
-        self.iter_vars = self.iter_vars + self.reduce_vars
-        self.reduce_vars = []
-        self.sizes = (self.sizes[0] + self.sizes[1], tuple())
-        return self
+    def extract_pw_from_reduction(self) -> LoopBody:
+        """A copy of this body whose reduction is a partial accumulate over
+        the reduction vars, now pointwise. This body is left unchanged, so
+        loop state snapshots that hold it can restore it."""
+        body = copy.copy(self)
+        # Drop cache_on_self results, which describe this body's graph.
+        for name in [k for k in vars(body) if k.endswith("_cache")]:
+            delattr(body, name)
+        # Rebind the blocks and submodules to the copy, as _init_with_copy does.
+        body.subblocks = {k: v.clone(body) for k, v in self.subblocks.items()}
+        submodules = {**self.submodules}
+        submodules.pop("get_index")
+        body.submodules = {
+            "get_index": body.get_index,
+            **{k: v.clone(body) for k, v in submodules.items()},  # type: ignore[attr-defined]
+        }
+        body.root_block = self.root_block.clone(body).extract_pw_from_reduction()
+        body.has_partial_accumulate = True
+        body.iter_vars = self.iter_vars + self.reduce_vars
+        body.reduce_vars = []
+        body.sizes = (self.sizes[0] + self.sizes[1], tuple())
+        return body
 
     def _init_with_tracing(self, fn, args):
         """Do an FX trace of an arbitrary callable to construct self"""
@@ -645,6 +661,8 @@ class LoopBodyBlock:
         self.graph = tracer.graph
 
     def extract_pw_from_reduction(self):
+        # Rewrite a copy of the graph, which clones share.
+        self.graph = copy.deepcopy(self.graph)
         red = None
         store = None
         for node in self.graph.nodes:
