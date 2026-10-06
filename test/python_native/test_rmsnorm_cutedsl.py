@@ -256,6 +256,8 @@ class TestRmsNormJit(TestCase):
     def test_autograd_and_cuda_graph(
         self, device: str, dtype: torch.dtype, n: int
     ) -> None:
+        from torch.profiler import profile, ProfilerActivity
+
         x = torch.randn(37, n, device=device, dtype=dtype, requires_grad=True)
         w = torch.randn(n, device=device, dtype=dtype, requires_grad=True)
         dy = torch.randn_like(x)
@@ -276,7 +278,11 @@ class TestRmsNormJit(TestCase):
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
                 actual = run()
-            graph.replay()
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                graph.replay()
+        names = [e.name for e in prof.events() if e.device_type.name == "CUDA"]
+        for kernel in ("RMSNorm_", "RMSNormBackward", "reduce_rows"):
+            self.assertTrue(any(kernel in name for name in names), (kernel, names))
         self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
 
 
