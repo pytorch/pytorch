@@ -1,0 +1,33 @@
+name: Auto PR Triage Request
+
+# Auto PR Triage needs the bedrock environment, which only main can deploy to.
+# pull_request_target runs from the PR's base branch, and ghstack opens PRs
+# against gh/<user>/<N>/base branches, so this workflow only admits entry
+# events. Its completion starts auto-pr-triage.yml from main via workflow_run,
+# and the run name passes along the PR number and event action.
+run-name: "Auto PR Triage Request #${{ github.event.pull_request.number }} ${{ github.event.action }}"
+
+on:
+  pull_request_target:
+    types: [labeled, ready_for_review]
+
+permissions: {}
+
+jobs:
+  request:
+    if: >-
+      github.repository_owner == 'pytorch' &&
+      github.event.pull_request.state == 'open' &&
+      (github.event.pull_request.base.ref == 'main' ||
+       (startsWith(github.event.pull_request.base.ref, 'gh/') &&
+        endsWith(github.event.pull_request.base.ref, '/base'))) &&
+      !github.event.pull_request.draft &&
+      ((github.event.action == 'labeled' &&
+        github.event.label.name == 'open source') ||
+       (github.event.action == 'ready_for_review' &&
+        contains(github.event.pull_request.labels.*.name, 'open source')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Request Auto PR Triage
+        run: echo "Auto PR Triage starts from main when this run completes."

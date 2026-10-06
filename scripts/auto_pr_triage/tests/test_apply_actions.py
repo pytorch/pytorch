@@ -36,6 +36,24 @@ ARTIFACTS = (
 )
 
 
+def read_workflow_step_script(step_name: str) -> str:
+    """Return the run script of a step in the Auto PR Triage workflow."""
+
+    workflow = (REPOSITORY_ROOT / ".github/workflows/auto-pr-triage.yml").read_text()
+    lines = workflow.splitlines()
+    step_index = lines.index(f"      - name: {step_name}")
+    run_index = lines.index("        run: |", step_index)
+    script_lines = []
+    for line in lines[run_index + 1 :]:
+        if line.startswith("          "):
+            script_lines.append(line[10:])
+        elif not line:
+            script_lines.append("")
+        else:
+            break
+    return "\n".join(script_lines)
+
+
 class GitHubClientTest(unittest.TestCase):
     def test_client_sends_mutation_payload_through_stdin(self) -> None:
         github = GitHubClient()
@@ -425,18 +443,37 @@ class ApplyMainTest(unittest.TestCase):
         self.assertNotIn("should-apply", action)
         self.assertNotIn("expected-head-sha", workflow)
         self.assertNotIn("expected-head-sha", action)
-        self.assertIn("types: [labeled, ready_for_review]", workflow)
+        request_workflow = (
+            REPOSITORY_ROOT / ".github/workflows/auto-pr-triage-request.yml"
+        ).read_text()
+        self.assertIn("name: Auto PR Triage Request\n", request_workflow)
+        self.assertIn("types: [labeled, ready_for_review]", request_workflow)
+        self.assertIn("permissions: {}", request_workflow)
+        self.assertIn(
+            'run-name: "Auto PR Triage Request '
+            '#${{ github.event.pull_request.number }} ${{ github.event.action }}"',
+            request_workflow,
+        )
+        self.assertIn("github.event.pull_request.state == 'open'", request_workflow)
+        self.assertIn("!github.event.pull_request.draft", request_workflow)
+        self.assertIn(
+            "contains(github.event.pull_request.labels.*.name, 'open source')",
+            request_workflow,
+        )
+        self.assertIn("workflows: [Auto PR Triage Request]", workflow)
         self.assertIn(
             "  analyze:\n    if: >-\n      github.repository_owner == 'pytorch' &&",
             workflow,
         )
-        self.assertIn("github.event.pull_request.state == 'open'", workflow)
-        self.assertIn("github.event.pull_request.base.ref == 'main'", workflow)
-        self.assertIn("!github.event.pull_request.draft", workflow)
-        self.assertIn("github.event.action == 'ready_for_review'", workflow)
         self.assertIn(
-            "contains(github.event.pull_request.labels.*.name, 'open source')",
-            workflow,
+            "github.event.workflow_run.event == 'pull_request_target'", workflow
+        )
+        self.assertIn("github.event.workflow_run.conclusion == 'success'", workflow)
+        self.assertNotIn("github.event.pull_request", workflow)
+        self.assertNotIn("expected-base-ref", workflow)
+        self.assertNotIn("expected-base-ref", action)
+        self.assertEqual(
+            workflow.count("PR_NUMBER: ${{ needs.analyze.outputs.pr-number }}"), 2
         )
         self.assertIn("READY_FOR_REVIEW_EVENT", workflow)
         self.assertIn("pageInfo { hasPreviousPage }", workflow)
@@ -474,7 +511,7 @@ class ApplyMainTest(unittest.TestCase):
         self.assertIn("labels[]=bot-triage-error", workflow)
         self.assertIn("Unable to add bot-triage-error", workflow)
         self.assertIn(
-            "group: auto-pr-triage-${{ github.event.pull_request.number }}",
+            "group: auto-pr-triage-${{ github.event.workflow_run.head_repository.full_name }}",
             workflow,
         )
         for artifact in ARTIFACTS:
@@ -483,23 +520,9 @@ class ApplyMainTest(unittest.TestCase):
         self.assertIn("always() &&", action)
 
     def test_workflow_admits_label_events_and_first_ready_event(self) -> None:
-        workflow = (
-            REPOSITORY_ROOT / ".github/workflows/auto-pr-triage.yml"
-        ).read_text()
-        lines = workflow.splitlines()
-        step_index = lines.index(
-            "      - name: Admit the label event or the first ready event after it"
+        script = read_workflow_step_script(
+            "Admit the label event or the first ready event after it"
         )
-        run_index = lines.index("        run: |", step_index)
-        script_lines = []
-        for line in lines[run_index + 1 :]:
-            if line.startswith("          "):
-                script_lines.append(line[10:])
-            elif not line:
-                script_lines.append("")
-            else:
-                break
-        script = "\n".join(script_lines)
         label = {"__typename": "LabeledEvent", "label": {"name": "open source"}}
         ready = {"__typename": "ReadyForReviewEvent"}
         cases = (
@@ -562,6 +585,65 @@ class ApplyMainTest(unittest.TestCase):
                     self.assertEqual(
                         output_path.read_text().splitlines(),
                         [f"should-run={expected}"],
+                    )
+
+    def test_workflow_resolves_request_bound_to_its_head(self) -> None:
+        script = read_workflow_step_script("Resolve the requested PR")
+        request_head = {"HEAD_REPOSITORY": "fork/ciforge", "HEAD_REF": "fix"}
+        cases = (
+            ("Auto PR Triage Request #123 labeled", "fork/ciforge:fix", "labeled"),
+            (
+                "Auto PR Triage Request #123 ready_for_review",
+                "fork/ciforge:fix",
+                "ready_for_review",
+            ),
+            ("Auto PR Triage Request #123 labeled", "other/ciforge:fix", None),
+            ("Auto PR Triage Request #123 labeled", "fork/ciforge:other", None),
+            ("Auto PR Triage Request #123 closed", "fork/ciforge:fix", None),
+            ("Auto PR Triage Request #0123 labeled", "fork/ciforge:fix", None),
+            ("Fix a bug (#123)", "fork/ciforge:fix", None),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gh = root / "gh"
+            output_path = root / "github-output"
+            gh.write_text('#!/bin/sh\necho "$*" > "$GH_ARGS"\necho "$FAKE_PR_HEAD"\n')
+            gh.chmod(0o755)
+            for title, pr_head, expected_action in cases:
+                with self.subTest(title=title, pr_head=pr_head):
+                    output_path.write_text("")
+                    environment = {
+                        **os.environ,
+                        **request_head,
+                        "FAKE_PR_HEAD": pr_head,
+                        "GH_ARGS": str(root / "gh-args"),
+                        "GH_TOKEN": "token",
+                        "GITHUB_OUTPUT": str(output_path),
+                        "PATH": f"{root}:{os.environ['PATH']}",
+                        "REPOSITORY": "pytorch/ciforge",
+                        "REQUEST_TITLE": title,
+                    }
+                    result = subprocess.run(
+                        ["bash", "-eu", "-o", "pipefail", "-c", script],
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                        check=False,
+                    )
+                    if expected_action is None:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertEqual(output_path.read_text(), "")
+                        continue
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue(
+                        (root / "gh-args")
+                        .read_text()
+                        .startswith("api repos/pytorch/ciforge/pulls/123 ")
+                    )
+                    self.assertEqual(
+                        output_path.read_text().splitlines(),
+                        ["pr-number=123", f"event-action={expected_action}"],
                     )
 
 

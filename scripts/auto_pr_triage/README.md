@@ -69,8 +69,13 @@ uncoordinated race-closing reads to apply.
 
 ## Security model
 
-- `pull_request_target` runs only workflow and action code from the trusted
-  base commit, and the PR head is fetched as data, never checked out or run.
+- A permissionless `pull_request_target` workflow admits entry events from the
+  PR's base branch, and its completion starts the analysis through
+  `workflow_run`, which always runs workflow, action, and policy code from
+  `main`. A ghstack PR's base is a `gh/<user>/<N>/base` branch that anyone
+  with push access can edit, so the analysis treats the request as a claim: the
+  PR it names must have the head branch GitHub recorded for the request run.
+  The PR head is fetched as data, never checked out or run.
 - The LLM has no GitHub token and no file, shell, web, MCP, plugin, or subagent
   capability; its Bedrock session can only invoke the model.
 - The write-capable job runs only in live mode and receives only the bounded
@@ -126,10 +131,12 @@ input step logs each skipped line; a skipped line's owners get no provenance.
 
 ## Operating notes
 
-- **Prerequisites.** The base branch needs the workflow and composite action,
+- **Prerequisites.** `main` needs both workflows and the composite action,
   root `CODEOWNERS`, the two files in `.github/auto-pr-triage/`, and the
   `open source`, `actionable`, `triaged`, `bot-triaged`, `bot-triage-error`,
   and `missing actionable issue` labels. The workflow does not create labels.
+  The request workflow runs from the PR's base branch, so a ghstack stack is
+  triaged only after it is rebased onto a `main` that has the workflow.
 - **Shadow mode leaves no outcome label,** so a later eligible event analyzes
   the PR again. Labels such as `bot-shadow-close` and `bot-shadow-triaged` from
   earlier shadow runs are not handled state.
