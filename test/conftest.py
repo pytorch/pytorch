@@ -435,9 +435,49 @@ def _device_allows_rerun(item: Any, target: Any) -> bool:
     return getattr(cls, "device_type", None) == expected
 
 
+# Kept on the item until the test finishes, then written with record_property.
+_CODE_SKIP_REASON_ATTR = "_pt_code_skip_reason"
+# Class-level unittest.skip is cleared on the first method. Later methods
+# still need the original __unittest_skip_why__.
+_SAVED_SKIP_WHY_ATTR = "_pt_saved_skip_why"
+
+
+def _remember_code_skip_reason(item: Any, reason: Any) -> None:
+    if reason is None:
+        return
+    text = reason if isinstance(reason, str) else str(reason)
+    text = text.strip()
+    if not text:
+        return
+    prev = getattr(item, _CODE_SKIP_REASON_ATTR, None)
+    if isinstance(prev, str) and prev:
+        if text == prev or text in prev.split("\n"):
+            return
+        text = f"{prev}\n{text}"
+    try:
+        setattr(item, _CODE_SKIP_REASON_ATTR, text)
+    except (AttributeError, TypeError):
+        return
+
+
+def _unittest_skip_why(obj: Any) -> str:
+    why = getattr(obj, "__unittest_skip_why__", None)
+    if not why:
+        why = getattr(obj, _SAVED_SKIP_WHY_ATTR, None)
+    if not why:
+        return ""
+    return why if isinstance(why, str) else str(why)
+
+
 def _clear_unittest_skip(obj: Any) -> None:
     if not getattr(obj, "__unittest_skip__", False):
         return
+    why = getattr(obj, "__unittest_skip_why__", None)
+    if why:
+        try:
+            setattr(obj, _SAVED_SKIP_WHY_ATTR, why)
+        except (AttributeError, TypeError):
+            pass
     obj.__unittest_skip__ = False
     obj.__unittest_skip_why__ = ""
 
@@ -452,22 +492,45 @@ def _replace_item_obj(item: Any, replacement: Any) -> None:
         item.obj = replacement
 
 
+def _pytest_skip_reason(markers: list[Any]) -> str:
+    parts: list[str] = []
+    for marker in markers:
+        kwargs = getattr(marker, "kwargs", None)
+        reason = kwargs.get("reason") if isinstance(kwargs, dict) else None
+        if not reason:
+            args = getattr(marker, "args", None) or ()
+            if args:
+                reason = args[0]
+        if not reason:
+            continue
+        text = reason if isinstance(reason, str) else str(reason)
+        text = text.strip()
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
+
+
 def _enable_unconditional_unittest_skip(item: Any) -> bool:
     target = _skip_func(getattr(item, "obj", None))
     if _has_rerun_stamp(target) and _device_allows_rerun(item, target):
         wrapped = getattr(target, "__wrapped__", None)
         if wrapped is not None:
+            _remember_code_skip_reason(item, _unittest_skip_why(target))
             _copy_rerun_stamps(target, wrapped)
             _replace_item_obj(item, wrapped)
             return True
         if getattr(target, "__unittest_skip__", False):
+            _remember_code_skip_reason(item, _unittest_skip_why(target))
             _clear_unittest_skip(target)
             return True
     cls = getattr(item, "cls", None)
     class_stamped = cls is not None and _has_rerun_stamp(cls)
     if class_stamped and getattr(cls, "__unittest_skip__", False):
+        _remember_code_skip_reason(item, _unittest_skip_why(cls))
         _clear_unittest_skip(cls)
         return True
+    if class_stamped:
+        _remember_code_skip_reason(item, getattr(cls, _SAVED_SKIP_WHY_ATTR, None))
     return False
 
 
@@ -478,6 +541,7 @@ def _enable_unconditional_pytest_skip(item: Any) -> bool:
     # skipif is conditional. Do not clear it.
     if any(True for _ in item.iter_markers(name="skipif")):
         return False
+    _remember_code_skip_reason(item, _pytest_skip_reason(own_skip))
     item.own_markers[:] = [
         m for m in item.own_markers if getattr(m, "name", None) != "skip"
     ]
@@ -516,8 +580,9 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
     and XML outputs with junk. So we want this to run last when collecting tests.
 
     Unconditional unittest.skip, pytest.mark.skip, and known-failure code
-    skips are kept and their skip is cleared so the body runs. skipIf and
-    other capability skips are not cleared.
+    skips are kept and their skip is cleared so the body runs. The reason
+    is copied onto the item first. skipIf and other capability skips are
+    not cleared and do not get a code_skip property.
     """
     rerun_disabled_tests = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
     if not rerun_disabled_tests:
@@ -547,7 +612,10 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
         if not _keep_for_rerun(item, disabled_tests):
             continue
 
+        reason = getattr(item, _CODE_SKIP_REASON_ATTR, None)
         cpy = copy.copy(item)
+        if reason:
+            _remember_code_skip_reason(cpy, reason)
         cpy._initrequest()
 
         filtered_items.append(cpy)
@@ -555,6 +623,28 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
     items.clear()
     # NB: Need to edit items directly here to have the list reflected back to pytest
     items.extend(filtered_items)
+
+
+def _record_property(item: Any, name: str, value: str) -> None:
+    """Same write as pytest's record_property fixture."""
+    props = getattr(item, "user_properties", None)
+    if not isinstance(props, list):
+        return
+    for pair in props:
+        if isinstance(pair, tuple) and pair and pair[0] == name:
+            return
+    props.append((name, value))
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item: Any, call: Any) -> None:
+    # junitxml writes record_property values from the teardown report, which
+    # copies item.user_properties when that report is built.
+    if getattr(call, "when", None) == "teardown":
+        reason = getattr(item, _CODE_SKIP_REASON_ATTR, None)
+        if isinstance(reason, str) and reason:
+            _record_property(item, "code_skip", reason)
+    yield
 
 
 def _spawns_multiple_processes(

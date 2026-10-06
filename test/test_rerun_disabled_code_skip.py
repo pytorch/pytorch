@@ -525,7 +525,12 @@ class TestRerunDisabledCodeSkip(TestCase):
             report = Path(tmp) / "report.xml"
             suite = ET.Element("testsuite")
 
-            def add(name: str, kind: str, message: str = "") -> None:
+            def add(
+                name: str,
+                kind: str,
+                message: str = "",
+                code_skip: str = "",
+            ) -> None:
                 case = ET.SubElement(
                     suite,
                     "testcase",
@@ -537,6 +542,9 @@ class TestRerunDisabledCodeSkip(TestCase):
                     ET.SubElement(case, "skipped", message=message)
                 elif kind == "fail":
                     ET.SubElement(case, "failure", message=message)
+                if code_skip:
+                    props = ET.SubElement(case, "properties")
+                    ET.SubElement(props, "property", name="code_skip", value=code_skip)
 
             add("test_code_skip", "skip", "skipIfRocm: PTX test")
             add("test_pass", "pass")
@@ -545,6 +553,17 @@ class TestRerunDisabledCodeSkip(TestCase):
                 "test_accounted",
                 "skip",
                 json.dumps({"num_green": 1, "num_red": 2}),
+            )
+            add(
+                "test_code_pass",
+                "pass",
+                code_skip="skipIfRocm: known bug",
+            )
+            add(
+                "test_code_fail",
+                "fail",
+                "assertion failed",
+                code_skip="skipIfWindows: known failure",
             )
             ET.ElementTree(suite).write(report, encoding="unicode")
             stats = process_report(report)
@@ -564,6 +583,204 @@ class TestRerunDisabledCodeSkip(TestCase):
         self.assertEqual(accounted.get("num_green"), 1)
         self.assertEqual(accounted.get("num_red"), 2)
         self.assertEqual("code_skip" in accounted, False)
+        code_pass = stats["test_code_pass;pkg.Cls;test_mod.py"]
+        code_fail = stats["test_code_fail;pkg.Cls;test_mod.py"]
+        self.assertEqual(code_pass.get("code_skip"), "skipIfRocm: known bug")
+        self.assertEqual(code_pass.get("num_green"), 1)
+        self.assertEqual(code_pass.get("num_red"), 0)
+        self.assertEqual(code_fail.get("code_skip"), "skipIfWindows: known failure")
+        self.assertEqual(code_fail.get("num_green"), 0)
+        self.assertEqual(code_fail.get("num_red"), 1)
+
+    def test_save_results_splits_code_skip_collection(self) -> None:
+        sys.path.insert(0, str(_REPO))
+        import tools.stats.check_disabled_tests as check_disabled
+
+        uploaded: list[tuple[str, list]] = []
+
+        def fake_upload(
+            workflow_id: int,
+            workflow_run_attempt: int,
+            collection_name: str,
+            documents: list,
+        ) -> None:
+            uploaded.append((collection_name, documents))
+
+        original = check_disabled.upload_workflow_stats_to_s3
+        check_disabled.upload_workflow_stats_to_s3 = fake_upload
+        try:
+            check_disabled.save_results(
+                123,
+                2,
+                {
+                    "test_listed_pass;pkg.Cls;test_mod.py": {
+                        "num_green": 1,
+                        "num_red": 0,
+                    },
+                    "test_code_pass;pkg.Cls;test_mod.py": {
+                        "num_green": 1,
+                        "num_red": 0,
+                        "code_skip": "skipIfRocm: known bug",
+                    },
+                    "test_code_still;pkg.Cls;test_mod.py": {
+                        "num_green": 0,
+                        "num_red": 0,
+                        "code_skip": "skipIfRocm: PTX test",
+                    },
+                },
+            )
+        finally:
+            check_disabled.upload_workflow_stats_to_s3 = original
+
+        by_name = dict(uploaded)
+        self.assertEqual(
+            set(by_name),
+            {"rerun_disabled_tests", "rerun_disabled_code_skips"},
+        )
+        rerun_docs = by_name["rerun_disabled_tests"]
+        rerun_names = {doc["name"] for doc in rerun_docs}
+        self.assertEqual(rerun_names, {"test_listed_pass"})
+        listed = rerun_docs[0]
+        rerun_keys = {
+            "workflow_id",
+            "workflow_run_attempt",
+            "name",
+            "classname",
+            "filename",
+            "flaky",
+            "num_green",
+            "num_red",
+        }
+        self.assertEqual(set(listed), rerun_keys)
+        self.assertEqual(listed["flaky"], False)
+        self.assertEqual(listed["num_green"], 1)
+        self.assertEqual(listed["num_red"], 0)
+        self.assertEqual(listed["workflow_id"], 123)
+        self.assertEqual(listed["workflow_run_attempt"], 2)
+        self.assertEqual("code_skip" in listed, False)
+        self.assertEqual("test_code_pass" in rerun_names, False)
+        self.assertEqual("test_code_still" in rerun_names, False)
+
+        code_docs = {doc["name"]: doc for doc in by_name["rerun_disabled_code_skips"]}
+        code_keys = {
+            "workflow_id",
+            "workflow_run_attempt",
+            "name",
+            "classname",
+            "filename",
+            "num_green",
+            "num_red",
+            "code_skip",
+        }
+        passed = code_docs["test_code_pass"]
+        self.assertEqual(set(passed), code_keys)
+        self.assertEqual(passed["code_skip"], "skipIfRocm: known bug")
+        self.assertEqual(passed["num_green"], 1)
+        self.assertEqual(passed["num_red"], 0)
+        self.assertEqual("flaky" in passed, False)
+        still = code_docs["test_code_still"]
+        self.assertEqual(set(still), code_keys)
+        self.assertEqual(still["code_skip"], "skipIfRocm: PTX test")
+        self.assertEqual(still["num_green"], 0)
+        self.assertEqual(still["num_red"], 0)
+        self.assertEqual("flaky" in still, False)
+
+    def test_junit_records_code_skip_after_body_runs(self) -> None:
+        test_dir = Path(__file__).resolve().parent
+        child_src = textwrap.dedent(
+            """\
+            import importlib.util
+            import os
+            import unittest
+
+            spec = importlib.util.spec_from_file_location(
+                "rerun_code_skip", os.environ["RERUN_CODE_SKIP_PY"]
+            )
+            helper = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(helper)
+
+            @helper.rerun_code_skip("skipIfWindows: known failure")
+            def test_known_pass():
+                pass
+
+            @helper.rerun_code_skip("skipIfWindows: known failure fails")
+            def test_known_fail():
+                raise AssertionError("body ran")
+
+            @unittest.skipIf(True, "PTX test")
+            def test_capability():
+                raise AssertionError("capability skip must not run")
+            """
+        )
+        with tempfile.TemporaryDirectory(dir=test_dir) as tmp:
+            tmp_path = Path(tmp)
+            child = tmp_path / "test_rerun_junit_child.py"
+            child.write_text(child_src, encoding="utf-8")
+            disabled = tmp_path / "disabled.json"
+            base = child.name
+            disabled.write_text(
+                json.dumps(
+                    {
+                        f"test_capability (mod.{base})": [
+                            "https://github.com/pytorch/pytorch/issues/1",
+                            [],
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            junit = tmp_path / "junit.xml"
+            env = os.environ.copy()
+            env["DISABLED_TESTS_FILE"] = str(disabled)
+            env["RERUN_CODE_SKIP_PY"] = str(_HELPER)
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
+            env["PYTORCH_TEST_RERUN_DISABLED_TESTS"] = "1"
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    str(child),
+                    "-vv",
+                    "--tb=short",
+                    "-p",
+                    "no:cacheprovider",
+                    f"--junitxml={junit}",
+                ],
+                cwd=_REPO,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            output = proc.stdout + proc.stderr
+            self.assertEqual(junit.is_file(), True, msg=output)
+            cases = {
+                case.get("name"): case for case in ET.parse(junit).iter("testcase")
+            }
+            self.assertEqual(proc.returncode, 1, msg=output + str(list(cases)))
+
+        def reason_of(name: str) -> str | None:
+            found = None
+            for prop in cases[name].iter("property"):
+                if prop.get("name") == "code_skip":
+                    found = prop.get("value")
+            return found
+
+        self.assertEqual("test_known_pass" in cases, True, msg=str(list(cases)))
+        self.assertEqual("test_known_fail" in cases, True, msg=str(list(cases)))
+        self.assertEqual("test_capability" in cases, True, msg=str(list(cases)))
+        passed = cases["test_known_pass"]
+        self.assertEqual(passed.find("skipped") is None, True)
+        self.assertEqual(passed.find("failure") is None, True)
+        self.assertEqual(reason_of("test_known_pass"), "skipIfWindows: known failure")
+        failed = cases["test_known_fail"]
+        self.assertEqual(failed.find("failure") is None, False)
+        self.assertEqual(
+            reason_of("test_known_fail"), "skipIfWindows: known failure fails"
+        )
+        skipped = cases["test_capability"]
+        self.assertEqual(skipped.find("skipped") is None, False)
+        self.assertEqual(reason_of("test_capability"), None)
 
 
 if __name__ == "__main__":
