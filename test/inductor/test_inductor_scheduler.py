@@ -796,6 +796,64 @@ class TestScheduler(TestCase):
                 template, retired, speedup, fused_nodes
             )
 
+    def test_defer_template_reduction_epilogues(self):
+        scheduler = object.__new__(Scheduler)
+        scheduler.get_backend = Mock(
+            return_value=Mock(can_fuse_reduction_epilogue=Mock(return_value=False))
+        )
+        template = self._mock_base_snode("template")
+        template.is_template.return_value = True
+        template.get_template_node.return_value = object.__new__(ir.MultiTemplateBuffer)
+        reduction = self._mock_base_snode("reduction")
+        reduction.is_reduction.return_value = True
+        pointwise = self._mock_base_snode("pointwise")
+        pointwise.get_template_node.return_value = None
+        fusions = [(template, reduction), (template, pointwise), (reduction, pointwise)]
+
+        with inductor_config.patch(
+            {
+                "benchmark_template_fusion": True,
+                "triton.template_reduction_epilogue": True,
+            }
+        ):
+            # Only the template reduction epilogue waits.
+            scheduler._defer_template_reduction_epilogues = True
+            self.assertEqual(
+                scheduler._defer_benchmarked_template_reductions(fusions),
+                fusions[1:],
+            )
+            self.assertTrue(scheduler._deferred_template_reduction_epilogues)
+
+            scheduler._defer_template_reduction_epilogues = False
+            self.assertEqual(
+                scheduler._defer_benchmarked_template_reductions(fusions), fusions
+            )
+            self.assertFalse(scheduler._deferred_template_reduction_epilogues)
+
+    def test_fuse_nodes_runs_deferred_template_reduction_epilogues_last(self):
+        """A GEMM followed by sum, rsqrt and mul, as in RMSNorm: rsqrt has to
+        fuse with sum before mul can join them, so the template reduction
+        epilogue waits for both rounds. It's then tried once with deferral off."""
+        scheduler = object.__new__(Scheduler)
+        rounds = []
+        # Node counts after each round, while deferred and then not.
+        lengths = iter([3, 2, 2, 2])
+
+        def fuse_nodes_once(nodes, is_reorder_round):
+            defer = scheduler._defer_template_reduction_epilogues
+            rounds.append(defer)
+            scheduler._deferred_template_reduction_epilogues = defer
+            return [Mock()] * next(lengths)
+
+        scheduler.fuse_nodes_once = fuse_nodes_once
+        with inductor_config.patch(
+            loop_ordering_after_fusion=False, loop_index_inversion_in_fusion=False
+        ):
+            nodes = scheduler.fuse_nodes([Mock()] * 4)
+        self.assertEqual(len(nodes), 2)
+        self.assertEqual(rounds, [True, True, True, False])
+        self.assertFalse(scheduler._defer_template_reduction_epilogues)
+
     def test_choice_supports_reduction_epilogue(self):
         template = self._mock_base_snode("template")
         template.is_template.return_value = True
@@ -1137,6 +1195,7 @@ class TestScheduler(TestCase):
 
         scheduler.name_to_fused_node = {"node1": node1, "node2": node2}
         scheduler._fusion_memory_state = None
+        scheduler._defer_template_reduction_epilogues = False
         scheduler._can_fuse_impl = Mock(return_value=True)
         scheduler.will_fusion_create_cycle = Mock(return_value=True)
         scheduler.unfusable_node = Mock(return_value=False)
