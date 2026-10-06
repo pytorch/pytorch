@@ -7292,7 +7292,7 @@ def quantize_tensor(
           Currently supported values: ``ScalingType.BlockWise1x32``.
         qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
           data. Currently supported values: ``torch.float8_e4m3fn``. Special value
-          handling is format dependent. For example, for ``mxfp8`` an input 
+          handling is format dependent. For example, for ``mxfp8`` an input
           ``NaN`` or ``Inf`` makes every quantized value sharing its scale ``NaN``;
           all-zero blocks quantize to zero.
         scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
@@ -7381,7 +7381,7 @@ def quantize_tensor_dual(
           Currently supported values: ``ScalingType.BlockWise1x32``.
         qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
           data. Currently supported values: ``torch.float8_e4m3fn``. Special value
-          handling is format dependent. For example, for ``mxfp8`` an input 
+          handling is format dependent. For example, for ``mxfp8`` an input
           ``NaN`` or ``Inf`` makes every quantized value sharing its scale ``NaN``;
           all-zero blocks quantize to zero.
         scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
