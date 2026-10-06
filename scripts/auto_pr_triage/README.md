@@ -72,10 +72,10 @@ uncoordinated race-closing reads to apply.
 - A permissionless `pull_request_target` workflow admits entry events from the
   PR's base branch, and its completion starts the analysis through
   `workflow_run`, which always runs workflow, action, and policy code from
-  `main`. A ghstack PR's base is a `gh/<user>/<N>/base` branch that anyone
-  with push access can edit, so the analysis treats the request as a claim: the
-  PR it names must have the head branch GitHub recorded for the request run.
-  The PR head is fetched as data, never checked out or run.
+  `main`. The analysis accepts only requests from `pull_request_target` runs,
+  which use the base branch's copy of the request workflow, so a fork cannot
+  forge one. A ghstack base branch's copy can be edited only by people with
+  push access. The PR head is fetched as data, never checked out or run.
 - The LLM has no GitHub token and no file, shell, web, MCP, plugin, or subagent
   capability; its Bedrock session can only invoke the model.
 - The write-capable job runs only in live mode and receives only the bounded

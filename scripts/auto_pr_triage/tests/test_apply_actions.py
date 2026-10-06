@@ -587,41 +587,24 @@ class ApplyMainTest(unittest.TestCase):
                         [f"should-run={expected}"],
                     )
 
-    def test_workflow_resolves_request_bound_to_its_head(self) -> None:
-        script = read_workflow_step_script("Resolve the requested PR")
-        request_head = {"HEAD_REPOSITORY": "fork/ciforge", "HEAD_REF": "fix"}
+    def test_workflow_reads_request_from_run_name(self) -> None:
+        script = read_workflow_step_script("Read the request")
         cases = (
-            ("Auto PR Triage Request #123 labeled", "fork/ciforge:fix", "labeled"),
-            (
-                "Auto PR Triage Request #123 ready_for_review",
-                "fork/ciforge:fix",
-                "ready_for_review",
-            ),
-            ("Auto PR Triage Request #123 labeled", "other/ciforge:fix", None),
-            ("Auto PR Triage Request #123 labeled", "fork/ciforge:other", None),
-            ("Auto PR Triage Request #123 closed", "fork/ciforge:fix", None),
-            ("Auto PR Triage Request #0123 labeled", "fork/ciforge:fix", None),
-            ("Fix a bug (#123)", "fork/ciforge:fix", None),
+            ("Auto PR Triage Request #123 labeled", "labeled"),
+            ("Auto PR Triage Request #123 ready_for_review", "ready_for_review"),
+            ("Auto PR Triage Request #123 closed", None),
+            ("Auto PR Triage Request #0123 labeled", None),
+            ("Fix a bug (#123)", None),
         )
 
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            gh = root / "gh"
-            output_path = root / "github-output"
-            gh.write_text('#!/bin/sh\necho "$*" > "$GH_ARGS"\necho "$FAKE_PR_HEAD"\n')
-            gh.chmod(0o755)
-            for title, pr_head, expected_action in cases:
-                with self.subTest(title=title, pr_head=pr_head):
+            output_path = Path(directory) / "github-output"
+            for title, expected_action in cases:
+                with self.subTest(title=title):
                     output_path.write_text("")
                     environment = {
                         **os.environ,
-                        **request_head,
-                        "FAKE_PR_HEAD": pr_head,
-                        "GH_ARGS": str(root / "gh-args"),
-                        "GH_TOKEN": "token",
                         "GITHUB_OUTPUT": str(output_path),
-                        "PATH": f"{root}:{os.environ['PATH']}",
-                        "REPOSITORY": "pytorch/ciforge",
                         "REQUEST_TITLE": title,
                     }
                     result = subprocess.run(
@@ -636,11 +619,6 @@ class ApplyMainTest(unittest.TestCase):
                         self.assertEqual(output_path.read_text(), "")
                         continue
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertTrue(
-                        (root / "gh-args")
-                        .read_text()
-                        .startswith("api repos/pytorch/ciforge/pulls/123 ")
-                    )
                     self.assertEqual(
                         output_path.read_text().splitlines(),
                         ["pr-number=123", f"event-action={expected_action}"],

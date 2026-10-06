@@ -51,26 +51,15 @@ jobs:
           [[ "$AUTO_PR_TRIAGE_MODE" == "shadow" || "$AUTO_PR_TRIAGE_MODE" == "live" ]] || exit 1
           echo "mode=$AUTO_PR_TRIAGE_MODE" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve the requested PR
+      - name: Read the request
         id: request
         env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_REF: ${{ github.event.workflow_run.head_branch }}
-          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
-          REPOSITORY: ${{ github.repository }}
           REQUEST_TITLE: ${{ github.event.workflow_run.display_title }}
         run: |
-          # Anyone who can push a ghstack base branch can edit the request
-          # workflow, so its run name is only a claim. The claimed PR must have
-          # the head branch that GitHub recorded for the request run.
           REQUEST_RE='^Auto PR Triage Request #([1-9][0-9]*) (labeled|ready_for_review)$'
           [[ "$REQUEST_TITLE" =~ $REQUEST_RE ]] || exit 1
-          PR_NUMBER="${BASH_REMATCH[1]}"
-          EVENT_ACTION="${BASH_REMATCH[2]}"
-          PR_HEAD="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '"\(.head.repo.full_name):\(.head.ref)"')"
-          [[ "$PR_HEAD" == "$HEAD_REPOSITORY:$HEAD_REF" ]] || exit 1
-          echo "pr-number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "event-action=$EVENT_ACTION" >> "$GITHUB_OUTPUT"
+          echo "pr-number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "event-action=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
 
       - name: Admit the label event or the first ready event after it
         id: history
