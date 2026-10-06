@@ -3903,6 +3903,21 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
+            isinstance(obj, variables.UserDefinedClassVariable)
+            and obj.source is None
+            and type(obj.value) is type
+            and name_var.is_python_constant()
+            and val.is_python_constant()
+        ):
+            # A class made by a constant-folded type() call has no source to replay.
+            try:
+                type.__setattr__(
+                    obj.value, name_var.as_python_constant(), val.as_python_constant()
+                )
+            except Exception as exc:
+                raise_observed_exception(type(exc), tx, args=list(exc.args))
+            return ConstantVariable.create(None)
+        elif (
             not tx.output.side_effects.is_attribute_mutation(obj)
             and obj.source is not None
             and (underlying := obj.get_value_for_setattr()) is not None
