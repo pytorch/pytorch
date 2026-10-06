@@ -200,12 +200,14 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         source = None if self.source is None else AttrSource(self.source, "__enter__")
+        fn = self.cm_obj.__enter__.__func__  # type: ignore[attr-defined]
         fn_source = self.cls_source and self.get_source_by_walking_mro(tx, "__enter__")
+        if fn_source is not None:
+            fn_vt = variables.UserFunctionVariable.create_with_source(fn, fn_source)
+        else:
+            fn_vt = variables.UserFunctionVariable(fn, source=fn_source)
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(  # type: ignore[attr-defined]
-                self.cm_obj.__enter__.__func__,
-                source=fn_source,
-            ),
+            fn_vt,
             self,
             source=source,
         ).call_function(tx, [], {})
@@ -214,12 +216,14 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         source = None if self.source is None else AttrSource(self.source, "__exit__")
+        fn = self.cm_obj.__exit__.__func__  # type: ignore[attr-defined]
         fn_source = self.cls_source and self.get_source_by_walking_mro(tx, "__exit__")
+        if fn_source is not None:
+            fn_vt = variables.UserFunctionVariable.create_with_source(fn, fn_source)
+        else:
+            fn_vt = variables.UserFunctionVariable(fn, source=fn_source)
         x = variables.UserMethodVariable(
-            variables.UserFunctionVariable(  # type: ignore[attr-defined]
-                self.cm_obj.__exit__.__func__,
-                source=fn_source,
-            ),
+            fn_vt,
             self,
             source=source,
         ).call_function(tx, list(args), {})

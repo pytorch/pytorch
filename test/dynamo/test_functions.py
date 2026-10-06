@@ -7994,24 +7994,153 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             g_inner(torch.ones(1))
         self.assertEqual(inner_log, ["touched", "touched"])
 
-    def test_build_class_in_compiled_fn_nonlocal_rebind(self):
-        # Rebinding nonlocal variable in method of class defined in compiled function
+    def test_locally_defined_method_nonlocal_rebind(self):
         n = 0
 
-        def f_nonlocal(x):
-            class InnerNonlocal:
-                def touch(self):
-                    nonlocal n
-                    n += 1
+        class Helper:
+            def touch(self):
+                nonlocal n
+                n += 1
 
-            InnerNonlocal().touch()
+        def fn(x):
+            Helper().touch()
             return x + 1
 
-        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
-            g_nonlocal = torch.compile(f_nonlocal, backend="eager")
-            self.assertEqual(g_nonlocal(torch.ones(1)), torch.tensor([2.0]))
-            self.assertEqual(g_nonlocal(torch.ones(1)), torch.tensor([2.0]))
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
         self.assertEqual(n, 2)
+
+    def test_locally_instantiated_method_rebind(self):
+        old_log = []
+        new_log = []
+
+        class Helper:
+            def value(self):
+                old_log.append("old")
+                return 1
+
+            @classmethod
+            def cm_value(cls):
+                old_log.append("old_cm")
+                return 10
+
+        def new_value(self):
+            new_log.append("new")
+            return 2
+
+        @classmethod
+        def new_cm_value(cls):
+            new_log.append("new_cm")
+            return 20
+
+        class CM:
+            def __enter__(self):
+                old_log.append("old_enter")
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def new_enter(self):
+            new_log.append("new_enter")
+            return self
+
+        def fn(x):
+            with CM():
+                return x + Helper().value() + Helper().cm_value()
+
+        backend = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        out1 = compiled(torch.ones(1))
+        Helper.value = new_value
+        out2 = compiled(torch.ones(1))
+        Helper.cm_value = new_cm_value
+        out3 = compiled(torch.ones(1))
+        CM.__enter__ = new_enter
+        out4 = compiled(torch.ones(1))
+
+        self.assertEqual(out1, torch.tensor([12.0]))
+        self.assertEqual(out2, torch.tensor([13.0]))
+        self.assertEqual(out3, torch.tensor([23.0]))
+        self.assertEqual(out4, torch.tensor([23.0]))
+        self.assertEqual(
+            old_log, ["old_enter", "old", "old_cm", "old_enter", "old_cm", "old_enter"]
+        )
+        self.assertEqual(new_log, ["new", "new", "new_cm", "new_enter", "new", "new_cm"])
+        self.assertEqual(backend.frame_count, 4)
+
+    def test_lru_cache_method_closure_mutation(self):
+        log = []
+
+        class Helper:
+            @functools.lru_cache(0)
+            def touch(self):
+                log.append("touch")
+
+        def fn(x):
+            Helper().touch()
+            return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([2.0]))
+        self.assertGreater(counter.frame_count, 0)
+        self.assertEqual(log, ["touch", "touch"])
+
+    def test_getattr_closure_mutation(self):
+        log = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                log.append("desc1")
+                return 2
+
+        class Helper:
+            desc = Desc()
+
+            def __getattr__(self, name):
+                log.append(f"getattr:{name}")
+                return 1
+
+        def new_get(self, obj, objtype=None):
+            log.append("desc2")
+            return 20
+
+        def new_getattr(self, name):
+            log.append(f"getattr2:{name}")
+            return 100
+
+        def fn(x):
+            return x + Helper().missing + Helper().desc
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([4.0]))
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([4.0]))
+
+        count_before = counter.frame_count
+        Desc.__get__ = new_get
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([22.0]))
+        self.assertEqual(counter.frame_count, count_before + 1)
+
+        Helper.__getattr__ = new_getattr
+        self.assertEqual(compiled(torch.ones(1)), torch.tensor([121.0]))
+        self.assertEqual(counter.frame_count, count_before + 2)
+        self.assertEqual(
+            log,
+            [
+                "getattr:missing",
+                "desc1",
+                "getattr:missing",
+                "desc1",
+                "getattr:missing",
+                "desc2",
+                "getattr2:missing",
+                "desc2",
+            ],
+        )
 
 
 instantiate_parametrized_tests(FunctionTests)
