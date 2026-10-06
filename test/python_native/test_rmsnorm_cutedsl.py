@@ -256,6 +256,8 @@ class TestRmsNormJit(TestCase):
     def test_autograd_and_cuda_graph(
         self, device: str, dtype: torch.dtype, n: int
     ) -> None:
+        from torch.profiler import profile, ProfilerActivity
+
         x = torch.randn(37, n, device=device, dtype=dtype, requires_grad=True)
         w = torch.randn(n, device=device, dtype=dtype, requires_grad=True)
         dy = torch.randn_like(x)
@@ -276,15 +278,30 @@ class TestRmsNormJit(TestCase):
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
                 actual = run()
-            graph.replay()
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                graph.replay()
+        names = [e.name for e in prof.events() if e.device_type.name == "CUDA"]
+        for kernel in ("RMSNorm_", "RMSNormBackward", "reduce_rows"):
+            self.assertTrue(any(kernel in name for name in names), (kernel, names))
         self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("m", [4096, 16384])
-    @parametrize("n", [128, 1024, 8192])
+    @parametrize(
+        "m,n",
+        [
+            (4096, 128),
+            (4096, 1024),
+            (4096, 8192),
+            (16384, 128),
+            (1024, 4096),
+            (16384, 8192),
+        ],
+    )
     def test_persistent_weight_gradient(
         self, device: str, dtype: torch.dtype, m: int, n: int
     ) -> None:
+        from torch._native.ops.norm.norms import quack_rmsnorm_bwd
+
         x = torch.randn(m, n, device=device, dtype=dtype)
         dy = torch.randn_like(x)
         w = torch.randn(n, device=device, dtype=dtype)
@@ -293,10 +310,7 @@ class TestRmsNormJit(TestCase):
             expected = torch.ops.aten._fused_rms_norm_backward(
                 dy, x, [n], rstd, w, [True, True]
             )
-        with jit_only():
-            actual = torch.ops.aten._fused_rms_norm_backward(
-                dy, x, [n], rstd, w, [True, True]
-            )
+        actual = quack_rmsnorm_bwd(dy, x, rstd, w, [n])
         tol = _TOLERANCES[dtype]
         self.assertEqual(actual, expected, atol=tol, rtol=tol)
 
