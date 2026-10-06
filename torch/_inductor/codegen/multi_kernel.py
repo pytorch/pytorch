@@ -496,6 +496,7 @@ class MultiKernelCall:
         return V.graph.multi_kernel_to_choice[multi_kernel_name]
 
     def run(self, *args, **kwargs):
+        # Every other sub-kernel was dropped, so there is nothing to benchmark.
         if self.picked_kernel is None and len(self.kernels) == 1:
             self.picked_kernel = 0
         if self.picked_kernel is None:
