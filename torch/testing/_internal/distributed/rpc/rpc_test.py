@@ -736,7 +736,7 @@ class MyConvNetForMNIST(nn.Module):
         x = x.to_here() if is_rref else x
         with torch.cuda.stream(torch.cuda.current_stream(self.device)):
             # intentionally adding delay to current CUDA stream
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            torch.cuda._sleep(FIFTY_MIL_CYCLES)
             return self.net(x)
 
     def __getstate__(self):
