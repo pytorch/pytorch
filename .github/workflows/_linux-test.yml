@@ -155,18 +155,6 @@ jobs:
       contents: read
       actions: read
     steps:
-      # The runner, not this container, owns RUNNER_TEMP (including the per-step
-      # GITHUB_ENV/GITHUB_OUTPUT files it creates) and HOME. Where its uid differs
-      # from jenkins (DGX B200 runners still on 1000), grant both uids access with
-      # default ACLs, which also cover files the runner creates for later steps.
-      - name: Share runner directories with the job container
-        shell: bash
-        run: |
-          runner_uid=$(stat -c '%u' "${RUNNER_TEMP}")
-          if [[ "${runner_uid}" != "$(id -u)" ]]; then
-            sudo setfacl -R -m "u:$(id -u):rwX,d:u:$(id -u):rwX,d:u:${runner_uid}:rwX" "${RUNNER_TEMP}" "${HOME}"
-          fi
-
       - name: Setup Linux
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@gh/huydhn/68/head

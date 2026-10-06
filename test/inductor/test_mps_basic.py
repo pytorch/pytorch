@@ -12,18 +12,12 @@ import torch
 from torch._inductor import config as inductor_config
 from torch._inductor.codegen.mps import MetalKernel
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import all_mps_types_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    MACOS_VERSION,
     parametrize,
 )
 
-
-MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble] + (
-    [torch.bfloat16] if MACOS_VERSION < 14.0 else []
-)
-MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 
 importlib.import_module("filelock")
 
@@ -48,7 +42,7 @@ class MPSBasicTests(TestCase):
     common = check_model_gpu
     device = "mps"
 
-    @parametrize("dtype", MPS_DTYPES)
+    @parametrize("dtype", all_mps_types_and(torch.bool, torch.complex64))
     def test_add(self, dtype):
         self.common(
             lambda a, b: a + b,
@@ -133,7 +127,7 @@ class MPSBasicTests(TestCase):
 
         self.common(foo, (torch.rand(1024),))
 
-    @parametrize("dtype", MPS_DTYPES)
+    @parametrize("dtype", all_mps_types_and(torch.bool, torch.complex64))
     def test_cast(self, dtype):
         self.common(lambda a: a.to(dtype), (torch.rand(1024),))
 
