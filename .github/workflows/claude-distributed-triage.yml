@@ -3,7 +3,7 @@ name: Claude Distributed Triage
 
 on:
   workflow_run:
-    workflows: ["Claude Issue Triage Run"]
+    workflows: ["Issue Triage (pi)"]
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -28,21 +28,36 @@ jobs:
       id-token: write
 
     steps:
+      # Only issue-triage-pi.yml runs that applied triage hand off an issue;
+      # replay and dry-run runs upload no triage-completed-data and are skipped.
       - name: Download issue number artifact (workflow_run only)
         if: github.event_name == 'workflow_run'
-        uses: actions/download-artifact@v4
-        with:
-          name: triage-completed-data
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" \
+              --jq '.artifacts[].name' | grep -qx triage-completed-data; then
+            echo "Run $RUN_ID handed off no issue; nothing to do"
+            exit 0
+          fi
+          for attempt in 1 2 3 4 5; do
+            rm -f issue_number.txt
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name triage-completed-data --dir . && exit 0
+            sleep "$((attempt * 5))"
+          done
+          echo "::error::Failed to download triage-completed-data from run $RUN_ID"
+          exit 1
 
       - name: Resolve issue number
         id: issue
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             ISSUE_NUM="${{ inputs.issue_number }}"
-          else
+          elif [ -f issue_number.txt ]; then
             ISSUE_NUM=$(cat issue_number.txt)
+          else
+            exit 0
           fi
           if ! [[ "$ISSUE_NUM" =~ ^[0-9]+$ ]]; then
             echo "::error::Invalid issue number format: '$ISSUE_NUM'. Must be a positive integer."
@@ -53,6 +68,7 @@ jobs:
 
       - name: Gate on oncall:distributed label
         id: gate
+        if: steps.issue.outputs.number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUM: ${{ steps.issue.outputs.number }}
