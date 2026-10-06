@@ -659,6 +659,63 @@ class ComputedLazyConstantTests(TestCase):
                 with self.assertRaisesRegex(TypeError, "bad operand type"):
                     opt_fn(t, "x")
 
+    def test_unused_builtin_fns_do_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            ("len_str", lambda t, a: (t.sin(), len(a)), [(t, "xy"), (t, "pqr")]),
+            ("bool_int", lambda t, a: (t.sin(), bool(a)), [(t, 5), (t, 0)]),
+            ("min_int", lambda t, a, b: (t.sin(), min(a, b)), [(t, 1, 2), (t, 9, 3)]),
+            ("max_int", lambda t, a, b: (t.sin(), max(a, b)), [(t, 1, 2), (t, 9, 3)]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_min_max_mixed_types_recompile(self):
+        t = torch.ones(2)
+
+        def fn(t, flag):
+            if isinstance(max(flag, 0.5), bool):
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, True), (t, False)], expected_frames=2)
+
+    def test_str_on_symbolic_int_compiles(self):
+        t = torch.ones(2)
+        d = {str(i): i for i in range(4)}
+
+        def fn(t, idx):
+            return t.relu() * d[str(idx)]
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        for idx in range(4):
+            self.assertEqual(fn(t, idx), opt_fn(t, idx))
+        self.assertGreater(counter.frame_count, 1)
+
+    def test_builtin_fn_in_branch_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            if len(a) > 2:
+                return t + 1
+            return t - 1
+
+        self._check(fn, [(t, "xy"), (t, "pqrs")], expected_frames=2)
+
+    def test_len_on_int_falls_back(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            try:
+                return t.sin(), len(a)
+            except TypeError:
+                return t.cos(), 0
+
+        self._check(fn, [(t, 1), (t, 2)], expected_frames=2)
+
     def test_unary_op_in_branch_recompiles(self):
         t = torch.ones(2)
 
