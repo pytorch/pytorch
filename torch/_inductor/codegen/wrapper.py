@@ -74,7 +74,6 @@ from ..utils import (
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     is_gpu,
-    is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
     sympy_product,
@@ -2370,7 +2369,7 @@ class PythonWrapperCodegen(CodeGen):
         self.prefix.writeline("args.clear()")
 
     def write_launcher_fn_call_get_indent(self) -> int:
-        if config.graph_partition:
+        if V.graph.graph_partition:
             self.prefix.splice(
                 """
                 class Runner:
@@ -2423,7 +2422,7 @@ class PythonWrapperCodegen(CodeGen):
             # avoid duplicating asserts for both partition functions and
             # the call function when using cudagraph partition
             if not (
-                is_using_cudagraph_partition()
+                V.graph.use_cudagraph_partition
                 and (not is_codegen_graph_partition_subgraph(self))
             ):
                 self.codegen_input_size_and_nan_asserts()
@@ -2834,7 +2833,7 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_after_suffix(self, result: IndentedBuffer) -> None:
-        if config.graph_partition:
+        if V.graph.graph_partition:
             all_partition_name_list = ", ".join(self.all_partition_names) + (
                 "," if len(self.all_partition_names) == 1 else ""
             )
@@ -3092,7 +3091,7 @@ class PythonWrapperCodegen(CodeGen):
             return self._generate(is_inference)
 
     def get_wrapper_call_indent(self) -> int:
-        if config.graph_partition:
+        if V.graph.graph_partition:
             return 2
         else:
             return 1
@@ -3407,7 +3406,7 @@ class PythonWrapperCodegen(CodeGen):
         ):
             return
         else:
-            if torch._inductor.config.graph_partition:
+            if V.graph.graph_partition:
                 pass
             else:
                 raise AssertionError(f"Unknown value type: {type(value)}")
