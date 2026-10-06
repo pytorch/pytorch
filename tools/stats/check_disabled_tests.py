@@ -27,7 +27,7 @@ SEPARATOR = ";"
 
 def process_report(
     report: Path,
-) -> dict[str, dict[str, int]]:
+) -> dict[str, dict[str, Any]]:
     """
     Return a list of disabled tests that should be re-enabled and those that are still
     flaky (failed or skipped)
@@ -43,7 +43,7 @@ def process_report(
     # * Skipped tests from unittest
     #
     # We want to keep track of how many times the test fails (num_red) or passes (num_green)
-    all_tests: dict[str, dict[str, int]] = {}
+    all_tests: dict[str, dict[str, Any]] = {}
 
     for test_case in root.iter(TESTCASE_TAG):
         # Parse the test case as string values only.
@@ -55,16 +55,17 @@ def process_report(
         # * or it's falky (num_red > 0 and num_green > 0)
         # * or it's failing (num_red > 0 and num_green == 0)
         #
-        # We care only about the latter two here
+        # Skips whose message carries num_red are the enabled-test accounting
+        # skip. Any other JUnit skip is a code skip: keep the reason text and
+        # do not count it as a pass. A bypassed test that then passes or fails
+        # is not a JUnit skip, so it still follows the green/red path below.
         skipped = parsed_test_case.get("skipped", None)
 
         # NB: Regular ONNX tests could return a list of subskips here where each item in the
         # list is a skipped message.  In the context of rerunning disabled tests, we could
         # ignore this case as returning a list of subskips only happens when tests are run
         # normally
-        if skipped and (
-            type(skipped) is list or "num_red" not in skipped.get("message", "")
-        ):
+        if skipped and type(skipped) is list:
             continue
 
         name = parsed_test_case.get("name", "")
@@ -74,9 +75,6 @@ def process_report(
         if not name or not classname or not filename:
             continue
 
-        # Check if the test is a failure
-        failure = parsed_test_case.get("failure", None)
-
         disabled_test_id = SEPARATOR.join([name, classname, filename])
         if disabled_test_id not in all_tests:
             all_tests[disabled_test_id] = {
@@ -84,11 +82,24 @@ def process_report(
                 "num_red": 0,
             }
 
+        skip_message = ""
+        if isinstance(skipped, dict):
+            skip_message = skipped.get("message", "")
+        if skipped and "num_red" not in skip_message:
+            prev = all_tests[disabled_test_id].get("code_skip")
+            all_tests[disabled_test_id]["code_skip"] = (
+                skip_message if not prev else f"{prev}\n{skip_message}"
+            )
+            continue
+
+        # Check if the test is a failure
+        failure = parsed_test_case.get("failure", None)
+
         # Under --rerun-disabled-tests mode, if a test is not skipped or failed, it's
         # counted as a success. Otherwise, it's still flaky or failing
         if skipped:
             try:
-                stats = json.loads(skipped.get("message", ""))
+                stats = json.loads(skip_message)
             except json.JSONDecodeError:
                 stats = {}
 
@@ -170,7 +181,7 @@ def prepare_record(
 def save_results(
     workflow_id: int,
     workflow_run_attempt: int,
-    all_tests: dict[str, dict[str, int]],
+    all_tests: dict[str, dict[str, Any]],
 ) -> None:
     """
     Save the result to S3, which then gets put into the HUD backend database
@@ -236,7 +247,7 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
     Find the list of all disabled tests that should be re-enabled
     """
     # Aggregated across all jobs
-    all_tests: dict[str, dict[str, int]] = {}
+    all_tests: dict[str, dict[str, Any]] = {}
 
     for report in get_test_reports(
         args.repo, args.workflow_run_id, args.workflow_run_attempt
@@ -256,6 +267,12 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
             else:
                 all_tests[name]["num_green"] += stats.get("num_green", 0)
                 all_tests[name]["num_red"] += stats.get("num_red", 0)
+                extra = stats.get("code_skip")
+                if extra:
+                    prev = all_tests[name].get("code_skip")
+                    all_tests[name]["code_skip"] = (
+                        extra if not prev else f"{prev}\n{extra}"
+                    )
 
     save_results(
         workflow_run_id,
