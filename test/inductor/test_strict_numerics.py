@@ -223,6 +223,64 @@ class StrictNumericsFallbackTest(TestCase):
 )
 class StrictNumericsCompileTest(TestCase):
     @ops(
+        [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp")],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    @parametrize("shared", (False, True))
+    def test_unary_nan_payload(self, device, dtype, op, numerics, upcast, shared):
+        if dtype in (torch.float16, torch.bfloat16):
+            x = _exhaustive_16bit(dtype, device)
+        else:
+            x = _min_max_specials(dtype, device)
+            if dtype == torch.float32:
+                x = torch.cat((x, _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)))
+            else:
+                finfo = torch.finfo(dtype)
+                edges = torch.tensor(
+                    [finfo.tiny * finfo.eps, finfo.tiny, finfo.max],
+                    dtype=dtype,
+                    device=device,
+                )
+                x = torch.cat((x, edges, -edges))
+
+        def fn(x):
+            result = op.op(x)
+            outputs = result if op.name == "frexp" else (result,)
+            if shared:
+                return (*outputs, outputs[0].double(), x + 1)
+            return outputs
+
+        result, codes = run_and_get_code(
+            torch.compile(
+                fn,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+        )
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW.get(t.dtype, t.dtype)) for t in result),
+            tuple(t.view(_BIT_VIEW.get(t.dtype, t.dtype)) for t in fn(x)),
+        )
+
+    @ops(
+        [op for op in op_db if op.name in ("abs", "neg", "angle")],
+        allowed_dtypes=(torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_unary_integer(self, device, dtype, op, numerics):
+        limits = torch.iinfo(dtype)
+        x = torch.tensor([limits.min, 0, 1, limits.max], dtype=dtype, device=device)
+        compiled = torch.compile(op.op, fullgraph=True, options={"numerics": numerics})
+        self.assertEqual(compiled(x), op.op(x))
+
+    @ops(
         [
             op
             for op in foreach_binary_op_db
@@ -1613,15 +1671,9 @@ POINTWISE_XFAIL = frozenset(
         ("special_ndtr", "float16"),
         ("true_divide", "bfloat16"),
         ("true_divide", "float16"),
-        ("abs", "bfloat16"),
-        ("abs", "float16"),
-        ("abs", "float32"),
         ("addcdiv", "bfloat16"),
         ("addcdiv", "float16"),
         ("addcdiv", "float32"),
-        ("angle", "bfloat16"),
-        ("angle", "float16"),
-        ("angle", "float32"),
         ("copysign", "bfloat16"),
         ("copysign", "float16"),
         ("div_floor_rounding", "bfloat16"),
@@ -1633,9 +1685,6 @@ POINTWISE_XFAIL = frozenset(
         ("floor_divide", "bfloat16"),
         ("floor_divide", "float16"),
         ("floor_divide", "float32"),
-        ("frexp", "bfloat16"),
-        ("frexp", "float16"),
-        ("frexp", "float32"),
         ("hypot", "float16"),
         ("hypot", "float32"),
         ("i0", "bfloat16"),
@@ -1655,9 +1704,6 @@ POINTWISE_XFAIL = frozenset(
         ("mvlgamma_mvlgamma_p_5", "bfloat16"),
         ("mvlgamma_mvlgamma_p_5", "float16"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
-        ("neg", "bfloat16"),
-        ("neg", "float16"),
-        ("neg", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),
         ("nn_functional_softshrink", "float32"),
@@ -1802,13 +1848,17 @@ FULL_DTYPE_BACKWARD_OPS = frozenset(
 FULL_DTYPE_POINTWISE_OPS = (
     frozenset(
         {
+            "abs",
+            "angle",
             "double",
             "fmax",
             "fmin",
+            "frexp",
             "max_binary",
             "maximum",
             "min_binary",
             "minimum",
+            "neg",
             "special_entr",
             "special_xlog1py",
             "xlogy",
