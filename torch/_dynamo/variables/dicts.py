@@ -1765,6 +1765,13 @@ class DunderDictVariable(ConstDictVariable):
         super().__init__({}, **kwargs)
         self.items = SideEffectsProxyDict(vt, tx)
 
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if isinstance(self.items.item, variables.StaticMethodVariable):
+            codegen(self.items.item)
+            codegen.append_output(codegen.create_load_attr("__dict__"))
+            return
+        super().reconstruct(codegen)
+
     def setitem(self, name: str, value: VariableTracker) -> None:
         self.items[name] = value
 

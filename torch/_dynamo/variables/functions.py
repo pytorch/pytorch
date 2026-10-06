@@ -5074,7 +5074,7 @@ def _lookup_wraps_copied_attr(
     return generic_getattr(tx, descriptor, name)
 
 
-class StaticMethodVariable(VariableTracker):
+class StaticMethodVariable(UserDefinedObjectVariable):
     """staticmethod descriptor wrapping a callable.
 
     CPython's staticmethod (PyStaticMethod_Type) is a non-data descriptor
@@ -5091,9 +5091,80 @@ class StaticMethodVariable(VariableTracker):
         "__wrapped__": Member(lambda s, _: s.descriptor, readonly_setter),
     }
 
-    def __init__(self, descriptor: VariableTracker, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        descriptor: VariableTracker,
+        value: staticmethod | None = None,  # type: ignore[type-arg]
+        **kwargs: Any,
+    ) -> None:
+        if value is None:
+            value = staticmethod(None)
+            value.__dict__.clear()
+        super().__init__(value, **kwargs)
         self.descriptor = descriptor
+
+    @classmethod
+    def create(
+        cls, tx: "InstructionTranslatorBase", descriptor: VariableTracker
+    ) -> "StaticMethodVariable":
+        from .object_protocol import generic_getattr
+
+        result = cls(descriptor, mutation_type=AttributeMutationNew())
+        tx.output.side_effects.track_attribute_mutation_new(result)
+        attrs = ("__module__", "__name__", "__qualname__", "__doc__")
+        if sys.version_info < (3, 14):
+            attrs += ("__annotations__",)
+        for name in attrs:
+            try:
+                value = generic_getattr(tx, descriptor, name)
+            except get_dynamo_observed_exception(AttributeError):
+                tx.exn_vt_stack.clear_current_exception()
+                continue
+            result.get_dict_vt(tx).setitem(name, value)
+        return result
+
+    def _is_abstract(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import generic_getattr, generic_is_true
+
+        value = generic_getattr(
+            tx, self.descriptor, "__isabstractmethod__", ConstantVariable.create(False)
+        )
+        return generic_is_true(tx, value)
+
+    def _get_wrapped_attr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        from .object_protocol import generic_getattr
+
+        return self.get_dict_vt(tx).getitem_or_default(
+            name, lambda: generic_getattr(tx, self.descriptor, name)
+        )
+
+    def _set_wrapped_attr(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        value: VariableTracker | None,
+    ) -> None:
+        attrs = self.get_dict_vt(tx)
+        if value is None:
+            if not attrs.contains(name):
+                msg = f"'staticmethod' object has no attribute '{name}'"
+                raise_observed_exception(AttributeError, tx, args=[msg])
+            attrs.delitem(name)
+        else:
+            attrs.setitem(name, value)
+
+    tp_getset = {
+        "__dict__": GetSet(lambda s, tx: s.get_dict_vt(tx), unmodeled_setter),
+        "__isabstractmethod__": GetSet(_is_abstract, readonly_setter),
+    }
+    if sys.version_info >= (3, 14):
+        for attr in ("__annotations__", "__annotate__"):
+            tp_getset[attr] = GetSet(
+                lambda s, tx, name=attr: s._get_wrapped_attr(tx, name),
+                lambda s, tx, value, name=attr: s._set_wrapped_attr(tx, name, value),
+            )
 
     @classmethod
     def from_descriptor(
@@ -5105,6 +5176,7 @@ class StaticMethodVariable(VariableTracker):
         func_source = AttrSource(source, "__func__") if source else None
         return cls(
             VariableTracker.build(tx, descriptor.__func__, func_source),
+            value=descriptor,
             source=source,
         )
 
@@ -5124,7 +5196,16 @@ class StaticMethodVariable(VariableTracker):
     def lookup_instance_dict(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker | None:
-        return _lookup_wraps_copied_attr(tx, self.descriptor, name)
+        attrs = self.get_dict_vt(tx)
+        return attrs.getitem(name) if attrs.contains(name) else None
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.descriptor.call_function(tx, args, kwargs)
 
     def tp_descr_get_impl(
         self,
