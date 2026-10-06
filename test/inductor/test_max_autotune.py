@@ -2584,7 +2584,8 @@ class TestMaxAutotune(TestCase):
                         'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
                         'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
-                        'hint_override':None,'triton_meta':None}"""
+                        'hint_override':None,'emulate_precision_casts':False,
+                        'triton_meta':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
@@ -2626,7 +2627,9 @@ class TestMaxAutotune(TestCase):
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
                     'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                     'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
-                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},'hint_override':None,'triton_meta':None}"""
+                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
+                    'hint_override':None,'emulate_precision_casts':False,
+                    'triton_meta':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
@@ -5137,6 +5140,59 @@ class TestPrologueFusion(TestCase):
             FileCheck().check(get_func_call()).check_count(
                 "del", num_deallocs, exactly=True
             ).run(code_str)
+
+    @contextlib.contextmanager
+    def force_template_fusion_benchmark(self):
+        with (
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+        ):
+            yield
+
+    @fresh_cache()
+    @mock.patch("torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True)
+    @config.patch(enable_caching_generated_triton_templates=True)
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_shared_prefix_and_input_prologue_fusion(self):
+        M = K = N = 64
+
+        def foo(x, b):
+            computed = x * 2.0
+            return torch.addmm(computed, computed, b)
+
+        x = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), x, b)
+
+        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
+        # The bias use needs the materialized producer, so the pointwise kernel
+        # computes x * 2.0 and the template kernel must not recompute it before
+        # tl.dot (i.e. the producer is not fused into the template's A input).
+        (
+            FileCheck()
+            .check("def triton_poi")
+            .check("2.0")
+            .check("def triton_tem")
+            .check_not("2.0")
+            .check("tl.dot")
+            .run(code[0])
+        )
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
