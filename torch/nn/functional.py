@@ -42,7 +42,16 @@ SwizzleType.__module__ = "torch.nn.functional"
 class ScalingAlgorithm(enum.IntEnum):
     r"""Algorithm used to compute and encode block scales for :func:`quantize_tensor`."""
 
-    RCEIL_E8M0 = 0
+    MXFP_E8M0_RU = 0
+    r"""MXFP E8M0 round-up scaling, described in `Algorithm 1
+    <https://arxiv.org/pdf/2506.08027>`_.
+
+    The block's maximum absolute input value, divided by the largest
+    representable quantized value, is rounded up to E8M0. If any input in the
+    block is ``NaN`` or ``+/-Inf``, the scale is E8M0 ``NaN`` (byte ``0xff``).
+    An all-zero block instead receives the smallest E8M0 scale,
+    :math:`2^{-127}` (byte ``0x00``), because E8M0 has no zero encoding.
+    """
 
 
 if TYPE_CHECKING:
@@ -7250,13 +7259,13 @@ def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
 def quantize_tensor(
     input: Tensor,
     *,
+    scaling_type: ScalingType,
     qdata_dtype: torch.dtype,
     scaling_algorithm: ScalingAlgorithm,
-    scaling_type: ScalingType,
     swizzle_type: SwizzleType,
     scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor]:
-    r"""quantize_tensor(input, *, qdata_dtype, scaling_algorithm, scaling_type, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
+    r"""quantize_tensor(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
 
     Quantize a 2D tensor. Returns ``(qdata, scale)`` for use with
     :func:`scaled_mm`.  Currently supported formats: ``mxfp8``.
@@ -7278,17 +7287,20 @@ def quantize_tensor(
         input (Tensor): Contiguous 2D tensor or a transposed view of one, with
           shape :math:`(M, K)` and dtype ``float16``, ``bfloat16``, or
           ``float32``. The data pointer must be 16-byte aligned.
-        qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
-          data. Currently supported values: ``torch.float8_e4m3fn``.
-        scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
-          local region of the ``input`` (with its size specified by ``scaling_type``)
-          to the inner scale and inverse inner scale corresponding to that region.
-          Currently supported values: ``ScalingAlgorithm.RCEIL_E8M0``.
         scaling_type (ScalingType): The size of the local region corresponding to
           a single inner scale, as well as the layout of the output inner scale.
           Currently supported values: ``ScalingType.BlockWise1x32``.
+        qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
+          data. Currently supported values: ``torch.float8_e4m3fn``. Special value
+          handling is format dependent. For example, for ``mxfp8`` an input 
+          ``NaN`` or ``Inf`` makes every quantized value sharing its scale ``NaN``;
+          all-zero blocks quantize to zero.
+        scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
+          local region of the ``input`` (with its size specified by ``scaling_type``)
+          to the inner scale and inverse inner scale corresponding to that region.
+          Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
-          Currently supported values: ``SwizzleType.NO_SWIZZLE`` and 
+          Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
           ``SwizzleType.SWIZZLE_32_4_4``.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
@@ -7309,30 +7321,30 @@ def quantize_tensor(
         >>> import torch
         >>> import torch.nn.functional as F
         >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
-        >>> mx_kwargs = dict(
-        ...     qdata_dtype=torch.float8_e4m3fn,
-        ...     scaling_algorithm=F.ScalingAlgorithm.RCEIL_E8M0,
+        >>> mxfp8_kwargs = dict(
         ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     scaling_algorithm=F.ScalingAlgorithm.MXFP_E8M0_RU,
         ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
         ... )
         >>> # mxfp8 dim-k with swizzled scales
-        >>> qdata_k, scale_k = F.quantize_tensor(x, **mx_kwargs)
+        >>> qdata_k, scale_k = F.quantize_tensor(x, **mxfp8_kwargs)
         >>> # mxfp8 dim-m: pass a transposed view of the contiguous input
-        >>> qdata_m, scale_m = F.quantize_tensor(x.t(), **mx_kwargs)
+        >>> qdata_m, scale_m = F.quantize_tensor(x.t(), **mxfp8_kwargs)
         >>> # mxfp8 dim-k with scales shared over 32x32 blocks
         >>> qdata_square, scale_square = F.quantize_tensor(
-        ...     x, **mx_kwargs, scaling_type_use_square_block_size=True
+        ...     x, **mxfp8_kwargs, scaling_type_use_square_block_size=True
         ... )
         >>> # mxfp8 dim-k with compact, unswizzled scales
-        >>> plain_kwargs = {**mx_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
+        >>> plain_kwargs = {**mxfp8_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
         >>> qdata_plain, scale_plain = F.quantize_tensor(x, **plain_kwargs)
     """
     # TODO(future PR): add torch.export support for the native quantization op.
     outputs = torch.ops.aten._quantize_tensor.default(
         input,
+        scaling_type=scaling_type.value,
         qdata_dtype=qdata_dtype,
         scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
-        scaling_type=scaling_type.value,
         swizzle_type=swizzle_type.value,
         scaling_type_use_square_block_size=scaling_type_use_square_block_size,
     )
@@ -7342,13 +7354,13 @@ def quantize_tensor(
 def quantize_tensor_dual(
     input: Tensor,
     *,
+    scaling_type: ScalingType,
     qdata_dtype: torch.dtype,
     scaling_algorithm: ScalingAlgorithm,
-    scaling_type: ScalingType,
     swizzle_type: SwizzleType,
     scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    r"""quantize_tensor_dual(input, *, qdata_dtype, scaling_algorithm, scaling_type, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
+    r"""quantize_tensor_dual(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
     Quantize a contiguous 2D tensor along both dim-k and dim-m dimensions in one
     pass. See :func:`quantize_tensor` to quantize along one dimension.
@@ -7364,15 +7376,18 @@ def quantize_tensor_dual(
         input (Tensor): Contiguous 2D tensor of shape :math:`(M, K)` with dtype
           ``float16``, ``bfloat16``, or ``float32``. The data pointer must
           be 16-byte aligned.
-        qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
-          data. Currently supported values: ``torch.float8_e4m3fn``.
-        scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
-          local region of the ``input`` (with its size specified by ``scaling_type``)
-          to the inner scale and inverse inner scale corresponding to that region.
-          Currently supported values: ``ScalingAlgorithm.RCEIL_E8M0``.
         scaling_type (ScalingType): The size of the local region corresponding to
           a single inner scale, as well as the layout of the output inner scale.
           Currently supported values: ``ScalingType.BlockWise1x32``.
+        qdata_dtype (:class:`torch.dtype`): The dtype of the resulting quantized
+          data. Currently supported values: ``torch.float8_e4m3fn``. Special value
+          handling is format dependent. For example, for ``mxfp8`` an input 
+          ``NaN`` or ``Inf`` makes every quantized value sharing its scale ``NaN``;
+          all-zero blocks quantize to zero.
+        scaling_algorithm (ScalingAlgorithm): The algorithm to convert from a
+          local region of the ``input`` (with its size specified by ``scaling_type``)
+          to the inner scale and inverse inner scale corresponding to that region.
+          Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
           Currently supported values: ``SwizzleType.SWIZZLE_32_4_4``.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
@@ -7395,20 +7410,20 @@ def quantize_tensor_dual(
         >>> import torch
         >>> import torch.nn.functional as F
         >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
-        >>> mx_kwargs = dict(
-        ...     qdata_dtype=torch.float8_e4m3fn,
-        ...     scaling_algorithm=F.ScalingAlgorithm.RCEIL_E8M0,
+        >>> mxfp8_kwargs = dict(
         ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     scaling_algorithm=F.ScalingAlgorithm.MXFP_E8M0_RU,
         ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
         ... )
         >>> # mxfp8 dim-km with swizzled scales
-        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, **mx_kwargs)
+        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, **mxfp8_kwargs)
     """
     outputs = torch.ops.aten._quantize_tensor_dual.default(
         input,
+        scaling_type=scaling_type.value,
         qdata_dtype=qdata_dtype,
         scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
-        scaling_type=scaling_type.value,
         swizzle_type=swizzle_type.value,
         scaling_type_use_square_block_size=scaling_type_use_square_block_size,
     )

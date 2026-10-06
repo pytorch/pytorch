@@ -8,9 +8,9 @@ from .utils import _device_capability
 
 def _quantize_tensor_impl(
     input: torch.Tensor,
+    scaling_type: int,
     qdata_dtype: torch.dtype,
     scaling_algorithm: int,
-    scaling_type: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
@@ -24,8 +24,8 @@ def _quantize_tensor_impl(
         raise ValueError("quantize_tensor supports only fp16, bf16, and fp32 input")
     if qdata_dtype != torch.float8_e4m3fn:
         raise ValueError("quantize_tensor supports only float8_e4m3fn qdata")
-    if scaling_algorithm != ScalingAlgorithm.RCEIL_E8M0.value:
-        raise ValueError("quantize_tensor requires scaling_algorithm=RCEIL_E8M0")
+    if scaling_algorithm != ScalingAlgorithm.MXFP_E8M0_RU.value:
+        raise ValueError("quantize_tensor requires scaling_algorithm=MXFP_E8M0_RU")
     if scaling_type != ScalingType.BlockWise1x32.value:
         raise ValueError("quantize_tensor supports only BlockWise1x32 scaling")
     if swizzle_type not in (
@@ -68,9 +68,9 @@ def _quantize_tensor_impl(
 
 def _quantize_tensor_dual_impl(
     input: torch.Tensor,
+    scaling_type: int,
     qdata_dtype: torch.dtype,
     scaling_algorithm: int,
-    scaling_type: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
@@ -86,8 +86,8 @@ def _quantize_tensor_dual_impl(
         raise ValueError("dual quantization supports only fp16, bf16, and fp32 input")
     if qdata_dtype != torch.float8_e4m3fn:
         raise ValueError("quantize_tensor_dual supports only float8_e4m3fn qdata")
-    if scaling_algorithm != ScalingAlgorithm.RCEIL_E8M0.value:
-        raise ValueError("quantize_tensor_dual requires scaling_algorithm=RCEIL_E8M0")
+    if scaling_algorithm != ScalingAlgorithm.MXFP_E8M0_RU.value:
+        raise ValueError("quantize_tensor_dual requires scaling_algorithm=MXFP_E8M0_RU")
     if scaling_type != ScalingType.BlockWise1x32.value:
         raise ValueError("quantize_tensor_dual supports only BlockWise1x32 scaling")
     if swizzle_type != SwizzleType.SWIZZLE_32_4_4.value:

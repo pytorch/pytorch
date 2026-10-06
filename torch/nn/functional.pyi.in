@@ -710,9 +710,9 @@ __all__ += ["poisson_nll_loss"]
 def quantize_tensor(
     input: Tensor,
     *,
+    scaling_type: ScalingType,
     qdata_dtype: _dtype,
     scaling_algorithm: ScalingAlgorithm,
-    scaling_type: ScalingType,
     swizzle_type: SwizzleType,
     scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor]: ...
@@ -722,9 +722,9 @@ __all__ += ["quantize_tensor"]
 def quantize_tensor_dual(
     input: Tensor,
     *,
+    scaling_type: ScalingType,
     qdata_dtype: _dtype,
     scaling_algorithm: ScalingAlgorithm,
-    scaling_type: ScalingType,
     swizzle_type: SwizzleType,
     scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]: ...
@@ -842,7 +842,7 @@ class ScalingType(Enum):
 __all__ += ["ScalingType"]
 
 class ScalingAlgorithm(IntEnum):
-    RCEIL_E8M0 = 0
+    MXFP_E8M0_RU = 0
 
 __all__ += ["ScalingAlgorithm"]
 

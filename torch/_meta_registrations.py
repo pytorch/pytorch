@@ -7517,8 +7517,8 @@ def _check_quantize_tensor_recipe(
         lambda: f"{op_name} supports only float8_e4m3fn qdata",
     )
     torch._check_value(
-        scaling_algorithm == ScalingAlgorithm.RCEIL_E8M0.value,
-        lambda: f"{op_name} requires scaling_algorithm=RCEIL_E8M0",
+        scaling_algorithm == ScalingAlgorithm.MXFP_E8M0_RU.value,
+        lambda: f"{op_name} requires scaling_algorithm=MXFP_E8M0_RU",
     )
     torch._check_value(
         scaling_type == ScalingType.BlockWise1x32.value,
@@ -7529,9 +7529,9 @@ def _check_quantize_tensor_recipe(
 @register_meta([aten._quantize_tensor.default])
 def meta_quantize_tensor(
     input: torch.Tensor,
+    scaling_type: int,
     qdata_dtype: torch.dtype,
     scaling_algorithm: int,
-    scaling_type: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:
@@ -7588,9 +7588,9 @@ def meta_quantize_tensor(
 @register_meta([aten._quantize_tensor_dual.default])
 def meta_quantize_tensor_dual(
     input: torch.Tensor,
+    scaling_type: int,
     qdata_dtype: torch.dtype,
     scaling_algorithm: int,
-    scaling_type: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool = False,
 ) -> list[torch.Tensor]:

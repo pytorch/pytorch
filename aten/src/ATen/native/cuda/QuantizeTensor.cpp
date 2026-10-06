@@ -8,9 +8,9 @@ namespace at::native {
 
 std::vector<Tensor> _quantize_tensor_cuda(
     const Tensor& /*input*/,
+    int64_t /*scaling_type*/,
     ScalarType /*qdata_dtype*/,
     int64_t /*scaling_algorithm*/,
-    int64_t /*scaling_type*/,
     int64_t /*swizzle_type*/,
     bool /*scaling_type_use_square_block_size*/) {
   TORCH_CHECK(
@@ -23,9 +23,9 @@ std::vector<Tensor> _quantize_tensor_cuda(
 
 std::vector<Tensor> _quantize_tensor_dual_cuda(
     const Tensor& /*input*/,
+    int64_t /*scaling_type*/,
     ScalarType /*qdata_dtype*/,
     int64_t /*scaling_algorithm*/,
-    int64_t /*scaling_type*/,
     int64_t /*swizzle_type*/,
     bool /*scaling_type_use_square_block_size*/) {
   TORCH_CHECK(

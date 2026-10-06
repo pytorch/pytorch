@@ -7470,7 +7470,7 @@ def sample_inputs_cutedsl_quantize_tensor(op_info, device, dtype, requires_grad,
     input = make_tensor((160, 160), device=device, dtype=dtype, requires_grad=False)
     recipe = {
         "qdata_dtype": torch.float8_e4m3fn,
-        "scaling_algorithm": F.ScalingAlgorithm.RCEIL_E8M0,
+        "scaling_algorithm": F.ScalingAlgorithm.MXFP_E8M0_RU,
         "scaling_type": F.ScalingType.BlockWise1x32,
         "swizzle_type": F.SwizzleType.NO_SWIZZLE,
     }
@@ -7486,7 +7486,7 @@ def sample_inputs_cutedsl_quantize_tensor_dual(op_info, device, dtype, requires_
     input = make_tensor((160, 192), device=device, dtype=dtype, requires_grad=False)
     yield SampleInput(input, kwargs={
         "qdata_dtype": torch.float8_e4m3fn,
-        "scaling_algorithm": F.ScalingAlgorithm.RCEIL_E8M0,
+        "scaling_algorithm": F.ScalingAlgorithm.MXFP_E8M0_RU,
         "scaling_type": F.ScalingType.BlockWise1x32,
         "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4,
     })

@@ -75,7 +75,7 @@ def _benchmark_one(kernel, M, K, dtype):
         return quantize(
             api_input,
             qdata_dtype=torch.float8_e4m3fn,
-            scaling_algorithm=F.ScalingAlgorithm.RCEIL_E8M0,
+            scaling_algorithm=F.ScalingAlgorithm.MXFP_E8M0_RU,
             scaling_type=F.ScalingType.BlockWise1x32,
             swizzle_type=swizzle_type,
             scaling_type_use_square_block_size=square,
