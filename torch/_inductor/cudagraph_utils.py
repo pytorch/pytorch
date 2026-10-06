@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import weakref
 from collections.abc import Callable
 from enum import Enum
 from typing import Any, Literal, TYPE_CHECKING, TypeVar
@@ -366,6 +367,12 @@ def check_multiple_devices_or_any_cpu_nodes(
 
         return format_default_skip_message(msg)
 
+    if not device_node_mapping:
+        # Everything left was tolerated above (cpu under partitioning, meta), so
+        # there is no GPU work to capture. Refuse, but name the real reason
+        # rather than falling through to an empty "multiple devices" list.
+        return format_default_skip_message("no GPU ops")
+
     if (
         len(device_node_mapping) == 1
         and next(iter(device_node_mapping)).type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES
@@ -422,9 +429,27 @@ def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
         metrics_context.set("cudagraph_skip_reason", msg, overwrite=True)
 
 
+class _ProcessLocalWeakSet(weakref.WeakSet[Any]):
+    """A WeakSet whose members only mean something in this process.
+
+    It pickles as empty, so whatever holds it can still be sent to a compile
+    subprocess.
+    """
+
+    def __reduce__(self) -> tuple[type[_ProcessLocalWeakSet], tuple[()]]:
+        return (type(self), ())
+
+
 @dataclasses.dataclass
 class BoxedDeviceIndex:
     value: int | None
+    # value is set at compile time once the forward can be captured, but a call
+    # can still run uncaptured, e.g. at a size outside
+    # triton.cudagraph_capture_sizes. These are the autograd invocations whose
+    # forward call was captured; its backward runs under the same invocation.
+    captured_invocations: _ProcessLocalWeakSet = dataclasses.field(
+        default_factory=_ProcessLocalWeakSet
+    )
 
     def set(self, device_idx: int | None) -> None:
         if not (device_idx is None or isinstance(device_idx, int)):

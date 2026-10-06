@@ -1999,7 +1999,7 @@ class _InProcessFxCompile(FxCompile):
                     if (
                         cudagraphs
                         and config.triton.cudagraph_skip_dynamic_graphs
-                        and not config.graph_partition
+                        and not V.graph.partition_handles_cudagraph_unsafe_ops
                         and not V.graph.disable_cudagraphs_reason
                         and torch._inductor.utils.any_is_symbolic(*example_inputs)
                     ):
@@ -2028,7 +2028,7 @@ class _InProcessFxCompile(FxCompile):
                     if (
                         cudagraphs
                         # pyrefly: ignore [unbound-name]
-                        and not config.graph_partition
+                        and not V.graph.partition_handles_cudagraph_unsafe_ops
                         # pyrefly: ignore [unbound-name]
                         and not V.graph.disable_cudagraphs_reason
                     ):
@@ -2068,8 +2068,10 @@ class _InProcessFxCompile(FxCompile):
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
                                 V.graph.device_node_mapping,
-                                # pyrefly: ignore [unbound-name]
-                                use_cudagraph_partition=V.graph.use_cudagraph_partition,
+                                use_cudagraph_partition=(
+                                    # pyrefly: ignore [unbound-name]
+                                    V.graph.partition_handles_cudagraph_unsafe_ops
+                                ),
                             )
                         )
 
@@ -2245,6 +2247,7 @@ def cudagraphify(
     mutated_input_idxs: tuple[int, ...] = (),
     kernel_free_cudagraph: bool = False,
     user_visible_output_idxs: tuple[int, ...] = (),
+    forward_device_index: BoxedDeviceIndex | None = None,
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -2269,6 +2272,7 @@ def cudagraphify(
             mutated_input_idxs=mutated_input_idxs,
             kernel_free_cudagraph=kernel_free_cudagraph,
             user_visible_output_idxs=user_visible_output_idxs,
+            forward_device_index=forward_device_index,
             cudagraph_managed_input_rerecord_limit=managed_input_rerecord_limit,
             cudagraph_managed_input_rerecord_action=managed_input_rerecord_action,
             cudagraph_initial_mempool_allocation_gb=(
