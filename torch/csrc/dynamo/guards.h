@@ -70,7 +70,8 @@ class TensorCheck {
       const at::Tensor& v,
       c10::DispatchKeySet dispatch_key_set,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
+      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+      bool device_index_is_current = false);
 
   TensorCheck(
       const LocalState& state,
@@ -99,12 +100,30 @@ class TensorCheck {
   PyTypeObject* pytype;
 
  private:
+  // True when the tensor's device index is the one this guard accepts.
+  bool deviceIndexMatches(const c10::Device& device) const;
+
   uint64_t dispatch_key_; // DispatchKeySet includes device/layout
   at::ScalarType dtype_;
+  // The device index this guard accepts. nullopt means "the index this rank is
+  // currently on" -- it does NOT mean "any index". There is no unchecked state:
+  // both forms compare the tensor's index against something, and a tensor on
+  // some other device fails either way. Do not add an accept-anything case; the
+  // compiled artifact launches on the current device, so a tensor from another
+  // one would run against the wrong context.
+  //
   // Note(voz): While dispatch_key_ is sufficiently representative of a device
   // In that keys are more granular AND device specific - they do not
   // necessarily capture device indices correctly.
-  at::DeviceIndex device_index_;
+  //
+  // nullopt is compile_on_one_rank: the guarded tensor sat on the current
+  // accelerator when this guard was built, and CooR's single-accelerator
+  // invariant means it must sit there on every rank too. Recording the index
+  // would pin the guard -- and the compiled artifact behind it -- to whichever
+  // rank happened to compile. Only accelerator tensors are relaxed; cpu is
+  // portable and keeps its index. The device *type* is guarded either way,
+  // since that rides in dispatch_key_.
+  std::optional<c10::DeviceIndex> device_index_;
   bool requires_grad_;
   // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<c10::SymInt>> sizes_;

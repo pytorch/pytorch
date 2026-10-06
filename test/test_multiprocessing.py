@@ -27,7 +27,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     load_tests,
     run_tests,
-    skipIfRocm,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -527,7 +526,6 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
     def test_empty_tensor_sharing(self, device, dtype):
         self._test_empty_tensor_sharing(dtype, torch.device(device))
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/92131")
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     @unittest.skipIf(
         TEST_WITH_ASAN,

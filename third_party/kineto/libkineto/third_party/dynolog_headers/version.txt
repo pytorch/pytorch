@@ -1,0 +1,2 @@
+https://github.com/facebookincubator/dynolog.git
+d2ffe0a4e3acace628db49974246b66fc3e85fb1
