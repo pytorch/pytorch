@@ -7,6 +7,7 @@ import sys
 from functools import partial
 from itertools import product
 from typing import Any
+from unittest import mock
 
 import torch
 import torch.cuda.nccl as nccl
@@ -240,7 +241,7 @@ class LinearMixedPrecision(nn.Module):
         return (self.lin(inp), cls, fsdp, mp_config, full_precision_param_dtype)
 
 
-class TestFSDPMixedPrecision(FSDPTest):
+class TestFSDPMixedPrecision(FSDPTestContinuous):
     @property
     def world_size(self):
         raise ValueError("To be implemented by child classes")
@@ -751,6 +752,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         model(inp).sum().backward()
 
     @skip_if_lt_x_gpu(2)
+    @mock.patch.dict(os.environ)
     def test_eval_root_cast_inputs(self):
         """
         In a case where root module does not manage FSDP parameters,
@@ -795,6 +797,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             model(inp, use_full_prec_in_eval).sum().backward()
 
     @skip_if_lt_x_gpu(2)
+    @mock.patch.dict(os.environ)
     def test_full_precision_in_eval(self):
         """
         Tests that eval runs in full precision if FSDP_USE_FULL_PREC_IN_EVAL is set.
@@ -838,6 +841,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             self.assertEqual(expected_dtype, loss.dtype)
 
     @skip_if_lt_x_gpu(2)
+    @mock.patch.dict(os.environ)
     def test_full_precision_in_eval_buffers(self):
         """
         Tests that when model.eval() and FSDP_USE_FULL_PREC_IN_EVAL is set,
@@ -910,6 +914,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 self.assertEqual(torch.float16, buf.dtype)
 
     @skip_if_lt_x_gpu(2)
+    @mock.patch.dict(os.environ)
     def test_full_precision_in_eval_comm(self):
         for (
             cast_forward_inputs,

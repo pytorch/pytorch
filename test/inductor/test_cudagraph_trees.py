@@ -21,7 +21,7 @@ import torch.nn as nn
 from torch._dynamo.backends.debugging import aot_eager_decomp_partition_with_mode
 from torch._dynamo.utils import counters
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._inductor import config
+from torch._inductor import config, lowering
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import (
@@ -35,8 +35,13 @@ from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import blas_library_context, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import (
+    blas_library_context,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -2533,8 +2538,7 @@ if HAS_CUDA_AND_TRITON:
         @blas_library_context("cublas")
         @unittest.mock.patch.dict(os.environ, {"TORCH_DISABLE_ADDR2LINE": "0"})
         @unittest.skipUnless(
-            torch.version.hip is not None
-            or os.environ.get("TORCH_CUBLAS_WORKSPACE_CACHE") == "1",
+            os.environ.get("TORCH_CUBLAS_WORKSPACE_CACHE") == "1",
             "persistent BLAS workspace caching is disabled",
         )
         def test_workspace_allocation_error(self):
@@ -4984,6 +4988,93 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @torch._inductor.config.patch(
+            "triton.cudagraph_dynamic_shape_rerecord_limit", 2
+        )
+        def test_dynamic_shape_rerecord_limit_stops_recording_new_shapes(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(3, 3, device="cuda")
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return self.linear(x)
+
+            mod = Mod()
+            # dynamic=True keeps every batch size on one compiled graph, so all
+            # four shapes share the fn_cache the limit is counted against.
+            compiled = torch.compile(mod, mode="reduce-overhead", dynamic=True)
+
+            inps = [
+                torch.rand((batch_size, 3), device="cuda")
+                for batch_size in (10, 20, 30, 40)
+            ]
+            # warning_once caches globally on its args; clear it so this test
+            # does not depend on what ran before it.
+            torch._logging._internal.warning_once.cache_clear()
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_trees", "cudagraphs"
+            )
+            with ctx(), torch.no_grad():
+                for inp in inps:
+                    for _ in range(3):
+                        out = compiled(inp).clone()
+                    # Shapes past the limit run eager, and must still be correct.
+                    self.assertEqual(out, mod(inp))
+
+                # An already-recorded shape keeps replaying its graph rather than
+                # falling back to eager or re-recording.
+                for _ in range(3):
+                    compiled(inps[0])
+
+            # Only the first two distinct shapes recorded a cudagraph.
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+            FileCheck().check(
+                "inference graph hit cudagraph_dynamic_shape_rerecord_limit=2"
+            ).run(log_stream.getvalue())
+
+        @torch._inductor.config.patch(
+            "triton.cudagraph_dynamic_shape_rerecord_limit", 2
+        )
+        def test_dynamic_shape_rerecord_limit_training(self):
+            mod = torch.nn.Linear(3, 3, device="cuda")
+            compiled = torch.compile(mod, mode="reduce-overhead", dynamic=True)
+
+            def inp(batch_size):
+                return torch.rand((batch_size, 3), device="cuda")
+
+            torch._logging._internal.warning_once.cache_clear()
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_trees", "cudagraphs"
+            )
+            with ctx():
+                # Forward-only A, then B and C with backward: the forward cache
+                # fills with {A, B} and the backward cache with {B, C}, so A's
+                # backward runs eager after a cudagraphed forward.
+                for _ in range(3):
+                    compiled(inp(10))
+                for batch_size in (20, 30):
+                    for _ in range(3):
+                        mod.zero_grad()
+                        compiled(inp(batch_size)).sum().backward()
+
+                # Keep the previous iteration's cudagraph output alive.
+                prev_out = None
+                for _ in range(5):
+                    out = compiled(inp(10))
+                    mod.zero_grad()
+                    out.sum().backward()
+                    prev_out = out
+
+            # fwd A, fwd B, bwd B, bwd C; A's forward must not re-record.
+            self.assertEqual(self.get_manager().new_graph_id().id, 4)
+
+            # Forward and backward share compile_id; each must warn on its own.
+            msg = "graph hit cudagraph_dynamic_shape_rerecord_limit=2"
+            logs = log_stream.getvalue()
+            FileCheck().check(f"forward {msg}").check(f"backward {msg}").run(logs)
+
         @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
         def test_skip_if_dynamic_shape_limit_reached1(self):
             class Mod(torch.nn.Module):
@@ -5131,25 +5222,218 @@ if HAS_CUDA_AND_TRITON:
             # 2 graph partitions lead to 2 cudagraph
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
-        @unittest.skip(
-            "Disabled due to CI failures; see "
-            "https://github.com/pytorch/pytorch/issues/190233"
-        )
-        def test_graph_partition_view_fallback(self):
+        @torch._inductor.config.patch("graph_partition", True)
+        @lowering.force_fallback(torch.ops.prims.device_put.default)
+        def test_graph_partition_device_put_fallback(self):
             def f(x):
-                y = x + 1
-                z = torch.ops.aten.view.dtype(y, torch.float8_e4m3fn)
-                z_cpu = z.cpu()
-                u_cuda = z_cpu.cuda()
-                return u_cuda
+                return (x + 1).cpu().cuda()
 
             compiled_f = torch.compile(f, mode="reduce-overhead")
 
-            for _ in range(3):
-                x = torch.ones(2, dtype=torch.int32, device="cuda")
+            for i in range(3):
+                x = torch.full((2,), i, dtype=torch.int32, device="cuda")
                 eager_out = f(x)
                 compiled_out = compiled_f(x)
                 self.assertEqual(eager_out, compiled_out)
+
+            # Without partitioning the H2D fallback, it forms a second graph.
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cross_device_custom_op_fallback(self):
+            device = torch.device("cuda", self.device_idx)
+
+            @torch.library.custom_op("mylib::cpu_to_cuda", mutates_args=())
+            def cpu_to_cuda(x: torch.Tensor) -> torch.Tensor:
+                return x.to(device)
+
+            @cpu_to_cuda.register_fake
+            def _(x):
+                return torch.empty_like(x, device=device)
+
+            def f(x):
+                return cpu_to_cuda(x) + 1
+
+            compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+
+            for i in range(3):
+                x = torch.full((2,), i, dtype=torch.int32)
+                eager_out = f(x)
+                compiled_out = compiled_f(x)
+                self.assertEqual(eager_out, compiled_out)
+
+            # Only the downstream CUDA add should be recorded.
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cross_device_out_variant_custom_op(self):
+            # With a Tag.out overload, the op lowers to ExternKernelOut rather
+            # than FallbackKernel.
+            device = torch.device("cuda", self.device_idx)
+
+            def to_cuda(x):
+                return x.to(device)
+
+            def to_cuda_out(x, *, out):
+                return out.copy_(x)
+
+            with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+                lib.define("to_cuda(Tensor x) -> Tensor")
+                lib.define(
+                    "to_cuda.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
+                    tags=(torch.Tag.out,),
+                )
+                lib.impl("to_cuda", to_cuda, "CompositeExplicitAutograd")
+                lib.impl("to_cuda.out", to_cuda_out, "CompositeExplicitAutograd")
+
+                @torch.library.register_fake("mylib::to_cuda", lib=lib)
+                def _(x):
+                    return torch.empty_like(x, device=device)
+
+                def f(x):
+                    return torch.ops.mylib.to_cuda(x) + 1
+
+                compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+
+                for i in range(3):
+                    x = torch.full((2,), i, dtype=torch.int32)
+                    eager_out = f(x)
+                    compiled_out = compiled_f(x)
+                    self.assertEqual(eager_out, compiled_out)
+
+                # Only the downstream CUDA add should be recorded.
+                self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cross_device_multi_output_custom_op(self):
+            # The op's MultiOutput children have to be split out with it.
+            @torch.library.custom_op("mylib::scale_both", mutates_args=())
+            def scale_both(
+                x: torch.Tensor, s: torch.Tensor
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                return x * s.item(), x + s.item()
+
+            @scale_both.register_fake
+            def _(x, s):
+                return torch.empty_like(x), torch.empty_like(x)
+
+            def f(x, s):
+                a, b = scale_both(x * 2, s)
+                return a + b + 1
+
+            compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+
+            for i in range(3):
+                x = torch.ones(4, device="cuda")
+                s = torch.tensor(float(i + 1))
+                eager_out = f(x, s)
+                compiled_out = compiled_f(x, s)
+                self.assertEqual(eager_out, compiled_out)
+
+            # The ops before and after the split custom op form two graphs.
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cross_device_output_custom_op(self):
+            # The op reads only CUDA tensors but writes one of its outputs to the CPU.
+            @torch.library.custom_op("mylib::with_cpu_sum", mutates_args=())
+            def with_cpu_sum(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+                return x + 1, x.sum().cpu()
+
+            @with_cpu_sum.register_fake
+            def _(x):
+                return torch.empty_like(x), torch.empty((), dtype=x.dtype, device="cpu")
+
+            def f(x):
+                a, s = with_cpu_sum(x * 3)
+                return a * 2, s + 1
+
+            compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+
+            for i in range(3):
+                x = torch.full((4,), float(i), device="cuda")
+                eager_out = f(x)
+                compiled_out = compiled_f(x)
+                self.assertEqual(eager_out, compiled_out)
+
+            # The ops before and after the split custom op form two graphs.
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_index_put_cpu_indices(self):
+            def f(x, idx):
+                y = torch.ops.aten.index_put(x * 2, [idx], torch.ones(2, device="cuda"))
+                return y + 1
+
+            compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+
+            for i in range(3):
+                x = torch.full((8,), float(i), device="cuda")
+                idx = torch.tensor([1, 3 + i])
+                eager_out = f(x, idx)
+                compiled_out = compiled_f(x, idx)
+                self.assertEqual(eager_out, compiled_out)
+
+            # index_put reads CPU indices, so it runs between two graphs.
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @config.patch("graph_partition", True)
+        @parametrize("dtype", (torch.complex64, torch.complex128))
+        @parametrize("copy_to_cpu", (False, True))
+        def test_graph_partition_index_put_output(self, dtype, copy_to_cpu):
+            def fn(x, index):
+                out = torch.zeros_like(x)
+                out[:, index] = x
+                return out.cpu() if copy_to_cpu else out
+
+            fn_c = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+            index = torch.arange(16, device="cuda").flip(0)
+            for i in range(3):
+                x = torch.randn(4, 16, device="cuda", dtype=dtype)
+                if i == 0:
+                    actual, code = run_and_get_code(fn_c, x, index)
+                    self.assertIn(
+                        "= torch.ops.aten.index_put_.default(", "\n".join(code)
+                    )
+                    self.assertEqual(get_num_partitions(code), 1)
+                else:
+                    actual = fn_c(x, index)
+                self.assertEqual(actual, fn(x, index), exact_device=True)
+                del actual
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "needs flash attention")
+        def test_graph_partition_sdpa_dropout_not_split(self):
+            # Flash attention returns RNG state that its backward reads. Its meta
+            # kernel creates those tensors on the meta device, and FakeTensorMode
+            # gives them the inputs' device. If they came out on the CPU, the
+            # cross-device rule would split attention out of both CUDA graphs.
+            def f(q, k, v):
+                attn = torch.nn.functional.scaled_dot_product_attention
+                out = attn(q * 2, k, v, dropout_p=0.1)
+                return (out * 2).float().sum()
+
+            def make_input():
+                x = torch.randn(2, 4, 128, 64, device="cuda", dtype=torch.half)
+                return x.requires_grad_()
+
+            compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx(), sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                for _ in range(3):
+                    compiled_f(make_input(), make_input(), make_input()).backward()
+
+            logs = log_stream.getvalue()
+            partitions = re.findall(r"Created \d+ graph partitions: .*", logs)
+            whole = "Created 1 graph partitions: 1 cudagraphable, 0 non-cudagraphable"
+            self.assertEqual(partitions, [whole] * 2)
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
         @skipIfRocm
