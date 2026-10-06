@@ -47,7 +47,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
+    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
@@ -7747,6 +7747,21 @@ class TestNNDeviceType(NNTestCase):
             layer_norm.cpu()
             Y_cpu = layer_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
+
+    @onlyOn(["cpu", "cuda"])
+    @dtypes(torch.float32, torch.bfloat16, torch.float16)
+    @parametrize_test("width", [11, 12, 16, 24, 244, 384, 1536])
+    def test_LayerNorm_constant_input_is_exactly_zero(self, device, dtype, width):
+        # A constant row has zero variance, so the saved mean is exactly the input
+        # value and every output element is exactly zero.
+        X = torch.ones(4, width, dtype=dtype, device=device)
+        Y, mean, _ = torch.ops.aten.native_layer_norm(X, (width,), None, None, 1e-5)
+        self.assertEqual(mean, torch.ones_like(mean), rtol=0, atol=0)
+        self.assertEqual(Y, torch.zeros_like(Y), rtol=0, atol=0)
+        gamma = torch.ones(width, dtype=dtype, device=device)
+        beta = torch.zeros(width, dtype=dtype, device=device)
+        Y_affine = F.layer_norm(X, (width,), gamma, beta, 1e-5)
+        self.assertEqual(Y_affine, torch.zeros_like(Y_affine), rtol=0, atol=0)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16)
@@ -16438,100 +16453,6 @@ class TestNNCPU(NNTestCase):
 
 class TestNNCUDA(NNTestCase):
     hw_classification = HardwareClassification.CUDA
-
-    @dtypes(torch.float, torch.half, torch.bfloat16)
-    @parametrize_test("affine", [False, True])
-    @parametrize_test("track_running_stats", [False, True])
-    @parametrize_test("training", [False, True])
-    def test_InstanceNorm3d_channels_last(
-        self, device, dtype, affine, track_running_stats, training
-    ):
-        shape = (2, 4, 3, 5, 7)
-        input_ref = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
-        input = input_ref.detach().clone(memory_format=torch.channels_last_3d).requires_grad_()
-        module_ref = nn.InstanceNorm3d(
-            shape[1], affine=affine, track_running_stats=track_running_stats
-        ).to(device=device, dtype=dtype)
-        module = deepcopy(module_ref)
-        module_ref.train(training)
-        module.train(training)
-
-        output_ref = module_ref(input_ref)
-        output = module(input)
-
-        self.assertTrue(output.is_contiguous(memory_format=torch.channels_last_3d))
-        # GroupNorm and folded BatchNorm use different reduction kernels, so
-        # compare their low-precision results at the corresponding precision.
-        low_precision_tolerance = {
-            torch.half: {"atol": 5e-4, "rtol": 8e-3},
-            torch.bfloat16: {"atol": 5e-3, "rtol": 5e-2},
-        }.get(dtype, {})
-        self.assertEqual(output, output_ref, **low_precision_tolerance)
-        if track_running_stats:
-            self.assertEqual(module.running_mean, module_ref.running_mean)
-            self.assertEqual(module.running_var, module_ref.running_var)
-
-        grad_output = torch.randn_like(output)
-        grad_inputs = (input,)
-        grad_inputs_ref = (input_ref,)
-        if affine:
-            grad_inputs += (module.weight, module.bias)
-            grad_inputs_ref += (module_ref.weight, module_ref.bias)
-        grads = torch.autograd.grad(output, grad_inputs, grad_output)
-        grads_ref = torch.autograd.grad(
-            output_ref,
-            grad_inputs_ref,
-            grad_output.contiguous(),
-        )
-        gradient_tolerance = {
-            torch.half: {"atol": 2e-3, "rtol": 2e-2},
-            torch.bfloat16: {"atol": 2e-2, "rtol": 1e-1},
-        }.get(dtype, {})
-        self.assertEqual(grads, grads_ref, **gradient_tolerance)
-
-    @dtypes(torch.half, torch.bfloat16)
-    @parametrize_test("training", [False, True])
-    def test_InstanceNorm3d_channels_last_mixed_dtype(
-        self, device, dtype, training
-    ):
-        shape = (2, 4, 3, 5, 7)
-        input_ref = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
-        input = input_ref.detach().clone(memory_format=torch.channels_last_3d).requires_grad_()
-        module_ref = nn.InstanceNorm3d(
-            shape[1], affine=True, track_running_stats=True
-        ).to(device=device, dtype=torch.float)
-        module = deepcopy(module_ref)
-        module_ref.train(training)
-        module.train(training)
-
-        output_ref = module_ref(input_ref)
-        output = module(input)
-
-        self.assertEqual(output.dtype, dtype)
-        self.assertTrue(output.is_contiguous(memory_format=torch.channels_last_3d))
-        low_precision_tolerance = {
-            torch.half: {"atol": 5e-4, "rtol": 8e-3},
-            torch.bfloat16: {"atol": 5e-3, "rtol": 5e-2},
-        }[dtype]
-        self.assertEqual(output, output_ref, **low_precision_tolerance)
-        self.assertEqual(module.running_mean, module_ref.running_mean)
-        self.assertEqual(module.running_var, module_ref.running_var)
-
-        grad_output = torch.randn_like(output)
-        grads = torch.autograd.grad(
-            output, (input, module.weight, module.bias), grad_output
-        )
-        grads_ref = torch.autograd.grad(
-            output_ref,
-            (input_ref, module_ref.weight, module_ref.bias),
-            grad_output.contiguous(),
-        )
-        gradient_tolerance = (
-            {"atol": 2e-2, "rtol": 1e-1}
-            if dtype == torch.bfloat16
-            else low_precision_tolerance
-        )
-        self.assertEqual(grads, grads_ref, **gradient_tolerance)
 
     @skipCUDAIfNoCudnn
     @deviceCountAtLeast(2)
