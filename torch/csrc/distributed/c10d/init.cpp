@@ -3141,6 +3141,21 @@ Arguments:
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
       .export_values();
 
+  // Getter for a Backend property that is backed by a virtual method. C++
+  // subclasses (ProcessGroupNCCL, ...) don't rebind these properties, so for
+  // them the getter must dispatch virtually to reach their override. For a
+  // Python subclass (PyBackend), reaching Backend's own property means the
+  // subclass doesn't override it or is calling super(); both want Backend's
+  // implementation, and dispatching virtually would go through the trampoline
+  // back into Python. This assumes PyBackend is the only trampoline below
+  // Backend.
+#define BACKEND_VIRTUAL_PROPERTY(method)                      \
+  [](::c10d::Backend& self) {                                 \
+    return dynamic_cast<::c10d::PyBackend*>(&self) != nullptr \
+        ? self.::c10d::Backend::method()                      \
+        : self.method();                                      \
+  }
+
   // TODO: The collection definitions handles direct instantiation of
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
   // and should be removed once all tests are transitioned
@@ -3176,15 +3191,15 @@ Arguments:
               py::arg("value"))
           .def_property_readonly(
               "supports_splitting",
-              &::c10d::Backend::supportsSplitting,
+              BACKEND_VIRTUAL_PROPERTY(supportsSplitting),
               "(test whether the backend supports splitting)")
           .def_property_readonly(
               "supports_coalescing",
-              &::c10d::Backend::supportsCoalescing,
+              BACKEND_VIRTUAL_PROPERTY(supportsCoalescing),
               "(test whether the backend supports coalescing)")
           .def_property_readonly(
               "_supports_time_estimate",
-              &::c10d::Backend::supportsTimeEstimation,
+              BACKEND_VIRTUAL_PROPERTY(supportsTimeEstimation),
               R"(Test whether the backend supports collective time estimation.
 
 This API is experimental and subject to change.)")
@@ -3202,11 +3217,11 @@ This API is experimental and subject to change.)")
 This API is experimental and subject to change.)")
           .def_property_readonly(
               "supports_shrinking",
-              &::c10d::Backend::supportsShrinking,
+              BACKEND_VIRTUAL_PROPERTY(supportsShrinking),
               "(test whether the backend supports communicator shrinking)")
           .def_property_readonly(
               "supports_reconfigure",
-              &::c10d::Backend::supportsReconfigure,
+              BACKEND_VIRTUAL_PROPERTY(supportsReconfigure),
               "(test whether the backend supports reconfigure for fault tolerance)")
           .def(
               "set_timeout",
@@ -3242,7 +3257,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "Reconfigure the backend with a new set of peers for fault tolerance")
           .def_property_readonly(
               "supports_window",
-              &::c10d::Backend::supportsWindow,
+              BACKEND_VIRTUAL_PROPERTY(supportsWindow),
               "(test whether the backend supports one-sided window operations)")
           .def(
               "new_window",
@@ -3728,11 +3743,14 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "bound_device_id",
               &::c10d::Backend::getBoundDeviceId,
               &::c10d::Backend::setBoundDeviceId)
-          .def_property_readonly("options", &::c10d::Backend::getBackendOptions)
+          .def_property_readonly(
+              "options", BACKEND_VIRTUAL_PROPERTY(getBackendOptions))
           .def(
               "get_error",
               &::c10d::Backend::getError,
               py::call_guard<py::gil_scoped_release>());
+
+#undef BACKEND_VIRTUAL_PROPERTY
 
   // base Backend::Options binding
   // TODO: Maybe we can consider how to merge this with
