@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
@@ -238,6 +239,7 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
 }
 
 void ProcessGroupNCCL::checkWorkQueue() {
+  drainRetiredGraphWork();
   WorkNCCL::WorkStatus status = workq_.garbageCollect();
 
   // Abort hooks run where a failure is DETECTED, not only where the process is
@@ -264,14 +266,16 @@ void ProcessGroupNCCL::checkWorkQueue() {
   }
 }
 
-// The timeout thread cannot make NCCL calls.  The only CUDA call it can make
-// it cudaEventQuery.
+// Retire completed work and graph states and check for timeouts.
 void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread starting for rank: " << rank_;
 
   // Honor the noexcept contract: the loop issues NCCL probes (NCCL_CHECK) and
   // abort paths that can throw; swallow here so nothing escapes this thread.
   try {
+    // A new thread defaults to device 0; even setting capture mode can create
+    // a CUDA context, so bind the communicator device first.
+    c10::cuda::CUDAGuard device_guard(device_);
     c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
         cudaStreamCaptureModeThreadLocal);
     while (!shutdown_) {
@@ -494,13 +498,26 @@ void ProcessGroupNCCL::graphCleanupCallback(void* userData) {
       cleanup_data != nullptr && cleanup_data->comm != nullptr,
       "Invalid cleanup data");
 
-  // Clear the work references for this graph
+  // CUDA user-object callbacks cannot call CUDA APIs, including event destroy.
   std::lock_guard<std::mutex> lock(
       cleanup_data->comm->graph_capture_work_mutex_);
-  cleanup_data->comm->graph_capture_work_refs_.erase(cleanup_data->graph_id);
+  auto& comm = *cleanup_data->comm;
+  auto it = comm.graph_capture_work_refs_.find(cleanup_data->graph_id);
+  if (it != comm.graph_capture_work_refs_.end()) {
+    comm.retired_graph_work_refs_.emplace_back(std::move(it->second));
+    comm.graph_capture_work_refs_.erase(it);
+  }
 
   // Clean up the cleanup data itself
   delete cleanup_data;
+}
+
+void ProcessGroupNCCL::drainRetiredGraphWork() {
+  std::list<std::vector<std::shared_ptr<WorkNCCL::State>>> retired;
+  {
+    std::lock_guard<std::mutex> lock(graph_capture_work_mutex_);
+    retired.swap(retired_graph_work_refs_);
+  }
 }
 
 cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
