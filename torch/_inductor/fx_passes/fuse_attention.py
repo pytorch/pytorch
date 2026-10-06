@@ -6,7 +6,10 @@ import logging
 import torch
 from torch.utils._ordered_set import OrderedSet
 
-from ..._dynamo.device_interface import get_interface_for_device
+from ..._dynamo.device_interface import (
+    DeviceInterface,
+    get_interface_for_device,
+)
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
@@ -21,6 +24,16 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 aten = torch.ops.aten
 
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
+
+
+def _attention_iface(device_type: str) -> type[DeviceInterface]:
+    # Devices without a registered interface fall through to the base
+    # DeviceInterface defaults, matching the pre-routing `== "cuda"` behavior
+    # that silently skipped the CUDA-specific checks everywhere else.
+    try:
+        return get_interface_for_device(device_type)
+    except NotImplementedError:
+        return DeviceInterface
 
 
 _INFERENCE_ONLY_SFDP_PATTERNS = frozenset(
@@ -441,7 +454,7 @@ def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
-    iface = get_interface_for_device(query.device.type)
+    iface = _attention_iface(query.device.type)
     if iface.keep_attention_on_math_path():
         attn_weight = torch.matmul(query, key.transpose(-2, -1))
         attn_weight = attn_weight.div(inv_scale) + attn_mask
@@ -766,7 +779,7 @@ def _sfdp_replacement_25(query, key, value, attn_mask, dropout_p):
     query = query.permute(0, 2, 1, 3)
     key = key.permute(0, 2, 1, 3)
     value = value.permute(0, 2, 1, 3)
-    if attn_mask.device.type == "xpu":
+    if _attention_iface(attn_mask.device.type).needs_contiguous_attn_mask():
         attn_mask = attn_mask.contiguous()
     return _scaled_dot_product_attention(
         query,
@@ -800,7 +813,7 @@ def _sfdp_replacement_26(query, key, value, attn_mask, dropout_p):
     query = query.permute(0, 2, 1, 3)
     key = key.permute(0, 2, 1, 3)
     value = value.permute(0, 2, 1, 3)
-    if attn_mask.device.type == "xpu":
+    if _attention_iface(attn_mask.device.type).needs_contiguous_attn_mask():
         attn_mask = attn_mask.contiguous()
     return (
         _scaled_dot_product_attention(
@@ -967,7 +980,7 @@ def _sfdp_params_check(match):
     ):
         return False
     # fused kernels use tf32
-    iface = get_interface_for_device(query.device.type)
+    iface = _attention_iface(query.device.type)
     if not iface.is_fp32_attention_fusion_safe(query.dtype):
         if iface.should_warn_tf32_disabled():
             _warn_tf32_disabled()
@@ -1003,11 +1016,16 @@ def _sfdp_params_check(match):
     return True
 
 
-def _sfdp_extra_check(scale_factor_op=None, fp32_upcast_softmax=False):
+def _sfdp_extra_check(scale_factor_op=None, fp32_upcast_softmax=False, math_path_only=False):
     def fn(match):
+        if math_path_only and "query" in match.kwargs:
+            query = match.kwargs["query"].meta["val"]
+            iface = _attention_iface(query.device.type)
+            if iface.keep_attention_on_math_path():
+                return False
         if fp32_upcast_softmax and "query" in match.kwargs:
             query = match.kwargs["query"].meta["val"]
-            iface = get_interface_for_device(query.device.type)
+            iface = _attention_iface(query.device.type)
             if not iface.is_fp32_softmax_attention_fusion_safe():
                 return False
         if scale_factor_op is not None:
@@ -1419,9 +1437,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g(), g(), g(), m_float(), c()],
                     d,
-                    _sfdp_extra_check(
-                        aten.div.Tensor, fp32_upcast_softmax=torch.version.hip is None
-                    ),
+                    _sfdp_extra_check(aten.div.Tensor, math_path_only=True),
                 )
             )
             candidates.append(
@@ -1430,9 +1446,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
                     d,
-                    _sfdp_extra_check(
-                        aten.div.Tensor, fp32_upcast_softmax=torch.version.hip is None
-                    ),
+                    _sfdp_extra_check(aten.div.Tensor, math_path_only=True),
                 )
             )
 
