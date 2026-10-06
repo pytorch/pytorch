@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 
 // Permute-free all-to-all for Ulysses-style sequence parallelism.
 //
@@ -283,6 +284,11 @@ void nccl_all_to_all_nd(
     const size_t dst_row_stride_bytes =
         static_cast<size_t>(local_cols) * esz_u;
 
+    // The LSA barriers belong to the group's device communicator, shared by
+    // every call of this op on the group: calls on different streams must run
+    // in issue order, or ranks pair one call's barrier with another's. Taken
+    // after validation so a rejected call leaves the group's ordering alone.
+    GroupStreamGuard stream_guard(group_name);
     all_to_all_lsa_kernel<<<dim3(p, ctas_per_slot), A2A_THREADS_PER_CTA, 0, stream>>>(
         window,
         base_src_byte_offset,
@@ -357,6 +363,7 @@ void nccl_all_to_all_nd(
     const size_t dst_row_stride_bytes =
         static_cast<size_t>(p) * cols_u * esz_u;
 
+    GroupStreamGuard stream_guard(group_name);
     all_to_all_lsa_kernel<<<dim3(p, ctas_per_slot), A2A_THREADS_PER_CTA, 0, stream>>>(
         window,
         base_src_byte_offset,
