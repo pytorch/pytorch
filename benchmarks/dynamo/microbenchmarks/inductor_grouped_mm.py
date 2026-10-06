@@ -491,10 +491,6 @@ def _print_results(results):
     for b in names:
         if any(f"{b} compile (s)" in r for r in results):
             timing[f"{b} compile s"] = [r.get(f"{b} compile (s)", nan) for r in results]
-        if any(f"{b} eager (us)" in r for r in results):
-            timing[f"{b} overhead us"] = [
-                r.get(f"{b} eager (us)", nan) - r.get(f"{b} (us)", nan) for r in results
-            ]
     if len(timing) > len(shape):
         print()
         _print_table(timing)
@@ -624,10 +620,6 @@ def benchmark_grouped_mm(
                 f"min={bench_aten['min_us']:.2f}, max={bench_aten['max_us']:.2f})"
             )
             result["ATen (us)"] = us_aten
-            if timing_details and use_cuda_graphs:
-                result["ATen eager (us)"] = _do_bench_cuda(
-                    fn_aten, warmup=warmup, rep=rep, cooldown_seconds=cooldown_seconds
-                )["median_us"]
             gc.collect()
             torch.cuda.empty_cache()
             done.append("aten")
@@ -649,7 +641,9 @@ def benchmark_grouped_mm(
                     A, B.transpose(-2, -1), offs
                 )
                 if timing_details:
-                    result["Triton compile (s)"] = _first_call_seconds(fn_triton, compile_start)
+                    result["Triton compile (s)"] = _first_call_seconds(
+                        fn_triton, compile_start
+                    )
                 bench_triton = _do_bench_cuda(
                     _maybe_wrap_cuda_graph(fn_triton, "triton", use_cuda_graphs),
                     warmup=warmup,
@@ -663,10 +657,6 @@ def benchmark_grouped_mm(
                     f"min={bench_triton['min_us']:.2f}, max={bench_triton['max_us']:.2f})"
                 )
                 result["Triton (us)"] = us_triton
-                if timing_details and use_cuda_graphs:
-                    result["Triton eager (us)"] = _do_bench_cuda(
-                        fn_triton, warmup=warmup, rep=rep, cooldown_seconds=cooldown_seconds
-                    )["median_us"]
                 if us_aten is not None:
                     result["Triton speedup"] = us_aten / us_triton
 
@@ -700,7 +690,9 @@ def benchmark_grouped_mm(
                         A, B.transpose(-2, -1), offs
                     )
                     if timing_details:
-                        result["CuTeDSL compile (s)"] = _first_call_seconds(fn_cutedsl, compile_start)
+                        result["CuTeDSL compile (s)"] = _first_call_seconds(
+                            fn_cutedsl, compile_start
+                        )
                     bench_cutedsl = _do_bench_cuda(
                         _maybe_wrap_cuda_graph(fn_cutedsl, "cutedsl", use_cuda_graphs),
                         warmup=warmup,
@@ -715,10 +707,6 @@ def benchmark_grouped_mm(
                         f"max={bench_cutedsl['max_us']:.2f})"
                     )
                     result["CuTeDSL (us)"] = us_cutedsl
-                    if timing_details and use_cuda_graphs:
-                        result["CuTeDSL eager (us)"] = _do_bench_cuda(
-                            fn_cutedsl, warmup=warmup, rep=rep, cooldown_seconds=cooldown_seconds
-                        )["median_us"]
                     if us_aten is not None:
                         result["CuTeDSL speedup"] = us_aten / us_cutedsl
 
@@ -753,7 +741,9 @@ def benchmark_grouped_mm(
                         A, B.transpose(-2, -1), offs
                     )
                     if timing_details:
-                        result["Gluon compile (s)"] = _first_call_seconds(fn_gluon, compile_start)
+                        result["Gluon compile (s)"] = _first_call_seconds(
+                            fn_gluon, compile_start
+                        )
                     bench_gluon = _do_bench_cuda(
                         _maybe_wrap_cuda_graph(fn_gluon, "gluon", use_cuda_graphs),
                         warmup=warmup,
@@ -767,10 +757,6 @@ def benchmark_grouped_mm(
                         f"min={bench_gluon['min_us']:.2f}, max={bench_gluon['max_us']:.2f})"
                     )
                     result["Gluon (us)"] = us_gluon
-                    if timing_details and use_cuda_graphs:
-                        result["Gluon eager (us)"] = _do_bench_cuda(
-                            fn_gluon, warmup=warmup, rep=rep, cooldown_seconds=cooldown_seconds
-                        )["median_us"]
                     if us_aten is not None:
                         result["Gluon speedup"] = us_aten / us_gluon
 
@@ -817,7 +803,13 @@ def _benchmark_isolated(gmnk, backends, child_args, layout):
             merged = dict(zip(("G", "M", "N", "K"), shape)) | layout
             while remaining:
                 result_file.unlink(missing_ok=True)
-                cmd = [sys.executable, __file__, *child_args, "--result-file", str(result_file)]
+                cmd = [
+                    sys.executable,
+                    __file__,
+                    *child_args,
+                    "--result-file",
+                    str(result_file),
+                ]
                 cmd += ["--gmnk", ",".join(map(str, shape)), "--backends", *remaining]
                 sys.stdout.flush()
                 rc = subprocess.run(cmd).returncode
@@ -830,7 +822,10 @@ def _benchmark_isolated(gmnk, backends, child_args, layout):
                 if rc == 0:
                     break
                 if remaining:
-                    print(f"  {remaining.pop(0)}: crashed the benchmark process (exit {rc}), skipped\n", flush=True)
+                    print(
+                        f"  {remaining.pop(0)}: crashed the benchmark process (exit {rc}), skipped\n",
+                        flush=True,
+                    )
             for b in ("Triton", "CuTeDSL", "Gluon"):
                 if "ATen (us)" in merged and f"{b} (us)" in merged:
                     merged[f"{b} speedup"] = merged["ATen (us)"] / merged[f"{b} (us)"]
@@ -1015,9 +1010,7 @@ if __name__ == "__main__":
         action="store_true",
         help=(
             "Also record each compiled backend's compile time (torch.compile "
-            "through the end of the first call, including autotuning) and, "
-            "with --use-cuda-graphs, each backend's eager time, whose "
-            "difference from the graph time is the per-call host overhead."
+            "through the end of the first call, including autotuning)."
         ),
     )
     parser.add_argument("--result-file", dest="result_file", help=argparse.SUPPRESS)
@@ -1030,16 +1023,26 @@ if __name__ == "__main__":
         if args.proton_out is not None:
             parser.error("--isolate does not support --proton-out")
         child_args = [
-            "--input-dtype", args.input_dtype,
-            "--seed", str(args.seed),
-            "--rtol", str(args.rtol),
-            "--atol", str(args.atol),
-            "--A", f"{a_dim}d:{_major_label(a_k_major, 'm')}",
-            "--B", f"{b_dim}d:{_major_label(b_k_major, 'n')}",
-            "--warmup", str(args.warmup),
-            "--iterations", str(args.iterations),
-            "--cooldown-seconds", str(args.cooldown_seconds),
-            "--grouping", args.grouping,
+            "--input-dtype",
+            args.input_dtype,
+            "--seed",
+            str(args.seed),
+            "--rtol",
+            str(args.rtol),
+            "--atol",
+            str(args.atol),
+            "--A",
+            f"{a_dim}d:{_major_label(a_k_major, 'm')}",
+            "--B",
+            f"{b_dim}d:{_major_label(b_k_major, 'n')}",
+            "--warmup",
+            str(args.warmup),
+            "--iterations",
+            str(args.iterations),
+            "--cooldown-seconds",
+            str(args.cooldown_seconds),
+            "--grouping",
+            args.grouping,
         ]
         if args.use_cuda_graphs:
             child_args.append("--use-cuda-graphs")
@@ -1051,7 +1054,9 @@ if __name__ == "__main__":
             "A layout": _major_label(a_k_major, "m"),
             "B layout": _major_label(b_k_major, "n"),
         }
-        _benchmark_isolated(gmnk or _default_gmnk(a_dim, b_dim), args.backends, child_args, layout)
+        _benchmark_isolated(
+            gmnk or _default_gmnk(a_dim, b_dim), args.backends, child_args, layout
+        )
         sys.exit(0)
     benchmark_grouped_mm(
         gmnk=gmnk,

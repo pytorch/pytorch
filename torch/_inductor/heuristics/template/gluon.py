@@ -203,8 +203,10 @@ def prune_grouped_mm_configs(
     # Padded N tiles up to 128 still win on tiny N, so they are never pruned.
     min_n = max(min(c.BLOCK_N for c in configs), 128)
     min_k = min(c.BLOCK_K for c in configs)
-    many_waves = m_g >= 128 and n_g >= 128 and (
-        G * math.ceil(m_g / 128) * math.ceil(n_g / 256) >= 4 * num_sms
+    many_waves = (
+        m_g >= 128
+        and n_g >= 128
+        and (G * math.ceil(m_g / 128) * math.ceil(n_g / 256) >= 4 * num_sms)
     )
 
     def keep(c: GluonGroupedMMConfig) -> bool:
