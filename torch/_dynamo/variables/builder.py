@@ -242,6 +242,7 @@ from .functions import (
     GetSetDescriptorVariable,
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
+    MethodDescriptorVariable,
     MethodWrapperVariable,
     PropertyVariable,
     SysFunctionVariable,
@@ -664,8 +665,18 @@ def bound_builtin_method_descriptor(value: Any) -> Any | None:
         return None
 
     # BoundBuiltinMethodVariable needs the descriptor that created this bound
-    # method.  For class-bound methods, look on the class object itself (e.g.
-    # dict.fromkeys); for instance-bound methods, look on type(self).
+    # method. A name lookup on the owner would return a Python override on a
+    # subclass, so bind each C descriptor along the MRO and compare instead:
+    # meth_richcompare equates bound methods with the same __self__ and the
+    # same PyMethodDef.
+    for base in owner.__mro__:
+        cand = base.__dict__.get(value.__name__)
+        if isinstance(cand, types.MethodDescriptorType):
+            if cand.__get__(method_self, owner) == value:
+                return cand
+        elif isinstance(cand, types.ClassMethodDescriptorType):
+            if cand.__get__(None, owner) == value:
+                return cand
     return inspect.getattr_static(owner, value.__name__, None)
 
 
@@ -1903,6 +1914,15 @@ class VariableBuilder:
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, method_self, obj_source)
             return BoundBuiltinMethodVariable(descriptor, obj_vt, source=self.source)
+        elif isinstance(value, types.MethodDescriptorType) and not is_torch_class(
+            value.__objclass__
+        ):
+            # Torch method descriptors (e.g. torch.Tensor.add) keep their
+            # trace-rule path below.
+            self.install_guards(GuardBuilder.ID_MATCH)
+            owner_source = self.source and AttrSource(self.source, "__objclass__")
+            owner = VariableTracker.build(self.tx, value.__objclass__, owner_source)
+            return MethodDescriptorVariable(value, owner=owner, source=self.source)
         elif is_function(value) and value in (float.fromhex, float.hex):
             self.install_guards(GuardBuilder.ID_MATCH)
             return GetAttrVariable(
@@ -1974,6 +1994,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, types.ClassMethodDescriptorType):
+            self.install_guards(GuardBuilder.ID_MATCH)
             return ClassMethodDescriptorVariable(value, source=self.source)
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
@@ -5672,6 +5693,22 @@ class SourcelessBuilder:
         )
         handlers[types.GetSetDescriptorType] = (
             lambda tx, value: GetSetDescriptorVariable(value)
+        )
+
+        def method_descriptor_handler(
+            tx: "InstructionTranslatorBase", value: types.MethodDescriptorType
+        ) -> VariableTracker:
+            # Torch method descriptors (e.g. torch.Tensor.add) keep their
+            # trace-rule path.
+            if is_torch_class(value.__objclass__):
+                # pyrefly: ignore[not-callable, bad-argument-count]
+                return trace_rules.lookup(value)(value)
+            owner = SourcelessBuilder.create(tx, value.__objclass__)
+            return MethodDescriptorVariable(value, owner=owner)
+
+        handlers[types.MethodDescriptorType] = method_descriptor_handler
+        handlers[types.ClassMethodDescriptorType] = (
+            lambda tx, value: ClassMethodDescriptorVariable(value)
         )
         handlers[types.MemberDescriptorType] = (
             lambda tx, value: MemberDescriptorVariable(value)

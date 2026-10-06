@@ -112,7 +112,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import pynumber_index, vt_is_iterable
+from .object_protocol import mro_lookup, pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -3828,7 +3828,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     args=list(exc.args),
                 )
 
-        if self.is_tensor_method():
+        # call_tensor_method records `x.<name>(...)`, which resolves on type(x)
+        # when the graph runs. If a tensor subclass overrides the method, fall
+        # through so the graph calls the descriptor itself.
+        if self.is_tensor_method() and not (
+            args
+            and args[0].is_tensor()
+            and mro_lookup(args[0].python_type(), self.value.__name__)
+            is not mro_lookup(torch.Tensor, self.value.__name__)
+        ):
             name = self.value.__name__
             # Guard against inplace view op on input tensor (not supported)
             if args and args[0].is_tensor():
