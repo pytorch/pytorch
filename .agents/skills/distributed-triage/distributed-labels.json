@@ -79,8 +79,8 @@
       "description": "Tools to help distributed training"
     },
     {
-      "name": "bot-triaged",
-      "description": "Issue has been triaged by the triage bot"
+      "name": "ptd-bot-triaged",
+      "description": "Processed by the distributed triage bot (added by the apply step)"
     },
     {
       "name": "triaged",

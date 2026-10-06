@@ -1,0 +1,47 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision",
+    "labels",
+    "templates",
+    "reasoning"
+  ],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": [
+        "already_classified",
+        "not_distributed",
+        "route",
+        "classify",
+        "low_confidence",
+        "high_priority",
+        "needs_reproduction"
+      ],
+      "description": "Which distributed-triage step decided the outcome."
+    },
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Labels to ADD, exact names from distributed-labels.json. Never list labels to remove."
+    },
+    "templates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "needs_distributed_reproduction",
+          "not_distributed"
+        ]
+      },
+      "description": "templates.json keys whose comment should be posted, in order."
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "2-6 sentences: what the issue is about and why this sub-queue and these labels."
+    }
+  }
+}
