@@ -80,15 +80,15 @@ _REDUCTION_IDENTITIES = {
     "prod": "1",
 }
 
-_REDUCTION_OPERATORS = {
-    "sum": "+=",
-    "dot": "+=",
-    "xor_sum": "^=",
-    "any": "or=",
-    "prod": "*=",
-    "max": "max=",
-    "fmax": "max=",
-    "min": "min=",
+_REDUCTION_COMBINES = {
+    "sum": "{acc} + {value}",
+    "dot": "{acc} + {value}",
+    "xor_sum": "{acc} ^ {value}",
+    "any": "{acc} | {value}",
+    "prod": "{acc} * {value}",
+    "max": "max({acc}, {value})",
+    "fmax": "fmax({acc}, {value})",
+    "min": "min({acc}, {value})",
 }
 
 
@@ -241,7 +241,7 @@ class _PrettyOpsHandler(DefaultHandler):
         self.body.append(f"{name}[{_render(index)}] {operator} {_render(value)}")
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        if reduction_type not in _REDUCTION_OPERATORS:
+        if reduction_type not in _REDUCTION_COMBINES:
             raise _Unsupported(f"reduction {reduction_type}")
 
         name = f"acc_{self._accumulator_count}"
@@ -259,9 +259,8 @@ class _PrettyOpsHandler(DefaultHandler):
         else:
             identity = _REDUCTION_IDENTITIES[reduction_type]
         self.initializers.append(f"{name}: {_dtype_name(dtype)} = {identity}")
-        self.body.append(
-            f"{name} {_REDUCTION_OPERATORS[reduction_type]} {_render(value)}"
-        )
+        combine = _REDUCTION_COMBINES[reduction_type]
+        self.body.append(f"{name} = {combine.format(acc=name, value=_render(value))}")
         return _Value(name, dtype)
 
     def store_reduction(self, name, index, value):
