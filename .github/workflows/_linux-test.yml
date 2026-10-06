@@ -8,11 +8,6 @@ on:
         required: true
         type: string
         description: Top-level label for what's being built/tested.
-      artifact-run-id:
-        required: false
-        type: string
-        default: ""
-        description: Workflow run ID to download build artifacts from instead of the current run.
       test-matrix:
         required: true
         type: string
@@ -182,25 +177,11 @@ jobs:
           role-duration-seconds: 18000
 
       - name: Download build artifacts
-        if: inputs.artifact-run-id == ''
         uses: pytorch/pytorch/.github/actions/download-build-artifacts@main
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
           use-gha: ${{ steps.aws-creds.outcome != 'success' || inputs.use-gha }}
-
-      - name: Download build artifacts from prior run
-        if: inputs.artifact-run-id != ''
-        shell: bash
-        env:
-          ARTIFACT_RUN_ID: ${{ inputs.artifact-run-id }}
-          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          S3_BUCKET: ${{ inputs.s3-bucket || 'gha-artifacts' }}
-        run: |
-          ARTIFACT_URL="https://${S3_BUCKET}.s3.amazonaws.com/${GITHUB_REPOSITORY}/${ARTIFACT_RUN_ID}/${BUILD_ENVIRONMENT}/artifacts.zip"
-          curl --fail --location --retry 3 --output artifacts.zip "$ARTIFACT_URL"
-          unzip -o artifacts.zip
-          rm artifacts.zip
 
       - name: Download TD artifacts
         continue-on-error: true
