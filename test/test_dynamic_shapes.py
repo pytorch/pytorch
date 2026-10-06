@@ -694,6 +694,33 @@ class TestPySymInt(TestCase):
             """Eq(FloorToInt(3.0*ToFloat(s97)), 15)""",
         )
 
+    def test_sym_int_round(self):
+        # round(SymInt, ndigits) must follow int.__round__: identity for
+        # ndigits None or >= 0, and half-to-even rounding to a multiple of
+        # 10 ** -ndigits for negative ndigits. See #198064.
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 25)
+        for ndigits in (None, 0, 3):
+            r = round(a0, ndigits) if ndigits is not None else round(a0)
+            self.assertIsInstance(r, torch.SymInt, msg=type(r))
+            self.assertEqual(r.node.expr, a0.node.expr)
+
+        r = round(a0, -1)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        # Rounding is expressed with floordiv/mod only: no guards are added.
+        self.assertEqual(len(shape_env.guards), 0)
+        self.assertEqual(r, 20)
+
+        hints = (0, 4, 5, 6, 14, 15, 16, 25, 35, 99, 105, 1250, 1350)
+        hints += (-5, -15, -25, -1250)
+        for hint in hints:
+            for ndigits in (-1, -2, -3):
+                shape_env = ShapeEnv()
+                a1 = create_symint(shape_env, hint, duck=False, positive=None)
+                r = round(a1, ndigits)
+                self.assertIsInstance(r, torch.SymInt, msg=type(r))
+                self.assertEqual(int(r), round(hint, ndigits), msg=(hint, ndigits))
+
     def test_sym_ite(self):
         shape_env = ShapeEnv()
         t = create_symint(shape_env, 5)

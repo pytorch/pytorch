@@ -5439,6 +5439,17 @@ class GraphModule(torch.nn.Module):
             fn(arr, np.s_[..., 1], np.array([3, 3])), np.array([[1, 3], [2, 3]])
         )
 
+    def test_round_symint_negative_ndigits(self):
+        # https://github.com/pytorch/pytorch/issues/198064
+        def fn(x):
+            n = x.shape[0]
+            return x.new_full((round(n, -1),), round(n * 5, -1)), round(n, -2)
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        for n in (14, 15, 16, 25, 35, 105):
+            x = torch.ones(n)
+            self.assertEqual(opt_fn(x), fn(x))
+
     def test_round(self):
         def fn(t):
             return t + round(1.00002000011, 7)
