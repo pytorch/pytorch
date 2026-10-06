@@ -530,7 +530,7 @@ struct ConvParams {
     return !(input.dim() == 4 && native_fits_32_bit_indexing()
              && miopen_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous);
   }
-  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const  {
+  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight, bool is_backward) const  {
 #if AT_MKLDNN_ENABLED()
     if (!at::globalContext().userEnabledMkldnn()) {
       return false;
@@ -541,6 +541,12 @@ struct ConvParams {
     if (input.device().is_cpu() &&
         ((input.scalar_type() == at::kBFloat16 && mkldnn_bf16_device_check()) ||
          (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
+      // oneDNN supports bf16/fp16 convolution forward but not backward on avx2_vnni_2.
+      if (is_backward && !input.is_mkldnn() && ideep::check_isa_is_avx2_vnni_2()) {
+        TORCH_WARN_ONCE("oneDNN does not support bf16/fp16 convolution backward on CPUs with avx2_vnni_2"
+                        " as their best ISA; falling back to the native implementation.");
+        return false;
+      }
       return true;
     }
     return (input.is_mkldnn()) || // input is mkldnn Tensor
@@ -1299,7 +1305,8 @@ static ConvBackend _select_conv_backend(
     const std::optional<Tensor>& bias,
     const at::OptionalArrayRef<T> bias_sizes_opt,
     const bool need_backward,
-    const ConvParams<T>& params) {
+    const ConvParams<T>& params,
+    const bool is_backward = false) {
 
   // don't send empty inputs through backends
   if constexpr (std::is_same_v<T, c10::SymInt>) {
@@ -1343,7 +1350,7 @@ static ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Miopen;
     }
-  } else if (params.use_mkldnn(input, weight)) {
+  } else if (params.use_mkldnn(input, weight, is_backward)) {
     if (params.transposed) {
       return ConvBackend::MkldnnTranspose;
     } else {
@@ -1459,8 +1466,9 @@ static ConvBackend select_conv_backend(
     const Tensor& weight,
     const at::OptionalIntArrayRef bias_sizes_opt,
     const bool need_backward,
-    const ConvParams<int64_t>& params) {
-  return _select_conv_backend(input, weight, {}, bias_sizes_opt, need_backward, params);
+    const ConvParams<int64_t>& params,
+    const bool is_backward = false) {
+  return _select_conv_backend(input, weight, {}, bias_sizes_opt, need_backward, params, is_backward);
 }
 
 static at::Tensor _convolution_nogroup_backend(
@@ -2151,7 +2159,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   }
 
   // Select appropriate backend to use.
-  ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, /*need_backward=*/ true, params);
+  ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, /*need_backward=*/ true, params, /*is_backward=*/ true);
   at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
 
   // Call the backend.
