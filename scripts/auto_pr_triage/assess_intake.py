@@ -23,7 +23,6 @@ from github_api import (
     PullRequestRef,
     SUBMITTED_REVIEW_STATES,
 )
-from identifiers import TARGET_BASE_REF
 from schemas import (
     IntakeFacts,
     IntakeResult,
@@ -487,7 +486,7 @@ def assess_intake(
     if pr_number != pr.number or base_repo.casefold() != pr.repo.casefold():
         raise RuntimeError("pull request identity does not match the target")
     # ghstack opens each PR in a stack against its own gh/<user>/<N>/base branch.
-    targets_main = base_ref == TARGET_BASE_REF or (
+    targets_main = base_ref == "main" or (
         base_ref.startswith("gh/") and base_ref.endswith("/base")
     )
     is_open_non_draft_pr_against_main = targets_main and state == "open" and not draft
