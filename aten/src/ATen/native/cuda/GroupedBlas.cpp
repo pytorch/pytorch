@@ -132,6 +132,18 @@ std::optional<CublasLtGroupedScaleSpec> get_cublaslt_grouped_scale_spec(
           at::kFloat8_e4m3fn,
           "float8_e4m3fn",
           "BlockWise1x16"};
+    case ScalingType::BlockWise1x128:
+      return CublasLtGroupedScaleSpec{
+          CublasGroupedScaleLayout::Vec128F32,
+          at::kFloat,
+          "float32",
+          "BlockWise1x128"};
+    case ScalingType::BlockWise128x128:
+      return CublasLtGroupedScaleSpec{
+          CublasGroupedScaleLayout::Block128x128F32,
+          at::kFloat,
+          "float32",
+          "BlockWise128x128"};
     default:
       return std::nullopt;
   }
@@ -176,7 +188,13 @@ bool is_cublaslt_grouped_scaling_type(ScalingType scaling) {
 bool is_cublaslt_grouped_scale_pair_supported(
     ScalingType scaling_a,
     ScalingType scaling_b) {
-  return scaling_a == scaling_b;
+  if (scaling_a == scaling_b) {
+    return scaling_a != ScalingType::BlockWise128x128;
+  }
+  return (scaling_a == ScalingType::BlockWise1x128 &&
+             scaling_b == ScalingType::BlockWise128x128) ||
+      (scaling_a == ScalingType::BlockWise128x128 &&
+          scaling_b == ScalingType::BlockWise1x128);
 }
 
 void check_cublaslt_grouped_scale_pair(
@@ -187,7 +205,7 @@ void check_cublaslt_grouped_scale_pair(
   TORCH_CHECK_VALUE(
       spec_a && spec_b &&
           is_cublaslt_grouped_scale_pair_supported(scaling_a, scaling_b),
-      "cuBLASLt grouped GEMM requires a supported scale recipe pair: matching recipes; got ",
+      "cuBLASLt grouped GEMM requires a supported scale recipe pair: matching recipes other than BlockWise128x128, or BlockWise1x128 paired with BlockWise128x128; got ",
       spec_a ? spec_a->recipe_name : "unsupported",
       " and ",
       spec_b ? spec_b->recipe_name : "unsupported");
@@ -229,6 +247,14 @@ void check_cublaslt_grouped_scale_recipe(
     const int64_t packed_multiplier = mat.scalar_type() == at::kFloat4_e2m1fn_x2 ? 2 : 1;
     const int64_t inner = (is_a ? mat.size(-1) : mat.size(-2)) * packed_multiplier;
     const int64_t outer = is_a ? mat.size(-2) : mat.size(-1);
+    if (mat.dim() == 3 &&
+        cublas_grouped_scale_requires_outer_multiple_of_4(spec->layout)) {
+      TORCH_CHECK(
+          outer % 4 == 0,
+          name,
+          " requires the per-group outer dimension to be divisible by 4, got ",
+          outer);
+    }
     const int64_t scale_size = cublas_grouped_scale_size_bytes(
         spec->layout, inner, outer) / scale.element_size();
     if (mat.dim() == 3) {
@@ -282,9 +308,12 @@ bool should_use_scaled_cublaslt_grouped_gemm(
   }
   check_cublaslt_grouped_scale_pair(*scaling_a, *scaling_b);
 
+  const bool uses_hopper_block = *scaling_a == ScalingType::BlockWise1x128 || *scaling_a == ScalingType::BlockWise128x128;
   bool valid_sm;
   const auto dprops = at::cuda::getCurrentDeviceProperties();
-  if (*scaling_a == ScalingType::BlockWise1x16) {
+  if (uses_hopper_block) {
+    valid_sm = dprops->major == 9;
+  } else if (*scaling_a == ScalingType::BlockWise1x16) {
     valid_sm = dprops->major == 10 || dprops->major == 11;
   } else {
     valid_sm = dprops->major >= 9 && dprops->major <= 11;
@@ -313,7 +342,10 @@ bool should_use_scaled_cublaslt_grouped_gemm(
       mat_b.scalar_type() == at::kFloat8_e5m2;
   const bool uses_vec16 = *scaling_a == ScalingType::BlockWise1x16 ||
       *scaling_b == ScalingType::BlockWise1x16;
-  const bool valid_in_dtypes = uses_vec16
+  const bool valid_in_dtypes = uses_hopper_block
+      ? mat_a.scalar_type() == at::kFloat8_e4m3fn &&
+          mat_b.scalar_type() == at::kFloat8_e4m3fn
+      : uses_vec16
       ? mat_a_is_fp4 && mat_b_is_fp4 &&
           *scaling_a == ScalingType::BlockWise1x16 &&
           *scaling_b == ScalingType::BlockWise1x16
@@ -321,7 +353,14 @@ bool should_use_scaled_cublaslt_grouped_gemm(
           (mat_a.scalar_type() == at::kFloat8_e4m3fn ||
            mat_b.scalar_type() == at::kFloat8_e4m3fn);
   if (!valid_in_dtypes) {
-    if (uses_vec16) {
+    if (uses_hopper_block) {
+      TORCH_WARN_ONCE(
+          "cuBLASLt scaled grouped GEMM is not used because FP32 128-element block scaling requires two Float8_e4m3fn inputs, got mat_a dtype ",
+          mat_a.scalar_type(),
+          " and mat_b dtype ",
+          mat_b.scalar_type(),
+          "; falling back to the non-cuBLASLt grouped GEMM path.");
+    } else if (uses_vec16) {
       TORCH_WARN_ONCE(
           "cuBLASLt scaled grouped GEMM is not used because 1x16 block scaling requires two Float4_e2m1fn_x2 inputs, got mat_a dtype ",
           mat_a.scalar_type(),

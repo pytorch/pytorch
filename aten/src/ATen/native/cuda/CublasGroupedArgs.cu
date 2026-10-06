@@ -96,6 +96,12 @@ __global__ void populate_cublas_grouped_args_kernel(
   m_out[i] = m_is_delta ? static_cast<IndexType>(delta) : cublas_m;
   n_out[i] = n_is_delta ? static_cast<IndexType>(delta) : cublas_n;
   k_out[i] = k_is_delta ? static_cast<IndexType>(delta) : cublas_k;
+  CUDA_KERNEL_ASSERT(
+      !cublas_grouped_scale_requires_outer_multiple_of_4(scale_layout_a) ||
+      m_out[i] % 4 == 0);
+  CUDA_KERNEL_ASSERT(
+      !cublas_grouped_scale_requires_outer_multiple_of_4(scale_layout_b) ||
+      n_out[i] % 4 == 0);
 
   lda_out[i] = lda_val;
   ldb_out[i] = ldb_val;
