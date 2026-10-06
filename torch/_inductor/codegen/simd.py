@@ -465,6 +465,13 @@ def codegen_reduced_buffer(buffer_name: str, reduced: str) -> None:
 COLUMN_REDUCTION_OPS = {"sum": "sum", "max": "amax", "min": "amin"}
 
 
+def is_row_major_read(dep: MemoryDep, numel: sympy.Expr) -> bool:
+    """Whether dep reads all numel elements of a buffer in row-major order.
+    Loop merging may have collapsed a contiguous read to a single var."""
+    dep = dep.normalize()
+    return dep.is_contiguous() and dep.get_numel() == numel
+
+
 def template_reduction_axis(
     node: scheduler.BaseSchedulerNode,
     template: ir.Buffer,
@@ -483,17 +490,14 @@ def template_reduction_axis(
             if dep.name in produced
         )
 
-    # Loop merging may have collapsed a contiguous read to a single var.
-    def row_major(dep):
-        dep = dep.normalize()
-        return dep.is_contiguous() and dep.get_numel() == m * n
-
     def col_major(dep):
         return len(dep.var_names) == 2 and dep.index == sympy_dot(
             (1, dep.size[0]), dep.var_names
         )
 
-    if node.group[1] == (m, n) and reads(node, row_major):
+    if node.group[1] == (m, n) and reads(
+        node, functools.partial(is_row_major_read, numel=m * n)
+    ):
         return 0
     if not (isinstance(node, scheduler.SchedulerNode) and node.is_reduction()):
         return None
@@ -504,9 +508,10 @@ def template_reduction_axis(
         if not (len(users) == 1 and users[0].node.is_reduction()):
             return None
     # The partials are fp32 and are finished by Python wrapper code, whose
-    # buffer sizes must be static.
+    # buffer sizes must be static. SizeHintMultiKernel never emits that code.
     if (
         not V.graph.cpp_wrapper
+        and not config.multi_kernel_hints
         and isinstance(m, sympy.Integer)
         and isinstance(n, sympy.Integer)
         and unsplit.group[1] == (n, m)
@@ -540,11 +545,20 @@ def tile_fits_reduction_epilogue(
     )
     if axes == OrderedSet([1]):
         # Column results are only complete after the wrapper reduces the
-        # partials, so no epilogue node may read them.
+        # partials, so no epilogue node may read them. The column pass
+        # transposes the stored tile, so the others must read in place.
         results = OrderedSet().union(*(node.get_buffer_names() for node in reductions))
         return all(
             node.is_reduction()
-            or (node.group[1] == (m * n, 1) and not node.used_buffer_names() & results)
+            or (
+                node.group[1] == (m * n, 1)
+                and not node.used_buffer_names() & results
+                and all(
+                    isinstance(dep, MemoryDep) and is_row_major_read(dep, m * n)
+                    for dep in node.read_writes.reads
+                    if dep.name in produced
+                )
+            )
             for node in epilogue_nodes
         )
     # A row reduction must see whole rows in one store. Reducing across column
@@ -2976,19 +2990,19 @@ class SIMDScheduling(BaseScheduling):
         ):
             why("template reduction epilogue not satisfied")
             return False
-        if (
-            config.triton.template_reduction_epilogue
-            and node1.is_template()
-            and any(
-                node.is_reduction()
-                and node.group[1] != tuple(node1.get_template_node().get_size())
-                for node in (*node1.get_nodes(), *node2.get_nodes())
-            )
-            and self.can_fuse_template_reduction_epilogue(node1, node2)
-        ):
+        if config.triton.template_reduction_epilogue and node1.is_template():
+            template = node1.get_template_node()
+            nodes = (*node1.get_nodes(), *node2.get_nodes())
+            produced = OrderedSet().union(*(node.get_buffer_names() for node in nodes))
             # A column reduction of the template output, which the tiling
-            # checks below can't express.
-            return True
+            # checks below can't express. Its group can't identify it: a split
+            # column reduction's can equal the output's (M, N).
+            if any(
+                node.is_reduction()
+                and template_reduction_axis(node, template, produced) == 1
+                for node in nodes
+            ) and self.can_fuse_template_reduction_epilogue(node1, node2):
+                return True
 
         if isinstance(node1, scheduler.FusedNestedReductions):
             # The scheduler already validated this vertical append. The normal

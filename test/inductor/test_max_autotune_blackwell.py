@@ -1213,8 +1213,8 @@ class TestBlackwellTMALoadFusion(TestCase):
 
     COL_OPS = {
         "sum": lambda a, b: (a @ b).float().sum(0),
-        # Every column is negative (positive), so unmasked out-of-range rows
-        # would win.
+        # Unmasked out-of-range rows would each add 1.
+        "plus1": lambda a, b: ((a @ b).float() + 1).sum(0),
         "amax": lambda a, b: ((a @ b) - 100).amax(0),
         "amin": lambda a, b: ((a @ b) + 100).amin(0),
         "mean": lambda a, b: (a @ b).float().mean(0),
@@ -1229,7 +1229,7 @@ class TestBlackwellTMALoadFusion(TestCase):
         "Need Blackwell with device-side TMA support in Triton",
     )
     @parametrize("op", tuple(COL_OPS))
-    @parametrize("M", (1000, 4096))
+    @parametrize("M", (1000, 1001, 4096))
     @parametrize("split", (False, True))
     def test_blackwell_mm_col_reduction_epilogue_fusion(
         self, op: str, M: int, split: bool
@@ -1245,6 +1245,51 @@ class TestBlackwellTMALoadFusion(TestCase):
         self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
         # Nodes reading the finished column results stay unfused.
         self.assertEqual(len(kernels), 2 if op in ("mean", "center") else 1, kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_col_reduction_epilogue_with_pointwise(self):
+        """A pointwise node reading the output in place fuses next to a column
+        reduction."""
+
+        def fn(a, b):
+            c = a @ b
+            return c.relu(), c.float().sum(0)
+
+        kernels, _ = self._run_reduction(
+            fn,
+            1024,
+            128,
+            256,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_col_reduction_epilogue_transposed_pointwise(self):
+        """A pointwise node reading the output transposed doesn't fuse next to
+        a column reduction, whose pass transposes the stored tile."""
+
+        def fn(a, b):
+            c = a @ b
+            return c.t().contiguous(), c.float().sum(0)
+
+        kernels, _ = self._run_reduction(
+            fn,
+            256,
+            128,
+            256,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertGreater(len(kernels), 1, kernels)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
