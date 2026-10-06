@@ -10,9 +10,10 @@ from pathlib import Path
 
 import torch
 from torch._inductor import config, test_operators
+from torch._inductor.pretty_print_ir import format_pre_fusion_ir
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import skipIfWindows
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 
 
@@ -35,6 +36,59 @@ def filesize(filename: Path):
 
 @config.patch("trace.enabled", True)
 class TestDebugTrace(test_torchinductor.TestCase):
+    def _compile_pretty_ir(self, fn, *inputs):
+        """Compile fn and return its pretty IR log for each stage."""
+        log_streams, ctx = multiple_logs_to_string(
+            "torch._inductor.debug", "ir_pre_fusion_pretty"
+        )
+        with config.patch("force_disable_caches", True), ctx():
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+        self.assertEqual(actual, fn(*inputs))
+        return tuple(stream.getvalue().strip() for stream in log_streams)
+
+    def test_ir_pre_fusion_pretty_unsupported(self):
+        class UnsupportedNode:
+            @staticmethod
+            def get_name():
+                return "op0"
+
+        self.assertEqual(
+            format_pre_fusion_ir([UnsupportedNode()]),
+            "kernel op0:\n    unimplemented UnsupportedNode",
+        )
+
+    @requires_gpu()
+    def test_ir_pre_fusion_pretty(self):
+        def fn(a):
+            return torch.sin(a + 1), a.sum(dim=1)
+
+        (pre_fusion,) = self._compile_pretty_ir(fn, torch.randn(4, 8, device=GPU_TYPE))
+        self.assertExpectedInline(
+            pre_fusion,
+            """\
+PRE-FUSION PRETTY IR
+kernel op0(
+    arg0_1: f32[4, 8]
+) -> buf0: f32[4, 8]:
+    for p0 in [0, 4):
+        for p1 in [0, 8):
+            tmp0: f32 = arg0_1[p1 + 8*p0]
+            tmp1: f32 = 1.0
+            tmp2: f32 = tmp0 + tmp1
+            tmp3: f32 = sin(tmp2)
+            buf0[p1 + 8*p0] = tmp3
+
+kernel op1(
+    arg0_1: f32[4, 8]
+) -> buf1: f32[4]:
+    for p0 in [0, 4):
+        acc_0: f32 = 0
+        for r0 in [0, 8):
+            tmp0: f32 = arg0_1[r0 + 8*p0]
+            acc_0 = acc_0 + tmp0
+        buf1[p0] = acc_0""",
+        )
+
     def test_debug_trace(self):
         @torch.compile
         def fn(a, b):
