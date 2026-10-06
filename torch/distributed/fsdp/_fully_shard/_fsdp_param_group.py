@@ -21,10 +21,11 @@ from torch.distributed.fsdp._common_utils import (
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
+from ._all_gather_layout import AllGatherLayout, DEFAULT_ALL_GATHER_LAYOUT
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
-    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    _wait_all_gather,
     AllGather,
     AllGatherResult,
     DefaultAllGather,
@@ -32,6 +33,7 @@ from ._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
+    PrepareReduceScatterInputsFn,
     ProcessGroupAllocAllGather,
     ProcessGroupAllocReduceScatter,
     ReduceScatter,
@@ -49,7 +51,7 @@ from ._fsdp_common import (
     ShardPlacementFnResult,
     TrainingState,
 )
-from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
+from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 
 if TYPE_CHECKING:
@@ -257,8 +259,10 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
-        self._all_gather_output_fn: Callable = _default_all_gather_output_fn
-        self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
+        self._all_gather_layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
+        self._prepare_reduce_scatter_inputs: PrepareReduceScatterInputsFn = (
+            _default_reduce_scatter_input_fn
+        )
         self._reduce_scatter_param_indices: list[int] = []
         self._fsdp_params_with_wider_grad_dtype: list[FSDPParam] = []
         self._param_group_index: int = 0
@@ -487,6 +491,7 @@ class FSDPParamGroup:
                 param_all_gather_input_dtypes=[],
                 param_all_gather_input_numels=[],
                 all_gather_input_split_sizes=[],
+                all_gather_input_outer_sizes=[],
             )
 
             return
@@ -499,6 +504,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                self._all_gather_layout,
             )
 
     @_disable_functorch_if_active
@@ -524,28 +530,30 @@ class FSDPParamGroup:
             # directly initialize unsharded parameters from sharded parameters
 
             for fsdp_param in self.fsdp_params:
-                # Use all_gather_inputs which already handles conversion to param_dtype
-                # This is consistent with the world_size > 1 path
-                all_gather_input = fsdp_param.all_gather_inputs[0]
-
-                # Make sure the all_gather_outputs has proper storage size before using it
-                # First ensure we have at least one tensor in all_gather_outputs
+                all_gather_inputs = fsdp_param.all_gather_inputs
                 fsdp_param.init_all_gather_outputs(
-                    [all_gather_input.numel()],
-                    [all_gather_input.dtype],
+                    [tensor.numel() for tensor in all_gather_inputs],
+                    [tensor.dtype for tensor in all_gather_inputs],
                     world_size,
                     self.device,
                 )
-
-                tensor = fsdp_param.all_gather_outputs[0]
-                alloc_storage(tensor)
-
-                with (
-                    torch.autograd._unsafe_preserve_version_counter(tensor)
+                fsdp_param.alloc_all_gather_outputs()
+                non_inference_outputs = tuple(
+                    tensor
+                    for tensor in fsdp_param.all_gather_outputs
                     if not tensor.is_inference()
-                    else contextlib.nullcontext()
+                )
+                with torch.autograd._unsafe_preserve_version_counter(
+                    non_inference_outputs
                 ):
-                    tensor.copy_(all_gather_input)
+                    for output, tensor in zip(
+                        fsdp_param.all_gather_outputs, all_gather_inputs
+                    ):
+                        # Like the world_size > 1 path, copy byte payloads
+                        # bytewise into cached outputs of other dtypes
+                        if tensor.dtype == torch.uint8:
+                            output = output.view(torch.uint8)
+                        output.copy_(tensor)
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
@@ -553,7 +561,6 @@ class FSDPParamGroup:
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
-                    all_gather_output_fn=self._all_gather_output_fn,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -597,12 +604,9 @@ class FSDPParamGroup:
         # accumulated grad-reduction state, and restores sharded params.
         current_stream = self.device_handle.current_stream()
         if self._all_gather_result is not None:
-            if (event := self._all_gather_result.all_gather_event) is not None:
-                current_stream.wait_event(event)
-            work = self._all_gather_result.all_gather_work
-            if isinstance(work, dist.distributed_c10d.Work):
-                work.wait()
+            _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
+            self._all_gather_comm.release_output()
         if self._post_reduce_event is not None:
             current_stream.wait_event(self._post_reduce_event)
             self._post_reduce_event = None
@@ -893,12 +897,9 @@ class FSDPParamGroup:
         if self._all_gather_result is not None:
             # If there was a mistargeted unshard without a corresponding wait,
             # then we wait here and clear the unshard
-            if (event := self._all_gather_result.all_gather_event) is not None:
-                self.device_handle.current_stream().wait_event(event)
-            work = self._all_gather_result.all_gather_work
-            if isinstance(work, dist.distributed_c10d.Work):
-                work.wait()
+            _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
+            self._all_gather_comm.release_output()
         self._post_forward_indices.clear()
 
     def _get_partial_reduce_grad(self, param: FSDPParam) -> torch.Tensor | None:
@@ -984,7 +985,7 @@ class FSDPParamGroup:
 
     def _get_unsharded_grad_to_reduce(self, param: FSDPParam) -> torch.Tensor | None:
         """Returns the unsharded gradient to reduce-scatter, or ``None`` to skip."""
-        if not hasattr(param, "_unsharded_param"):
+        if param._unsharded_param is None:
             return None
         unsharded_param = param.unsharded_param
         # A group unused in this microbatch may still own gradients from an
@@ -1112,15 +1113,21 @@ class FSDPParamGroup:
     # Utilities #
     def _to_sharded(self):
         if not self.is_sharded:
+            if self._all_gather_result is not None:
+                # Discard a post-forward mesh prefetch before changing meshes.
+                _wait_all_gather(self._all_gather_result)
+                self._all_gather_result = None
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
+            self._all_gather_comm.release_output()
 
     def _to_sharded_post_forward(self):
         if not self.is_sharded_post_forward:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded_post_forward()
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
+            self._all_gather_comm.release_output()
 
     def _to_unsharded(self):
         if not self.is_unsharded:

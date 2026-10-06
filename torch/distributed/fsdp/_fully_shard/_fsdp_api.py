@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, KW_ONLY, replace
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+
+from ._all_gather_layout import AllGatherLayout, DEFAULT_ALL_GATHER_LAYOUT
 
 
 _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
@@ -154,9 +156,34 @@ class Comm(ABC):
 
 
 class AllGather(Comm):
+    """Interface for the all_gather comm primitive.
+
+    Set ``layout`` to customize input packing and parameter output views.
+    The default layout uses rank-major copy-in and copy-out.
     """
-    Interface for all_gather comm primitive
-    """
+
+    layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
+    # Preserve version counters when outputs may alias saved parameter views.
+    reuses_output_storage: bool = False
+
+    def release_output(self) -> None:
+        """Release this group's output lease on the compute stream.
+
+        Called after reshard or after waiting for a discarded unused prefetch.
+        Finishing a backward callback or clearing deferred communication state
+        does not release the lease while the parameters remain unsharded. This
+        also applies when gradient reduction or backward finalization is deferred.
+        Previously returned parameter views must remain valid objects. A backend
+        sharing their storage must restore the same regions on the next gather
+        and order overwrites after all local and remote consumers finish.
+        The backend must protect reuse during both input packing and collective
+        execution; FSDP does not synchronize backend-owned output reuse.
+
+        Must be idempotent when no output is active. FSDP also calls this after
+        failed input preparation or collective setup, on a stream ordered after
+        any work already queued by that call. A backend whose communication may
+        have partially failed must prevent unsafe reuse rather than recover it.
+        """
 
     @abstractmethod
     def __call__(
@@ -253,3 +280,35 @@ class CPUOffloadPolicy(OffloadPolicy):
     """
 
     pin_memory: bool = True
+
+
+@dataclass(frozen=True)
+class AllGatherInput:
+    r"""Describe one payload returned by an FSDP all-gather extension.
+
+    Return these records in the inputs of ``(inputs, metadata)`` from
+    ``fsdp_pre_all_gather``. Each rank's payload is concatenated along ``dim``
+    using its own shape, independently of the parameter's shard dimension.
+    For example, a payload of shape ``(2, F, D)`` with ``dim=1`` produces
+    ``(2, world_size * F, D)``. Scalar payloads are treated as shape ``(1,)``.
+    The gathered payload is optionally reshaped to ``output_size`` before
+    being passed to the unchanged ``fsdp_post_all_gather`` hook.
+
+    Payloads must be flattenable with ``view(-1)``. Each rank must return the
+    same payload shapes, dtypes, and layouts; extensions own any padding.
+    The number, element counts, and dtypes of payloads must stay fixed across
+    calls so FSDP can reuse their output buffers.
+
+    Attributes:
+        tensor (Tensor): Local payload to communicate.
+        dim (int): Payload dimension to concatenate across ranks. Negative
+            dimensions are supported. Defaults to 0.
+        output_size (torch.Size, optional): Shape passed to the post hook, with
+            the same number of elements as the gathered payload. Defaults to
+            the concatenated shape.
+    """
+
+    tensor: torch.Tensor
+    _: KW_ONLY
+    dim: int = 0
+    output_size: torch.Size | None = None
