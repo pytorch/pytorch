@@ -48,7 +48,7 @@ from .cpp_utils import (
 from .wrapper import (
     _get_profiling_args,
     _rewrite_symbol_solution_for_int_codegen,
-    codegen_reinterpret_view_helper,
+    codegen_reinterpret_view_layout_match,
     EnterKernelProfileScopeLine,
     EnterSubgraphLine,
     ExitKernelProfileScopeLine,
@@ -289,6 +289,27 @@ def _ivalue_conversion(ivalue_var: str, to_ivalue_call: str) -> list[str]:
         f"AOTI_TORCH_ERROR_CODE_CHECK({to_ivalue_call});",
         f"RAIIC10IValueHandle RAII_{ivalue_var}({ivalue_var});",
     ]
+
+
+def _record_function_var(kernel_name: str) -> str:
+    """The C++ identifier stem for a recorded kernel name."""
+    return kernel_name.replace("::", "_").replace(".", "_")
+
+
+def _record_function_handle_line(
+    kernel_name: str, inputs_vec: str | None = None
+) -> str:
+    """The RAIIAtenRecordFunctionHandle declaration for one kernel call.
+
+    Every path that records a kernel builds its declaration here, so the name a
+    trace shows and the name of the handle holding it cannot drift apart
+    between the paths.
+    """
+    inputs = f", {inputs_vec}" if inputs_vec else ""
+    return (
+        "RAIIAtenRecordFunctionHandle "
+        f'record_{_record_function_var(kernel_name)}_("{kernel_name}", nullptr{inputs});'
+    )
 
 
 def _profiling_ivalue_lines(
@@ -1679,8 +1700,23 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
             )
 
+    @staticmethod
+    def output_aliases_constant(output: str, output_buffer: ir.IRNode) -> bool:
+        def aliases_constant(name: str) -> bool:
+            if name in V.graph.constants:
+                return True
+            # IR views of a constant already resolve to its name, but fallback
+            # view ops (e.g. under fallback_by_default) alias their input
+            # without an IR view in between.
+            buf = V.graph.try_get_buffer(name)
+            return isinstance(buf, ir.Buffer) and any(
+                map(aliases_constant, buf.get_inputs_that_alias_output())
+            )
+
+        name = output_buffer.maybe_get_name()
+        return output in V.graph.constants or bool(name and aliases_constant(name))
+
     def generate_return(self, output_refs: list[str]):
-        cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
 
         # If any output ref represents an rvalue tensor, materialize it to an lvalue
@@ -1695,17 +1731,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if output == "nullptr":
                 continue
 
-            is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
-            if isinstance(output_buffer, ir.BaseView):
-                output_storage = output_buffer.unwrap_view()
-                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
-                    raise AssertionError(
-                        f"expected output_storage to be BaseView or MutableBox, "
-                        f"got {type(output_storage)}"
-                    )
-                if isinstance(output_storage.data, ir.ConstantBuffer):
-                    is_constant_buffer = True
+            is_constant_buffer = self.output_aliases_constant(output, output_buffer)
 
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors
@@ -2741,10 +2768,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         reinterpreted tensor data.  Callers of this function are responsible for saving
         the handle if persistent access is needed."""
 
-        d_size, d_stride, d_offset, d_dtype, collapsible = (
-            codegen_reinterpret_view_helper(data)
-        )
-
         dim = str(len(size))
         original_offset = offset
         offset = self.codegen_sizevar(offset)
@@ -2790,17 +2813,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ]
             return f"RAIIAtenTensorHandle({tmp_AtenTensorHandle})", tmp_call_strs
 
-        collapsed = collapsible and original_offset == d_offset
-        if collapsed:
-            same_layout = size == d_size and stride == d_stride
-            base_dtype = d_dtype
-        else:
-            same_layout = (
-                size == data.layout.size
-                and stride == data.layout.stride
-                and original_offset == data.layout.offset
-            )
-            base_dtype = data.dtype
+        same_layout, base_dtype = codegen_reinterpret_view_layout_match(
+            data, size, stride, original_offset
+        )
 
         if same_layout:
             # pure dtypeview
@@ -3650,13 +3665,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             outputs,
         )
 
-    def generate_scoped_gil_acquire(self, declarations_before_scope, lines_in_scope):
+    def generate_scoped_gil_acquire(
+        self, declarations_before_scope, lines_in_scope, lines_before_acquire=()
+    ):
         scoped_lines = IndentedBuffer()
         for declaration in declarations_before_scope:
             scoped_lines.writeline(declaration)
 
         scoped_lines.writeline("{")
         with scoped_lines.indent():
+            scoped_lines.writelines(lines_before_acquire)
             scoped_lines.writeline("py::gil_scoped_acquire_simple acquire;")
             scoped_lines.writelines(lines_in_scope.split("\n"))
         scoped_lines.writelines("}")
@@ -3849,6 +3867,8 @@ if (!custom_op_wrapper) {
         dispatch_lines.writeline("{")
 
         with dispatch_lines.indent():
+            if kernel_profile_enabled():
+                dispatch_lines.writeline(_record_function_handle_line(str(op_overload)))
             tmp_var_number = count()
 
             def parse_arg(arg_type: torch.JitType, codegen_arg: str) -> str:
@@ -4289,8 +4309,16 @@ if (!custom_op_wrapper) {
                 for output_arg in output_args  # type: ignore[arg-type]
                 if output_arg is not None
             ]
+        # The record opens the block ahead of the GIL acquisition: acquiring the
+        # GIL is often the dominant cost of this fallback, so an event starting
+        # after it would hide the very thing being profiled.
+        lines_before_acquire = (
+            [_record_function_handle_line(str(op_overload))]
+            if kernel_profile_enabled()
+            else []
+        )
         scope_gil_acquire = self.generate_scoped_gil_acquire(
-            declarations_before_scope, lines
+            declarations_before_scope, lines, lines_before_acquire
         )
         self.writelines(scope_gil_acquire)
 
@@ -4323,6 +4351,10 @@ if (!custom_op_wrapper) {
         )
 
         extern_kernel_node_index = len(V.extern_kernel_nodes) - 1
+        enable_kernel_profile = kernel_profile_enabled()
+        if enable_kernel_profile:
+            self.writeline(EnterKernelProfileScopeLine(self))
+            self.write_record_function_handle(str(op_overload))
         self.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
@@ -4331,6 +4363,8 @@ if (!custom_op_wrapper) {
             f"{len(tensor_call_args)}, "
             f"{tensor_call_str}));"
         )
+        if enable_kernel_profile:
+            self.writeline(ExitKernelProfileScopeLine(self))
 
     def codegen_runtime_lookup_tensor_call_args(
         self, tensor_call_args: Sequence[str]
@@ -4632,16 +4666,11 @@ if (!custom_op_wrapper) {
         kernel_name: str,
         profiling_args: Sequence[str | None] | None = None,
     ):
-        sanitized = kernel_name.replace("::", "_").replace(".", "_")
         if profiling_args:
             ivalue_lines, inputs_vec = _profiling_ivalue_lines(
-                sanitized, profiling_args
+                _record_function_var(kernel_name), profiling_args
             )
             self.writelines(ivalue_lines)
-            self.writeline(
-                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr, {inputs_vec});'
-            )
+            self.writeline(_record_function_handle_line(kernel_name, inputs_vec))
         else:
-            self.writeline(
-                f'RAIIAtenRecordFunctionHandle record_{sanitized}_("{kernel_name}", nullptr);'
-            )
+            self.writeline(_record_function_handle_line(kernel_name))
