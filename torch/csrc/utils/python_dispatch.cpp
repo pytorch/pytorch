@@ -1225,6 +1225,9 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(FuncTorchVmapMode)
       DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
+      // Export DispatchKey::Fake to Python so Python guards and dispatch
+      // utilities can construct, inspect, include, or exclude that key.
+      DEF_ONE(Fake)
       DEF_ONE(PreDispatch)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
@@ -1441,16 +1444,16 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
-    return at::functionalization::impl::replace_(a, b);
+    at::functionalization::impl::replace_(a, b);
   });
   m.def("_propagate_xla_data", [](const at::Tensor& a, const at::Tensor& b) {
     at::functionalization::impl::propagate_xla_data(a, b);
   });
   m.def("_commit_update", [](const at::Tensor& a) {
-    return at::functionalization::impl::commit_update(a);
+    at::functionalization::impl::commit_update(a);
   });
   m.def("_unsafe_reset_storage", [](const at::Tensor& a) {
-    return at::functionalization::impl::unsafe_reset_storage(a);
+    at::functionalization::impl::unsafe_reset_storage(a);
   });
 
   m.def("_dispatch_key_for_device", [](const std::string& device_type) {
