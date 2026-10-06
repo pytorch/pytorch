@@ -12517,7 +12517,7 @@ class Scheduler:
             remove_redundant_argreduce_indices(list(loop_bodies))
             return (
                 self._codegen_partitions()
-                if torch._inductor.config.graph_partition
+                if V.graph.graph_partition
                 else self._codegen(self.nodes)
             )
 
