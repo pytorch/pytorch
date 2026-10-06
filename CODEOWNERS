@@ -8,6 +8,9 @@
 # - Active rules name one or more owners; commented rules mark paths whose
 #   ownership is still to be determined.
 # - Sections are ordered from broad defaults to narrower overrides.
+# - A "# label: <name>" line names the GitHub issue/PR label for the paths
+#   below it, up to the next "# label:" line or the end of the section. Paths
+#   before the first "# label:" line in a section have no single label.
 #
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
@@ -41,6 +44,7 @@
 # /aten/
 #
 # [functorch]
+# label: module: functorch
 # /aten/src/ATen/functorch/
 # /functorch/
 # /test/functorch/
@@ -48,10 +52,13 @@
 # /torch/csrc/functorch/
 # /torch/func/
 /test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
+# label: module: vmap
 /test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 #
 # [compiler_autograd]
+# label: module: compiled autograd
 # /test/compiled_autograd_skips/
+# label: module: aotdispatch
 # /test/functorch/test_aot_joint_with_descriptors.py
 /test/functorch/test_aotdispatch.py @ezyang @Chillee
 # /test/functorch/test_codegen_backward_epilogue.py
@@ -73,9 +80,11 @@
 # /torch/_functorch/compilers.py
 # /torch/_functorch/partitioners.py
 /torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
+# label: module: complex
 /torch/_functorch/_aot_autograd/complex_decomposition.py @hameerabbasi @amjames
 #
 # [core_aten_linalg]
+# label: module: linear algebra
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved
 # /aten/src/ATen/native/BatchLinearAlgebra.cpp
 # /aten/src/ATen/native/BatchLinearAlgebra.h
@@ -86,28 +95,32 @@
 # /aten/src/ATen/native/CPUBlas.h
 # /aten/src/ATen/native/Cross.cpp
 # /aten/src/ATen/native/Cross.h
-# /aten/src/ATen/native/Distance.cpp
-# /aten/src/ATen/native/Distance.h
 # /aten/src/ATen/native/FunctionOfAMatrixUtils.cpp
 # /aten/src/ATen/native/FunctionOfAMatrixUtils.h
 # /aten/src/ATen/native/GroupedMMUtils.h
 # /aten/src/ATen/native/LinearAlgebra.cpp
 # /aten/src/ATen/native/LinearAlgebra.h
 # /aten/src/ATen/native/LinearAlgebraUtils.h
-# /aten/src/ATen/native/ScaledBlas.cpp
-# /aten/src/ATen/native/ScaledBlasUtils.cpp
-# /aten/src/ATen/native/ScaledBlasUtils.h
-# /aten/src/ATen/native/SpectralOps.cpp
-# /aten/src/ATen/native/SpectralOpsUtils.h
 # /aten/src/ATen/native/TriangularOps.cpp
 # /aten/src/ATen/native/TriangularOpsUtils.h
 /test/test_linalg.py @lezcano @nikitaved
 # /test/test_matmul_cuda.py
-/test/test_scaled_matmul_cuda.py @drisspg @slayton58
-# /test/test_spectral_ops.py
 /torch/linalg/ @lezcano @nikitaved
+# label: module: distance functions
+# /aten/src/ATen/native/Distance.cpp
+# /aten/src/ATen/native/Distance.h
+# label: module: fft
+# /aten/src/ATen/native/SpectralOps.cpp
+# /aten/src/ATen/native/SpectralOpsUtils.h
+# /test/test_spectral_ops.py
+# label: module: floatx (formerly float8)
+# /aten/src/ATen/native/ScaledBlas.cpp
+# /aten/src/ATen/native/ScaledBlasUtils.cpp
+# /aten/src/ATen/native/ScaledBlasUtils.h
+/test/test_scaled_matmul_cuda.py @drisspg @slayton58
 #
 # [sparse]
+# label: module: sparse
 # /aten/src/ATen/native/SparseTensorUtils.cpp
 # /aten/src/ATen/native/SparseTensorUtils.h
 /aten/src/ATen/native/sparse/ @amjames @pearu @nikitaved
@@ -138,18 +151,21 @@
 /test/test_sparse_csr.py @amjames @pearu @nikitaved
 # /test/test_sparse_semi_structured.py
 /torch/sparse/ @amjames @pearu @nikitaved
-/aten/src/ATen/native/ao_sparse/ @salilsdesai @digantdesai @jianyuh
 /aten/src/ATen/SparseCsrTensorImpl.cpp @amjames @pearu @nikitaved
 # /aten/src/ATen/SparseCsrTensorImpl.h
 # /aten/src/ATen/SparseCsrTensorUtils.h
 /aten/src/ATen/SparseTensorImpl.cpp @amjames @pearu @nikitaved
 # /aten/src/ATen/SparseTensorImpl.h
+# label: oncall: quantization
+/aten/src/ATen/native/ao_sparse/ @salilsdesai @digantdesai @jianyuh
 #
 # [core_aten_optimizers]
+# label: module: mta
 /aten/src/ATen/native/Foreach* @janeyx99
+/torch/foreach/ @janeyx99
+# label: module: optimizer
 /aten/src/ATen/native/Fused* @janeyx99
 # /test/test_functional_optim.py
-/torch/foreach/ @janeyx99
 /torch/optim/ @albanD @janeyx99
 #
 # [core_aten_runtime]
@@ -320,6 +336,7 @@
 # /c10/
 #
 # [autograd]
+# label: module: autograd
 /torch/autograd/ @albanD @soulitzer
 /torch/csrc/autograd/ @albanD @soulitzer
 #
@@ -395,15 +412,17 @@
 # /torch/csrc/python_headers.h
 # /torch/csrc/serialization.cpp
 # /torch/csrc/serialization.h
-/torch/csrc/shim* @janeyx99
-/torch/csrc/stable/ @janeyx99
 # /torch/csrc/stub.c
 # /torch/csrc/tensor/
 # /torch/csrc/utils.cpp
 # /torch/csrc/utils.h
 # /torch/csrc/utils/
+# label: module: abi
+/torch/csrc/shim* @janeyx99
+/torch/csrc/stable/ @janeyx99
 #
 # [core_lazy_runtime]
+# label: module: lazy
 # /torch/csrc/lazy/
 #
 # [core_tests]
@@ -411,7 +430,6 @@
 /test/allowlist_for_publicAPI.json @albanD
 # /test/backends/
 # /test/bench_mps_ops.py
-/test/complex_tensor/ @hameerabbasi @amjames
 # /test/conftest.py
 # /test/create_dummy_torchscript_model.py
 # /test/error_messages/
@@ -490,8 +508,6 @@
 # /test/mkldnn_verbose.py
 # /test/pytest_shard_custom.py
 # /test/python_native/
-/test/python_native/test_lce_fused_grad_logits_kernel.py @slayton58 @pearu
-/test/python_native/test_linear_cross_entropy_override.py @slayton58 @pearu
 # /test/run_doctests.sh
 # /test/simulate_nccl_errors.py
 # /test/slow_tests.json
@@ -522,11 +538,9 @@
 # /test/test_fake_tensor.py
 # /test/test_file_check.py
 # /test/test_flop_counter.py
-/test/test_foreach.py @janeyx99
 # /test/test_function_schema.py
 # /test/test_functionalization.py
 # /test/test_futures.py
-/test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
 # /test/test_hub.py
 # /test/test_img/
 # /test/test_import_stats.py
@@ -556,8 +570,6 @@
 # /test/test_opaque_obj_v2.py
 # /test/test_openmp.py
 # /test/test_ops.py
-/test/test_ops_fwd_gradients.py @soulitzer
-/test/test_ops_gradients.py @soulitzer
 # /test/test_ops_jit.py
 # /test/test_ops_unbacked.py
 # /test/test_out_dtype_op.py
@@ -596,14 +608,28 @@
 # /test/test_view_ops.py
 # /test/test_weak.py
 /test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
+# label: module: complex
+/test/complex_tensor/ @hameerabbasi @amjames
+# label: module: dsl-native-ops
+/test/python_native/test_lce_fused_grad_logits_kernel.py @slayton58 @pearu
+/test/python_native/test_linear_cross_entropy_override.py @slayton58 @pearu
+# label: module: mta
+/test/test_foreach.py @janeyx99
+# label: module: higher order operators
+/test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
+# label: module: autograd
+/test/test_ops_fwd_gradients.py @soulitzer
+/test/test_ops_gradients.py @soulitzer
 #
 # [backend_device_runtime]
 # /test/custom_backend/
 # /torch/backends/
+# label: module: mtia
 /aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
 /torch/csrc/mtia/ @egienvalue
 #
 # [backend_cuda]
+# label: module: cuda
 /aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
 # /test/test_cuda.py
@@ -617,32 +643,38 @@
 # /test/test_cuda_sanitizer.py
 # /test/test_cuda_trace.py
 /torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
-/torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/backends/cusparselt/
 /torch/csrc/cuda/ @eqy @syed-ahmed @Aidyn-A
 /torch/cuda/ @eqy @syed-ahmed @Aidyn-A
 /c10/cuda/ @eqy @syed-ahmed @Aidyn-A
-/aten/src/ATen/native/cuda/Blas.cpp @drisspg @slayton58
 /aten/src/ATen/native/cuda/GroupedBlas.cpp @drisspg @slayton58
-/aten/src/ATen/native/cuda/ScaledBlas.cpp @drisspg @slayton58
+# label: module: cublas
+/aten/src/ATen/native/cuda/Blas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
+# label: module: floatx (formerly float8)
+/aten/src/ATen/native/cuda/ScaledBlas.cpp @drisspg @slayton58
+# label: module: cudnn
+/torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/native/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/cudnn/ @eqy @syed-ahmed @Aidyn-A
 #
 # [backend_mps]
-# /aten/src/ATen/metal/
+# label: module: mps
 /aten/src/ATen/mps/ @malfet @Isalia20
 /aten/src/ATen/native/mps/ @malfet @Isalia20
 /c10/metal/ @malfet @Isalia20
-# /test/metal/
-# /test/test_metal.py
 /test/test_mps.py @malfet @Isalia20
 # /torch/backends/mps/
 # /torch/csrc/mps/
 # /torch/mps/
+# label: oncall: mobile
+# /aten/src/ATen/metal/
+# /test/metal/
+# /test/test_metal.py
 #
 # [backend_xpu]
+# label: module: xpu
 /aten/src/ATen/xpu/ @EikanWang @gujinghui
 /c10/xpu/ @EikanWang @gujinghui
 /test/test_xpu.py @EikanWang @gujinghui
@@ -653,6 +685,7 @@
 /aten/src/ATen/native/mkldnn/xpu/ @EikanWang @gujinghui
 #
 # [backend_rocm]
+# label: module: rocm
 /aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
 # /torch/backends/miopen/
 /c10/hip/ @jeffdaily @jithunnair-amd
@@ -660,6 +693,7 @@
 /aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
 #
 # [backend_vulkan]
+# label: module: vulkan
 # /aten/src/ATen/native/vulkan/
 #
 # [python_core_api]
@@ -683,8 +717,6 @@
 # /torch/_lobpcg.py
 # /torch/_lowrank.py
 # /torch/_meta_registrations.py
-/torch/_native/ @slayton58 @drisspg
-/torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
 # /torch/_numpy/
 # /torch/_opaque_base.py
 # /torch/_prims/
@@ -697,7 +729,6 @@
 # /torch/_streambase.py
 # /torch/_strobelight/
 # /torch/_subclasses/
-/torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
 # /torch/_tensor.py
 # /torch/_tensor_docs.py
 # /torch/_tensor_iterator.py
@@ -718,8 +749,6 @@
 # /torch/fft/
 # /torch/functional.py
 # /torch/futures/
-/torch/header_only_apis.txt @janeyx99
-/torch/headeronly/ @janeyx99
 # /torch/hub.py
 # /torch/legacy/
 # /torch/lib/
@@ -740,48 +769,68 @@
 # /torch/torch_version.py
 # /torch/types.py
 # /torch/utils/
+/torch/_vendor/quack/ @slayton58 @drisspg
+# label: module: dsl-native-ops
+/torch/_native/ @slayton58 @drisspg
+/torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
+# label: module: complex
+/torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
+# label: module: fakeTensor
 /torch/_subclasses/fake_tensor.py @aorenste
 /torch/_subclasses/fake_utils.py @aorenste
+# label: module: abi
+/torch/header_only_apis.txt @janeyx99
+/torch/headeronly/ @janeyx99
+# label: module: rocm
 /torch/utils/hipify/ @jeffdaily @jithunnair-amd
+# label: module: pytree
 /torch/utils/_pytree.py @XuehaiPan
 /torch/utils/_cxx_pytree.py @XuehaiPan
-/torch/_vendor/quack/ @slayton58 @drisspg
 #
 # [python_nn_api]
+# label: module: nn
 /torch/nn/ @albanD @jbschlosser
 /torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
+# label: module: nn.utils.parametrize
 /torch/nn/utils/parametriz*.py @lezcano
+# label: module: flex attention
 /torch/nn/attention/flex_attention.py @drisspg
 #
 # [python_data_api]
+# label: module: dataloader
 /torch/utils/data/ @divyanshk @ramanishsingh @scotts @aelavender
 #
 # [python_specialized_api]
+# label: module: masked operators
 # /test/test_masked.py
 # /test/test_maskedtensor.py
 # /torch/masked/
+# label: module: tensorboard
 # /torch/utils/tensorboard/
 #
 # [python_api_tests]
-/test/autograd/ @soulitzer
 # /test/cpython/
 # /test/distributions/
 # /test/nn/
-/test/optim/ @janeyx99
-/test/test_autograd.py @soulitzer
-/test/test_autograd_fallback.py @soulitzer
 # /test/test_modules.py
 # /test/test_nn.py
 # /test/test_nnapi.py
 # /test/test_numpy_interop.py
-/test/test_optim.py @janeyx99
 # /test/test_transformers.py
 # /test/test_type_hints.py
 # /test/test_typing.py
-/test/test_varlen_attention.py @liangel-02
 # /test/torch_np/
 # /test/typing/
 # /test/xpu/test_transformers.py
+# label: module: autograd
+/test/autograd/ @soulitzer
+/test/test_autograd.py @soulitzer
+/test/test_autograd_fallback.py @soulitzer
+# label: module: optimizer
+/test/optim/ @janeyx99
+/test/test_optim.py @janeyx99
+# label: module: sdpa
+/test/test_varlen_attention.py @liangel-02
 #
 # [cpp_runtime_tests]
 # /test/cpp/
@@ -789,6 +838,7 @@
 # /test/test_cpp_api_parity.py
 #
 # [jit_torchscript]
+# label: oncall: jit
 # /test/cpp/jit/test_jit_logging_levels.cpp
 # /test/cpp/jit/test_jit_type.cpp
 # /test/cpp/jit/test_save_load.cpp
@@ -805,12 +855,13 @@
 # /test/test_jit_profiling.py
 # /test/test_jit_simple.py
 # /test/test_jit_string.py
-# /test/test_jiterator.py
 # /test/test_tensorexpr.py
 # /test/test_tensorexpr_pybind.py
 # /torch/csrc/jit/
 # /torch/jit/
 # /torch/csrc/jit/python/init.cpp
+# label: module: jiterator
+# /test/test_jiterator.py
 #
 # [cpp_api_custom_ops]
 # /aten/src/ATen/native/native_functions.yaml
@@ -845,9 +896,11 @@
 # /torch/library.h
 # /torch/library.py
 # /torch/utils/_cpp_extension_versioner.py
+# label: module: cpp-extensions
 /torch/utils/cpp_extension.py @fmassa @ezyang @malfet
 #
 # [onnx_export]
+# label: module: onnx
 /test/onnx/ @titaiwangms @xadupre @justinchuby
 /torch/onnx/ @titaiwangms @xadupre @justinchuby
 /torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
@@ -855,6 +908,7 @@
 /torch/csrc/jit/passes/onnx/ @titaiwangms @xadupre
 #
 # [quantization]
+# label: oncall: quantization
 /test/ao/ @jerryzh168
 # /test/onnx/test_models_quantized_onnxruntime.py
 /test/quantization/ @jerryzh168
@@ -872,6 +926,7 @@
 /aten/src/ATen/native/quantized/cudnn/ @jerryzh168
 #
 # [profiler]
+# label: oncall: profiler
 # /test/cpp/profiler/test_profiler_collection.cpp
 # /test/profiler/
 # /test/test_throughput_benchmark.py
@@ -891,6 +946,7 @@
 /torch/profiler/ @scotts @ryanzhang22
 #
 # [mobile_runtime]
+# label: oncall: mobile
 # /test/cpp/jit/test_mobile_type_parser.cpp
 # /test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp
 # /test/mobile/
@@ -898,10 +954,12 @@
 # /torch/csrc/jit/mobile/
 #
 # [mobile_android]
+# label: module: android
 # /android/
 # /test/mobile/custom_build/
 #
 # [mobile_delegates]
+# label: oncall: mobile
 # /test/test_vulkan.py
 # /test/test_xnnpack_integration.py
 # /torch/backends/_coreml/
@@ -910,18 +968,24 @@
 # /torch/csrc/jit/backends/
 #
 # [infra_ci]
+# label: module: ci
 /.ci/ @pytorch/pytorch-dev-infra
+# label: module: rocm
 /.ci/docker/ubuntu-rocm/ @jeffdaily
 /.ci/docker/common/install_roc*.sh @jeffdaily
 /.ci/docker/common/install_amdsmi.sh @jeffdaily
 /.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
+# label: module: inductor
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+# label: module: xpu
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 #
 # [infra_github_automation]
+# label: module: ci
 /.github/ @pytorch/pytorch-dev-infra
 #
 # [infra_build_packaging]
+# label: module: build
 # /.ci/wheel/
 # /.coveragerc
 # /.ctags.d/
@@ -954,12 +1018,14 @@
 # /version.txt
 #
 # [third_party_core_build_deps]
+# label: module: third_party
 # /.gitmodules
 # /requirements-build.txt
 # /requirements.txt
 # /third_party/
 #
 # [third_party_backend_deps]
+# label: module: third_party
 # /third_party/NNPACK
 # /third_party/VulkanMemoryAllocator
 # /third_party/XNNPACK
@@ -978,37 +1044,46 @@
 # /third_party/xnnpack_buck_shim.bzl
 # /third_party/xnnpack_src_defs.bzl
 # /third_party/xnnpack_wrapper_defs.bzl
+# label: module: xpu
 /third_party/xpu.txt @EikanWang @gujinghui
 #
 # [third_party_serialization_schema]
+# label: module: third_party
 # /third_party/flatbuffers
 # /third_party/miniz-3.0.2/
 # /third_party/onnx
 # /third_party/protobuf
 #
 # [benchmark_compiler]
+# label: module: benchmark
 # /benchmarks/
 #
 # [distributed]
+# label: oncall: distributed
 # /benchmarks/distributed/
 # /test/distributed/
 # /torch/csrc/distributed/
 # /torch/distributed/
+/torch/distributed/optim/ @weifengpy
+# label: module: tensorpipe
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @lw
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @lw
+# label: module: c10d
 /torch/csrc/distributed/c10d/ @d4l3k @fduwjj @kapilsh
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 /torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
+# label: module: fsdp
 /torch/distributed/_composable/fsdp/ @weifengpy
-/torch/distributed/_composable/replicate.py @weifengpy
 /torch/distributed/_composable/replicate_with_fsdp.py @weifengpy
 /torch/distributed/fsdp/ @weifengpy
-/torch/distributed/optim/ @weifengpy
+# label: module: ddp
+/torch/distributed/_composable/replicate.py @weifengpy
+/torch/nn/parallel/ @weifengpy
+# label: module: dtensor
 /torch/distributed/tensor/placement_types.py @weifengpy
 /torch/distributed/tensor/_ops/_view_ops.py @weifengpy
 /torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
-/torch/nn/parallel/ @weifengpy
 #
 # [infra_developer_tools]
 # /.devcontainer/
@@ -1019,9 +1094,11 @@
 # /binaries/
 # /scripts/
 # /tools/
+# label: module: rocm
 /tools/amd_build/ @jeffdaily @jithunnair-amd
 #
 # [infra_linting]
+# label: module: lint
 # /.bc-linter.yml
 # /.clang-format
 # /.clang-tidy
@@ -1046,7 +1123,9 @@
 # /tools/linter/
 #
 # [infra_codegen]
+# label: module: autograd
 /tools/autograd/ @albanD @soulitzer
+# label: module: codegen
 # /torchgen/
 #
 # [infra_test]
@@ -1066,13 +1145,16 @@
 # /torch/_logging/
 # /torch/testing/
 # /torch/utils/benchmark/
+# label: module: testing
 /torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
 # /torch/testing/_internal/common_methods_invocations.py
 # /torch/testing/_internal/common_device_type.py
-/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
 /test/run_test.py @pytorch/pytorch-dev-infra
+# label: module: higher order operators
+/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
 #
 # [benchmark_operator_runtime]
+# label: module: benchmark
 # /benchmarks/framework_overhead_benchmark/
 # /benchmarks/functional_autograd_benchmark/
 # /benchmarks/instruction_counts/
@@ -1085,6 +1167,7 @@
 # /test/test_functional_autograd_benchmark.py
 #
 # [benchmark_models]
+# label: module: benchmark
 # /benchmarks/compare-fastrnn-results.py
 # /benchmarks/data/
 # /benchmarks/diffusion/
@@ -1098,42 +1181,49 @@
 # /caffe2/
 #
 # [serialization_package]
+# label: module: serialization
 # /benchmarks/serialization/
 # /caffe2/serialize/
+# /test/test_serialization.py
+# /torch/serialization.py
+# label: module: package/deploy
 # /test/package/
 # /test/test_package.py
-# /test/test_serialization.py
 # /torch/package/
-# /torch/serialization.py
 #
 # [compiler_export_fx]
-# /test/export/
-# /test/fx/
-# /test/higher_order_ops/
 # /test/onnx/exporter/test_exportable_module.py
 # /test/onnx/test_fx_type_promotion.py
 # /test/package/package_bc/test_fx_module.pt
+# label: oncall: export
+# /test/export/
+/torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
+# label: module: fx
+# /test/fx/
 # /test/test_dynamic_spec_make_fx.py
 # /test/test_fx.py
 # /test/test_fx_experimental.py
 # /test/test_fx_graph_print.py
 # /test/test_fx_passes.py
 # /test/test_fx_reinplace_pass.py
-/torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
-/torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
-/torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 # /torch/fx/
 /torch/fx/proxy.py @zou3519
-/torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
+# label: module: higher order operators
+# /test/higher_order_ops/
+/torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
+# label: module: dynamic shapes
 /torch/fx/experimental/symbolic_shapes.py @laithsakka
 /torch/fx/experimental/sym_node.py @laithsakka
 /torch/fx/experimental/recording.py @laithsakka
+# label: module: ProxyTensor
 /torch/fx/experimental/proxy_tensor.py @aorenste
 #
 # [compiler_dynamo]
+# label: module: dynamo
 # /test/distributed/test_dynamo_distributed.py
 # /test/dynamo/
-/test/dynamo/test_complex.py @hameerabbasi @amjames
 # /test/dynamo_expected_failures/
 # /test/dynamo_skips/
 # /test/export/test_dynamic_shapes.py
@@ -1142,11 +1232,17 @@
 # /torch/_dynamo/
 # /torch/csrc/dynamo/
 /torch/_dynamo/backends/tvm.py @guan404ming
+# label: module: complex
+/test/dynamo/test_complex.py @hameerabbasi @amjames
+# label: module: onnx
 /torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
+# label: module: higher order operators
 /torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
+# label: module: pytree
 /torch/_dynamo/polyfills/pytree.py @XuehaiPan
 #
 # [compiler_inductor]
+# label: module: inductor
 # /test/distributed/test_inductor_collectives.py
 # /test/distributed/test_inductor_compile_collectives.py
 # /test/inductor/
@@ -1154,18 +1250,20 @@
 # /test/inductor_skips/
 # /test/test_precompile.py
 # /test/test_triton_utils.py
-/torch/_higher_order_ops/flex_attention.py @drisspg
 # /torch/_inductor/
 # /torch/_precompile.py
 # /torch/_precompile_driver.py
 # /torch/csrc/inductor/
 # /torch/utils/_indented_buffer.py
+# label: module: flex attention
+/torch/_higher_order_ops/flex_attention.py @drisspg
 /torch/_inductor/kernel/flex/ @drisspg
 /torch/_inductor/codegen/cpp_flex_attention_template.py @drisspg
 /test/inductor/test_flex_attention.py @drisspg
 /test/inductor/test_flex_decoding.py @drisspg
 #
 # [nativert]
+# label: module: nativert
 # /test/cpp/nativert/
 # /test/export/test_nativert.py
 # /torch/csrc/api/include/torch/nativert/
@@ -1196,9 +1294,12 @@
 # /README.md
 # /RELEASE.md
 # /SECURITY.md
+# label: module: docs
 # /docs/
 /docs/source/conf.py @albanD
+# label: module: higher order operators
 /docs/source/higher_order_ops/ @bohnstingl
+# label: module: xpu
 /docs/source/notes/get_start_xpu.md @EikanWang @gujinghui
 #
 # [protected_codeownership]
