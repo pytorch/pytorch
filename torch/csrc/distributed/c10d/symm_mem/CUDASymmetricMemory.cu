@@ -293,6 +293,10 @@ int CUDASymmetricMemory::get_rank() {
   return rank_;
 }
 
+std::string CUDASymmetricMemory::get_group_name() {
+  return pai_->group_name_;
+}
+
 int CUDASymmetricMemory::get_world_size() {
   return world_size_;
 }
