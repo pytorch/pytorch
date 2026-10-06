@@ -2213,13 +2213,18 @@ def is_valid_addmm_fusion(match):
     ):
         return False
 
-    # addmm skips the operand scaled by 0, so it wouldn't propagate its NaN/inf
-    alpha = match.output_node().kwargs.get("alpha", 1)
-    if not isinstance(alpha, (int, float)) or alpha == 0:
-        return False
-
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
+
+    # add(inp, mm, alpha) folds into addmm's alpha. add(mm, inp, alpha) would need
+    # beta=alpha, which cublasLt runs as a separate kernel, so it is no faster than
+    # mm + add. alpha=0 is excluded since addmm would skip the mm and its NaN/inf.
+    add = match.output_node()
+    alpha = add.kwargs.get("alpha", 1)
+    if alpha != 1 and not (
+        isinstance(alpha, (int, float)) and alpha != 0 and add.args[0] is inp
+    ):
+        return False
 
     if not (
         isinstance(inp, torch.fx.Node) and isinstance(inp.meta["val"], torch.Tensor)
@@ -2262,10 +2267,8 @@ def is_valid_addmm_fusion(match):
     extra_check=is_valid_addmm_fusion,
 )
 def addmm(match, mat1, mat2, *, inp):
-    add = match.output_node()
-    alpha = add.kwargs.get("alpha", 1)
-    # add(inp, mm, alpha) = inp + alpha * mm; add(mm, inp, alpha) = mm + alpha * inp
-    scale = {} if alpha == 1 else {"alpha" if add.args[0] is inp else "beta": alpha}
+    alpha = match.output_node().kwargs.get("alpha", 1)
+    scale = {} if alpha == 1 else {"alpha": alpha}
 
     def repl(inp, mat1, mat2):
         return aten.addmm(inp, mat1, mat2, **scale)
