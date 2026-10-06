@@ -23,10 +23,8 @@ class HWCaps:
         self.smem_per_block_optin = p.shared_memory_per_block_optin  # 228KB H, 232KB B
         self.smem_per_sm = p.shared_memory_per_multiprocessor
         self.l2_bytes = p.L2_cache_size
-        # Divide last to avoid truncating non-byte-multiple bus widths. memory_clock_rate
-        # queries the current device, so request the indexed property separately.
-        with torch.cuda.device(device):
-            mem_clock_khz = p.memory_clock_rate
+        # Divide last to avoid truncating non-byte-multiple bus widths.
+        mem_clock_khz = p.memory_clock_rate
         self.peak_bw_bytes = p.memory_bus_width * mem_clock_khz * 1000 * 2 // 8
 
     # --- derived quantities the launch heuristics reason in ---

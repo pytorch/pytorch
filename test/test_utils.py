@@ -1274,7 +1274,6 @@ class TestUtilsInternal(TestCase):
         try:
             with (
                 unittest.mock.patch.object(torch.version, "hip", "6.0"),
-                unittest.mock.patch.object(torch.cuda, "device"),
                 unittest.mock.patch.object(
                     torch.cuda, "current_device", return_value=1
                 ) as current_device,
