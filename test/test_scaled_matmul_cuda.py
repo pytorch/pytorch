@@ -713,8 +713,8 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
             'scale_b': scale_b,
             'scale_recipe_a': [ScalingType.BlockWise1x16, ScalingType.TensorWise],
             'scale_recipe_b': [ScalingType.BlockWise1x16, ScalingType.TensorWise],
-            'swizzle_a': swizzle,
-            'swizzle_b': swizzle,
+            'swizzle_a': [swizzle, SwizzleType.NO_SWIZZLE],
+            'swizzle_b': [swizzle, SwizzleType.NO_SWIZZLE],
             'offs': offs,  # (G,)
             'out_dtype': torch.bfloat16,
             'wrap_v2': True,
@@ -3658,6 +3658,99 @@ class TestFP8Matmul(TestCase):
         C = f(A, B_T.transpose(-2, -1), scale_a, scale_b, offs=offs, use_fast_accum=fast_accum, out_dtype=out_dtype)
         self.assertEqual(C, C_ref)
 
+
+    def scaled_grouped_gemm_cublaslt_nvfp4_helper(self, op, device):
+        ngroups = 3
+        group_sizes = [128] * ngroups
+
+        def make_group(_group, outer, k):
+            value = torch.ones((outer, k), device=device, dtype=torch.bfloat16)
+            scale = torch.ones((outer, k // 16), device=device, dtype=torch.float8_e4m3fn)
+            return _bfloat16_to_float4_e2m1fn_x2(value), to_blocked(scale)
+
+        (A, scale_a), (B_T, scale_b), offs, _, _, _ = (
+            self._make_cublaslt_grouped_gemm_inputs(
+                op, group_sizes, group_sizes, group_sizes, make_group, make_group, device
+            )
+        )
+        return A, B_T, scale_a, scale_b, offs
+
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not (
+            PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM
+            and PLATFORM_SUPPORTS_MX_GEMM
+        ),
+        cublaslt_grouped_mm_skip_msg
+    )
+    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
+    @parametrize("two_level", [False, True])
+    @parametrize("use_out", [False, True])
+    def test_scaled_grouped_gemm_cublaslt_nvfp4(self, op, two_level, use_out, device):
+        A, B_T, block_scale_a, block_scale_b, offs = (
+            self.scaled_grouped_gemm_cublaslt_nvfp4_helper(op, device)
+        )
+        scale_a = block_scale_a
+        scale_b = block_scale_b
+        expected_scale = 1
+        if two_level:
+            scale_a = [block_scale_a, torch.tensor([2.0], device=device)]
+            scale_b = [block_scale_b, torch.tensor([3.0], device=device)]
+            expected_scale = 6
+            kwargs = _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, "nvfp4")
+        else:
+            kwargs = {
+                "scale_a": scale_a,
+                "scale_b": scale_b,
+                "scale_recipe_a": ScalingType.BlockWise1x16,
+                "scale_recipe_b": ScalingType.BlockWise1x16,
+                "swizzle_a": SwizzleType.SWIZZLE_32_4_4,
+                "swizzle_b": SwizzleType.SWIZZLE_32_4_4,
+                "offs": offs,
+            }
+        b = B_T.transpose(-2, -1)
+        if use_out:
+            out_shape = (A.size(-2), B_T.size(-2))
+            if A.dim() == B_T.dim():
+                groups = offs.numel() if offs is not None else A.size(0)
+                out_shape = (groups, *out_shape)
+            kwargs["out"] = torch.empty(out_shape, device=device, dtype=torch.bfloat16)
+        C = scaled_grouped_mm_wrap(A, b, **kwargs)
+        if use_out:
+            self.assertIs(C, kwargs["out"])
+        self.assertEqual(C, torch.full_like(C, 128 * expected_scale))
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not (PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and not IS_SM90),
+        "cuBLASLt grouped block scaling requires SM10.x or SM11.0 and CUDA 13.4+",
+    )
+    @parametrize("recipe", ["nvfp4", "nvfp4_two_level"])
+    @parametrize("side", ["a", "b"])
+    @parametrize("bad_swizzle", [SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_8, []])
+    def test_scaled_grouped_gemm_cublaslt_swizzle_validation(self, device, recipe, side, bad_swizzle):
+        a, b_t, sa, sb, offs = self.scaled_grouped_gemm_cublaslt_nvfp4_helper("3d/3d", device)
+        recipes = ScalingType.BlockWise1x16
+        swizzle = SwizzleType.SWIZZLE_32_4_4
+        if recipe == "nvfp4_two_level":
+            sa = [sa, torch.tensor([2.0], device=device)]
+            sb = [sb, torch.tensor([3.0], device=device)]
+            recipes = [ScalingType.BlockWise1x16, ScalingType.TensorWise]
+            swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
+            if not isinstance(bad_swizzle, list):
+                bad_swizzle = [bad_swizzle, SwizzleType.NO_SWIZZLE]
+        kwargs = {"swizzle_a": swizzle, "swizzle_b": swizzle}
+        kwargs[f"swizzle_{side}"] = bad_swizzle
+        error = "number of scale recipes" if bad_swizzle == [] else f"scale_{side} must be swizzled"
+        with self.assertRaisesRegex(ValueError, error):
+            scaled_grouped_mm_wrap(a, b_t.transpose(-2, -1), sa, sb, recipes, recipes, offs=offs, **kwargs)
+        kwargs[f"swizzle_{side}"] = swizzle
+        result = scaled_grouped_mm_wrap(a, b_t.transpose(-2, -1), sa, sb, recipes, recipes, offs=offs, **kwargs)
+        expected = torch.full_like(result, 768 if recipe == "nvfp4_two_level" else 128)
+        self.assertEqual(result, expected)
 
     @onlyCUDA
     @skipIfRocm

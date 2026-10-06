@@ -126,6 +126,12 @@ std::optional<CublasLtGroupedScaleSpec> get_cublaslt_grouped_scale_spec(
           at::kFloat,
           "float32",
           "TensorWise"};
+    case ScalingType::BlockWise1x16:
+      return CublasLtGroupedScaleSpec{
+          CublasGroupedScaleLayout::Vec16UE4M3,
+          at::kFloat8_e4m3fn,
+          "float8_e4m3fn",
+          "BlockWise1x16"};
     default:
       return std::nullopt;
   }
@@ -212,6 +218,46 @@ void check_cublaslt_grouped_scale_recipe(
         " elements for ",
         batchCount,
         " groups");
+  } else {
+    TORCH_CHECK(
+        scale.scalar_type() == spec->dtype && scale.is_contiguous() &&
+            reinterpret_cast<uintptr_t>(scale.const_data_ptr()) % 16 == 0,
+        name,
+        " blockwise scale must be a contiguous ",
+        spec->dtype_name,
+        " tensor with a 16-byte aligned data pointer");
+    const int64_t packed_multiplier = mat.scalar_type() == at::kFloat4_e2m1fn_x2 ? 2 : 1;
+    const int64_t inner = (is_a ? mat.size(-1) : mat.size(-2)) * packed_multiplier;
+    const int64_t outer = is_a ? mat.size(-2) : mat.size(-1);
+    const int64_t scale_size = cublas_grouped_scale_size_bytes(
+        spec->layout, inner, outer) / scale.element_size();
+    if (mat.dim() == 3) {
+      TORCH_CHECK(
+          scale.dim() == 2 &&
+          scale.size(0) == batchCount &&
+          scale.size(1) == scale_size,
+          name,
+          " blockwise scale for cuBLASLt grouped GEMM must have shape (",
+          batchCount,
+          ", ",
+          scale_size,
+          "), got ",
+          scale.sizes());
+    } else {
+      // 2D inputs have data-dependent per-group extents along the jagged
+      // dimension (only known from offs on device), so the exact concatenated
+      // blocked-scale size can't be computed here. Because ceil() is
+      // subadditive, the sum of per-group scale sizes is at least
+      // scale_size for the total dimensions, so this is a safe lower bound
+      // on the required element count.
+      TORCH_CHECK(
+          scale.numel() >= scale_size,
+          name,
+          " blockwise scale for cuBLASLt grouped GEMM must have at least ",
+          scale_size,
+          " elements, got ",
+          scale.numel());
+    }
   }
 }
 
@@ -236,8 +282,13 @@ bool should_use_scaled_cublaslt_grouped_gemm(
   }
   check_cublaslt_grouped_scale_pair(*scaling_a, *scaling_b);
 
+  bool valid_sm;
   const auto dprops = at::cuda::getCurrentDeviceProperties();
-  const bool valid_sm = dprops->major >= 9 && dprops->major <= 11;
+  if (*scaling_a == ScalingType::BlockWise1x16) {
+    valid_sm = dprops->major == 10 || dprops->major == 11;
+  } else {
+    valid_sm = dprops->major >= 9 && dprops->major <= 11;
+  }
   if (!valid_sm) {
     TORCH_WARN_ONCE(
         "cuBLASLt scaled grouped GEMM is not used because this device is not supported; falling back to the non-cuBLASLt grouped GEMM path.");
@@ -252,22 +303,39 @@ bool should_use_scaled_cublaslt_grouped_gemm(
     return false;
   }
 
+  const bool mat_a_is_fp4 = mat_a.scalar_type() == at::kFloat4_e2m1fn_x2;
+  const bool mat_b_is_fp4 = mat_b.scalar_type() == at::kFloat4_e2m1fn_x2;
   const bool mat_a_is_fp8 =
       mat_a.scalar_type() == at::kFloat8_e4m3fn ||
       mat_a.scalar_type() == at::kFloat8_e5m2;
   const bool mat_b_is_fp8 =
       mat_b.scalar_type() == at::kFloat8_e4m3fn ||
       mat_b.scalar_type() == at::kFloat8_e5m2;
-  const bool valid_in_dtypes = mat_a_is_fp8 && mat_b_is_fp8 &&
-      (mat_a.scalar_type() == at::kFloat8_e4m3fn ||
-       mat_b.scalar_type() == at::kFloat8_e4m3fn);
+  const bool uses_vec16 = *scaling_a == ScalingType::BlockWise1x16 ||
+      *scaling_b == ScalingType::BlockWise1x16;
+  const bool valid_in_dtypes = uses_vec16
+      ? mat_a_is_fp4 && mat_b_is_fp4 &&
+          *scaling_a == ScalingType::BlockWise1x16 &&
+          *scaling_b == ScalingType::BlockWise1x16
+      : mat_a_is_fp8 && mat_b_is_fp8 &&
+          (mat_a.scalar_type() == at::kFloat8_e4m3fn ||
+           mat_b.scalar_type() == at::kFloat8_e4m3fn);
   if (!valid_in_dtypes) {
-    TORCH_WARN_ONCE(
-        "cuBLASLt scaled grouped GEMM is not used because inputs must both be FP8 and at least one input must be Float8_e4m3fn, got mat_a dtype ",
-        mat_a.scalar_type(),
-        " and mat_b dtype ",
-        mat_b.scalar_type(),
-        "; falling back to the non-cuBLASLt grouped GEMM path.");
+    if (uses_vec16) {
+      TORCH_WARN_ONCE(
+          "cuBLASLt scaled grouped GEMM is not used because 1x16 block scaling requires two Float4_e2m1fn_x2 inputs, got mat_a dtype ",
+          mat_a.scalar_type(),
+          " and mat_b dtype ",
+          mat_b.scalar_type(),
+          "; falling back to the non-cuBLASLt grouped GEMM path.");
+    } else {
+      TORCH_WARN_ONCE(
+          "cuBLASLt scaled grouped GEMM is not used because inputs must both be FP8 and at least one input must be Float8_e4m3fn, got mat_a dtype ",
+          mat_a.scalar_type(),
+          " and mat_b dtype ",
+          mat_b.scalar_type(),
+          "; falling back to the non-cuBLASLt grouped GEMM path.");
+    }
     return false;
   }
 
@@ -294,10 +362,18 @@ bool cublaslt_grouped_mm_use_int64(const Tensor& mat_a, const Tensor& mat_b, con
   // int32_t. Per-group deltas (jagged dim) are bounded by the corresponding
   // total size, so checking sizes is sufficient.
   const int64_t int32_max = std::numeric_limits<int32_t>::max();
-  return mat_a.size(-2) > int32_max || mat_a.size(-1) > int32_max ||
-      mat_b.size(-2) > int32_max || mat_b.size(-1) > int32_max ||
-      mat_a.stride(-2) > int32_max || mat_a.stride(-1) > int32_max ||
-      mat_b.stride(-2) > int32_max || mat_b.stride(-1) > int32_max ||
+  const int64_t k_multiplier =
+      mat_a.scalar_type() == at::kFloat4_e2m1fn_x2 ? 2 : 1;
+  const auto scaled_value_exceeds_int32 = [int32_max, k_multiplier](int64_t value) {
+    return value > int32_max / k_multiplier;
+  };
+  return mat_a.size(-2) > int32_max || mat_b.size(-1) > int32_max ||
+      scaled_value_exceeds_int32(mat_a.size(-1)) ||
+      scaled_value_exceeds_int32(mat_b.size(-2)) ||
+      scaled_value_exceeds_int32(mat_a.stride(-2)) ||
+      scaled_value_exceeds_int32(mat_a.stride(-1)) ||
+      scaled_value_exceeds_int32(mat_b.stride(-2)) ||
+      scaled_value_exceeds_int32(mat_b.stride(-1)) ||
       out.stride(-2) > int32_max;
 }
 #endif
@@ -678,6 +754,8 @@ static void scaled_grouped_mm_cublaslt(
     int batchCount,
     ScalingType scaling_a,
     ScalingType scaling_b,
+    const std::optional<Tensor>& alpha_scale_a,
+    const std::optional<Tensor>& alpha_scale_b,
     Tensor& out) {
   check_cublaslt_grouped_scale_pair(scaling_a, scaling_b);
   check_cublaslt_grouped_scale_recipe(mat_a, scale_a, scaling_a, batchCount, /*is_a*/ true, "scale_a");
@@ -691,6 +769,21 @@ static void scaled_grouped_mm_cublaslt(
         scale_config_a.layout == scale_config_b.layout,
         "cuBLASLt grouped GEMM requires matching scale layouts: both scales must be single values or both must have one value per group");
   }
+  if (mat_a.scalar_type() == at::kFloat4_e2m1fn_x2) {
+    TORCH_CHECK(!use_fast_accum, "use_fast_accum is not supported for NVFP4");
+  }
+  if (alpha_scale_a || alpha_scale_b) {
+    TORCH_CHECK(
+        alpha_scale_a && alpha_scale_b,
+        "NVFP4 tensorwise global scales must be provided for both inputs");
+    TORCH_CHECK(
+        alpha_scale_a->scalar_type() == at::kFloat &&
+            alpha_scale_b->scalar_type() == at::kFloat &&
+            alpha_scale_a->numel() == 1 && alpha_scale_b->numel() == 1 &&
+            alpha_scale_a->is_contiguous() && alpha_scale_b->is_contiguous(),
+        "NVFP4 tensorwise global scales must be contiguous float32 tensors with one element");
+  }
+
   const bool needs_int64 = cublaslt_grouped_mm_use_int64(mat_a, mat_b, out);
 
   cublasGroupedArgs args(
@@ -703,7 +796,9 @@ static void scaled_grouped_mm_cublaslt(
       scale_a,
       scale_b,
       scale_config_a.layout,
-      scale_config_b.layout);
+      scale_config_b.layout,
+      alpha_scale_a,
+      alpha_scale_b);
   const at::cuda::blas::GroupedGemmScaleOptions scales{
       args.scale_mata_ptr,
       args.scale_matb_ptr,
@@ -807,6 +902,8 @@ _scaled_grouped_mm_cuda(
         static_cast<int>(batchCount64),
         *scaling_a,
         *scaling_b,
+        std::nullopt,
+        std::nullopt,
         out);
     return out;
   }
@@ -934,7 +1031,15 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
       scale_b.size() == 1 &&
       scale_recipe_a_enum.size() == 1 &&
       scale_recipe_b_enum.size() == 1;
-  if (single_scale_recipe &&
+  const bool nvfp4_two_level = scaled_blas::check_nvfp4_recipe(
+      mat_a.scalar_type(),
+      scale_recipe_a_enum,
+      scale_a_ref,
+      mat_b.scalar_type(),
+      scale_recipe_b_enum,
+      scale_b_ref) &&
+      scale_a[1].numel() == 1 && scale_b[1].numel() == 1;
+  if ((single_scale_recipe || nvfp4_two_level) &&
       should_use_scaled_cublaslt_grouped_gemm(
           mat_a,
           mat_b,
@@ -942,6 +1047,18 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           scale_recipe_a_enum[0],
           scale_recipe_b_enum[0],
           batchCount64)) {
+    if (scale_recipe_a_enum[0] == ScalingType::BlockWise1x16) {
+      TORCH_CHECK_VALUE(swizzle_a_enum.size() == scale_recipe_a_enum.size(),
+          "swizzle_a must match the number of scale recipes");
+      TORCH_CHECK_VALUE(swizzle_a_enum[0] == SwizzleType::SWIZZLE_32_4_4,
+          "scale_a must be swizzled to SWIZZLE_32_4_4 format");
+    }
+    if (scale_recipe_b_enum[0] == ScalingType::BlockWise1x16) {
+      TORCH_CHECK_VALUE(swizzle_b_enum.size() == scale_recipe_b_enum.size(),
+          "swizzle_b must match the number of scale recipes");
+      TORCH_CHECK_VALUE(swizzle_b_enum[0] == SwizzleType::SWIZZLE_32_4_4,
+          "scale_b must be swizzled to SWIZZLE_32_4_4 format");
+    }
     scaled_grouped_mm_cublaslt(
         mat_a,
         mat_b,
@@ -952,6 +1069,8 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
         static_cast<int>(batchCount64),
         scale_recipe_a_enum[0],
         scale_recipe_b_enum[0],
+        nvfp4_two_level ? std::optional<Tensor>{scale_a[1]} : std::nullopt,
+        nvfp4_two_level ? std::optional<Tensor>{scale_b[1]} : std::nullopt,
         out_mut);
     return;
   }
