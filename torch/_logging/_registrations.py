@@ -146,6 +146,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "ir_post_fusion_pretty",
+    "Prints readable loop IR after inductor fusion passes, one loop nest per fused kernel.",
+    off_by_default=True,
+)
+register_artifact(
     "compiled_autograd",
     "Prints various logs in compiled_autograd, including but not limited to the graphs. Useful for debugging compiled_autograd.",
     visible=True,

@@ -1,5 +1,43 @@
 # mypy: allow-untyped-defs
-"""Readable Inductor loop IR for debugging."""
+"""Readable Inductor loop IR for debugging.
+
+The same computation has a different loop nest at each stage. For example, a
+reduction over 16 elements whose output is [4, 1, 8]:
+
+1. Post-lowering (ComputedBuffer): the loop nest exactly as lowered; size-1
+   dims stay.
+
+    for idx0 in range(4):
+        for idx1 in range(1):
+            for idx2 in range(8):
+                for ridx in range(16):
+                    body(idx0, idx1, idx2, ridx)
+
+2. Pre-fusion (SchedulerNode): the body is rebuilt over snode.get_ranges().
+   Size-1 dims are dropped, dims may be reordered by stride, and dims are
+   merged where every access is contiguous across them, so the nest can still
+   be multidimensional. snode._body takes one variable per remaining dim; the
+   mapping back to the buffer's dims is folded into its index expressions.
+
+    for idx0 in range(4):
+        for idx1 in range(8):  # was idx2
+            for ridx in range(16):
+                snode._body(idx0, idx1, ridx)
+
+3. Post-fusion (FusedSchedulerNode): fused.group = (numel, rnumel) is the
+   product of the pointwise dims and of the reduction dims, so the kernel has
+   one pointwise loop and one reduction loop. Each snode's variables are
+   recovered from (idx, ridx) by SIMDKernel.map_kernel_groups_to_node_sizes;
+   snodes placed outside the reduction loop are mapped with rnumel = 1. E.g.
+   s1 is the reduction above and s2 is a pointwise epilogue on its output:
+
+    for idx in range(4 * 8):
+        for ridx in range(16):
+            # s1map: (idx, ridx) -> (idx // 8, idx % 8, ridx)
+            s1._body(*s1map(idx, ridx))
+        # s2map: (idx,) -> (idx,)
+        s2._body(*s2map(idx))
+"""
 
 from __future__ import annotations
 
@@ -13,7 +51,7 @@ import sympy
 import torch
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._inductor.ops_handler import DefaultHandler
-from torch._inductor.utils import sympy_index_symbol
+from torch._inductor.utils import sympy_index_symbol, sympy_product
 from torch._inductor.virtualized import OpsValue, V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.printers import PythonPrinter
@@ -142,7 +180,7 @@ def _render(value: object) -> str:
 
 def _indent(lines: Sequence[str], level: int = 1) -> list[str]:
     prefix = "    " * level
-    return [f"{prefix}{line}" for line in lines]
+    return [f"{prefix}{line}" if line else "" for line in lines]
 
 
 def _loop_nest(
@@ -208,6 +246,7 @@ class _PrettyOpsHandler(DefaultHandler):
         return self._bind(_render(value), dtype)
 
     def load(self, name: str, index: sympy.Expr):
+        name = _real_name(name)
         self.reads.add(name)
         return self._bind(
             f"{name}[{_render(index)}]",
@@ -220,7 +259,8 @@ class _PrettyOpsHandler(DefaultHandler):
 
     def store(self, name, index, value, mode=None):
         operator = "+=" if mode == "atomic_add" else "="
-        self.body.append(f"{name}[{_render(index)}] {operator} {_render(value)}")
+        index, value = _render(index), _render(value)
+        self.body.append(f"{_real_name(name)}[{index}] {operator} {value}")
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         if reduction_type not in _REDUCTION_COMBINES:
@@ -246,7 +286,8 @@ class _PrettyOpsHandler(DefaultHandler):
         return _Value(name, dtype)
 
     def store_reduction(self, name, index, value):
-        self.finalizers.append(f"{name}[{_render(index)}] = {_render(value)}")
+        index, value = _render(index), _render(value)
+        self.finalizers.append(f"{_real_name(name)}[{index}] = {value}")
 
     def where(self, condition, input, other):
         dtype = self._dtypes.where(condition, input, other)
@@ -307,14 +348,27 @@ def _make_variables(prefix: str, ranges: Sequence[sympy.Expr]):
     return [sympy_index_symbol(f"{prefix}{index}") for index in range(len(ranges))]
 
 
-def _tensor_declaration(name: str) -> str:
+def _real_name(name: str) -> str:
+    """The buffer that owns `name`'s storage. A mutation output (e.g. with a
+    MutationLayoutSHOULDREMOVE) has none: codegen writes it through to the buffer
+    it mutates, as Scheduler.mutation_real_name records."""
+    while (buffer := V.graph.try_get_buffer(name)) is not None and (
+        mutated := buffer.get_mutation_names()
+    ):
+        name = mutated[0]
+    return name
+
+
+def _tensor_declaration(name: str, mutable: bool = False) -> str:
     value = V.graph.try_get_buffer(name)
     if value is None:
         value = V.graph.graph_inputs.get(name)
     if value is None or not value.has_tensor_output():
-        return f"{name}: ?[?]"
-    shape = ", ".join(_render(sympy.sympify(size)) for size in value.get_size())
-    return f"{name}: {_dtype_name(value.get_dtype())}[{shape}]"
+        tensor_type = "?[?]"
+    else:
+        shape = ", ".join(_render(sympy.sympify(size)) for size in value.get_size())
+        tensor_type = f"{_dtype_name(value.get_dtype())}[{shape}]"
+    return f"{name}: {'mutate ' if mutable else ''}{tensor_type}"
 
 
 def _format_loop_body(
@@ -360,22 +414,32 @@ def _signature(
     written_names: OrderedSet[str],
     comment: str | None = None,
 ) -> list[str]:
+    # A mutation output is written into the buffer it mutates, so that buffer
+    # is a `mutate` input instead, even if the loop body never loads it.
+    real_names = {written: _real_name(written) for written in written_names}
+    mutated_names = OrderedSet(
+        real for written, real in real_names.items() if real != written
+    )
+    output_names = [written for written, real in real_names.items() if real == written]
     suffix = f"  # {comment}" if comment else ""
     inputs = [
-        _tensor_declaration(read) for read in read_names if read not in written_names
+        _tensor_declaration(read, mutable=read in mutated_names)
+        for read in OrderedSet([*mutated_names, *read_names])
+        if read not in written_names
     ]
-    outputs = ", ".join(_tensor_declaration(output) for output in written_names)
-    if len(written_names) > 1:
+    outputs = ", ".join(_tensor_declaration(output) for output in output_names)
+    if len(output_names) > 1:
         outputs = f"({outputs})"
+    arrow = f" -> {outputs}" if outputs else ""
     if not inputs:
-        return [f"{keyword} {name}() -> {outputs}{suffix}"]
+        return [f"{keyword} {name}(){arrow}{suffix}"]
     return [
         f"{keyword} {name}({suffix}",
         *(
             f"    {value}{',' if index + 1 < len(inputs) else ''}"
             for index, value in enumerate(inputs)
         ),
-        f") -> {outputs}",
+        f"){arrow}",
     ]
 
 
@@ -455,6 +519,100 @@ def format_scheduler_node(node) -> str:
     )
 
 
+def _format_fused_node(node) -> str:
+    from torch._inductor import ir
+    from torch._inductor.codegen.simd import (
+        DisableReduction,
+        EnableReduction,
+        SIMDKernel,
+    )
+
+    name = node.get_name()
+    device, (numel, rnumel) = node.group
+    backend = node.scheduler.get_backend(device)
+    # CUDACombinedScheduling hands fused pointwise/reduction nodes to Triton.
+    backend = getattr(backend, "_triton_scheduling", backend)
+    if not hasattr(backend, "generate_node_schedule"):
+        return f"kernel {name}:\n    unimplemented {type(backend).__name__}"
+
+    # Nodes between DisableReduction and EnableReduction run once per p0,
+    # outside any r0 loop; each other run of nodes shares one r0 loop.
+    segments: list[tuple[bool, list[Any]]] = [(True, [])]
+    for item in backend.generate_node_schedule(node.get_nodes(), numel, rnumel):
+        if item is DisableReduction:
+            segments.append((False, []))
+        elif item is EnableReduction:
+            segments.append((True, []))
+        else:
+            segments[-1][1].append(item)
+
+    pointwise_variable = sympy_index_symbol("p0")
+    reduction_variable = sympy_index_symbol("r0")
+    handler = _PrettyOpsHandler([reduction_variable])
+    variable_ranges = {pointwise_variable: numel, reduction_variable: rnumel}
+
+    def set_ranges(*ranges):
+        # Unflatten each kernel loop variable into the node's sizes, as a view would.
+        return [
+            [
+                V.graph.sizevars.simplify_with_ranges(index, variable_ranges)
+                for index in ir.View._dynamic_reshape_indexer(
+                    sizes, [sympy_product(sizes)]
+                )([variable])
+            ]
+            for variable, sizes in zip((pointwise_variable, reduction_variable), ranges)
+        ]
+
+    lines: list[str] = []
+    try:
+        with V.set_ops_handler(handler):
+            for inside_reduction, snodes in segments:
+                if not snodes:
+                    continue
+                groups = [numel, rnumel if inside_reduction else 1]
+                for snode in snodes:
+                    if handler.body:
+                        handler.body.append("")
+                    handler.body.append(f"# {snode.get_name()}")
+                    snode._body(
+                        *SIMDKernel.map_kernel_groups_to_node_sizes(
+                            groups, snode.get_ranges(), set_ranges
+                        ),
+                        allow_same_symbol_in_index=True,
+                    )
+                body = handler.body
+                if inside_reduction and rnumel != 1:
+                    body = [
+                        *handler.initializers,
+                        *_loop_nest([reduction_variable], [rnumel], body),
+                        *handler.finalizers,
+                    ]
+                lines.extend(body)
+                if handler.finalizers:
+                    lines.append("")
+                handler.body, handler.initializers, handler.finalizers = [], [], []
+    except _Unsupported as exc:
+        return f"kernel {name}:\n    unimplemented {exc}"
+    except Exception as exc:
+        return f"kernel {name}:\n    unimplemented {type(exc).__name__}: {exc}"
+    if lines and not lines[-1]:
+        lines.pop()
+
+    # Buffers only used inside the fused kernel are neither inputs nor outputs.
+    operation_names = node.get_operation_names()
+    buffer_names = node.get_buffer_names()
+    written_names = OrderedSet(
+        buffer.get_name()
+        for buffer in node.get_outputs()
+        if any(user.get_name() not in operation_names for user in buffer.users)
+    )
+    read_names = [read for read in handler.reads if read not in buffer_names]
+    signature = _signature("kernel", name, read_names, written_names)
+    signature[-1] += ":"
+    body = _loop_nest([pointwise_variable], [numel], lines)
+    return "\n".join([*signature, *_indent(body)])
+
+
 def format_computed_buffer(buffer) -> str:
     from torch._inductor import ir
 
@@ -495,4 +653,18 @@ def format_post_lowering_ir(operations: Sequence[Any]) -> str:
         format_computed_buffer(operation)
         for operation in operations
         if not _is_folded_multi_output(operation)
+    )
+
+
+def format_post_fusion_ir(nodes: Sequence[Any]) -> str:
+    """Render each fused kernel as one loop nest shared by the nodes it fuses."""
+    from torch._inductor.scheduler import FusedSchedulerNode
+
+    return "\n\n".join(
+        # Subclasses (foreach, mix-order, ...) have their own codegen.
+        _format_fused_node(node)
+        if type(node) is FusedSchedulerNode
+        else format_scheduler_node(node)
+        for node in nodes
+        if not _is_folded_multi_output(getattr(node, "node", None))
     )
