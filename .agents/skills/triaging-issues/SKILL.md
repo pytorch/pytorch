@@ -1,21 +1,6 @@
 ---
 name: triaging-issues
 description: Triages GitHub issues by routing to oncall teams, applying labels, and closing questions. Use when processing new PyTorch issues or when asked to triage an issue.
-hooks:
-  PreToolUse:
-    - matcher: "mcp__github__issue_write|mcp__github__update_issue|mcp__github__add_issue_comment|mcp__github__transfer_issue"
-      hooks:
-        - type: command
-          command: "python3 \"$CLAUDE_PROJECT_DIR\"/.agents/skills/triaging-issues/scripts/validate_issue_target.py"
-    - matcher: "mcp__github__issue_write|mcp__github__update_issue"
-      hooks:
-        - type: command
-          command: "python3 \"$CLAUDE_PROJECT_DIR\"/.agents/skills/triaging-issues/scripts/validate_labels.py"
-  PostToolUse:
-    - matcher: "mcp__github__issue_write|mcp__github__update_issue|mcp__github__add_issue_comment|mcp__github__transfer_issue"
-      hooks:
-        - type: command
-          command: "python3 \"$CLAUDE_PROJECT_DIR\"/.agents/skills/triaging-issues/scripts/add_bot_triaged.py"
 ---
 
 # PyTorch Issue Triage Skill
@@ -23,7 +8,7 @@ hooks:
 This skill helps triage GitHub issues by routing issues, applying labels, and leaving first-line responses.
 
 ## Contents
-- [MCP Tools Available](#mcp-tools-available)
+- [Tools and Output](#tools-and-output)
 - [Labels You Must NEVER Add](#labels-you-must-never-add)
 - [Issue Triage Steps](#issue-triage-for-each-issue)
   - Step 0: Already Routed — SKIP
@@ -46,17 +31,26 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
 
 ---
 
-## MCP Tools Available
+## Tools and Output
 
-Use these GitHub MCP tools for triage:
+You read the issue and submit a triage plan; you never change the issue yourself.
+`.github/workflows/issue-triage-pi.yml` applies the plan in a separate step.
 
 | Tool | Purpose |
 |------|---------|
-| `mcp__github__get_issue` | Get issue details and existing labels |
-| `mcp__github__get_issue_comments` | Get existing issue comments |
-| `mcp__github__update_issue` | Apply labels or close issues |
-| `mcp__github__add_issue_comment` | Add comment (only for redirecting questions) |
-| `mcp__github__search_issues` | Find similar issues for context |
+| `get_issue` | Issue title, body, labels, state, and author |
+| `get_issue_comments` | Existing comments |
+| `search_issues` | Similar or duplicate issues in the same repository |
+| `read`, `grep`, `find`, `ls` | This skill's files |
+| `submit_result` | The triage plan (required, call once as your last action) |
+
+The plan has a `decision`, the `labels` to add, the `templates` to post, and your `reasoning`.
+The apply step enforces it:
+
+- `labels` are only added; existing labels are never removed. List only labels from `labels.json`.
+- `templates` are `templates.json` keys whose comments are posted verbatim; free-form comments are not possible. A template the bot already posted on the issue is not posted again.
+- Only `close_question` (posts `redirect_to_forum`) and `close_expected_behavior` (posts `numerical_accuracy`) close the issue.
+- `bot-triaged` is added automatically; do not list it.
 
 ---
 
@@ -75,9 +69,7 @@ Use these GitHub MCP tools for triage:
 | Any label containing "deprecated" | Obsolete |
 | `oncall: releng` | Not a triage redirect target. Use `module: ci` instead |
 
-**If blocked:** When a label is blocked by the hook, add ONLY `triage review` and stop. A human will handle it.
-
-These rules are enforced by a PreToolUse hook that validates all labels against `labels.json`.
+**If unsure whether a label is allowed:** leave it out. The apply step (`scripts/issue_triage_pi/labels.py`) drops forbidden labels and adds `triage review` in their place, so a human will look.
 
 ### Never Override Human Labels
 
@@ -99,8 +91,8 @@ That issue belongs to the sub-oncall team. They own their queue.
 
 ### 1) Question vs Bug/Feature
 
-- If it is a question (not a bug report or feature request): close and use the `redirect_to_forum` template from `templates.json`.
-- If unclear whether it is a bug/feature vs a question: request additional information using the `request_more_info` template and stop.
+- If it is a question (not a bug report or feature request): use `decision: "close_question"`, which closes the issue with the `redirect_to_forum` template.
+- If unclear whether it is a bug/feature vs a question: use `decision: "request_info"` with the `request_more_info` template and stop.
 
 ### 1.5) External Files
 
@@ -112,10 +104,10 @@ Check if the issue body contains links to external files that users would need t
 - Model hubs: Hugging Face Hub links to model files
 
 **Action:**
-1. **Edit the issue body** to remove/redact the download links
-   - Replace with: `[Link removed - external file downloads are not permitted for security reasons]`
-2. Use the `request_self_contained_reproduction` template from `templates.json`
-3. Do NOT add `triaged` — wait for the user to provide a reproducible example
+1. Use `decision: "request_reproduction"` with the `request_self_contained_reproduction` template
+2. Do NOT add `triaged` — wait for the user to provide a reproducible example
+
+The links stay in the issue body: editing issue bodies is not supported.
 
 ### 1.55) Missing Reproduction — Other Cases
 
@@ -151,11 +143,11 @@ Ask: "Where would the fix need to be made?" That determines the label.
 1. Add `module: edge cases` label
 2. If from a fuzzer, also add `topic: fuzzer`
 3. Use the `numerical_accuracy` template from `templates.json` to link to the docs
-4. If the issue is clearly expected behavior per the docs, close it with the template comment
+4. If the issue is clearly expected behavior per the docs, use `decision: "close_expected_behavior"`, which closes it with that template
 
 ### 2) Transfer (domain library or ExecuTorch)
 
-If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), transfer the issue and **STOP**.
+If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), use `decision: "transfer"` with `transfer_repo` and **STOP**. Transfers are not automated: the apply step adds `triage review` so a human moves it.
 
 ### 2.5) PT2 Issues — Special Handling
 
@@ -177,7 +169,7 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 | Label | When to use |
 |-------|-------------|
 | `oncall: jit` | TorchScript issues |
-| `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d, DTensor, DeviceMesh, symmetric memory, context parallel, pipelining). **Special handling:** after applying this label, invoke the distributed triage sub-skill (`/distributed-triage` on this issue) for second-level triage — it will route to a sub-oncall, add module labels, and mark triaged. |
+| `oncall: distributed` | Distributed training (DDP, FSDP, RPC, c10d, DTensor, DeviceMesh, symmetric memory, context parallel, pipelining). **Special handling:** after this label is applied, the distributed triage workflow runs second-level triage automatically — it routes to a sub-oncall, adds module labels, and marks triaged. |
 | `oncall: export` | torch.export issues |
 | `oncall: quantization` | Quantization issues |
 | `oncall: mobile` | Mobile (iOS/Android), excludes ExecuTorch |
@@ -191,7 +183,9 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 - **CI/releng → `module: ci`.** Do not use `oncall: releng`. Use `module: ci` for CI infrastructure issues.
 - **torch.compile + distributed.** When `torch.compile` mishandles a distributed op (e.g., `dist.all_reduce`), the issue typically needs BOTH `oncall: pt2` and `oncall: distributed` since the fix may span both codebases.
 
-**Note:** `oncall: cpu inductor` is a sub-queue of PT2. For general triage, just use `oncall: pt2`.
+**Note:** `oncall: cpu inductor` is the PT2 sub-queue for Inductor issues that reproduce only on CPU (see "CPU Inductor Routing" in [pt2-triage-rubric.md](pt2-triage-rubric.md)). Redirect those to it instead of `oncall: pt2` and stop; every other PT2 issue gets `oncall: pt2`.
+
+**Distributed sub-queues:** apply only `oncall: distributed`, never `oncall: distributed parallelisms`, `oncall: distributed infra`, or `oncall: distributed checkpointing`. The distributed triage picks the sub-queue, and it stops early on an issue that already has one, so a sub-queue applied here skips its second-level triage. The apply step replaces any sub-queue with `oncall: distributed`.
 
 ### 4) Label the issue (if NOT transferred/redirected)
 
@@ -284,7 +278,7 @@ remains a flag, not a verdict: whether to cherry-pick is never the bot's call.
 
 ### 6) bot-triaged (automatic)
 
-The `bot-triaged` label is automatically applied by a post-hook after any issue mutation. You do not need to add it manually.
+The apply step adds `bot-triaged` whenever the plan changes the issue. You do not need to list it.
 
 ### 7) Mark triaged
 
@@ -296,7 +290,7 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 
 **DO NOT:**
 - Close bug reports or feature requests automatically
-- Close issues unless they are clear usage questions per Step 1
+- Close issues unless they are clear usage questions (Step 1) or clearly expected numerical behavior (Step 1.6)
 - Assign issues to users
 - Add `high priority` directly without human confirmation
 - Add module labels when redirecting to oncall
@@ -308,5 +302,3 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 - Add `release triage` only when the issue is confirmed on the most recent released minor, or already carries `high priority` (step 5b); when unsure, leave it off
 - Apply type labels (`feature`, `enhancement`, `function request`) when confident
 - Add `triaged` label when classification is complete
-
-**Note:** `bot-triaged` is automatically applied by a post-hook after any issue mutation.

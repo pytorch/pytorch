@@ -6154,7 +6154,7 @@ class TestTheStage1ArtifactDownloadRetries(unittest.TestCase):
     """A miss here skips every downstream step: no review AND no terminal row.
 
     `actions/download-artifact@v4` carries no retry and intermittently fails to
-    find a cross-run artifact that exists. `claude-issue-triage-run.yml` already
+    find a cross-run artifact that exists. `issue-triage-pi.yml` already
     documents that failure in this repository.
     """
 
