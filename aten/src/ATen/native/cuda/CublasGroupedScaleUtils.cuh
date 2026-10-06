@@ -13,6 +13,8 @@ enum class CublasGroupedScaleLayout : uint8_t {
   Vec16UE4M3,
   Vec128F32,
   Block128x128F32,
+  Vec32MnK4UE8M0,
+  Vec128MnK4UE8M0,
 };
 
 C10_HOST_DEVICE inline bool cublas_grouped_scale_uses_pointer_array(
@@ -49,6 +51,12 @@ C10_HOST_DEVICE inline int64_t cublas_grouped_scale_size_bytes(
     case CublasGroupedScaleLayout::Block128x128F32:
       return at::round_up(at::ceil_div(inner, int64_t{128}), int64_t{4}) *
           at::ceil_div(outer, int64_t{128}) * sizeof(float);
+    case CublasGroupedScaleLayout::Vec32MnK4UE8M0:
+      return at::round_up(outer, int64_t{4}) *
+          at::ceil_div(inner, int64_t{128}) * sizeof(int32_t);
+    case CublasGroupedScaleLayout::Vec128MnK4UE8M0:
+      return at::round_up(outer, int64_t{4}) *
+          at::ceil_div(inner, int64_t{512}) * sizeof(int32_t);
   }
   return 0;
 }
