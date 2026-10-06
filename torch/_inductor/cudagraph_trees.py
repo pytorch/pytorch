@@ -2890,7 +2890,7 @@ class CUDAGraphTreeManager:
         self.roots = None  # type: ignore[assignment]
         self.current_node = None
 
-    def _note_tree_run(self, function_id: FunctionID) -> None:
+    def _note_tree_run(self) -> None:
         self.ran_in_tree = True
 
     def record_function(
@@ -2898,7 +2898,7 @@ class CUDAGraphTreeManager:
     ) -> OutputType:
         if isinstance(self.current_node, CUDAWarmupNode):
             raise AssertionError("expected current_node to not be a CUDAWarmupNode")
-        self._note_tree_run(function_id)
+        self._note_tree_run()
         with torch._dynamo.callback_handler.install_callbacks(
             CallbackTrigger.CUDAGRAPH_RECORDING, str(self.compile_id)
         ):
@@ -2939,7 +2939,7 @@ class CUDAGraphTreeManager:
     def execute_node(
         self, node: CUDAGraphNode, new_inputs: list[InputType]
     ) -> OutputType:
-        self._note_tree_run(node.wrapped_function.id)
+        self._note_tree_run()
         self.current_node = node
         self.path_state = ExecutionState.EXECUTION
         self.update_generation()
@@ -2950,7 +2950,7 @@ class CUDAGraphTreeManager:
     ) -> OutputType:
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
-        self._note_tree_run(function_id)
+        self._note_tree_run()
         already_warm = function_id in self.warmed_up_functions
         func_name = self.get_func_name(function_id)
         if not already_warm:
