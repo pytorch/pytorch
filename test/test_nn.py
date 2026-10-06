@@ -11048,6 +11048,79 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_grad(device)
 
+    def _test_norm_second_order_forward_ad(self, fn, device, dtype, check_rev_over_fwd=True):
+        # A norm jvp formula that consumes the kernel's saved mean/invstd is right to first
+        # order but silently drops the d(mean) and d(invstd) terms once differentiated again.
+        # gradgradcheck only covers fwd-over-rev, which stays correct either way, so the two
+        # compositions below are the only ones that expose it.
+        for t_val in (-6.0, -0.5, 0.0, 0.3, 2.5):
+            t = torch.tensor(t_val, dtype=dtype, device=device)
+            ones = torch.ones_like(t)
+
+            leaf = t.clone().requires_grad_()
+            (first,) = torch.autograd.grad(fn(leaf), leaf, create_graph=True)
+            expected = torch.autograd.grad(first, leaf)[0]
+
+            # Forward over forward: both levels go through the jvp formula.
+            nested_jvp = torch.func.jvp(lambda t: torch.func.jvp(fn, (t,), (ones,))[1], (t,), (ones,))[1]
+            self.assertEqual(nested_jvp, expected, msg=f"fwd-over-fwd at t={t_val}")
+
+            # Reverse over forward: differentiates through the jvp formula's own graph.
+            if check_rev_over_fwd:
+                leaf = t.clone().requires_grad_()
+                with fwAD.dual_level():
+                    tangent = fwAD.unpack_dual(fn(fwAD.make_dual(leaf, ones))).tangent
+                    rev_over_fwd = torch.autograd.grad(tangent, leaf)[0]
+                self.assertEqual(rev_over_fwd, expected, msg=f"rev-over-fwd at t={t_val}")
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    @parametrize_test("training,track_running_stats", [(True, True), (True, False), (False, True)])
+    @parametrize_test("affine", [True, False])
+    def test_batchnorm_second_order_forward_ad(self, device, dtype, training, track_running_stats, affine):
+        C = 3
+        make = partial(torch.randn, dtype=dtype, device=device)
+        base, coef = make(4, C, 5), make(4, C, 5)
+        weight = make(C) if affine else None
+        bias = make(C) if affine else None
+        running_mean = make(C) if track_running_stats else None
+        running_var = make(C).abs() + 0.5 if track_running_stats else None
+
+        def fn(t):
+            x = base + t * coef + t * t * coef.flip(0)
+            # Clone the buffers: training mode updates them in place, which a functorch
+            # transform rejects as a mutation of a captured tensor.
+            y = F.batch_norm(x,
+                             running_mean.clone() if track_running_stats else None,
+                             running_var.clone() if track_running_stats else None,
+                             weight=weight, bias=bias, training=training, eps=0.25)
+            return (y * coef).sum()
+
+        self._test_norm_second_order_forward_ad(fn, device, dtype)
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.double)
+    @parametrize_test("num_groups", [1, 3, 6])
+    @parametrize_test("affine", [True, False])
+    def test_groupnorm_second_order_forward_ad(self, device, dtype, num_groups, affine):
+        # group_norm already propagates tangents through its saved statistics, via the
+        # result1/result2 forward formulas in derivatives.yaml. This guards that property,
+        # which group_norm_jvp relies on to use those statistics directly.
+        C = 6
+        make = partial(torch.randn, dtype=dtype, device=device)
+        base, coef = make(4, C, 5), make(4, C, 5)
+        weight = make(C) if affine else None
+        bias = make(C) if affine else None
+
+        def fn(t):
+            x = base + t * coef + t * t * coef.flip(0)
+            y = F.group_norm(x, num_groups, weight=weight, bias=bias, eps=0.25)
+            return (y * coef).sum()
+
+        # native_group_norm_backward has no forward-AD support, so reverse over forward is
+        # unreachable here; forward over forward still exercises the jvp formula twice.
+        self._test_norm_second_order_forward_ad(fn, device, dtype, check_rev_over_fwd=False)
+
     @onlyAccelerator
     def test_layernorm_half_precision(self, device):
         width = 128

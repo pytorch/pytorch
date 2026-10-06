@@ -6877,6 +6877,25 @@ Tensor cumprod_jvp(
   }
 }
 
+// Helper for {batch,group}_norms below
+// These reduce over every dim but the channel dim. Returns those dims, the
+// broadcastable (keepdim) shape of the per-channel statistics, and how many
+// elements each channel reduces over.
+static std::tuple<std::vector<int64_t>, std::vector<int64_t>, int64_t>
+_channel_reduction_info(const Tensor& input) {
+  auto dims = std::vector<int64_t>{};
+  auto view_size = input.sizes().vec();
+  int64_t numel = 1;
+  for (const auto dim : c10::irange(view_size.size())) {
+    if (dim != 1) {
+      numel *= input.size(static_cast<int64_t>(dim));
+      view_size[dim] = 1;
+      dims.push_back(static_cast<int64_t>(dim));
+    }
+  }
+  return {std::move(dims), std::move(view_size), numel};
+}
+
 // Helper for {batch,layer,group}_norms below
 // Computes the jvp for `1 / input.std(dims, keepdim)`
 static Tensor _invstd_jvp(
@@ -6975,26 +6994,22 @@ Tensor batch_norm_jvp(
     const Tensor& bias_t,
     const std::optional<Tensor>& running_mean,
     const std::optional<Tensor>& running_var,
-    const Tensor& saved_mean,
-    const Tensor& saved_invstd,
     bool train,
     double eps) {
-  auto dims = std::vector<int64_t>{};
-  auto view_size = input_t.sizes().vec();
-  int64_t numel = 1;
-  for (const auto dim : c10::irange(view_size.size())) {
-    if (dim != 1) {
-      numel *= input_t.size(static_cast<int64_t>(dim));
-      view_size[dim] = 1;
-      dims.push_back(static_cast<int64_t>(dim));
-    }
-  }
+  auto [dims, view_size, numel] = _channel_reduction_info(input_t);
   Tensor mean_p;
   Tensor invstd_p;
   Tensor result_t;
   if (train) {
-    mean_p = saved_mean.view(view_size);
-    invstd_p = saved_invstd.view(view_size);
+    // Derive the statistics from input_p rather than reusing the kernel's
+    // save_mean/save_invstd. Those are non-differentiable outputs, so they
+    // carry no tangent, and consuming them silently drops the d(mean) and
+    // d(invstd) terms once this formula is itself differentiated. Recomputing
+    // keeps the jvp a pure function of its differentiable inputs.
+    auto [var_p, mean_out] = at::var_mean(
+        input_p, dims, /*correction=*/c10::Scalar(0), /*keepdim=*/true);
+    mean_p = std::move(mean_out);
+    invstd_p = 1 / at::sqrt(var_p + at::Scalar(eps));
     result_t = _norm_jvp(input_p, input_t, mean_p, invstd_p, dims, numel);
   } else {
     TORCH_INTERNAL_ASSERT(
@@ -7169,25 +7184,22 @@ Tensor group_norm_jvp(
   auto input_t_reshaped = input_t.reshape({1, N * groups, N ? -1 : 1});
   auto input_p_reshaped = input_p.reshape({1, N * groups, N ? -1 : 1});
 
-  auto result_t = batch_norm_jvp(
+  auto [dims, view_size, numel] = _channel_reduction_info(input_t_reshaped);
+
+  // Unlike batch_norm's, group_norm's saved statistics are differentiable
+  // outputs (see result1/result2 in derivatives.yaml), so they carry a tangent
+  // and are used directly; eps is already folded into saved_invstd.
+  auto result_t = _norm_jvp(
                       input_p_reshaped,
                       input_t_reshaped,
-                      /*weight_p=*/{},
-                      /*weight_t=*/{},
-                      /*bias_p=*/{},
-                      /*bias_t=*/{},
-                      /*running_mean=*/{},
-                      /*running_var=*/{},
-                      saved_mean,
-                      saved_invstd,
-                      /*train=*/true,
-                      /*eps=*/0)
+                      saved_mean.view(view_size),
+                      saved_invstd.view(view_size),
+                      dims,
+                      numel)
                       .view(input_shape);
 
   std::optional<Tensor> result_p = std::nullopt;
   if (weight_p.defined()) {
-    std::vector<int64_t> view_size(input_t_reshaped.dim(), 1);
-    view_size[1] = input_t_reshaped.size(1);
     result_p = ((input_p_reshaped - saved_mean.view(view_size)) *
                 saved_invstd.view(view_size))
                    .view(input_shape);
