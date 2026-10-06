@@ -763,6 +763,95 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     @skip_but_pass_in_sandcastle_if(
         not TEST_WITH_ROCM,
+        "NVSHMEM all_to_all_vdev launches via nvshmemx_collective_launch "
+        "(cooperative launch), which cannot be captured into a CUDA graph; the "
+        "device-memory epoch path that makes capture work is rocSHMEM-only.",
+    )
+    def test_all_to_all_vdev_cudagraph(self) -> None:
+        # Regression for the epoch counter: capture a single all_to_all_vdev call
+        # in a CUDA/HIP graph, then REPLAY it several times with changing input
+        # data, verifying the received data matches a fresh dist.all_to_all_single
+        # reference on EACH replay.
+        #
+        # Splits are held constant across replays (so the graph's data-dependent
+        # sizes stay valid) and only the payload values change. The op's per-peer
+        # completion barrier waits with CMP_GE(epoch). If the epoch is a host-side
+        # value baked in at capture time, every replay after the first reuses that
+        # stale token: the peer signal slots already satisfy CMP_GE from the first
+        # replay, so the waits degenerate into no-ops and a peer racing ahead can
+        # tear the receive buffer -> replay N>0 diverges from its reference. With
+        # the epoch advanced in device memory inside the captured
+        # exchangeSplitAndOffset kernel, each replay bumps the token and the
+        # per-peer waits are real again, so every replay matches.
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        dtype = torch.float
+        k = 16
+        max_inp_numel = k * self.world_size
+        max_out_numel = max_inp_numel * self.world_size
+
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device)
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device)
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int64, device=self.device
+        )
+        for t in (inp, out, in_splits, out_splits_offsets):
+            symm_mem.rendezvous(t, group=group_name)
+
+        torch.manual_seed(2024 + self.rank)
+        # Fixed splits for the whole capture/replay sequence.
+        inp_splits = torch.randint(1, k, (self.world_size,), device=self.device)
+        out_splits = torch.zeros_like(inp_splits)
+        dist.all_to_all_single(out_splits, inp_splits)
+        inp_numel = inp_splits.sum().item()
+        out_numel = out_splits.sum().item()
+        in_splits.copy_(inp_splits)
+
+        # Precompute per-replay payloads and their references (needs the
+        # collective, so it must happen before the capture-free replay loop).
+        iters = 5
+        payloads = []
+        for _ in range(iters):
+            data = torch.randn(max_inp_numel, dtype=dtype, device=self.device)
+            expected = torch.empty(out_numel, dtype=dtype, device=self.device)
+            dist.all_to_all_single(
+                expected, data[:inp_numel], out_splits.tolist(), inp_splits.tolist()
+            )
+            payloads.append((data, expected))
+
+        # Warm up once (captures allocate + first-touch rocSHMEM state) and align.
+        inp.copy_(payloads[0][0])
+        torch.ops.symm_mem.all_to_all_vdev(
+            inp, out, in_splits, out_splits_offsets, group_name
+        )
+        torch.cuda.synchronize()
+        dist.barrier()
+
+        # Capture a single call.
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            torch.ops.symm_mem.all_to_all_vdev(
+                inp, out, in_splits, out_splits_offsets, group_name
+            )
+
+        # Replay with changing input; the received data must match every time.
+        for i, (data, expected) in enumerate(payloads):
+            inp.copy_(data)
+            dist.barrier()  # align ranks before the (barrier-free) replay
+            graph.replay()
+            torch.cuda.synchronize()
+            torch.testing.assert_close(
+                out[:out_numel],
+                expected,
+                msg=lambda m, i=i: f"cudagraph replay {i} mismatch: {m}",
+            )
+
+    @skip_if_lt_x_gpu(2)
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_WITH_ROCM,
         "CUDA/NVSHMEM does not handle uneven bytes: its all_to_all_vdev kernel "
         "asserts block_size * blocks_per_peer == peer_size, so a per-peer byte "
         "count that is not a multiple of blocks_per_peer device-asserts. Only "
@@ -782,6 +871,11 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         # override. nsend*D = 32767*3 = 98301 bytes/peer is odd, so it is not a
         # multiple of 2 and the buggy version drops its tail byte.
         self._init_device()
+        if os.environ.get("TORCH_SYMMMEM_NBLOCKS"):
+            # Needs get_a2a_nblocks to derive 2 blocks/peer from the input size;
+            # the override forces a fixed count and makes the remainder path a
+            # vacuous pass.
+            self.skipTest("TORCH_SYMMMEM_NBLOCKS override bypasses the remainder path")
         group_name = dist.group.WORLD.group_name
         dtype = torch.int8
         D = 3
