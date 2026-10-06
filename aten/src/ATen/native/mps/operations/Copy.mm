@@ -29,7 +29,7 @@ namespace mps {
 // input dtype the runtime switch covers; the (needs_conj, needs_neg) pair selects the functor. Conj+neg uses a fused
 // copy_conj_neg functor for complex (the only case where it differs from neg); real types route through copy_neg.
 // Strided iterators get the `_strided_castout_<in>` template; contiguous get `_dense_castout_*`.
-static void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
+void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
   const bool needs_conj = src.is_conj() != dst.is_conj();
   const bool needs_neg = src.is_neg() != dst.is_neg();
 
@@ -216,21 +216,22 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   // clobbers out-of-view storage (the CPU-to-MPS direction already guards
   // this with is_dense_in_storage). Gather/scatter through contiguous
   // temporaries in that case.
-  const bool direct_copy = dst_.strides() == src_.strides() && is_dense_in_storage(src_);
+  // Bits must match too: the same-dtype path below is a raw blit that copies storage verbatim,
+  // so a conj/neg difference between the two sides has to be resolved by the gather instead.
+  const bool sameBits = src_.is_conj() == dst_.is_conj() && src_.is_neg() == dst_.is_neg();
+  const bool direct_copy = dst_.strides() == src_.strides() && is_dense_in_storage(src_) && sameBits;
   if (!direct_copy) {
     dst = at::empty_like(dst_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
   if (!direct_copy) {
-    Tensor emptyShell = Tensor();
-    src = gatherViewTensor(src_, emptyShell);
-    if (src.has_storage()) {
-      storage_byte_offset = 0;
-    } else {
-      src = src_.expand_as(dst).contiguous();
-      storage_byte_offset = src.storage_offset() * src.itemsize();
-    }
+    // Materialize the view into a flat run, resolving src_'s conj/neg bits into the data: `dst` carries
+    // no bits of its own, and dst_'s are applied by the host-side copy at the end.
+    Tensor gathered = at::empty(src_.sizes(), src_.options());
+    copy_cast_kernel_mps(gathered, src_);
+    src = gathered;
+    storage_byte_offset = 0;
   }
 
   id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
@@ -246,6 +247,11 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     NSUInteger blitSourceOffset = storage_byte_offset;
     bool needsBlit = true;
     if (src_.dtype() != dst.dtype()) {
+      // The castout kernel picks the store type from a runtime switch over the
+      // dtypes Metal can represent. A CPU destination can have any other dtype
+      // (Double, ComplexDouble, ...), for which the store would be silently
+      // skipped, so raise for those here.
+      scalarToMetalTypeString(dst.scalar_type());
       // Unified memory: cast straight from the MPS source into the CPU-wrapped
       // destination buffer at the requested offsets. This avoids the temporary
       // that used to alias the live source buffer and blitting from it (see
@@ -347,58 +353,23 @@ void copy_blit_mps(void* dst, const void* src, size_t size) {
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
-  auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
-
-  // If dst is contiguous and there is no byte offset, we can save directly the result of
-  // gather into dst. This reduces the overhead of doing an additional copy for most cases.
-  bool returnGatherOutput = dst_.is_contiguous();
-  Tensor src;
-  auto sameMemFormat =
-      src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
+  const auto memFormat = dst_.suggest_memory_format();
+  const bool sameMemFormat = src_.is_contiguous(memFormat) && dst_.is_contiguous(memFormat);
   const bool sameDataType =
       src_.dtype() == dst_.dtype() && src_.is_conj() == dst_.is_conj() && src_.is_neg() == dst_.is_neg();
 
-  if ((!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) ||
-      // the copy_cast path requires storage_offset to be applied before casting
-      (src_.storage_offset() && !sameDataType)) {
-    Tensor emptyShell = Tensor();
-    src = gatherViewTensor(src_, returnGatherOutput ? dst_ : emptyShell);
-
-    if (src.has_storage()) {
-      if (returnGatherOutput) {
-        return dst_;
-      }
-    } else {
-      src = src_.expand_as(dst_).contiguous();
-    }
-  } else {
-    src = src_;
+  // Unless both sides are the same flat run, hand the whole copy to the strided cast kernel: it resolves
+  // strides, dtype and conj/neg bits in one dispatch. Gathering into a contiguous temporary first would
+  // cost a second pass and lose the bits the fast paths below still reason about.
+  // (the copy_cast path also requires storage_offset to be applied before casting)
+  if (!sameMemFormat || (src_.storage_offset() && !sameDataType)) {
+    copy_cast_kernel_mps(dst_, src_);
+    return dst_;
   }
-  id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
-
-  // Strided dst can't be written as one contiguous run: route it through the scatter kernel.
-  if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
-    return scatterViewTensor(src, dst_);
-  }
-  src._set_conj(src_.is_conj());
-  src._set_neg(src_.is_neg());
-
-  MPSStream* stream = getCurrentMPSStream();
   if (sameDataType) {
-    contiguous_copy_kernel_mps(dst_, src, non_blocking);
+    contiguous_copy_kernel_mps(dst_, src_, non_blocking);
   } else {
-    if (dst_byte_offset) {
-      auto maybeCastedSource =
-          at::empty(dst_.sizes(), dst_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-      auto maybeCastedSourceBuffer = getMTLBufferStorage(maybeCastedSource);
-      copy_cast_kernel_mps(maybeCastedSource, src);
-
-      uint64_t profile_id = getMPSProfiler().beginProfileCopy(
-          maybeCastedSourceBuffer, destBuffer, maybeCastedSource, dst_, dst_.nbytes(), stream, true);
-      stream->copy(maybeCastedSourceBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset, profile_id);
-    } else {
-      copy_cast_kernel_mps(dst_, src);
-    }
+    copy_cast_kernel_mps(dst_, src_);
   }
   return dst_;
 }
@@ -443,31 +414,6 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
   }
   TORCH_INTERNAL_ASSERT(src.device().type() == DeviceType::MPS, "mps_copy_ is implemented only for *->MPS; MPS->*");
   return dst;
-}
-
-// Materialize a strided view into a contiguous tensor (or into the provided dst). conj/neg bits on src
-// and dst are honored via copy_cast_kernel_mps's functor dispatch. Replaces the JIT scatter/gather
-// shader machinery that previously lived in View.mm; the strided castout templates handle the same
-// cross-dtype and bit-flip combinations.
-Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
-  Tensor output = dst.has_storage()
-      ? dst
-      : at::empty(src.sizes(), src.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-  if (src.numel() == 0 || output.numel() == 0) {
-    return dst.has_storage() ? dst : output;
-  }
-  copy_cast_kernel_mps(output, src);
-  return dst.has_storage() ? dst : output;
-}
-
-// Scatter a contiguous tensor into a strided view. Symmetrical to gatherViewTensor; the strided side is
-// the destination here so the iterator's strided dimensions live on the output.
-Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
-  if (src.numel() == 0 || output.numel() == 0) {
-    return output;
-  }
-  copy_cast_kernel_mps(output, src);
-  return output;
 }
 
 } // namespace mps

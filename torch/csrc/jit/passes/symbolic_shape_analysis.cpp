@@ -529,8 +529,7 @@ struct SymbolicShapeOpAnalyzer {
 
     // there are ways to compute this more efficiently but typically number of
     // Values for each symbolic set is low and this is cheap to run
-    for (const auto i : c10::irange(symbolic_set.size())) {
-      Value* v = symbolic_set[i];
+    for (Value* const v : symbolic_set) {
       Value* dominating_value = v;
       for (const auto& sym_set : symbolic_set) {
         if (dominating_value->node()->isDominatedBy(sym_set->node())) {
