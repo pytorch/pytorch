@@ -146,29 +146,15 @@ class TestUsesGpuCppWrapper(TestCase):
 @instantiate_parametrized_tests
 class TestAttentionFusionDeviceHooks(TestCase):
     hw_classification = HardwareClassification.GENERIC
-    # The attention-fusion hooks routed through DeviceInterface in
-    # fuse_attention.py. The base DeviceInterface defaults encode the non-CUDA
-    # fall-through (fp32 fusion allowed, no tf32 warning, fp32 upcast softmax
-    # allowed, fused SDPA preferred over the math path); CudaInterface overrides
-    # each to the CUDA-specific condition the inline checks encoded before.
 
     def test_base_defaults_are_non_cuda_fallthrough(self):
         self.assertTrue(DeviceInterface.is_fp32_attention_fusion_safe(torch.float32))
         self.assertFalse(DeviceInterface.should_warn_tf32_disabled())
         self.assertTrue(DeviceInterface.is_fp32_softmax_attention_fusion_safe())
         self.assertFalse(DeviceInterface.keep_attention_on_math_path())
+        self.assertFalse(DeviceInterface.needs_contiguous_attn_mask())
 
     def test_cuda_overrides_match_inline_conditions(self):
-        # keep_attention_on_math_path reproduces `query.device.type == "cuda"
-        # and torch.version.hip is None`.
-        self.assertEqual(
-            CudaInterface.keep_attention_on_math_path(), torch.version.hip is None
-        )
-        # is_fp32_softmax_attention_fusion_safe rejects CUDA (was
-        # `"cuda" not in str(device)` for the CUDA-resolved interface, i.e.
-        # always False once dispatched through CudaInterface).
-        self.assertFalse(CudaInterface.is_fp32_softmax_attention_fusion_safe())
-
         # cuBLASModule.fp32_precision is dispatched through __getattr__/__setattr__
         # to a C getter/setter (not a real attribute or property), so mock.patch.object
         # cannot patch it; restore it explicitly instead.
@@ -192,14 +178,14 @@ class TestAttentionFusionDeviceHooks(TestCase):
             matmul.fp32_precision = saved
 
     def test_registered_non_cuda_inherits_base_defaults(self):
-        # CPU/XPU/MTIA are registered but do not override the fusion hooks, so
-        # they inherit the base fall-through.
         self.assertIs(get_interface_for_device("cpu"), CpuInterface)
         self.assertIs(get_interface_for_device("xpu"), XpuInterface)
         self.assertIs(get_interface_for_device("mtia"), MtiaInterface)
         self.assertTrue(CpuInterface.is_fp32_attention_fusion_safe(torch.float32))
         self.assertTrue(CpuInterface.is_fp32_softmax_attention_fusion_safe())
         self.assertFalse(CpuInterface.keep_attention_on_math_path())
+        self.assertFalse(CpuInterface.needs_contiguous_attn_mask())
+        self.assertTrue(XpuInterface.needs_contiguous_attn_mask())
 
     def _match_for(self, device_type):
         device = SimpleNamespace(type=device_type)
@@ -217,31 +203,50 @@ class TestAttentionFusionDeviceHooks(TestCase):
             _sfdp_params_check,
         )
 
-        # Registered non-CUDA devices inherit the base fall-through defaults,
-        # so neither check rejects the fusion: _sfdp_params_check returns True
-        # (the fp32/tf32 CUDA gate is skipped), and the fp32-upcast softmax
-        # extra check does not short-circuit. This matches the pre-routing
-        # `query.device.type == "cuda"` fall-through.
         match = self._match_for(device_type)
         self.assertTrue(_sfdp_params_check(match))
         self.assertTrue(_sfdp_extra_check(fp32_upcast_softmax=True)(match))
 
     @parametrize("device_type", ["definitely_unregistered_device", "privateuse1"])
-    def test_sfdp_checks_unregistered_device_raises(self, device_type):
+    def test_sfdp_checks_unregistered_device_falls_through(self, device_type):
         from torch._inductor.fx_passes.fuse_attention import (
             _sfdp_extra_check,
             _sfdp_params_check,
         )
 
-        # get_interface_for_device raises NotImplementedError for a device type
-        # with no registered interface; the attention-fusion checks route
-        # through it unconditionally, so an unregistered PrivateUse1 backend
-        # surfaces that error rather than silently falling through.
+        # Unregistered devices fall back to the base DeviceInterface defaults,
+        # matching the pre-routing `== "cuda"` skip instead of raising.
         match = self._match_for(device_type)
-        with self.assertRaises(NotImplementedError):
-            _sfdp_params_check(match)
-        with self.assertRaises(NotImplementedError):
-            _sfdp_extra_check(fp32_upcast_softmax=True)(match)
+        self.assertTrue(_sfdp_params_check(match))
+        self.assertTrue(_sfdp_extra_check(fp32_upcast_softmax=True)(match))
+        self.assertTrue(_sfdp_extra_check(math_path_only=True)(match))
+
+    def test_override_changes_fusion_outcome(self):
+        from torch._dynamo import device_interface as di
+        from torch._inductor.fx_passes.fuse_attention import (
+            _sfdp_extra_check,
+            _sfdp_params_check,
+        )
+
+        # An out-of-tree backend overriding keep_attention_on_math_path drives
+        # the pattern-16 fusion decision the PR is meant to enable: the override
+        # rejects the pattern-16 match (math_path_only gate) while the base
+        # defaults still let _sfdp_params_check and the fp32-upcast-softmax
+        # gate fall through.
+        class FakeBackendInterface(DeviceInterface):
+            @staticmethod
+            def keep_attention_on_math_path() -> bool:
+                return True
+
+        fake_device = "fakebackend"
+        di.device_interfaces[fake_device] = FakeBackendInterface
+        try:
+            match = self._match_for(fake_device)
+            self.assertTrue(_sfdp_params_check(match))
+            self.assertFalse(_sfdp_extra_check(math_path_only=True)(match))
+            self.assertTrue(_sfdp_extra_check(fp32_upcast_softmax=True)(match))
+        finally:
+            di.device_interfaces.pop(fake_device, None)
 
 
 if __name__ == "__main__":

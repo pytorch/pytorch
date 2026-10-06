@@ -257,21 +257,48 @@ class DeviceInterface:
 
     @staticmethod
     def is_fp32_attention_fusion_safe(dtype: torch.dtype) -> bool:
+        """Queried by inductor's SDPA pattern matcher (_sfdp_params_check) to
+        decide whether fusing an fp32 attention pattern is safe. True fuses;
+        False keeps the unfused code. Base default allows fusion everywhere;
+        CudaInterface gates it on the tf32 precision knob."""
         return True
 
     @staticmethod
     def should_warn_tf32_disabled() -> bool:
+        """Queried right after is_fp32_attention_fusion_safe returns False, to
+        decide whether to emit the tf32-disabled perf hint. True emits the
+        warning. Base default never warns; CudaInterface warns on CUDA SM >=
+        8.0 unless the bfx9 precision mode is selected."""
         return False
 
     @staticmethod
     def is_fp32_softmax_attention_fusion_safe() -> bool:
+        """Queried by _sfdp_extra_check for the fp32-upcast-softmax SDPA
+        patterns (25-27): whether fusing them is numerically safe on this
+        device. True fuses; False keeps the unfused code. Base default allows
+        it; CudaInterface rejects CUDA (and ROCm, which shares CudaInterface)
+        because the fused kernel's numerics fail the tight checks those
+        patterns require."""
         return True
 
     @staticmethod
     def keep_attention_on_math_path() -> bool:
-        # Whether this device should stay on the explicit attention math path
-        # (matmul/div/add/softmax/dropout) instead of fused SDPA, whose
-        # scaling/dropout numerics fail tight checks for some patterns.
+        """Queried by _sfdp_replacement_16 (and, via _sfdp_extra_check's
+        math_path_only flag, by pattern 16's match gate) to keep Bert-style
+        patterns on the explicit matmul/div/add/softmax/dropout math path
+        instead of fused SDPA, whose scaling/dropout numerics fail tight
+        checks for some patterns. True stays on the math path (and rejects the
+        pattern-16 fusion match); False uses fused SDPA. Base default uses
+        fused SDPA; CudaInterface stays on the math path on CUDA only."""
+        return False
+
+    @staticmethod
+    def needs_contiguous_attn_mask() -> bool:
+        """Queried by _sfdp_replacement_25/26 before passing attn_mask to fused
+        SDPA: whether the device's SDPA kernel requires a contiguous attn_mask.
+        True makes attn_mask contiguous first; False passes it through as-is.
+        Base default passes it through; XpuInterface forces contiguity because
+        the XPU fused SDPA kernel does not accept a non-contiguous mask."""
         return False
 
 
@@ -407,20 +434,14 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def is_fp32_attention_fusion_safe(dtype: torch.dtype) -> bool:
-        if dtype != torch.float32:
-            return True
-        if torch.backends.cuda.matmul.fp32_precision == "tf32":
-            return True
-        return False
+        return dtype != torch.float32 or torch.backends.cuda.matmul.fp32_precision == "tf32"
 
     @staticmethod
     def should_warn_tf32_disabled() -> bool:
         if torch.backends.cuda.matmul.fp32_precision == "bfx9":
             return False
-        return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
-            8,
-            0,
-        )
+        min_cap = (8, 0)
+        return torch.cuda.is_available() and torch.cuda.get_device_capability() >= min_cap
 
     @staticmethod
     def is_fp32_softmax_attention_fusion_safe() -> bool:
@@ -558,6 +579,10 @@ class XpuInterface(DeviceInterface):
 
     @staticmethod
     def is_gpu() -> bool:
+        return True
+
+    @staticmethod
+    def needs_contiguous_attn_mask() -> bool:
         return True
 
     # pyrefly: ignore [bad-override]

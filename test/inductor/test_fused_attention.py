@@ -2107,15 +2107,6 @@ class TestSDPAPatternRegistration(TestCase):
 
 class TestAttentionFusionDeviceRouting(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
-    # Fast validation that the DeviceInterface hooks routed in fuse_attention
-    # drive the fused-vs-math SDPA decision and the fp32 fusion gate per
-    # device, instead of the inline `query.device.type == "cuda"` /
-    # `torch.version.hip` checks. Exercises the routing functions directly
-    # (_sfdp_replacement_16 and _sfdp_params_check) with real tensors / mock
-    # matches, asserting the hook-driven outcome without the torch.compile +
-    # Inductor codegen the end-to-end variant pays for. Pattern matching
-    # itself is covered by TestSDPAPatternRewriterTemplate, and the base/CUDA
-    # hook conditions by test_device_backend_hooks.
 
     def _match_for(self, device):
         dev = torch.device(device)
@@ -2127,7 +2118,6 @@ class TestAttentionFusionDeviceRouting(TestCase):
         )
 
     def test_keep_attention_on_math_path(self, device):
-        from torch._dynamo.device_interface import get_interface_for_device
         from torch._inductor.fx_passes import fuse_attention
 
         tensor_shape = (4, 16, 2, 32)
@@ -2137,9 +2127,6 @@ class TestAttentionFusionDeviceRouting(TestCase):
         attn_mask = torch.zeros(1, 1, 16, 16, device=device)
         inv_scale = 3.0
         dropout_p = 0.4
-
-        iface = get_interface_for_device(device)
-        keep_on_math = iface.keep_attention_on_math_path()
 
         sdpa_calls = 0
 
@@ -2156,31 +2143,30 @@ class TestAttentionFusionDeviceRouting(TestCase):
                 query, key, value, attn_mask, inv_scale, dropout_p
             )
 
-        # The replacement ran and routed through the hook: the math path skips
-        # fused SDPA; every other device calls it.
+        # CUDA keeps pattern 16 on the explicit math path (no fused SDPA call);
+        # every other device calls fused SDPA.
         self.assertEqual(counters["inductor"]["fuse_attention"], 1)
-        self.assertEqual(sdpa_calls, 0 if keep_on_math else 1)
+        on_cuda = torch.device(device).type == "cuda" and torch.version.hip is None
+        self.assertEqual(sdpa_calls, 0 if on_cuda else 1)
 
     def test_fp32_fusion_gated_by_precision(self, device):
-        # _sfdp_params_check gates fp32 fusion via
-        # iface.is_fp32_attention_fusion_safe(): CUDA blocks it under non-tf32
-        # precision; non-CUDA inherit the base fall-through and fuse regardless
-        # of the precision knob. Asserting the check's return per the hook
-        # decision proves the gate is driven by the interface, not by the
-        # global matmul precision flag.
-        from torch._dynamo.device_interface import get_interface_for_device
         from torch._inductor.fx_passes.fuse_attention import _sfdp_params_check
 
-        iface = get_interface_for_device(device)
         match = self._match_for(device)
-
         matmul = torch.backends.cuda.matmul
         saved = matmul.fp32_precision
         try:
-            for precision in ("tf32", "ieee"):
-                matmul.fp32_precision = precision
-                expected = iface.is_fp32_attention_fusion_safe(torch.float32)
-                self.assertEqual(_sfdp_params_check(match), expected)
+            if torch.device(device).type == "cuda":
+                # CUDA blocks fp32 fusion under "ieee" and allows it under "tf32".
+                matmul.fp32_precision = "ieee"
+                self.assertFalse(_sfdp_params_check(match))
+                matmul.fp32_precision = "tf32"
+                self.assertTrue(_sfdp_params_check(match))
+            else:
+                # Non-CUDA inherits the base fall-through and fuses regardless.
+                for precision in ("tf32", "ieee"):
+                    matmul.fp32_precision = precision
+                    self.assertTrue(_sfdp_params_check(match))
         finally:
             matmul.fp32_precision = saved
 
