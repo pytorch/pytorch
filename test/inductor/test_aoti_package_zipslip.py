@@ -1,12 +1,13 @@
 # Owner(s): ["module: inductor"]
 
 import tempfile
+import unittest
 import zipfile
 from pathlib import Path
 
 import torch
 from torch._inductor.package import load_package
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
 
 MARKER = b"AOTI_ZIPSLIP_CANARY\n"
@@ -55,6 +56,7 @@ class TestAOTIPackageZipSlip(TestCase):
     def test_model_member_dotdot_is_not_extracted(self) -> None:
         self._assert_traversal_rejected(backslash=False)
 
+    @unittest.skipIf(not IS_WINDOWS, "backslash is a path separator only on Windows")
     def test_model_member_backslash_dotdot_is_not_extracted(self) -> None:
         self._assert_traversal_rejected(backslash=True)
 

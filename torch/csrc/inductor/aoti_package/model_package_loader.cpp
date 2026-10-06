@@ -10,7 +10,6 @@
 #include <fmt/format.h>
 #include <miniz.h>
 #include <nlohmann/json.hpp>
-#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <iostream>
@@ -18,6 +17,7 @@
 #include <utility>
 
 #ifdef _WIN32
+#include <algorithm>
 #include <torch/headeronly/util/win32-headers.h>
 #endif
 
@@ -88,11 +88,14 @@ std::string normalize_path_separator(const std::string& orig_path) {
   On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
   "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
 
-  Always convert '\\' to '/' (including on Linux). Zip member names can embed
-  Windows separators to hide a ".." component from a separator-sensitive check.
+  Only convert '\\' to '/' on Windows. On Linux, '\\' is a valid filename
+  character, not a path separator. Zip members that use Windows separators to
+  hide ".." are still rejected on Windows after this conversion.
   */
   std::string normalized_path = orig_path;
+#ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
+#endif
   normalized_path = remove_duplicate_separator_of_path(normalized_path);
   return normalized_path;
 }
