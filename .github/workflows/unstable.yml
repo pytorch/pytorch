@@ -60,8 +60,8 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build:
-    if: github.repository_owner == 'pytorch'
-    name: linux-jammy-aarch64-cuda13.2-py3.12-gcc13
+    if: github.repository_owner == 'pytorch' && github.event_name == 'workflow_dispatch'
+    name: linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
@@ -85,15 +85,17 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100
     uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build
-      - get-label-type
+    needs: get-label-type
     with:
-      build-environment: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.build-environment }}
+      artifact-run-id: "37407561799"
+      build-environment: linux-jammy-aarch64-cuda13.2-py3.12-gcc13
       docker-image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
       force-no-td: true
       python-version: "3.12"
-      test-matrix: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.test-matrix }}
+      test-matrix: |
+        { include: [
+          { config: "smoke_b200", shard: 1, num_shards: 1, runner: "nv-l-arm64grace-16-200-gb300" },
+        ]}
       timeout-minutes: 120
       compiler: gcc13
       cuda-version: "13.2"
