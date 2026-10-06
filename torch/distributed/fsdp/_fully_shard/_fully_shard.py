@@ -314,6 +314,8 @@ def fully_shard(
 
 
 def _check_all_gather_replaceable(fsdp_param_group: FSDPParamGroup) -> None:
+    # Unsharded parameters and pending results depend on the current backend's
+    # outputs, and outputs that view a custom layout's buffers keep their owner
     if (
         fsdp_param_group._all_gather_result is not None
         or fsdp_param_group.is_unsharded
@@ -324,8 +326,8 @@ def _check_all_gather_replaceable(fsdp_param_group: FSDPParamGroup) -> None:
     ):
         raise ValueError(
             "cannot replace an all-gather backend or layout with pending work, "
-            "unsharded parameters, or backend-owned outputs; "
-            "install it before the first unshard"
+            "unsharded parameters, or outputs that view a custom layout's "
+            "buffers; install it before the first unshard"
         )
 
 
@@ -777,15 +779,12 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
-        Create a separate stateful backend/layout instance for each FSDP
-        parameter group. Sharing registered storage through a backend pool does
-        not permit sharing a stateful instance. The stateless default layout
-        does not impose this restriction. Consult the backend's documentation
-        for supported layouts and storage lifetime requirements.
-        A backend cannot be replaced while an all-gather is pending, while
-        parameters are unsharded, or after they adopt backend-owned output storage.
-        The comm's ``layout`` is installed with it, replacing a layout set by
-        :meth:`set_all_gather_layout`.
+        This sets only the comm and keeps the installed all-gather layout. A
+        layout that requires a specific comm is installed with it by
+        :meth:`set_all_gather_layout`; while such a layout is installed, any
+        other comm is rejected. Install the comm before the first unshard:
+        replacement is rejected while an all-gather is pending, while parameters
+        are unsharded, or after they adopt output storage from a custom layout.
 
         Args:
             comm (AllGather): Custom all-gather communication.
@@ -798,14 +797,16 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
-            if (
-                comm is not fsdp_param_group._all_gather_comm
-                or comm.layout is not fsdp_param_group._all_gather_layout
-            ):
+            bound_comm = fsdp_param_group._all_gather_layout.comm
+            if bound_comm is not None and comm is not bound_comm:
+                raise ValueError(
+                    "cannot install a different all-gather comm while the "
+                    "installed layout is bound to its comm; install another layout "
+                    "with set_all_gather_layout first"
+                )
+            if comm is not fsdp_param_group._all_gather_comm:
                 _check_all_gather_replaceable(fsdp_param_group)
-            comm.layout._bind_owner(fsdp_param_group)
             fsdp_param_group._all_gather_comm = comm
-            fsdp_param_group._all_gather_layout = comm.layout
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
         """
@@ -930,11 +931,13 @@ class FSDPModule:
         :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`
         packs rank-major input and copies the output with its ``output_fn``,
         e.g. ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)``
-        for the native copy. It works with FSDP's built-in all-gather comms. A
-        layout that needs a matching collective, e.g. one that views
-        parameters into a backend-owned buffer, is installed with its comm by
-        :meth:`set_custom_all_gather` instead. Set layouts before the first
-        unshard.
+        for the native copy; it works with any comm that produces rank-major
+        output. This is the only way to install a layout. A layout whose
+        ``comm`` is set, e.g. one that views parameters into a backend-owned
+        buffer, requires that collective: installing the layout installs its
+        comm too, and the group then rejects any other comm, including from
+        :meth:`set_custom_all_gather`, until another layout is installed. Set
+        layouts before the first unshard.
 
         Args:
             layout (Optional[AllGatherLayout]): Layout, or ``None`` to restore
@@ -949,10 +952,15 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
-                    if layout is not fsdp_param_group._all_gather_layout:
+                    comm = layout.comm or fsdp_param_group._all_gather_comm
+                    if (
+                        layout is not fsdp_param_group._all_gather_layout
+                        or comm is not fsdp_param_group._all_gather_comm
+                    ):
                         _check_all_gather_replaceable(fsdp_param_group)
                     layout._bind_owner(fsdp_param_group)
                     fsdp_param_group._all_gather_layout = layout
+                    fsdp_param_group._all_gather_comm = comm
 
     def set_reduce_scatter_input_fn(
         self, fn: PrepareReduceScatterInputsFn | None, /, *, recurse: bool = True

@@ -206,7 +206,7 @@ class FSDPParam:
     sharded_param: nn.Parameter  # ND
     _sharded_post_forward_param_data: torch.Tensor | None  # 1D
     _sharded_post_forward_param: nn.Parameter | None  # ND
-    _unsharded_param: nn.Parameter | None  # ND
+    _unsharded_param: nn.Parameter  # ND
     _sharding_spec: DTensorSpec
     # Sharding specs for sharded grads, whose dtype can differ from the param's.
     # Cached per dtype so each backward doesn't build a DTensorSpec per param,
@@ -216,7 +216,9 @@ class FSDPParam:
         DTensorSpec | None
     )  # set for DTensor params (SPMD or TP/EP)
     all_gather_outputs: list[torch.Tensor]  # 1D
-    _keep_all_gather_output_storage: bool = False  # Backend-owned storage
+    # Set when the outputs view a custom layout's buffers, which the param group
+    # or, for a BackendOwnedAllGatherLayout, the backend allocates and frees
+    _keep_all_gather_output_storage: bool = False
     _all_gather_copy_layouts: tuple[_AllGatherOutputLayout, ...]
     # All-gather extension attributes
     _all_gather_metadata: Any | None
@@ -258,7 +260,6 @@ class FSDPParam:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
-        self._unsharded_param = None
         self._param_fqn: str | None = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
@@ -908,7 +909,7 @@ class FSDPParam:
         ]
 
     def init_unsharded_param(self):
-        if self._unsharded_param is not None:  # after the 1st all-gather
+        if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
                 return  # already initialized
@@ -1035,8 +1036,6 @@ class FSDPParam:
 
     def to_unsharded(self) -> None:
         # Assume that the data has been allocated and all-gathered
-        if self._unsharded_param is None:
-            raise AssertionError("Unsharded parameter is not initialized")
         set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
         self._setattr_on_modules(self._unsharded_param)
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
@@ -1091,6 +1090,8 @@ class FSDPParam:
         return _from_local_no_grad(tensor, post_forward_sharding_spec)
 
     def alloc_all_gather_outputs(self) -> None:
+        if self._keep_all_gather_output_storage:
+            return
         for tensor in self.all_gather_outputs:
             alloc_storage(tensor)
 
@@ -1203,8 +1204,6 @@ class FSDPParam:
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
-        if self._unsharded_param is None:
-            raise AssertionError("Unsharded parameter is not initialized")
         return self._unsharded_param
 
     @property
