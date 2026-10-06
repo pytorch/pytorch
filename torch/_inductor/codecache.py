@@ -117,7 +117,7 @@ from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
-    is_fake,
+    is_fake_tensor,
     TensorMetadata,
 )
 from torch._utils_internal import log_cache_bypass
@@ -841,7 +841,7 @@ class FxGraphCachePickler(pickle.Pickler):
         Route fake tensors to metadata-only serialization and real tensors to
         constant serialization.
         """
-        if is_fake(t):
+        if is_fake_tensor(t):
             return self._reduce_fake_tensor(t)
 
         return self._reduce_constant_tensor(t)

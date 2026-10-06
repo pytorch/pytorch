@@ -483,7 +483,7 @@ def _merge_output(
 
     if not (is_fake_tensor(a) and is_fake_tensor(b)):
         raise AssertionError(
-            f"expected both a and b to be fake tensors, got a={type(a)}, b={type(b)}"
+            f"expected both a and b to be FakeTensor, got a={type(a)}, b={type(b)}"
         )
 
     # Note: we don't check size, stride because

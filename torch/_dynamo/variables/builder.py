@@ -3001,7 +3001,7 @@ class VariableBuilder:
         return LazyConstantVariable.create(value, source=self.source)
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor) -> None:
-        if maybe_get_fake_mode(value) is self.tx.fake_mode:
+        if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
             raise InternalTorchDynamoError(
                 "Cannot wrap a Tensor that has already been",
                 "wrapped by this instance of Dynamo",
@@ -3709,11 +3709,10 @@ class VariableBuilder:
 
         fake_tensor_value = example_value
         # type: ignore[attr-defined]
-        fake_mode = maybe_get_fake_mode(fake_tensor_value)
-        if is_fake_tensor(fake_tensor_value) and fake_mode is not self.tx.fake_mode:
+        if fake_tensor_value.fake_mode is not self.tx.fake_mode:
             raise AssertionError(
-                f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
-                f"({self.tx.fake_mode}) from InstructionTranslator"
+                f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                "({self.tx.fake_mode}) from InstructionTranslator"
             )
 
         # There's something a bit incoherent about pass_arg_as_tensor,
@@ -3815,11 +3814,10 @@ class VariableBuilder:
 
             fake_tensor_value = example_value
             # type: ignore[attr-defined]
-            fake_mode = maybe_get_fake_mode(fake_tensor_value)
-            if is_fake_tensor(fake_tensor_value) and fake_mode is not self.tx.fake_mode:
+            if fake_tensor_value.fake_mode is not self.tx.fake_mode:
                 raise AssertionError(
-                    f"fake mode ({fake_mode}) from fake tensor metadata doesn't match mode"
-                    f"({self.tx.fake_mode}) from InstructionTranslator"
+                    f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                    "({self.tx.fake_mode}) from InstructionTranslator"
                 )
 
             proxy.node.meta["grapharg"] = GraphArg(
@@ -3871,11 +3869,8 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
             )
             or value.is_nested
         ):
-            # NB: ensure strides are preserved.
-            from torch._subclasses.fake_tensor import unset_fake_temporarily
-
-            with unset_fake_temporarily():
-                value = clone_input(value)
+            # NB: ensure strides are preserved
+            value = clone_input(value)
 
     return value
 
@@ -5294,10 +5289,7 @@ def _wrap_to_fake_tensor_and_record_impl(
         if (
             source is not None
             and is_fake_tensor(fake_e)
-            and isinstance(
-                sym_val := maybe_get_item_memo(fake_e),
-                (torch.SymFloat, torch.SymInt),
-            )
+            and (sym_val := maybe_get_item_memo(fake_e)) is not None
         ):
             # Match the peephole in FakeTensorConverter.from_real_tensor that
             # strips FloatTensorSource before calling create_symbol.  Without
@@ -5308,6 +5300,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             else:
                 item_source = CallMethodItemSource(source)
             tx.output.tracked_fakes.append(
+                # pyrefly: ignore[bad-argument-type]
                 TrackedFake(sym_val, item_source, symbolic_context)
             )
 

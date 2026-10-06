@@ -3547,11 +3547,13 @@ class OutputGraph(OutputGraphCommon):
             example_value = node.meta.get("example_value")
             item_memo = maybe_get_item_memo(example_value)
             if (
-                isinstance(item_memo, (torch.SymFloat, torch.SymInt))
+                item_memo is not None
+                # pyrefly: ignore[missing-attribute]
                 and hasattr(item_memo.node._expr, "name")
                 and all(u.target == "item" for u in node.users)
                 and TensorifyState.should_specialize(
                     # We use _expr instead of expr b/c we want the symbol not the replacement
+                    # pyrefly: ignore[missing-attribute]
                     item_memo.node._expr.name
                 )
             ):
@@ -4333,14 +4335,11 @@ class SubgraphTracer(fx.Tracer):
     ) -> fx.Proxy:
         if isinstance(example_value, torch.Tensor):
             self._input_versions_at_beginning.append(example_value._version)
-            ev_str = f"{example_value.__class__.__name__}(..., size={tuple(example_value.shape)})"
-        else:
-            ev_str = example_value
         log.debug(
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
             source.name if source is not None else "(none)",
-            ev_str,
+            example_value,
             self.debug_level,
             before,
         )
