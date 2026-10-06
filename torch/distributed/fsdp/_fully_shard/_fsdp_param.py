@@ -230,6 +230,7 @@ class FSDPParam:
     # so the override flag cannot be inferred from the dtype.
     _has_sharded_grad_dtype_override: bool
     sharded_grad_dtype: torch.dtype | None
+    keep_unsharded_storage: bool
 
     def __init__(
         self,
@@ -264,6 +265,7 @@ class FSDPParam:
                 lambda *args, **kwargs: self.reset_sharded_param()
             )
         )
+        self.keep_unsharded_storage = False
 
     @torch.no_grad()
     def _init_sharded_param(
@@ -981,7 +983,8 @@ class FSDPParam:
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
-        self.free_unsharded_param()
+        if not self.keep_unsharded_storage:
+            self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED
 
     def to_sharded_post_forward(self) -> None:
@@ -1024,7 +1027,8 @@ class FSDPParam:
         )
         self._sharded_post_forward_param.grad_dtype = self.sharded_grad_dtype
         self._setattr_on_modules(self._sharded_post_forward_param)
-        self.free_unsharded_param()
+        if not self.keep_unsharded_storage:
+            self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:

@@ -9,6 +9,7 @@ import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -41,6 +42,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     ShardPlacementResult,
     TrainingState,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
     reduce_scatter_input_fn_with_native_copy,
@@ -282,6 +284,36 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
                     module.reshard()  # however, we can manually reshard
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
+
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_keep_unsharded_storage_with_post_forward_reshard(self):
+        """Tests storage retention when resharding to a smaller mesh."""
+        device = torch.device(device_type.type, 0)
+        model = nn.Linear(8, 8, device=device)
+        fully_shard(model, reshard_after_forward=2)
+        model.set_keep_unsharded_storage(True)
+        # Get unsharded storage pointers to compare against later
+        model.unshard()
+        param_group = model._get_fsdp_state()._fsdp_param_group
+        self.assertIsNotNone(param_group)
+        data_ptrs = [
+            fsdp_param.unsharded_param.data_ptr()
+            for fsdp_param in param_group.fsdp_params
+        ]
+
+        # Trigger a reshard, which should not free the unsharded storage
+        with torch.inference_mode():
+            model(torch.randn(2, 8, device=device))
+        self.assertTrue(param_group.is_sharded_post_forward)
+        model.unshard()
+        # The unsharded storage pointers remain unchanged after resharding
+        self.assertEqual(
+            [
+                fsdp_param.unsharded_param.data_ptr()
+                for fsdp_param in param_group.fsdp_params
+            ],
+            data_ptrs,
+        )
 
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
@@ -3510,6 +3542,59 @@ class TestFullyShardCudaGraph(FSDPTest):
             {"async_op": [False, True]},
             self._test_manual_backward_finalization_cudagraph,
         )
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/173761")
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(device_type.type != "cuda", "CUDA graph test requires CUDA")
+    def test_pending_backward_prefetch_cleanup_cudagraph(self):
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+        fake_pg = dist.new_group(backend="fake")
+        mesh = DeviceMesh.from_group(fake_pg, "cuda")
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device)
+        fully_shard(model[0], mesh=mesh)
+        fully_shard(model[1], mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        static_inputs = [torch.randn(4, 8, device=device) for _ in range(2)]
+
+        def run_accumulation() -> None:
+            model.set_is_last_backward(False)
+            model.set_reshard_after_backward(False)
+            model.set_requires_gradient_sync(False)
+            model(static_inputs[0]).sum().backward()
+            model.set_is_last_backward(True)
+            model.set_reshard_after_backward(True)
+            model.set_requires_gradient_sync(True)
+            model(static_inputs[1]).sum().backward()
+
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            run_accumulation()
+            model.zero_grad(set_to_none=True)
+
+        pending_all_gather_cleanups = 0
+        orig_finalize_backward = FSDPParamGroup.finalize_backward
+
+        def finalize_backward(param_group: FSDPParamGroup) -> None:
+            nonlocal pending_all_gather_cleanups
+            result = param_group._all_gather_result
+            if result is not None and result.all_gather_event is not None:
+                pending_all_gather_cleanups += 1
+            orig_finalize_backward(param_group)
+
+        graph = torch.cuda.CUDAGraph()
+        with mock.patch.object(FSDPParamGroup, "finalize_backward", finalize_backward):
+            with torch.cuda.graph(graph, stream=stream):
+                run_accumulation()
+        self.assertGreater(pending_all_gather_cleanups, 0)
+        graph.replay()
+        torch.cuda.synchronize()
 
     def _test_manual_backward_finalization_cudagraph(self, async_op: bool) -> None:
         torch.cuda.set_device(self.rank)
