@@ -127,6 +127,24 @@ def _remove_if_exists(path):
             shutil.rmtree(path)
 
 
+def _resolve_path_under(
+    base: str | os.PathLike,
+    relative: str,
+    *,
+    err_msg: str | None = None,
+) -> Path:
+    """Resolve ``relative`` under ``base``; raise if the result escapes ``base``."""
+    base_path = Path(base).resolve(strict=False)
+    out = (base_path / relative).resolve(strict=False)
+    if not out.is_relative_to(base_path):
+        raise ValueError(
+            err_msg
+            if err_msg is not None
+            else f"Path escapes target directory: {relative!r}"
+        )
+    return out
+
+
 def _safe_extract_zip(zip_file, extract_to):
     """
     Safely extract a zip file, preventing zipslip attacks.
@@ -157,13 +175,11 @@ def _safe_extract_zip(zip_file, extract_to):
                 f"Archive entry contains directory traversal: {member.filename}"
             )
 
-        # Construct the full extraction path and verify it's within extract_to
-        out = (extract_to / filename).resolve(strict=False)
-
-        if not out.is_relative_to(extract_to):
-            raise ValueError(
-                f"Archive entry escapes target directory: {member.filename}"
-            )
+        _resolve_path_under(
+            extract_to,
+            filename,
+            err_msg=f"Archive entry escapes target directory: {member.filename}",
+        )
 
         # Extract the member safely
         zip_file.extract(member, extract_to)
@@ -905,11 +921,13 @@ def load_state_dict_from_url(
     _require_remote_http_url(url)
     parts = urlparse(url)
     filename = _checkpoint_file_name(parts.path if file_name is None else file_name)
-    model_dir_path = Path(model_dir).resolve(strict=False)
-    cached_path = (model_dir_path / filename).resolve(strict=False)
-    if not cached_path.is_relative_to(model_dir_path):
-        raise ValueError(f"Download path escapes model_dir: {filename!r}")
-    cached_file = os.fspath(cached_path)
+    cached_file = os.fspath(
+        _resolve_path_under(
+            model_dir,
+            filename,
+            err_msg=f"Download path escapes model_dir: {filename!r}",
+        )
+    )
     if not os.path.exists(cached_file):
         sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
