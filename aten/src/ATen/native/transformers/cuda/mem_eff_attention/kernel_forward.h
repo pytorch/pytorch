@@ -183,6 +183,8 @@ struct AttentionKernel {
     int64_t bias_strideB = 0;
 
     int32_t num_batches = 0;
+    int32_t batch_offset = 0;
+    int32_t head_offset = 0;
     int32_t num_heads = 0;
     int32_t q_heads_per_kv = 1;
 
@@ -197,8 +199,8 @@ struct AttentionKernel {
     // Moves pointers to what we should process
     // Returns "false" if there is no work to do
     CUTLASS_DEVICE bool advance_to_block() {
-      auto batch_id = blockIdx.z;
-      auto head_id = blockIdx.y;
+      auto batch_id = blockIdx.z + batch_offset;
+      auto head_id = blockIdx.y + head_offset;
       auto kv_head_id = head_id / q_heads_per_kv;
       int32_t query_start = blockIdx.x * kQueriesPerBlock;
 
@@ -798,6 +800,8 @@ struct AttentionKernel {
 
       if (kPreloadV) {
         prologueV(0);
+      } else {
+        MM1::Mma::drain_cp_asyncs();
       }
 
       typename MM0::Mma::Operator::IteratorC::TensorCoord
@@ -1059,7 +1063,7 @@ struct AttentionKernel {
           }
 
           // int first_key_block = 0;
-          // MM1::Mma::drain_cp_asyncs(); # TODO figure out if this is needed for correctness
+          MM1::Mma::drain_cp_asyncs();
           DISPATCH_BOOL(
               iter_key_start == first_key, kIsFirst, ([&] {
                 DISPATCH_BOOL(
@@ -1166,6 +1170,7 @@ struct AttentionKernel {
           thread_id(),
           warp_id(),
           lane_id());
+      MM1::Mma::drain_cp_asyncs();
       epilogue(rescale, dest_iter, accum_o);
     }
 
