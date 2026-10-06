@@ -2119,16 +2119,6 @@ def tlx_mode_default() -> Literal["allow", "force"] | None:
     return DEFAULT_MODE
 
 
-def autotune_tensor_descriptor_from_env() -> Literal["off", "auto", "all"]:
-    # Unrecognized values map to "off", so TORCHINDUCTOR_AUTOTUNE_TENSOR_DESCRIPTOR=0 disables the pool.
-    pool = os.environ.get("TORCHINDUCTOR_AUTOTUNE_TENSOR_DESCRIPTOR")
-    if pool is None:
-        return "auto"
-    if pool in ("off", "auto", "all"):
-        return cast("Literal['off', 'auto', 'all']", pool)
-    return "off"
-
-
 class triton:
     """
     Config specific to codegen/triton.py
@@ -2437,9 +2427,9 @@ class triton:
 
     # With use_tensor_descriptor and max_autotune(_pointwise), pointwise/reduction kernels compete with TMA variants.
     # "auto" adds host-side TMA, "all" also device-side TMA, and "off" leaves use_tensor_descriptor to decide alone.
-    autotune_tensor_descriptor: Literal["off", "auto", "all"] = (
-        autotune_tensor_descriptor_from_env()
-    )
+    autotune_tensor_descriptor: Literal["off", "auto", "all"] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_TENSOR_DESCRIPTOR", "auto"
+    )  # type: ignore[assignment]
 
     # Whether FlexAttention forward/decode may select AMD TDM descriptors on
     # gfx1250. Defaults on: selection is capability-driven, so this is a kill

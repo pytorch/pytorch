@@ -526,6 +526,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
     sexpr: Callable[[sympy.Expr], str] = pexpr
     kexpr: Callable[[sympy.Expr], str]
     allow_block_ptr: bool = False
+    # A choice its MultiKernel drops, rather than failing the compile, if it fails or adds nothing.
+    optional: bool = False
     # pyrefly: ignore [bad-override]
     kernel_name: str
 
@@ -4343,44 +4345,51 @@ class SIMDScheduling(BaseScheduling):
             {"features": kernel_features, "tiling_scores": tiling_score},
             allow_tma_variants=True,
         )
-        built = len(kernels)
-        generated = []
-        for kernel in kernels:
+        num_choices = len(kernels)
+        for kernel in list(kernels):
             try:
                 self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-            except Exception as exc:
-                if not self.drop_failed_tma_variant(kernel, kernels, exc):
+            except Exception:
+                if not kernel.optional:
                     raise
-                continue
-            generated.append(kernel)
-        kernels = generated
+                log.warning("Dropping an optional kernel choice", exc_info=True)
+                kernels.remove(kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
-        # Call args are settled once the bodies exist, and a variant dropped here is never defined.
-        kernels = self.drop_variants_with_mismatched_args(kernels)
 
         # Collect config_patches from operations (e.g., decomposition ops with
         # coordinate_descent_tuning) and apply during kernel codegen
         config_patches = self._collect_config_patches(node_schedule)
 
-        defined = []
-        for kernel in kernels:
+        _, baseline_args, _, baseline_types = kernels[0].args.python_argdefs()
+        for kernel in list(kernels):
+            _, call_args, _, arg_types = kernel.args.python_argdefs()
+            # MultiKernel.call_kernel passes one set of call args to every choice.
+            if kernel.optional and (call_args, arg_types) != (
+                baseline_args,
+                baseline_types,
+            ):
+                kernels.remove(kernel)
+                continue
             try:
                 with V.set_kernel_handler(kernel), config.patch(**config_patches):
                     src_code = kernel.codegen_kernel()
-            except Exception as exc:
-                if not self.drop_failed_tma_variant(kernel, kernels, exc):
+            except Exception:
+                if not kernel.optional:
                     raise
+                log.warning("Dropping an optional kernel choice", exc_info=True)
+                kernels.remove(kernel)
+                continue
+            src_hash = code_hash(src_code)
+            # A TMA choice whose accesses all fell back to tl.load repeats an earlier one.
+            if kernel.optional and any(k.code_hash == src_hash for k in kernels):
+                kernels.remove(kernel)
                 continue
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
-            kernel.code_hash = code_hash(src_code)
-            defined.append(kernel)
-        kernels = defined
-
-        kernels = self.dedupe_kernels_by_source(kernels)
-        # Kernel.__init__ already counted the variants that were dropped without being emitted.
-        metrics.generated_kernel_count -= built - len(kernels)
+            kernel.code_hash = src_hash
+        del kernel
+        metrics.generated_kernel_count -= num_choices - len(kernels)
 
         final_kernel: SIMDKernel | MultiKernel
         if len(kernels) > 1:
@@ -4456,75 +4465,13 @@ class SIMDScheduling(BaseScheduling):
         *,
         allow_tma_variants: bool = False,
     ) -> list[SIMDKernel]:
-        """allow_tma_variants opts a caller into the TMA candidate pool.
-        Callers that take choices[0], like codegen_mix_order_reduction, must not pass it.
-        """
-        del allow_tma_variants
+        """allow_tma_variants is for callers that keep every choice, unlike codegen_mix_order_reduction."""
         return [
             self.kernel_type(
                 *kernel_args,
                 **kernel_kwargs,
             )
         ]
-
-    @staticmethod
-    def dedupe_kernels_by_source(kernels: list[SIMDKernel]) -> list[SIMDKernel]:
-        """Drop variants that codegen'd to the same source, like a TMA variant that fell back to tl.load.
-        multi_kernel 2/3 select a sub-kernel by index, so they keep every variant.
-        """
-        if len(kernels) < 2 or config.triton.multi_kernel > 1:
-            return kernels
-        by_source: dict[str, SIMDKernel] = {}
-        for kernel in kernels:
-            if kernel.code_hash is None:
-                # Every variant would key on None and silently collapse to one.
-                raise AssertionError(
-                    "dedupe_kernels_by_source needs code_hash on every kernel"
-                )
-            by_source.setdefault(kernel.code_hash, kernel)
-        return list(by_source.values())
-
-    @staticmethod
-    def drop_failed_tma_variant(kernel, kernels, exc: Exception) -> bool:
-        """Whether a variant whose codegen raised exc is dropped rather than failing the compile.
-        Only a pinned TMA variant with siblings is dropped, the way a failing GEMM autotuning choice is.
-        """
-        if (
-            len(kernels) < 2
-            or getattr(kernel, "override_tensor_descriptor", None) is not True
-        ):
-            return False
-        log.warning(
-            "Dropping a TMA variant whose codegen failed; the pool keeps the rest.",
-            exc_info=exc,
-        )
-        counters["inductor"]["tma_variant_codegen_failed"] += 1
-        return True
-
-    @staticmethod
-    def drop_variants_with_mismatched_args(
-        kernels: list[SIMDKernel],
-    ) -> list[SIMDKernel]:
-        """Drop variants whose call args or types differ from kernels[0]'s, which MultiKernel.call_kernel rejects.
-        multi_kernel 2/3 select a sub-kernel by index, so they keep every variant.
-        """
-        if len(kernels) < 2 or config.triton.multi_kernel > 1:
-            return kernels
-        _, call_args, _, arg_types = kernels[0].args.python_argdefs()
-        kept = [kernels[0]]
-        for kernel in kernels[1:]:
-            _, other_args, _, other_types = kernel.args.python_argdefs()
-            if (other_args, other_types) == (call_args, arg_types):
-                kept.append(kernel)
-            else:
-                log.debug(
-                    "dropping kernel variant: args %s %s do not match %s %s",
-                    other_args,
-                    other_types,
-                    call_args,
-                    arg_types,
-                )
-        return kept
 
     def codegen_node_schedule_with_kernel(
         self,

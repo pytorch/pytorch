@@ -8915,8 +8915,7 @@ class TritonScheduling(SIMDScheduling):
         # exact string) hits at wrapper time instead of compiling the kernel twice
         # and overwriting the same cache file.
         src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
-        # A pooled TMA variant whose Triton compile fails leaves the pool instead of failing the compile.
-        optional = getattr(kernel, "override_tensor_descriptor", None) is True
+        optional = isinstance(kernel, SIMDKernel) and kernel.optional
         if async_compile.use_process_pool():
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,
@@ -9141,73 +9140,54 @@ class TritonScheduling(SIMDScheduling):
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
-        # Scans are out of scope for #187175.
-        if (
-            allow_tma_variants
-            and not is_scan
-            and (pins := self.tensor_descriptor_variant_pins())
-        ):
-            # The two pools cannot combine, since multi_kernel's alone can fill the metrics table's 4 slots.
-            # Where multi_kernel builds one, it was asked for explicitly, so it wins.
-            if config.triton.multi_kernel:
-                kernel = kernel_type(*kernel_args, **kernel_kwargs)
-                choices = self.add_multi_kernel_choices(
-                    kernel, kernel_args, kernel_kwargs
-                )
-                if len(choices) > 1:
-                    return choices
-                # Kernel.__init__ counted this discarded probe.
-                metrics.generated_kernel_count -= 1
-            return self.add_tensor_descriptor_kernel_choices(
-                kernel_type, kernel_args, kernel_kwargs, pins
-            )
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
-        return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
+        choices = self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
+        # A multi_kernel pool was asked for explicitly, and scans are out of scope for #187175.
+        if (
+            len(choices) > 1
+            or is_scan
+            or not allow_tma_variants
+            or not (pins := self.tensor_descriptor_variant_pins())
+        ):
+            return choices
+        # The pinned choices replace the unpinned kernel, which Kernel.__init__ already counted.
+        metrics.generated_kernel_count -= 1
+        choices = [
+            kernel_type(*kernel_args, **{**kernel_kwargs, **pin}) for pin in pins
+        ]
+        for choice in choices[1:]:
+            choice.optional = True
+            # Shared, not copied: it fills during codegen, and MultiKernel needs identical call args.
+            choice.must_keep_buffers = choices[0].must_keep_buffers
+        return choices
 
     @staticmethod
     def tensor_descriptor_variant_pins() -> list[dict[str, bool]]:
-        """TMA settings to pin on each variant of one node schedule, or [] without a pool.
-        The non-TMA baseline comes first, which MultiKernelCall's coordesc_margin relies on.
-        """
+        """TMA settings pinned on each choice of a pool, the non-TMA baseline first, or [] for no pool."""
         pool = config.triton.autotune_tensor_descriptor
-        if pool not in ("auto", "all") or not config.triton.use_tensor_descriptor:
+        if (
+            pool not in ("auto", "all")
+            or not config.triton.use_tensor_descriptor
+            or not (config.max_autotune or config.max_autotune_pointwise)
+            # Picking by measured time is what these forbid.
+            or config.deterministic
+            or config.batch_invariant
+            # These force a sub-kernel by index into multi_kernel's own order.
+            or config.triton.multi_kernel in (2, 3)
+            # JIT cpp-wrapper codegens in one pass, so lookup_choice would find no pick.
+            or config.cpp_wrapper
+        ):
             return []
-        if not (config.max_autotune or config.max_autotune_pointwise):
-            return []
-        # Selecting by measured time is what these modes forbid; may_ban_benchmarking would raise.
-        if config.deterministic or config.batch_invariant:
-            return []
-        # These force a sub-kernel by index into multi_kernel's own variant order.
-        if config.triton.multi_kernel in (2, 3):
-            return []
-        # JIT cpp-wrapper codegens in one pass, so MultiKernel.call_kernel's lookup_choice would find no pick.
-        if config.cpp_wrapper:
-            return []
-        non_tma = {"override_tensor_descriptor": False}
-        # Pinned rather than inherited: #187175 and #188823 measure device-side behind the baseline everywhere.
-        host_tma = {"override_tensor_descriptor": True, "override_host_side_tma": True}
-        if pool == "all":
-            return [
-                non_tma,
-                host_tma,
-                {"override_tensor_descriptor": True, "override_host_side_tma": False},
-            ]
-        return [non_tma, host_tma]
-
-    def add_tensor_descriptor_kernel_choices(
-        self,
-        kernel_type: type[TritonKernel],
-        kernel_args: list[Any],
-        kernel_kwargs: dict[str, Any],
-        pins: list[dict[str, bool]],
-    ) -> list[TritonKernel]:
-        kernels = [
-            kernel_type(*kernel_args, **{**kernel_kwargs, **pin}) for pin in pins
+        # Device-side TMA is opt-in: #187175 and #188823 measure it behind the baseline everywhere.
+        pins = [
+            {"override_tensor_descriptor": False},
+            {"override_tensor_descriptor": True, "override_host_side_tma": True},
         ]
-        for kernel in kernels[1:]:
-            # Shared, not copied: it fills during codegen, and MultiKernel needs identical call args.
-            kernel.must_keep_buffers = kernels[0].must_keep_buffers
-        return kernels
+        if pool == "all":
+            pins.append(
+                {"override_tensor_descriptor": True, "override_host_side_tma": False}
+            )
+        return pins
 
     def add_multi_kernel_choices(
         self,

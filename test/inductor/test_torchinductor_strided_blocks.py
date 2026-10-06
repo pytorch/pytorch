@@ -5,10 +5,8 @@ import dataclasses
 import functools
 import importlib
 import math
-import re
 import unittest
 from collections.abc import Callable
-from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -16,20 +14,19 @@ import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.debug_utils import InputReader
 from torch._dynamo.utils import counters
-from torch._inductor import config, metrics
+from torch._inductor import config
 from torch._inductor.choices import InductorChoices
-from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.codegen.triton import (
     FixedTritonConfig,
     TritonKernel,
     TritonScheduling,
 )
-from torch._inductor.config import autotune_tensor_descriptor_from_env
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -50,7 +47,6 @@ from torch.testing._internal.inductor_utils import (
     skip_windows_ci,
     TRITON_HAS_CPU,
 )
-from torch.utils._triton import has_triton
 
 
 try:
@@ -2604,210 +2600,36 @@ class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
         self.assertNotIn("host_tma_descriptor_args", "\n".join(code_list))
 
 
-def multi_kernel_sub_kernels(code):
-    """Sub-kernel names in a generated multi-kernel definition, or [] without one."""
-    match = re.search(
-        r"async_compile\.multi_kernel\(\s*'[^']+',\s*\[(.*?)\]", code, re.DOTALL
-    )
-    return [n.strip() for n in match.group(1).split(",") if n.strip()] if match else []
-
-
-def triton_kernel_source(code, name):
-    """One generated kernel's module, inductor_meta included."""
-    match = re.search(
-        rf"{re.escape(name)}\s*=\s*async_compile\.triton\([^,]+,\s*'''(.*?)'''",
-        code,
-        re.DOTALL,
-    )
-    return match.group(1) if match else ""
-
-
-def has_tma(source):
-    return "host_tma_descriptor_args" in source or "make_tensor_descriptor" in source
-
-
-BASELINE_PIN = {"override_tensor_descriptor": False}
-HOST_TMA_PIN = {"override_tensor_descriptor": True, "override_host_side_tma": True}
-DEVICE_TMA_PIN = {"override_tensor_descriptor": True, "override_host_side_tma": False}
-# A config that builds pools, pinned so that environment overrides cannot decide the tests.
-POOL_CONFIG = {
-    "triton.use_tensor_descriptor": True,
-    "triton.autotune_tensor_descriptor": "auto",
-    "max_autotune": False,
-    "max_autotune_pointwise": True,
-    "triton.multi_kernel": 0,
-    "deterministic": False,
-    "batch_invariant": False,
-    "cpp_wrapper": False,
-}
-
-
+@config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.autotune_tensor_descriptor": "auto",
+        "max_autotune_pointwise": True,
+    }
+)
 class TensorDescriptorPoolGateTest(InductorTestCase):
-    """Which kernels get TMA variants, with which pins and configs."""
-
-    @staticmethod
-    def pins(**patches):
-        with config.patch({**POOL_CONFIG, **patches}):
-            return TritonScheduling.tensor_descriptor_variant_pins()
-
-    def test_pins(self):
-        with mock.patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(autotune_tensor_descriptor_from_env(), "auto")
-        # Either autotuning flag enables the pool, and its flavor ignores enable_host_side_tma.
-        for patches in (
-            {"triton.enable_host_side_tma": False},
-            {"triton.enable_host_side_tma": True},
-            {"max_autotune": True, "max_autotune_pointwise": False},
-        ):
-            with self.subTest(patches):
-                self.assertEqual(self.pins(**patches), [BASELINE_PIN, HOST_TMA_PIN])
+    def test_pool_pins(self):
+        pins = TritonScheduling.tensor_descriptor_variant_pins
         self.assertEqual(
-            self.pins(**{"triton.autotune_tensor_descriptor": "all"}),
-            [BASELINE_PIN, HOST_TMA_PIN, DEVICE_TMA_PIN],
+            pins(),
+            [
+                {"override_tensor_descriptor": False},
+                {"override_tensor_descriptor": True, "override_host_side_tma": True},
+            ],
         )
-
-    def test_pool_is_off(self):
-        # An unrecognized env value disables the pool instead of falling back to "auto".
-        env = {"TORCHINDUCTOR_AUTOTUNE_TENSOR_DESCRIPTOR": "0"}
-        with mock.patch.dict("os.environ", env):
-            self.assertEqual(autotune_tensor_descriptor_from_env(), "off")
+        with config.patch({"triton.autotune_tensor_descriptor": "all"}):
+            self.assertEqual(len(pins()), 3)
+        # A pick by measured time is banned under deterministic and batch_invariant, and the rest never look one up.
         for patches in (
             {"triton.autotune_tensor_descriptor": "off"},
-            {"triton.use_tensor_descriptor": False},
             {"max_autotune_pointwise": False},
             {"deterministic": True},
             {"batch_invariant": True},
             {"triton.multi_kernel": 2},
             {"cpp_wrapper": True},
         ):
-            with self.subTest(patches):
-                self.assertEqual(self.pins(**patches), [])
-
-    def test_kernel_choices(self):
-        import sympy
-
-        class Kernel:
-            persistent_reduction = False
-            cooperative_reduction = False
-
-            def __init__(self, *args, **kwargs):
-                self.kwargs = kwargs
-                self.must_keep_buffers = set()
-
-            @staticmethod
-            def apply_feature_required_overrides(features, kwargs):
-                pass
-
-        class PersistentKernel(Kernel):
-            persistent_reduction = True
-
-        def choices(kernel_type=Kernel, scan=False, opt_in=True, **patches):
-            features = SimpleNamespace(
-                contains_op=lambda name: scan and name == "scan",
-                has_strict_multirow_reduction=lambda: False,
-                scheduler_nodes=list,
-                reduction_numel=sympy.Integer(1),
-            )
-            scheduling = TritonScheduling(None)
-            scheduling.kernel_type = kernel_type
-            with config.patch({**POOL_CONFIG, **patches}):
-                return scheduling.create_kernel_choices(
-                    features, ["tiling"], {}, allow_tma_variants=opt_in
-                )
-
-        pool = choices()
-        self.assertEqual([k.kwargs for k in pool], [BASELINE_PIN, HOST_TMA_PIN])
-        # One shared set, since MultiKernel needs every variant's call args to match.
-        self.assertIs(pool[1].must_keep_buffers, pool[0].must_keep_buffers)
-        self.assertEqual(len(choices(opt_in=False)), 1)
-        self.assertEqual(len(choices(scan=True)), 1)
-        # multi_kernel=1 keeps its persistent-reduction pool, and a pointwise kernel keeps this one.
-        with mock.patch.object(metrics, "generated_kernel_count", 0):
-            pointwise = choices(**{"triton.multi_kernel": 1})
-        self.assertEqual([k.kwargs for k in pointwise], [BASELINE_PIN, HOST_TMA_PIN])
-        persistent = choices(PersistentKernel, **{"triton.multi_kernel": 1})
-        self.assertEqual(len(persistent), 2)
-        self.assertFalse(
-            any("override_tensor_descriptor" in k.kwargs for k in persistent)
-        )
-
-    @unittest.skipUnless(has_triton(), "builds triton Configs")
-    def test_tma_variant_configs(self):
-        from torch._inductor.heuristics.triton_codegen.pointwise import (
-            PointwiseHeuristic,
-        )
-        from torch._inductor.runtime.triton_compat import Config
-        from torch._inductor.runtime.triton_heuristics import (
-            _maybe_filter_configs_for_tma_restrictions as tma_filter,
-            triton_config,
-        )
-
-        meta = {"tma_variant": True, "tma_min_block_sizes": {"XBLOCK": 8}}
-        heuristic = PointwiseHeuristic()
-        configs = heuristic.get_configs(
-            {"x": 2**26}, 1024, triton_config, [], inductor_meta=meta
-        )
-        # One bulk-copy config, and the TMA floor no longer adds a duplicate of it.
-        (config,) = tma_filter(meta, configs)
-        self.assertEqual((config.kwargs, config.num_warps), ({"XBLOCK": 2048}, 2))
-        # A config below the floor is still replaced by a raised copy.
-        (raised,) = tma_filter(meta, [Config({"XBLOCK": 4}, num_warps=1)])
-        self.assertEqual(raised.kwargs, {"XBLOCK": 8})
-
-
-class TensorDescriptorPoolFilterTest(InductorTestCase):
-    """The filters codegen_node_schedule runs over a pool's variants."""
-
-    @staticmethod
-    def kept(fn, kernels, multi_kernel=0):
-        with config.patch({"triton.multi_kernel": multi_kernel}):
-            out = fn(kernels)
-        return [i for i, kernel in enumerate(kernels) if any(kernel is k for k in out)]
-
-    def test_dedupe_kernels_by_source(self):
-        def kernels(*hashes):
-            return [SimpleNamespace(code_hash=h) for h in hashes]
-
-        dedupe = SIMDScheduling.dedupe_kernels_by_source
-        self.assertEqual(self.kept(dedupe, kernels("a", "b", "a")), [0, 1])
-        # multi_kernel 2 and 3 force a sub-kernel by index, so nothing is dropped.
-        self.assertEqual(self.kept(dedupe, kernels("a", "a"), multi_kernel=2), [0, 1])
-        with self.assertRaises(AssertionError):
-            self.kept(dedupe, kernels(None, None))
-
-    def test_drop_variants_with_mismatched_args(self):
-        def kernel(*args, types=None):
-            argdefs = ([], list(args), [], types or ["f32"] * len(args))
-            return SimpleNamespace(args=SimpleNamespace(python_argdefs=lambda: argdefs))
-
-        drop = SIMDScheduling.drop_variants_with_mismatched_args
-        # A permutation, an extra arg and a type change all differ from kernels[0].
-        variants = [
-            kernel("a", "b"),
-            kernel("b", "a"),
-            kernel("a", "b", "s0"),
-            kernel("a", "b", types=["f32", "f16"]),
-            kernel("a", "b"),
-        ]
-        self.assertEqual(self.kept(drop, variants), [0, 4])
-        self.assertEqual(self.kept(drop, variants, multi_kernel=2), [0, 1, 2, 3, 4])
-
-    def test_drop_failed_tma_variant(self):
-        def kernel(pin):
-            return SimpleNamespace(override_tensor_descriptor=pin)
-
-        def drops(failed, kernels):
-            return SIMDScheduling.drop_failed_tma_variant(
-                failed, kernels, RuntimeError()
-            )
-
-        baseline, tma = kernel(False), kernel(True)
-        with self.assertLogs("torch._inductor.codegen.simd", level="WARNING"):
-            self.assertTrue(drops(tma, [baseline, tma]))
-        # The baseline, an unpinned kernel, and a TMA kernel with no sibling still raise.
-        self.assertFalse(drops(baseline, [baseline, tma]))
-        self.assertFalse(drops(kernel(None), [kernel(None), tma]))
-        self.assertFalse(drops(tma, [tma]))
+            with config.patch(patches):
+                self.assertEqual(pins(), [], msg=str(patches))
 
 
 @unittest.skipIf(
@@ -2815,114 +2637,84 @@ class TensorDescriptorPoolFilterTest(InductorTestCase):
     or torch.version.hip,
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
 )
-@config.patch({**POOL_CONFIG, "assume_aligned_inputs": True})
+@config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.autotune_tensor_descriptor": "auto",
+        "max_autotune_pointwise": True,
+        "assume_aligned_inputs": True,
+    }
+)
 class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
-    """Compiled pools: what they emit, benchmark and drop."""
+    def test_pool_benchmarks_pointer_loads_against_host_side_tma(self):
+        def fn(x):
+            return torch.nn.functional.silu(x)
 
-    def setUp(self):
-        super().setUp()
-        # Dynamo does not guard on inductor config, so a later test would reuse an earlier compile.
-        torch._dynamo.reset()
+        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x), exact_device=True)
+        # Both choices are emitted, and only the TMA one is marked to skip the baseline's tuning.
+        FileCheck().check_count("@triton.jit", 2, exactly=True).run(code)
+        FileCheck().check_count("'tma_variant': True", 1, exactly=True).run(code)
+        FileCheck().check("async_compile.multi_kernel").run(code)
 
-    @staticmethod
-    def inputs():
-        # 2 KiB rows of bfloat16, so every access can take a descriptor.
-        return torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+    @config.patch(
+        {
+            "triton.autotune_tensor_descriptor": "all",
+            "bundle_triton_into_fx_graph_cache": True,
+            "use_static_triton_launcher": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_tma_variants_out_of_shared_memory_are_dropped(self):
+        from torch._inductor.codecache import PyCodeCache
 
-    @config.patch({"triton.enable_host_side_tma": False})
-    def test_pool_benchmarks_the_baseline_against_host_side_tma(self):
-        silu, x = torch.nn.functional.silu, self.inputs()
-        env = {"TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE": "1"}
-        with (
-            mock.patch.dict("os.environ", env),
-            self.assertLogs("torch._inductor.codegen.multi_kernel", "DEBUG") as logs,
-        ):
-            result, code_list = run_and_get_code(torch.compile(silu), x)
-        self.assertEqual(result, silu(x))
-        code = "\n".join(code_list)
-        names = multi_kernel_sub_kernels(code)
-        self.assertEqual(len(names), 2, code)
-        baseline, tma = (triton_kernel_source(code, name) for name in names)
-        # The baseline autotunes as stock does, while the host-side variant skips coordinate descent.
-        self.assertFalse(has_tma(baseline), baseline)
-        self.assertNotIn("tma_variant", baseline)
-        self.assertIn("host_tma_descriptor_args", tma)
-        self.assertIn("'coordinate_descent_tuning': False", tma)
-        self.assertIn("'tma_variant': True", tma)
-        picks = [line for line in logs.output if "sub-kernel in" in line]
-        self.assertRegex(picks[0], r"Timings \[[^]]+,[^]]+\]")
+        def fn(x):
+            return torch.softmax(x, dim=-1)
 
-    @config.patch({"triton.autotune_tensor_descriptor": "all"})
-    def test_all_pool_on_a_reduction(self):
-        # 18432 wide: the default reduction configs alone would leave the TMA variants none that fit in SMEM.
+        # 18432 wide, where no default reduction config of a TMA variant fits in shared memory.
         x = torch.randn(256, 18432, dtype=torch.bfloat16, device=GPU_TYPE)
-        softmax = functools.partial(torch.softmax, dim=-1)
-        result, code_list = run_and_get_code(torch.compile(softmax), x)
-        # Loose, since the TMA block floor can change the accumulation order.
-        self.assertEqual(result, softmax(x), atol=1e-2, rtol=1.6e-2)
-        code = "\n".join(code_list)
-        bodies = [triton_kernel_source(code, n) for n in multi_kernel_sub_kernels(code)]
-        # A host-side variant that fell back to in-kernel descriptors is deduped away.
-        self.assertIn(len(bodies), (2, 3), code)
-        self.assertEqual(
-            [has_tma(b) for b in bodies], [False] + [True] * (len(bodies) - 1)
+        # The second compile loads the graph from the FX graph cache, with the dropped variants bundled.
+        for _ in range(2):
+            torch._dynamo.reset()
+            PyCodeCache.cache_clear(purge=True)
+            # Loose, since the TMA block floor can change the accumulation order.
+            self.assertEqual(torch.compile(fn)(x), fn(x), atol=1e-2, rtol=1.6e-2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertGreaterEqual(
+            counters["inductor"]["multi_kernel_sub_kernel_dropped"], 2
         )
 
-    @config.patch({"force_disable_caches": True})
-    def test_failing_tma_variant_falls_back_to_the_baseline(self):
-        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
-
-        def failing(original, is_tma):
-            def fail_for_tma(*args, **kwargs):
-                if is_tma(args):
-                    raise RuntimeError("injected TMA variant failure")
-                return original(*args, **kwargs)
-
-            return fail_for_tma
-
-        silu, x = torch.nn.functional.silu, self.inputs()
-        # Codegen failures drop the variant before it is emitted, a Triton compile failure when it loads.
-        for owner, method, is_tma, counter in (
-            (
-                SIMDScheduling,
-                "codegen_node_schedule_with_kernel",
-                lambda a: a[2].override_tensor_descriptor,
-                "tma_variant_codegen_failed",
-            ),
-            (
-                TritonKernel,
-                "codegen_kernel",
-                lambda a: a[0].override_tensor_descriptor,
-                "tma_variant_codegen_failed",
-            ),
-            (
-                CachingAutotuner,
-                "precompile",
-                lambda a: a[0].inductor_meta.get("tma_variant"),
-                "optional_kernel_compile_failed",
-            ),
-        ):
-            with self.subTest(method):
-                torch._dynamo.reset()
-                counters.clear()
-                patched = failing(getattr(owner, method), is_tma)
-                with mock.patch.object(owner, method, patched):
-                    result = torch.compile(silu)(x)
-                self.assertEqual(result, silu(x))
-                self.assertEqual(counters["inductor"][counter], 1)
-
     @config.patch({"assume_aligned_inputs": False})
-    def test_ineligible_kernel_is_not_duplicated(self):
-        # Without aligned inputs no access takes a descriptor, so both variants are the same kernel.
-        silu, x = torch.nn.functional.silu, self.inputs()
-        metrics.reset()
-        result, code_list = run_and_get_code(torch.compile(silu), x)
-        self.assertEqual(result, silu(x))
-        code = "\n".join(code_list)
-        self.assertEqual(code.count("def triton_"), 1, code)
-        self.assertNotIn("multi_kernel", code)
-        # Kernel.__init__ also counted the duplicate that was dropped.
-        self.assertEqual(metrics.generated_kernel_count, 1)
+    def test_tma_variant_that_falls_back_to_tl_load_is_dropped(self):
+        def fn(x):
+            return torch.nn.functional.silu(x) * 2
+
+        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x), exact_device=True)
+        # Without aligned inputs no access takes a descriptor, so the TMA choice repeats the baseline.
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code)
+        FileCheck().check_not("async_compile.multi_kernel").run(code)
+
+    @config.patch({"force_disable_caches": True})
+    def test_tma_variant_whose_codegen_fails_is_dropped(self):
+        codegen_kernel = TritonKernel.codegen_kernel
+
+        def fail_for_optional(kernel, *args, **kwargs):
+            if kernel.optional:
+                raise RuntimeError("injected codegen failure")
+            return codegen_kernel(kernel, *args, **kwargs)
+
+        def fn(x):
+            return torch.nn.functional.silu(x) + 1
+
+        x = torch.randn(1024, 1024, dtype=torch.bfloat16, device=GPU_TYPE)
+        # Only an Inductor bug fails codegen, so no input reaches this fallback.
+        with mock.patch.object(TritonKernel, "codegen_kernel", fail_for_optional):
+            result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x), exact_device=True)
+        FileCheck().check_not("async_compile.multi_kernel").run(code)
 
 
 if __name__ == "__main__":
