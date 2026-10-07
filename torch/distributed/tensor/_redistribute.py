@@ -29,6 +29,8 @@ from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _is_shard_like,
     _StridedShard,
+    _validate_block_shard_placements,
+    BlockShard,
     Partial,
     Placement,
     Replicate,
@@ -1605,11 +1607,6 @@ def redistribute_local_tensor(
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
 
-    if current_spec.use_strided_shard_as_shard_order is None:
-        raise ValueError(
-            "use_strided_shard_as_shard_order should be initialized in DTensorSpec.__post_init__()"
-        )
-
     # We do not see a valid use case for mixing different partial types in the same DTensor.
     # in principle it could be supported, but since nonlinear reductions (e.g. max) exist, relative ordering
     # of different partials would become semantically critical.  Without a motivating use case, we prohibit this.
@@ -1623,6 +1620,37 @@ def redistribute_local_tensor(
         # if rank is not part of mesh, we skip redistribute and simply return local_tensor,
         # which should be an empty tensor
         return local_tensor
+
+    if any(isinstance(p, BlockShard) for p in target_spec.placements):
+        if current_spec.placements == target_spec.placements:
+            return local_tensor
+        raise NotImplementedError(
+            f"Redistributing to BlockShard is not supported: {current_spec} -> {target_spec}"
+        )
+    if any(isinstance(p, BlockShard) for p in current_spec.placements):
+        block_shard_layout = _validate_block_shard_placements(
+            current_spec.placements, current_spec.shape, device_mesh.shape
+        )
+        if block_shard_layout is None:
+            raise AssertionError(f"Expected a BlockShard layout in {current_spec}")
+        # BlockShard applies last, so undo it first: all-gather its merged view
+        # (of the Shard(0) slice, if any), then plan the remaining mesh dims.
+        mesh_dim = block_shard_layout.mesh_dim
+        local_tensor = new_local_tensor = (
+            block_shard_layout.placement._to_replicate_tensor(
+                local_tensor, device_mesh, mesh_dim, block_shard_layout.block_shape
+            )
+        )
+        placements = list(current_spec.placements)
+        placements[mesh_dim] = Replicate()
+        current_spec = DTensorSpec(
+            device_mesh, tuple(placements), tensor_meta=current_spec.tensor_meta
+        )
+
+    if current_spec.use_strided_shard_as_shard_order is None:
+        raise ValueError(
+            "use_strided_shard_as_shard_order should be initialized in DTensorSpec.__post_init__()"
+        )
 
     if _are_we_tracing():
         transform_infos = _gen_transform_infos_non_cached(
