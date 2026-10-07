@@ -563,24 +563,20 @@ def _round_up(a: int, b: int) -> int:
 
 def _allocate_output(
     mat_a: Tensor, mat_b: Tensor, out_dtype: torch.dtype, ngroups: int
-) -> Tensor | None:
-    a_is_2d = mat_a.dim() == 2
-    b_is_2d = mat_b.dim() == 2
+) -> Tensor:
     M, N = mat_a.size(0), mat_b.size(-1)
     alignment = 128 // torch.finfo(out_dtype).bits
     N_padded = _round_up(N, alignment)
-    if a_is_2d and b_is_2d:
+    if mat_b.dim() == 2:
         return torch.empty_strided(
             (ngroups, M, N),
             (M * N_padded, N_padded, 1),
             device=mat_a.device,
             dtype=out_dtype,
         )
-    if a_is_2d and not b_is_2d:
-        return torch.empty_strided(
-            (M, N), (N_padded, 1), device=mat_a.device, dtype=out_dtype
-        )
-    return None
+    return torch.empty_strided(
+        (M, N), (N_padded, 1), device=mat_a.device, dtype=out_dtype
+    )
 
 
 @instrumented_cutedsl_cache("aten::_scaled_grouped_mm_v2")
@@ -656,10 +652,6 @@ def _compile_scaled_grouped_mm_blockscaled(
 
     g = cute.sym_int()
     fake_problem = make_fake_tensor(cutlass.Int32, (g, 4), stride=(4, 1))
-    fake_strides = make_fake_tensor(cutlass.Int64, (g, 3, 2), stride=(6, 2, 1))
-    fake_ptrs_abc = make_fake_tensor(cutlass.Int64, (g, 3), stride=(3, 1))
-    fake_ptrs_scale = make_fake_tensor(cutlass.Int64, (g, 2), stride=(2, 1))
-    fake_global_scale_ptrs = make_fake_tensor(cutlass.Int64, (g,), stride=(1,))
     fake_total_clusters = make_fake_tensor(cutlass.Int32, (1,), stride=(1,))
 
     tensormap_stride1 = Sm100GroupedBlockScaledGemmKernel.bytes_per_tensormap // 8
@@ -694,18 +686,14 @@ def _compile_scaled_grouped_mm_blockscaled(
             initial_c=fake_c,
             initial_sfa=fake_scale_a,
             initial_sfb=fake_scale_b,
-            tensor_addr_global_scale=fake_global_scale_ptrs,
             group_count=0,
             problem_shape_mnkl=fake_problem,
-            strides_abc=fake_strides,
-            tensor_address_abc=fake_ptrs_abc,
-            tensor_address_sfasfb=fake_ptrs_scale,
             estimate_total_num_clusters=cutlass.Int32(1),
             total_num_clusters=fake_total_clusters,
             tensormap_cute_tensor=fake_tensormap,
             offs=fake_offs,
             dims_mnk=(cute.sym_int(32), cute.sym_int(32), cute.sym_int(32)),
-            base_ptrs=tuple(cute.sym_int(64) for _ in range(6)),
+            base_ptrs=tuple(cute.sym_int(64) for _ in range(7)),
             strides=tuple(
                 tuple(cute.sym_int(64) for _ in range(rank))
                 for rank in (2, 3, 2, 3, 2, 2, 2)
@@ -755,7 +743,6 @@ def _get_cluster_tile_shape_mn(
 
 def _estimate_total_clusters_for_launch(
     *,
-    a_is_2d: bool,
     b_is_2d: bool,
     transpose_ab: bool,
     ngroups: int,
@@ -764,7 +751,7 @@ def _estimate_total_clusters_for_launch(
     cluster_tile_m: int,
     cluster_tile_n: int,
 ) -> int:
-    if a_is_2d and b_is_2d:
+    if b_is_2d:
         if transpose_ab:
             return (
                 ngroups
@@ -786,17 +773,11 @@ def _estimate_total_clusters_for_launch(
 
 
 @functools.cache
-def _alloc_aux_tensors(
-    device_index: int, cap: int
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+def _alloc_aux_tensors(device_index: int, cap: int) -> tuple[Tensor, Tensor, Tensor]:
     from .scaled_grouped_mm_blockscaled_kernel import Sm100GroupedBlockScaledGemmKernel
 
     device = torch.device("cuda", device_index)
-    ptrs_abc = torch.empty((cap, 3), device=device, dtype=torch.int64)
-    ptrs_scale = torch.empty((cap, 2), device=device, dtype=torch.int64)
-    ptrs_global_scale = torch.empty((cap,), device=device, dtype=torch.int64)
     problem_sizes = torch.empty((cap, 4), device=device, dtype=torch.int32)
-    strides_abc = torch.empty((cap, 3, 2), device=device, dtype=torch.int64)
     total_num_clusters = torch.empty((1,), device=device, dtype=torch.int32)
     tensormaps = torch.empty(
         (
@@ -807,58 +788,24 @@ def _alloc_aux_tensors(
         device=device,
         dtype=torch.int64,
     )
-    return (
-        ptrs_abc,
-        ptrs_scale,
-        ptrs_global_scale,
-        problem_sizes,
-        strides_abc,
-        total_num_clusters,
-        tensormaps,
-    )
-
-
-def _get_aux_tensors(
-    ngroups: int, device: torch.device
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
-    # Re-allocated when ngroups exceeds current capacity (rounded to
-    # next power of 2).
-    cap = max(64, 1 << (ngroups - 1).bit_length())
-    device_index = (
-        device.index if device.index is not None else torch.cuda.current_device()
-    )
-    (
-        ptrs_abc,
-        ptrs_scale,
-        ptrs_global_scale,
-        problem_sizes,
-        strides_abc,
-        total_num_clusters,
-        tensormaps,
-    ) = _alloc_aux_tensors(device_index, cap)
-    return (
-        ptrs_abc[:ngroups],
-        ptrs_scale[:ngroups],
-        ptrs_global_scale[:ngroups],
-        problem_sizes[:ngroups],
-        strides_abc[:ngroups],
-        total_num_clusters,
-        tensormaps[:ngroups],
-    )
+    return problem_sizes, total_num_clusters, tensormaps
 
 
 @functools.cache
-def _alloc_unit_global_scales(device_index: int, cap: int) -> Tensor:
-    device = torch.device("cuda", device_index)
-    return torch.ones((cap,), device=device, dtype=torch.float32)
-
-
-def _get_unit_global_scales(ngroups: int, device: torch.device) -> Tensor:
+def _get_aux_tensors(ngroups: int, device_index: int) -> tuple[Tensor, Tensor, Tensor]:
+    # Re-allocated when ngroups exceeds current capacity (rounded to
+    # next power of 2).
     cap = max(64, 1 << (ngroups - 1).bit_length())
-    device_index = (
-        device.index if device.index is not None else torch.cuda.current_device()
+    problem_sizes, total_num_clusters, tensormaps = _alloc_aux_tensors(
+        device_index, cap
     )
-    return _alloc_unit_global_scales(device_index, cap)[:ngroups]
+    return problem_sizes[:ngroups], total_num_clusters, tensormaps[:ngroups]
+
+
+def _validated_blockscaled_format(mat_a: Tensor, scale_a: list[Tensor]):
+    if mat_a.dtype == torch.float8_e4m3fn:
+        return _BLOCKSCALED_FORMATS[0]
+    return _BLOCKSCALED_FORMATS[2 if len(scale_a) == 2 else 1]
 
 
 def scaled_grouped_mm_blockscaled(
@@ -866,16 +813,10 @@ def scaled_grouped_mm_blockscaled(
     mat_b: Tensor,
     scale_a: list[Tensor],
     scale_b: list[Tensor],
-    scale_recipe_a: list[ScalingType],
-    scale_recipe_b: list[ScalingType],
-    swizzle_a: list[SwizzleType],
-    swizzle_b: list[SwizzleType],
-    offs: Tensor | None,
+    offs: Tensor,
     output_dtype: torch.dtype | None = None,
-    contraction_dim: Sequence[int] = (),
-    use_fast_accum: bool = False,
-    bias: Tensor | None = None,
 ) -> Tensor:
+    # Assumes _should_use_cutedsl_scaled_grouped_mm_blockscaled accepted the inputs.
     def _is_transposed_layout(t: Tensor) -> bool:
         end_dim = t.dim() - 1
         if t.stride(end_dim - 1) == 1 and t.stride(end_dim) >= max(
@@ -889,56 +830,35 @@ def scaled_grouped_mm_blockscaled(
             f"{t.size()} for sizes"
         )
 
-    a_is_2d = mat_a.dim() == 2
     b_is_2d = mat_b.dim() == 2
-    if not a_is_2d:
-        raise ValueError(
-            "CuTeDSL blockscaled path currently supports only 2d/2d and 2d/3d"
-        )
+    fmt = _validated_blockscaled_format(mat_a, scale_a)
 
-    # tvm-ffi validates shape/dtype/layout constraints at runtime.
-    if offs is None:
-        raise ValueError("offs must be provided for scaled grouped MM")
-    fmt = _get_blockscaled_format(
-        mat_a, mat_b, scale_a, scale_b, scale_recipe_a, scale_recipe_b
-    )
-    if fmt is None:
-        raise ValueError(
-            "CuTeDSL blockscaled path currently supports only MXFP8, MXFP4, and NVFP4"
-        )
-
-    if mat_a.device.type != "cuda":
-        raise ValueError("scaled grouped MM blockscaled is only supported on CUDA")
-    if mat_a.device != mat_b.device:
+    device = mat_a.device
+    if mat_b.device != device:
         raise ValueError("mat_a and mat_b must be on the same device")
-    if any(scale.device != mat_a.device for scale in scale_a):
+    if any(scale.device != device for scale in scale_a):
         raise ValueError("scale_a must be on the same device as mat_a")
-    if any(scale.device != mat_a.device for scale in scale_b):
+    if any(scale.device != device for scale in scale_b):
         raise ValueError("scale_b must be on the same device as mat_a")
-    if offs.device != mat_a.device:
+    if offs.device != device:
         raise ValueError("offs must be on the same device as mat_a")
-
-    if bias is not None:
-        raise ValueError("bias is not supported for scaled grouped MM")
 
     ngroups = int(offs.numel())
     mat_a_m = int(mat_a.size(0))
     mat_a_physical_k = int(mat_a.size(-1))
     mat_b_n = int(mat_b.size(-1))
     mat_b_physical_k = int(mat_b.size(0 if b_is_2d else -2))
-    global_scales = None
+    global_scale_ptrs = (0, 0)
     if fmt.torch_global_scale_dtype is not None:
         if scale_a[1].numel() != ngroups or scale_b[1].numel() != ngroups:
             raise ValueError(
                 "NVFP4 global scales must have numel equal to offs.numel()"
             )
-        global_scales = scale_a[1].reshape(-1).mul(scale_b[1].reshape(-1))
+        global_scale_a = scale_a[1].contiguous()
+        global_scale_b = scale_b[1].contiguous()
+        global_scale_ptrs = (global_scale_a.data_ptr(), global_scale_b.data_ptr())
     requested_out_dtype = output_dtype or torch.bfloat16
     out = _allocate_output(mat_a, mat_b, requested_out_dtype, ngroups)
-    if out is None:
-        raise ValueError(
-            "CuTeDSL blockscaled path currently supports only 2d/2d and 2d/3d"
-        )
     if ngroups == 0:
         return out
 
@@ -952,29 +872,18 @@ def scaled_grouped_mm_blockscaled(
     if not _is_transposed_layout(mat_b):
         raise ValueError("expected mat_b to be transposed")
 
-    if use_fast_accum:
-        raise ValueError("use_fast_accum is not supported for scaled grouped MM")
     logical_k_a = mat_a_physical_k * fmt.logical_vals_per_elem
     logical_k_b = mat_b_physical_k * fmt.logical_vals_per_elem
-    if a_is_2d and not b_is_2d:
-        if contraction_dim and tuple(contraction_dim) != (-1, -2):
-            raise ValueError("contraction_dim must be (-1, -2) if provided")
+    if b_is_2d and logical_k_a != logical_k_b:
+        raise ValueError("for 2d/2d grouped gemm, total K dimensions must match")
+    if not b_is_2d:
         if logical_k_a != logical_k_b:
             raise ValueError("contraction dimension of mat_a and mat_b must match")
+        if ngroups != int(mat_b.size(0)):
+            raise ValueError(
+                "for 2d/3d grouped gemm, offs size must match mat_b.size(0)"
+            )
 
-    if len(swizzle_a) != 1 or len(swizzle_b) != 1:
-        raise ValueError("swizzle_a and swizzle_b must be singleton lists")
-    if swizzle_a[0] != SwizzleType.SWIZZLE_32_4_4:
-        raise ValueError(f"swizzle_a must be SWIZZLE_32_4_4 for {fmt.name}")
-    if swizzle_b[0] != SwizzleType.SWIZZLE_32_4_4:
-        raise ValueError(f"swizzle_b must be SWIZZLE_32_4_4 for {fmt.name}")
-
-    if a_is_2d and b_is_2d and logical_k_a != logical_k_b:
-        raise ValueError("for 2d/2d grouped gemm, total K dimensions must match")
-    if a_is_2d and not b_is_2d and ngroups != int(mat_b.size(0)):
-        raise ValueError("for 2d/3d grouped gemm, offs size must match mat_b.size(0)")
-
-    device = mat_a.device
     device_id = (
         device.index if device.index is not None else torch.cuda.current_device()
     )
@@ -991,7 +900,6 @@ def scaled_grouped_mm_blockscaled(
         config.mma_tile_mn, config.cluster_shape_mn
     )
     estimate_total_num_clusters = _estimate_total_clusters_for_launch(
-        a_is_2d=a_is_2d,
         b_is_2d=b_is_2d,
         transpose_ab=config.transpose_ab,
         ngroups=ngroups,
@@ -1013,27 +921,16 @@ def scaled_grouped_mm_blockscaled(
         _TORCH_TO_CUTLASS_DTYPE_NAME[requested_out_dtype],
     )
 
-    (
-        ptrs_abc,
-        ptrs_scale,
-        ptrs_global_scale,
-        problem_sizes,
-        strides_abc,
-        total_num_clusters,
-        tensormaps,
-    ) = _get_aux_tensors(ngroups, device)
+    problem_sizes, total_num_clusters, tensormaps = _get_aux_tensors(ngroups, device_id)
 
     scale_a0 = scale_a[0]
     scale_b0 = scale_b[0]
-    if global_scales is None:
-        global_scales = _get_unit_global_scales(ngroups, device)
 
     mat_a_ptr = mat_a.data_ptr()
     mat_b_ptr = mat_b.data_ptr()
     out_ptr = out.data_ptr()
     scale_a_ptr = scale_a0.data_ptr()
     scale_b_ptr = scale_b0.data_ptr()
-    global_scale_ptr = global_scales.data_ptr()
     mat_a_stride = mat_a.stride()
     mat_b_stride = mat_b.stride()
     out_stride = out[0].stride() if b_is_2d else out.stride()
@@ -1041,7 +938,7 @@ def scaled_grouped_mm_blockscaled(
     scale_b_stride = scale_b0.stride()
 
     if b_is_2d:
-        if a_is_2d and fmt.logical_vals_per_elem > 1:
+        if fmt.logical_vals_per_elem > 1:
             stride_b_logical = (0, 1, logical_k_a)
         else:
             stride_b_logical = (0, mat_b_stride[0], mat_b_stride[1])
@@ -1053,11 +950,7 @@ def scaled_grouped_mm_blockscaled(
     metadata_strides = (
         mat_a_stride,
         (0, mat_b_stride[0], mat_b_stride[1]) if b_is_2d else mat_b_stride,
-        (
-            (logical_k_a, 1)
-            if a_is_2d and fmt.logical_vals_per_elem > 1
-            else mat_a_stride
-        ),
+        ((logical_k_a, 1) if fmt.logical_vals_per_elem > 1 else mat_a_stride),
         stride_b_logical,
         out_stride,
         (
@@ -1081,12 +974,8 @@ def scaled_grouped_mm_blockscaled(
         ),
         _with_l_dim(scale_a0),
         _with_l_dim(scale_b0),
-        ptrs_global_scale,
         ngroups,
         problem_sizes,
-        strides_abc,
-        ptrs_abc,
-        ptrs_scale,
         estimate_total_num_clusters,
         total_num_clusters,
         tensormaps,
@@ -1098,7 +987,7 @@ def scaled_grouped_mm_blockscaled(
             out_ptr,
             scale_a_ptr,
             scale_b_ptr,
-            global_scale_ptr,
+            *global_scale_ptrs,
         ),
         metadata_strides,
     )

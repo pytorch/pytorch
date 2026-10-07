@@ -3,10 +3,6 @@ from typing import cast
 
 import torch
 from torch import Tensor
-from torch._C import (
-    _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
-    _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
-)
 
 from ... import cutedsl_utils as cu
 
@@ -70,21 +66,7 @@ def _impl(
 
         cutedsl_call = torch_dynamo.disable(cutedsl_call)
 
-    return cutedsl_call(
-        mat_a,
-        mat_b,
-        cast(list[Tensor], scale_a),
-        cast(list[Tensor], scale_b),
-        [ScalingType(v) for v in scale_recipe_a],
-        [ScalingType(v) for v in scale_recipe_b],
-        [SwizzleType(swizzle_a[0])],
-        [SwizzleType(swizzle_b[0])],
-        offs,
-        out_dtype,
-        contraction_dim,
-        use_fast_accum,
-        bias=bias,
-    )
+    return cutedsl_call(mat_a, mat_b, scale_a, scale_b, cast(Tensor, offs), out_dtype)
 
 
 def register_to_dispatch() -> None:

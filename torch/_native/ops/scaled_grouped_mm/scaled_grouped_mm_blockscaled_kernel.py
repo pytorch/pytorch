@@ -1,7 +1,4 @@
-from inspect import isclass
-
 import cuda.bindings.driver as cuda
-
 import cutlass
 import cutlass.cute as cute
 import cutlass.pipeline as pipeline
@@ -16,8 +13,9 @@ from ._clc_scheduler import ClcState, create_clc_pipeline, make_clc_problem_shap
 
 _Int64x2 = tuple[cutlass.Int64, cutlass.Int64]
 _Int64x3 = tuple[cutlass.Int64, cutlass.Int64, cutlass.Int64]
-# A, B, C, scale A, scale B, global scale.
+# A, B, C, scale A, scale B, global scale A, global scale B.
 _BasePtrs = tuple[
+    cutlass.Int64,
     cutlass.Int64,
     cutlass.Int64,
     cutlass.Int64,
@@ -211,6 +209,7 @@ class Sm100GroupedBlockScaledGemmKernel:
     ):
         self.acc_dtype = cutlass.Float32
         self.sf_vec_size = sf_vec_size
+        self.has_global_scale = sf_vec_size == 16
         self.use_2cta_instrs = mma_tiler_mn[0] == 256
         self.cluster_shape_mn = cluster_shape_mn
         self.transpose_ab = transpose_ab
@@ -422,12 +421,8 @@ class Sm100GroupedBlockScaledGemmKernel:
         initial_c: cute.Tensor,
         initial_sfa: cute.Tensor,
         initial_sfb: cute.Tensor,
-        tensor_addr_global_scale: cute.Tensor,
         group_count: cutlass.Int32,
         problem_shape_mnkl: cute.Tensor,
-        strides_abc: cute.Tensor,
-        tensor_address_abc: cute.Tensor,
-        tensor_address_sfasfb: cute.Tensor,
         estimate_total_num_clusters: cutlass.Int32,
         total_num_clusters: cute.Tensor,
         tensormap_cute_tensor: cute.Tensor,
@@ -673,10 +668,6 @@ class Sm100GroupedBlockScaledGemmKernel:
             offs,
             strides,
             problem_shape_mnkl,
-            tensor_address_abc,
-            tensor_address_sfasfb,
-            tensor_addr_global_scale,
-            strides_abc,
             total_num_clusters,
             tensormap_cute_tensor,
         ).launch(grid=(group_count, 1, 1), block=[32, 1, 1], stream=stream)
@@ -703,7 +694,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.c_smem_layout_staged,
             self.epi_tile,
             total_num_clusters,
-            tensor_addr_global_scale,
+            base_ptrs[5:],
             group_count,
             problem_shape_mnkl,
             tensormap_cute_tensor,
@@ -743,7 +734,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         c_smem_layout_staged: cute.Layout | cute.ComposedLayout,
         epi_tile: cute.Tile,
         total_num_clusters: cute.Tensor,
-        tensor_addr_global_scale: cute.Tensor,
+        global_scale_ptrs: _Int64x2,
         group_count: cutlass.Int32,
         problem_sizes_mnkl: cute.Tensor,
         tensormaps: cute.Tensor,
@@ -1508,9 +1499,11 @@ class Sm100GroupedBlockScaledGemmKernel:
 
                 subtile_cnt = cute.size(tTR_tAcc.shape, mode=[3])
                 num_prev_subtiles = epilog_tile_count * subtile_cnt
-                global_scale = self.load_global_scale_for_group(
-                    cur_group_idx, tensor_addr_global_scale
-                )
+                global_scale = cutlass.Float32(1.0)
+                if cutlass.const_expr(self.has_global_scale):
+                    global_scale = self.load_global_scale_for_group(
+                        cur_group_idx, global_scale_ptrs
+                    )
                 for subtile_idx in cutlass.range(subtile_cnt, unroll_full=True):
                     acc_subtile_idx = subtile_idx
                     if cutlass.const_expr(self.overlapping_accum):
@@ -1526,7 +1519,8 @@ class Sm100GroupedBlockScaledGemmKernel:
                             cute.arch.fence_view_async_tmem_load()
 
                     acc_vec = tiled_copy_r2s.retile(tTR_rAcc).load()
-                    acc_vec = acc_vec * global_scale
+                    if cutlass.const_expr(self.has_global_scale):
+                        acc_vec = acc_vec * global_scale
                     tRS_rC.store(acc_vec.to(self.c_dtype))
 
                     c_buffer = (num_prev_subtiles + subtile_idx) % self.num_c_stage
@@ -1599,36 +1593,118 @@ class Sm100GroupedBlockScaledGemmKernel:
         offs: cute.Tensor,
         strides: _MetadataStrides,
         problem_sizes_mnkl: cute.Tensor,
-        ptrs_abc: cute.Tensor,
-        ptrs_sfasfb: cute.Tensor,
-        ptrs_global_scale: cute.Tensor,
-        strides_abc: cute.Tensor,
         total_num_clusters: cute.Tensor,
         tensormaps: cute.Tensor,
     ):
-        # One warp per group: lane 0 writes the group's metadata, then the warp
-        # builds the group's TMA descriptors for the main kernel.
+        # One warp per group. Every lane computes the group's metadata, so the
+        # descriptors are built from registers; lane 0 stores what the GEMM reads.
         cute.arch.griddepcontrol_launch_dependents()
-        group_idx, _, _ = cute.arch.block_idx()
-        tidx, _, _ = cute.arch.thread_idx()
-        if tidx == 0:
-            self._write_group_metadata(
-                group_idx,
-                dims_mnk,
-                base_ptrs,
-                offs,
-                strides,
-                problem_sizes_mnkl,
-                ptrs_abc,
-                ptrs_sfasfb,
-                ptrs_global_scale,
-                strides_abc,
+        g, _, _ = cute.arch.block_idx()
+        lane = cute.arch.lane_idx()
+        M, N, K = dims_mnk
+        base_a, base_b, base_c = base_ptrs[:3]
+        base_scale_a, base_scale_b = base_ptrs[3:5]
+        (
+            stride_a_packed,
+            stride_b_packed,
+            stride_a,
+            stride_b,
+            stride_c,
+            stride_scale_a,
+            stride_scale_b,
+        ) = strides
+        logical_vals_per_elem = 8 // self.a_dtype.width
+        sizeof_ab = cutlass.Int64(self.a_dtype.width * logical_vals_per_elem // 8)
+        sizeof_scale_ab = cutlass.Int64(self.sf_dtype.width // 8)
+        sizeof_c = cutlass.Int64(self.c_dtype.width // 8)
+
+        off_start = cutlass.Int32(0)
+        if g > 0:
+            off_start = offs[g - 1]
+        group_size = offs[g] - off_start
+
+        # 2d/3d: 128-row padded A scale rows; 2d/2d: 4-column padded scale columns.
+        scale_blocks_before = cutlass.Int32(0)
+        for i in cutlass.range(lane, g, cute.arch.WARP_SIZE):
+            prev_start = cutlass.Int32(0)
+            if i > 0:
+                prev_start = offs[i - 1]
+            prev_size = offs[i] - prev_start
+            if cutlass.const_expr(self.uniform_mn_groups):
+                prev_scale_cols = cute.ceil_div(prev_size, self.sf_vec_size)
+                scale_blocks_before += cute.ceil_div(prev_scale_cols, 4) * 4
+            else:
+                scale_blocks_before += cute.ceil_div(prev_size, 128) * 128
+        scale_blocks_before = cute.arch.warp_reduction(
+            scale_blocks_before, lambda x, y: x + y
+        )
+
+        if cutlass.const_expr(not self.uniform_mn_groups):
+            # 2d/3d: offs partition rows (M) of A/output.
+            byte_off_a = cutlass.Int64(off_start) * stride_a_packed[0] * sizeof_ab
+            byte_off_b = cutlass.Int64(g) * stride_b_packed[0] * sizeof_ab
+            byte_off_c = cutlass.Int64(off_start) * stride_c[0] * sizeof_c
+            scale_off_a = cutlass.Int64(scale_blocks_before) * stride_scale_a[0]
+            scale_off_b = cutlass.Int64(g) * stride_scale_b[0]
+            rows_m, rows_n, depth_k = group_size, N, K
+        else:
+            # 2d/2d: offs partition the contraction dim (K) of both A and B.
+            packed_off_start = cutlass.Int64(off_start // logical_vals_per_elem)
+            byte_off_a = packed_off_start * stride_a_packed[1] * sizeof_ab
+            byte_off_b = packed_off_start * stride_b_packed[1] * sizeof_ab
+            byte_off_c = cutlass.Int64(g) * cutlass.Int64(M) * stride_c[0] * sizeof_c
+            m_rounded = cutlass.Int64(cute.ceil_div(M, 128) * 128)
+            n_rounded = cutlass.Int64(cute.ceil_div(N, 128) * 128)
+            scale_off_a = (
+                m_rounded * cutlass.Int64(scale_blocks_before) * stride_scale_a[1]
             )
-            if group_idx == 0:
-                self._write_total_num_clusters(
-                    group_count, dims_mnk, offs, total_num_clusters
-                )
-        cute.arch.sync_warp()
+            scale_off_b = (
+                n_rounded * cutlass.Int64(scale_blocks_before) * stride_scale_b[1]
+            )
+            rows_m, rows_n, depth_k = M, N, group_size
+
+        ptr_a = base_a + byte_off_a
+        ptr_b = base_b + byte_off_b
+        ptr_sfa = base_scale_a + scale_off_a * sizeof_scale_ab
+        ptr_sfb = base_scale_b + scale_off_b * sizeof_scale_ab
+        strides_a = (stride_a[0], stride_a[1])
+        strides_b = (stride_b[2], stride_b[1])
+        strides_c = (stride_c[0], stride_c[1])
+        problem_m, problem_n = rows_m, rows_n
+        if cutlass.const_expr(self.transpose_ab):
+            ptr_a, ptr_b = ptr_b, ptr_a
+            ptr_sfa, ptr_sfb = ptr_sfb, ptr_sfa
+            strides_a, strides_b = strides_b, strides_a
+            strides_c = (stride_c[1], stride_c[0])
+            problem_m, problem_n = rows_n, rows_m
+
+        if lane == 0:
+            problem_sizes_mnkl[g, 0] = problem_m
+            problem_sizes_mnkl[g, 1] = problem_n
+            problem_sizes_mnkl[g, 2] = depth_k
+            problem_sizes_mnkl[g, 3] = cutlass.Int32(1)
+
+        if g == 0:
+            cluster_tile_m, cluster_tile_n = self.cluster_tile_shape_mnk[:2]
+            nclusters = cutlass.Int32(0)
+            for i in cutlass.range(lane, group_count, cute.arch.WARP_SIZE):
+                rows = M
+                if cutlass.const_expr(not self.uniform_mn_groups):
+                    start = cutlass.Int32(0)
+                    if i > 0:
+                        start = offs[i - 1]
+                    rows = offs[i] - start
+                if cutlass.const_expr(self.transpose_ab):
+                    nclusters += cute.ceil_div(N, cluster_tile_m) * cute.ceil_div(
+                        rows, cluster_tile_n
+                    )
+                else:
+                    nclusters += cute.ceil_div(rows, cluster_tile_m) * cute.ceil_div(
+                        N, cluster_tile_n
+                    )
+            nclusters = cute.arch.warp_reduction(nclusters, lambda x, y: x + y)
+            if lane == 0:
+                total_num_clusters[0] = nclusters
 
         tensormap_manager = utils.TensorMapManager(
             utils.TensorMapUpdateMode.GMEM,
@@ -1637,7 +1713,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         tma_atoms = (tma_atom_a, tma_atom_b, tma_atom_sfa, tma_atom_sfb, tma_atom_c)
         tensormap_ptrs = tuple(
             tensormap_manager.get_tensormap_ptr(
-                tensormaps[(group_idx, tensor_idx, None)].iterator
+                tensormaps[(g, tensor_idx, None)].iterator
             )
             for tensor_idx in range(len(tma_atoms))
         )
@@ -1645,31 +1721,46 @@ class Sm100GroupedBlockScaledGemmKernel:
             tensormap_manager.init_tensormap_from_atom(tma_atom, tensormap_ptr, 0)
         tensormap_manager.fence_tensormap_initialization()
 
-        problem_shape_mnk = (
-            problem_sizes_mnkl[group_idx, 0],
-            problem_sizes_mnkl[group_idx, 1],
-            problem_sizes_mnkl[group_idx, 2],
-        )
+        unit = cutlass.Int32(1)
+        no_stride = cutlass.Int64(0)
+        shape_a = (problem_m, depth_k, unit)
+        shape_b = (problem_n, depth_k, unit)
         real_tensors = (
-            self.make_tensor_abc_for_tensormap_update(
-                group_idx, self.a_dtype, problem_shape_mnk, strides_abc, ptrs_abc, 0
+            self._gmem_tensor(
+                self.a_dtype,
+                ptr_a,
+                cute.make_layout(shape_a, stride=(*strides_a, no_stride)),
             ),
-            self.make_tensor_abc_for_tensormap_update(
-                group_idx, self.b_dtype, problem_shape_mnk, strides_abc, ptrs_abc, 1
+            self._gmem_tensor(
+                self.b_dtype,
+                ptr_b,
+                cute.make_layout(shape_b, stride=(*strides_b, no_stride)),
             ),
-            self.make_tensor_sfasfb_for_tensormap_update(
-                group_idx, self.sf_dtype, problem_shape_mnk, ptrs_sfasfb, 0
+            self._gmem_tensor(
+                self.sf_dtype,
+                ptr_sfa,
+                blockscaled_utils.tile_atom_to_shape_SF(shape_a, self.sf_vec_size),
             ),
-            self.make_tensor_sfasfb_for_tensormap_update(
-                group_idx, self.sf_dtype, problem_shape_mnk, ptrs_sfasfb, 1
+            self._gmem_tensor(
+                self.sf_dtype,
+                ptr_sfb,
+                blockscaled_utils.tile_atom_to_shape_SF(shape_b, self.sf_vec_size),
             ),
-            self.make_tensor_abc_for_tensormap_update(
-                group_idx, self.c_dtype, problem_shape_mnk, strides_abc, ptrs_abc, 2
+            self._gmem_tensor(
+                self.c_dtype,
+                base_c + byte_off_c,
+                cute.make_layout(
+                    (problem_m, problem_n, unit), stride=(*strides_c, no_stride)
+                ),
             ),
         )
         tensormap_manager.update_tensormap(
             real_tensors, tma_atoms, tensormap_ptrs, 0, tensormap_ptrs
         )
+
+    def _gmem_tensor(self, dtype, ptr_i64, layout):
+        ptr = cute.make_ptr(dtype, ptr_i64, cute.AddressSpace.gmem, assumed_align=16)
+        return cute.make_tensor(ptr, layout)
 
     @cute.jit
     def group_tma_desc(
@@ -1686,323 +1777,20 @@ class Sm100GroupedBlockScaledGemmKernel:
         return tensormap_manager.get_tensormap_ptr(gmem_ptr, cute.AddressSpace.generic)
 
     @cute.jit
-    def _write_group_metadata(
-        self,
-        g: cutlass.Int32,
-        dims_mnk: tuple[cutlass.Int32, cutlass.Int32, cutlass.Int32],
-        base_ptrs: _BasePtrs,
-        offs: cute.Tensor,
-        strides: _MetadataStrides,
-        out_mnkl: cute.Tensor,
-        out_ptrs_abc: cute.Tensor,
-        out_ptrs_scale_ab: cute.Tensor,
-        out_ptrs_global_scale: cute.Tensor,
-        out_strides_abc: cute.Tensor,
-    ):
-        M, N, K = dims_mnk
-        base_a_u64, base_b_u64, base_c_u64 = base_ptrs[:3]
-        base_scale_a_u64, base_scale_b_u64, base_global_scale_u64 = base_ptrs[3:]
-        (
-            stride_a_packed,
-            stride_b_packed,
-            stride_a,
-            stride_b,
-            stride_c,
-            stride_scale_a,
-            stride_scale_b,
-        ) = strides
-        logical_vals_per_elem = 8 // self.a_dtype.width
-        sizeof_ab = self.a_dtype.width * logical_vals_per_elem // 8
-        sizeof_scale_ab = self.sf_dtype.width // 8
-        sizeof_c = self.c_dtype.width // 8
-        sizeof_global_scale = cutlass.Float32.width // 8
-
-        off_start = 0
-        if g > 0:
-            off_start = offs[g - 1]
-        off_end = offs[g]
-        group_size = off_end - off_start
-        byte_off_a = cutlass.Int64(0)
-        b_byte_off = cutlass.Int64(0)
-        c_byte_off = cutlass.Int64(0)
-        byte_off_scale_a = cutlass.Int64(0)
-        byte_off_scale_b = cutlass.Int64(0)
-        problem_m = cutlass.Int32(0)
-        problem_n = cutlass.Int32(0)
-        problem_k = cutlass.Int32(0)
-
-        if cutlass.const_expr(not self.uniform_mn_groups):
-            # 2d/3d: offs partition rows (M) of A/output.
-            byte_off_a = (
-                cutlass.Int64(off_start) * stride_a_packed[0] * cutlass.Int64(sizeof_ab)
-            )
-            b_byte_off = (
-                cutlass.Int64(g) * stride_b_packed[0] * cutlass.Int64(sizeof_ab)
-            )
-            c_byte_off = (
-                cutlass.Int64(off_start) * stride_c[0] * cutlass.Int64(sizeof_c)
-            )
-
-            # Scale factors for A are stored per group, but with
-            # each group padded to 128 rows.
-            off_start_scale_a = cutlass.Int32(0)
-            for i in cutlass.range(offs.shape[0]):
-                if i < g:
-                    prev_off_start = cutlass.Int32(0)
-                    if i > 0:
-                        prev_off_start = offs[i - 1]
-                    prev_off_end = offs[i]
-                    off_start_scale_a += (
-                        cute.ceil_div(prev_off_end - prev_off_start, 128) * 128
-                    )
-            byte_off_scale_a = (
-                cutlass.Int64(off_start_scale_a)
-                * stride_scale_a[0]
-                * cutlass.Int64(sizeof_scale_ab)
-            )
-            byte_off_scale_b = (
-                cutlass.Int64(g) * stride_scale_b[0] * cutlass.Int64(sizeof_scale_ab)
-            )
-
-            if cutlass.const_expr(self.transpose_ab):
-                problem_m = N
-                problem_n = group_size
-            else:
-                problem_m = group_size
-                problem_n = N
-            problem_k = K
-        else:
-            # 2d/2d: offs partition contraction dim (K) of both A
-            # and B.
-            packed_off_start = off_start // logical_vals_per_elem
-            byte_off_a = (
-                cutlass.Int64(packed_off_start)
-                * stride_a_packed[1]
-                * cutlass.Int64(sizeof_ab)
-            )
-            b_byte_off = (
-                cutlass.Int64(packed_off_start)
-                * stride_b_packed[1]
-                * cutlass.Int64(sizeof_ab)
-            )
-            c_byte_off = (
-                cutlass.Int64(g)
-                * cutlass.Int64(M)
-                * stride_c[0]
-                * cutlass.Int64(sizeof_c)
-            )
-
-            m_rounded = cute.ceil_div(M, 128) * 128
-            n_rounded = cute.ceil_div(N, 128) * 128
-            off_start_scale_a = cutlass.Int32(0)
-            off_start_scale_b = cutlass.Int32(0)
-            for i in cutlass.range(offs.shape[0]):
-                if i < g:
-                    prev_off_start = cutlass.Int32(0)
-                    if i > 0:
-                        prev_off_start = offs[i - 1]
-                    prev_off_end = offs[i]
-                    prev_group_k = prev_off_end - prev_off_start
-                    prev_scale_cols = cute.ceil_div(prev_group_k, self.sf_vec_size)
-                    prev_scale_cols = cute.ceil_div(prev_scale_cols, 4) * 4
-                    off_start_scale_a += m_rounded * prev_scale_cols
-                    off_start_scale_b += n_rounded * prev_scale_cols
-            byte_off_scale_a = (
-                cutlass.Int64(off_start_scale_a)
-                * stride_scale_a[1]
-                * cutlass.Int64(sizeof_scale_ab)
-            )
-            byte_off_scale_b = (
-                cutlass.Int64(off_start_scale_b)
-                * stride_scale_b[1]
-                * cutlass.Int64(sizeof_scale_ab)
-            )
-
-            if cutlass.const_expr(self.transpose_ab):
-                problem_m = N
-                problem_n = M
-            else:
-                problem_m = M
-                problem_n = N
-            problem_k = group_size
-
-        out_mnkl[g, 0] = problem_m
-        out_mnkl[g, 1] = problem_n
-        out_mnkl[g, 2] = problem_k
-        out_mnkl[g, 3] = cutlass.Int32(1)
-        out_ptrs_global_scale[g] = base_global_scale_u64 + cutlass.Int64(
-            g
-        ) * cutlass.Int64(sizeof_global_scale)
-
-        if cutlass.const_expr(self.transpose_ab):
-            out_ptrs_abc[g, 0] = base_b_u64 + b_byte_off
-            out_ptrs_abc[g, 1] = base_a_u64 + byte_off_a
-            out_ptrs_abc[g, 2] = base_c_u64 + c_byte_off
-            out_ptrs_scale_ab[g, 0] = base_scale_b_u64 + byte_off_scale_b
-            out_ptrs_scale_ab[g, 1] = base_scale_a_u64 + byte_off_scale_a
-
-            out_strides_abc[g, 0, 0] = cutlass.Int64(stride_b[2])
-            out_strides_abc[g, 0, 1] = cutlass.Int64(stride_b[1])
-            out_strides_abc[g, 1, 0] = cutlass.Int64(stride_a[0])
-            out_strides_abc[g, 1, 1] = cutlass.Int64(stride_a[1])
-            out_strides_abc[g, 2, 0] = cutlass.Int64(stride_c[1])
-            out_strides_abc[g, 2, 1] = cutlass.Int64(stride_c[0])
-        else:
-            out_ptrs_abc[g, 0] = base_a_u64 + byte_off_a
-            out_ptrs_abc[g, 1] = base_b_u64 + b_byte_off
-            out_ptrs_abc[g, 2] = base_c_u64 + c_byte_off
-            out_ptrs_scale_ab[g, 0] = base_scale_a_u64 + byte_off_scale_a
-            out_ptrs_scale_ab[g, 1] = base_scale_b_u64 + byte_off_scale_b
-
-            out_strides_abc[g, 0, 0] = cutlass.Int64(stride_a[0])
-            out_strides_abc[g, 0, 1] = cutlass.Int64(stride_a[1])
-            out_strides_abc[g, 1, 0] = cutlass.Int64(stride_b[2])
-            out_strides_abc[g, 1, 1] = cutlass.Int64(stride_b[1])
-            out_strides_abc[g, 2, 0] = cutlass.Int64(stride_c[0])
-            out_strides_abc[g, 2, 1] = cutlass.Int64(stride_c[1])
-
-    @cute.jit
-    def _write_total_num_clusters(
-        self,
-        group_count: cutlass.Int32,
-        dims_mnk: tuple[cutlass.Int32, cutlass.Int32, cutlass.Int32],
-        offs: cute.Tensor,
-        out_nclusters: cute.Tensor,
-    ):
-        M, N, _ = dims_mnk
-        cluster_tile_m, cluster_tile_n = self.cluster_tile_shape_mnk[:2]
-        nclusters = cutlass.Int32(0)
-        for i in cutlass.range(group_count):
-            off_start = 0
-            if i > 0:
-                off_start = offs[i - 1]
-            off_end = offs[i]
-            rows = M
-            if cutlass.const_expr(not self.uniform_mn_groups):
-                rows = off_end - off_start
-            if cutlass.const_expr(self.transpose_ab):
-                nclusters_m = cute.ceil_div(N, cluster_tile_m)
-                nclusters_n = cute.ceil_div(rows, cluster_tile_n)
-            else:
-                nclusters_m = cute.ceil_div(rows, cluster_tile_m)
-                nclusters_n = cute.ceil_div(N, cluster_tile_n)
-            nclusters += nclusters_m * nclusters_n
-        out_nclusters[0] = nclusters
-
-    @cute.jit
-    def make_tensor_abc_for_tensormap_update(
-        self,
-        group_idx: cutlass.Int32,
-        dtype: type[cutlass.Numeric],
-        problem_shape_mnk: tuple[cutlass.Int32, cutlass.Int32, cutlass.Int32],
-        strides_abc: cute.Tensor,
-        tensor_address_abc: cute.Tensor,
-        tensor_index: int,
-    ):
-        ptr_i64 = tensor_address_abc[(group_idx, tensor_index)]
-        if cutlass.const_expr(
-            not isclass(dtype) or not issubclass(dtype, cutlass.Numeric)
-        ):
-            raise TypeError(
-                f"dtype must be a type of cutlass.Numeric, got {type(dtype)}"
-            )
-        tensor_gmem_ptr = cute.make_ptr(
-            dtype, ptr_i64, cute.AddressSpace.gmem, assumed_align=16
-        )
-
-        strides_tensor_gmem = strides_abc[(group_idx, tensor_index, None)]
-        strides_tensor_reg = cute.make_rmem_tensor(
-            cute.make_layout(2),
-            strides_abc.element_type,
-        )
-        cute.autovec_copy(strides_tensor_gmem, strides_tensor_reg)
-        stride_mn = strides_tensor_reg[0]
-        stride_k = strides_tensor_reg[1]
-        c1 = cutlass.Int32(1)
-        c0 = cutlass.Int64(0)
-
-        if cutlass.const_expr(tensor_index == 0):
-            m = problem_shape_mnk[0]
-            k = problem_shape_mnk[2]
-            return cute.make_tensor(
-                tensor_gmem_ptr,
-                cute.make_layout((m, k, c1), stride=(stride_mn, stride_k, c0)),
-            )
-        elif cutlass.const_expr(tensor_index == 1):
-            n = problem_shape_mnk[1]
-            k = problem_shape_mnk[2]
-            return cute.make_tensor(
-                tensor_gmem_ptr,
-                cute.make_layout((n, k, c1), stride=(stride_mn, stride_k, c0)),
-            )
-        else:
-            m = problem_shape_mnk[0]
-            n = problem_shape_mnk[1]
-            return cute.make_tensor(
-                tensor_gmem_ptr,
-                cute.make_layout((m, n, c1), stride=(stride_mn, stride_k, c0)),
-            )
-
-    @cute.jit
-    def make_tensor_sfasfb_for_tensormap_update(
-        self,
-        group_idx: cutlass.Int32,
-        dtype: type[cutlass.Numeric],
-        problem_shape_mnk: tuple[cutlass.Int32, cutlass.Int32, cutlass.Int32],
-        tensor_address_sfasfb: cute.Tensor,
-        tensor_index: int,
-    ):
-        ptr_i64 = tensor_address_sfasfb[(group_idx, tensor_index)]
-        if cutlass.const_expr(
-            not isclass(dtype) or not issubclass(dtype, cutlass.Numeric)
-        ):
-            raise TypeError(
-                f"dtype must be a type of cutlass.Numeric, got {type(dtype)}"
-            )
-        tensor_gmem_ptr = cute.make_ptr(
-            dtype, ptr_i64, cute.AddressSpace.gmem, assumed_align=16
-        )
-
-        c1 = cutlass.Int32(1)
-        if cutlass.const_expr(tensor_index == 0):
-            m = problem_shape_mnk[0]
-            k = problem_shape_mnk[2]
-            sfa_layout = blockscaled_utils.tile_atom_to_shape_SF(
-                (m, k, c1), self.sf_vec_size
-            )
-            return cute.make_tensor(
-                tensor_gmem_ptr,
-                sfa_layout,
-            )
-        else:
-            n = problem_shape_mnk[1]
-            k = problem_shape_mnk[2]
-            sfb_layout = blockscaled_utils.tile_atom_to_shape_SF(
-                (n, k, c1), self.sf_vec_size
-            )
-            return cute.make_tensor(
-                tensor_gmem_ptr,
-                sfb_layout,
-            )
-
-    @cute.jit
     def load_global_scale_for_group(
-        self,
-        group_idx: cutlass.Int32,
-        tensor_addr_global_scale: cute.Tensor,
+        self, group_idx: cutlass.Int32, global_scale_ptrs: _Int64x2
     ):
-        ptr_i64 = tensor_addr_global_scale[group_idx]
-        scale_gmem_ptr = cute.make_ptr(
-            cutlass.Float32,
-            ptr_i64,
-            cute.AddressSpace.gmem,
-            assumed_align=4,
-        )
-        scale_tensor = cute.make_tensor(
-            scale_gmem_ptr,
-            cute.make_layout((cutlass.Int32(1),), stride=(cutlass.Int64(1),)),
-        )
-        return scale_tensor[0]
+        sizeof_global_scale = cutlass.Int64(cutlass.Float32.width // 8)
+        scale = cutlass.Float32(1.0)
+        for base in global_scale_ptrs:
+            ptr = cute.make_ptr(
+                cutlass.Float32,
+                base + cutlass.Int64(group_idx) * sizeof_global_scale,
+                cute.AddressSpace.gmem,
+                assumed_align=4,
+            )
+            scale *= cute.make_tensor(ptr, cute.make_layout(1))[0]
+        return scale
 
     def mainloop_s2t_copy_and_partition(
         self,
