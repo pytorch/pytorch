@@ -13,6 +13,7 @@
 #endif
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/Resize.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
@@ -584,6 +585,7 @@ static void _rrelu_with_noise_train(
     const Scalar& upper_,
     const std::optional<Generator>& generator) {
   using opmath_t = at::opmath_type<scalar_t>;
+  at::assert_no_internal_overlap(noise);
   opmath_t lower = lower_.to<opmath_t>();
   opmath_t upper = upper_.to<opmath_t>();
   Tensor tmp_tensor = output.contiguous();
