@@ -48,7 +48,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   bool rendezvous();
 
   /**
-   * Selects a AllReduceAlgo that we think will outperform nccl.
+   * Selects an AllReduceAlgo that we think will outperform nccl.
    * Returns AllReduceAlgo::NONE if we don't think we can outperform nccl.
    */
   AllReduceAlgo selectAllReduceAlgo(const at::Tensor& input);

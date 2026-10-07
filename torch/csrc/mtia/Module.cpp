@@ -195,6 +195,13 @@ void initModule(PyObject* module) {
     return at::detail::getMTIAHooks().graphPoolHandle();
   });
 
+  m.def("_mtia_isCurrentStreamCapturing", []() {
+    if (!torch::utils::is_device_initialized(at::kMTIA)) {
+      return false;
+    }
+    return at::detail::getMTIAHooks().isCurrentStreamCapturing();
+  });
+
   py::class_<_MTIAGraph>(m, "_MTIAGraph")
       .def(py::init<bool>(), py::arg("keep_graph") = false)
       .def("capture_begin", &_MTIAGraph::capture_begin)

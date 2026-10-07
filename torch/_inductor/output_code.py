@@ -126,7 +126,7 @@ class OutputCode:
         raise NotImplementedError(type(self))
 
     # TODO: Get rid of this
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: TritonBundle) -> None:
         raise NotImplementedError(type(self))
 
 
@@ -554,6 +554,7 @@ class CompiledFxGraph(OutputCode):
 
     cudagraph_info: CudagraphCachedInfo | None
     partition_maps: list[GraphPartitionMap] | None
+    has_uncaptured_partition: bool
     compile_region_name: str | None
     fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
@@ -644,6 +645,7 @@ class CompiledFxGraph(OutputCode):
         self.extern_libs_key = None
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
+        self.has_uncaptured_partition = graph.has_uncaptured_partition
         self._defers_input_alignment = getattr(graph, "_defers_input_alignment", False)
         storage_mutation_info = get_input_storage_mutation_info(gm)
         self.fx_kwargs = {}
@@ -993,7 +995,7 @@ class CompiledFxGraph(OutputCode):
 
             self.current_callable = wrapped_callable
 
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: TritonBundle) -> None:
         self._triton_bundle = triton_bundle
 
     def prepare_for_serialization(self) -> None:
@@ -1164,7 +1166,7 @@ class CompiledAOTI(OutputCode):
         if self.current_callable is None:
             self.__post_init__()
 
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: TritonBundle) -> None:
         pass
 
 
@@ -1186,7 +1188,7 @@ class MockFXGraphCacheOutput(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         return self.gm(inputs)
 
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: TritonBundle) -> None:
         pass
 
 
@@ -1321,7 +1323,7 @@ class RegionalOutputCode(OutputCode):
             gm = fn(gm, **kwargs)
         self._graph_module = gm
 
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: TritonBundle) -> None:
         """Regional inductor doesn't use triton bundles directly."""
 
     def prepare_for_serialization(self) -> None:

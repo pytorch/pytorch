@@ -53,7 +53,7 @@ if [[ "$TEST_CONFIG" != "onnx" ]]; then
 fi
 
 # Remove dill to test that serialization works without it
-if [[ "$BUILD_ENVIRONMENT" == *py3.10-gcc11 ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *py3.11-gcc11 ]]; then
   pip uninstall -y dill 2>/dev/null || true
 fi
 
@@ -84,6 +84,24 @@ export TORCH_SERIALIZATION_DEBUG=1
 # any legitimately long compile on those backends.
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT=300
+    # Cap Inductor compile-worker fan-out on the ROCm test jobs. They run in a
+    # multi-pod-per-node ROCm runner fleet where the nested test container sees
+    # the host CPU count (nproc=192) instead of the pod's CPU allocation (no
+    # cpuset/quota is inherited), so decide_compile_threads() defaults
+    # compile_threads to min(32, cpu_count()) = 32 per test process and
+    # async_compile forks that many GPU-attached compile workers onto the single
+    # visible GPU. That oversubscribes the accelerator scheduler runlist and can
+    # thrash/hang a shard until its timeout. Cap the fan-out to a bounded pool of
+    # 16 workers: this still creates a GPU-attached SubprocPool (unlike a single
+    # thread, which runs compilation inline with no pool) but bounds the number of
+    # concurrent GPU-attached workers below the oversubscription threshold.
+    export TORCHINDUCTOR_COMPILE_THREADS=16
+    # ROCr loads code objects larger than HSA_CO_DMACOPY_SIZE (default 1 MiB)
+    # via a blit kernel whose first dispatch can execute stale instructions and
+    # fault or hang (ROCm/rocm-systems#12209, fixed in ROCm 10.2). Raise the
+    # threshold to 1 GiB so code-object loads stay on the memcpy path. The value
+    # is parsed with atoi, so it must stay within int range.
+    export HSA_CO_DMACOPY_SIZE=1073741824
 fi
 
 export VALGRIND=ON
@@ -160,6 +178,13 @@ if [[ -n $TESTS_TO_INCLUDE ]]; then
   INCLUDE_CLAUSE="--include $TESTS_TO_INCLUDE"
 fi
 
+if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+  # These custom run_test.py targets cannot be filtered cleanly by -m periodic:
+  # doctests and autoload bypass pytest; AOT builds extensions before pytest;
+  # CI sanity expects its unmarked test to fail.
+  TESTS_TO_EXCLUDE="$TESTS_TO_EXCLUDE doctests test_cpp_extensions_aot_ninja test_cpp_extensions_aot_no_ninja test_autoload_enable test_autoload_disable test_ci_sanity_check_fail"
+fi
+
 # Exclude tests from run_test.py (symmetric to TESTS_TO_INCLUDE).
 if [[ -n $TESTS_TO_EXCLUDE ]]; then
   echo "Setting EXCLUDE_CLAUSE"
@@ -198,7 +223,7 @@ export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
-if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
+if [[ -d "${HF_CACHE}" ]]; then
   export HF_HOME="${HF_CACHE}"
 fi
 
@@ -217,6 +242,13 @@ fi
 if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
+fi
+
+if [[ "$TEST_CONFIG" == 'periodic' ]]; then
+  export PYTORCH_TEST_WITH_PERIODIC=1
+  # Allows @periodic tests that are also marked slow (@slowTest or
+  # slow-tests.json) to run.
+  export PYTORCH_TEST_WITH_SLOW=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
@@ -371,7 +403,9 @@ fi
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
-  export ATEN_CPU_CAPABILITY=avx2
+  export ATEN_CPU_CAPABILITY=avx512
+  # valgrind cannot decode AVX-512 instructions
+  export VALGRIND=OFF
 fi
 
 test_tsan() {
@@ -424,20 +458,38 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_cpuset_num_threads() {
+  # Regression test for https://github.com/pytorch/pytorch/issues/193859
+  # When the process is restricted to a single CPU via a cpuset/affinity mask,
+  # the default intraop thread count must respect that limit rather than the
+  # host's physical core count. Clear the *_NUM_THREADS env vars so the count
+  # is derived from the affinity mask instead of an explicit override.
+  if ! command -v taskset >/dev/null; then
+    echo "taskset not available, skipping cpuset num_threads test"
+    return
+  fi
+  (cd test && env -u OMP_NUM_THREADS -u MKL_NUM_THREADS taskset -c 0 python -c \
+    'import torch; n = torch.get_num_threads(); print("num_threads =", n); assert n == 1, n')
+  assert_git_not_dirty
+}
+
 test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_foreach -k TestForeachMM $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_linalg -k polar $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
+# PYTHON_TEST_EXTRA_OPTION intentionally expands into multiple arguments.
+# shellcheck disable=SC2086
 test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
-  install_cutlass_api
+  install_cutlass_operators
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
@@ -445,15 +497,58 @@ test_python_smoke_b200() {
       inductor/test_fp8 \
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
-      inductor/test_flex_flash \
-      inductor/test_flex_gemm \
       inductor/test_torchinductor \
       inductor/test_async_compile \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
-      test_varlen_attention \
+      inductor/test_cutedsl_grouped_mm \
+      inductor/test_cutedsl_template \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
+
+  # These suites spend most of their time compiling many independent kernels.
+  # Use xdist's dynamic scheduler to avoid a long tail, and bound each test
+  # worker's Inductor compile pool so parallelism does not multiply to 32x32.
+  time env TORCHINDUCTOR_COMPILE_THREADS=1 python test/run_test.py \
+    --include test_varlen_attention \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running \
+    --pytest-xdist-workers 32
+  time env TORCHINDUCTOR_COMPILE_THREADS=2 python test/run_test.py \
+    --include inductor/test_flex_flash \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running \
+    --pytest-xdist-workers 32
+  time env TORCHINDUCTOR_COMPILE_THREADS=1 python test/run_test.py \
+    --include inductor/test_flex_gemm \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running \
+    --pytest-xdist-workers 32
+
+  # The CuTeDSL linear_cross_entropy OpInfo variants exist only where the
+  # CuTeDSL runtime does, so they are collected nowhere else.
+  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # The variants' expectations live outside test_ops too: two xfails in
+  # test_ops_gradients.py and nine TestOperators entries in the shared skip
+  # tuple. An expectation that never runs rots into an unexpected success
+  # without anyone noticing, so collect those suites here as well -- a handful
+  # of tests each once restricted to this op.
+  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops_gradients -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # functorch selects its variants with -k instead: restricting op_db trips
+  # `opsToleranceOverride`, which asserts that every op it names is present.
+  time python test/run_test.py --include functorch/test_ops -k "linear_cross_entropy and cutedsl" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # The op's own accuracy harness: fp16/bf16 against an fp64 reference with
+  # calibrated tolerances. It runs in every CUDA job, but only here is the DSL
+  # installed, so only here does it measure the override rather than eager.
+  time python test/run_test.py --include test_nn -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+
+  time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # Dynamically discover the DSL override tests so new ones are picked up. This
+  # is the only job with CuTeDSL installed, so they skip everywhere else.
+  # shellcheck disable=SC2046
+  time python test/run_test.py \
+    --include $(find test/python_native -name 'test_*.py' -printf '%P\n' | sed 's|\.py$||; s|^|python_native/|' | sort | tr '\n' ' ') \
+    --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -487,12 +582,14 @@ test_h100_distributed() {
   assert_git_not_dirty
 }
 
-_run_symm_mem_tests() {
+_run_fabric_handle_tests() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_shmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k "NCCLSymmetricMemoryTest or NCCLOneSidedOpHandleTypeTest or NCCLSymmetricMemoryRestartTest" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_symm_mem_registry.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include inductor/test_low_contention_collectives.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -503,7 +600,7 @@ test_h100_symm_mem() {
   # Disable NVLink Switch features (not available on AWS H100 instances)
   export NVSHMEM_DISABLE_NVLS=1
   export NCCL_NVLS_ENABLE=0
-  _run_symm_mem_tests
+  _run_fabric_handle_tests
 }
 
 test_h100_fabric() {
@@ -512,7 +609,9 @@ test_h100_fabric() {
 }
 
 test_b200_symm_mem() {
-  _run_symm_mem_tests
+  # TODO: fix the op to reuse/free teams instead of raising this limit.
+  export NVSHMEM_MAX_TEAMS=512
+  _run_fabric_handle_tests
 }
 
 test_h100_cutlass_backend() {
@@ -520,6 +619,29 @@ test_h100_cutlass_backend() {
   git submodule update --init --depth 1 third_party/cutlass
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_backend $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   TORCHINDUCTOR_CUTLASS_DIR=$(realpath "./third_party/cutlass") python test/run_test.py --include inductor/test_cutlass_evt $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+}
+
+test_native_aot() {
+  # These suites exercise the Python JIT route too, so they need the DSL runtime.
+  # Installed here rather than in requirements-ci.txt, which is shared by every
+  # image and would put ~190 MB of CUDA-only tooling into the CPU, ROCm and XPU
+  # images as well.
+  install_cutlass_dsl
+
+  # Assert the wheel under test carries the kernels stage 2 embedded: without
+  # them every routing test below passes vacuously on the JIT/aten fallbacks.
+  # cd test, because from the repo root the source torch/ dir shadows the
+  # installed wheel, same as the ASAN smoke checks above.
+  (cd test && python -c "
+from torch._native import _native_aot_embedded
+assert _native_aot_embedded(), 'AOT kernels not embedded: stage 2 did not run in the build'
+print('native-AOT: embedded kernels detected')
+")
+  local native_aot_tests=()
+  for f in test/python_native/test_*.py; do
+    native_aot_tests+=("${f#test/}")
+  done
+  time python test/run_test.py --include "${native_aot_tests[@]%.py}" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 }
 
 test_xpu_sycl_tla_backend() {
@@ -644,6 +766,11 @@ test_inductor_core() {
               inductor/test_torchinductor \
               inductor/test_mkldnn_pattern_matcher \
               inductor/test_torchinductor_codegen_dynamic_shapes \
+              inductor/test_max_autotune_blackwell \
+              inductor/test_torchinductor_codegen_config_overrides \
+              inductor/test_torchinductor_opinfo \
+              inductor/test_torchinductor_opinfo_properties \
+              inductor/test_torchinductor_strided_blocks \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -684,7 +811,38 @@ test_inductor_aoti_cpp() {
   fi
   TEST_ENVS=(CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}")
 
-  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_aoti_inference cpp/test_vec_half_AVX2 -dist=loadfile
+  # test_aoti_inference is not run: it loads libaoti_custom_class.so and its model
+  # and data files from its build directory, which the build artifacts don't include.
+  /usr/bin/env "${TEST_ENVS[@]}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_shim cpp/test_vec_half_AVX2 -dist=loadfile
+}
+
+test_inductor_aoti_fallback_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+
+  # Re-run the AOTInductor suites under Inductor lite / all-fallback mode: every
+  # op goes to ATen unless it sits inside a regional-inductor annotation.
+  # TORCHINDUCTOR_LITE_MODE is read once when torch._inductor.config is imported,
+  # so it also reaches the model-generation subprocess behind the C++ tests --
+  # which is why those can be reused as-is rather than reimplemented.
+  export TORCHINDUCTOR_LITE_MODE=1
+
+  # --upload-artifacts-while-running is load bearing here, not cosmetic: this mode
+  # can abort the interpreter mid-file (a proxy-executor CHECK failure), and an
+  # aborted process writes no junit XML at exit. Streaming the reports out keeps
+  # the failure visible on HUD instead of leaving a shard that is red with no
+  # per-test record of why.
+  python test/run_test.py \
+    --include inductor/test_inductor_lite_mode \
+              inductor/test_aot_inductor \
+              inductor/test_aot_inductor_arrayref \
+              inductor/test_aot_inductor_custom_ops \
+              inductor/test_aot_inductor_package \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose \
+    --upload-artifacts-while-running
 }
 
 test_inductor_aoti_cross_compile_for_windows() {
@@ -1092,6 +1250,43 @@ test_inductor_micro_benchmark() {
   python benchmarks/gpt_fast/benchmark.py --output "${TEST_REPORTS_DIR}/gpt_fast_benchmark.csv"
 }
 
+test_better_benchmark() {
+  local test_reports_dir
+  test_reports_dir="$(pwd)/test/test-reports"
+  local debug_dir
+  debug_dir="$(pwd)/test/debug/better-benchmark"
+  local benchmark_dir
+  benchmark_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/better-benchmark.XXXXXX")"
+  mkdir -p "${test_reports_dir}" "${debug_dir}"
+
+  git clone --depth 1 --branch main \
+    https://github.com/eellison/better-benchmark.git "${benchmark_dir}"
+  pushd "${benchmark_dir}"
+
+  local gpu_indices
+  gpu_indices="$(python - <<'PY'
+import torch
+
+count = torch.cuda.device_count()
+if count < 1:
+    raise RuntimeError("Expected at least one GPU")
+print(",".join(str(index) for index in range(count)))
+PY
+)"
+
+  python scripts/bench_parallel.py \
+    repros/canonical \
+    --all-shapes \
+    --gpus "${gpu_indices}" \
+    --output "${debug_dir}/current.json"
+  python scripts/dashboard_export.py \
+    --input "${debug_dir}/current.json" \
+    --model-accounting benchmarks/model_accounting/b200 \
+    --timing auto \
+    --ci-json "${test_reports_dir}/inductor_kernel_benchmark.json"
+  popd
+}
+
 test_inductor_halide() {
   python test/run_test.py --include inductor/test_halide.py --verbose
   assert_git_not_dirty
@@ -1099,6 +1294,41 @@ test_inductor_halide() {
 
 test_inductor_pallas() {
   python test/run_test.py --include inductor/test_pallas.py --verbose
+  assert_git_not_dirty
+}
+
+test_inductor_flydsl() {
+  install_flydsl
+  (
+    cd test
+    python3 - <<'PY'
+import importlib
+import importlib.metadata
+
+import torch
+from torch._inductor.codegen.flydsl import flydsl_utils
+from torch._inductor.codegen.flydsl.flydsl_scheduling import (
+    _get_flydsl_device_arch,
+)
+
+importlib.import_module("flydsl")
+if torch.version.hip is None or not torch.cuda.is_available():
+    raise RuntimeError("FlyDSL CI requires a ROCm-enabled PyTorch build")
+device_index = torch.cuda.current_device()
+arch = _get_flydsl_device_arch(device_index)
+if arch != "gfx950":
+    raise RuntimeError(f"FlyDSL CI requires gfx950, got {arch}")
+if not flydsl_utils.runtime_available():
+    reason = (
+        flydsl_utils._flydsl_runtime_unavailable_reason()
+        or "ROCm runtime support is unavailable"
+    )
+    raise RuntimeError(f"FlyDSL runtime is unavailable: {reason}")
+version = importlib.metadata.version("flydsl")
+print(f"FlyDSL {version} runtime available on {arch}")
+PY
+  )
+  python test/run_test.py --include inductor/test_flydsl_template.py inductor/test_flydsl_grouped_scheduler.py --verbose
   assert_git_not_dirty
 }
 
@@ -1358,13 +1588,17 @@ test_inductor_set_cpu_affinity(){
   thread_per_core=$(lscpu | grep 'Thread(s) per core:' | awk '{print $4}')
   cores=$((cpus / thread_per_core))
 
-  export OMP_NUM_THREADS=$cores
-
   # Handle cgroups slice start and end CPU
   start_cpu=$(python -c 'import os; print(min(os.sched_getaffinity(0)))')
   # Leaving one physical CPU for other tasks
   end_cpu=$(($(python -c 'import os; print(max(os.sched_getaffinity(0)))') - thread_per_core))
   export TASKSET="taskset -c $start_cpu-$end_cpu"
+  if [[ "$(uname -m)" == "aarch64" ]]; then
+    # Match OpenMP threads to the CPUs retained by taskset
+    # https://github.com/pytorch/pytorch/issues/195629
+    cores=$(taskset -c "$start_cpu-$end_cpu" nproc)
+  fi
+  export OMP_NUM_THREADS=$cores
 }
 
 test_inductor_torchbench_cpu_smoketest_perf(){
@@ -1426,9 +1660,9 @@ test_aten() {
     TEST_BASE_DIR="$BUILD_BIN_DIR"
   fi
 
-  # NB: the ATen test binaries don't have RPATH set, so it's necessary to
-  # put the dynamic libraries somewhere were the dynamic linker can find them.
-  # This is a bit of a hack.
+  # The test binaries' RUNPATH is build/lib under the build job's workspace,
+  # which does not exist where the ROCm tests run, so the run below also puts
+  # the installed libraries on the loader path.
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
@@ -1436,7 +1670,7 @@ test_aten() {
   ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
 
   ls "$TEST_BASE_DIR"
-  aten/tools/run_tests.sh "$TEST_BASE_DIR"
+  LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}" aten/tools/run_tests.sh "$TEST_BASE_DIR"
 
   if [[ -n "$IN_WHEEL_TEST" ]]; then
     # Restore the build folder to avoid any impact on other tests
@@ -1467,13 +1701,6 @@ test_libtorch() {
   # the libtorch tests instead.
   if [[ "$TEST_CONFIG" != "slow" ]]; then
     echo "Testing libtorch"
-    ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libcaffe2_nvrtc.so "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
     export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
 
@@ -1528,8 +1755,42 @@ test_libtorch_profiler() {
   # Tests for torch/csrc/profiler/collection.cpp.
   python test/run_test.py --cpp --verbose -i cpp/test_profiler_collection
 
+  # Tests for MTIA profiler activity filtering.
+  python test/run_test.py --cpp --verbose -i cpp/test_mtia_activity_filter
+
   # Tests for torch/csrc/profiler/util.h GlobalStateManager.
   python test/run_test.py --cpp --verbose -i cpp/test_global_state_manager
+
+  # Kineto's own unit tests, vendored under third_party/kineto. The binaries
+  # are globbed rather than listed so a test added to Kineto runs here without
+  # a matching change to this script.
+  if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+    # Kineto's xpu tests compile SYCL device code through an ExternalProject,
+    # so the PyTorch build leaves them out. See cmake/Dependencies.cmake.
+    echo "Skipping Kineto C++ tests on XPU"
+  elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+    # CUDA builds link Kineto's tests against CUPTI, which segfaults without
+    # a driver present rather than letting the tests skip.
+    echo "Skipping Kineto C++ tests on nogpu"
+  else
+    echo "Testing Kineto C++ tests"
+    local kineto_bin_dir="${BUILD_BIN_DIR}/kineto"
+    local kineto_tests=()
+    local kineto_test
+    for kineto_test in "${kineto_bin_dir}"/*; do
+      [[ -x "${kineto_test}" ]] || continue
+      kineto_tests+=("cpp/$(basename "${kineto_test}")")
+    done
+    if [[ ${#kineto_tests[@]} -eq 0 ]]; then
+      echo "ERROR: no Kineto test binaries found in ${kineto_bin_dir}"
+      return 1
+    fi
+    echo "Running ${#kineto_tests[@]} Kineto tests: ${kineto_tests[*]}"
+    # A single -i takes the whole list. Repeating the flag keeps only the last
+    # name, because run_test.py declares -i with nargs="+" and no append.
+    CPP_TESTS_DIR="${kineto_bin_dir}" python test/run_test.py --cpp --verbose \
+      -i "${kineto_tests[@]}"
+  fi
 }
 
 test_libtorch_api() {
@@ -1552,7 +1813,7 @@ test_libtorch_api() {
   if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* && "${BUILD_ENVIRONMENT}" != *s390x* ]]; then
     # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
     export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
-    python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
+    LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}" python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
   fi
 }
 
@@ -1607,6 +1868,8 @@ test_distributed() {
     filter_arg=(--multigpu-filter "$multigpu_filter")
   fi
   echo "Testing distributed python tests (${multigpu_filter:-all})"
+  # Same NVSHMEM team limit as test_b200_symm_mem; test_nvshmem.py runs here too.
+  export NVSHMEM_MAX_TEAMS=512
   # shellcheck disable=SC2086
   time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
@@ -1618,8 +1881,6 @@ test_distributed() {
 
   if [[ ("$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm*) && "$SHARD_NUMBER" == 1 ]]; then
     echo "Testing distributed C++ tests"
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
 
     export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
     # These are distributed tests, so let's continue running them sequentially here to avoid
@@ -1643,6 +1904,7 @@ test_distributed() {
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
     fi
+    python test/run_test.py --cpp --verbose -i cpp/NCCLDevCommManagerTest
   fi
 }
 
@@ -1656,6 +1918,42 @@ test_distributed_single_gpu() {
   test_distributed not-multigpu
 }
 
+test_distributed_4gpu() {
+  # Distributed tests that need more GPUs than the standard 2-GPU distributed
+  # runner provides (3-4 GPU tests), run on runners with 4-GPU labels (e.g. ROCm
+  # gfx950.4). Selection reuses the native `multigpu` marker machinery (see
+  # test/conftest.py): --distributed-tests discovers every distributed test file
+  # dynamically, --multigpu-filter multigpu keeps the process-spawning tests, and
+  # --multigpu-min-gpus 3 keeps only those needing more than the standard 2-GPU
+  # runner, so there is no per-test list to maintain.
+  # Python suite only; the multi-GPU C++/mpiexec tests already run on the
+  # standard `distributed` job.
+  echo "Testing distributed python tests that need more than 2 GPUs"
+  local count_file min_gpus=3 total_kept rc
+  count_file=$(mktemp)
+  export PYTORCH_MULTIGPU_SELECTION_COUNT_FILE="$count_file"
+  set +e
+  # shellcheck disable=SC2086
+  time python test/run_test.py --distributed-tests --multigpu-filter multigpu --multigpu-min-gpus "$min_gpus" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
+  rc=$?
+  set -e
+  total_kept=$(awk '{s+=$1} END {print s+0}' "$count_file")
+  rm -f "$count_file"
+  unset PYTORCH_MULTIGPU_SELECTION_COUNT_FILE
+  # Only meaningful when the run itself succeeded; on failure rc is the real
+  # signal and a 0 count just means collection never finished.
+  # Rerun-disabled-tests mode (PYTORCH_TEST_RERUN_DISABLED_TESTS=1, the 08:29
+  # cron) narrows collection to disabled tests, so a shard can legitimately
+  # select nothing. A normal run that selects 0 is still a broken filter.
+  if [[ "$rc" -eq 0 && "$total_kept" -eq 0 && "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" != "1" ]]; then
+    echo "::error::distributed_4gpu shard selected 0 tests; min-gpus filter may have regressed"
+    exit 1
+  fi
+  echo "distributed_4gpu shard selected $total_kept tests across files"
+  assert_git_not_dirty
+  return "$rc"
+}
+
 test_quantization() {
   echo "Testing quantization"
 
@@ -1666,8 +1964,6 @@ test_rpc() {
   echo "Testing RPC C++ tests"
   # NB: the ending test_rpc must match the current function name for the current
   # test reporting process to function as expected.
-  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
 
   CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
 }
@@ -2101,6 +2397,62 @@ test_executorch() {
   assert_git_not_dirty
 }
 
+test_torchtitan() {
+  install_torchao
+  install_torchcomms
+  # muse_glimmer and kimi_k2_7 import torchvision at model-build time. Build it
+  # from the pinned commit rather than PyPI so it links the CI-built torch.
+  install_torchvision
+
+  local torchtitan_commit
+  torchtitan_commit=$(get_pinned_commit torchtitan)
+
+  if [[ ! -d ./torchtitan ]]; then
+    git clone --quiet https://github.com/pytorch/torchtitan.git
+    pushd torchtitan
+    git checkout "${torchtitan_commit}"
+    popd
+  fi
+
+  # Neither helion nor torchtitan should pull their own copies of these from
+  # PyPI, that would silently run the tests against the wrong PyTorch
+  local ci_built_versions
+  ci_built_versions=$(get_pkg_versions torch torchao torchcomms)
+
+  pip_install helion
+
+  pushd torchtitan
+  pip_install -e .
+
+  local installed_versions
+  installed_versions=$(get_pkg_versions torch torchao torchcomms)
+  if [[ "${installed_versions}" != "${ci_built_versions}" ]]; then
+    echo "ERROR: installing helion or torchtitan overwrote the CI-built packages"
+    echo "Expected:"
+    echo "${ci_built_versions}"
+    echo "Got:"
+    echo "${installed_versions}"
+    exit 1
+  fi
+
+  # torchtitan loads checkpoints from a RUNNER_TEMP path but saves them to
+  # OUTPUT_DIR, which defaults relative to cwd. Point both at the same directory.
+  export NGPU=8
+  if [[ -n "${RUNNER_TEMP:-}" ]]; then
+    export OUTPUT_DIR="${RUNNER_TEMP}/artifacts-to-be-uploaded"
+  fi
+
+  if [[ "${TEST_CONFIG}" == *features* ]]; then
+    scripts/ci/pytorch_ci_test_runner.sh feature_tests
+  elif [[ "${TEST_CONFIG}" == *models* ]]; then
+    scripts/ci/pytorch_ci_test_runner.sh model_tests
+  else
+    echo "Unknown torchtitan test config: ${TEST_CONFIG}"
+    exit 1
+  fi
+  popd
+}
+
 test_operator_benchmark() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -2220,8 +2572,7 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
 
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
-    (cd .ci/lumen_cli && python -m pip install -e .)
-    python -m cli.run test external torchtitan --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
+  test_torchtitan
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
@@ -2231,6 +2582,10 @@ elif [[ "$TEST_CONFIG" == 'quantization' ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
+elif [[ "$TEST_CONFIG" == distributed_4gpu ]]; then
+  install_torchcomms
+  install_spmd_types
+  test_distributed_4gpu
 elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchcomms
   install_spmd_types
@@ -2274,10 +2629,10 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
       if [[ "${BUILD_ENVIRONMENT}" == *cuda12.8* ]]; then
         BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"
       elif [[ "${BUILD_ENVIRONMENT}" == *cuda13* ]]; then
-        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu130"
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu132"
       elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
         # Keep in sync with the ROCm version in the benchmarks docker image
-        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm6.4"
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm7.2"
       else
         echo "ERROR: cannot infer BASELINE_INDEX_URL from BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
         exit 1
@@ -2296,12 +2651,16 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   collect_tlparse_output
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
+elif [[ "${TEST_CONFIG}" == *inductor-flydsl* ]]; then
+  test_inductor_flydsl
 elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
   test_inductor_pallas
 elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
+elif [[ "${TEST_CONFIG}" == *inductor_better_benchmark* ]]; then
+  test_better_benchmark
 elif [[ "${TEST_CONFIG}" == *aoti_cross_compile_for_windows* ]]; then
   test_inductor_aoti_cross_compile_for_windows
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
@@ -2362,6 +2721,18 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
     test_inductor_aoti_cpp
   fi
   collect_tlparse_output
+elif [[ "${TEST_CONFIG}" == *inductor_aoti_fallback* ]]; then
+  setup_torch_trace
+  # This config is expected to be red while the all-fallback bugs are triaged, and
+  # test.sh runs under `set -e`. Guard each leg so a red Python shard still lets the
+  # C++ leg run and still uploads tlparse, then report the first failure at the end.
+  aoti_fallback_status=0
+  test_inductor_aoti_fallback_shard "$SHARD_NUMBER" || aoti_fallback_status=$?
+  if [[ "$SHARD_NUMBER" -eq "1" ]]; then
+    TORCHINDUCTOR_LITE_MODE=1 test_inductor_aoti_cpp || aoti_fallback_status=$?
+  fi
+  collect_tlparse_output
+  exit "$aoti_fallback_status"
 elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
   setup_torch_trace
   test_inductor_core
@@ -2383,6 +2754,10 @@ elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
+elif [[ "${TEST_CONFIG}" == periodic ]]; then
+  # Sweeps the default test files; run_test.py selects the @periodic tests.
+  install_torchvision
+  test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
@@ -2447,6 +2822,8 @@ elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
   test_b200_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
+elif [[ "${TEST_CONFIG}" == native_aot ]]; then
+  test_native_aot
 elif [[ "${TEST_CONFIG}" == openreg ]]; then
   test_openreg
 elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
@@ -2454,6 +2831,7 @@ elif [[ "${TEST_CONFIG}" == "tsan" ]]; then
 else
   install_torchvision
   install_monkeytype
+  test_cpuset_num_threads
   test_python
   test_aten
   test_vec256

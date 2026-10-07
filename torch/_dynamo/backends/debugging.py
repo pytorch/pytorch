@@ -43,6 +43,7 @@ from .registry import CompiledFn, CompilerFn, register_debug_backend as register
 
 
 if TYPE_CHECKING:
+    from torch._inductor.triton_bundler import TritonBundle
     from torch.fx.node import Target
 
 
@@ -314,7 +315,7 @@ class AOTEagerOutputCode(OutputCode):
             self.gm.recompile()
             self._serialized_gm = None
 
-    def set_triton_bundle(self, triton_bundle: Any) -> None:
+    def set_triton_bundle(self, triton_bundle: "TritonBundle") -> None:
         pass
 
 
@@ -481,8 +482,8 @@ register_backend(
 )
 
 
-# aot_eager_decomp_partition_with_mode is similar as aot_eager_decomp_partition,
-# except that it takes a TorchDispatchMode mode and run the fw/bw in the mode
+# aot_eager_decomp_partition_with_mode is similar to aot_eager_decomp_partition,
+# except that it takes a TorchDispatchMode mode and runs the fw/bw in the mode
 def aot_eager_decomp_partition_with_mode(
     gm: torch.fx.GraphModule,
     fake_tensor_inputs: list[torch.Tensor],

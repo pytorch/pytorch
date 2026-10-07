@@ -20,10 +20,16 @@ from torch.distributed.elastic.events import (
     NodeState,
     RdzvEvent,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class EventLibTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def assert_event(self, actual_event, expected_event):
         self.assertEqual(actual_event.name, expected_event.name)
         self.assertEqual(actual_event.source, expected_event.source)
@@ -60,6 +66,8 @@ class EventLibTest(TestCase):
 
 
 class RdzvEventLibTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @patch("torch.distributed.elastic.events.record_rdzv_event")
     @patch("torch.distributed.elastic.events.get_logging_handler")
     def test_construct_and_record_rdzv_event(self, get_mock, record_mock):

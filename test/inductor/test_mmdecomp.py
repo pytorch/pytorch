@@ -163,6 +163,27 @@ class TestDecomp(NNTestCase):
         self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 1)
 
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @config.patch(shape_padding=True)
+    def test_small_mm_pointwise_skips_padding(self, device):
+        if device == "cpu":
+            self.skipTest("small-dim mm pointwise is GPU-only")
+        from unittest import mock
+
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+        torch._dynamo.reset()
+        a = torch.ones(64, 3, device=device)
+        b = torch.ones(3, 3, device=device)
+        with mock.patch(
+            "torch._inductor.fx_passes.pad_mm._should_pad", return_value=True
+        ) as should_pad:
+            with fresh_cache():
+                run_comp_nocomp(torch_mm, a, b)
+        self.assertEqual(should_pad.call_count, 0)
+        self.assertEqual(counters["inductor"]["decompose_mm_pointwise"], 1)
+
+    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @parametrize(
         "dtype",
         [torch.float, torch.float16, torch.bfloat16]

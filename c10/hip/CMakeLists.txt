@@ -38,13 +38,17 @@ if(NOT BUILD_LIBTORCHLESS)
   # minimal.  I'm not sure if we need hip_hcc or not; for now leave it out
 
   # If building shared library, set dllimport/dllexport proper.
-  target_compile_options(c10_hip PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
+  target_compile_definitions(c10_hip PRIVATE C10_CUDA_BUILD_MAIN_LIB)
   # Enable hidden visibility if compiler supports it.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10_hip PRIVATE "-fvisibility=hidden")
   endif()
 
   # ---[ Dependency of c10_hip
+  # The -rpath-link fix for hip::amdhip64's own libhsa-runtime64.so lookup
+  # (see cmake/public/LoadHIP.cmake) is attached directly to the hip::amdhip64
+  # imported target, so every consumer -- this one included -- inherits it
+  # regardless of how many levels of target_link_libraries separate them.
   target_link_libraries(c10_hip PUBLIC ${C10_LIB} hip::host)
 
   target_include_directories(
