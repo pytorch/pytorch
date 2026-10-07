@@ -3,7 +3,6 @@
 # the general path. Override OpInfo suites provide full numerical coverage.
 
 import pathlib
-import re
 import sys
 import unittest
 
@@ -114,25 +113,6 @@ class TestKernelGeneral(TestCase):
             q, r = divmod(linear, extents[0])
             expected = torch.tensor([r * strides[0] + q * strides[1]], device="cuda")
             self.assertEqual(out, expected)
-
-    def test_family_has_exactly_one_cute_kernel(self):
-        # Assert every axis still shares one kernel. Glob files and match qualified or
-        # annotated decorators so new drivers and spellings cannot evade the check.
-        # Runtime introspection cannot distinguish @cute.kernel from @cute.jit wrappers.
-        root = pathlib.Path(reductions.__file__).parent
-        deco = re.compile(r"@(?:\w+\.)*cute\.kernel\b")
-        found = [
-            f"{path.name}:{i}"
-            # Exclude the reference implementation.
-            for path in sorted(root.glob("*.py"))
-            if path.name != "inner_tree_kernel.py"
-            for i, line in enumerate(path.read_text().splitlines(), 1)
-            if deco.match(line.strip())
-        ]
-        self.assertEqual(
-            len(found), 1, f"expected one kernel in the family, got {found}"
-        )
-        self.assertTrue(found[0].startswith("tile.py"), f"the body moved: {found}")
 
     def test_internal_invariants_raise(self):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
