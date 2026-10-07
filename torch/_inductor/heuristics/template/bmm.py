@@ -16,7 +16,9 @@ from ...kernel.bmm import (
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...utils import can_use_tma, get_num_sms, has_free_symbols
+from ...virtualized import V
 from .base import TemplateConfigHeuristics
+from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
@@ -140,3 +142,37 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         op_name: str,
     ) -> dict[str, Any]:
         return {"ALLOW_TF32": False}
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_tma_bmm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="baddbmm",
+)
+class CUDABlackwellBaddbmmTemplateConfigHeuristic(
+    AddMMConfigMixin, CUDABlackwellBMMTemplateConfigHeuristic
+):
+    """Applies baddbmm's beta * input + alpha * (A @ B) in the epilogue."""
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        kwargs = super().get_extra_kwargs(kernel_inputs, op_name)
+        if kernel_inputs.get_scalar("beta") != 0:
+            return kwargs
+        # Matches eager's beta=0 semantics: the input is ignored rather than
+        # scaled by zero, so inf/NaN in it can't reach the output.
+        alpha = kernel_inputs.get_scalar("alpha")
+        dtype = kernel_inputs.out_dtype()
+
+        def epilogue(acc: Any, bias: Any) -> Any:
+            if alpha == 1:
+                return acc
+            return V.ops.mul(acc, V.ops.constant(alpha, dtype))
+
+        kwargs["epilogue_fn"] = epilogue
+        kwargs["epilogue_fn_hash"] = str(["baddbmm_beta0_epilogue", dtype, alpha])
+        return kwargs

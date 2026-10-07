@@ -199,7 +199,8 @@ BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
 
 
 def use_triton_blackwell_bmm_template(mat1, mat2, layout, out_dtype) -> bool:
-    """Whether tuned_bmm should offer the Blackwell persistent-TMA BMM template.
+    """Whether tuned_bmm and tuned_baddbmm should offer the Blackwell
+    persistent-TMA BMM template.
 
     Mirrors the gating of the Blackwell mm template. The config heuristic also
     rejects dynamic shapes and non-TMA-compatible operands, but raises when
@@ -537,6 +538,9 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+
+    if use_triton_blackwell_bmm_template(mat1, mat2, layout, None):
+        templates_to_use.append(blackwell_ws_persistent_tma_bmm_template)
 
     # Single unified call for all templates
     choices.extend(

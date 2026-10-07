@@ -396,6 +396,109 @@ class TestMaxAutotune(TestCase):
             actual, torch.bmm(a.float(), b.float()).bfloat16(), atol=0, rtol=0
         )
 
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Blackwell BMM template requires data-center Blackwell",
+    )
+    @parametrize("use_meta_ws", (False, True))
+    @parametrize(
+        "inp_shape,alpha,beta",
+        (
+            ((3, 192, 136), 1, 1),
+            ((1, 192, 136), 2, 0.5),
+            ((192, 136), 0.5, -1),
+            ((136,), -1, 2),
+            ((136,), 1, 0),
+        ),
+    )
+    @fresh_cache()
+    def test_blackwell_bmm_template_from_tuned_baddbmm(
+        self,
+        use_meta_ws: bool,
+        inp_shape: tuple[int, ...],
+        alpha: float,
+        beta: float,
+    ) -> None:
+        # Small integers and power-of-two scalars keep the fp32 result exact,
+        # so the single rounding to bf16 must match the reference bitwise.
+        inp = torch.randint(-4, 5, inp_shape, device=GPU_TYPE).to(torch.bfloat16)
+        self._check_blackwell_bmm_template_baddbmm(inp, alpha, beta, use_meta_ws)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Blackwell BMM template requires data-center Blackwell",
+    )
+    @parametrize("use_meta_ws", (False, True))
+    @parametrize("alpha", (1, 2))
+    @fresh_cache()
+    def test_blackwell_bmm_template_baddbmm_beta_zero_ignores_input(
+        self, use_meta_ws: bool, alpha: float
+    ) -> None:
+        # Eager never reads the input when beta == 0, so inf/NaN must not leak.
+        inp = torch.randint(-4, 5, (3, 192, 136), device=GPU_TYPE).to(torch.bfloat16)
+        inp[0, 0, :8] = float("inf")
+        inp[1, 5, 3] = float("-inf")
+        inp[2, 191, 128:] = float("nan")
+        self._check_blackwell_bmm_template_baddbmm(inp, alpha, 0, use_meta_ws)
+
+    def _check_blackwell_bmm_template_baddbmm(
+        self,
+        inp: torch.Tensor,
+        alpha: float,
+        beta: float,
+        use_meta_ws: bool,
+    ) -> None:
+        if use_meta_ws and not has_meta_ws():
+            self.skipTest("requires Meta Triton autoWS")
+        from triton import knobs
+
+        a = torch.randint(-1, 2, (3, 192, 256), device=GPU_TYPE).to(torch.bfloat16)
+        b = torch.randint(-1, 2, (3, 256, 136), device=GPU_TYPE).to(torch.bfloat16)
+        names: list[str] = []
+
+        def record(choices):
+            names.extend(choice.name for choice in choices)
+            return choices
+
+        def fn(inp, a, b):
+            return torch.baddbmm(inp, a, b, alpha=alpha, beta=beta)
+
+        counters.clear()
+        add_preprocessing_fn(record)
+        try:
+            with (
+                knobs.nvidia.scope(),
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "compile_threads": 1,
+                        "triton.enable_persistent_tma_matmul": True,
+                        "triton.native_matmul": False,
+                        "test_configs.autotune_choice_name_regex": "blackwell_bmm",
+                    }
+                ),
+            ):
+                knobs.nvidia.use_meta_ws = use_meta_ws
+                actual, codes = run_and_get_code(
+                    torch.compile(fn, fullgraph=True), inp, a, b
+                )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertTrue(
+            any(key.startswith("aten.baddbmm") for key in counters["aten_mm_info"]),
+            counters["aten_mm_info"],
+        )
+        self.assertTrue(names, "tuned_baddbmm offered no Blackwell BMM choices")
+        self.assertTrue(all("blackwell_bmm" in name for name in names), names)
+        self.assertIn("make_tensor_descriptor", codes[0])
+        self.assertIn("num_tiles = BATCH * num_tiles_per_batch", codes[0])
+        self.assertIn(f"USE_META_WS : tl.constexpr = {use_meta_ws}", codes[0])
+        expected = torch.baddbmm(
+            inp.float(), a.float(), b.float(), alpha=alpha, beta=beta
+        ).bfloat16()
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     def test_blackwell_bmm_template_broadcast_b(self) -> None:
         self._run_blackwell_bmm_template(
