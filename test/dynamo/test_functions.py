@@ -5445,10 +5445,13 @@ class GraphModule(torch.nn.Module):
             n = x.shape[0]
             return x.new_full((round(n, -1),), round(n * 5, -1)), round(n, -2)
 
-        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=True, fullgraph=True)
         for n in (14, 15, 16, 25, 35, 105):
             x = torch.ones(n)
             self.assertEqual(opt_fn(x), fn(x))
+        # The rounding is traced symbolically: no recompilation across sizes.
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_round(self):
         def fn(t):
