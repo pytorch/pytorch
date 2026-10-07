@@ -73,6 +73,7 @@
 # /torch/_functorch/compilers.py
 # /torch/_functorch/partitioners.py
 /torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
+/torch/_functorch/_aot_autograd/complex_decomposition.py @hameerabbasi @amjames
 #
 # [core_aten_linalg]
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved
@@ -410,7 +411,7 @@
 /test/allowlist_for_publicAPI.json @albanD
 # /test/backends/
 # /test/bench_mps_ops.py
-# /test/complex_tensor/
+/test/complex_tensor/ @hameerabbasi @amjames
 # /test/conftest.py
 # /test/create_dummy_torchscript_model.py
 # /test/error_messages/
@@ -525,6 +526,7 @@
 # /test/test_function_schema.py
 # /test/test_functionalization.py
 # /test/test_futures.py
+# /test/test_gpu_trace.py
 /test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
 # /test/test_hub.py
 # /test/test_img/
@@ -614,7 +616,6 @@
 # /test/test_cuda_nvml_based_avail.py
 # /test/test_cuda_primary_ctx.py
 # /test/test_cuda_sanitizer.py
-# /test/test_cuda_trace.py
 /torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
 /torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 # /torch/backends/cusparselt/
@@ -696,6 +697,7 @@
 # /torch/_streambase.py
 # /torch/_strobelight/
 # /torch/_subclasses/
+/torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
 # /torch/_tensor.py
 # /torch/_tensor_docs.py
 # /torch/_tensor_iterator.py
@@ -997,6 +999,7 @@
 /torch/csrc/distributed/c10d/ @d4l3k @fduwjj @kapilsh
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
+/torch/csrc/distributed/fsdp/ @weifengpy
 /torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
 /torch/distributed/_composable/fsdp/ @weifengpy
 /torch/distributed/_composable/replicate.py @weifengpy
@@ -1131,6 +1134,7 @@
 # [compiler_dynamo]
 # /test/distributed/test_dynamo_distributed.py
 # /test/dynamo/
+/test/dynamo/test_complex.py @hameerabbasi @amjames
 # /test/dynamo_expected_failures/
 # /test/dynamo_skips/
 # /test/export/test_dynamic_shapes.py
@@ -1169,6 +1173,7 @@
 # /torch/nativert/
 #
 # [ai_agent_tooling]
+# /.agents/
 # /.claude/
 # /.github/copilot-instructions.md
 # /.github/workflows/claude-autorevert-advisor.yml
