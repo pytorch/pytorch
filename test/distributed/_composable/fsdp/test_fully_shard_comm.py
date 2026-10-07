@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch.distributed as dist
@@ -42,14 +42,25 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _init_default_fully_shard_mesh,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
+    AllGatherState,
+    FSDPCommContext,
+    FSDPParamGroup,
+)
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
+from torch.profiler import profile, ProfilerActivity
+from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
+    requires_nccl_version,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import (
@@ -72,6 +83,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -94,6 +106,57 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 device_type = torch.device(get_devtype())
 device_module = torch.get_device_module(device_type)
+
+
+class TestFSDPCommContext(TestCase):
+    def test_release_all_gather_state_for_comm_reuse_before_lazy_init(self):
+        comm_ctx = FSDPCommContext()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), MagicMock())
+
+        comm_ctx.release_all_gather_state_for_comm_reuse()
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_on_current_stream_before_lazy_init(self):
+        comm_ctx = FSDPCommContext()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), MagicMock())
+
+        comm_ctx.release_all_gather_state_on_current_stream()
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_for_comm_reuse_orders_comm_streams(self):
+        comm_ctx = FSDPCommContext()
+        event = MagicMock()
+        comm_ctx.all_gather_copy_in_stream = MagicMock()
+        comm_ctx.all_gather_stream = MagicMock()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), event)
+
+        comm_ctx.release_all_gather_state_for_comm_reuse()
+
+        for stream in (
+            comm_ctx.all_gather_copy_in_stream,
+            comm_ctx.all_gather_stream,
+        ):
+            stream.wait_event.assert_called_once_with(event)
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_on_current_stream(self):
+        comm_ctx = FSDPCommContext()
+        event = MagicMock()
+        current_stream = MagicMock()
+        comm_ctx.device_handle = MagicMock()
+        comm_ctx.device_handle.current_stream.return_value = current_stream
+        comm_ctx.all_gather_copy_in_stream = MagicMock()
+        comm_ctx.all_gather_stream = MagicMock()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), event)
+
+        comm_ctx.release_all_gather_state_on_current_stream()
+
+        current_stream.wait_event.assert_called_once_with(event)
+        comm_ctx.all_gather_copy_in_stream.wait_event.assert_not_called()
+        comm_ctx.all_gather_stream.wait_event.assert_not_called()
+        self.assertIsNone(comm_ctx.all_gather_state)
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -313,7 +376,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             group,
             reduce_scatter_stream,
             comm,
-            orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
             gradient_divide_factor=None,
@@ -346,6 +408,99 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
+
+
+class TestFullyShardChunkCatMixedDtype(TestCase):
+    def test_numerics(self, device):
+        bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
+        # Dim-0 sizes that need padding, multi-dim, and one large enough to
+        # span several blocks per chunk
+        sizes = [(5, 3), (7,), (2049, 2, 2)]
+        # On CUDA: the fused kernel, then two composite fallbacks
+        for input_dtypes, noncontiguous in (
+            ((bf16, fp32, bf16), False),
+            ((bf16, fp32, bf16), True),
+            ((fp16, fp32, fp16), False),
+        ):
+            tensors = [
+                torch.randn(size, device=device, dtype=dtype)
+                for size, dtype in zip(sizes, input_dtypes)
+            ]
+            if noncontiguous:
+                tensors = [torch.cat([t, t], dim=-1)[..., ::2] for t in tensors]
+                self.assertFalse(tensors[0].is_contiguous())
+            expected = torch._chunk_cat([t.to(fp32) for t in tensors], 0, 4)
+            out = torch.empty_like(expected)
+            version = out._version
+            torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, 4, out=out)
+            self.assertEqual(out, expected, atol=0, rtol=0)
+            # Autograd must see the in-place write to out
+            self.assertGreater(out._version, version)
+
+    @onlyCUDA
+    def test_kernels(self, device):
+        bf16, fp32 = torch.bfloat16, torch.float32
+        tensors = [torch.randn(8, 3, device=device, dtype=d) for d in (bf16, fp32)]
+        out = torch.empty(2, 24, device=device)
+        with profile(activities=[ProfilerActivity.CUDA]) as prof:
+            torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, 2, out=out)
+            torch.cuda.synchronize()
+        chunk_cat_kernels = [
+            event.name
+            for event in prof.events()
+            if event.device_type == DeviceType.CUDA
+            and "chunk_cat_cuda_kernel" in event.name
+        ]
+        # One launch copies the fp32 input and a second casts the bf16 one. The
+        # composite fallback casts separately and launches _chunk_cat once.
+        self.assertEqual(len(chunk_cat_kernels), 2, str(chunk_cat_kernels))
+
+
+instantiate_device_type_tests(
+    TestFullyShardChunkCatMixedDtype, globals(), only_for=("cpu", "cuda", "xpu")
+)
+
+
+class TestFullyShardNativeCollectiveCopy(TestCase):
+    @parametrize("outer_size", [1, 2])
+    def test_opcheck(self, device, outer_size):
+        tensor = make_tensor((outer_size, 8, 3), device=device, dtype=torch.float32)
+        packed = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, dim=1)])
+        torch.library.opcheck(
+            torch.ops.fsdp._all_gather_copy_out_.default,
+            ([torch.empty_like(tensor)], packed, [packed.size(1)], [outer_size], 4),
+        )
+        torch.library.opcheck(
+            torch.ops.fsdp._reduce_scatter_copy_in_.default,
+            (torch.empty_like(packed), [tensor], [1], 4),
+        )
+
+    @onlyCUDA
+    def test_cuda_graph(self, device):
+        tensor = make_tensor((128, 8, 3), device=device, dtype=torch.bfloat16)
+        packed = tensor.new_empty((4, tensor.numel() // 4))
+        output = torch.empty_like(tensor)
+
+        def copy():
+            torch.ops.fsdp._reduce_scatter_copy_in_(packed, [tensor], [1], 4)
+            torch.ops.fsdp._all_gather_copy_out_(
+                [output], packed, [packed.size(1)], [128], 4
+            )
+
+        copy()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            copy()
+        for _ in range(3):
+            tensor.add_(1)
+            graph.replay()
+            # The round trip only matches if both copies replay on the new data
+            self.assertEqual(output, tensor, atol=0, rtol=0)
+
+
+instantiate_device_type_tests(
+    TestFullyShardNativeCollectiveCopy, globals(), only_for=("cpu", "cuda", "xpu")
+)
 
 
 class TestFullyShardCommunication(FSDPTestContinuous):
@@ -1850,6 +2005,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
 @unittest.skipIf(
     not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
 )
+@requires_nccl_version((2, 28), "Need NCCL 2.28+ for CE collectives")
 @skipCUDAIf(not SM90OrLater, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
     @classmethod
@@ -2125,6 +2281,120 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
+
+
+class TestFullyShardReduceScatterRecordStream(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, device_module.device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_records_consumer_stream(self):
+        # A backend can register a device impl of fsdp::record_grad_output_stream at
+        # import time. Then the op is not a no-op on that device, so the not-opted-in
+        # case is not testable there. Run only the opted-in case on such a device.
+        import torch.distributed.fsdp._fully_shard._fsdp_collectives
+
+        backend_has_impl = torch._C._dispatch_has_kernel_for_dispatch_key(
+            "fsdp::record_grad_output_stream",
+            torch._C._dispatch_key_for_device(device_type.type),
+        )
+        needs_record_stream = [True] if backend_has_impl else [True, False]
+        self.run_subtests(
+            {
+                "needs_record_stream": needs_record_stream,
+                "mixed_precision": [False, True],
+            },
+            self._test_reduce_scatter_records_consumer_stream,
+        )
+
+    def _test_reduce_scatter_records_consumer_stream(
+        self, needs_record_stream: bool, mixed_precision: bool
+    ):
+        torch.manual_seed(42)
+        model = nn.Sequential(*[nn.Linear(1024, 1024) for _ in range(3)]).to(
+            device_type
+        )
+        if mixed_precision:
+            model = model.to(torch.bfloat16)
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        mp_policy = (
+            MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
+            if mixed_precision
+            else None
+        )
+        for module in model:
+            if mp_policy is not None:
+                fully_shard(module, mp_policy=mp_policy)
+            else:
+                fully_shard(module)
+        if mp_policy is not None:
+            fully_shard(model, mp_policy=mp_policy)
+        else:
+            fully_shard(model)
+
+        recorded_dtypes = []
+        orig_record_stream = torch.Tensor.record_stream
+
+        def _record_stream_spy(tensor, stream):
+            recorded_dtypes.append(tensor.dtype)
+            return orig_record_stream(tensor, stream)
+
+        from torch.library import _scoped_library
+
+        inp_dtype = torch.bfloat16 if mixed_precision else torch.float32
+
+        def _run_backward():
+            with patch.object(torch.Tensor, "record_stream", _record_stream_spy):
+                for _ in range(2):
+                    inp = torch.randn(8, 1024, device=device_type, dtype=inp_dtype)
+                    model(inp).sum().backward()
+                device_module.synchronize()
+
+        if needs_record_stream:
+            # Model a backend that opts in: register an impl of the
+            # fsdp::record_grad_output_stream op for this device. The impl records
+            # the consumer stream on the reduce-scatter output, exactly as a
+            # backend whose free releases device memory must.
+            with _scoped_library("fsdp", "FRAGMENT") as test_lib:
+
+                @torch.library.impl(
+                    "fsdp::record_grad_output_stream", device_type.type, lib=test_lib
+                )
+                def _record(buffer, stream_id, device_index, device_type_enum):
+                    buffer.record_stream(
+                        torch.Stream(
+                            stream_id=stream_id,
+                            device_index=device_index,
+                            device_type=device_type_enum,
+                        )
+                    )
+
+                _run_backward()
+        else:
+            # No impl registered: the op is the default no-op, so FSDP2 must not
+            # record any stream.
+            _run_backward()
+
+        if needs_record_stream:
+            # The reduce-scatter output that backs the sharded gradient is the POST-cast
+            # tensor (orig_dtype). In mixed precision that is bf16, not the reduce_dtype
+            # (fp32) buffer, so record_stream must land on the orig_dtype tensor.
+            expected_dtype = torch.bfloat16 if mixed_precision else torch.float32
+            self.assertIn(
+                expected_dtype,
+                recorded_dtypes,
+                f"expected record_stream on the post-cast (orig_dtype={expected_dtype}) "
+                f"reduce-scatter output; got {recorded_dtypes}",
+            )
+        else:
+            self.assertEqual(
+                recorded_dtypes,
+                [],
+                "record_stream must not be called when the backend does not advertise "
+                "_needs_record_stream_on_free",
+            )
 
 
 if __name__ == "__main__":
