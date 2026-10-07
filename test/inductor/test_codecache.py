@@ -3,6 +3,7 @@ import base64
 import copy
 import functools
 import hashlib
+import io
 import json
 import logging
 import os
@@ -12,9 +13,11 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import types
 import unittest
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any, cast
 from typing_extensions import override
@@ -29,6 +32,7 @@ from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, config_comms, metrics
+from torch._inductor.async_compile import CompiledTritonKernels
 from torch._inductor.cache_key import (
     AUTOTUNE_CACHE_KEY_STRATEGY,
     CacheKeyStrategy,
@@ -41,14 +45,17 @@ from torch._inductor.codecache import (
     BypassFxGraphCache,
     CacheabilityValidator,
     CacheBase,
+    compiled_fx_graph_hash,
     CppWrapperCodeCache,
     CUDACodeCache,
     FxGraphCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
     PyCodeCache,
+    StaticAutotunerFuture,
     TensorMetadata,
     TensorMetadataAndValues,
+    triton_key,
 )
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
@@ -63,6 +70,11 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.triton_bundler import (
+    StaticallyLaunchedAutotuner,
+    TritonBundle,
+    TritonBundler,
+)
 from torch._inductor.utils import clear_caches, fresh_cache
 from torch._library import capture_triton
 from torch._subclasses import FakeTensorMode
@@ -123,6 +135,12 @@ STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
+    def setUp(self):
+        super().setUp()
+        # These tests expect triton_key to be recomputed under their patches;
+        # an earlier compile may have cached (or be prefetching) the real value.
+        triton_key.clear()
+
     @parametrize("backend_precision", ("bfx9", "tf32"))
     def test_precompile_cache_key_handles_bfx9(self, backend_precision):
         from torch._inductor.select_algorithm import create_precompile_key
@@ -808,6 +826,43 @@ class TestFxGraphCache(TestCase):
     def test_cpu_thread_count_cache_key_no_input_randperm(self):
         self._check_cpu_thread_count_cache_key_no_input(
             "torch.randperm(1 << 12, dtype=torch.float32).log()"
+        )
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_fx_graph_cache_artifact_contains_hash_components(self):
+        def fn(x):
+            return x.sin() + 1
+
+        with (
+            fresh_cache(),
+            mock.patch("torch._inductor.compile_fx.trace_structured") as mock_trace,
+        ):
+            torch.compile(fn, backend="inductor")(torch.ones(2))
+
+        cache_payloads = []
+        for call in mock_trace.call_args_list:
+            if not call.args or call.args[0] != "artifact":
+                continue
+
+            metadata_fn = call.kwargs.get("metadata_fn")
+            if metadata_fn is None and len(call.args) > 1:
+                metadata_fn = call.args[1]
+            if metadata_fn is None:
+                continue
+
+            metadata = metadata_fn()
+            if metadata.get("name") != "fx_graph_cache_miss":
+                continue
+
+            payload_fn = call.kwargs.get("payload_fn")
+            self.assertIsNotNone(payload_fn)
+            cache_payloads.append(json.loads(payload_fn()))
+
+        self.assertEqual(len(cache_payloads), 1)
+        self.assertEqual(cache_payloads[0]["cache_state"], "miss")
+        self.assertTrue(
+            any("example_inputs[0]" in line for line in cache_payloads[0]["components"])
         )
 
     @requires_triton()
@@ -1556,6 +1611,87 @@ class TestFxGraphCache(TestCase):
 
     def test_cache_hot_load_empty(self):
         self.assertIsNone(torch.compiler.save_cache_artifacts())
+
+    @config.patch(
+        bundle_triton_into_fx_graph_cache=True,
+        use_static_triton_launcher=True,
+    )
+    @parametrize("operation", ("clear", "remove", "replace"))
+    def test_cache_hot_load_during_kernel_finalization(self, operation):
+        kernel_src = "megacache_concurrent_kernel"
+        bundle = TritonBundle(
+            [],
+            [
+                StaticallyLaunchedAutotuner(
+                    CompiledTritonKernels.key(kernel_src),
+                    "concurrent_kernel",
+                    types.SimpleNamespace(compile_results=[]),
+                )
+            ],
+        )
+        content = pickle.dumps(types.SimpleNamespace(_triton_bundle=bundle))
+        graph_key = "f" + "0" * 51
+        CacheArtifactManager.record_artifact("inductor", graph_key, content)
+        artifacts = torch.compiler.save_cache_artifacts()
+        self.assertIsNotNone(artifacts)
+        artifact_bytes, _ = artifacts
+        CacheArtifactManager.clear()
+
+        finalizing = threading.Event()
+        loaded = threading.Event()
+        finalized = []
+
+        class FinalizedKernel:
+            def __del__(self):
+                # Kernel finalizers can release the GIL while the cache drops
+                # its last reference. Force megacache loading into that window.
+                finalizing.set()
+                finalized.append(loaded.wait(timeout=30))
+
+        def load_artifacts():
+            try:
+                self.assertTrue(finalizing.wait(timeout=30))
+                return torch.compiler.load_cache_artifacts(artifact_bytes)
+            finally:
+                loaded.set()
+
+        self.addCleanup(CompiledTritonKernels.cache_clear)
+        CompiledTritonKernels.save(kernel_src, FinalizedKernel())
+        self.assertIsInstance(CompiledTritonKernels.get(kernel_src), FinalizedKernel)
+        replacement = mock.sentinel.compiled_kernel
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            loading = executor.submit(load_artifacts)
+            if operation == "clear":
+                CompiledTritonKernels.cache_clear()
+            elif operation == "remove":
+                CompiledTritonKernels.remove_future(kernel_src)
+            else:
+                CompiledTritonKernels.save(kernel_src, replacement)
+            cache_info = loading.result(timeout=30)
+
+        self.assertEqual(finalized, [True])
+        self.assertIsNotNone(cache_info)
+        self.assertEqual(cache_info.inductor_artifacts, [graph_key])
+        expected = replacement if operation == "replace" else None
+        self.assertIs(CompiledTritonKernels.get(kernel_src), expected)
+        self.assertEqual(
+            counters["inductor"]["triton_bundler_load_static_autotuner"], 0
+        )
+
+        directory = FxGraphCache._get_tmp_dir_for_key(graph_key)
+        filenames = os.listdir(directory)
+        self.assertEqual(len(filenames), 1)
+        with open(os.path.join(directory, filenames[0]), "rb") as f:
+            restored = pickle.load(f)
+
+        # The bundle must still be loadable on the compile thread.
+        metadata = TritonBundler.read_and_emit(restored._triton_bundle)
+        self.assertEqual(
+            metadata.statically_launched_kernel_names, ["concurrent_kernel"]
+        )
+        self.assertIsInstance(
+            CompiledTritonKernels.get(kernel_src), StaticAutotunerFuture
+        )
 
     def test_cache_hot_load_generic(self):
         class CacheStub:
@@ -3773,6 +3909,33 @@ class TestFxGraphCacheHashing(TestCase):
                 self.assertEqual(key_1, key_2)
         finally:
             torch.set_num_threads(orig_num_threads)
+
+    def test_compiled_fx_graph_hash_details_are_not_debug_logged(self):
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.call_function(torch.ops.aten.sin.default, (x,))
+        graph.output((y,))
+        gm = torch.fx.GraphModule({}, graph)
+
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setLevel(logging.DEBUG)
+        logger = logging.getLogger("torch._inductor.codecache")
+        old_level = logger.level
+        old_propagate = logger.propagate
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+        logger.addHandler(handler)
+        try:
+            _, debug_lines = compiled_fx_graph_hash(gm, [torch.randn(2)], {}, [])
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+            logger.propagate = old_propagate
+
+        self.assertTrue(any("example_inputs[0]" in line for line in debug_lines))
+        self.assertNotIn("FX graph cache hash details", stream.getvalue())
+        self.assertNotIn("example_inputs[0]", stream.getvalue())
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "requires MKLDNN")
     def test_cacheability_validator_checks_mkldnn_constant(self):
