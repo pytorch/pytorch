@@ -15,7 +15,8 @@ body:
     attributes:
       value: >
         #### Before submitting a bug, please make sure the issue hasn't been already addressed by searching through [the
-        existing and past issues](https://github.com/pytorch/pytorch/issues)
+        existing and past issues](https://github.com/pytorch/pytorch/issues). 
+        If possible, check whether the issue also reproduces with the latest nightly build (select **Preview (Nightly)** in the [installation selector](https://pytorch.org/get-started/locally/)), as it may already be fixed.
         It's likely that your bug will be resolved by checking our FAQ or troubleshooting guide [documentation](https://pytorch.org/docs/main/dynamo/index.html)
 
         Note: if you're submitting an issue that you generated from a fuzzer. Please do the following:
