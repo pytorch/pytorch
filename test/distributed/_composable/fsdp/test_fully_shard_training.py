@@ -43,6 +43,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     TrainingState,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
@@ -488,6 +489,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     [(16, 17), (17, 8)],
                 ],
                 "use_shard_placement_fn": [False],
+                "reduce_scatter_input_fn": [
+                    None,
+                    reduce_scatter_input_fn_with_native_copy,
+                ],
             },
             self._test_train_parity_single_group,
         )
@@ -505,6 +510,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "use_shard_placement_fn": [True],
                 # False tests Shard(1)-only weights; True adds Shard(0) biases.
                 "bias": [False, True],
+                "reduce_scatter_input_fn": [
+                    None,
+                    reduce_scatter_input_fn_with_native_copy,
+                ],
             },
             self._test_train_parity_single_group,
         )
@@ -514,6 +523,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         lin_shapes: list[tuple[int, int]],
         use_shard_placement_fn: bool,
         bias: bool = True,
+        reduce_scatter_input_fn: Callable | None = None,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
@@ -530,6 +540,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
+        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
