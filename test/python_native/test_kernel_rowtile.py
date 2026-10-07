@@ -270,6 +270,13 @@ class TestKernelRowTile(TestCase):
         self.assertFalse(
             rt.tma_ok(32, 2, 1 << 20)
         )  # bf16 does not map one element per 4-byte bank
+        with mock.patch.object(rt._hw, "caps") as caps:
+            caps.return_value.cc = (9, 0)
+            self.assertTrue(rt.one_thread_row_ok(92, 4, 1 << 16, "cuda"))
+            self.assertFalse(rt.one_thread_row_ok(96, 4, 1 << 16, "cuda"))
+            self.assertTrue(rt.one_thread_row_ok(128, 4, 1 << 16, "cuda"))
+            caps.return_value.cc = (10, 0)
+            self.assertTrue(rt.one_thread_row_ok(96, 4, 1 << 16, "cuda"))
 
     def test_narrow_row_scalar_vec(self):
         # Exercise scalar and short-vector narrow loads.

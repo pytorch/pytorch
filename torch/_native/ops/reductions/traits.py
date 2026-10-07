@@ -143,6 +143,7 @@ class WelfordOps:
         self.return_mean = bool(return_mean)
         self.acc = acc
         self.fdtypes = (acc, acc, acc)
+        self.split_grid_mult = 8 if acc.width == 32 else 4
 
     def init(self):
         z = self.acc(0.0)
