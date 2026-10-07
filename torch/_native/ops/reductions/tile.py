@@ -458,6 +458,68 @@ def fold_row_rolled(
 
 
 @cute.jit
+def fold_row_aligned(
+    trait,
+    mX,
+    r,
+    tm: cutlass.Constexpr,
+    lane,
+    n,
+    unroll: cutlass.Constexpr = _ROLL_UNROLL,
+):
+    """Fold a ragged row with aligned wide interior loads and scalar edges."""
+    reduce_fn = trait.reduce
+    acc_dtype = trait.acc
+    acc = trait.init()
+    vec = const_expr(tm.vec)
+    threads_per_row = const_expr(tm.threads_per_row)
+    rowv = mX[Int64(r), None]
+    aligned = rowv.iterator.align(TRANSFER_ALIGNMENT)
+    prefix = Int32((-Int64(r) * Int64(n)) & Int64(vec - 1))
+    prefix = n if prefix > n else prefix  # noqa: FURB136
+    groups = (n - prefix) // Int32(vec)
+    waves = (groups + Int32(threads_per_row - 1)) // Int32(threads_per_row)
+    tail = prefix + groups * Int32(vec)
+    for i in cutlass.range_constexpr(vec - 1):
+        prefix_valid = (lane == Int32(0)) & (Int32(i) < prefix)
+        prefix_index = Int32(i) if prefix_valid else Int32(0)
+        acc = reduce_fn(
+            acc,
+            acc_dtype(rowv[prefix_index]),
+            prefix_index,
+            prefix_valid,
+        )
+        tail_index = tail + Int32(i)
+        tail_valid = (lane == Int32(0)) & (tail_index < n)
+        safe_tail = tail_index if tail_valid else Int32(0)
+        acc = reduce_fn(
+            acc,
+            acc_dtype(rowv[safe_tail]),
+            safe_tail,
+            tail_valid,
+        )
+    frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
+    for c in cutlass.range(waves, unroll=unroll):
+        group = c * Int32(threads_per_row) + lane
+        valid = group < groups
+        safe_group = group if valid else Int32(0)
+        base = prefix + safe_group * Int32(vec)
+        src = cute.make_tensor(
+            aligned + safe_group * Int32(vec),
+            cute.make_layout(vec),
+        )
+        cute.autovec_copy(src, frag)
+        for i in cutlass.range_constexpr(vec):
+            acc = reduce_fn(
+                acc,
+                acc_dtype(frag[i]),
+                base + Int32(i),
+                valid,
+            )
+    return acc
+
+
+@cute.jit
 def fold_row_prefetched4(
     trait,
     mX,
@@ -760,6 +822,7 @@ class TileReduce:
         # Duck-typed because its driver-owned type would invert the dependency.
         itree: Any = None,
         row_accumulators: int = 0,
+        ragged_vector=False,
         general_tree_count: int = 0,
         col_group: int = 1,
     ) -> None:
@@ -784,6 +847,19 @@ class TileReduce:
             raise ValueError(
                 "static row accumulators require complete real-valued linear row tiles"
             )
+        if ragged_vector and (
+            axis != "row"
+            or order != "linear"
+            or vec is None
+            or vec <= 1
+            or vec & (vec - 1)
+            or use_tma
+            or combine
+            or load_ahead != 1
+            or row_accumulators
+            or getattr(trait, "complex_input", False)
+        ):
+            raise ValueError("ragged vectors require a real linear row reduction")
         if order == "inner_tree":
             if axis not in ("row", "general") or itree is None:
                 raise ValueError(
@@ -852,6 +928,7 @@ class TileReduce:
         self.unroll = unroll
         self.load_ahead = load_ahead
         self.row_accumulators = row_accumulators
+        self.ragged_vector = ragged_vector
         self.general_tree_count = general_tree_count
         self.col_group = col_group
         self.use_tma = use_tma
@@ -889,6 +966,8 @@ class TileReduce:
                 else N // (threads_per_row * vec_size(N, itemsize))
                 if row_accumulators
                 else 1,
+                vec=vec if ragged_vector else None,
+                exact=False if ragged_vector else None,
             )
             if axis == "row" and order == "linear"
             else None
@@ -953,7 +1032,9 @@ class TileReduce:
             self.complex_input,
             self.output_widths,
             getattr(self.trait, "canonical_bool", False),
-            self.N if self.use_tma or self.row_accumulators else 0,
+            self.N
+            if self.use_tma or self.row_accumulators or self.ragged_vector
+            else 0,
             self.npairs_red,
             self.npairs_kept,
             self.wide_count,
@@ -964,6 +1045,7 @@ class TileReduce:
             self.gidx_from,
             self.flat_tail,
             self.ragged_chunk,
+            self.ragged_vector,
             self.general_tree_count,
             self.col_group,
             self.order,
@@ -1867,6 +1949,18 @@ class TileReduce:
             )
         elif const_expr(self.use_tma):
             accs = (self._fold_tma(mIns[0], tma_atom, bx, tx),)
+        elif const_expr(self.ragged_vector):
+            acc = fold_row_aligned(
+                trait,
+                mIns[0],
+                unit,
+                self.tm,
+                lane,
+                Int32(const_expr(self.N)),
+                const_expr(self.unroll),
+            )
+            acc = merge_lanes(trait, acc, const_expr(self.threads_per_row))
+            accs = (self._block_merge(acc),)
         elif const_expr(self.threads_per_row == 1):
             # One thread owns the row, so omit wave/lane arithmetic and its predicate.
             accs = (
