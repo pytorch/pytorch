@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -32,6 +33,31 @@ namespace c10d::symmetric_memory {
 
 // A set of exchange methods with prefix "CUDASymmetricMemory"
 static StoreExchange storeExchange = StoreExchange("CUDASymmetricMemory");
+
+namespace {
+
+// alloc() and a first-time rendezvous() both block the host on the current
+// stream (see the cudaStreamSynchronize calls below). That is not permitted
+// while the stream is capturing a CUDA graph; without this check the failure
+// surfaces as a bare cudaErrorStreamCaptureUnsupported from deep inside the
+// driver call, with nothing telling the caller what to change. The check
+// goes through the caching allocator's capture tracking, so an eager call
+// costs a counter read rather than a driver query.
+void check_not_capturing(
+    c10::DeviceIndex device,
+    const std::string& op,
+    const char* hint) {
+  if (C10_LIKELY(!c10::cuda::CUDACachingAllocator::isCaptureContext(device))) {
+    return;
+  }
+  TORCH_CHECK(
+      false,
+      op,
+      ": not supported while the current CUDA stream is capturing a graph. ",
+      hint);
+}
+
+} // namespace
 
 AllocationRef::AllocationRef(
     void* ptr,
@@ -80,6 +106,7 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
     std::vector<void*> buffers,
     std::vector<void*> signal_pads,
     void* mc_signal_pad_addr,
+    size_t barrier_state_offset,
     HandleType mc_handle,
     void* mc_addr,
     size_t buffer_size,
@@ -91,6 +118,7 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
       buffers_(std::move(buffers)),
       signal_pads_(std::move(signal_pads)),
       mc_signal_pad_addr_(mc_signal_pad_addr),
+      barrier_state_offset_(barrier_state_offset),
       mc_handle_(mc_handle),
       mc_addr_(mc_addr),
       buffer_size_(buffer_size),
@@ -191,10 +219,16 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
-  if (get_multicast_ptr() != nullptr) {
+  GroupStreamGuard stream_guard(pai_->group_name_, pg);
+  // The barrier state holds counters for groups of two or more ranks; see
+  // alloc().
+  if (get_multicast_ptr() != nullptr && world_size_ > 1) {
+    const auto state_offset = pai_->barrier_state_offset_;
     multimem_barrier_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-        static_cast<uint32_t*>(pai_->signal_pads_[rank_]),
-        static_cast<uint32_t*>(pai_->mc_signal_pad_addr_),
+        reinterpret_cast<uint32_t*>(
+            static_cast<char*>(pai_->signal_pads_[rank_]) + state_offset),
+        reinterpret_cast<uint32_t*>(
+            static_cast<char*>(pai_->mc_signal_pad_addr_) + state_offset),
         channel,
         rank_,
         world_size_,
@@ -236,6 +270,7 @@ void CUDASymmetricMemory::put_signal(
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
+  GroupStreamGuard stream_guard(pai_->group_name_, pg);
   put_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -271,6 +306,7 @@ void CUDASymmetricMemory::wait_signal(
       -1,
       world_size_);
   c10::cuda::CUDAGuard device_guard(local_device_idx_);
+  GroupStreamGuard stream_guard(pai_->group_name_, pg);
   wait_signal_kernel<<<
       1,
       at::cuda::warp_size(),
@@ -320,24 +356,48 @@ Block::Block(
 namespace {
 using Expandable_Segments_Handle_Type =
     c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type;
+
+// The region in front of the data buffer: the signal pad, then the multimem
+// barrier's state with one arrival counter per channel. The group, and with it
+// the channel count, is not known until rendezvous, but barrier() only uses
+// this state for groups of two or more ranks, which have at most pad / 8
+// channels, so half the pad holds every counter. The pad takes two units of
+// half its size and the state one.
+size_t front_region_size(size_t signal_pad_size) {
+  return 3 * at::round_up((signal_pad_size + 1) / 2, signal_pad_alignment);
 }
 
-// Allocates a symmetric-memory region laid out as [signal pad | data buffer]:
-// the signal pad occupies [0, buffer_offset) and the user data buffer starts at
-// buffer_offset. Returns the data buffer pointer (alloc_base + buffer_offset),
-// NOT the allocation base -- the signal pad stays hidden in front, and
-// free()/rendezvous() key off this returned data pointer.
+// The barrier state's offset follows from the front region's size alone, which
+// rendezvous checks is the same on every rank.
+size_t barrier_state_offset(size_t buffer_offset) {
+  TORCH_INTERNAL_ASSERT(buffer_offset % 3 == 0);
+  return buffer_offset / 3 * 2;
+}
+} // namespace
+
+// Allocates a symmetric-memory region laid out as
+// [signal pad | barrier state | data buffer]: the signal pad takes the first
+// two thirds of [0, buffer_offset) and the multimem barrier's state the last
+// third, and the user data buffer starts at buffer_offset. Returns the data
+// buffer pointer (alloc_base + buffer_offset), NOT the allocation base -- the
+// signal pad stays hidden in front, and free()/rendezvous() key off this
+// returned data pointer.
 void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
     const std::optional<std::string>& group_name) {
-  // buffer_offset is the signal pad size rounded up to signal_pad_alignment so
-  // the data buffer stays aligned.
-  size_t buffer_offset =
-      at::round_up(get_signal_pad_size(), signal_pad_alignment);
+  // Kernels outside PyTorch index the pad as world_size * channel + src, so
+  // PyTorch's own barrier state stays out of it; see front_region_size().
+  const size_t buffer_offset = front_region_size(get_signal_pad_size());
   size_t block_size = buffer_offset + at::round_up(size, 16UL);
   c10::cuda::CUDAGuard guard(device_idx);
   device_idx = static_cast<int>(guard.current_device().index());
+  check_not_capturing(
+      static_cast<c10::DeviceIndex>(device_idx),
+      "CUDASymmetricMemoryAllocator::alloc",
+      "Allocation maps the block, zeroes the signal pad and synchronizes the "
+      "stream. Allocate the buffer with "
+      "torch.distributed._symmetric_memory.empty() before starting capture.");
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   CUmemAllocationProp prop = {};
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -404,10 +464,10 @@ void* CUDASymmetricMemoryAllocator::alloc(
   void* alloc_base = nullptr;
   map_block(&alloc_base, handle, block_size, device_idx);
 
-  // Zero the signal pad (at the front, [0, buffer_offset)) to initialize it for
-  // the CAS-based barrier() protocol; the data buffer that follows does not
-  // need zeroing. Zero on the current stream, then sync so the signal pad is
-  // fully zeroed before rendezvous can expose it to peers.
+  // Zero the signal pad and the barrier state ([0, buffer_offset)): both
+  // barrier() protocols start from zero. The data buffer that follows does not
+  // need zeroing. Zero on the current stream, then sync so the region is fully
+  // zeroed before rendezvous can expose it to peers.
   auto stream =
       at::cuda::getCurrentCUDAStream(static_cast<c10::DeviceIndex>(device_idx));
   AT_CUDA_CHECK(cudaMemsetAsync(alloc_base, 0, buffer_offset, stream));
@@ -1048,6 +1108,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       std::move(buffers),
       std::move(signal_pads),
       mc_signal_pad_addr,
+      barrier_state_offset(block->buffer_offset),
       mc_handle,
       mc_buffer_addr,
       block->buffer_size,
@@ -1095,6 +1156,17 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   // If found, this block has been rendezvous by the given group
   auto it = block->symm_mems.find(group_name_);
   if (it == block->symm_mems.end()) {
+    // The first rendezvous of a block exchanges handles across processes,
+    // uploads the peer pointer tables and synchronizes the stream (see
+    // CUDAPeerAllocInfo::CUDAPeerAllocInfo). None of that can be captured, so
+    // refuse up front. Later calls hit the cache above and are capture-safe.
+    check_not_capturing(
+        static_cast<c10::DeviceIndex>(block->device_idx),
+        c10::str(
+            "CUDASymmetricMemory::rendezvous (group \"", group_name_, "\")"),
+        "Call torch.distributed._symmetric_memory.rendezvous(tensor, group) "
+        "and run the collective once eagerly before starting capture; later "
+        "calls on the same buffer reuse the cached handle.");
     // Create PeerAllocInfo for this block (this is the costly part)
     TORCH_INTERNAL_ASSERT(
         handle_type_ != Expandable_Segments_Handle_Type::UNSPECIFIED)
