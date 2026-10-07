@@ -110,6 +110,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
+from .object_protocol import python_constant_repr_impl
 from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
     maybe_reconstruct_decorator_ctx_manager_clone,
@@ -2959,8 +2960,6 @@ class SkipFunctionVariable(VariableTracker):
         )
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -3685,8 +3684,6 @@ class FunctoolsPartialVariable(VariableTracker):
         return result
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -3850,8 +3847,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         return self.fn
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -5134,8 +5129,6 @@ class StaticMethodVariable(VariableTracker):
         codegen.extend_output(create_call_function(1, False))
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -5249,8 +5242,6 @@ class ClassMethodVariable(VariableTracker):
         codegen.extend_output(create_call_function(1, False))
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -5737,6 +5728,4 @@ class TupleGetterVariable(VariableTracker):
         raise_observed_exception(AttributeError, tx, args=[msg])
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)

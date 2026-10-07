@@ -76,6 +76,7 @@ from .object_protocol import (
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
+    python_constant_repr_impl,
     type_implements_nb_index,
     vt_is_iterable,
 )
@@ -2262,8 +2263,6 @@ class ByteArrayVariable(VariableTracker):
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # bytearray_str warns under -b (BytesWarning), then returns the repr.
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx, str)
 
     def nb_remainder_impl(

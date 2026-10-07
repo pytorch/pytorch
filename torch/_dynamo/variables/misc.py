@@ -87,7 +87,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import mro_attr_source
+from .object_protocol import mro_attr_source, python_constant_repr_impl
 from .user_defined import (
     call_random_fn,
     is_standard_setattr,
@@ -500,8 +500,6 @@ class SuperVariable(VariableTracker):
         )
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -688,8 +686,6 @@ class CellVariable(VariableTracker):
         )
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -1500,8 +1496,6 @@ class GetAttrVariable(VariableTracker):
         return super().mp_subscript_impl(tx, key)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -1571,8 +1565,6 @@ class CallMethodVariable(VariableTracker):
         codegen.extend_output(codegen.create_load_attrs(self.method_name))
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -1622,8 +1614,6 @@ class PythonModuleVariable(VariableTracker):
         return VariableTracker.build(tx, attr_value, source)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -1747,8 +1737,6 @@ class TypingVariable(VariableTracker):
         codegen.append_output(codegen.create_load_const(self.value))
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -2281,8 +2269,6 @@ class LoggingLoggerVariable(VariableTracker):
         )
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
@@ -2562,8 +2548,6 @@ class RandomClassVariable(VariableTracker):
         )
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
