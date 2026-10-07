@@ -912,8 +912,8 @@ def foreach_reduce_scatter_copy_in(
     # parameter's grad_dtype policy (default: the parameter's dtype), so a group
     # can mix dtypes, e.g. bf16 weights with fp32 norms. Uniform groups run the
     # same _chunk_cat kernels as fsdp.chunk_cat, at the same cost. On CUDA, mixed
-    # bf16/fp32 groups run that kernel once per input dtype, casting during the
-    # copy-in; other mixes cast each gradient first.
+    # bf16/fp32 and fp16/fp32 groups run that kernel once per input dtype, casting
+    # during the copy-in; other mixes cast each gradient first.
     torch.ops.fsdp.chunk_cat_mixed_dtype(
         unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
     )
