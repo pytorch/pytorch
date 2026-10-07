@@ -377,6 +377,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 make_config(64, 4, num_warps=8),
             ]
             + scalar_acc_configs
+            + self._get_strided_reduction_configs(
+                size_hints, inductor_meta, rnumel, register_intensive, warp_size
+            )
         )
 
         return self._finalize_configs(
@@ -549,6 +552,52 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             num_dynamic,
             register_intensive,
         )
+
+    def _get_strided_reduction_configs(
+        self, size_hints, inductor_meta, rnumel, register_intensive, warp_size
+    ) -> list[Config]:
+        """
+        Extra candidate for reductions over a non-contiguous dim, e.g. sum(0)
+        of a row-major [R, N] tensor. These want a wide x tile for coalescing
+        and a deep R0_BLOCK, which no other candidate provides:
+        _adapt_config_for_tiling keeps a reduction dim with zero tiling score
+        at its minimum block of 4, and the 2D candidates pair a wide x tile
+        with at most R0_BLOCK=64.
+        """
+        from torch._inductor.runtime.triton_heuristics import (
+            triton_config_reduction,
+            triton_config_tiled_reduction,
+        )
+
+        if "y" in size_hints:
+            tiling_scores = _get_tiling_scores(inductor_meta, size_hints)
+            if any(
+                tiling_scores.get(dim, 0)
+                for dim in size_hints
+                if prefix_is_reduction(dim)
+            ):
+                return []
+            return [
+                triton_config_tiled_reduction(
+                    size_hints,
+                    32,
+                    1,
+                    min(rnumel, 128),
+                    register_intensive=register_intensive,
+                    warp_size=warp_size,
+                )
+            ]
+        if rnumel < 1024:
+            return []
+        return [
+            triton_config_reduction(
+                size_hints,
+                32,
+                128,
+                register_intensive=register_intensive,
+                warp_size=warp_size,
+            )
+        ]
 
     def _finalize_configs(self, configs, make_config, size_hints, inductor_meta):
         """Post-process non-persistent configs."""
@@ -752,6 +801,12 @@ class ROCmReductionHeuristic(ReductionHeuristic):
     ):
         # HIP uses simple outer config (no outer_config_opt)
         return make_config(64, 8, register_intensive=register_intensive)
+
+    def _get_strided_reduction_configs(
+        self, size_hints, inductor_meta, rnumel, register_intensive, warp_size
+    ):
+        # Only tuned on CUDA
+        return []
 
     def _finalize_configs(self, configs, make_config, size_hints, inductor_meta):
         hip_configs = [
