@@ -19,12 +19,6 @@ MPSDevice::~MPSDevice() {
 }
 
 MPSDevice::MPSDevice() : _mtl_device(nil) {
-  // MPS backend requires macOS 15.0+
-  if (![[NSProcessInfo processInfo]
-          isOperatingSystemAtLeastVersion:{.majorVersion = 15, .minorVersion = 0, .patchVersion = 0}]) {
-    return;
-  }
-
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0; i < [devices count]; i++) {
     id<MTLDevice> device = devices[i];
