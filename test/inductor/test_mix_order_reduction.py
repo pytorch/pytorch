@@ -459,6 +459,37 @@ class MixOrderReductionTest(TestBase):
         check_one_split_size(8)
         check_one_split_size(16)
 
+    @inductor_config.patch("triton.mix_order_reduction_autotune_split_size", True)
+    def test_split_size_autotune_times_finish(self):
+        """Split-size autotuning also times the wrapper's finish of the
+        partials, not just the kernel."""
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+        from torch._inductor.codegen.simd import SIMDScheduling
+
+        sources = []
+        generate = SIMDScheduling._generate_kernel_code_for_mix_order_reduction
+
+        def spy(self, kernel, for_benchmark):
+            ws_name, src_code = generate(self, kernel, for_benchmark)
+            if for_benchmark:
+                sources.append(src_code)
+            return ws_name, src_code
+
+        def f(x):
+            return x.sum(dim=-1), x.sum(dim=0)
+
+        x = torch.randn(32768, 768, dtype=torch.float, device=GPU_TYPE)
+        with mock.patch.object(
+            SIMDScheduling, "_generate_kernel_code_for_mix_order_reduction", spy
+        ):
+            self.check_numeric(f, (x,))
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        self.assertTrue(sources)
+        for src in sources:
+            call = src.split("def call(args):")[1].split("def benchmark_all_configs")[0]
+            FileCheck().check(".run(").check(".view(").check(".sum(dim=0)").run(call)
+
     @inductor_config.patch(split_reductions=False)
     def test_non_contiguous_input(self):
         def f(x):

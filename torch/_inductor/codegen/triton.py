@@ -7597,6 +7597,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
                 )
+                self.codegen_benchmark_post_call(result, call_args, signature)
 
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
@@ -7630,6 +7631,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
         return result
+
+    def codegen_benchmark_post_call(
+        self, result: IndentedBuffer, call_args: list[str], signature: list[Any]
+    ) -> None:
+        """Hook to emit code the benchmark times along with the kernel launch."""
+        if not (self.mix_order_reduction and self.saved_partial_accumulate):
+            return
+        # Also time the wrapper's finish of the mix-order partials.
+        idx = next(
+            i for i, sig in enumerate(signature) if isinstance(sig, WorkspaceArg)
+        )
+        numel, rnumel = (
+            V.graph.sizevars.optimization_hint(self.numels[prefix])
+            for prefix in ("x", "r0_")
+        )
+        nsplit = (numel + self.rsplit_size - 1) // self.rsplit_size
+        for i, partial_accum in enumerate(self.saved_partial_accumulate):
+            start, end = i * nsplit * rnumel, (i + 1) * nsplit * rnumel
+            result.writeline(
+                f"args[{idx}][{start}:{end}].view({nsplit}, {rnumel})"
+                f".{partial_accum.reduction_type}(dim=0)"
+            )
 
     def imports_for_benchmark_kernel(self):
         # Dedent BEFORE substituting get_raw_stream: a multi-line override would
