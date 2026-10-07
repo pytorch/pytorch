@@ -17,6 +17,7 @@ from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from typing import Any, cast, TYPE_CHECKING, TypeVar
+from typing_extensions import override
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -1339,6 +1340,15 @@ class TritonOverrides(OpOverrides):
     _LOG_2_E = math.log2(math.e)
 
     @staticmethod
+    def _strict_cuda_pointwise() -> bool:
+        return (
+            config.strict_pointwise
+            and torch.version.hip is None
+            and V.graph.get_current_device_or_throw().type == "cuda"
+        )
+
+    @staticmethod
+    @override
     def to_dtype(
         x,
         dtype: torch.dtype,
@@ -1390,6 +1400,15 @@ class TritonOverrides(OpOverrides):
         ):
             x = f"triton_helpers.fp8e4m3fn_to_float32({x})"
             src_dtype = torch.float32
+
+        if (
+            dtype in (torch.uint8, torch.int8, torch.int16)
+            and (src_dtype is None or src_dtype.is_floating_point)
+            and TritonOverrides._strict_cuda_pointwise()
+        ):
+            # CUDA narrows through int32; c10 routes uint8 through int64 instead.
+            intermediate = "tl.int64" if dtype == torch.uint8 else "tl.int32"
+            return f"{x}.to({intermediate}).to({triton_type(dtype)})"
 
         if dtype == torch.bool:
             return f"({x} != 0)"
@@ -1594,6 +1613,10 @@ class TritonOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + 1"
         elif bug is None:
+            if TritonOverrides._strict_cuda_pointwise():
+                # Eager preserves the input's negative zero and NaN payload.
+                zero = ops.constant(0, torch.int32)
+                return ops.where(ops.lt(x, zero), zero, x)
             return ops.maximum(ops.constant(0, torch.int32), x)
         else:
             raise AssertionError(
@@ -2273,6 +2296,9 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sigmoid(x):
+        if TritonOverrides._strict_cuda_pointwise():
+            # CUDA eager uses exp and correctly rounded division at opmath precision.
+            return f"libdevice.rcp_rn(1.0 + libdevice.exp(-({x})))"
         return f"tl.sigmoid({x})"
 
     @staticmethod
@@ -6422,11 +6448,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         shape=accumulator.shape,
                     )
 
+                # Cast the int8 result back to tl.int1, otherwise result_var is
+                # tracked as torch.bool but holds int8 (e.g. `~` yields -2, not 0)
                 final_reduction_define(
                     self.post_loop_combine,
                     cast(CSEVariable, result_var),
                     accumulator,
-                    None,
+                    torch.bool if src_dtype == torch.bool else None,
                 )
 
         if self.cooperative_reduction:
