@@ -17,10 +17,9 @@ namespace at::impl {
 //               via torch._decomp._add_op_to_registry
 //   - OpImpl:   the exact-identity tier of
 //               torch._subclasses.fake_impls.op_implementations_dict, via
-//               register_op_impl / _deregister_op_impl, minus ops whose C++
-//               meta kernel is used instead (see cpp_meta_supports_symint_ops).
-//               (Predicate-based op_impls are matched separately in
-//               fakeFallback and are not mirrored here.)
+//               register_op_impl / _deregister_op_impl. (Predicate-based
+//               op_impls are matched separately in fakeFallback and are not
+//               mirrored here.)
 //   - PrimMeta: prims ops that define a prim_meta_impl, via torch._prims
 //
 // This does not store the Python callables and is backed by c10::LeftRight
