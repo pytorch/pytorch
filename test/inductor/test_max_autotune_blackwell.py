@@ -1147,21 +1147,23 @@ class TestBlackwellTMALoadFusion(TestCase):
             "dynamic",
             "cpp_wrapper",
             "fp32",
-            "wide_n",
+            "var_mean_wide",
         ),
     )
     def test_blackwell_mm_row_reduction_epilogue_not_fused(self, case: str):
         """The reduction stays unfused when the flag is off, when the fused
         kernel benchmarks slower or isn't benchmarked, for arg reductions,
         configs that can't host it (EPILOGUE_SUBTILE > 1, data partitioning,
-        2CTA), dynamic shapes, cpp_wrapper, fp32 outputs,
-        and tiles narrower than N."""
+        2CTA), dynamic shapes, cpp_wrapper, fp32 outputs, and welford
+        reductions of tiles narrower than N, which can't finish from
+        partials."""
         fn = {
             "max_values": lambda a, b: (a @ b).float().max(-1).values,
             "argmax": lambda a, b: (a @ b).argmax(-1),
+            "var_mean_wide": lambda a, b: torch.var_mean((a @ b).float(), -1),
         }.get(case, self.ROW_OPS["sum"])
         # With N == 8, BLOCK_N is clamped to 16, so one of two subtiles spans N.
-        M, K, N = 1024, 512, {"wide_n": 256, "subtile": 8}.get(case, 128)
+        M, K, N = 1024, 512, {"subtile": 8, "var_mean_wide": 256}.get(case, 128)
         test_config = BlackwellGPUGemmConfig(
             128,
             128,
@@ -1204,7 +1206,9 @@ class TestBlackwellTMALoadFusion(TestCase):
             fused_ms=1e6 if case == "unprofitable" else 0.0,
             **patches,
         )
-        self.assertEqual(actual, fn(a, b), atol=0, rtol=0)
+        # var_mean's division may be reassociated.
+        tol = 1e-5 if case == "var_mean_wide" else 0
+        self.assertEqual(actual, fn(a, b), atol=tol, rtol=tol)
         kernels = re.findall(r"def (triton_\w+)\(", code[0])
         self.assertTrue(any(k.startswith("triton_tem") for k in kernels), kernels)
         self.assertTrue(
@@ -1243,7 +1247,8 @@ class TestBlackwellTMALoadFusion(TestCase):
             **{"triton.template_reduction_epilogue": True, "split_reductions": split},
         )
         self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
-        # Nodes reading the finished column results stay unfused.
+        # Nodes reading the finished column results run after the template as
+        # separate kernels.
         self.assertEqual(len(kernels), 2 if op in ("mean", "center") else 1, kernels)
 
     @unittest.skipIf(
@@ -1330,6 +1335,113 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    @parametrize(
+        "op",
+        (
+            "sum",
+            "amax",
+            "sum_and_out",
+            "extra_input",
+            "row_col",
+            "mean",
+            "mean_and_sqmean",
+            "center",
+        ),
+    )
+    @parametrize("M", (1000, 4096))
+    @parametrize("N", (200, 512))
+    def test_blackwell_mm_row_reduction_epilogue_wide_n(self, op: str, M: int, N: int):
+        """Row reductions of an output wider than the tile fuse as per-tile
+        partials that the wrapper finishes."""
+        fn = {
+            "sum": lambda a, b: (a @ b).float().sum(1),
+            # Every row is negative, so unmasked out-of-range columns would win.
+            "amax": lambda a, b: ((a @ b) - 100).amax(1),
+            "sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(1)),
+            "extra_input": lambda a, b: ((a @ b).float() * b[0].float()).sum(1),
+            "row_col": lambda a, b: ((c := (a @ b).float()).sum(0), c.sum(1)),
+            "mean": lambda a, b: (a @ b).float().mean(1),
+            "mean_and_sqmean": lambda a, b: (
+                (c := (a @ b).float()).mean(1),
+                (c * c).mean(1),
+            ),
+            "center": lambda a, b: (c := (a @ b).float()) - c.sum(1, keepdim=True),
+        }[op]
+        kernels, _ = self._run_reduction(
+            fn,
+            M,
+            128,
+            N,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            tol=1e-5 if "mean" in op else 0,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        # The reductions fuse; nodes reading their finished results run after.
+        after = op in ("mean", "mean_and_sqmean", "center")
+        self.assertEqual(
+            [k.split("_fused")[0] for k in kernels],
+            ["triton_tem", "triton_poi"] if after else ["triton_tem"],
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_row_reduction_epilogue_wide_n_unfused_kernels(self):
+        """Nodes reading the finished partials of two row reductions run as two
+        kernels after the template. Both read buffers whose last use is the
+        template's node, which must stay alive until the second has run."""
+        kernels, _ = self._run_reduction(
+            lambda a, b: (
+                (c := (a @ b).float()).mean(1),
+                c * torch.rsqrt((c * c).mean(1, keepdim=True) + 1),
+            ),
+            1000,
+            128,
+            200,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            tol=1e-5,
+            # The kernels after the template are benchmarked for real on top of
+            # fused_ms, so offset them for the fusion to always win.
+            fused_ms=-1.0,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertEqual(
+            [k.split("_fused")[0] for k in kernels],
+            ["triton_tem", "triton_poi", "triton_poi"],
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_row_reduction_epilogue_wide_n_chained(self):
+        """A row reduction reading the finished result of another can't run in
+        the kernel that stores the first one's partials."""
+
+        def fn(a, b):
+            y = (a @ b).float()
+            z = y - y.mean(-1, keepdim=True)
+            return (z * z).sum(-1)
+
+        kernels, _ = self._run_reduction(
+            fn,
+            1024,
+            128,
+            2048,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            tol=1e-5,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertTrue(kernels[0].startswith("triton_tem"), kernels)
+        self.assertTrue(
+            any(k.startswith(("triton_per", "triton_red")) for k in kernels), kernels
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     @parametrize("op", ("sum", "gated", "amax_sum", "mean", "sum_and_out"))
     # At 4096x128 the split column reduction's group equals the output's; at
     # 65536 the two reductions form a mix-order reduction when unfused.
@@ -1400,10 +1512,37 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    @parametrize("op", ("col_reads_row", "row_reads_col", "pw_reads_col"))
+    def test_blackwell_mm_row_and_col_reduction_epilogue_pw_reads_col(self):
+        """The column reduction fuses even when a pointwise node reads its
+        result. That node runs after the template, in the kernel the scheduler
+        already fused it into with the row reduction."""
+
+        def fn(a, b):
+            c = (a @ b).float()
+            s = c.sum(0)
+            return s, c * s, c.sum(1)
+
+        kernels, _ = self._run_reduction(
+            fn,
+            1024,
+            128,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertEqual(len(kernels), 2, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertIn("sum", kernels[0])
+        self.assertTrue(kernels[1].startswith("triton_per"), kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("col_reads_row", "row_reads_col"))
     def test_blackwell_mm_row_and_col_reduction_epilogue_not_fused(self, op: str):
-        """A column reduction may not read a row result, and nothing may read a
-        column result, since column results finish after the kernel."""
+        """A column reduction may not read a row result, and no reduction may
+        read a column result, since column results finish after the kernel."""
         fn = {
             "col_reads_row": lambda a, b: (
                 (d := (c := (a @ b).float()) - c.sum(1, keepdim=True)),
@@ -1412,11 +1551,6 @@ class TestBlackwellTMALoadFusion(TestCase):
             "row_reads_col": lambda a, b: (
                 (s := (c := (a @ b).float()).sum(0)),
                 (c * s).sum(1),
-            ),
-            "pw_reads_col": lambda a, b: (
-                (s := (c := (a @ b).float()).sum(0)),
-                c * s,
-                c.sum(1),
             ),
         }[op]
         kernels, _ = self._run_reduction(
@@ -1433,20 +1567,26 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    def test_blackwell_mm_reduction_epilogue_benchmark_times_finish(self):
-        """The benchmark harness of a kernel with column reduction partials also
-        runs the wrapper's finish, so epilogue benchmarking pays for it."""
+    @parametrize("op", ("col", "row_wide"))
+    def test_blackwell_mm_reduction_epilogue_benchmark_times_finish(self, op: str):
+        """The benchmark harness of a kernel with reduction partials also runs
+        the wrapper's finish, so epilogue benchmarking pays for it."""
+        fn, n = {
+            "col": (self.COL_OPS["sum"], 128),
+            "row_wide": (lambda a, b: (a @ b).float().sum(1), 256),
+        }[op]
         _, code = self._run_reduction(
-            self.COL_OPS["sum"],
+            fn,
             1024,
             128,
-            128,
+            n,
             BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
             **{"triton.template_reduction_epilogue": True, "benchmark_kernel": True},
         )
+        size = 1024 if op == "row_wide" else n
         finish = re.findall(
             r"\.run\(\*args, stream=\w+\)\n\s+args\[\d+\]\[\d+:\d+\]"
-            r"\.view\(torch\.float32\)\.view\(\d+, 128\)\.sum\(dim=0\)",
+            rf"\.view\(torch\.float32\)\.view\(\d+, {size}\)\.sum\(dim=0\)",
             code,
         )
         self.assertEqual(len(finish), 1, code)
@@ -1500,6 +1640,55 @@ class TestBlackwellTMALoadFusion(TestCase):
                 "split_reductions": False,
             },
         )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_reduction_epilogue_benchmark_wide_mix_order(self):
+        """An output wide enough that its column reduction isn't split forms
+        an unsplit mix-order reduction under the default config."""
+        self._run_reduction(
+            lambda a, b: ((y := (a @ b).float()).sum(0), y.sum(1)),
+            8192,
+            128,
+            16384,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True},
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_reduction_epilogue_benchmark_deferred_epilogue(self):
+        """Epilogue benchmarking also times the nodes run after the finish of
+        the reduction partials."""
+        from torch._inductor.scheduler import Scheduler
+
+        benchmarked = []
+        bench = Scheduler.benchmark_fused_nodes
+
+        def spy(self, nodes, *args, **kwargs):
+            benchmarked.append(nodes)
+            return bench(self, nodes, *args, **kwargs)
+
+        with mock.patch.object(Scheduler, "benchmark_fused_nodes", spy):
+            self._run_reduction(
+                lambda a, b: ((y := (a @ b).float()).mean(1), (y * y).mean(1)),
+                1024,
+                128,
+                256,
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                BlackwellGPUGemmConfig(128, 64, 64, 3, 8),
+                tol=1e-5,
+                **{
+                    "triton.template_reduction_epilogue": True,
+                    "benchmark_template_fusion": True,
+                },
+            )
+        deferred = [n for n in benchmarked if not any(x.is_reduction() for x in n)]
+        self.assertEqual(len(deferred), 1, benchmarked)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),

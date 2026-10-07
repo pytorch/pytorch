@@ -908,7 +908,7 @@ class TestScheduler(TestCase):
             (None, row, False),
             # Across epilogue subtiles.
             ((128, 32, 2), row, False),
-            # Across column tiles.
+            # Across column tiles, only reductions that finish from partials fit.
             ((128, 32, 1), row, False),
             # A column read: (M, N) matches (N, M), but the read isn't row-major.
             ((128, N, 1), reduction(x + N * r), False),
@@ -956,10 +956,10 @@ class TestScheduler(TestCase):
             ([pointwise(row_major), column], True),
             # The column pass transposes the stored tile.
             ([pointwise(MemoryDep("buf0", x + N * r, (x, r), (N, M))), column], False),
-            # The column result is only complete after the kernel.
+            # A reader of the column result runs after the kernel.
             (
                 [column, pointwise(row_major, MemoryDep("buf1", r, (x, r), (M, N)))],
-                False,
+                True,
             ),
         ]
         graph = Mock(sizevars=SizeVarAllocator(), cpp_wrapper=False)
@@ -1061,6 +1061,44 @@ class TestScheduler(TestCase):
             )
         autotune.assert_called_once()
         self.assertEqual(split_sizes[-1], 64)
+
+    def test_tile_fits_reduction_epilogue_chained_partials(self):
+        M = N = 64
+        x, r = sympy.symbols("x r", integer=True, nonnegative=True)
+        template = Mock()
+        template.get_size.return_value = [sympy.Integer(M), sympy.Integer(N)]
+        template.get_name.return_value = "buf0"
+
+        def node(name, reads, reduction):
+            node = self._mock_base_snode(name)
+            node.is_reduction.return_value = reduction
+            node.group = ("cuda", (M, N) if reduction else (M * N, sympy.S.One))
+            node.get_buffer_names.return_value = OrderedSet([name])
+            node.read_writes.reads = OrderedSet(
+                MemoryDep(dep, index, (x, r), (M, N)) for dep, index in reads
+            )
+            return node
+
+        mean = node("buf1", [("buf0", N * x + r)], True)
+        center = node("buf2", [("buf0", N * x + r), ("buf1", x)], False)
+        sq_sum = node("buf3", [("buf2", N * x + r)], True)
+        # Row reductions of tiles narrower than N store partials. center reads
+        # mean's finished result, so it runs after the kernel, and so must
+        # sq_sum, which reads center.
+        tile = (128, 32, 1)
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            patch(
+                "torch._inductor.codegen.simd.finishes_from_partials",
+                return_value=True,
+            ),
+        ):
+            self.assertTrue(
+                tile_fits_reduction_epilogue(tile, template, [mean, center])
+            )
+            self.assertFalse(
+                tile_fits_reduction_epilogue(tile, template, [mean, center, sq_sum])
+            )
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
