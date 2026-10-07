@@ -105,7 +105,7 @@ def _enable_from_env() -> None:
     Never raises: the variable is process-wide and usually set by a launcher,
     so a stale value or a missing package must not break ``import torch``.
     """
-    if os.environ.get(ENV_VAR, "") not in ("1", "true", "True"):
+    if os.environ.get(ENV_VAR, "0") != "1":
         return
     try:
         enable()
