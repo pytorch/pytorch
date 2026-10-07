@@ -1104,12 +1104,19 @@ def _get_linux_aarch64_arch_flag(cpp_compiler: str) -> str:
         if OrderedSet(["bf16", "sve"]).issubset(flags):
             return "march=armv8.6-a+sve+bf16"
 
-    # GCC does not support SME without SVE2, and GCC 15 enables SME under
-    # -march=native, so CPUs with SME but no SVE2 (e.g. Apple M4 in a Linux VM)
-    # fail every compile with "no support for 'sme' without 'sve2'". GCC also
-    # rejects -march=native+nosme, so spell out the detected extensions instead.
-    # Any SME CPU implements Armv9.2, so the armv8.2-a base is always available.
-    if _is_gcc(cpp_compiler) and "sme" in flags and "sve2" not in flags:
+    # GCC 15 enables SME under -march=native but does not support SME without
+    # SVE2, so CPUs with SME but no SVE2 (e.g. Apple M4 in a Linux VM) fail every
+    # compile with "no support for 'sme' without 'sve2'". GCC 16 supports this
+    # combination. GCC also rejects -march=native+nosme, so spell out the detected
+    # extensions instead. Any SME CPU implements Armv9.2, so the armv8.2-a base is
+    # always available.
+    if (
+        _is_gcc(cpp_compiler)
+        and not _is_gcc_version_less_than(cpp_compiler, 15)
+        and _is_gcc_version_less_than(cpp_compiler, 16)
+        and "sme" in flags
+        and "sve2" not in flags
+    ):
         extensions = [
             gcc_name
             for capability, gcc_name in _AARCH64_GCC_EXTENSIONS.items()
