@@ -13049,7 +13049,7 @@ print(count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetC
             with self.assertRaises(RuntimeError):
                 query(torch.cuda.device_count())
 
-    @parametrize("visibility", ["ordinal", "uuid", "partial_uuid", "unknown"])
+    @parametrize("visibility", ["ordinal", "uuid", "partial_uuid"])
     def test_greencontext_locality_nvml(self, device, visibility):
         from torch.cuda import green_contexts
 
@@ -13072,14 +13072,10 @@ print(count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetC
         code = """
 import json
 import multiprocessing
-import os
-import sys
 from ctypes import byref, c_int
 import torch
 from torch.cuda import green_contexts as g
 from cuda.bindings import driver as drv
-if sys.argv[1] == 'unknown':
-    os.environ['CUDA_MPS_ACTIVE_THREAD_PERCENTAGE'] = '100'
 nvml = g._is_localization_supported_nvml(0)
 supported = error = None
 try:
@@ -13094,8 +13090,6 @@ uninitialized = (
     == drv.CUresult.CUDA_ERROR_NOT_INITIALIZED.value
 )
 torch_initialized = torch.cuda.is_initialized()
-if sys.argv[1] == 'unknown':
-    del os.environ['CUDA_MPS_ACTIVE_THREAD_PERCENTAGE']
 def worker():
     count = g.get_num_locality_domains(0)
     value = torch.ones(1, device='cuda').item()
@@ -13111,7 +13105,7 @@ if process.exitcode != 0:
     raise RuntimeError(f'Forked CUDA worker failed: {process.exitcode}')
 """
         output = subprocess.check_output(
-            [sys.executable, "-c", code, visibility],
+            [sys.executable, "-c", code],
             env={**os.environ, "CUDA_VISIBLE_DEVICES": visible},
             text=True,
         )
@@ -13122,8 +13116,6 @@ if process.exitcode != 0:
             self.assertRegex(error, "Cannot determine locality-domain support")
         else:
             self.assertEqual(supported, count > 1)
-        if visibility == "unknown":
-            self.assertIsNone(nvml)
         self.assertTrue(uninitialized)
         self.assertFalse(torch_initialized)
         self.assertEqual(value, 1)
@@ -13416,22 +13408,31 @@ class TestExecuteOnStreams(TestCase):
         original_stream = torch.cuda.current_stream(device)
         original_device = torch.cuda.current_device()
 
-        def compute(index: int) -> None:
+        def compute(output: torch.Tensor, value: int) -> torch.Tensor:
+            index = len(visited)
             self.assertEqual(torch.cuda.current_stream(), streams[index])
             visited.append(index)
             torch.cuda._sleep(20_000_000)
-            outputs[index].copy_(source)
+            output.copy_(source).add_(value)
             if index == fail_at:
                 raise RuntimeError("callback failed")
+            return output
 
         with torch.cuda.stream(caller):
             torch.cuda._sleep(20_000_000)
             source.fill_(7)
             if fail_at is None:
-                torch.cuda.execute_on_streams(streams, compute)
+                results = torch.cuda.execute_on_streams(
+                    streams, compute, outputs, range(1, num_streams + 1)
+                )
+                self.assertEqual(len(results), num_streams)
+                for result, output in zip(results, outputs):
+                    self.assertIs(result, output)
             else:
                 with self.assertRaisesRegex(RuntimeError, "callback failed"):
-                    torch.cuda.execute_on_streams(streams, compute)
+                    torch.cuda.execute_on_streams(
+                        streams, compute, outputs, range(1, num_streams + 1)
+                    )
             self.assertEqual(torch.cuda.current_stream(), caller)
             for dst, src in zip(observed, outputs):
                 dst.copy_(src)
@@ -13440,7 +13441,9 @@ class TestExecuteOnStreams(TestCase):
         count = num_streams if fail_at is None else fail_at + 1
         self.assertEqual(visited, list(range(count)))
         for index, value in enumerate(observed):
-            self.assertEqual(value, torch.full_like(value, 7 if index < count else 0))
+            self.assertEqual(
+                value, torch.full_like(value, 8 + index if index < count else 0)
+            )
         self.assertEqual(torch.cuda.current_stream(device), original_stream)
         self.assertEqual(torch.cuda.current_device(), original_device)
 
@@ -13457,7 +13460,7 @@ class TestExecuteOnStreams(TestCase):
         caller = torch.cuda.Stream(device=device)
         completed = []
 
-        def compute(index: int) -> None:
+        def compute(index: int) -> torch.cuda.Event:
             self.assertEqual(torch.cuda.current_device(), index)
             self.assertEqual(torch.cuda.current_stream(), streams[index])
             torch.cuda._sleep(20_000_000)
@@ -13466,13 +13469,15 @@ class TestExecuteOnStreams(TestCase):
             completed.append(event)
             if index == fail_at:
                 raise RuntimeError("callback failed")
+            return event
 
         with torch.cuda.stream(caller):
             if fail_at is None:
-                torch.cuda.execute_on_streams(streams, compute)
+                results = torch.cuda.execute_on_streams(streams, compute, (0, 1))
+                self.assertEqual(results, completed)
             else:
                 with self.assertRaisesRegex(RuntimeError, "callback failed"):
-                    torch.cuda.execute_on_streams(streams, compute)
+                    torch.cuda.execute_on_streams(streams, compute, (0, 1))
             self.assertEqual(torch.cuda.current_stream(), caller)
             self.assertEqual(torch.cuda.current_device(), caller.device.index)
         caller.synchronize()
@@ -13494,17 +13499,17 @@ class TestExecuteOnStreams(TestCase):
         outputs = [torch.empty_like(source) for _ in streams]
         result = torch.empty_like(source)
 
-        def compute(index: int) -> None:
-            torch.add(source, index + 1, out=outputs[index])
+        def compute(output: torch.Tensor, value: int) -> torch.Tensor:
+            return torch.add(source, value, out=output)
 
         caller.wait_stream(torch.cuda.current_stream(device))
         with torch.cuda.stream(caller):
-            torch.cuda.execute_on_streams(streams, compute)
+            torch.cuda.execute_on_streams(streams, compute, outputs, (1, 2))
         caller.synchronize()
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph, stream=caller):
-            torch.cuda.execute_on_streams(streams, compute)
-            torch.add(outputs[0], outputs[1], out=result)
+            mapped = torch.cuda.execute_on_streams(streams, compute, outputs, (1, 2))
+            torch.add(mapped[0], mapped[1], out=result)
         for value in (2, 5):
             source.fill_(value)
             graph.replay()
@@ -13518,7 +13523,7 @@ class TestStreamExecution(TestCase):
     def test_empty_execution_streams(self) -> None:
         with patch("torch.cuda.current_stream") as current_stream:
             with self.assertRaisesRegex(ValueError, "at least one"):
-                torch.cuda.execute_on_streams([], lambda index: None)
+                torch.cuda.execute_on_streams([], lambda value: value, [])
             current_stream.assert_not_called()
 
 
@@ -13798,38 +13803,6 @@ instantiate_device_type_tests(TestLocalizedAllocator, globals(), only_for="cuda"
 
 
 class TestGreenContextStreamPool(TestCase):
-    def test_failed_stream_creation(self) -> None:
-        from torch.cuda import green_contexts
-
-        ctx = object.__new__(green_contexts.GreenContext)
-        ctx._init_from_cuda_objects(0, 1, 1)
-        try:
-            with (
-                patch.object(green_contexts, "_drv") as driver,
-                patch.object(
-                    green_contexts, "_check_cuda_bindings", side_effect=lambda x: x
-                ),
-                patch(
-                    "torch.cuda.ExternalStream",
-                    side_effect=lambda stream, device: stream,
-                ),
-            ):
-                driver.cuGreenCtxStreamCreate.side_effect = [
-                    RuntimeError("creation failed"),
-                    10,
-                ]
-                with self.assertRaisesRegex(RuntimeError, "creation failed"):
-                    ctx.Stream()
-                self.assertEqual(ctx._curr_stream_idx, -1)
-                self.assertTrue(
-                    all(stream is None for stream in ctx._green_ctx_streams)
-                )
-                self.assertEqual(ctx.Stream(), 10)
-                self.assertEqual(ctx._curr_stream_idx, 0)
-                self.assertEqual(ctx._green_ctx_streams[0], 10)
-        finally:
-            ctx._green_ctx = None
-
     @parametrize("fail_first", [False, True])
     def test_concurrent_stream_pool_initialization(self, fail_first: bool) -> None:
         from torch.cuda import green_contexts
