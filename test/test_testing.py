@@ -1528,6 +1528,7 @@ class TestReportHelpers(TestCase):
         _assert_run_line(self, run, int(now * 1000), int(now * 1000))
         self.assertEqual(run["outcome_summary"], r"\ud800")
 
+    @skipIfTorchDynamo("Dynamo calls the patched torch._C function while tracing")
     def test_capture_skips_torch_accelerator(self) -> None:
         environment = importlib.import_module("torch.testing._internal.torchci.environment")
         with unittest.mock.patch.object(torch._C, "_accelerator_getAccelerator") as probe:
