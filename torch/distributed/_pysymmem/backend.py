@@ -260,10 +260,6 @@ class SymmemBackend(C10DBackend):
         return self._options
 
     @property
-    def supports_splitting(self) -> bool:
-        return True
-
-    @property
     def supports_coalescing(self) -> bool:
         return False
 
@@ -963,56 +959,6 @@ class SymmemBackend(C10DBackend):
             slot_typed = cast_buffer(src_slot, tensor)[: tensor.numel()]
             tensor.copy_(slot_typed.view(tensor.shape))
         return self._make_work()
-
-    def split(
-        self,
-        store: Store,
-        ranks: list[int],
-        opts: C10DBackend.Options | None = None,
-    ) -> "SymmemBackend | None":
-        ranks_list = list(ranks)
-        if len(set(ranks_list)) != len(ranks_list):
-            raise self._err("split: ranks list contains duplicates")
-        for r in ranks_list:
-            if not 0 <= r < self._size:
-                raise self._err(f"split: rank {r} out of range [0, {self._size})")
-
-        if self._rank not in ranks_list:
-            return None
-
-        sub_global_ranks = tuple(self._global_ranks[r] for r in ranks_list)
-        sub_rank = ranks_list.index(self._rank)
-        sub_size = len(ranks_list)
-
-        child = SymmemBackend.__new__(SymmemBackend)
-        C10DBackend.__init__(child, sub_rank, sub_size)
-        child._store = store
-        child._options = opts if opts is not None else C10DBackend.Options("symmem")
-        child._timeout = self._timeout
-        child._device = self._device
-        child._rank = sub_rank
-        child._size = sub_size
-        child._global_ranks = sub_global_ranks
-        child._world_rank = self._world_rank
-        child._world_size = self._world_size
-
-        if self._resources is None:
-            raise self._err("split: parent resources missing")
-        child._resources = self._resources
-        child._scratch_bytes = (
-            child._resources.workspace_bytes - child._world_size * _SEND_SLOT_BYTES
-        )
-        child._send_region_offset = child._scratch_bytes
-
-        chan_space = max(_SymmetricMemory.signal_pad_size // 4 - 32, 64)
-        h = hashlib.sha256(
-            ("sub_barrier:" + "_".join(map(str, sub_global_ranks))).encode()
-        ).digest()
-        child._barrier_channel = int.from_bytes(h[:4], "big") % chan_space + 16
-        child._sendrecv_channel_base = (
-            16 + _next_comm_id() * child._world_size * child._world_size
-        )
-        return child
 
     def shutdown(self) -> None:
         self._resources = None

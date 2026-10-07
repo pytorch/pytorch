@@ -440,7 +440,7 @@ class TestSymmemBackendCollectives(MultiProcessTestCase):
         self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
-    def test_split_single_rank(self):
+    def test_subgroup_single_rank(self):
         self._init_pg()
         subgroup = dist.new_group([0])
         if self.rank == 0:
@@ -452,7 +452,7 @@ class TestSymmemBackendCollectives(MultiProcessTestCase):
         self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
-    def test_split_all_ranks(self):
+    def test_subgroup_all_ranks(self):
         self._init_pg()
         subgroup = dist.new_group([0, 1])
         t = torch.ones(4, device=self.device) * (self.rank + 1)
