@@ -4,7 +4,6 @@ from typing import Any, TYPE_CHECKING
 
 import sympy
 
-import torch
 from torch._inductor import config
 from torch._inductor.heuristics.registry import register_template_heuristic
 
@@ -12,7 +11,7 @@ from ...ir import get_free_symbols
 from ...kernel.mm import decompose_k_subgraph_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
-from ...utils import get_k_splits
+from ...utils import ceildiv, get_k_splits
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
@@ -21,17 +20,24 @@ from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    import torch
+
 
 def decompose_k_split_bounds(device: torch.device) -> tuple[int, int]:
-    """Return (min_output_ctas, max_workspace_bytes) for decompose-K splits.
+    """Return (min_output_tiles, max_workspace_bytes) for decompose-K splits.
 
-    0 means unbounded. Tuned on B200 (SM100) and H100.
+    0 means unbounded. Tuned by timing every legal split against ATen on B200 and
+    H100 and checking that no split that beat ATen gets filtered out.
     """
     device_properties = DeviceProperties.create(device)
-    if device_properties.type != "cuda" or torch.version.hip is not None:
+    if device_properties.type != "cuda":
         return 0, 0
     if (device_properties.major or 0) >= 10:
+        # SM100+: ensure splits fill at least one wave, assuming two CTAs per output
+        # tile (decompose_k_min_output_tile_size).
         return (device_properties.multi_processor_count + 1) // 2, 0
+    # SM90 and earlier: prune splits that use more than 8 MiB of FP32 workspace (no
+    # split that beat ATen used more than ~5 MiB) or launch fewer than 8 output tiles.
     return 8, 8 * 1024 * 1024
 
 
@@ -39,10 +45,11 @@ def filter_decompose_k_splits(
     k_splits: list[int],
     m: int,
     n: int,
-    min_output_ctas: int,
+    tile_size: int,
+    min_output_tiles: int,
     max_workspace_bytes: int,
 ) -> list[int]:
-    """Drop split choices that rarely win: too few output CTAs or a large workspace.
+    """Drop split choices that rarely win: too few output tiles or a large workspace.
 
     Only removes candidates, and never all of them.
     """
@@ -51,11 +58,12 @@ def filter_decompose_k_splits(
         for split in k_splits
         if max_workspace_bytes <= 0 or split * m * n * 4 <= max_workspace_bytes
     ]
-    output_tiles = ((m + 63) // 64) * ((n + 63) // 64)
-    kept = [split for split in fits if split * output_tiles >= min_output_ctas]
+    output_tiles = ceildiv(m, tile_size) * ceildiv(n, tile_size)
+    kept = [split for split in fits if split * output_tiles >= min_output_tiles]
     if kept:
         return kept
-    # Keep the split closest to both bounds rather than dropping decompose-K.
+    # Rather than dropping decompose-K, keep the split closest to the tile bound that
+    # fits the workspace, else the one with the least workspace.
     if fits:
         return [max(fits)]
     return [min(k_splits)] if k_splits else []
@@ -106,19 +114,22 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         m, n, k = kernel_inputs.mnk_symbolic()
         k_splits = get_k_splits(m, n, k)
-        m_is_static = not isinstance(m, sympy.Expr) or bool(m.is_number)
-        n_is_static = not isinstance(n, sympy.Expr) or bool(n.is_number)
+        tile_size = config.triton.decompose_k_min_output_tile_size
         if (
-            config.triton.decompose_k_filter_splits
+            tile_size > 0
             and config.max_autotune_gemm_search_space != "EXHAUSTIVE"
-            and m_is_static
-            and n_is_static
+            and all(not isinstance(x, sympy.Expr) or x.is_number for x in (m, n, k))
         ):
-            min_output_ctas, max_workspace_bytes = decompose_k_split_bounds(
+            min_output_tiles, max_workspace_bytes = decompose_k_split_bounds(
                 kernel_inputs.device()
             )
             k_splits = filter_decompose_k_splits(
-                k_splits, int(m), int(n), min_output_ctas, max_workspace_bytes
+                k_splits,
+                int(m),
+                int(n),
+                tile_size,
+                min_output_tiles,
+                max_workspace_bytes,
             )
 
         for k_split in k_splits:

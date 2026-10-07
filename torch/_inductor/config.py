@@ -2398,11 +2398,11 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
-    # Drop decompose-K split choices that rarely win: too few estimated output
-    # CTAs or a large FP32 partial workspace, with per-device bounds. Not applied
-    # to the EXHAUSTIVE GEMM search space.
-    decompose_k_filter_splits: bool = (
-        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_FILTER_SPLITS", "1") == "1"
+    # Output tile size used to estimate how many tiles a decompose-K split launches,
+    # for pruning split choices that rarely win. 0 disables the pruning, which is
+    # also skipped for symbolic shapes and the EXHAUSTIVE search space.
+    decompose_k_min_output_tile_size: int = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_MIN_OUTPUT_TILE_SIZE", "64")
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
