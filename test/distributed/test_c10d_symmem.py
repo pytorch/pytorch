@@ -463,6 +463,23 @@ class TestSymmemBackendCollectives(MultiProcessTestCase):
         self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
+    def test_groups_with_same_ranks_have_distinct_workspaces(self):
+        self._init_pg()
+        first_group = dist.new_group([0, 1])
+        second_group = dist.new_group([0, 1])
+
+        first_backend = first_group._get_backend(self.device)
+        second_backend = second_group._get_backend(self.device)
+        self.assertNotEqual(
+            first_backend._workspace_tensor.data_ptr(),
+            second_backend._workspace_tensor.data_ptr(),
+        )
+
+        dist.destroy_process_group(first_group)
+        dist.destroy_process_group(second_group)
+        self._destroy_pg()
+
+    @skip_if_lt_x_gpu(2)
     def test_allgather_large(self):
         self._init_pg()
         n = 256 * 1024

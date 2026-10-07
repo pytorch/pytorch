@@ -127,7 +127,7 @@ class _GroupResources:
     _pointer_cache: object | None = field(default=None, init=False, repr=False)
 
 
-_ResourceKey = tuple[str, int | None, tuple[int, ...]]
+_ResourceKey = tuple[str, int | None, str]
 
 _GROUP_RESOURCES: dict[_ResourceKey, _GroupResources] = {}
 
@@ -242,6 +242,7 @@ class SymmemBackend(C10DBackend):
         )
 
         self._resources = self._get_or_create_resources(
+            group_id=str(dist_backend_opts.group_id),
             global_ranks=self._global_ranks,
             rank_in_group=rank,
             device=self._device,
@@ -371,13 +372,12 @@ class SymmemBackend(C10DBackend):
         return _SymmemWork(None, self._device)
 
     @staticmethod
-    def _resource_key(
-        global_ranks: tuple[int, ...], device: torch.device
-    ) -> _ResourceKey:
-        return (device.type, device.index, tuple(sorted(global_ranks)))
+    def _resource_key(group_id: str, device: torch.device) -> _ResourceKey:
+        return (device.type, device.index, group_id)
 
     def _get_or_create_resources(
         self,
+        group_id: str,
         global_ranks: tuple[int, ...],
         rank_in_group: int,
         device: torch.device,
@@ -385,7 +385,7 @@ class SymmemBackend(C10DBackend):
         workspace_bytes: int,
         timeout: timedelta,
     ) -> _GroupResources:
-        key = self._resource_key(global_ranks, device)
+        key = self._resource_key(group_id, device)
         cached = _GROUP_RESOURCES.get(key)
         if cached is not None:
             if cached.workspace_bytes < workspace_bytes:
@@ -397,7 +397,7 @@ class SymmemBackend(C10DBackend):
             return cached
 
         size = len(global_ranks)
-        group_name = "symmem_grp_" + "_".join(str(r) for r in sorted(global_ranks))
+        group_name = f"symmem_grp_{group_id}"
         prefix_store = PrefixStore(group_name + "/", root_store)
         pg_store = PrefixStore("pg/", prefix_store)
         pg = _build_process_group(
