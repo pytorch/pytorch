@@ -64,21 +64,6 @@ def _add_file(filename: str) -> None:
                 cur_name += "."
             cur_name += tokens[i + 1].string
         result[token.start[0]] = cur_name
-        if (
-            token.type == tokenize.NEWLINE
-            and significant_indents
-            and cur_indent == significant_indents[-1]
-        ):
-            next_token = i + 1
-            while next_token < len(tokens) and tokens[next_token].type in (
-                tokenize.COMMENT,
-                tokenize.NL,
-            ):
-                next_token += 1
-            if next_token == len(tokens) or tokens[next_token].type != tokenize.INDENT:
-                # A same-line body has no DEDENT to end its scope.
-                significant_indents.pop()
-                cur_name = cur_name.rpartition(".")[0]
 
     cache[filename] = result
 
