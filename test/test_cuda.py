@@ -100,7 +100,6 @@ from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
     skipIfRocmArch,
-    skipIfRocmVersionAtLeast,
     skipIfRocmVersionInRange,
     skipIfRocmVersionLessThan,
     slowTest,
@@ -149,6 +148,27 @@ if TEST_CUDA:
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
     TEST_BF16 = torch.cuda.is_bf16_supported()
+
+
+def skipIfNonPrimaryRocmPartition(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if TEST_WITH_ROCM and TEST_PYNVML:
+            import amdsmi
+
+            handle = torch.cuda._get_amdsmi_handler()
+            try:
+                kfd_info = amdsmi.amdsmi_get_gpu_kfd_info(handle)
+            except (AttributeError, amdsmi.AmdSmiException):
+                kfd_info = {}
+            partition = kfd_info.get("current_partition_id", 0)
+            if isinstance(partition, int) and partition != 0:
+                msg = f"no full-GPU amdsmi metrics on partition {partition}"
+                raise unittest.SkipTest(msg)
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
 
 _cycles_per_ms = None
 
@@ -8356,7 +8376,7 @@ print(value, end="")
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI350_ARCH)
+    @skipIfNonPrimaryRocmPartition
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
@@ -8397,9 +8417,8 @@ print(value, end="")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
-    @skipIfRocmVersionAtLeast([10, 1])  # ROCM-30651
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI350_ARCH)
+    @skipIfNonPrimaryRocmPartition
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
