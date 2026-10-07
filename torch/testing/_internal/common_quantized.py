@@ -5,6 +5,7 @@ tensors and modules.
 """
 import numpy as np
 import torch
+import torch.func._random as prng
 from torch import Tensor
 from torch.nn.functional import SwizzleType
 from contextlib import contextmanager
@@ -672,15 +673,205 @@ def _to_mx_rceil(
     return exponent, data_lp
 
 
+_PHILOX_M0 = 0xD2511F53
+_PHILOX_M1 = 0xCD9E8D57
+_PHILOX_W0 = 0x9E3779B9
+_PHILOX_W1 = 0xBB67AE85
+_UINT16_MASK = (1 << 16) - 1
+_UINT32_MASK = (1 << 32) - 1
+_UINT62_MASK = (1 << 62) - 1
+
+
+# Ported from quant_cast_bench/quant_cast_gold/utils.py.
+def _mulhilo_uint32(x, multiplier):
+    r"""Return the high and low halves of a uint32 product using safe int64 operations."""
+    x_lo = x & _UINT16_MASK
+    x_hi = x >> 16
+    multiplier_lo = multiplier & _UINT16_MASK
+    multiplier_hi = multiplier >> 16
+    product_lo = x_lo * multiplier_lo
+    product_cross_0 = x_lo * multiplier_hi
+    product_cross_1 = x_hi * multiplier_lo
+    product_hi = x_hi * multiplier_hi
+    carry = (
+        (product_lo >> 16)
+        + (product_cross_0 & _UINT16_MASK)
+        + (product_cross_1 & _UINT16_MASK)
+    )
+    lo = (product_lo & _UINT16_MASK) | ((carry & _UINT16_MASK) << 16)
+    hi = (
+        product_hi
+        + (product_cross_0 >> 16)
+        + (product_cross_1 >> 16)
+        + (carry >> 16)
+    ) & _UINT32_MASK
+    return hi, lo
+
+
+def _philox4x32_10_stateful_words(
+    seed, offset_words, intragraph_offset_words, word_count, device
+):
+    r"""Draw words using one generator block and tile-invariant logical subsequences."""
+    if int(intragraph_offset_words.item()) % 4 != 0:
+        raise AssertionError("intragraph Philox offset must be divisible by four")
+
+    # Generator offsets are word-based signed-int64 bit containers. Convert them to a block index
+    # without signed overflow: both terms are multiples of four, and the block sum wraps at 2**62.
+    offset_words = offset_words.to(device=device)
+    offset_blocks = (offset_words >> 2) & _UINT62_MASK
+    intragraph_blocks = (
+        int(intragraph_offset_words.item()) & ((1 << 64) - 1)
+    ) >> 2
+    block = (offset_blocks + intragraph_blocks) & _UINT62_MASK
+
+    subsequence_count = (word_count + 3) // 4
+    subsequence = torch.arange(
+        subsequence_count, dtype=torch.int64, device=device
+    )
+    c0 = (block & _UINT32_MASK).expand_as(subsequence)
+    c1 = ((block >> 32) & _UINT32_MASK).expand_as(subsequence)
+    c2 = subsequence & _UINT32_MASK
+    c3 = (subsequence >> 32) & _UINT32_MASK
+
+    seed = seed.to(device=device)
+    k0 = (seed & _UINT32_MASK).expand_as(subsequence)
+    k1 = ((seed >> 32) & _UINT32_MASK).expand_as(subsequence)
+    for _ in range(10):
+        hi0, lo0 = _mulhilo_uint32(c0, _PHILOX_M0)
+        hi1, lo1 = _mulhilo_uint32(c2, _PHILOX_M1)
+        c0, c1, c2, c3 = (
+            (hi1 ^ c1 ^ k0) & _UINT32_MASK,
+            lo1,
+            (hi0 ^ c3 ^ k1) & _UINT32_MASK,
+            lo0,
+        )
+        k0 = (k0 + _PHILOX_W0) & _UINT32_MASK
+        k1 = (k1 + _PHILOX_W1) & _UINT32_MASK
+
+    return torch.stack((c0, c1, c2, c3), dim=1).reshape(-1)[:word_count]
+
+
+# Ported from quant_cast_bench/quant_cast_gold/recipes.py.
+def _f32_to_fp8_nvidia_sr_with_words(x, word):
+    r"""Emulate Blackwell ``cvt.rs.satfinite.e4m3x4.f32`` with supplied random words.
+
+    Each word rounds four values in NVIDIA's lane and bit order. The exponent-dependent
+    discarded-bit width handles normal and subnormal E4M3 values; the bottom bin rounds
+    directly between zero and 2**-9. NaNs use the canonical positive E4M3 NaN encoding.
+    """
+    flat = x.contiguous().reshape(-1)
+    if flat.numel() % 4 != 0:
+        raise AssertionError("NVIDIA fp8 SR requires numel divisible by 4")
+    groups = flat.numel() // 4
+    if word.numel() != groups:
+        raise AssertionError(f"expected {groups} random words, got {word.numel()}")
+    word = word.reshape(-1).to(torch.int64)
+
+    # cvt.rs.e4m3x4 reuses each half-word for two lanes; the second lane reads its bits reversed.
+    low = word & 0xFFFF
+    high = (word >> 16) & 0xFFFF
+    low_reversed = sum(((low >> i) & 1) << (15 - i) for i in range(16))
+    high_reversed = sum(((high >> i) & 1) << (15 - i) for i in range(16))
+    random16 = torch.stack(
+        [low, low_reversed, high, high_reversed], dim=1
+    ).reshape(-1).double()
+
+    is_nan = torch.isnan(flat)
+    rounding_input = torch.where(is_nan, torch.zeros_like(flat), flat)
+
+    # E4M3 keeps three mantissa bits and has minimum normal exponent -6. For normal values this
+    # discards 20 fp32 mantissa bits; each subnormal binade discards one additional bit.
+    clamped = rounding_input.clamp(-448.0, 448.0)
+    exponent = (
+        (clamped.abs().view(torch.int32).to(torch.int64) >> 23) & 0xFF
+    ) - 127
+    discarded_bits = 20 + (-6 - exponent).clamp(min=0)
+    shift = discarded_bits.clamp(max=23)
+    rounded_bits = (
+        clamped.view(torch.int32).to(torch.int64)
+        + (random16.to(torch.int64) << (shift - 16))
+    ) & -(torch.ones_like(shift) << shift)
+    rounded = rounded_bits.to(torch.int32).view(torch.float32)
+
+    # Values below the smallest subnormal require a direct probabilistic choice between zero and
+    # 2**-9 because zero has no exponent field on which the add-and-truncate rule can operate.
+    subnormal_ulp = 2.0**-9
+    magnitude = rounding_input.abs().double()
+    promote = magnitude / subnormal_ulp + random16 / (1 << 16) >= 1.0
+    sign = torch.where(torch.signbit(rounding_input), -1.0, 1.0)
+    bottom = sign.double() * torch.where(
+        promote,
+        torch.full_like(magnitude, subnormal_ulp),
+        torch.zeros_like(magnitude),
+    )
+    rounded = torch.where(
+        magnitude < subnormal_ulp, bottom.to(torch.float32), rounded
+    )
+    rounded = torch.where(
+        is_nan, torch.full_like(rounded, float("nan")), rounded
+    )
+    return rounded.to(torch.float8_e4m3fn).reshape(x.shape)
+
+
 # This function is extracted from https://github.com/pytorch/ao/blob/v0.12.0/torchao/prototype/mx_formats/mx_tensor.py#L142
 def to_mxfp(
     data_hp: torch.Tensor,
     block_size: int = 32,
     format: str = "mxfp8",
     swizzle_type: SwizzleType = SwizzleType.NO_SWIZZLE,
+    *,
+    rounding_mode: str = "rtne",
+    random_key: torch.Tensor | None = None,
 ):
+    r"""to_mxfp(data_hp, block_size=32, format="mxfp8",
+    swizzle_type=SwizzleType.NO_SWIZZLE, *, rounding_mode="rtne",
+    random_key=None) -> tuple[Tensor, Tensor]
+
+    Quantize a tensor to MXFP8 or MXFP4, returning ``(scales, qdata)``.
+
+    Args:
+        data_hp (Tensor): Contiguous input whose last dimension is divisible
+          by ``block_size``.
+        block_size (int, optional): Number of values per scale. Default: ``32``.
+        format (str, optional): ``"mxfp8"`` or ``"mxfp4"``. Default: ``"mxfp8"``.
+        swizzle_type (SwizzleType, optional): Scale layout. Default:
+          ``SwizzleType.NO_SWIZZLE``.
+        rounding_mode (str, optional): ``"rtne"`` or ``"stochastic"``. The
+          latter emulates NVIDIA E4M3 rounding and requires MXFP8 blocks of 32
+          values. Default: ``"rtne"``.
+        random_key (Tensor, optional): A two-element ``uint64`` Philox key on
+          the input device for stateless stochastic rounding. With
+          ``rounding_mode="stochastic"`` and no key, use the default CUDA
+          generator instead. Default: ``None``.
+
+    Returns:
+        tuple[Tensor, Tensor]: E8M0 scales and quantized data. Swizzled scales
+        are returned as a flattened buffer.
+
+    Examples::
+
+        >>> import torch
+        >>> from torch.testing._internal.common_quantized import to_mxfp
+        >>> input = torch.randn(4, 32, dtype=torch.bfloat16)
+        >>> key = torch.func._random.key(7)
+        >>> scales, qdata = to_mxfp(input, rounding_mode="stochastic", random_key=key)
+    """
     if swizzle_type not in (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4):
         raise ValueError(f"unsupported MXFP swizzle type: {swizzle_type}")
+    if rounding_mode not in ("rtne", "stochastic"):
+        raise ValueError(f"unsupported MXFP rounding mode: {rounding_mode}")
+    if rounding_mode == "rtne" and random_key is not None:
+        raise ValueError("RTNE does not use random_key")
+    if rounding_mode == "stochastic":
+        if format != "mxfp8" or block_size != 32:
+            raise ValueError("stochastic rounding requires MXFP8 with block_size=32")
+        if random_key is None:
+            if data_hp.device.type != "cuda":
+                raise ValueError("stateful stochastic rounding requires a CUDA tensor")
+        elif random_key.dtype != torch.uint64 or random_key.shape != (2,):
+            raise ValueError("random_key must be a two-element uint64 tensor")
+        elif random_key.device != data_hp.device:
+            raise ValueError("random_key and data_hp must be on the same device")
     if data_hp.dtype not in (torch.bfloat16, torch.float16, torch.float):
         raise AssertionError(f"{data_hp.dtype} is not supported yet")
     if data_hp.shape[-1] % block_size != 0:
@@ -711,7 +902,78 @@ def to_mxfp(
 
     # cast to target dtype
     if format == "mxfp8":
-        data_lp = data_lp.to(torch.float8_e4m3fn)
+        if rounding_mode == "stochastic":
+            if random_key is None:
+                #
+                # Stateful RNG, the randomness is managed by a PyTorch generator
+                #
+                # Mapping of RNG state to philox call is below. This assumes that
+                # `f` is the flat element index, and `f2` is the flat element index adjusted
+                # for the number of random words needed per element.
+                # * For mxfp8 + NVIDIA SR, `f2 = f >> 2` as we consume one random
+                #   word per 4 elements.
+                # * Note that this reference materializes the entire randomness
+                #   tensor. A real kernel will materialize partial randomness in-kernel
+                #   based only on the generator state and `f2`, which is recoverable
+                #   from tensor sizes, strides, and element indices.
+                # * Note: we explicitly do not follow the same scheme as historical aten ops
+                #   which use `thread_id` for the subsequence dimension. Instead, we use
+                #   a tile-invariant `f2` in the subsequence dimension. `seed` and `blk` are
+                #   used in the same way as other stateful randomness kernels.
+                #
+                #   counter_offset = 4  # increment global RNG by 4 philox words (eager)
+                #   seed, offset, intra = generator.philox_state(counter_offset)
+                #   combined_offset = offset + intra  # cuda graph safety
+
+                #   blk = combined_offset >> 2  # word offset -> Philox block (64-bit)
+                #   sub = f2 >> 2  # random word index -> subsequence group (64-bit)
+                #   # offset half (c0/c1) -- FIXED for the whole op
+                #   c0 = blk & 0xffffffff  # low 32
+                #   c1 = (blk >> 32) & 0xffffffff  # high 32
+                #   # subsequence half (c2/c3) -- per-subsequence-group identity
+                #   c2 = sub & 0xffffffff  # low 32
+                #   c3 = (sub >> 32) & 0xffffffff  # high 32
+                #   r0, r1, r2, r3 = philox(seed, c0, c1, c2, c3)
+                #
+                generator = torch.cuda.default_generators[data_hp.get_device()]
+                seed, offset_words, intragraph_offset_words = generator.philox_state(4)
+                words = _philox4x32_10_stateful_words(
+                    seed,
+                    offset_words,
+                    intragraph_offset_words,
+                    data_lp.numel() // 4,
+                    data_hp.device,
+                )
+            else:
+                #
+                # Stateless RNG, the randomness is managed by the user
+                #
+                # Mapping of key + RNG state to philox call is below. This assumes that
+                # `f` is the flat element index, and `f2` is the flat element index adjusted
+                # for the number of random words needed per element.
+                # * For mxfp8 + NVIDIA SR, `f2 = f >> 2` as we consume one random
+                #   word per 4 elements.
+                # * Note that the mapping below exactly matches
+                #   `torch.func._random.bits`.
+                # * Note that this reference materializes the entire randomness
+                #   tensor. A real kernel will materialize partial randomness in-kernel
+                #   based only on the key and `f2`, which is recoverable from tensor
+                #   sizes, strides, and element indices.
+                #
+                #   seed = key[0]
+                #   offset64 = key[1] + (f2 >> 2)
+                #   c0 = offset64 & 0xffffffff  # low 32
+                #   c1 = (offset64 >> 32) & 0xffffffff  # high 32
+                #   c2, c3 = 0, 0  # unused
+                #   r0, r1, r2, r3 = philox(seed, c0, c1, c2, c3)
+                #
+                groups = data_lp.numel() // 4
+                n_words = ((groups + 3) // 4) * 4
+                words = prng.bits(random_key, n_words, dtype=torch.uint32)[:groups]
+
+            data_lp = _f32_to_fp8_nvidia_sr_with_words(data_lp, words)
+        else:
+            data_lp = data_lp.to(torch.float8_e4m3fn)
         # need to reshape at the end to help inductor fuse things
         data_lp = data_lp.reshape(orig_shape)
     elif format == "mxfp4":

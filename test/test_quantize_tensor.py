@@ -3,12 +3,14 @@
 import inspect
 
 import torch
+import torch.func._random as prng
 from torch.nn import functional as F
 from torch.nn.functional import SwizzleType
 from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import (
     _f32_to_e8m0_rceil,
+    _f32_to_fp8_nvidia_sr_with_words,
     compute_error,
     from_blocked,
     from_blocked_format,
@@ -64,6 +66,21 @@ _MXFP8_NO_SWIZZLE_KWARGS = {
     **_MXFP8_KWARGS,
     "swizzle_type": SwizzleType.NO_SWIZZLE,
 }
+
+
+def _make_mxfp8_sr_gold_input(device):
+    M, K = 96, 160
+    values = (torch.arange(M * K, device=device, dtype=torch.int32) % 63).float()
+    input = ((values - 31) / 32).to(torch.bfloat16).reshape(M, K)
+    input[0, :8] = torch.tensor(
+        [448, -448, 0, -0.0, 2**-9, -(2**-9), 2**-10, -(2**-10)],
+        device=device,
+        dtype=torch.bfloat16,
+    )
+    input[1, 1] = float("nan")
+    input[2, 2] = float("inf")
+    input[3, 3] = -float("inf")
+    return input
 
 
 class TestMXFP8ReferenceNumerics(TestCase):
@@ -702,7 +719,168 @@ class TestQuantizeTensorMeta(TestCase):
         )
 
 
+class TestMXFP8StochasticReferenceNumerics(TestCase):
+    @parametrize("input_dtype", (torch.float16, torch.bfloat16, torch.float32))
+    @parametrize("swizzle_type", (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4))
+    def test_stateless_round_trip(self, input_dtype, swizzle_type, device):
+        input = torch.randn((96, 160), device=device, dtype=input_dtype)
+        key = prng.key(7, device=device)
+        scales, qdata = to_mxfp8_reference(
+            input, swizzle_type=swizzle_type, rounding_mode="stochastic", random_key=key
+        )
+        unswizzled = (
+            from_blocked(qdata, scales, 32)
+            if swizzle_type == SwizzleType.SWIZZLE_32_4_4
+            else scales
+        )
+        reconstructed = from_blocked_format(qdata, unswizzled)
+        self.assertGreater(
+            compute_error(input.float(), reconstructed.float()).item(), 15.0
+        )
+
+    def test_stateless_nonfinite_groups(self, device):
+        input = torch.zeros((32, 32), device=device, dtype=torch.bfloat16)
+        input[0, 0] = float("nan")
+        input[1, 1] = float("inf")
+        input[2, 2] = -float("inf")
+        scales, qdata = to_mxfp8_reference(
+            input, rounding_mode="stochastic", random_key=prng.key(7, device=device)
+        )
+        qbytes = qdata.view(torch.uint8)
+        self.assertEqual(
+            qbytes[:3], torch.full((3, 32), 0x7F, device=device, dtype=torch.uint8)
+        )
+        self.assertEqual(
+            qbytes[3:], torch.zeros((29, 32), device=device, dtype=torch.uint8)
+        )
+        self.assertEqual(
+            scales.view(torch.uint8)[:3],
+            torch.full((3, 1), 0xFF, device=device, dtype=torch.uint8),
+        )
+
+    def test_stateful_cuda_graph(self, device):
+        if device != "cuda" or torch.version.rocm is not None:
+            self.skipTest("stateful NVIDIA Philox rounding requires CUDA")
+        input = torch.randn((32, 64), device=device, dtype=torch.bfloat16)
+        with torch.random.fork_rng(devices=[input.get_device()]):
+            torch.manual_seed(123)
+            _, expected = to_mxfp8_reference(input, rounding_mode="stochastic")
+            torch.manual_seed(123)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                _, captured = to_mxfp8_reference(input, rounding_mode="stochastic")
+            graph.replay()
+            first = captured.clone()
+            graph.replay()
+            second = captured.clone()
+        self.assertEqual(first.view(torch.uint8), expected.view(torch.uint8))
+        self.assertFalse(torch.equal(first.view(torch.uint8), second.view(torch.uint8)))
+
+
+class TestFP8StochasticRounding(TestCase):
+    def test_exact_neighbors_and_special_values(self, device):
+        key = prng.fold_in(prng.key(7, device=device), 12345)
+        words = prng.bits(key, 4, dtype=torch.uint32)
+        exact = torch.tensor(
+            [
+                0.0,
+                -0.0,
+                1.0,
+                -1.0,
+                1.125,
+                -1.125,
+                2**-9,
+                -(2**-9),
+                2**-6,
+                -(2**-6),
+                1.875,
+                2.0,
+                416.0,
+                448.0,
+                -448.0,
+                0.0,
+            ],
+            device=device,
+        )
+        rounded = _f32_to_fp8_nvidia_sr_with_words(exact, words)
+        expected_exact = exact.to(torch.float8_e4m3fn).view(torch.uint8)
+        self.assertEqual(rounded.view(torch.uint8), expected_exact)
+        self.assertEqual(
+            rounded[:2].view(torch.uint8),
+            torch.tensor([0x00, 0x80], device=device, dtype=torch.uint8),
+        )
+
+        intervals = torch.tensor(
+            [
+                [1.0, 1.125],
+                [-1.125, -1.0],
+                [1.875, 2.0],
+                [416.0, 448.0],
+                [0.0, 2**-9],
+                [7 * 2**-9, 2**-6],
+                [-(2**-9), -0.0],
+                [-(2**-6), -(7 * 2**-9)],
+            ],
+            device=device,
+        )
+        between = intervals[:, 0] + 0.375 * (intervals[:, 1] - intervals[:, 0])
+        rounded = _f32_to_fp8_nvidia_sr_with_words(between, words[:2]).view(torch.uint8)
+        endpoints = intervals.to(torch.float8_e4m3fn).view(torch.uint8)
+        neighbors = (rounded == endpoints[:, 0]) | (rounded == endpoints[:, 1])
+        self.assertEqual(neighbors, torch.ones_like(neighbors))
+
+        inf = float("inf")
+        nan = float("nan")
+        nonfinite_or_overflow = torch.tensor(
+            [449.0, -449.0, 1e6, -1e6, inf, -inf, nan, -nan],
+            device=device,
+        )
+        rounded = _f32_to_fp8_nvidia_sr_with_words(nonfinite_or_overflow, words[:2])
+        expected_finite = torch.tensor([448.0, -448.0] * 3, device=device)
+        self.assertEqual(rounded[:6].float(), expected_finite)
+        self.assertEqual(
+            rounded[6:].view(torch.uint8),
+            torch.tensor([0x7F, 0x7F], device=device, dtype=torch.uint8),
+        )
+
+    @parametrize(
+        "lower,upper",
+        (
+            (1.0, 1.125),
+            (-1.125, -1.0),
+            (1.875, 2.0),
+            (416.0, 448.0),
+            (0.0, 2**-9),
+            (7 * 2**-9, 2**-6),
+        ),
+    )
+    def test_round_up_probability(self, lower, upper, device):
+        probabilities = torch.tensor((0.125, 0.5, 0.875), device=device)
+        values = lower + (upper - lower) * probabilities
+        samples = values[:, None].expand(-1, 8192).contiguous()
+        key = prng.fold_in(prng.key(7, device=device), 12345)
+        words = prng.bits(key, samples.numel() // 4, dtype=torch.uint32)
+        rounded = _f32_to_fp8_nvidia_sr_with_words(samples, words).float()
+        neighbors = (rounded == lower) | (rounded == upper)
+        self.assertEqual(neighbors, torch.ones_like(neighbors))
+
+        observed = (rounded == upper).float().mean(dim=1)
+        tolerance = 6 * torch.sqrt(probabilities * (1 - probabilities) / 8192)
+        for probability, frequency, bound in zip(probabilities, observed, tolerance):
+            self.assertLessEqual(
+                abs(frequency.item() - probability.item()),
+                bound.item(),
+                f"[{lower}, {upper}]: expected round-up probability {probability.item()}, got {frequency.item()}",
+            )
+
+
 instantiate_device_type_tests(TestMXFP8ReferenceNumerics, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestMXFP8StochasticReferenceNumerics, globals(), only_for=("cpu", "cuda")
+)
+instantiate_device_type_tests(
+    TestFP8StochasticRounding, globals(), only_for=("cpu", "cuda")
+)
 
 if __name__ == "__main__":
     run_tests()
