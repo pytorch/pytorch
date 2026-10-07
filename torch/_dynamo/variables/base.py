@@ -20,6 +20,7 @@ import dataclasses
 import functools
 import inspect
 import logging
+import operator
 import textwrap
 from collections.abc import Callable, ItemsView, KeysView, ValuesView
 from contextvars import ContextVar
@@ -47,6 +48,12 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import format_source_range, istype
+
+
+# Stands in for the %p address object_repr/slot_tp_repr print: the real address
+# is runtime-only for objects created during tracing, and baking a sourced
+# object's address into the graph would need an ID_MATCH guard.
+REPR_ADDRESS_PLACEHOLDER = "0x..."
 
 
 _RICHCOMPARE_OPS = frozenset(
@@ -2061,9 +2068,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         other: VariableTracker,
         op: str,
     ) -> VariableTracker:
-        """Per-VT tp_richcompare slot. Subclasses must override.
+        """Default tp_richcompare: object_richcompare.
 
-        Analogous to CPython's tp_richcompare function pointer on PyTypeObject.
+        https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
+
         Returns ConstantVariable(NotImplemented) when the type does not handle
         the comparison (signaling do_richcompare to try the other operand).
 
@@ -2073,15 +2081,32 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         - generic_richcompare calls tp_richcompare_impl as part of the 4-step
           do_richcompare algorithm (subclass priority, forward, reflected,
           fallback).
+
+        VT subclasses override this for types with their own C tp_richcompare.
         """
-        unimplemented(
-            gb_type="Missing tp_richcompare_impl override",
-            context=f"tp_richcompare_impl {self} {op}",
-            explanation=f"{type(self).__name__} does not implement "
-            f"tp_richcompare_impl. Add a tp_richcompare_impl override to "
-            f"{type(self).__name__}.",
-            hints=[*graph_break_hints.DYNAMO_BUG],
+        from .constant import ConstantVariable
+        from .object_protocol import (
+            generic_is_true,
+            is_richcompare_not_implemented,
+            vt_identity_compare,
         )
+
+        if op == "__eq__":
+            identity = vt_identity_compare(self, other)
+            if identity is not None and identity.as_python_constant():
+                return ConstantVariable.create(True)
+            return ConstantVariable.create(NotImplemented)
+        if op == "__ne__":
+            # __ne__ delegates to Py_TYPE(self)->tp_richcompare(Py_EQ) and
+            # inverts the result, unless it is NotImplemented.
+            res = self.tp_richcompare_impl(tx, other, "__eq__")
+            if is_richcompare_not_implemented(res):
+                return res
+            ok = generic_is_true(tx, res)
+            if ok.is_python_constant():
+                return ConstantVariable.create(not ok.as_python_constant())
+            return VariableTracker.build(tx, operator.not_).call_function(tx, [ok], {})
+        return ConstantVariable.create(NotImplemented)
 
     def is_constant_match(self, *values: Any) -> bool:
         """
@@ -2851,20 +2876,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self,
         tx: InstructionTranslatorBase,
     ) -> VariableTracker:
-        """Mirrors CPython's tp_repr slot.
+        """Default tp_repr: object_repr, "<module.qualname object at 0x...>".
 
-        https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L745-L778
+        https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L6214-L6243
 
-        Called when type_implements_tp_repr returns True for this type.
-        Subclasses override to provide the actual repr implementation.
+        VT subclasses override this for types with their own tp_repr.
         """
-        unimplemented(
-            gb_type="tp_repr_impl not implemented",
-            context=f"{type(self).__name__} has tp_repr slot but no tp_repr_impl override",
-            explanation=f"The type {self.python_type_name()} has a tp_repr C slot but "
-            "the corresponding VariableTracker doesn't implement tp_repr_impl.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        py_type, addr = self.python_type(), REPR_ADDRESS_PLACEHOLDER
+        mod = getattr(py_type, "__module__", None)
+        if isinstance(mod, str) and mod != "builtins":
+            return VariableTracker.build(
+                tx, f"<{mod}.{py_type.__qualname__} object at {addr}>"
+            )
+        return VariableTracker.build(tx, f"<{py_type.__name__} object at {addr}>")
 
     def repr_recursive_sentinel(self) -> str:
         """What repr() emits for this object when it contains itself.
@@ -2877,17 +2901,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self,
         tx: InstructionTranslatorBase,
     ) -> VariableTracker:
-        """Dynamo hook for VariableTrackers with dedicated str behavior.
-        Subclasses override this for the per-type str result; generic_str()
-        handles dispatch and repr fallback.
+        """Default tp_str: object_str, which calls Py_TYPE(self)->tp_repr.
+
+        https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L6245-L6254
+
+        VT subclasses override this for types with their own tp_str.
         """
-        unimplemented(
-            gb_type="tp_str_impl not implemented",
-            context=f"{type(self).__name__} has no tp_str_impl override for {self.python_type_name()}",
-            explanation=f"Dynamo does not implement __str__ for {self.python_type_name()} "
-            f"in {type(self).__name__}.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        from .object_protocol import generic_repr
+
+        # object_str calls tp_repr directly; go through generic_repr instead
+        # because Dynamo's repr cycle detection (Py_ReprEnter) lives there.
+        return generic_repr(tx, self)
 
     def nb_int_impl(
         self,

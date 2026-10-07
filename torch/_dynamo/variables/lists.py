@@ -179,9 +179,6 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
 
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        return VariableTracker.build(tx, self.debug_repr())
-
     def as_proxy(self) -> Any:
         if self.python_type() is SizeVariable:
             raise AssertionError(
@@ -2263,6 +2260,12 @@ class ByteArrayVariable(VariableTracker):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, repr(self.data))
 
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # bytearray_str warns under -b (BytesWarning), then returns the repr.
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx, str)
+
     def nb_remainder_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -2720,6 +2723,11 @@ class SliceVariable(VariableTracker):
 
     def debug_repr(self) -> str:
         return "slice(" + ", ".join(i.debug_repr() for i in self.items) + ")"
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # slice_repr: https://github.com/python/cpython/blob/v3.13.3/Objects/sliceobject.c#L344-L348
+        start, stop, step = (tracked_repr(tx, item) for item in self.items)
+        return VariableTracker.build(tx, f"slice({start}, {stop}, {step})")
 
     def as_proxy(self) -> slice:
         return slice(*[x.as_proxy() for x in self.items])

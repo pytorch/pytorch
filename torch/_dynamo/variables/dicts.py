@@ -1158,6 +1158,11 @@ class MappingProxyVariable(VariableTracker):
             return VariableTracker.build(tx, name in types.MappingProxyType.__dict__)
         return super().call_obj_hasattr(tx, name)
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
 
 class NNModuleHooksDictVariable(OrderedDictVariable):
     # Special class to avoid adding any guards on the nn module hook ids.
@@ -1444,9 +1449,7 @@ class DictValuesVariable(DictViewVariable):
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         # dict_values has no tp_richcompare (inherits object's).
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
+        return VariableTracker.tp_richcompare_impl(self, tx, other, op)
 
     def debug_repr(self) -> str:
         if not self.view_items:

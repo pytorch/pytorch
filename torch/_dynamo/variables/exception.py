@@ -19,7 +19,7 @@ from torch._guards import Source
 from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, raise_type_error, unimplemented
 from ..source import AttrSource
-from ..utils import istype, unpack_iterable
+from ..utils import istype, tracked_repr, unpack_iterable
 from .base import (
     GetSet,
     getset_build,
@@ -170,13 +170,6 @@ class TracebackVariable(VariableTracker):
         "tb_lasti": Member(_get_tb_lasti, readonly_setter),
     }
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -256,13 +249,6 @@ class ExceptionVariable(VariableTracker):
 
     def python_type(self) -> type:
         return self.exc_type
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def call_method(
         self,
@@ -486,7 +472,16 @@ class ExceptionVariable(VariableTracker):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: BaseException_repr in https://github.com/python/cpython/blob/3.13/Objects/exceptions.c#L135-L142
-        return VariableTracker.build(tx, self.debug_repr())
+        from . import TupleVariable
+
+        name = self.python_type_name()
+        if len(self.args) == 1:
+            return VariableTracker.build(
+                tx, f"{name}({tracked_repr(tx, self.args[0])})"
+            )
+        return VariableTracker.build(
+            tx, name + tracked_repr(tx, TupleVariable(list(self.args)))
+        )
 
 
 class StopIterationVariable(ExceptionVariable):
