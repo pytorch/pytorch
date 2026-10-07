@@ -27,16 +27,16 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
-    get_report_path,
+    _get_test_report_path,
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
     isRocmArchAnyOf,
     retry_shell,
+    sanitize_test_filename,
     set_cwd,
     shell,
     TEST_CUDA,
-    TEST_SAVE_XML,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
@@ -315,7 +315,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
-    "test_cuda_trace",
+    "test_gpu_trace",
     "inductor/test_benchmark_fusion",
     "test_cuda_nvml_based_avail",
     # temporarily sets a global config
@@ -589,6 +589,7 @@ def run_test(
         unittest_args.extend(
             get_pytest_args(
                 options,
+                test_file,
                 is_cpp_test=is_cpp_test,
                 is_distributed_test=is_distributed_test,
             )
@@ -720,13 +721,21 @@ def run_test(
                 label=test_label,
             )
 
-            # Pytest return code 5 means no test is collected. Exit code 4 is
-            # returned when the binary is not a C++ test executable, but 4 can
-            # also be returned if the file fails before running any tests. All
-            # binary files under build/bin that are not C++ test at the time of
-            # this writing have been excluded and new ones should be added to
-            # the list of exclusions in tools/testing/discover_tests.py
-            ret_code = 0 if ret_code == 5 else ret_code
+            # Pytest return code 5 means no test is collected, which is expected
+            # for a C++ test binary that defines no tests or whose tests are all
+            # deselected. pytest-cpp also collects nothing from a binary whose
+            # --help fails, e.g. on a missing shared library, so check for that.
+            if ret_code == 5:
+                ret_code = 0
+                if is_cpp_test:
+                    probe = subprocess.run(
+                        [argv[0], "--help"], env=env, capture_output=True, text=True
+                    )
+                    if probe.returncode != 0:
+                        print_to_stderr(
+                            f"{argv[0]} --help failed with exit code {probe.returncode}:\n{probe.stderr}"
+                        )
+                        ret_code = 1
 
     if options.pipe_logs and print_log:
         handle_log_file(
@@ -1396,7 +1405,7 @@ def handle_log_file(
     print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
-def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
+def get_pytest_args(options, test_file, is_cpp_test=False, is_distributed_test=False):
     if is_distributed_test:
         # Distributed tests do not support rerun, see https://github.com/pytorch/pytorch/issues/162978
         rerun_options = ["-x", "--reruns=0"]
@@ -1430,11 +1439,17 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # is much slower than running them directly
         pytest_args.extend(["-n", str(NUM_PROCS)])
 
-        if TEST_SAVE_XML:
-            # Add the option to generate XML test report here as C++ tests
-            # won't go into common_utils
-            test_report_path = get_report_path(pytest=True)
-            pytest_args.extend(["--junit-xml-reruns", test_report_path])
+        if IS_CI:
+            # C++ tests don't go through common_utils.run_tests, which is what
+            # sets TEST_SAVE_XML, so build the pytest report path here.
+            # The path is relative to the test directory pytest runs in.
+            report_name = sanitize_test_filename(test_file)
+            report_path = os.path.join(
+                _get_test_report_path().replace("python-unittest", "python-pytest"),
+                report_name,
+                f"{report_name}-{os.urandom(8).hex()}.xml",
+            )
+            pytest_args.extend(["--junit-xml-reruns", report_path])
 
     if options.pytest_k_expr:
         pytest_args.extend(["-k", options.pytest_k_expr])
@@ -1464,7 +1479,7 @@ def run_ci_sanity_check(test: ShardedTest, test_directory, options):
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
     "test_cuda_nvml_based_avail": run_test_with_subprocess,
-    "test_cuda_trace": run_test_with_subprocess,
+    "test_gpu_trace": run_test_with_subprocess,
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,

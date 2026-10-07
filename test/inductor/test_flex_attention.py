@@ -7723,6 +7723,52 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cuda
+    @skip_on_xpu
+    @skip_on_mps  # asserts on the CPU C++ template's generated code
+    @common_utils.parametrize("qkv_source", ["input", "bshd_buffer", "linear"])
+    @common_utils.parametrize("q_len", [1, 256])
+    def test_cpu_flex_template_choice_qkv_views(self, device, qkv_source, q_len):
+        # q/k/v may be views over buffers whose shape differs from the logical
+        # (B, H, S, D); template choice must use the logical sizes.
+        B, H, S_kv, D = 1, 4, 1024, 64
+        proj = nn.ModuleList(nn.Linear(H * D, H * D) for _ in range(3)).eval()
+
+        def to_bhsd(x, i):
+            if qkv_source == "input":
+                return x
+            if qkv_source == "bshd_buffer":
+                return x.sin().transpose(1, 2)
+            return proj[i](x).view(B, x.size(1), H, D).transpose(1, 2)
+
+        def fn(q, k, v, block_mask):
+            q, k, v = (to_bhsd(t, i) for i, t in enumerate((q, k, v)))
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        def make(S):
+            if qkv_source == "input":
+                return torch.randn(B, H, S, D, device=device)
+            if qkv_source == "bshd_buffer":
+                return torch.randn(B, S, H, D, device=device)
+            return torch.randn(B, S, H * D, device=device)
+
+        q, k, v = make(q_len), make(S_kv), make(S_kv)
+        block_mask = create_block_mask(noop_mask, B, 1, q_len, S_kv, device=device)
+
+        with torch.no_grad():
+            eager_out = fn(q, k, v, block_mask)
+            compiled_out, code = run_and_get_code(
+                torch.compile(fn), q, k, v, block_mask
+            )
+
+        torch.testing.assert_close(compiled_out, eager_out, rtol=1e-4, atol=1e-4)
+        # PARTITION_SIZE only appears in the FLEX_DECODING template.
+        if q_len == 1:
+            FileCheck().check("PARTITION_SIZE").run(code[0])
+        else:
+            FileCheck().check_not("PARTITION_SIZE").run(code[0])
+
+    @supported_platform
+    @skip_on_cuda
     def test_cpu_error_message_return_lse(self, device):
         make_tensor = functools.partial(
             torch.randn,
