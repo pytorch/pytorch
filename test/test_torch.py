@@ -135,6 +135,15 @@ def _copy_uses_strided_chunks(dst, src):
     return any("maybe_strided_chunk_copy" in e.name for e in prof.events())
 
 
+# Writes signed zeros and NaNs with distinct payloads into the first fp32 words.
+# Kept out of dynamo: an in-graph mutation makes inductor return later slices of
+# the tensor as fresh contiguous buffers, so the layout under test would be lost.
+@torch._dynamo.disable
+def _seed_special_fp32(t):
+    t.view(torch.int32).view(-1)[:4] = torch.tensor(
+        [0, -2**31, 0x7FC01234, 0x7FC05678], dtype=torch.int32, device=t.device)
+
+
 # Arbitrary bits may include NaNs; compare bytewise.
 def _random_bytes(shape, dtype, device):
     numel = math.prod(shape) * torch.empty((), dtype=dtype).element_size()
@@ -3501,9 +3510,7 @@ class TestTorchDeviceType(TestCase):
 
         src_base = _random_bytes(src_shape, dtype, device)
         if dtype == torch.float32:
-            # Preserve signed zeros and NaN payloads bitwise.
-            src_base.view(torch.int32).view(-1)[:4] = torch.tensor(
-                [0, -2**31, 0x7FC01234, 0x7FC05678], dtype=torch.int32, device=device)
+            _seed_special_fp32(src_base)
         dst_bytes = (*dst_shape[:-1], dst_shape[-1] * element_size)
         dst_base = torch.full(dst_bytes, 7, dtype=torch.uint8, device=device).view(dtype)
         dst = dst_view(dst_base)
