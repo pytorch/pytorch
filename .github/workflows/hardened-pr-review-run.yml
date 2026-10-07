@@ -63,6 +63,9 @@ env:
   # against a value the artifact cannot influence, whoever authored it.
   REVIEW_LABEL: "in progress"
   DONE_LABEL: "ready for review"
+  # Opt-out: a PR carrying this label is never reviewed, whatever triggered
+  # the run. Stage 1 skips it too; this copy decides.
+  OPT_OUT_LABEL: "no automated review"
   # Skip PRs too large to review usefully or affordably. Recorded as
   # skipped_too_large rather than silently dropped.
   MAX_CHANGED_FILES: 100
@@ -309,9 +312,15 @@ jobs:
           # for another review and overrides the marker, anything else does not.
           IS_DONE=$(jq -r --arg l "$DONE_LABEL" \
                         'if any(.labels[]?.name; ascii_downcase == ($l | ascii_downcase)) then "true" else "false" end' <<<"$PR_JSON")
+          # The opt-out, read now rather than trusted from Stage 1, so a label
+          # added while the capture was in flight still counts. No trigger
+          # overrides it.
+          OPTED_OUT=$(jq -r --arg l "$OPT_OUT_LABEL" \
+                        'if any(.labels[]?.name; ascii_downcase == ($l | ascii_downcase)) then "true" else "false" end' <<<"$PR_JSON")
           if [ "$IS_DRAFT" != "false" ] || [ "$HAS_LABEL" != "true" ] \
+             || [ "$OPTED_OUT" != "false" ] \
              || { [ "$IS_DONE" = "true" ] && [ "$TRIGGER_EVENT" != "labeled" ]; }; then
-            echo "::notice::PR #${PR_NUMBER} is not eligible (draft=${IS_DRAFT}, labelled=${HAS_LABEL}, done=${IS_DONE}, trigger=${TRIGGER_EVENT}); no review, no rows"
+            echo "::notice::PR #${PR_NUMBER} is not eligible (draft=${IS_DRAFT}, labelled=${HAS_LABEL}, opted_out=${OPTED_OUT}, done=${IS_DONE}, trigger=${TRIGGER_EVENT}); no review, no rows"
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -355,9 +364,8 @@ jobs:
           # pinned by TestTheReviewJobsTrustedSurfaceIsPinned's
           # prompt-hash tests, which also EXECUTE this step.
           #
-          # The rubric is four files: pr-review-readiness/SKILL.md delegates the
-          # review logic to pr-review's three, so they shape the verdict as
-          # directly as it does and must move the hash when they change.
+          # The rubric delegates the review logic to the pr-review files, so
+          # they shape the verdict too and must move the hash when they change.
           HASH=$(cat .github/workflows/hardened-pr-review-run.yml \
                      scripts/pr_review/extract_verdict.py \
                      scripts/pr_review/emit_row.py \
@@ -369,7 +377,8 @@ jobs:
                      .claude/skills/pr-review-readiness/SKILL.md \
                      .claude/skills/pr-review/SKILL.md \
                      .claude/skills/pr-review/review-checklist.md \
-                     .claude/skills/pr-review/bc-guidelines.md | sha256sum | cut -c1-16)
+                     .claude/skills/pr-review/bc-guidelines.md \
+                     .claude/skills/pr-review/ci-runner-naming.md | sha256sum | cut -c1-16)
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials via OIDC
@@ -1179,6 +1188,21 @@ jobs:
             # rather than implying the pipeline recovers on its own.
             echo "::notice::head moved ${REVIEWED_SHA} -> ${CURRENT_SHA} since the review; leaving labels alone, so the verdict is not applied to a commit nobody reviewed"
             echo "::notice::if PR #${PR_NUMBER} already carries '${DONE_LABEL}', automatic re-review of ${CURRENT_SHA} is suppressed; re-add '${REVIEW_LABEL}' to review it"
+            exit 0
+          fi
+
+          # The opt-out can arrive while the review runs. The review cannot be
+          # recalled, but its verdict is not applied to a PR that asked to be
+          # left alone. Same residual as the freshness check above: a label
+          # added between this read and the calls below is not seen.
+          if ! LABELS_JSON=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/labels?per_page=100" 2>&1); then
+            echo "::warning::could not re-read the labels of PR #${PR_NUMBER} (${LABELS_JSON}); leaving labels alone"
+            exit 0
+          fi
+          OPTED_OUT=$(jq -r --arg l "$OPT_OUT_LABEL" \
+                        'if any(.[]?.name; ascii_downcase == ($l | ascii_downcase)) then "true" else "false" end' <<<"$LABELS_JSON")
+          if [ "$OPTED_OUT" != "false" ]; then
+            echo "::notice::PR #${PR_NUMBER} carries '${OPT_OUT_LABEL}'; leaving labels alone"
             exit 0
           fi
 

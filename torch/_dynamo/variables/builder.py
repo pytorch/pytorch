@@ -2719,14 +2719,13 @@ class VariableBuilder:
             isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
             and not config.allow_rnn
         ):
-            unimplemented(
-                gb_type="Attempted to wrap RNN, GRU, or LSTM",
-                context=str(value),
-                explanation="Dynamo does not support RNN, GRU, or LSTM.",
-                hints=[
-                    "Set torch._dynamo.config.allow_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
+            return DelayGraphBreakVariable(
+                source=self.source,
+                msg=(
+                    "Dynamo does not support RNN, GRU, or LSTM. "
+                    "Set torch._dynamo.config.allow_rnn=True to enable "
+                    "experimental support for RNN, GRU, and LSTM in Dynamo"
+                ),
             )
 
         if inspect.getattr_static(value, "_is_fsdp_managed_module", False):
@@ -4176,6 +4175,19 @@ def handle_traced_output(
         return SizeVariable(sizes, **options)
     elif isinstance(example_value, (tuple, list)):
         set_example_value(proxy.node, example_value)
+        output_tensor_counts = collections.Counter(
+            id(value)
+            for value in torch.utils._pytree.tree_leaves(example_value)
+            if isinstance(value, torch.Tensor)
+        )
+        input_tensor_ids = {
+            id(value)
+            for input_node in proxy.node.all_input_nodes
+            for value in torch.utils._pytree.tree_leaves(
+                input_node.meta.get("example_value")
+            )
+            if isinstance(value, torch.Tensor)
+        }
         unpacked = []
         for i, val in enumerate(example_value):
             if val is None:
@@ -4210,17 +4222,30 @@ def handle_traced_output(
                     options_i = options
 
                 # WARNING: this assumes the same target_cls as this tuple/list call
-                unpacked.append(
-                    # pyrefly: ignore [bad-argument-type]
-                    wrap_fx_proxy_cls(
-                        # pyrefly: ignore[bad-argument-type]
-                        target_cls=target_cls,
-                        tx=tx,
-                        proxy=proxy_i,
-                        example_value=val,
-                        **options_i,
-                    )
+                item = wrap_fx_proxy_cls(
+                    # pyrefly: ignore[bad-argument-type]
+                    target_cls=target_cls,
+                    tx=tx,
+                    proxy=proxy_i,
+                    example_value=val,
+                    **options_i,
                 )
+                if not isinstance(item, VariableTracker):
+                    raise AssertionError(f"Expected VariableTracker, got {type(item)}")
+                # Direct sourceless Tensor children with unique wrapper identities
+                # can replay attrs independently. Leave repeated Tensor objects and
+                # exact input Tensor objects untracked so setattr graph breaks.
+                if (
+                    isinstance(val, torch.Tensor)
+                    and item.is_tensor()
+                    and item.source is None
+                    and output_tensor_counts[id(val)] == 1
+                    and id(val) not in input_tensor_ids
+                ):
+                    tx.output.side_effects._track_obj(
+                        proxy_i, item, mutation_type_cls=AttributeMutationNew
+                    )
+                unpacked.append(item)
         if isinstance(example_value, torch.Size):
             # NB: Keep the old proxy around.  See SizeVariable for an
             # explanation why

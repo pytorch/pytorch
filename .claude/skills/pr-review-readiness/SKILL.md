@@ -5,7 +5,7 @@ description: Non-interactive wrapper over pr-review that emits JSON assessing wh
 
 # PR readiness rubric
 
-Read and apply [pr-review/SKILL.md](../pr-review/SKILL.md), all nine Review Philosophy points, and its full [review-checklist.md](../pr-review/review-checklist.md) and [bc-guidelines.md](../pr-review/bc-guidelines.md). pr-review owns the review logic; this file overrides conflicts.
+Read and apply [pr-review/SKILL.md](../pr-review/SKILL.md), all nine Review Philosophy points, and its full [review-checklist.md](../pr-review/review-checklist.md), [bc-guidelines.md](../pr-review/bc-guidelines.md) and [ci-runner-naming.md](../pr-review/ci-runner-naming.md). pr-review owns the review logic; this file overrides conflicts.
 
 Keep Step 4 consolidation: same root cause or same fix means one finding. Merge findings on one `file:line` unless you can name two independent defects.
 
@@ -17,7 +17,7 @@ Answer one question: **is this pull request ready for a human maintainer's time,
 - Replace all sub-agents, including Steps 1–3 fan-out and Step 5 per-finding fact-checks, with your own code reading. Understand surrounding code before judging a line, re-read each anchor before writing a finding, and drop findings you can no longer point at.
 - Replace **Output Format**—the markdown template, eight sections, Recommendation line, and Specific Comments—with the prompt's JSON object containing `verdict`, `summary`, and `findings`. Nothing written in chat is published.
 
-Surface form alone—formatting or naming and wording preferences without further consequences—is out of scope and belongs to linters. Judge consequences, not appearance: a docstring misstating units or semantics is a correctness problem; a rename breaking a caller is a BC problem; a misleading public API name is an API problem. Each is in scope at its own severity. If unclear, read the code and report only a consequence you can name. Uncertainty is not a consequence.
+Surface form alone—formatting or naming and wording preferences without further consequences—is out of scope and belongs to linters. Judge consequences, not appearance: a docstring misstating units or semantics is a correctness problem; a rename breaking a caller is a BC problem; a misleading public API name is an API problem; a CI runner label that pr-review's runner naming rule flags is a repo-policy problem, `major` when that rule calls it a blocker and `minor` when it calls it a heads-up. Each is in scope at its own severity. If unclear, read the code and report only a consequence you can name. Uncertainty is not a consequence.
 
 ## Severity and verdict
 

@@ -754,6 +754,8 @@ def run_corroboration(
     api_head_ref: str = "b",
     event_head_repo: str = "o/r",
     event_head_branch: str = "b",
+    labels: tuple[str, ...] = ("in progress",),
+    trigger_event: str = "labeled",
 ):
     """Execute `prepare`'s corroboration step against a stubbed `gh`.
 
@@ -778,7 +780,7 @@ def run_corroboration(
             },
             "base": {"sha": STUB_API_BASE},
             "draft": False,
-            "labels": [{"name": "in progress"}],
+            "labels": [{"name": name} for name in labels],
             "changed_files": 3,
         }
     )
@@ -801,12 +803,13 @@ def run_corroboration(
             "GH_TOKEN": "stub-token",
             "PR_NUMBER": "1",
             "HEAD_SHA": STUB_API_HEAD,
-            "TRIGGER_EVENT": "labeled",
+            "TRIGGER_EVENT": trigger_event,
             "REPO": "o/r",
             "EVENT_HEAD_REPO": event_head_repo,
             "EVENT_HEAD_BRANCH": event_head_branch,
             "REVIEW_LABEL": "in progress",
             "DONE_LABEL": "ready for review",
+            "OPT_OUT_LABEL": "no automated review",
             "MAX_CHANGED_FILES": "100",
         },
         {"gh": _GH_STUB},
@@ -1651,6 +1654,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             ".claude/skills/pr-review/SKILL.md",
             ".claude/skills/pr-review/review-checklist.md",
             ".claude/skills/pr-review/bc-guidelines.md",
+            ".claude/skills/pr-review/ci-runner-naming.md",
         } | {
             f".claude/hooks/pr_review/{n}"
             for n in (
@@ -2549,6 +2553,97 @@ class TestReviewLabelAgreesAcrossStages(unittest.TestCase):
         )
 
 
+class TestOptOutLabel(unittest.TestCase):
+    """`no automated review` stops the review in both stages."""
+
+    def test_stage1_literal_matches_stage2_label(self):
+        m = re.search(
+            r"^\s*OPT_OUT_LABEL:\s*(.+?)\s*$", strip_comments(STAGE2.read_text()), re.M
+        )
+        self.assertIsNotNone(m, "OPT_OUT_LABEL env not found in Stage 2")
+        label = m.group(1).strip().strip("\"'")
+        self.assertIn(
+            f"!contains(github.event.pull_request.labels.*.name, '{label}')",
+            strip_comments(STAGE1.read_text()),
+        )
+
+    def _eligible(self, labels, trigger_event="labeled"):
+        with tempfile.TemporaryDirectory() as td:
+            proc, out, _argv = run_corroboration(
+                "c" * 40, td, labels=labels, trigger_event=trigger_event
+            )
+            written = out.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return sole_outputs(self, written).get("eligible")
+
+    def test_opted_out_pr_is_not_eligible_on_any_trigger(self):
+        for trigger in ("labeled", "synchronize"):
+            for spelling in ("no automated review", "No Automated Review"):
+                self.assertEqual(
+                    self._eligible(("in progress", spelling), trigger),
+                    "false",
+                    f"{spelling!r} on {trigger} did not opt out",
+                )
+
+    def test_pr_without_the_label_stays_eligible(self):
+        self.assertEqual(self._eligible(("in progress",)), "true")
+
+
+_PUBLISH_GH_STUB = """#!/bin/bash
+printf '%s\\n' "$*" >> "$GH_ARGV"
+case "$*" in
+  *"/labels?per_page=100"*) printf '%s' "$LABELS_JSON" ;;
+  *"/pulls/"*) echo "$CURRENT_SHA" ;;
+  *) ;;
+esac
+"""
+
+
+class TestPublishHonoursALateOptOut(unittest.TestCase):
+    """An opt-out added during the review stops the label move."""
+
+    def _run(self, labels):
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "out").mkdir()
+            (Path(td) / "out" / "verdict.json").write_text(
+                json.dumps({"verdict": "ready_for_human_review"})
+            )
+            argv = Path(td) / "gh_calls"
+            argv.write_text("")
+            proc, _out = run_step(
+                STAGE2.read_text(),
+                "Move the PR out of review",
+                td,
+                {
+                    "GH_ARGV": str(argv),
+                    "GH_TOKEN": "stub-token",
+                    "REPO": "o/r",
+                    "PR_NUMBER": "1",
+                    "REVIEWED_SHA": STUB_API_HEAD,
+                    "CURRENT_SHA": STUB_API_HEAD,
+                    "EFFECTIVE_STATUS": "succeeded",
+                    "LABELS_JSON": json.dumps([{"name": n} for n in labels]),
+                    "REVIEW_LABEL": "in progress",
+                    "DONE_LABEL": "ready for review",
+                    "OPT_OUT_LABEL": "no automated review",
+                },
+                {"gh": _PUBLISH_GH_STUB},
+            )
+            calls = argv.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        return proc, calls
+
+    def test_opted_out_pr_keeps_its_labels(self):
+        proc, calls = self._run(("in progress", "No Automated Review"))
+        self.assertIn("leaving labels alone", proc.stdout)
+        self.assertNotIn("DELETE", calls)
+        self.assertNotIn("POST", calls)
+
+    def test_pr_without_the_label_is_moved(self):
+        _proc, calls = self._run(("in progress",))
+        self.assertIn("DELETE", calls)
+
+
 class TestCorroboratedValuesAreTheOnlyOnesOffered(unittest.TestCase):
     """`base_sha` and `is_fork` must reach a row only from the trusted API.
 
@@ -2738,6 +2833,7 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "MAX_CHANGED_FILES",
             "MAX_DIFF_BYTES",
             "MERGE_BASE_SHA",
+            "OPT_OUT_LABEL",
             "PROMPT_HASH",
             "PR_DIR",
             "PR_NUMBER",
@@ -4901,9 +4997,10 @@ class TestLabelMoveCannotContradictTheRow(unittest.TestCase):
 class TestLabelComparisonsAreCaseInsensitive(unittest.TestCase):
     """pytorch/pytorch spells the marker `Ready for Review`; `==` never matched."""
 
-    def test_both_label_checks_downcase_both_sides(self):
+    def test_every_label_check_downcases_both_sides(self):
+        # Review, done and opt-out labels.
         prepare = strip_comments(job_block(STAGE2.read_text(), "prepare"))
-        self.assertEqual(prepare.count("ascii_downcase == ($l | ascii_downcase)"), 2)
+        self.assertEqual(prepare.count("ascii_downcase == ($l | ascii_downcase)"), 3)
         self.assertNotIn("any(.labels[]?.name; . == $l)", prepare)
 
 
@@ -5073,8 +5170,8 @@ def rubric_delegates() -> set[Path]:
     """Every file the rubric sends the model to, TRANSITIVELY.
 
     Derived from the rubric rather than listed, so a delegate added tomorrow is
-    covered. Transitive because `pr-review/SKILL.md` delegates onward to its own
-    checklist and BC guidelines.
+    covered. Transitive because pr-review's own files link onward to further
+    delegates.
 
     Only inline `[text](target)` links are seen; a reference-style link or a
     file named in prose is invisible, which UNDERSTATES the set. The hash is
@@ -5160,7 +5257,7 @@ class TestTheRubricIsAWrapperOverPrReview(unittest.TestCase):
         self.assertTrue(
             self.delegates,
             "the rubric links to no other skill file — it is standalone again, "
-            "so the pr-review Read grant and its three prompt-hash entries are "
+            "so the pr-review Read grant and its prompt-hash entries are "
             "now unearned and should be removed with it.",
         )
 
@@ -5182,8 +5279,9 @@ class TestTheRubricIsAWrapperOverPrReview(unittest.TestCase):
         # constant is that it is VERBATIM.
         "Read and apply [pr-review/SKILL.md](../pr-review/SKILL.md), all nine "  # @lint-ignore
         "Review Philosophy points, and its full "
-        "[review-checklist.md](../pr-review/review-checklist.md) and "  # @lint-ignore
-        "[bc-guidelines.md](../pr-review/bc-guidelines.md)."  # @lint-ignore
+        "[review-checklist.md](../pr-review/review-checklist.md), "  # @lint-ignore
+        "[bc-guidelines.md](../pr-review/bc-guidelines.md) and "  # @lint-ignore
+        "[ci-runner-naming.md](../pr-review/ci-runner-naming.md)."  # @lint-ignore
     )
 
     def test_the_rubric_tells_the_model_to_apply_what_it_links(self):
