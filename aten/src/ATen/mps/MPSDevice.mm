@@ -19,12 +19,9 @@ MPSDevice::~MPSDevice() {
 }
 
 MPSDevice::MPSDevice() : _mtl_device(nil) {
-  // Check that MacOS 13.0+ version of MPS framework is available
-  // Create the MPSGraph and check method introduced in 14.0
-  // which is used by MPS backend.
-  id mpsCD = NSClassFromString(@"MPSGraph");
-
-  if ([mpsCD instancesRespondToSelector:@selector(HermiteanToRealFFTWithTensor:axes:descriptor:name:)] == NO) {
+  // MPS backend requires macOS 15.0+
+  if (![[NSProcessInfo processInfo]
+          isOperatingSystemAtLeastVersion:{.majorVersion = 15, .minorVersion = 0, .patchVersion = 0}]) {
     return;
   }
 
