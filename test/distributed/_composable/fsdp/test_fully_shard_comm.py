@@ -50,7 +50,13 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
+from torch.profiler import profile, ProfilerActivity
+from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -370,7 +376,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             group,
             reduce_scatter_stream,
             comm,
-            orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
             gradient_divide_factor=None,
@@ -403,6 +408,99 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
+
+
+class TestFullyShardChunkCatMixedDtype(TestCase):
+    def test_numerics(self, device):
+        bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
+        # Dim-0 sizes that need padding, multi-dim, and one large enough to
+        # span several blocks per chunk
+        sizes = [(5, 3), (7,), (2049, 2, 2)]
+        # On CUDA: the fused kernel, then two composite fallbacks
+        for input_dtypes, noncontiguous in (
+            ((bf16, fp32, bf16), False),
+            ((bf16, fp32, bf16), True),
+            ((fp16, fp32, fp16), False),
+        ):
+            tensors = [
+                torch.randn(size, device=device, dtype=dtype)
+                for size, dtype in zip(sizes, input_dtypes)
+            ]
+            if noncontiguous:
+                tensors = [torch.cat([t, t], dim=-1)[..., ::2] for t in tensors]
+                self.assertFalse(tensors[0].is_contiguous())
+            expected = torch._chunk_cat([t.to(fp32) for t in tensors], 0, 4)
+            out = torch.empty_like(expected)
+            version = out._version
+            torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, 4, out=out)
+            self.assertEqual(out, expected, atol=0, rtol=0)
+            # Autograd must see the in-place write to out
+            self.assertGreater(out._version, version)
+
+    @onlyCUDA
+    def test_kernels(self, device):
+        bf16, fp32 = torch.bfloat16, torch.float32
+        tensors = [torch.randn(8, 3, device=device, dtype=d) for d in (bf16, fp32)]
+        out = torch.empty(2, 24, device=device)
+        with profile(activities=[ProfilerActivity.CUDA]) as prof:
+            torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, 2, out=out)
+            torch.cuda.synchronize()
+        chunk_cat_kernels = [
+            event.name
+            for event in prof.events()
+            if event.device_type == DeviceType.CUDA
+            and "chunk_cat_cuda_kernel" in event.name
+        ]
+        # One launch copies the fp32 input and a second casts the bf16 one. The
+        # composite fallback casts separately and launches _chunk_cat once.
+        self.assertEqual(len(chunk_cat_kernels), 2, str(chunk_cat_kernels))
+
+
+instantiate_device_type_tests(
+    TestFullyShardChunkCatMixedDtype, globals(), only_for=("cpu", "cuda", "xpu")
+)
+
+
+class TestFullyShardNativeCollectiveCopy(TestCase):
+    @parametrize("outer_size", [1, 2])
+    def test_opcheck(self, device, outer_size):
+        tensor = make_tensor((outer_size, 8, 3), device=device, dtype=torch.float32)
+        packed = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, dim=1)])
+        torch.library.opcheck(
+            torch.ops.fsdp._all_gather_copy_out_.default,
+            ([torch.empty_like(tensor)], packed, [packed.size(1)], [outer_size], 4),
+        )
+        torch.library.opcheck(
+            torch.ops.fsdp._reduce_scatter_copy_in_.default,
+            (torch.empty_like(packed), [tensor], [1], 4),
+        )
+
+    @onlyCUDA
+    def test_cuda_graph(self, device):
+        tensor = make_tensor((128, 8, 3), device=device, dtype=torch.bfloat16)
+        packed = tensor.new_empty((4, tensor.numel() // 4))
+        output = torch.empty_like(tensor)
+
+        def copy():
+            torch.ops.fsdp._reduce_scatter_copy_in_(packed, [tensor], [1], 4)
+            torch.ops.fsdp._all_gather_copy_out_(
+                [output], packed, [packed.size(1)], [128], 4
+            )
+
+        copy()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            copy()
+        for _ in range(3):
+            tensor.add_(1)
+            graph.replay()
+            # The round trip only matches if both copies replay on the new data
+            self.assertEqual(output, tensor, atol=0, rtol=0)
+
+
+instantiate_device_type_tests(
+    TestFullyShardNativeCollectiveCopy, globals(), only_for=("cpu", "cuda", "xpu")
+)
 
 
 class TestFullyShardCommunication(FSDPTestContinuous):
@@ -1644,6 +1742,52 @@ class TestFullyShardPrefetch(FSDPTest):
             loss.backward()
             optim.step()
             self.assertEqual(ref_loss, loss)
+
+    @skip_if_lt_x_gpu(4)
+    def test_unused_backward_prefetch_with_post_forward_mesh(self):
+        """
+        Tests that a backward prefetch of a group that backward does not use,
+        which gathers over the post-forward mesh, is discarded when the group
+        reshards instead of being copied out by the next forward.
+        """
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin0, self.lin1, self.lin2 = (nn.Linear(16, 16) for _ in range(3))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                y = self.lin0(x)
+                self.lin1(y)  # does not reach the loss
+                return self.lin2(y)
+
+        torch.manual_seed(42)
+        model = Model().to(device_type)
+        ref_model = copy.deepcopy(model)
+        for lin in (model.lin0, model.lin1, model.lin2):
+            fully_shard(lin, reshard_after_forward=2)
+        fully_shard(model)
+        optim = torch.optim.SGD(model.parameters(), lr=1e-2)
+        ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
+        unused_group = model.lin1._get_fsdp_state()._fsdp_param_group
+        torch.manual_seed(42 + self.rank)
+        for _ in range(2):
+            # Gradient accumulation keeps the first backward from finalizing
+            for is_last_backward in (False, True):
+                model.set_is_last_backward(is_last_backward)
+                model.set_requires_gradient_sync(is_last_backward)
+                inp = torch.randn((4, 16), device=device_type.type)
+                losses = [ref_model(inp).sum(), model(inp).sum()]
+                for loss in losses:
+                    loss.backward()
+                self.assertEqual(losses[0], losses[1])
+                self.assertIsNone(unused_group._all_gather_result)
+            for param in ref_model.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+            for _optim in (ref_optim, optim):
+                _optim.step()
+                _optim.zero_grad()
 
     def _init_transformer(
         self,

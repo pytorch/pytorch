@@ -11,45 +11,13 @@ can be used to visualize the traces in Perfetto/Chrome Trace Viewer.
 Currently, tracing on NVIDIA and AMD GPUs are supported as well as XPU and HPU.
 
 ## Build Notes
-Libkineto uses the standard CMAKE-based build flow.
+Libkineto is built with PyTorch and linked statically into `libtorch_cpu`. It is
+on by default; set `USE_KINETO=0` to turn it off.
 
-### Dependencies
-Libkineto requires gcc 5+ and:
-
-- NVIDIA CUPTI: used to collect traces and metrics from NVIDIA GPUs.
-- fmt: used for its convenient and lightweight string formatting functionality.
-- googletest: required to build and run Kineto's tests.
-  - **googletest is not required** if you don't want to run Kineto tests.
-By default, building of tests is **on**. Turn it off by setting `KINETO_BUILD_TESTS` to **off**.
-
-You can download [NVIDIA CUPTI][1], [fmt][2], [googletest][3] and set
-`CUDA_SOURCE_DIR`, `FMT_SOURCE_DIR`, `GOOGLETEST_SOURCE_DIR` respectively for
-cmake to find these libraries. If the fmt and googletest variables are not set, cmake will
-build the git submodules found in the `third_party` directory.
-If `CUDA_SOURCE_DIR` is not set, libkineto will fail to build.
-
-### Building Libkineto
-
-```
-# Check out repo and sub modules
-git clone --recursive https://github.com/pytorch/kineto.git
-# Build libkineto with cmake
-cd kineto/libkineto
-mkdir build && cd build
-cmake ..
-make
-```
-
-To run the tests after building libkineto (if tests are built), use the following
-command:
-```
-make test
-```
-
-### Installing Libkineto
-```
-make install
-```
+The backend follows the PyTorch build: CUPTI for CUDA, rocprofiler-sdk for
+ROCm, XPUPTI for XPU (when `XPU_ENABLE_KINETO` is set), and CPU-only otherwise.
+Its dependencies (fmt, googletest, nlohmann_json) come from PyTorch's
+`third_party`. See the Kineto section of `cmake/Dependencies.cmake` for details.
 
 ## How Libkineto works
 
@@ -75,7 +43,3 @@ The default trace output is a JSON file that can be visualized in Chrome Trace V
 
 ## License
 Libkineto is BSD licensed, as detailed in the [LICENSE](../LICENSE) file.
-
-[1]:https://developer.nvidia.com/CUPTI-CTK10_2
-[2]:https://github.com/fmtlib/fmt
-[3]:https://github.com/google/googletest

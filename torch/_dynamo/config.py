@@ -149,11 +149,11 @@ fail_on_cache_limit_hit: bool = Config(
     alias="torch._dynamo.config.fail_on_recompile_limit_hit"
 )
 
-# whether or not to specialize on int inputs.  This only has an effect with
-# dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
-# inputs.  Note that assume_static_by_default will also cause ints to get
-# specialized, so this is mostly useful for export, where we want inputs
-# to be dynamic, but accesses to ints should NOT get promoted into inputs.
+# whether or not to specialize on int inputs.  assume_static_by_default will also
+# cause ints to get specialized initially, so this is mostly useful for export,
+# where we want inputs to be dynamic, but accesses to ints should NOT get promoted into
+# inputs.  If True, ints are never made dynamic by automatic dynamic shapes or
+# assume_static_by_default=False.
 specialize_int = False
 
 # Whether or not to specialize on float inputs.  Dynamo will always promote
@@ -171,18 +171,17 @@ use_lazy_graph_module = (
     os.environ.get("TORCH_COMPILE_USE_LAZY_GRAPH_MODULE", "1") == "1"
 )
 
-# This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
-# When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
-# NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
-# see [Note - on the state of mark_dynamic]
+# By itself, tells dynamo to only allocate symbols for shapes and int inputs
+# that are explicitly marked dynamic (via mark_dynamic or similar).
+# See automatic_dynamic_shapes for the overall behavior.  Setting to False will
+# treat most shapes/ints as dynamic.
 assume_static_by_default = True
 
 # Internal: Shape specification patched during tracing by enter_exit_hooks.
 # Set via torch.compile(dynamic_shapes=...), not directly by users.
 _dynamic_shapes_spec = None
 
-# This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
-# with assume_static_by_default=True.
+# This flag is meant to be used in conjunction with assume_static_by_default=True.
 # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
 automatic_dynamic_shapes = (
@@ -371,12 +370,11 @@ same_two_models_use_fp64 = True
 
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
-# This requires dynamic_shapes to be True.
 capture_scalar_outputs = os.environ.get("TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS") == "1"
 
 # Not all backends support operators that have dynamic output shape (e.g.,
 # nonzero, unique).  When this flag is set to False, we introduce a graph
-# break instead of capturing.  This requires dynamic_shapes to be True.
+# break instead of capturing.
 # If you set this to True, you probably also want capture_scalar_outputs
 # (these are separated for historical reasons).
 capture_dynamic_output_shape_ops = (
