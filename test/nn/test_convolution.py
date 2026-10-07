@@ -4153,6 +4153,10 @@ def _log_conv3d_hipblaslt_heuristic(device):
     HIPBLASLT_MATMUL_DESC_TRANSA = 0
     HIPBLASLT_MATMUL_DESC_TRANSB = 1
     HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1
+    # hipDeviceAttributePciChipId and hipDeviceAttributePhysicalMultiProcessorCount
+    # in the HIP 7.16 hipDeviceAttribute_t enum. rocminfo's Chip ID is the first.
+    HIP_DEVICE_ATTRIBUTE_PCI_CHIP_ID = 10020
+    HIP_DEVICE_ATTRIBUTE_PHYSICAL_MULTIPROCESSOR_COUNT = 10015
     m, n, k = 114278400, 16, 144
     # Matches parseCUDABlasLtWorkspaceSize: KiB, CUBLASLT then HIPBLASLT, else 80 MiB.
     raw = os.environ.get("CUBLASLT_WORKSPACE_SIZE")
@@ -4247,6 +4251,68 @@ def _log_conv3d_hipblaslt_heuristic(device):
         props = torch.cuda.get_device_properties(device)
         arch = getattr(props, "gcnArchName", "").split(":")[0]
 
+        def hip_device_attribute(attr):
+            hip = None
+            for soname in ("libamdhip64.so.1", "libamdhip64.so.7", "libamdhip64.so"):
+                try:
+                    hip = ctypes.CDLL(soname)
+                    break
+                except OSError:
+                    continue
+            if hip is None:
+                return None
+            hip.hipDeviceGetAttribute.argtypes = [
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.c_int,
+                ctypes.c_int,
+            ]
+            hip.hipDeviceGetAttribute.restype = ctypes.c_int
+            value = ctypes.c_int()
+            status = hip.hipDeviceGetAttribute(
+                ctypes.byref(value), attr, torch.cuda.current_device()
+            )
+            if status != 0:
+                return None
+            return value.value
+
+        def chip_library_files(libpath):
+            # Kernels are tagged ID75a0 (the root id). Other gfx950 ids, including
+            # the CI virtual function 75b0, only match if a fallback file exists.
+            if not libpath or not arch:
+                return "unavailable"
+            folder = os.path.join(
+                os.path.dirname(libpath), "hipblaslt", "library", arch
+            )
+            if not os.path.isdir(folder):
+                return f"missing {folder}"
+            try:
+                names = os.listdir(folder)
+            except OSError as exc:
+                return f"unreadable {folder}: {exc}"
+            # Match ID75a0 and combined tags such as ID75a3-75a2.
+            tokens = (
+                "75a0",
+                "75b0",
+                "75a2",
+                "75b2",
+                "75a3",
+                "75b3",
+                "75a8",
+                "75b8",
+                "CU256",
+            )
+            counts = " ".join(
+                f"{token}={sum(token in name for name in names)}" for token in tokens
+            )
+            return f"{folder} files {len(names)} {counts}"
+
+        chip_id = hip_device_attribute(HIP_DEVICE_ATTRIBUTE_PCI_CHIP_ID)
+        physical_cus = hip_device_attribute(
+            HIP_DEVICE_ATTRIBUTE_PHYSICAL_MULTIPROCESSOR_COUNT
+        )
+        chip_text = "unavailable" if chip_id is None else f"0x{chip_id:04x}"
+        physical_text = "unavailable" if physical_cus is None else str(physical_cus)
+
         def tensile_library(libpath, component):
             import hashlib
 
@@ -4281,6 +4347,16 @@ def _log_conv3d_hipblaslt_heuristic(device):
             f" lib {rocblas_path}"
         )
         hipblaslt_path = loaded("libhipblaslt.so")
+        print(
+            "conv3d_cudnn_broken heuristic:"
+            f" pciChipId {chip_text}"
+            f" multiProcessorCount {getattr(props, 'multi_processor_count', 'unavailable')}"
+            f" physicalCUs {physical_text}"
+        )
+        print(
+            "conv3d_cudnn_broken heuristic:"
+            f" hipBLASLt chip files {chip_library_files(hipblaslt_path)}"
+        )
         print(
             "conv3d_cudnn_broken heuristic:"
             f" hipBLASLt tensile {tensile_library(hipblaslt_path, 'hipblaslt')}"
