@@ -512,7 +512,7 @@ if(INTERN_BUILD_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLCompiler.mm
       ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLFeatureProvider.mm
     )
-    set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm PROPERTIES COMPILE_OPTIONS -fno-objc-arc)
+    set_property(SOURCE ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm APPEND PROPERTY COMPILE_OPTIONS "-fno-objc-arc")
     include_directories(${TORCH_ROOT}/third_party/nlohmann/single_include)
     list(APPEND TORCH_SRCS ${COREML_DELEGATE_SRCS})
   endif()
@@ -525,8 +525,8 @@ endif()
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX)
   # See https://github.com/pytorch/pytorch/issues/38856
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_OPTIONS "-Wno-redundant-move;-Wno-noexcept-type")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_OPTIONS -Wno-init-list-lifetime)
+  set_property(SOURCE ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-redundant-move")
+  set_property(SOURCE ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-init-list-lifetime")
 endif()
 
 # Enable conditional FP16 arithmetic intrinsics
@@ -649,10 +649,10 @@ if(USE_CUDA)
     set(ASYNC_MM_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu")
     # Disable the warning to make cutlass warp-specialized cooperative kernel build for gcc-9
     if(CMAKE_COMPILER_IS_GNUCXX)
-      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
+      set_property(SOURCE ${ASYNC_MM_FILE} APPEND PROPERTY COMPILE_OPTIONS "-Wno-unused-but-set-variable")
     endif()
     if(CUDA_NVCC_FLAGS MATCHES ".*compute_90.*")
-      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
+      set_property(SOURCE ${ASYNC_MM_FILE} APPEND PROPERTY COMPILE_OPTIONS "-gencode=arch=compute_90a,code=sm_90a")
     endif()
   endif()
   set_source_files_properties(
@@ -690,6 +690,29 @@ if(USE_ROCM)
     append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_HIP_SRCS)
     if(NOT WIN32)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_HIP_SRCS)
+      # On ROCm the native async-TP GEMM is the CK-tile kernel in
+      # hip/AsyncMM.hip instead of the CUTLASS one in cuda/AsyncMM.cu. The .hip
+      # file always provides the async_input_mm symbol the op registration
+      # needs; the kernel itself (USE_ROCM_ASYNC_MM) needs gfx942/gfx950 in
+      # PYTORCH_ROCM_ARCH and the CK headers, which ATen adds to the include
+      # path only when CK SDPA or CK GEMM is enabled.
+      list(REMOVE_ITEM Caffe2_HIP_SRCS
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu)
+      set(ASYNC_MM_HIP_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/hip/AsyncMM.hip")
+      list(APPEND Caffe2_HIP_SRCS ${ASYNC_MM_HIP_FILE})
+      set(_have_async_mm_arch FALSE)
+      if((USE_FLASH_ATTENTION AND USE_ROCM_CK_SDPA) OR USE_ROCM_CK_GEMM)
+        foreach(ARCH gfx942 gfx950)
+          if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+            set(_have_async_mm_arch TRUE)
+            break()
+          endif()
+        endforeach()
+      endif()
+      if(_have_async_mm_arch)
+        set_source_files_properties(${ASYNC_MM_HIP_FILE} PROPERTIES
+          COMPILE_DEFINITIONS USE_ROCM_ASYNC_MM)
+      endif()
     endif()
   endif()
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
@@ -843,7 +866,7 @@ if(BUILD_LIBTORCHLESS)
   add_subdirectory(../torch torch)
   # ---[ Torch python bindings build
   set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
-  set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
+  set(TORCH_PYTHON_LINK_OPTIONS "${TORCH_PYTHON_LINK_OPTIONS}" PARENT_SCOPE)
 else()
   set(TORCH_LIB torch)
   set(TORCH_CPU_LIB torch_cpu)
@@ -870,18 +893,18 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML
   endif()
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
   foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
-    set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes;-mllvm;-openmp-opt-disable")
+    set_property(SOURCE ${generated_file} APPEND PROPERTY COMPILE_OPTIONS "-Wno-missing-prototypes" "-Wno-error=missing-prototypes" "-mllvm" "-openmp-opt-disable")
   endforeach()
   foreach(source_file IN LISTS TORCH_CPU_SOURCES)
     get_filename_component(source_file "${source_file}" REALPATH)
     string(FIND "${source_file}" "${CMAKE_BINARY_DIR}" res)
     if(res GREATER -1)
-      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+      set_property(SOURCE ${source_file} APPEND PROPERTY COMPILE_OPTIONS "-Wno-missing-prototypes" "-Wno-error=missing-prototypes")
       continue()
     endif()
     string(FIND "${source_file}" "embedding_lookup_idx_avx2.cc" res)
     if(res GREATER -1)
-      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+      set_property(SOURCE ${source_file} APPEND PROPERTY COMPILE_OPTIONS "-Wno-missing-prototypes" "-Wno-error=missing-prototypes")
     endif()
   endforeach()
 endif()
@@ -1533,7 +1556,7 @@ install(FILES
 # ---[ Torch python bindings build
 add_subdirectory(../torch torch)
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
-set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
+set(TORCH_PYTHON_LINK_OPTIONS "${TORCH_PYTHON_LINK_OPTIONS}" PARENT_SCOPE)
 # ==========================================================
 # END formerly-libtorch flags
 # ==========================================================
@@ -1746,10 +1769,9 @@ if($ENV{TH_BINARY_BUILD})
     #
     # These linker commands do not work on OS X, do not attempt this there.
     # (It shouldn't matter anyway, though, because OS X has dropped CUDA support)
-    foreach(_symb  slaed0 daled0 dormql sormql zheevd cheevd)
-    STRING(APPEND _undefined_link_flags " -Wl,--undefined=mkl_lapack_${_symb}")
-    endforeach(_symb)
-    set_target_properties(torch_cpu PROPERTIES LINK_FLAGS  ${_undefined_link_flags})
+    foreach(_symb IN ITEMS slaed0 daled0 dormql sormql zheevd cheevd)
+      target_link_options(torch_cpu PRIVATE "LINKER:--undefined=mkl_lapack_${_symb}")
+    endforeach()
 
   endif()
 endif()
@@ -2209,6 +2231,9 @@ if(BUILD_TEST)
   if(USE_ROCM)
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
+      # hipify renames cuda_foo_test to hip_foo_test; keep the CUDA binary
+      # name so ROCm and CUDA C++ test reports line up.
+      string(REGEX REPLACE "^hip_" "cuda_" test_name ${test_name})
       if(test_src MATCHES "^.*\.hip$")
         set_source_files_properties(${test_src} PROPERTIES LANGUAGE HIP)
         add_executable(${test_name} "${test_src}")

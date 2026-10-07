@@ -90,11 +90,7 @@ class TestCKBackend(TestCase):
         (
             # CK float16 is covered by test_max_autotune_precompile_preselected
             # and test_max_autotune_addmm. Only CKTILE needs a float16 cell here.
-            subtest(
-                ("CK", torch.bfloat16),
-                name="standalone_ck",
-                decorators=[skipIfRocmVersionAtLeast([7, 14])],
-            ),
+            subtest(("CK", torch.bfloat16), name="standalone_ck"),
             subtest(("CKTILE", torch.float16), name="standalone_cktile_float16"),
             subtest(("CKTILE", torch.bfloat16), name="standalone_cktile_bfloat16"),
             subtest(("ATen,CK", torch.bfloat16), name="fallback"),
@@ -154,7 +150,7 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        ("CK", "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     @parametrize("autotune_in_subproc", (True,))
@@ -204,7 +200,6 @@ class TestCKBackend(TestCase):
             torch.testing.assert_close(Y1_compiled, Y1)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
-    @skipIfRocmVersionAtLeast([7, 14])
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("num_gemms", (1, 2))
     def test_max_autotune_ck_backend_cpp_wrapper(self, num_gemms):
@@ -263,7 +258,7 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        ("CK", "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     def test_max_autotune_precompile_preselected(self, max_autotune_gemm_backends):
@@ -338,11 +333,12 @@ class TestCKBackend(TestCase):
             Y_eager = a @ b
             torch.testing.assert_close(Y_compiled, Y_eager, equal_nan=True)
 
+    @skipIfRocmVersionAtLeast((10, 1))
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        ("CK", "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     @parametrize(
@@ -490,7 +486,7 @@ class TestCKBackend(TestCase):
     )
     @parametrize(
         "max_autotune_conv_backends",
-        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATEN,CK"),
+        ("CK", "ATEN,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     def test_max_autotune_conv2d(self, max_autotune_conv_backends):
@@ -531,7 +527,7 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
         "max_autotune_gemm_backends",
-        (subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]), "ATen,CK"),
+        ("CK", "ATen,CK"),
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     def test_max_autotune_precompile_bmm(
