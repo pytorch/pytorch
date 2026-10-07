@@ -1476,7 +1476,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         device_module.synchronize()
 
         counter = torch.zeros(1, dtype=torch.float32, device=device_type)
-        # Calibrated out here: get_cycles_per_ms(device_type) issues its own CUDA work,
+        # Calibrated out here: get_cycles_per_ms(device_type) issues its own device work,
         # which must not end up inside the capture.
         delay_cycles = int(100 * get_cycles_per_ms(device_type))
         graph = graph_cls()
@@ -2786,6 +2786,9 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
         res = torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
         self.assertEqual(res, torch.full_like(res, float(sum(range(self.world_size)))))
 
+    @skipIfXpu(
+        msg="symm_mem::one_shot_all_reduce is not implemented for XPU: https://github.com/intel/torch-xpu-ops/issues/5404"
+    )
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -2811,20 +2814,20 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
             t.fill_(float(self.rank)).add_(step)
             step.add_(1.0)
             if self.rank == 0:
-                torch.cuda._sleep(20_000_000)
+                device_module._sleep(20_000_000)
             return torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
 
         warmup = fill_and_run()
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
-        graph = torch.cuda.CUDAGraph()
+        graph = graph_cls()
         observed = torch.empty_like(warmup)
-        with torch.cuda.graph(graph):
+        with device_module.graph(graph):
             observed.copy_(fill_and_run())
 
         for _ in range(replays):
             graph.replay()
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
         # Capture does not execute, so step counts the warm-up plus replays,
         # and the last replay reduced rank + replays on every rank.

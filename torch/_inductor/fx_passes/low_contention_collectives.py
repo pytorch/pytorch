@@ -170,7 +170,7 @@ def _select_low_contention_all_gather_target(
 
     device_index = None
     input_val = input_node.meta.get("val")
-    acc = torch.accelerator.current_accelerator(True)
+    acc = torch.accelerator.current_accelerator()
     if (
         isinstance(input_val, torch.Tensor)
         and acc is not None
