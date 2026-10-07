@@ -3386,6 +3386,34 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_lazy_clone_side_stream_warmup(self):
+        static_input = torch.randn(1024, device="cuda")
+
+        def model(x):
+            y = x._lazy_clone()
+            y.data_ptr()
+            return y * 2
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(3):
+                model(static_input)
+        torch.cuda.current_stream().wait_stream(s)
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = model(static_input)
+
+        for _ in range(2):
+            data = torch.randn(1024, device="cuda")
+            static_input.copy_(data)
+            g.replay()
+            self.assertEqual(out, data * 2)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
     )
@@ -3414,19 +3442,23 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
     )
-    def test_lazy_clone_cross_stream_errors(self):
+    def test_lazy_clone_cross_stream(self):
         s = torch.cuda.Stream()
         s.wait_stream(torch.cuda.current_stream())
 
-        # Lazily cloning on a stream other than the allocation stream.
+        # Lazily cloning on a side stream (e.g., when warming up for CUDA graph
+        # capture) is fine, and so is materializing on that stream.
         x = torch.randn(1024, device="cuda")
         with torch.cuda.stream(s):
-            with self.assertRaisesRegex(RuntimeError, "Lazily cloning a tensor"):
-                x._lazy_clone()
-        self.assertFalse(torch._C._is_cow_tensor(x))
+            y = x._lazy_clone()
+            y.add_(1)
+        torch.cuda.current_stream().wait_stream(s)
+        self.assertFalse(torch._C._is_cow_tensor(y))
+        self.assertEqual(y, x + 1)
 
         # Materializing a lazy clone on a stream other than the one it was
         # lazily cloned on.
+        x = torch.randn(1024, device="cuda")
         y = x._lazy_clone()
         with torch.cuda.stream(s):
             with self.assertRaisesRegex(RuntimeError, "not the stream it was lazily"):
@@ -3438,16 +3470,20 @@ torch.cuda.synchronize()
                 x.add_(1)
         self.assertTrue(torch._C._is_cow_tensor(x))
 
-        # Stealing the data on another stream while a copy of it may be pending.
+        # The last reference stealing the data on another stream waits for
+        # pending copies of it. Delay the copy to make sure it is still pending.
+        x = torch.randn(1024, device="cuda")
+        x_orig = x.clone()
+        y = x._lazy_clone()
+        s.wait_stream(torch.cuda.current_stream())
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
         y.add_(1)
-        self.assertFalse(torch._C._is_cow_tensor(y))
         with torch.cuda.stream(s):
-            with self.assertRaisesRegex(RuntimeError, "on a different stream"):
-                x.add_(1)
-        self.assertTrue(torch._C._is_cow_tensor(x))
-        x.add_(1)
+            x.add_(1)
+        torch.cuda.current_stream().wait_stream(s)
         self.assertFalse(torch._C._is_cow_tensor(x))
-        self.assertEqual(y, x)
+        self.assertEqual(y, x_orig + 1)
+        self.assertEqual(x, x_orig + 1)
 
         # Without a pending copy, the last reference can be written on any
         # stream.

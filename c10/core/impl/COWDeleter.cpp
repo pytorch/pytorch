@@ -27,7 +27,7 @@ auto cow::COWDeleterContext::decrement_refcount()
   TORCH_INTERNAL_ASSERT(refcount >= 0, refcount);
   if (refcount == 0) {
     std::unique_lock lock(mutex_);
-    auto result = std::move(data_);
+    LastReference result{std::move(data_), std::move(copy_events_)};
     lock.unlock();
     delete this;
     return {std::move(result)};
@@ -40,19 +40,18 @@ auto cow::COWDeleterContext::is_unique() const -> bool {
   return refcount_ == 1;
 }
 
-auto cow::COWDeleterContext::record_copy_stream(c10::Stream stream) -> void {
-  std::lock_guard lock(copy_stream_mutex_);
-  if (!copy_stream_.has_value()) {
-    copy_stream_ = stream;
-  } else if (*copy_stream_ != stream) {
-    copy_streams_differ_ = true;
+auto cow::COWDeleterContext::record_copy_event(c10::Stream stream) -> void {
+  std::lock_guard lock(copy_events_mutex_);
+  for (auto& [copy_stream, event] : copy_events_) {
+    if (copy_stream == stream) {
+      // Supersedes the previous event recorded on the same stream.
+      event.record(stream);
+      return;
+    }
   }
-}
-
-auto cow::COWDeleterContext::copies_ordered_before(c10::Stream stream) -> bool {
-  std::lock_guard lock(copy_stream_mutex_);
-  return !copy_streams_differ_ &&
-      (!copy_stream_.has_value() || *copy_stream_ == stream);
+  c10::Event event(stream.device_type());
+  event.record(stream);
+  copy_events_.emplace_back(stream, std::move(event));
 }
 
 cow::COWDeleterContext::~COWDeleterContext() {

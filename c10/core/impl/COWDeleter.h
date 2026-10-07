@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Event.h>
 #include <c10/core/Stream.h>
 #include <c10/macros/Export.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -10,7 +11,9 @@
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <utility>
 #include <variant>
+#include <vector>
 
 namespace c10::impl::cow {
 
@@ -42,8 +45,15 @@ class C10_API COWDeleterContext {
   // Represents the last reference to the context.
   //
   // This will be returned by decrement_refcount when it is the last
-  // reference remaining and after any pending copies have completed.
-  using LastReference = std::unique_ptr<void, DeleterFnPtr>;
+  // reference remaining and after any pending copies have completed. For
+  // devices with streams, that only means that the copies have been enqueued,
+  // so it also returns events that are recorded after them.
+  struct LastReference {
+    std::unique_ptr<void, DeleterFnPtr> data;
+    // For each stream that copies of the data were enqueued on, an event
+    // recorded after the last of them.
+    std::vector<std::pair<c10::Stream, c10::Event>> copy_events;
+  };
 
   // Decrements the refcount, returning a handle indicating what to
   // do with it.
@@ -54,13 +64,10 @@ class C10_API COWDeleterContext {
   // can be created concurrently in that case.
   bool is_unique() const;
 
-  // Records that a reference is about to be materialized by copying the data
-  // on `stream`. Must be called before the corresponding decrement_refcount().
-  void record_copy_stream(c10::Stream stream);
-
-  // Returns true if every copy recorded with record_copy_stream() was on
-  // `stream`, i.e., if work enqueued on `stream` is ordered after all of them.
-  bool copies_ordered_before(c10::Stream stream);
+  // Records an event on `stream` after a copy of the data was enqueued on it.
+  // Must be called while holding the NotLastReference that the copy was made
+  // under, so that the event is returned with the LastReference.
+  void record_copy_event(c10::Stream stream);
 
  private:
   // The destructor is hidden, this should only ever be used within
@@ -71,9 +78,8 @@ class C10_API COWDeleterContext {
   std::unique_ptr<void, DeleterFnPtr> data_;
   std::atomic<std::int64_t> refcount_ = 1;
 
-  std::mutex copy_stream_mutex_;
-  std::optional<c10::Stream> copy_stream_;
-  bool copy_streams_differ_ = false;
+  std::mutex copy_events_mutex_;
+  std::vector<std::pair<c10::Stream, c10::Event>> copy_events_;
 };
 
 // The `ctx` of a COW DataPtr. There is one of these per DataPtr, while the

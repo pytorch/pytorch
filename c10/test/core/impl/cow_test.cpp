@@ -83,28 +83,6 @@ TEST_F(ContextTest, cow_deleter) {
   ASSERT_THAT(delete_count(), testing::Eq(1));
 }
 
-TEST_F(ContextTest, copies_ordered_before) {
-  auto& context = *new cow::COWDeleterContext(new_delete_tracker());
-  Device device(DeviceType::CUDA, 0);
-  Stream s0(Stream::UNSAFE, device, 0);
-  Stream s1(Stream::UNSAFE, device, 1);
-
-  // No copies yet: any stream is fine.
-  ASSERT_TRUE(context.copies_ordered_before(s0));
-  ASSERT_TRUE(context.copies_ordered_before(s1));
-
-  context.record_copy_stream(s0);
-  ASSERT_TRUE(context.copies_ordered_before(s0));
-  ASSERT_FALSE(context.copies_ordered_before(s1));
-
-  // Copies on different streams can't both be ordered before a single stream.
-  context.record_copy_stream(s1);
-  ASSERT_FALSE(context.copies_ordered_before(s0));
-  ASSERT_FALSE(context.copies_ordered_before(s1));
-
-  cow::cow_deleter(new cow::COWReference{&context, std::nullopt});
-}
-
 MATCHER(is_copy_on_write, "") {
   const c10::StorageImpl& storage = std::ref(arg);
   return cow::is_cow_data_ptr(storage.data_ptr());
