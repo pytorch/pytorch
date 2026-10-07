@@ -8931,6 +8931,11 @@ class DistributedTest:
                     )
 
             self._barrier(timeout=30)
+            # The other ranks' communicators were aborted by their timeouts, and
+            # NCCL requires rank 0 to abort as well: since NCCL 2.31 a graceful
+            # destroy waits in an intra-node barrier that they never join.
+            if self.rank == 0:
+                dist.distributed_c10d._abort_process_group(nccl_pg)
 
         @with_nccl_blocking_wait
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
