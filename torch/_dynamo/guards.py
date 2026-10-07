@@ -3903,8 +3903,6 @@ class GuardBuilder(GuardBuilderBase):
             ):
                 if value.pytype is not None:
                     pytype = value.pytype
-            elif torch._subclasses.fake_tensor.is_fake_tensor(value):
-                pytype = type(self.get(guard))
 
             if not isinstance(value, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(value)}")
@@ -4858,8 +4856,6 @@ class GuardsStatePickler(FunctionPicklerBase):
                 obj, torch._subclasses.FakeTensor
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-            elif torch._subclasses.fake_tensor.is_fake_tensor(obj):
-                pytype = torch.Tensor
             # A fake answers empty_like with another fake through its own
             # __torch_dispatch__, whether or not its FakeTensorMode is active,
             # and that fake would drag the mode and its converters into the
