@@ -50,6 +50,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-noble-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
+      rocm-arch-list: gfx950
       # The amd-sandbox experiment routes the mi350 test shards onto the
       # amd-sandbox- prefixed runner scale sets via the dedicated
       # amd-sandbox-label-type output (empty when the experiment is disabled, in

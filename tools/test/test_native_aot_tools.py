@@ -1233,11 +1233,13 @@ def _patched_generation(ops, declarations=(_FakeDecl,)):
             mock.patch.object(
                 gen_aot_lib,
                 "impl_signature_params",
-                lambda op: "const at::Tensor & self, int64_t k",
+                lambda op, *, structured=True: "const at::Tensor & self, int64_t k",
             )
         )
         stack.enter_context(
-            mock.patch.object(gen_aot_lib, "precomputed_args", lambda op: [])
+            mock.patch.object(
+                gen_aot_lib, "precomputed_args", lambda op, *, structured=True: []
+            )
         )
         yield
 
@@ -1562,6 +1564,89 @@ class TestStructuredIntrospection(unittest.TestCase):
         )
         self.assertIn("precomputes NOTHING", raw)
         self.assertIn("arrive RAW", raw)
+
+
+class TestFunctionalIntrospection(unittest.TestCase):
+    def test_functional_base_name_export(self) -> None:
+        declaration = types.SimpleNamespace(
+            ATEN_OP="prod",
+            DISPATCH_KEY="CUDA",
+            STRUCTURED=False,
+            ARCHS=_FakeDecl.ARCHS,
+            cpp_dispatch=lambda spec: "true",
+            cpp_launch=lambda spec, launch_fn: (
+                "aot_result = at::empty({}, self.options());\n"
+                f"{launch_fn}(self, aot_result, at::cuda::getCurrentCUDAStream());"
+            ),
+            cpp_covers=lambda: "return true;",
+        )
+        with tempfile.TemporaryDirectory() as art, tempfile.TemporaryDirectory() as ops:
+            art_op = os.path.join(art, "sm_100a", "prod")
+            os.makedirs(art_op)
+            _write_sidecar(
+                art_op,
+                SIDECAR["spec"],
+                prefix=SIDECAR["prefix"],
+                arch=SIDECAR["arch"],
+                tensor_args=SIDECAR["tensor_args"],
+            )
+            os.makedirs(os.path.join(ops, "prod"))
+            open(os.path.join(ops, "prod", "aot.py"), "w").close()
+            with (
+                mock.patch.object(gen_aot_lib, "OPS_DIR", ops),
+                mock.patch.object(
+                    gen_aot_lib.decl, "load_declarations", return_value=[declaration]
+                ),
+            ):
+                gen_aot_lib.main(["--artifacts-dir", art])
+            with open(os.path.join(art, "prod", "aot_prod_cuda.cpp")) as f:
+                src = f.read()
+        self.assertIn(
+            "bool prod_cuda_aot_kernel(const at::Tensor & self, "
+            "::std::optional<at::ScalarType> dtype, at::Tensor& aot_result)",
+            src,
+        )
+        self.assertIn(
+            'm.def("covers_prod(Tensor self, *, ScalarType? dtype=None) -> bool"',
+            src,
+        )
+        self.assertEqual(
+            gen_aot_lib.impl_signature_params("prod"),
+            gen_aot_lib.impl_signature_params("prod.dim_int"),
+        )
+
+    def test_functional_codegen(self) -> None:
+        for op in ("_fused_rms_norm", "_fused_rms_norm_backward"):
+            with self.subTest(op=op):
+                params = gen_aot_lib.impl_signature_params(op, structured=False)
+                self.assertIn("std::tuple<at::Tensor,at::Tensor>& aot_result", params)
+                self.assertNotIn("aot_result", gen_aot_lib._int32_size_gate(params))
+                _, schema = gen_aot_lib.covers_signature(op, structured=False)
+                self.assertTrue(schema.startswith(f"covers_{op}("))
+                self.assertNotIn("aot_result", schema)
+                self.assertNotIn("Tensor? out", schema)
+                self.assertEqual(gen_aot_lib.precomputed_args(op, structured=False), [])
+
+    def test_functional_hook_rejects_aliases_and_mutation(self) -> None:
+        from torchgen.gen import get_grouped_native_functions, parse_native_yaml
+        from torchgen.model import DispatchKey
+        from torchgen.native_aot import NativeAotManifest, validate_native_aot_manifests
+
+        native = os.path.join(REPO, "aten", "src", "ATen", "native")
+        parsed = parse_native_yaml(
+            os.path.join(native, "native_functions.yaml"),
+            os.path.join(native, "tags.yaml"),
+        )
+        grouped = get_grouped_native_functions(parsed.native_functions)
+        for op in ("view", "add.out", "missing_native_aot_op"):
+            with self.subTest(op=op):
+                manifest = NativeAotManifest(
+                    op=op, dispatch_key=DispatchKey.CUDA, structured=False
+                )
+                with self.assertRaisesRegex(RuntimeError, "returning fresh tensors"):
+                    validate_native_aot_manifests(
+                        {(DispatchKey.CUDA, op): manifest}, grouped
+                    )
 
 
 class TestAtomicWrites(unittest.TestCase):
@@ -5920,7 +6005,9 @@ class TestArchScopedGeneration(unittest.TestCase):
             with (
                 tempfile.TemporaryDirectory() as ops,
                 mock.patch.object(
-                    gen_aot_lib, "covers_signature", lambda op: signature
+                    gen_aot_lib,
+                    "covers_signature",
+                    lambda op, *, structured=True: signature,
                 ),
             ):
                 os.makedirs(os.path.join(ops, "fakeop"))
