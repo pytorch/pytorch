@@ -276,6 +276,9 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
         from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
         from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+        from torch._inductor.utils import (
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
 
         class LocalStrides(NamedTuple):
             batch: int
@@ -285,14 +288,16 @@ class KernelTests(torch._inductor.test_case.TestCase):
             outer: int
             strides: LocalStrides
 
-        strides = LocalStrides(batch=8, token=1)
+        strides = _sanitize_for_repr(LocalStrides(batch=8, token=1))
+        strides_type = namedtuple_type("LocalStrides", ("batch", "token"))
+        strides_alias = strides_type.__qualname__
         defs = codegen_namedtuple_defs({"X_STRIDES": strides})
         self.assertIn(
             "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type",
             defs,
         )
         self.assertIn(
-            "LocalStrides = namedtuple_type('LocalStrides', ('batch', 'token'))",
+            f"{strides_alias} = namedtuple_type('LocalStrides', ('batch', 'token'))",
             defs,
         )
         # Never import the user's defining module (remote cache / non-importable).
@@ -317,19 +322,18 @@ class KernelTests(torch._inductor.test_case.TestCase):
             namedtuple_type("LocalStrides", ("batch", "token")),
         )
 
-        nested_defs = codegen_namedtuple_defs({"X": Nested(outer=2, strides=strides)})
+        nested = _sanitize_for_repr(Nested(outer=2, strides=strides))
+        nested_defs = codegen_namedtuple_defs({"X": nested})
         self.assertIn(
-            "LocalStrides = namedtuple_type('LocalStrides', ('batch', 'token'))",
+            f"{strides_alias} = namedtuple_type('LocalStrides', ('batch', 'token'))",
             nested_defs,
         )
         self.assertIn(
-            "Nested = namedtuple_type('Nested', ('outer', 'strides'))",
+            f"{type(nested).__qualname__} = namedtuple_type('Nested', ('outer', 'strides'))",
             nested_defs,
         )
-        # Dependency order: nested field type before parent.
-        self.assertLess(
-            nested_defs.index("LocalStrides ="), nested_defs.index("Nested =")
-        )
+        exec(nested_defs, ns)
+        self.assertEqual(eval(repr(nested), ns), nested)
 
         # Plain tuples need no defs (already self-contained under ``repr``).
         self.assertEqual(codegen_namedtuple_defs({"t": (8, 1)}), "")
@@ -345,32 +349,36 @@ class KernelTests(torch._inductor.test_case.TestCase):
                 "b": DupB(batch=3, token=4),
             }
         )
-        self.assertEqual(dup_defs.count("DupStrides = namedtuple_type"), 1)
+        self.assertEqual(dup_defs.count(" = namedtuple_type"), 1)
 
-        # Same __name__ + different fields: clear error (repr would be ambiguous).
+        # Same __name__ + different fields: use distinct structural aliases.
         Conflict = collections.namedtuple("DupStrides", ["token", "batch"])
-        with self.assertRaisesRegex(RuntimeError, "different fields"):
-            codegen_namedtuple_defs(
-                {
-                    "a": DupA(batch=1, token=2),
-                    "b": Conflict(token=3, batch=4),
-                }
-            )
+        values = _sanitize_for_repr(
+            {"a": DupA(batch=1, token=2), "b": Conflict(token=3, batch=4)}
+        )
+        conflict_defs = codegen_namedtuple_defs(values)
+        self.assertEqual(conflict_defs.count(" = namedtuple_type"), 2)
+        exec(conflict_defs, ns)
+        rebuilt = eval(repr(values), ns)
+        self.assertEqual(rebuilt["a"].batch, 1)
+        self.assertEqual(rebuilt["b"].batch, 4)
 
         # Module-level NamedTuple also uses namedtuple_type (never user import).
         module_defs = codegen_namedtuple_defs(
             {"X_STRIDES": ModuleLevelStrides(batch=8, token=1)}
         )
         self.assertIn(
-            "ModuleLevelStrides = namedtuple_type("
-            "'ModuleLevelStrides', ('batch', 'token'))",
+            " = namedtuple_type('ModuleLevelStrides', ('batch', 'token'))",
             module_defs,
         )
-        self.assertNotIn("from test.", module_defs)
         self.assertNotIn("import ModuleLevelStrides", module_defs)
 
     def test_add_namedtuple_types_to_launcher_scope(self):
         # Heuristics inlines constexprs via repr; Nested field types must be bound.
+        from torch._inductor.utils import (
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
         from torch._inductor.runtime.triton_heuristics import (
             _add_namedtuple_types_to_scope,
         )
@@ -386,9 +394,212 @@ class KernelTests(torch._inductor.test_case.TestCase):
         strides = LocalStrides(batch=8, token=1)
         scope: dict = {}
         _add_namedtuple_types_to_scope({"X": Nested(outer=2, strides=strides)}, scope)
-        self.assertIs(scope["Nested"], Nested)
-        self.assertIs(scope["LocalStrides"], LocalStrides)
-        self.assertEqual(eval(repr(strides), scope).batch, 8)
+        sanitized = _sanitize_for_repr(Nested(outer=2, strides=strides))
+        self.assertIs(scope[type(sanitized).__qualname__], type(sanitized))
+        self.assertIs(
+            scope[type(sanitized.strides).__qualname__], type(sanitized.strides)
+        )
+        self.assertEqual(eval(repr(sanitized), scope).strides.batch, 8)
+
+    def test_namedtuple_constexpr_collisions_and_nested_values(self):
+        import collections
+        import dataclasses
+        import sys
+        import types
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import (
+            get_importable_constexpr_types,
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
+        first = collections.namedtuple("Strides", ("x", "y"), module="module_a")
+        second = collections.namedtuple("Strides", ("x", "z"), module="module_b")
+        module = types.ModuleType("_inductor_namedtuple_collision_test")
+        config_type = dataclasses.make_dataclass("Strides", [("nested", object)])
+        config_type.__module__ = module.__name__
+        module.Strides = config_type
+        values = {
+            "first": first(1, 2),
+            "second": second(3, 4),
+            "config": config_type(first(5, 6)),
+            "mapping": {second(7, 8): first(9, 10)},
+        }
+        reserved = (
+            "tl",
+            "triton",
+            "torch",
+            "DeviceProperties",
+            "TensorDescriptor",
+            "bin",
+            "runner",
+            "namedtuple_type",
+            "math",
+        )
+        for name in reserved:
+            values[name] = collections.namedtuple(name, ("x",))(11)
+        values = _sanitize_for_repr(values)
+        self.assertIs(_sanitize_for_repr(values), values)
+        with mock.patch.dict(sys.modules, {module.__name__: module}):
+            defs = codegen_namedtuple_defs(values)
+            for launcher in (False, True):
+                with self.subTest(launcher=launcher):
+                    sentinels = {name: object() for name in reserved}
+                    scope = dict(sentinels)
+                    if launcher:
+                        _add_namedtuple_types_to_scope(values, scope)
+                    else:
+                        exec(defs, scope)
+                    # The helper import intentionally binds namedtuple_type.
+                    for name in reserved:
+                        if name != "namedtuple_type" or launcher:
+                            self.assertIs(scope[name], sentinels[name])
+                    imports = get_importable_constexpr_types(values.values())
+                    self.assertEqual(len(imports), 1)
+                    exec(f"from {module.__name__} import Strides", scope)
+                    rebuilt = eval(repr(values), scope)
+                    self.assertEqual(rebuilt["first"].y, 2)
+                    self.assertEqual(rebuilt["second"].z, 4)
+                    self.assertEqual(rebuilt["config"].nested.y, 6)
+                    key = next(iter(rebuilt["mapping"]))
+                    self.assertEqual(key.z, 8)
+                    self.assertEqual(rebuilt["mapping"][key].y, 10)
+
+    @parametrize(
+        "container", ["dataclass", "attrs", "pydantic", "mapping_key", "set", "frozenset"]
+    )
+    @parametrize("launcher", [False, True])
+    def test_namedtuple_constexpr_repr_containers(self, container, launcher):
+        import collections
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import sanitize_constexpr_for_repr
+        from triton_constexpr_configs import (
+            UserDefinedAttrsLikeConfig,
+            UserDefinedPydanticLikeConfig,
+            UserDefinedTritonKernelNestedConfig,
+        )
+
+        strides = ModuleLevelStrides(8, 1)
+        hidden = collections.namedtuple("HiddenStrides", ("unused",))(9)
+        values = {
+            "dataclass": UserDefinedTritonKernelNestedConfig(strides),
+            "attrs": UserDefinedAttrsLikeConfig(strides, hidden),
+            "pydantic": UserDefinedPydanticLikeConfig(strides, hidden),
+            "mapping_key": collections.OrderedDict([(strides, 3)]),
+            "set": {strides},
+            "frozenset": frozenset({strides}),
+        }
+        expected_type = namedtuple_type("ModuleLevelStrides", ("batch", "token"))
+        prepared_strides = sanitize_constexpr_for_repr(strides)
+        raw = values[container]
+        prepared = sanitize_constexpr_for_repr(raw)
+        scope = {}
+        if launcher:
+            _add_namedtuple_types_to_scope(raw, scope)
+        else:
+            defs = codegen_namedtuple_defs({"X": prepared})
+            self.assertEqual(defs.count(" = namedtuple_type"), 1)
+            exec(defs, scope)
+        self.assertIs(scope[expected_type.__qualname__], expected_type)
+        self.assertEqual(eval(repr(prepared_strides), scope), strides)
+        # Only repr-visible children need bindings. Hidden fields must not
+        # introduce unrelated NamedTuple definitions.
+        self.assertNotIn("HiddenStrides", scope)
+        self.assertNotIn(
+            namedtuple_type("HiddenStrides", ("unused",)).__qualname__, scope
+        )
+
+    def test_namedtuple_constexpr_reserved_alias_import(self):
+        import dataclasses
+        import sys
+        import types
+
+        from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+        from torch._inductor.utils import get_importable_constexpr_types
+
+        pair_type = namedtuple_type("Strides", ("x",))
+        module = types.ModuleType("_inductor_namedtuple_alias_test")
+        config_type = dataclasses.make_dataclass(
+            pair_type.__qualname__, [("nested", object)]
+        )
+        config_type.__module__ = module.__name__
+        setattr(module, pair_type.__qualname__, config_type)
+        # This import would replace the alias emitted for the NamedTuple.
+        with mock.patch.dict(sys.modules, {module.__name__: module}):
+            with self.assertRaisesRegex(ImportError, "reserved by generated Triton"):
+                get_importable_constexpr_types([pair_type(5), config_type(3)])
+
+    def test_namedtuple_constexpr_legacy_source_and_pickle(self):
+        import pickle
+
+        from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
+        from torch._inductor.runtime.triton_heuristics import (
+            _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import (
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
+        )
+
+        # Previously cached source still calls the original two-argument API.
+        scope = {}
+        exec(
+            "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type\n"
+            "Legacy = namedtuple_type('Legacy', ('x',))\n"
+            "value = Legacy(x=3)\n",
+            scope,
+        )
+        value = scope["value"]
+        sanitized = _sanitize_for_repr(value)
+        self.assertEqual(type(sanitized).__name__, "Legacy")
+        self.assertEqual(repr(sanitized), repr(value))
+        self.assertEqual(repr(_sanitize_for_repr(sanitized)), repr(value))
+        defs = codegen_namedtuple_defs({"x": value})
+        self.assertEqual(defs, codegen_namedtuple_defs({"x": sanitized}))
+        launcher_scope = {}
+        _add_namedtuple_types_to_scope(value, launcher_scope)
+        self.assertEqual(eval(repr(value), launcher_scope).x, 3)
+        for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+            rebuilt = pickle.loads(pickle.dumps(value, protocol=protocol))
+            self.assertIs(type(rebuilt), type(value))
+            self.assertEqual(repr(rebuilt), repr(value))
+
+    def test_namedtuple_constexpr_preserves_device_metadata(self):
+        from torch._inductor.codegen.wrapper import (
+            _sanitize_for_repr,
+            codegen_namedtuple_defs,
+        )
+        from torch._inductor.runtime.hints import DeviceProperties
+        from torch._inductor.utils import sanitize_constexpr_for_repr
+
+        device = DeviceProperties(
+            type="cuda", index=0, multi_processor_count=1, cc=80, warp_size=32
+        )
+
+        class Strides(NamedTuple):
+            x: int
+
+        for constants in ({}, {"strides": Strides(3)}):
+            with self.subTest(constants=constants):
+                meta = {"device": device, "constants": constants}
+                meta["constants"] = sanitize_constexpr_for_repr(meta["constants"])
+                sanitized = _sanitize_for_repr(meta)
+                self.assertIs(sanitized["device"], device)
+                self.assertIs(type(sanitized["device"]), DeviceProperties)
+                self.assertEqual(sanitized["device"].warp_size_or_default, 32)
+                self.assertEqual(repr(sanitized["device"]), repr(device))
+                scope = {"DeviceProperties": DeviceProperties}
+                exec(codegen_namedtuple_defs(sanitized["constants"]), scope)
+                rebuilt = eval(repr(sanitized), scope)
+                self.assertIs(type(rebuilt["device"]), DeviceProperties)
+                self.assertEqual(rebuilt["device"].warp_size_or_default, 32)
 
     def _run_and_get_triton_compile_options(self, fn, *args):
         # TestCase already gives each test a fresh compile cache. This patch
@@ -495,8 +706,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
             # Python wrapper embeds triton_meta via !r (also present under
             # cpp_wrapper in the Python compile path). Reconstruct via the
             # pickle-safe helper, never via a user-module import.
-            self.assertIn("MatrixStrides = namedtuple_type", code)
-            self.assertNotIn("from test.", code)
+            self.assertIn(" = namedtuple_type('MatrixStrides',", code)
+            self.assertNotIn("import MatrixStrides", code)
 
     @inductor_config.patch(strict_signed_zero=True)
     @requires_cuda_and_triton

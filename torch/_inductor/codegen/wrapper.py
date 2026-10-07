@@ -15,7 +15,6 @@ import secrets
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
-from enum import Enum
 from itertools import chain, count
 from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
@@ -55,6 +54,7 @@ from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
+from ..runtime.namedtuple_helpers import namedtuple_type
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import (
     COOR_DEVICE_IDX_VAR,
@@ -77,6 +77,7 @@ from ..utils import (
     is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
+    sanitize_constexpr_for_repr,
     sympy_product,
     sympy_str,
     sympy_subs,
@@ -307,20 +308,9 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
 
 
 def _sanitize_for_repr(obj: object) -> object:
-    """Convert Enum values to their underlying value for valid Python repr in code generation."""
-    if isinstance(obj, Enum):
-        return _sanitize_for_repr(obj.value)
-    repr_children = get_constexpr_repr_children(obj)
-    if repr_children is not None:
-        children = tuple(_sanitize_for_repr(child) for child in repr_children.values)
-        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
-        # invoke user code, so preserve the original when sanitization is a no-op.
-        if all(
-            child is original for child, original in zip(children, repr_children.values)
-        ):
-            return obj
-        return repr_children.rebuild(children)
-    return obj
+    # Infrastructure NamedTuples such as DeviceProperties must retain their
+    # runtime methods. Only user constexpr constants need structural aliases.
+    return sanitize_constexpr_for_repr(obj, canonicalize_namedtuples=False)
 
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool, int, tuple[int, int] | None]
@@ -601,24 +591,21 @@ def _collect_namedtuple_types(
     if seen is None:
         seen = OrderedSet()
     result: list[type] = []
+    visited: OrderedSet[int] = OrderedSet()
 
     def visit(obj: Any) -> None:
+        if id(obj) in visited:
+            return
+        visited.add(id(obj))
+        repr_children = get_constexpr_repr_children(obj)
+        if repr_children is not None:
+            for child in repr_children.values:
+                visit(child)
         if pytree.is_namedtuple_instance(obj):
             cls = type(obj)
-            # Nested NamedTuple fields first so parents can reference them.
-            for field_name in cls._fields:
-                visit(getattr(obj, field_name))
             if cls not in seen:
                 seen.add(cls)
                 result.append(cls)
-            return
-        if isinstance(obj, dict):
-            for item in obj.values():
-                visit(item)
-            return
-        if isinstance(obj, (list, tuple)):
-            for item in obj:
-                visit(item)
 
     visit(value)
     return result
@@ -642,26 +629,22 @@ def codegen_namedtuple_defs(constants: dict[str, Any]) -> str:
 
     buf = IndentedBuffer()
     lines: list[str] = []
-    # Repr binds by ``cls.__name__``; key on name+fields and error on conflicts.
-    emitted: dict[str, tuple[str, ...]] = {}
+    emitted: OrderedSet[str] = OrderedSet()
     for cls in types:
         name = cls.__name__
         fields = tuple(cls._fields)
-        if name in emitted:
-            if emitted[name] != fields:
-                raise RuntimeError(
-                    f"Cannot embed two NamedTuple types named {name!r} with "
-                    f"different fields ({emitted[name]} vs {fields}) as "
-                    f"tl.constexpr values; rename one so generated repr can eval."
-                )
+        alias = namedtuple_type(name, fields).__qualname__
+        if alias in emitted:
             continue
-        emitted[name] = fields
-        lines.append(f"{name} = namedtuple_type({name!r}, {fields!r})")
+        emitted.add(alias)
+        lines.append(f"{alias} = namedtuple_type({name!r}, {fields!r})")
 
     buf.writeline(
         "from torch._inductor.runtime.namedtuple_helpers import namedtuple_type"
     )
-    for line in lines:
+    # Type definitions do not reference each other. Keep source deterministic
+    # even when constexpr values contain sets.
+    for line in sorted(lines):
         buf.writeline(line)
     buf.newline()
     return buf.getvalue()
@@ -4411,6 +4394,10 @@ class PythonWrapperCodegen(CodeGen):
                 arg_names[i] for i in constexprs
             ]
 
+        # Prepare constants before both cache-key construction and type discovery.
+        triton_meta["constants"] = sanitize_constexpr_for_repr(triton_meta["constants"])
+        triton_meta = _sanitize_for_repr(triton_meta)
+
         # Distinguish between different functions using function id
         cache_key: Any = [id(kernel.fn)]
         if len(configs) > 0:
@@ -4454,7 +4441,7 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
-        # NamedTuple tl.constexpr values stringify as TypeName(...); emit the
+        # NamedTuple tl.constexpr values stringify with stable aliases; emit the
         # type so triton_meta={triton_meta!r} can eval in this module (#192288).
         if namedtuple_defs := codegen_namedtuple_defs(triton_meta.get("constants", {})):
             compile_wrapper.splice(namedtuple_defs)
@@ -4468,14 +4455,12 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
-        # Sanitize triton_meta to convert Enum values for valid Python repr
-        sanitized_triton_meta = _sanitize_for_repr(triton_meta)
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
                 configs={[*map(config_to_dict, configs)]!r},
                 inductor_meta={inductor_meta!r},
-                triton_meta={sanitized_triton_meta!r},
+                triton_meta={triton_meta!r},
                 filename=__file__,
                 custom_kernel=True,
             )

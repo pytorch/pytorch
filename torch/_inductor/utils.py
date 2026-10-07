@@ -57,6 +57,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -396,6 +397,39 @@ def _constexpr_type_repr_prefix(value: object) -> str | None:
     return None
 
 
+def sanitize_constexpr_for_repr(
+    value: object, *, canonicalize_namedtuples: bool = True
+) -> object:
+    """Prepare constexpr reprs with Enum values and collision-safe NamedTuples."""
+    if isinstance(value, enum.Enum):
+        return sanitize_constexpr_for_repr(
+            value.value, canonicalize_namedtuples=canonicalize_namedtuples
+        )
+    repr_children = get_constexpr_repr_children(value)
+    if repr_children is not None:
+        children = tuple(
+            sanitize_constexpr_for_repr(
+                child, canonicalize_namedtuples=canonicalize_namedtuples
+            )
+            for child in repr_children.values
+        )
+        unchanged = all(
+            child is original for child, original in zip(children, repr_children.values)
+        )
+        if canonicalize_namedtuples and pytree.is_namedtuple_instance(value):
+            cls = type(value)
+            helper_type = namedtuple_type(cls.__name__, tuple(cls._fields))
+            if cls is helper_type and unchanged:
+                return value
+            return helper_type(*children)
+        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
+        # invoke user code, so preserve the original when sanitization is a no-op.
+        if unchanged:
+            return value
+        return repr_children.rebuild(children)
+    return value
+
+
 def _collect_importable_constexpr_types(
     value: object,
     result: dict[str, ImportableConstexprType],
@@ -451,7 +485,11 @@ def _collect_importable_constexpr_types(
                         "evaluated as a constructor call. Set repr=False or init=True."
                     )
         root_name = type_qualname.split(".", 1)[0]
-        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES:
+        # Structural NamedTuple aliases are emitted before user-type imports.
+        # Reserve their namespace so an import cannot replace an emitted type.
+        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES or root_name.startswith(
+            "_NamedTuple_"
+        ):
             raise ImportError(
                 "Triton constexpr value type "
                 f"{type_module}.{type_qualname} requires import name {root_name}, "

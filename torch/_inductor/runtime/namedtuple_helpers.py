@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import collections
 import hashlib
+import reprlib
 import sys
 from typing import Any
 
@@ -44,8 +45,9 @@ def _rebuild_namedtuple_instance(
 def namedtuple_type(name: str, fields: tuple[str, ...] | list[str]) -> type:
     """Return a cached ``collections.namedtuple`` registered for pickling.
 
-    ``name`` is kept as ``cls.__name__`` so ``repr`` still evals as
-    ``Name(field=...)`` in generated modules. Pickle uses a custom
+    ``name`` is kept as ``cls.__name__``, while ``repr`` uses the stable
+    ``cls.__qualname__`` alias to avoid shadowing generated module bindings.
+    Pickle uses a custom
     ``__reduce_ex__`` that reconstructs through this helper, so the class
     need not already exist in the unpickling process.
     """
@@ -60,9 +62,15 @@ def namedtuple_type(name: str, fields: tuple[str, ...] | list[str]) -> type:
     cls.__module__ = __name__
     cls.__qualname__ = attr
 
+    @reprlib.recursive_repr()
+    def __repr__(self) -> str:
+        args = ", ".join(f"{field}={value!r}" for field, value in zip(fields_t, self))
+        return f"{attr}({args})"
+
     def __reduce_ex__(self, protocol: int) -> tuple[Any, ...]:
         return (_rebuild_namedtuple_instance, (name, fields_t, tuple(self)))
 
+    cls.__repr__ = __repr__  # type: ignore[method-assign]
     cls.__reduce_ex__ = __reduce_ex__  # type: ignore[method-assign, assignment]
     setattr(sys.modules[__name__], attr, cls)
     _CACHE[key] = cls

@@ -44,9 +44,11 @@ from torch.utils._triton import get_triton_version, has_triton_stable_tma_api
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
+    get_constexpr_repr_children,
     get_importable_constexpr_types,
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
+    sanitize_constexpr_for_repr,
     tlx_only_cuda_options,
     tlx_only_hip_options,
     TMA_ALIGNMENT,
@@ -244,23 +246,25 @@ def _add_namedtuple_types_to_scope(value: Any, scope: dict[str, Any]) -> None:
     """Bind NamedTuple types into launcher ``exec`` scope for ``repr`` inlining.
 
     ``_convert_constant`` embeds constexpr values via ``repr``. NamedTuple
-    reprs reference their type name (``MatrixStrides(batch=8, ...)``), so the
-    type must exist in the launcher scope. Mirrors ``codegen_namedtuple_defs``
+    reprs reference a stable alias, so the reconstructed type must exist in
+    the launcher scope. Mirrors ``codegen_namedtuple_defs``
     in the generated Triton module (#192288).
     """
-    if pytree.is_namedtuple_instance(value):
-        cls = type(value)
-        scope.setdefault(cls.__name__, cls)
-        for field_name in cls._fields:
-            _add_namedtuple_types_to_scope(getattr(value, field_name), scope)
-        return
-    if isinstance(value, dict):
-        for item in value.values():
-            _add_namedtuple_types_to_scope(item, scope)
-        return
-    if isinstance(value, (list, tuple)):
-        for item in value:
-            _add_namedtuple_types_to_scope(item, scope)
+    visited: OrderedSet[int] = OrderedSet()
+
+    def visit(obj: Any) -> None:
+        if id(obj) in visited:
+            return
+        visited.add(id(obj))
+        if pytree.is_namedtuple_instance(obj):
+            cls = type(obj)
+            scope[cls.__qualname__] = cls
+        repr_children = get_constexpr_repr_children(obj)
+        if repr_children is not None:
+            for child in repr_children.values:
+                visit(child)
+
+    visit(sanitize_constexpr_for_repr(value))
 
 
 def autotune_hints_to_configs(
@@ -2992,7 +2996,7 @@ class CompileResult(Generic[_T]):
             if isinstance(constant, str):
                 return "r'" + constant + "'"
             else:
-                return repr(constant)
+                return repr(sanitize_constexpr_for_repr(constant))
 
         if triton_version_uses_attrs_dict():
             call_args = arg_names
