@@ -4,6 +4,11 @@ import copy
 import pickle
 
 import torch
+import torch.distributed.checkpoint as dcp
+from torch.distributed._state_dict_utils import _distribute_tensors
+from torch.distributed.checkpoint.planner_helpers import (
+    _create_default_metadata_only_plan,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     distribute_tensor,
@@ -27,6 +32,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 # (E, O, I) expert-weight shapes over 4 ranks: aligned, rows crossing expert
@@ -263,6 +269,136 @@ class BlockShardDTensorTest(DTensorContinuousTestBase):
         partial = DTensor.from_local(x.clone(), mesh, [Partial()])
         with self.assertRaises(NotImplementedError):
             d + partial
+
+
+class TestBlockShardBoxes(TestCase):
+    def test_local_boxes(self):
+        p = BlockShard((5,))
+        # 12 rows over 2 ranks: rank 0 holds expert 0 and 2 rows of expert 1.
+        self.assertEqual(
+            p._local_boxes((3, 4, 5), 2, 0),
+            [((0, 0, 0), (1, 4, 5), 0, 4), ((1, 0, 0), (1, 2, 5), 4, 6)],
+        )
+        self.assertEqual(
+            p._local_boxes((3, 4, 5), 2, 1),
+            [((1, 2, 0), (1, 2, 5), 0, 2), ((2, 0, 0), (1, 4, 5), 2, 6)],
+        )
+        self.assertEqual(BlockShard((2,))._local_boxes((2, 3, 2), 4, 3), [])
+        for shape in SHAPES:
+            p = BlockShard((shape[2],))
+            covered = torch.zeros(shape[:2], dtype=torch.int)
+            for rank in range(4):
+                for offset, size, start, stop in p._local_boxes(shape, 4, rank):
+                    self.assertEqual(stop - start, size[0] * size[1])
+                    covered[
+                        offset[0] : offset[0] + size[0], offset[1] : offset[1] + size[1]
+                    ] += 1
+            self.assertTrue(torch.all(covered == 1))
+
+
+class BlockShardCheckpointTest(DTensorContinuousTestBase):
+    world_size = 4
+
+    def setUp(self):
+        super().setUp()
+        torch.manual_seed(0)
+
+    def _ep_mesh(self):
+        return init_device_mesh(
+            self.device_type, (2, 2), mesh_dim_names=("efsdp", "ep")
+        )
+
+    def test_chunk_list_and_write_items(self):
+        for mesh, placements, shape in [
+            (self.build_device_mesh(), [BlockShard((5,))], (3, 4, 5)),
+            (self._ep_mesh(), [BlockShard((3,)), Shard(0)], (6, 2, 3)),
+        ]:
+            x = torch.randn(shape, device=self.device_type)
+            d = block_shard_tensor(x, mesh, placements)
+            boxes = d._block_shard_boxes()
+            chunks = d.__create_chunk_list__()
+            self.assertEqual(
+                [(tuple(c.offsets), tuple(c.sizes)) for c in chunks],
+                [(offset, size) for offset, size, _, _ in boxes],
+            )
+            items = _create_default_metadata_only_plan({"w": d}).items
+            self.assertEqual(len(items), len(boxes))
+            for item, (offset, size, start, stop) in zip(items, boxes):
+                self.assertEqual(item.tensor_data.size, torch.Size(shape))
+                shard = d.__get_tensor_shard__(item.index)
+                self.assertEqual(shard.data_ptr(), d.to_local()[start:stop].data_ptr())
+                self.assertEqual(
+                    shard, x[tuple(slice(o, o + n) for o, n in zip(offset, size))]
+                )
+
+    @with_temp_dir
+    def test_save_load_reshard(self):
+        mesh = self.build_device_mesh()
+        mesh_2d = init_device_mesh(self.device_type, (2, 2))
+        ep_mesh = self._ep_mesh()
+        full = {
+            "w": torch.randn(3, 4, 5, device=self.device_type),
+            "e": torch.randn(6, 2, 3, device=self.device_type),
+        }
+        saved = {
+            "w": block_shard_tensor(full["w"], mesh, [BlockShard((5,))]),
+            "e": block_shard_tensor(full["e"], ep_mesh, [BlockShard((3,)), Shard(0)]),
+        }
+        dcp.save(saved, checkpoint_id=self.temp_dir)
+
+        def zeros_like(t, mesh, placements):
+            return block_shard_tensor(torch.zeros_like(t), mesh, placements)
+
+        targets = {
+            "block_shard": lambda t: zeros_like(t, mesh, [BlockShard((t.shape[2],))]),
+            "hsdp_block_shard": lambda t: zeros_like(
+                t, mesh_2d, [Replicate(), BlockShard((t.shape[2],))]
+            ),
+            "ep_block_shard": lambda t: zeros_like(
+                t, ep_mesh, [BlockShard((t.shape[2],)), Shard(0)]
+            )
+            if t.shape[0] % 2 == 0
+            else zeros_like(t, mesh, [BlockShard((t.shape[2],))]),
+            "replicate": lambda t: distribute_tensor(
+                torch.zeros_like(t), mesh, [Replicate()]
+            ),
+            "shard_1": lambda t: distribute_tensor(
+                torch.zeros_like(t), mesh, [Shard(1)]
+            ),
+        }
+        for target_name, make in targets.items():
+            loaded = {name: make(t) for name, t in full.items()}
+            dcp.load(loaded, checkpoint_id=self.temp_dir)
+            for name, t in full.items():
+                self.assertEqual(loaded[name].full_tensor(), t, msg=target_name)
+
+    @with_temp_dir
+    def test_load_into_block_shard(self):
+        mesh = self.build_device_mesh()
+        full = torch.randn(3, 4, 5, device=self.device_type)
+        dcp.save(
+            {"w": distribute_tensor(full, mesh, [Shard(1)])},
+            checkpoint_id=self.temp_dir,
+        )
+        loaded = {
+            "w": block_shard_tensor(torch.zeros_like(full), mesh, [BlockShard((5,))])
+        }
+        dcp.load(loaded, checkpoint_id=self.temp_dir)
+        self.assertEqual(loaded["w"].placements, (BlockShard((5,)),))
+        self.assertEqual(loaded["w"].full_tensor(), full)
+
+    def test_distribute_tensors(self):
+        # set_model_state_dict(..., broadcast_from_rank0=True) fills sharded
+        # params from full tensors with _distribute_tensors.
+        for mesh, placements, shape in [
+            (self.build_device_mesh(), [BlockShard((5,))], (3, 4, 5)),
+            (self._ep_mesh(), [BlockShard((3,)), Shard(0)], (6, 2, 3)),
+        ]:
+            full = torch.randn(shape, device=self.device_type)
+            local_state = block_shard_tensor(torch.zeros_like(full), mesh, placements)
+            state_dict = {"w": (local_state, full)}
+            _distribute_tensors(state_dict, ["w"], torch.device(self.device_type))
+            self.assertEqual(state_dict["w"].full_tensor(), full)
 
 
 if __name__ == "__main__":

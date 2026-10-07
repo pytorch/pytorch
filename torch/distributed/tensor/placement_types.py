@@ -2048,6 +2048,47 @@ class _MaskPartial(Partial):
         )
 
 
+def _range_to_boxes(
+    dims: Sequence[int], start: int, stop: int
+) -> list[tuple[tuple[int, ...], tuple[int, ...]]]:
+    """Decompose the row-major index range [start, stop) over ``dims`` into boxes.
+
+    Returns at most ``2 * len(dims) - 1`` (offset, size) boxes, in row-major order.
+    """
+    if start >= stop:
+        return []
+    if len(dims) == 1:
+        return [((start,), (stop - start,))]
+    inner = math.prod(dims[1:])
+    start_outer, start_inner = divmod(start, inner)
+    stop_outer, stop_inner = divmod(stop, inner)
+    if start_outer == stop_outer:
+        return [
+            ((start_outer, *offset), (1, *size))
+            for offset, size in _range_to_boxes(dims[1:], start_inner, stop_inner)
+        ]
+    boxes: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+    if start_inner != 0:
+        boxes.extend(
+            ((start_outer, *offset), (1, *size))
+            for offset, size in _range_to_boxes(dims[1:], start_inner, inner)
+        )
+        start_outer += 1
+    if stop_outer > start_outer:
+        boxes.append(
+            (
+                (start_outer, *([0] * (len(dims) - 1))),
+                (stop_outer - start_outer, *dims[1:]),
+            )
+        )
+    if stop_inner != 0:
+        boxes.extend(
+            ((stop_outer, *offset), (1, *size))
+            for offset, size in _range_to_boxes(dims[1:], 0, stop_inner)
+        )
+    return boxes
+
+
 class BlockShard(Placement):
     """
     The ``BlockShard`` placement shards a tensor in contiguous blocks of its
@@ -2191,6 +2232,49 @@ class BlockShard(Placement):
         result = Shard(0)._to_replicate_tensor(local_tensor, mesh, mesh_dim, merged)
         return result.view(current_logical_shape)
 
+    def _replicate_to_block_shard(
+        self,
+        local_tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        shard_index: IntLikeType,
+    ) -> torch.Tensor:
+        merged = local_tensor.reshape(self._merged_shape(local_tensor.shape))
+        return Shard(0)._replicate_to_shard(merged, mesh, mesh_dim, shard_index)
+
+    def _local_boxes(
+        self, shape: Sequence[int], num_chunks: int, rank: int
+    ) -> list[tuple[tuple[int, ...], tuple[int, ...], int, int]]:
+        """Boxes of ``shape`` owned by ``rank``, in row-major order.
+
+        Each entry is ``(global_offset, size, local_row_start, local_row_stop)``,
+        where the local rows index the merged-view local tensor. A rank's rows
+        cover at most ``2k - 1`` boxes, e.g. the end of one expert and the start
+        of the next.
+        """
+        k = self._split_dim(shape)
+        merged = self._merged_shape(shape)
+        rows, row_offset = Shard.local_shard_size_and_offset(
+            merged[0], num_chunks, rank
+        )
+        trailing = tuple(shape[k:])
+        boxes = []
+        local_row = 0
+        for offset, size in _range_to_boxes(
+            tuple(shape[:k]), row_offset, row_offset + rows
+        ):
+            box_rows = math.prod(size)
+            boxes.append(
+                (
+                    (*offset, *([0] * len(trailing))),
+                    (*size, *trailing),
+                    local_row,
+                    local_row + box_rows,
+                )
+            )
+            local_row += box_rows
+        return boxes
+
 
 class _BlockShardLayout(NamedTuple):
     """Where a supported BlockShard layout sits on the mesh.
@@ -2251,6 +2335,24 @@ def _validate_block_shard_placements(
     return _BlockShardLayout(
         block_shard_dims[0], placement, shard0_mesh_dim, block_shape
     )
+
+
+def _block_shard_local_boxes(
+    layout: _BlockShardLayout,
+    mesh_shape: Sequence[int],
+    coordinate: Sequence[int],
+) -> list[tuple[tuple[int, ...], tuple[int, ...], int, int]]:
+    """Global boxes owned by ``coordinate``, as in ``BlockShard._local_boxes``."""
+    boxes = layout.placement._local_boxes(
+        layout.block_shape, mesh_shape[layout.mesh_dim], coordinate[layout.mesh_dim]
+    )
+    if layout.shard0_mesh_dim is None:
+        return boxes
+    row_offset = coordinate[layout.shard0_mesh_dim] * layout.block_shape[0]
+    return [
+        ((offset[0] + row_offset, *offset[1:]), size, start, stop)
+        for offset, size, start, stop in boxes
+    ]
 
 
 def _register_placements_as_opaque():
