@@ -50,6 +50,16 @@ def requires_h100():
     )
 
 
+# rocSHMEM device reduce only supports these dtypes.
+ROCSHMEM_REDUCE_SUPPORTED_DTYPES = (
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.float32,
+    torch.float64,
+)
+
+
 # So that tests are written in device-agnostic way
 device_type = "cuda"
 device_module = torch.get_device_module(device_type)
@@ -948,7 +958,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -961,11 +970,13 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.uint8,
             torch.float16,
             torch.float32,
-            # torch.float64,  # Tensor-likes are not close
+            *([torch.float64] if TEST_WITH_ROCM else []),  # ROCm only; fails on CUDA
             torch.bfloat16,
         ],
     )
     def test_triton_sum_reduce(self, dtype) -> None:
+        if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
+            self.skipTest(f"rocSHMEM does not support {dtype} reduce")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
@@ -1010,7 +1021,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst, torch.tensor(expected, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -1027,6 +1037,8 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         ],
     )
     def test_triton_minmax_reduce(self, dtype) -> None:
+        if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
+            self.skipTest(f"rocSHMEM does not support {dtype} reduce")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name
@@ -1095,7 +1107,6 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             dst_max, torch.tensor(expected_max, device=self.device, dtype=dtype)
         )
 
-    @skip_if_rocm_multiprocess
     @requires_triton()
     @requires_h100()
     @parametrize(
@@ -1107,11 +1118,13 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             torch.int64,
             torch.float16,
             torch.float32,
-            # torch.float64,  # Tensor-likes are not close
+            *([torch.float64] if TEST_WITH_ROCM else []),  # ROCm only; fails on CUDA
             torch.bfloat16,
         ],
     )
     def test_triton_prod_reduce(self, dtype) -> None:
+        if TEST_WITH_ROCM and dtype not in ROCSHMEM_REDUCE_SUPPORTED_DTYPES:
+            self.skipTest(f"rocSHMEM does not support {dtype} reduce")
         torch.manual_seed(42 + self.rank)
         self._init_device()
         group_name = dist.distributed_c10d._get_default_group().group_name

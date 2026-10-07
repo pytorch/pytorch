@@ -164,6 +164,8 @@ if has_triton():
     # Wait / signal:
     #   nvshmem_int_wait_until    → rocshmem_int_wait_until
     #   nvshmem_signal_wait_until → rocshmem_uint64_wait_until
+    # Collectives (wg-scoped):
+    #   nvshmem_{T}_{op}_reduce → rocshmem_{T}_{op}_reduce_wg
     # Memory ordering, PE info, barriers: names are identical.
     # -----------------------------------------------------------------------
 
@@ -428,8 +430,8 @@ if has_triton():
             _semantic=_semantic,
         )
 
-    # Collective stubs: rocSHMEM *_wg collectives are not exposed in current
-    # device bitcode, so Triton kernels cannot call them yet.
+    # Collective stubs: rocSHMEM alltoall/broadcast device APIs are not exported
+    # with C linkage in the device bitcode, so Triton cannot call them yet.
 
     @triton.jit
     def alltoall(team, dest, source, nelems_per_pe):  # type: ignore[no-untyped-def]
@@ -451,9 +453,87 @@ if has_triton():
 
     @triton.jit
     def reduce(team, dest, source, nreduce, operation: tl.constexpr):  # type: ignore[no-untyped-def]
-        """Not available: rocshmem team reduce wg ops are not in current device bitcode."""
-        tl.static_assert(
-            False,
-            "rocshmem team reduce is not available in current device bitcode. "
-            "Use host-side rocshmem reduce API instead.",
+        """
+        Performs a collective reduction on tensors across all PEs.
+
+        Calls the work-group scoped rocSHMEM reduce (``rocshmem_{T}_{op}_reduce_wg``).
+
+        Args:
+            team: The team handle. Only 0 (all PEs) is supported. A compile-time
+                team other than 0 raises ValueError. A runtime team other than 0
+                does nothing and returns non-zero.
+            dest: Destination tensor for the reduction results.
+            source: Source tensor containing data to be reduced. Must be the same type as dest.
+            nreduce: The number of elements in the source tensor to reduce. Passed
+                as int32 because the rocSHMEM reduce API takes a C ``int``.
+            operation: The reduction operation to perform ("sum", "max", "min", "prod").
+
+        Notes:
+            - All threads of the work-group must call this function.
+            - This is a collective operation that must be called by all PEs.
+            - Supported dtypes: int16, int32, int64, float32, float64.
+
+        Example:
+            ```
+            # Perform a sum reduction on two tensors
+            rocshmem.reduce(0, dest_tensor, src_tensor, 100, "sum")
+            ```
+        """
+        tl.static_assert(dest.type == source.type)
+        dtype = dest.type.element_ty
+        # team and nreduce are int32: the rocSHMEM reduce API takes C `int` for both.
+        # team is cast in _reduce_wg, after its compile-time check.
+        return _reduce_wg(
+            team,
+            tl.cast(dest, tl.int64),
+            tl.cast(source, tl.int64),
+            tl.cast(nreduce, tl.int32),
+            operation,
+            dtype,
+        )
+
+    @core.extern
+    def _reduce_wg(team, dest, source, nreduce, operation, dtype, _semantic=None):  # type: ignore[no-untyped-def]
+        # Triton dtype -> rocSHMEM type name.
+        dtype_to_rocshmem = {
+            "int16": "short",
+            "int32": "int",
+            "int64": "long",
+            "fp32": "float",
+            "fp64": "double",
+        }
+        dtype_name = str(dtype).replace("tl.", "")
+        if dtype_name not in dtype_to_rocshmem:
+            raise TypeError(
+                f"Unsupported rocSHMEM reduction dtype: {dtype_name}. "
+                f"Supported dtypes: {list(dtype_to_rocshmem.keys())}"
+            )
+        op_name = operation.value if hasattr(operation, "value") else operation
+        supported_ops = {"sum", "max", "min", "prod"}
+        if op_name not in supported_ops:
+            raise ValueError(
+                f"Unsupported reduction operation: '{op_name}'. "
+                f"Supported ops are {supported_ops}"
+            )
+        # Check before the cast: tl.cast turns a constexpr into a tensor.
+        if isinstance(team, core.constexpr) and team.value != 0:
+            raise ValueError(
+                f"Unsupported rocSHMEM reduction team: {team.value}. Only team 0 is supported."
+            )
+        team = core.cast(team, core.int32, _semantic=_semantic)
+        func = f"rocshmem_{dtype_to_rocshmem[dtype_name]}_{op_name}_reduce_wg"
+        return core.extern_elementwise(
+            "",
+            "",
+            [team, dest, source, nreduce],
+            {
+                (
+                    core.dtype("int32"),  # team (only 0 is supported)
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int32"),  # nreduce
+                ): (func, core.dtype("int32"))
+            },
+            is_pure=False,
+            _semantic=_semantic,
         )
