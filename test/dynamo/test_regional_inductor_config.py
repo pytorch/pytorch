@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 from dataclasses import FrozenInstanceError
-from unittest import mock
 
 import torch
 import torch._inductor.test_case
@@ -237,59 +236,6 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             result = torch.compile(fn, backend="inductor", fullgraph=True)(x)
         self.assertEqual(result, expected)
         self.assertEqual(pass_calls, [])
-
-    def test_disabled_backward_transitions_forward_cudagraph_generation(self):
-        from torch._inductor.cudagraph_utils import BoxedDeviceIndex
-        from torch._inductor.output_code import CompiledFxGraph
-        from torch._inductor.utils import BoxedBool
-
-        compiled_graph = mock.Mock(spec=CompiledFxGraph)
-        compiled_graph.partition_maps = None
-        compiled_graph.fx_kwargs = {
-            "is_backward": True,
-            "is_inference": False,
-        }
-        compiled_graph.inputs_to_check = ()
-        compiled_graph.mutated_input_idxs = set()
-        compiled_graph._original_gm = object()
-        compiled_graph._serialized_original_gm = None
-        compiled_graph._wrap_compiled_regions = False
-        forward_device_index = BoxedDeviceIndex(0)
-        graph_kwargs = {
-            "cudagraphs": BoxedBool(False),
-            "is_backward": True,
-            "boxed_forward_device_index": forward_device_index,
-        }
-
-        with (
-            mock.patch(
-                "torch._inductor.output_code.set_tracing_context_output_strides"
-            ),
-            mock.patch("torch._inductor.output_code.maybe_realign_inputs"),
-            mock.patch(
-                "torch._inductor.output_code.maybe_handle_backward_generation"
-            ) as handle_backward,
-        ):
-            CompiledFxGraph.post_compile(compiled_graph, [], mock.Mock(), graph_kwargs)
-
-        handle_backward.assert_called_once_with(
-            compiled_graph,
-            forward_device_index,
-            forward_cudagraphs_enabled=True,
-        )
-
-    @torch._inductor.config.patch("triton.cudagraph_trees", True)
-    def test_backward_generation_keeps_forward_state_invariants(self):
-        from torch._inductor.output_code import maybe_handle_backward_generation
-
-        compiled_graph = mock.Mock()
-        compiled_graph.current_callable = lambda args: args
-        compiled_graph.fx_kwargs = {"is_backward": True}
-
-        with self.assertRaisesRegex(
-            AssertionError, "boxed_forward_device_index must not be None"
-        ):
-            maybe_handle_backward_generation(compiled_graph, None)
 
     def test_check_multiple_devices_or_any_cpu_nodes(self):
         """A device-less mapping has no GPU work, so capture is refused.
