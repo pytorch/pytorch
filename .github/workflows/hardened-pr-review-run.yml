@@ -1161,8 +1161,8 @@ jobs:
         # Only a clean verdict changes anything: it adds the marker and takes
         # the gating label off. Every other outcome leaves the labels alone.
         #
-        # Last step, and after the terminal row is in S3, so a labelling failure
-        # can never cost telemetry.
+        # After the terminal row is in S3, so a labelling failure can never
+        # cost telemetry.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -1329,3 +1329,14 @@ jobs:
             exit 0
           fi
           echo "::notice::PR #${PR_NUMBER} moved to '${DONE_LABEL}'"
+
+      - name: Post the automated review on the PR
+        # Posts the verdict as a GitHub review and hides the previous one.
+        # Runs after the label move, so a posting failure cannot affect labels.
+        # See the docstring of post_review.py.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          REVIEWED_SHA: ${{ needs.prepare.outputs.head_sha }}
+        run: python3 scripts/pr_review/post_review.py --row-file terminal.json
