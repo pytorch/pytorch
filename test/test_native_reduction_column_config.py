@@ -1,0 +1,291 @@
+# Owner(s): ["module: dsl-native-ops"]
+
+import sys
+import unittest
+from unittest.mock import patch
+
+import torch
+from torch import _native as native
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_CUTEDSL,
+    TestCase,
+)
+
+
+if not TEST_CUTEDSL:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("CuTeDSL not available")
+
+import cutlass
+
+from torch._native.ops.reductions import kernel_coltile as ct, traits as T
+
+
+class TestColumnConfig(TestCase):
+    def select(self, dtype=torch.float32, size=256, columns=4096, **kwargs):
+        itemsize = 2 if dtype == torch.bfloat16 else 4
+        args = dict(
+            cc=(10, 3),
+            dtype=dtype,
+            rows=(size << 20) // (columns * itemsize),
+            columns=columns,
+            batches=1,
+            nfields=1,
+            trait_key="sum",
+            itemsize=itemsize,
+            acc_bits=32,
+            nouts=1,
+            alignment=16,
+            contiguous=True,
+        )
+        args.update(kwargs)
+        return ct.select_col_config(**args)
+
+    def test_default_geometry(self):
+        """Keep unmeasured architectures on conservative column geometry."""
+        cfg = self.select(size=16, columns=256)
+        self.assertEqual(cfg.rule, "default")
+        self.assertEqual(cfg.threads_per_block, 32)
+        self.assertEqual(cfg.npar, 256)
+        self.assertEqual(cfg.vec, 4)
+        self.assertEqual(cfg.partial_layout, "column")
+
+    @parametrize(
+        "dtype,size,columns,key,fields,rule",
+        [
+            (torch.float32, 256, 256, "sum", 1, "rubin_c256"),
+            (torch.bfloat16, 2048, 1024, "argmaxi32", 2, "rubin_c1024"),
+            (torch.float32, 256, 4096, "mean", 1, "rubin_mean_c4096_tiled"),
+            (torch.bfloat16, 2048, 4096, "var0", 3, "rubin_var_c4096"),
+            (
+                torch.bfloat16,
+                2048,
+                4096,
+                "argmaxi32",
+                2,
+                "rubin_argmax_c4096_tree",
+            ),
+        ],
+    )
+    def test_sm107_unordered_profiles(self, dtype, size, columns, key, fields, rule):
+        """Pin each distinct SM107 unordered-column launch family."""
+        expected = {
+            "rubin_c256": (4096, 4, "column", 0, "linear"),
+            "rubin_c1024": (4096, 8, "column", 0, "inner_tree"),
+            "rubin_mean_c4096_tiled": (256, 8, "partition", 16, "linear"),
+            "rubin_var_c4096": (2048, 8, "column", 0, "inner_tree"),
+            "rubin_argmax_c4096_tree": (2048, 4, "partition", 8, "inner_tree"),
+        }
+        cfg = self.select(
+            dtype,
+            size,
+            columns,
+            cc=(10, 7),
+            trait_key=key,
+            nfields=fields,
+        )
+        self.assertEqual(
+            (
+                cfg.npar,
+                cfg.vec,
+                cfg.partial_layout,
+                cfg.combine_columns,
+                cfg.kernel_order,
+            ),
+            expected[rule],
+        )
+        self.assertEqual(cfg.rule, rule)
+        self.assertEqual(cfg.threads_per_block, 64)
+
+    @parametrize(
+        "dtype,key,rows,columns,partials,fields,outputs,expected",
+        [
+            (
+                torch.float32,
+                "sum",
+                65536,
+                129,
+                8,
+                1,
+                (torch.float32,),
+                (16, 16, 1),
+            ),
+            (
+                torch.float32,
+                "varmean0",
+                16384,
+                1024,
+                2,
+                3,
+                (torch.float32, torch.float32),
+                (0, 16, 1),
+            ),
+            (
+                torch.bfloat16,
+                "mean",
+                262144,
+                4096,
+                32,
+                1,
+                (torch.float32,),
+                (32, 8, 4),
+            ),
+        ],
+    )
+    def test_sm107_ordered_profiles(
+        self, dtype, key, rows, columns, partials, fields, outputs, expected
+    ):
+        """Pin SM107 ordered mappings, including packed full-column loads."""
+        cfg = ct.select_ordered_col_config(
+            (10, 7),
+            dtype,
+            key,
+            columns,
+            1,
+            partials,
+            field_bits=(32,) * fields,
+            out_dtypes=outputs,
+            rows=rows,
+            full_tiles=True,
+        )
+        self.assertEqual((cfg.min_blocks, cfg.tile_columns, cfg.column_pack), expected)
+        self.assertEqual((cfg.worker_warps, cfg.full_tiles), (16, True))
+
+    def test_sm107_column_guards(self):
+        """Keep incompatible SM107 calls on generic policies."""
+        self.assertEqual(self.select(cc=(10, 7), size=255).rule, "default")
+        self.assertIsNone(
+            ct.select_ordered_col_config(
+                (10, 7),
+                torch.bfloat16,
+                "mean",
+                4096,
+                1,
+                32,
+                field_bits=(64,),
+                out_dtypes=(torch.float32,),
+                rows=262144,
+                full_tiles=True,
+            )
+        )
+
+    @parametrize("kwargs", [{"threads_per_block": 128}, {"npar": 7}, {"vec": 2}])
+    def test_explicit_geometry_disables_policy(self, kwargs):
+        """Honor explicit column geometry without rewriting it through policy."""
+        cfg = self.select(**kwargs)
+        self.assertEqual(cfg.rule, "explicit")
+        for key, value in kwargs.items():
+            self.assertEqual(getattr(cfg, key), value)
+        self.assertEqual(cfg.partial_layout, "column")
+        self.assertEqual(cfg.combine_columns, 0)
+
+    def test_inner_tree_never_selects_unordered_plan(self):
+        """Never satisfy an ordered request with an unordered column plan."""
+        self.assertIsNone(self.select(order="inner_tree"))
+        with self.assertRaisesRegex(ValueError, "unknown reduction order"):
+            self.select(order="linear")
+        with self.assertRaisesRegex(ValueError, "requires unordered"):
+            ct.reduce_col_tile(None, "sum", None, torch.float32, order="inner_tree")
+        with self.assertRaisesRegex(ValueError, "require inner_tree"):
+            ct.reduce_ordered_col(
+                None, "sum", None, [torch.float32], 1, order="unordered"
+            )
+
+    def test_b200_ordered_column_packing(self):
+        """Keep B200 packing independent from SM107 policy guards."""
+        cfg = ct.select_ordered_col_config(
+            (10, 0),
+            torch.bfloat16,
+            "mean",
+            4096,
+            1,
+            16,
+            field_bits=(32,),
+            out_dtypes=(torch.float32,),
+            rows=262144,
+            full_tiles=True,
+        )
+        self.assertEqual(
+            cfg,
+            ct.OrderedColConfig(0, tile_columns=8, full_tiles=True, column_pack=4),
+        )
+
+
+class TestColumnCombine(TestCase):
+    @onlyCUDA
+    @parametrize(
+        "dtype,op,pattern,tile_columns",
+        [
+            (torch.float32, "sum", "signed", 8),
+            (torch.bfloat16, "argmax", "nonfinite_ties", 8),
+            (torch.float32, "var_mean", "offset", 32),
+        ],
+    )
+    def test_tiled_combine_numerics(self, device, dtype, op, pattern, tile_columns):
+        """Validate one-field, indexed, and multi-output tiled combines."""
+        x = torch.randn((257, 260), device=device, dtype=dtype)
+        if pattern == "offset":
+            x.mul_(8).add_(1024)
+        elif pattern == "nonfinite_ties":
+            x.fill_(0)
+            x[0, :] = 1
+            x[-1, :] = 1
+            x[0, 0] = float("nan")
+            x[1, 1] = float("inf")
+            x[2, 2] = -float("inf")
+        traits = {
+            "sum": T.SumOps,
+            "argmax": T.ArgMaxOps,
+            "var_mean": T.VarMeanOps,
+        }
+        kw = {"correction": 0} if op == "var_mean" else {}
+        trait = traits[op](acc=cutlass.Float32, **kw)
+        nouts = 2 if op == "var_mean" else 1
+        odt = torch.int64 if op == "argmax" else torch.float32
+        cfg = ct.ColConfig(
+            "unordered", "test_tiled", 64, 7, 4, "partition", tile_columns
+        )
+
+        def reference():
+            with (
+                native._unconditional_masked(),
+                torch.backends.python_native.cutedsl.disabled(),
+            ):
+                kw = {"correction": 0} if op == "var_mean" else {}
+                if op == "sum":
+                    kw["dtype"] = torch.float32
+                result = getattr(torch, op)(x, dim=0, **kw)
+            return tuple(result) if nouts == 2 else (result,)
+
+        def run():
+            return ct._reduce_col_tile(
+                trait,
+                f"test_tiled_{op}",
+                x,
+                [odt] * nouts,
+                nouts,
+                None,
+                None,
+                None,
+            )
+
+        tol = 0 if op == "argmax" else 0.016 if dtype == torch.bfloat16 else 1e-4
+        with patch.object(ct, "select_col_config", return_value=cfg):
+            got = run()
+        self.assertEqual(got, reference(), rtol=tol, atol=tol, equal_nan=True)
+
+
+instantiate_parametrized_tests(TestColumnConfig)
+instantiate_device_type_tests(TestColumnCombine, globals(), only_for=("cuda",))
+
+
+if __name__ == "__main__":
+    run_tests()
