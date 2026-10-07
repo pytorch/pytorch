@@ -70,11 +70,7 @@ from torch._guards import (
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
-from torch._subclasses.fake_tensor import (
-    maybe_get_fake_device,
-    maybe_get_item_memo,
-    maybe_set_fake_device,
-)
+from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
@@ -170,6 +166,7 @@ from .utils import (
     nn_module_proxy,
     same,
     set_example_value,
+    temporarily_clear_torch_function_mode_stack,
 )
 from .variables.builder import (
     BackwardStateGraphArg,
@@ -934,8 +931,8 @@ class OutputGraph(OutputGraphCommon):
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
 
-        # Used to wrap the compiled graph at runtime with
-        # DisableTorchFunctionSubclass to prevent double dispatch.
+        # Used to prevent inlined subclass __torch_function__ dispatch from
+        # running again when the compiled graph executes.
         self.torch_function_subclass_inlined = False
 
         # Tracks if the output graph has a user defined allowed function in the
@@ -3041,10 +3038,7 @@ class OutputGraph(OutputGraphCommon):
                 for node, snapshot in self._shallow_copy_placeholder_snapshots.items():
                     node.meta["example_value"] = snapshot
                     idx = placeholder_to_idx[node]
-                    snapshot_device = maybe_get_fake_device(snapshot)
-                    if snapshot_device is None:
-                        raise AssertionError("expected a fake tensor device")
-                    maybe_set_fake_device(example_inputs[idx], snapshot_device)
+                    example_inputs[idx].fake_device = snapshot.fake_device  # type: ignore[union-attr]
 
             gm.graph.lint()
             if is_noop_graph(gm):
@@ -3087,24 +3081,33 @@ class OutputGraph(OutputGraphCommon):
                 # registered backends covered by convert_frame weakref cleanup.
                 # Backends have already consumed the graph, so non-CPU Dynamo
                 # tracing constants no longer need to keep real tensors alive.
-                old_fake_mode.clear_non_cpu_constants()
+                old_fake_mode.fake_tensor_converter.clear_non_cpu_constants()
 
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 
-            # If __torch_function__ subclass dispatch was inlined during
-            # tracing, wrap the compiled graph to disable __torch_function__
-            # at runtime, preventing double dispatch (the C++ dispatcher
-            # would otherwise re-trigger __torch_function__ on subclass
-            # inputs that the graph already handles).
+            # Clear the compile-time mode stack while running the graph so its
+            # effects are not applied twice. Keep mode dispatch enabled because
+            # the backend may install its own modes while the graph runs.
+            if self.torch_function_mode_stack:
+                mode_compiled_fn = compiled_fn
+
+                def _clear_modes_wrapper(*args, **kwargs):
+                    with temporarily_clear_torch_function_mode_stack():
+                        return mode_compiled_fn(*args, **kwargs)
+
+                compiled_fn = _clear_modes_wrapper
+
             if self.torch_function_subclass_inlined:
-                real_compiled_fn = compiled_fn
+                # Subclass inputs would otherwise re-trigger the override that
+                # the graph already handles.
+                subclass_compiled_fn = compiled_fn
 
-                def _tf_disabled_wrapper(*args, **kwargs):
+                def _tf_subclass_disabled_wrapper(*args, **kwargs):
                     with torch._C.DisableTorchFunctionSubclass():
-                        return real_compiled_fn(*args, **kwargs)
+                        return subclass_compiled_fn(*args, **kwargs)
 
-                compiled_fn = _tf_disabled_wrapper
+                compiled_fn = _tf_subclass_disabled_wrapper
 
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
@@ -3545,18 +3548,18 @@ class OutputGraph(OutputGraphCommon):
 
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value")
-            item_memo = maybe_get_item_memo(example_value)
             if (
-                isinstance(item_memo, (torch.SymFloat, torch.SymInt))
-                and hasattr(item_memo.node._expr, "name")
+                isinstance(example_value, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+                and example_value.item_memo is not None
+                and hasattr(example_value.item_memo.node._expr, "name")
                 and all(u.target == "item" for u in node.users)
                 and TensorifyState.should_specialize(
                     # We use _expr instead of expr b/c we want the symbol not the replacement
-                    item_memo.node._expr.name
+                    example_value.item_memo.node._expr.name
                 )
             ):
                 for u in list(node.users):
-                    u.replace_all_uses_with(guard_scalar(item_memo))
+                    u.replace_all_uses_with(guard_scalar(example_value.item_memo))
                     self.remove_node(u)
                 self.remove_node(node)
 
@@ -4333,14 +4336,11 @@ class SubgraphTracer(fx.Tracer):
     ) -> fx.Proxy:
         if isinstance(example_value, torch.Tensor):
             self._input_versions_at_beginning.append(example_value._version)
-            ev_str = f"{example_value.__class__.__name__}(..., size={tuple(example_value.shape)})"
-        else:
-            ev_str = example_value
         log.debug(
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
             source.name if source is not None else "(none)",
-            ev_str,
+            example_value,
             self.debug_level,
             before,
         )
