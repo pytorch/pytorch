@@ -1442,33 +1442,6 @@ class TritonOverrides(OpOverrides):
         ):
             return f"{x}.to(tl.float32).to({out_dtype})"
 
-        if (
-            src_dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-            and src_dtype != dtype
-            and dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-            and utils.is_strict_cuda_triton()
-        ):
-            if src_dtype == torch.float32 and dtype == torch.float64:
-                # Widening quiets signaling NaNs even if a later cast narrows back.
-                nan = (
-                    f"({x}.to(tl.int32, bitcast=True) | 0x00400000)"
-                    ".to(tl.float32, bitcast=True).to(tl.float64)"
-                )
-                return f"tl.where({x} != {x}, {nan}, {x}.to({out_dtype}))"
-            nan_bits = None
-            if dtype in (torch.float16, torch.bfloat16):
-                nan_bits = 0x7FFF
-            elif src_dtype == torch.float16:
-                nan_bits = 0x7FFFFFFF if dtype == torch.float32 else 0x7FFFFFFFE0000000
-            if nan_bits is not None:
-                # Preserve CUDA's NaN conversion when Triton folds a cast chain.
-                int_type = {2: "tl.int16", 4: "tl.int32", 8: "tl.int64"}[dtype.itemsize]
-                nan = (
-                    f"tl.full((), {nan_bits}, {int_type})"
-                    f".to({triton_type(dtype)}, bitcast=True).to({out_dtype})"
-                )
-                return f"tl.where({x} != {x}, {nan}, {x}.to({out_dtype}))"
-
         return f"{x}.to({out_dtype})"
 
     @staticmethod
@@ -1667,28 +1640,6 @@ class TritonOverrides(OpOverrides):
     # pyrefly: ignore [bad-override]
     def maximum(a, b):
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
-
-    @staticmethod
-    def _fminmax(a, b, name):
-        result = f"tl.{name}({a}, {b})"
-        both_nan = f"tl.{name}({a}, {b}, tl.PropagateNan.ALL)"
-        if a.dtype == torch.float64:
-            # Lowering orders the operands so the second NaN supplies the payload.
-            both_nan = (
-                f"({b}.to(tl.int64, bitcast=True) | 0x0008000000000000)"
-                ".to(tl.float64, bitcast=True)"
-            )
-        return f"tl.where(({a} != {a}) & ({b} != {b}), {both_nan}, {result})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def fmin(a, b):
-        return TritonOverrides._fminmax(a, b, "minimum")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def fmax(a, b):
-        return TritonOverrides._fminmax(a, b, "maximum")
 
     @staticmethod
     # pyrefly: ignore [bad-override]
