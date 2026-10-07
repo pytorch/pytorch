@@ -1418,7 +1418,8 @@ PrivatePoolState::PrivatePoolState(
 
 cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
-    *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
+    *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc_with_stream(
+        size, p.stream());
     p.custom_allocator_failed = *ptr == nullptr;
     return *ptr ? cudaSuccess : cudaErrorMemoryAllocation;
   } else {
