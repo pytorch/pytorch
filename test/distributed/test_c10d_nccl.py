@@ -2155,7 +2155,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.destroy_process_group()
         else:
             log_test_info(self.rank, "Excluded from shrink test - exiting immediately")
-            dist.destroy_process_group()
+            # After NCCL_SHRINK_ABORT the survivors abort the parent, so a
+            # graceful destroy here would wait for them forever.
+            pg1._get_backend(device).abort()
             return
 
         # Performance analysis (only for participating ranks)

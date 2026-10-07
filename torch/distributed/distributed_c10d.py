@@ -7698,7 +7698,9 @@ def shrink_group(
 
     # Step 6: Handle cleanup and creation of new process group
     target_group_info["pg_options_override"] = pg_options
-    return _finalize_shrunk_group(target_group_info, excluded_ranks_set, new_backend)
+    return _finalize_shrunk_group(
+        target_group_info, excluded_ranks_set, new_backend, shrink_flags
+    )
 
 
 def _validate_shrink_inputs(ranks_to_exclude: list[int], shrink_flags: int) -> None:
@@ -7844,6 +7846,7 @@ def _finalize_shrunk_group(
     group_info: _ShrinkGroupInfo,
     excluded_ranks_set: set[int],
     new_backend: C10DBackend,
+    shrink_flags: int = SHRINK_DEFAULT,
 ) -> ProcessGroup:
     """Clean up old group and create new shrunk process group."""
     target_pg = group_info["process_group"]
@@ -7863,7 +7866,9 @@ def _finalize_shrunk_group(
     ]
 
     # Clean up the original group
-    _cleanup_original_group(target_pg, is_default_group)
+    _cleanup_original_group(
+        target_pg, is_default_group, abort=bool(shrink_flags & SHRINK_ABORT)
+    )
 
     # Create and configure the new process group
     new_pg = _create_shrunk_process_group(
@@ -7916,10 +7921,18 @@ def _extract_group_metadata(target_pg: ProcessGroup) -> _GroupMetadata:
     }
 
 
-def _cleanup_original_group(target_pg: ProcessGroup, is_default_group: bool) -> None:
+def _cleanup_original_group(
+    target_pg: ProcessGroup, is_default_group: bool, abort: bool = False
+) -> None:
     """Clean up the original process group safely."""
     try:
-        destroy_process_group(target_pg)
+        if abort:
+            # After SHRINK_ABORT the excluded ranks may be dead or have aborted
+            # their side. Since NCCL 2.31 a graceful destroy waits in a barrier
+            # for every local rank of the parent, so it could hang here.
+            _abort_process_group(target_pg)
+        else:
+            destroy_process_group(target_pg)
     except Exception:
         group_type = "default" if is_default_group else "non-default"
         logger.warning(
