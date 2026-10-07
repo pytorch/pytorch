@@ -1553,6 +1553,8 @@ inline torch::stable::Tensor flip(
 /// Stable version of the from_file op.
 ///
 /// Creates a CPU tensor backed by a memory-map of the file at filename.
+/// Unlike at::from_file, filename is a const std::string& rather than a
+/// std::string_view.
 ///
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.15.
@@ -1561,9 +1563,9 @@ inline torch::stable::Tensor flip(
 /// @param shared Optional flag to write tensor changes back to the file.
 /// @param size Optional number of elements to read from the file.
 /// @param dtype Optional scalar type for the tensor elements.
-/// @param layout Optional memory layout (e.g., strided, sparse).
+/// @param layout Optional memory layout, which must be strided for this op.
 /// @param device Optional device, which must be CPU for this op.
-/// @param pin_memory Optional flag to use pinned memory.
+/// @param pin_memory Optional pinning flag, which must be false for this op.
 /// @return A new tensor holding the file contents.
 inline torch::stable::Tensor from_file(
     const std::string& filename,

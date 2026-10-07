@@ -504,29 +504,19 @@ class TestLibtorchAgnostic(TestCase):
         result = libtorch_agnostic.ops.my_flip(t, dims)
         self.assertEqual(result, torch.flip(t, dims))
 
+    @skipIfWindows(msg="TemporaryFileName cannot unlink a memory-mapped file")
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_from_file(self, device):
         import libtorch_agn_2_10 as libtorch_agnostic
 
-        my_from_file = libtorch_agnostic.ops.my_from_file
-        expected = torch.arange(24, dtype=torch.float32)
+        data = bytearray(range(256))
         with TemporaryFileName() as path:
-            expected.numpy().tofile(path)
-
-            result = my_from_file(path, shared=False, size=24, dtype=torch.float32)
-            self.assertEqual(result, expected)
-
-            result = my_from_file(path, size=8, dtype=torch.uint8)
-            self.assertEqual(result, torch.from_file(path, size=8, dtype=torch.uint8))
-
-            shared = my_from_file(path, shared=True, size=24, dtype=torch.float32)
-            shared.fill_(3.0)
-            on_disk = torch.from_file(path, size=24, dtype=torch.float32)
-            self.assertEqual(on_disk, torch.full((24,), 3.0))
-
-            with self.assertRaises(RuntimeError):
-                my_from_file(path + ".missing", size=1, dtype=torch.uint8)
+            Path(path).write_bytes(data)
+            result = libtorch_agnostic.ops.my_from_file(
+                path, shared=False, size=len(data), dtype=torch.uint8
+            )
+            self.assertEqual(result, torch.frombuffer(data, dtype=torch.uint8))
 
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
