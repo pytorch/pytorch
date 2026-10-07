@@ -309,13 +309,6 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         unimplemented(
             gb_type="Unimplemented next() call",
