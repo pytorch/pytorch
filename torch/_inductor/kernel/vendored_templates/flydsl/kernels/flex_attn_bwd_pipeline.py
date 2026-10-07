@@ -41,6 +41,8 @@ def make_pipeline_kernel(context, f32, exp2):
     mask_program = context["mask_program"]
     mask_output = context["mask_program_output"]
     dq_partitions = context["dq_partitions"]
+    dq_workspace_dtype = context["dq_workspace_dtype"]
+    dq_copy_op = context["dq_copy_op"]
     workspace_head_group = context["workspace_head_group"]
     cta_head_group = context["cta_head_group"]
     batch_heads = batch_size * num_heads
@@ -191,7 +193,7 @@ def make_pipeline_kernel(context, f32, exp2):
                 head,
             )
             g64 = fx.make_copy_atom(fx.rocdl.BufferCopy64b(), fx.BFloat16)
-            dq_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Float32)
+            dq_copy = fx.make_copy_atom(dq_copy_op(), dq_workspace_dtype)
             read128 = fx.make_copy_atom(fx.UniversalCopy128b(), fx.BFloat16)
             tr16 = fx.make_copy_atom(fx.rocdl.cdna4.LDSReadTrans(16, 64), fx.BFloat16)
             score_mma = fx.make_tiled_mma(
@@ -422,7 +424,7 @@ def make_pipeline_kernel(context, f32, exp2):
                 return ds_fragment, key_fragments
 
             previous_dq = [
-                fx.make_rmem_tensor(4, fx.Float32)
+                fx.make_rmem_tensor(4, dq_workspace_dtype)
                 for _ in fx.range_constexpr(2 * dq_phase_tiles)
             ]
 
@@ -470,9 +472,9 @@ def make_pipeline_kernel(context, f32, exp2):
                     4, scale, fx.Float32
                 )
                 if const_expr(dq_partitions < owner_count):
-                    values = values + fx.Vector(previous_dq[part].load())
-                output = fx.make_rmem_tensor(4, fx.Float32)
-                output.store(values.ir_value())
+                    values = values + fx.Vector(previous_dq[part].load()).to(fx.Float32)
+                output = fx.make_rmem_tensor(4, dq_workspace_dtype)
+                output.store(values.to(dq_workspace_dtype).ir_value())
                 fx.copy(dq_copy, output, destination)
 
             def consume(
