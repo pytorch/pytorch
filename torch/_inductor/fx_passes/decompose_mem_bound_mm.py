@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -273,6 +274,12 @@ def decompose_addmm(
     mat2: torch.fx.Node,
     mat3: torch.fx.Node,
 ):
+    alpha_is_zero = cast(
+        "bool | torch.SymBool", match.output_node().kwargs.get("alpha", 1) == 0
+    )
+    if statically_known_true(alpha_is_zero):
+        return
+
     def repl(mat1, mat2, mat3):
         return (
             torch.sum(mat2[:, :, None] * mat3[None, :, :], dim=-2).to(mat2.dtype) + mat1

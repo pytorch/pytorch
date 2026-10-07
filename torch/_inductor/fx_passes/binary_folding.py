@@ -3,6 +3,7 @@ import functools
 import itertools
 
 import torch
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 from ..._dynamo.utils import counters
 from .. import config
@@ -224,6 +225,11 @@ def binary_folding_init():
         return True
 
     def _check_linear_and_broadcast_op(linear_node, other, has_reshape):
+        if linear_node.target is aten.addmm.default and statically_known_true(
+            linear_node.kwargs.get("alpha", 1) == 0
+        ):
+            return False
+
         weight_node = (
             linear_node.args[2]
             if linear_node.target is aten.addmm.default

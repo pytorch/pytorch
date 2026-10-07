@@ -17,6 +17,7 @@ from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.nn.functional import ScalingType, SwizzleType  # type: ignore[attr-defined]
 from torch.torch_version import TorchVersion
 from torch.utils._ordered_set import OrderedSet
@@ -935,11 +936,17 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     return node
 
 
+addmm_fallback = fallback_handler(aten.addmm.default, add_to_fallback_set=False)
+
+
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    if statically_known_true(alpha == 0):
+        return addmm_fallback(inp, mat1, mat2, alpha=alpha, beta=beta)
+
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
     if not use_bf16x9 and beta == 0 and mat1.get_device().type == "cuda":
         _check_addmm_input_metadata(inp, mat1, mat2)
