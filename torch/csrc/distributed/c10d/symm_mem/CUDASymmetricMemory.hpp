@@ -4,6 +4,7 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SignalPad.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 #include <shared_mutex>
@@ -47,6 +48,8 @@ class CUDASymmetricMemory : public SymmetricMemory {
   std::vector<void*> get_signal_pad_ptrs() override;
   void** get_buffer_ptrs_dev() override;
   void** get_signal_pad_ptrs_dev() override;
+  void** get_group_signal_pad_ptrs_dev() override;
+  size_t get_group_signal_pad_size() override;
   size_t get_buffer_size() override;
   size_t get_offset() override;
 
@@ -82,8 +85,7 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
       std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs,
       std::vector<void*> buffers,
       std::vector<void*> signal_pads,
-      void* mc_signal_pad_addr,
-      size_t barrier_state_offset,
+      uint64_t peer_mapping_id,
       HandleType mc_handle,
       void* mc_addr,
       size_t buffer_size,
@@ -96,9 +98,8 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
-  void* mc_signal_pad_addr_;
-  // Bytes from a signal pad to the multimem barrier's state; see alloc().
-  size_t barrier_state_offset_;
+  // Identifies the device of every rank at rendezvous.
+  uint64_t peer_mapping_id_;
   HandleType mc_handle_;
   void* mc_addr_;
   size_t buffer_size_;
@@ -108,8 +109,13 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
   void** buffers_dev_;
   void** signal_pads_dev_;
   std::string group_name_;
+  // The group's internal pad, which PyTorch's own operations use, set by
+  // rendezvous() before the info is shared with any handle. Unset only on the
+  // info that maps a pad itself.
+  std::shared_ptr<const SignalPad> pad_;
 
   friend class CUDASymmetricMemory;
+  friend class CUDASymmetricMemoryAllocator;
 };
 
 // Metadata associated with each allocation performed by
@@ -120,8 +126,7 @@ struct Block : public c10::intrusive_ptr_target {
   size_t block_size;
   size_t buffer_size;
   // Byte offset from the allocation base (alloc_ref->ptr) to the start of the
-  // user buffer. The signal pad occupies the first two thirds of
-  // [0, buffer_offset) and the multimem barrier's state the last; see alloc().
+  // user buffer; the signal pad occupies [0, buffer_offset).
   size_t buffer_offset;
   std::optional<std::string> default_group_name;
   std::map<std::string, c10::intrusive_ptr<CUDAPeerAllocInfo>> symm_mems;
@@ -153,6 +158,19 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   std::string name() override;
 
  private:
+  // Allocates and maps a block of `size` bytes after a front region of
+  // `front_size` bytes, without registering it, so that alloc() and the
+  // groups' internal pads share one allocation path.
+  c10::intrusive_ptr<Block> create_block(
+      size_t size,
+      size_t front_size,
+      int device_idx,
+      const std::optional<std::string>& group_name);
+  // The internal pad of (group, device), created by the group's first
+  // rendezvous on the device.
+  std::shared_ptr<const SignalPad> signal_pad(
+      const std::string& group_name,
+      int device_idx);
   c10::intrusive_ptr<Block> find_block(void* ptr);
   c10::intrusive_ptr<Block> find_block_covering(void* ptr, size_t& offset);
 
