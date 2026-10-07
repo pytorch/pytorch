@@ -6,7 +6,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/fsdp/ChunkCat.h>
-#include <torch/csrc/distributed/fsdp/CollectiveCopy.hpp>
+#include <torch/csrc/distributed/fsdp/CollectiveCopy.h>
 #include <torch/library.h>
 
 #include <algorithm>
