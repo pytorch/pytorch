@@ -414,7 +414,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("save", &ProfilerResult::save)
       .def(
           "trace_activities",
-          [](py::object self) {
+          [](const py::object& self) {
             auto& r = self.cast<ProfilerResult&>();
             auto* activities = r.traceActivities();
             if (!activities) {
@@ -601,20 +601,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       "_top_saved_tensors_default_hooks",
       [](bool ignore_is_tracing)
           -> std::optional<std::pair<py::function, py::function>> {
-        auto out = at::SavedTensorDefaultHooks::get_hooks(ignore_is_tracing);
-
-        if (!out.has_value()) {
+        auto out{at::SavedTensorDefaultHooks::get_hooks(ignore_is_tracing)};
+        if (!out) {
           return std::nullopt;
         }
 
-        auto [pack_hook, unpack_hook] = *out;
-        // gil for destructor of pack_hook, unpack_hook that decrements
-        // reference
-        py::gil_scoped_acquire gil;
-
         return std::make_pair(
-            py::reinterpret_steal<py::function>(pack_hook.release()),
-            py::reinterpret_steal<py::function>(unpack_hook.release()));
+            py::reinterpret_steal<py::function>(out->first.release()),
+            py::reinterpret_steal<py::function>(out->second.release()));
       }
 
   );
@@ -704,6 +698,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py_context_manager<EnablePreDispatch>(_C_m, "_EnablePreDispatch");
   py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
   py_context_manager<DisableAutocast>(_C_m, "_DisableAutocast");
+  m.def(
+      "_make_saved_tensor",
+      [](const at::Tensor& tensor,
+         bool is_output,
+         bool is_inplace_on_view) -> torch::autograd::SavedVariable {
+        return torch::autograd::SavedVariable(
+            tensor, is_output, is_inplace_on_view);
+      },
+      py::arg("tensor"),
+      py::arg("is_output"),
+      py::arg("is_inplace_on_view") = false);
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
@@ -751,18 +756,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             return py::reinterpret_borrow<py::function>(
                 opt->ptr(getPyInterpreter()));
           });
-
-  m.def(
-      "_make_saved_tensor",
-      [](const at::Tensor& tensor,
-         bool is_output,
-         bool is_inplace_on_view) -> torch::autograd::SavedVariable {
-        return torch::autograd::SavedVariable(
-            tensor, is_output, is_inplace_on_view);
-      },
-      py::arg("tensor"),
-      py::arg("is_output"),
-      py::arg("is_inplace_on_view") = false);
 
   torch::autograd::profiler::python_tracer::init();
   Py_RETURN_TRUE;
