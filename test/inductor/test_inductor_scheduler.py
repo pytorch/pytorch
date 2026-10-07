@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+from types import SimpleNamespace
 from unittest import skipIf
 from unittest.mock import Mock, patch, PropertyMock
 
@@ -1258,7 +1259,12 @@ class TestScheduler(TestCase):
         self.assertEqual(list(tma_store_outputs_within_budget(outputs, -1)), [])
 
     def test_epilogue_tma_store_budget(self):
-        def budget(meta, num_stages, dtypes=(torch.bfloat16, torch.bfloat16)):
+        def budget(
+            meta,
+            num_stages,
+            dtypes=(torch.bfloat16, torch.bfloat16),
+            props=SimpleNamespace(shared_memory_per_block_optin=232448),
+        ):
             kernel = Mock(
                 meta=meta,
                 num_stages=num_stages,
@@ -1266,12 +1272,12 @@ class TestScheduler(TestCase):
                 prefix_args=0,
                 suffix_args=0,
             )
+            kernel._staged_tile_elems = lambda: (
+                TritonTemplateKernel._staged_tile_elems(kernel)
+            )
             kernel.output_node.get_device.return_value = torch.device("cuda", 0)
             kernel.output_node.get_dtype.return_value = torch.bfloat16
-            with patch(
-                "torch.cuda.get_device_properties",
-                return_value=Mock(shared_memory_per_block_optin=232448),
-            ):
+            with patch("torch.cuda.get_device_properties", return_value=props):
                 return TritonTemplateKernel._epilogue_tma_store_budget(kernel)
 
         tile = {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64}
@@ -1280,7 +1286,23 @@ class TestScheduler(TestCase):
         self.assertEqual(budget(tile, 3), 68608)
         # fp32 operands double the ring.
         self.assertEqual(budget(tile, 3, (torch.float32, torch.float32)), 68608 - 98304)
-        # Without the tile sizes, nothing is budgeted.
+        # A TMA store stages one 128 x (128 / EPILOGUE_SUBTILE) subtile.
+        for subtile in (2, 4):
+            subtiled = {**tile, "EPILOGUE_SUBTILE": subtile}
+            self.assertEqual(
+                TritonTemplateKernel._staged_tile_elems(Mock(meta=subtiled)),
+                128 * 128 // subtile,
+            )
+            self.assertEqual(
+                budget(subtiled, 3), 68608 + 128 * 128 * 2 * (subtile - 1) // subtile
+            )
+        # ROCm reports only shared_memory_per_block.
+        self.assertEqual(
+            budget(tile, 3, props=SimpleNamespace(shared_memory_per_block=65536)),
+            68608 - (232448 - 65536),
+        )
+        # Without a shared memory size or the tile sizes, nothing is budgeted.
+        self.assertLess(budget(tile, 3, props=SimpleNamespace()), 0)
         self.assertEqual(budget({}, 3), 0)
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
