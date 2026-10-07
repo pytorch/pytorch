@@ -184,6 +184,7 @@ SLOW_TESTS_FILE = ""
 TEST_BAILOUTS = False
 TEST_DISCOVER = False
 TEST_IN_SUBPROCESS = False
+TEST_SAVE_RUN_JSONL = ""
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
@@ -270,6 +271,10 @@ class TestEnvironment:
     # Specifically, this includes env vars that are set to non-default values and
     # are not implied. Maps from env var name -> value (int)
     repro_env_vars: dict = {}
+    # Value in effect of every include_in_repro env var: "1"/"0" for flags (implied
+    # included), the parsed value for settings ("" if unset). Read by
+    # torchci/environment.py.
+    env_var_values: dict = {}
 
     # Defines a flag usable throughout the test suite, determining its value by querying
     # the specified environment variable.
@@ -314,8 +319,10 @@ class TestEnvironment:
         if env_var_val is None:
             implied = implied_by_fn()
             enabled = enabled or implied
-        if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[env_var] = env_var_val
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = "1" if enabled else "0"
+            if (enabled != default) and not implied:
+                TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         if name in globals():
@@ -350,6 +357,8 @@ class TestEnvironment:
     ):
         value = default if env_var is None else os.getenv(env_var)
         value = parse_fn(value)
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = "" if value is None else str(value)
         if include_in_repro and (value != default):
             TestEnvironment.repro_env_vars[env_var] = value
 
@@ -1144,6 +1153,9 @@ def _get_test_report_path():
     test_source = override if override is not None else 'python-unittest'
     return os.path.join('test-reports', test_source)
 
+# torchci test run reports; relative to the cwd like the junit path.
+TEST_RUN_REPORTS_DIR = 'torchci-reports'
+
 def parse_cmd_line_args():
     global DISABLED_TESTS_FILE
     global GRAPH_EXECUTOR
@@ -1157,6 +1169,7 @@ def parse_cmd_line_args():
     global TEST_BAILOUTS
     global TEST_DISCOVER
     global TEST_IN_SUBPROCESS
+    global TEST_SAVE_RUN_JSONL
     global TEST_SAVE_XML
     global UNITTEST_ARGS
     global USE_PYTEST
@@ -1174,6 +1187,10 @@ def parse_cmd_line_args():
     parser.add_argument('--save-xml', nargs='?', type=str,
                         const=_get_test_report_path(),
                         default=_get_test_report_path() if IS_CI else None)
+    parser.add_argument('--save-test-run-reports', nargs='?', type=str,
+                        const=TEST_RUN_REPORTS_DIR, default=None)
+    parser.add_argument('--no-save-test-run-reports', dest='save_test_run_reports',
+                        action='store_const', const=None, default=argparse.SUPPRESS)
     parser.add_argument('--discover-tests', action='store_true')
     parser.add_argument('--log-suffix', type=str, default="")
     parser.add_argument('--run-parallel', type=int, default=1)
@@ -1215,6 +1232,7 @@ def parse_cmd_line_args():
     PYTEST_SINGLE_TEST = args.pytest_single_test
     TEST_DISCOVER = args.discover_tests
     TEST_IN_SUBPROCESS = args.subprocess
+    TEST_SAVE_RUN_JSONL = args.save_test_run_reports
     TEST_SAVE_XML = args.save_xml
     REPEAT_COUNT = args.repeat
     SHOWLOCALS = args.showlocals
@@ -1243,18 +1261,12 @@ def wait_for_process(p, timeout=None):
             p.kill()
             raise
     except subprocess.TimeoutExpired:
-        # send SIGINT to give pytest a chance to make xml
+        # Send SIGINT so pytest can write its reports, but keep the timeout even if
+        # pytest exits in the grace period.
         p.send_signal(signal.SIGINT)
-        exit_status = None
         try:
-            exit_status = p.wait(timeout=5)
-        # try to handle the case where p.wait(timeout=5) times out as well as
-        # otherwise the wait() call in the finally block can potentially hang
+            p.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            pass
-        if exit_status is not None:
-            return exit_status
-        else:
             p.kill()
         raise
     except:
@@ -1544,6 +1556,8 @@ def run_tests(argv=None):
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
             other_args += ['--save-xml', TEST_SAVE_XML]
+        if TEST_SAVE_RUN_JSONL:
+            other_args.append(f'--save-test-run-reports={TEST_SAVE_RUN_JSONL}')
         if HW_CLASSIFICATION is not None:
             other_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
 
@@ -1565,7 +1579,18 @@ def run_tests(argv=None):
 
             timeout = None if RERUN_DISABLED_TESTS else 15 * 60
 
+            started = time.time()
             exitcode, _ = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
+
+            if TEST_SAVE_RUN_JSONL and USE_PYTEST:
+                # A child that crashed or timed out couldn't record its test.
+                try:
+                    from torch.testing._internal.torchci import recovery
+
+                    report_dir = os.path.join(TEST_SAVE_RUN_JSONL, sanitize_test_filename(argv[0]))
+                    recovery.record_dead_subprocess(report_dir, test_case_full_name, exitcode, started)
+                except Exception as e:
+                    print(f"torchci: could not record the test: {e!r}", file=sys.stderr)
 
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.
@@ -1609,6 +1634,9 @@ def run_tests(argv=None):
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+        if TEST_SAVE_RUN_JSONL:
+            report_dir = os.path.join(TEST_SAVE_RUN_JSONL, sanitize_test_filename(argv[0]))
+            pytest_args += ['-p', 'torch.testing._internal.torchci.plugin', f'--torchci-report-dir={report_dir}']
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 

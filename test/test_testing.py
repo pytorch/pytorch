@@ -7,15 +7,21 @@ import functools
 import importlib
 import importlib.metadata
 import inspect
+import io
 import itertools
+import json
 import math
 import os
+import platform
 import re
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import textwrap
+import time
 import unittest.mock
+import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
@@ -29,7 +35,7 @@ from torch.testing._internal.common_utils import (
     IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    getRocmVersion, TemporaryFileName, sanitize_pytest_xml,
+    getRocmVersion, TemporaryFileName, sanitize_pytest_xml, TestEnvironment,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -41,6 +47,7 @@ from torch.testing._internal import common_cuda, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
+from torch.testing._internal.torchci import report as torchci_report
 import operator
 import string
 
@@ -781,6 +788,722 @@ class TestJunitXml(TestCase):
             sanitize_pytest_xml(path)
             normalized = _normalize_junit_xml(Path(path).read_text())
         self._assert_matches_golden("pytest_sanitized", normalized)
+
+
+# The fixture's run context, which the report records.
+_REPORT_CHILD_ENV = _JUNIT_CHILD_ENV | {
+    "GITHUB_REPOSITORY": "pytorch/pytorch",
+    "JOB_ID": "123456789",
+    "BUILD_ENVIRONMENT": "report-build",
+    "TEST_CONFIG": "report-config",
+    "RUNNER_NAME": "report-runner",
+}
+
+
+_RUN_KEYS = [
+    "type", "schema_version", "file", "suite", "case_name", "language",
+    "declared_case_name", "rerun_number", "outcome", "outcome_summary",
+    "started_at", "ended_at", "properties",
+]
+_RUN_OUTCOMES = {
+    "passed", "failed", "error", "skipped", "xfailed", "xpassed",
+    "crashed", "timed_out",
+}
+
+
+def _assert_run_line(run: dict[str, Any], t0_ms: int, t1_ms: int) -> None:
+    if list(run) != _RUN_KEYS:
+        raise AssertionError(f"unexpected run keys: {list(run)}")
+    if run["type"] != "run" or run["schema_version"] != "0.1":
+        raise AssertionError(f"unexpected run version: {run}")
+    for name in (
+        "file", "suite", "case_name", "language", "declared_case_name", "outcome",
+        "outcome_summary",
+    ):
+        if not isinstance(run[name], str):
+            raise AssertionError(f"{name} is not a string: {run[name]!r}")
+    for name in ("rerun_number", "started_at", "ended_at"):
+        if type(run[name]) is not int:
+            raise AssertionError(f"{name} is not an int: {run[name]!r}")
+    if run["language"] not in ("python", "cpp"):
+        raise AssertionError(f"unexpected language: {run['language']}")
+    if run["outcome"] not in _RUN_OUTCOMES:
+        raise AssertionError(f"unexpected outcome: {run['outcome']}")
+    if not (t0_ms <= run["started_at"] <= run["ended_at"] <= t1_ms):
+        raise AssertionError(
+            f"timestamps outside [{t0_ms}, {t1_ms}]: "
+            f"{run['started_at']}, {run['ended_at']}"
+        )
+    if run["properties"] != {}:
+        raise AssertionError(f"unexpected run properties: {run['properties']}")
+
+
+def _report_files(directory: Path) -> list[Path]:
+    return sorted(directory.glob("*.jsonl"))
+
+
+def _run_plugin(
+    cwd: str, args: list[str], report_dir: Path, env: dict[str, str] | None = None
+) -> tuple[subprocess.CompletedProcess, Path]:
+    """Runs pytest with the report plugin; returns the process and its one report."""
+    proc = subprocess.run(
+        [
+            sys.executable, "-m", "pytest", *args,
+            "-p", "torch.testing._internal.torchci.plugin", f"--torchci-report-dir={report_dir}",
+            "-p", "no:cacheprovider", "-q",
+        ],
+        cwd=cwd,
+        env=_REPORT_CHILD_ENV | (env or {}),
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    reports = _report_files(report_dir)
+    if len(reports) != 1:
+        raise RuntimeError(f"pytest produced {len(reports)} reports\n{proc.stdout}\n{proc.stderr}")
+    return proc, reports[0]
+
+
+def _runs(report: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in report.read_text().splitlines()[1:]]
+
+
+# torchci test run reports, on TestJunitXml's fixture suite.
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "report shape doesn't depend on the device")
+class TestReportJsonl(TestCase):
+    raw: str
+    report_name: str
+    t0_ms: int
+    t1_ms: int
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cls.t0_ms = int(time.time() * 1000)
+            # A non-default setting, to show up in flags.
+            _, report = _run_plugin(
+                str(_JUNIT_TESTDATA.parent), ["junit_xml_testdata/pytest_suite.py"], Path(tmp) / "suite",
+                {"PYTORCH_TEST_WITH_SLOW": "1"},
+            )
+            cls.t1_ms = int(time.time() * 1000)
+            cls.raw = report.read_text()
+            cls.report_name = report.name
+        super().setUpClass()
+
+    def test_runs(self) -> None:
+        _, *runs = (json.loads(line) for line in self.raw.splitlines())
+        rendered = "\n".join(
+            f"{run['case_name']} {run['rerun_number']} {run['outcome']}"
+            + (f": {run['outcome_summary']}" if run["outcome_summary"] else "")
+            for run in runs
+        )
+        self.assertExpectedInline(rendered, """\
+test_pass 0 passed
+test_assert_failure 0 failed: AssertionError: values differ
+test_raises_non_assertion 0 failed: RuntimeError: runtime error!
+test_error_in_setup 0 error: RuntimeError: setup error
+test_error_in_teardown 0 error: RuntimeError: teardown error
+test_skipped 0 skipped: skipped unconditionally
+test_skipif 0 skipped: skipped conditionally
+test_xfail 0 xfailed: known bad
+test_xpass_non_strict 0 xpassed
+test_xpass_strict 0 failed: [XPASS(strict)] strictly expected to fail
+test_rerun_then_pass 0 failed: AssertionError: attempt 1 fails
+test_rerun_then_pass 1 failed: AssertionError: attempt 2 fails
+test_rerun_then_pass 2 passed
+test_rerun_then_fail 0 failed: AssertionError: attempt 1 fails
+test_rerun_then_fail 1 failed: AssertionError: attempt 2 fails
+test_rerun_then_fail 2 failed: AssertionError: attempt 3 fails
+test_no_rerun_needed 0 passed""")
+
+    def test_schema(self) -> None:
+        report, *runs = (json.loads(line) for line in self.raw.splitlines())
+        self.assertEqual(
+            list(report),
+            ["type", "schema_version", "repo", "github_workflow_job_id", "report_uuid", "environment", "flags",
+             "properties"],
+        )
+        self.assertEqual(report["type"], "report")
+        self.assertEqual(report["schema_version"], "0.1")
+        self.assertEqual(report["repo"], "pytorch/pytorch")
+        self.assertEqual(report["github_workflow_job_id"], 123456789)
+        self.assertEqual(str(uuid.UUID(report["report_uuid"])), report["report_uuid"])
+        self.assertEqual(self.report_name, f"suite-{report['report_uuid']}.jsonl")
+        env = report["environment"]
+        self.assertEqual(
+            list(env),
+            ["os", "os_version", "cpu_architecture", "cpu_capability", "python_version", "cc_compiler",
+             "cc_compiler_version", "accelerator", "accelerator_version", "device_count", "device_name"],
+        )
+        for name, value in env.items():
+            self.assertIsInstance(value, int if name == "device_count" else str)
+        self.assertEqual(env["os"], {"Linux": "linux", "Darwin": "macos"}[platform.system()])
+        free_threaded = "t" if sysconfig.get_config_var("Py_GIL_DISABLED") else ""
+        self.assertEqual(env["python_version"], f"{sys.version_info.major}.{sys.version_info.minor}{free_threaded}")
+        self.assertIn(env["cc_compiler"], ("", "gcc", "clang", "msvc"))
+        self.assertIn(env["accelerator"], ("cpu", "cuda", "rocm", "xpu", "mps"))
+        if env["device_count"] == 0:
+            self.assertEqual(env["device_name"], "")
+        flags = report["flags"]
+        self.assertEqual(list(flags), sorted(TestEnvironment.env_var_values))
+        self.assertTrue(all(isinstance(value, str) for value in flags.values()))
+        self.assertEqual(flags["PYTORCH_TEST_WITH_SLOW"], "1")
+        self.assertEqual(flags["PYTORCH_TEST_WITH_INDUCTOR"], "0")
+        property_names = {
+            "torch_version", "os_release", "device_memory_mib", "driver_version",
+            "host_memory_mib", "build_environment", "test_config", "runner_name",
+        }
+        self.assertTrue(set(report["properties"]) <= property_names)
+        self.assertTrue(all(isinstance(value, str) and value for value in report["properties"].values()))
+        self.assertEqual(report["properties"]["build_environment"], "report-build")
+        self.assertEqual(report["properties"]["test_config"], "report-config")
+        self.assertEqual(report["properties"]["runner_name"], "report-runner")
+        for run in runs:
+            _assert_run_line(run, self.t0_ms, self.t1_ms)
+            self.assertEqual(run["language"], "python")
+
+    # One xdist worker, so the names travel from a worker to the controller.
+    XDIST_SOURCE = """
+import pytest
+
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize, TestCase
+
+
+class TestDevice(TestCase):
+    def test_device(self, device):
+        pass
+
+
+instantiate_device_type_tests(TestDevice, globals(), only_for="cpu")
+
+
+@instantiate_parametrized_tests
+class TestParametrize(TestCase):
+    @parametrize("value", [1])
+    def test_parametrize(self, value):
+        pass
+
+
+class TestPytest:
+    @pytest.mark.parametrize("value", [1], ids=["one"])
+    def test_pytest(self, value):
+        pass
+
+
+class TestSetattr:
+    pass
+
+
+setattr(TestSetattr, "test_added", lambda self: None)
+"""
+
+    def test_declared_case_names(self) -> None:
+        # Below test/ so pytest loads the same conftest chain as CI.
+        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+            (Path(tmp) / "xdist_report.py").write_text(textwrap.dedent(self.XDIST_SOURCE))
+            t0_ms = int(time.time() * 1000)
+            proc, report = _run_plugin(tmp, ["xdist_report.py", "-n", "1"], Path(tmp) / "xdist")
+            t1_ms = int(time.time() * 1000)
+            runs = _runs(report)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        for run in runs:
+            _assert_run_line(run, t0_ms, t1_ms)
+        declared = {run["case_name"]: run["declared_case_name"] for run in runs}
+        self.assertEqual(declared["test_device_cpu"], "test_device")
+        self.assertEqual(declared["test_parametrize_value_1"], "test_parametrize")
+        self.assertEqual(declared["test_pytest[one]"], "test_pytest")
+        # Added with setattr, so the function is named <lambda>.
+        self.assertEqual(declared["test_added"], "test_added")
+
+    SUBTESTS_SOURCE = """
+import unittest
+
+
+class TestSubtests(unittest.TestCase):
+    def test_failing_subtest(self):
+        for i in range(2):
+            with self.subTest(i=i):
+                self.assertEqual(i, 0)
+"""
+
+    def test_subtests(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+            (Path(tmp) / "subtests_report.py").write_text(textwrap.dedent(self.SUBTESTS_SOURCE))
+            _, report = _run_plugin(tmp, ["subtests_report.py"], Path(tmp) / "subtests")
+            runs = _runs(report)
+        # One run per test, however many subtests it has.
+        self.assertEqual([(run["case_name"], run["outcome"]) for run in runs], [("test_failing_subtest", "failed")])
+        self.assertIn("1 != 0", runs[0]["outcome_summary"])
+
+
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "report failures don't need GPU coverage")
+class TestReportFailureIsolation(TestCase):
+    """A failing writer must not change outcomes or the exit code, and warns once."""
+
+    SOURCE = """
+def test_pass():
+    pass
+
+
+def test_fail():
+    raise RuntimeError("expected failure")
+"""
+    # Breaks the writer at the point FAIL_MODE names.
+    CONFTEST = """
+import os
+import pytest
+
+from torch.testing._internal.torchci import environment, plugin
+
+
+def boom(*args, **kwargs):
+    raise RuntimeError(os.environ["FAIL_MODE"] + " failed")
+
+
+class FailingFile:
+    def write(self, value):
+        raise OSError("write failed")
+
+    def flush(self):
+        pass
+
+    def close(self):
+        pass
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_configure(config):
+    mode = os.environ.get("FAIL_MODE")
+    if mode == "capture":
+        environment.capture = boom
+    elif mode == "write":
+        plugin.open = lambda *args, **kwargs: FailingFile()
+    elif mode == "name":
+        plugin._item_declared_case_name = boom
+    elif mode == "cache":
+        plugin.ReportWriter._publish = boom
+"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        # Below test/ so pytest loads the same conftest chain as CI.
+        cls.tmp = tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent)
+        cls.dir = Path(cls.tmp.name)
+        (cls.dir / "failure_isolation.py").write_text(textwrap.dedent(cls.SOURCE))
+        (cls.dir / "conftest.py").write_text(textwrap.dedent(cls.CONFTEST))
+        cls.baseline = cls._run("baseline", ["-p", "no:cacheprovider"])
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.tmp.cleanup()
+        super().tearDownClass()
+
+    @classmethod
+    def _run(cls, name: str, args: list[str], env: dict[str, str] | None = None):
+        xml = cls.dir / f"{name}.xml"
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "failure_isolation.py", "-q", f"--junitxml={xml}", *args],
+            cwd=cls.dir,
+            env=_JUNIT_CHILD_ENV | (env or {}),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        outcomes = []
+        for case in ET.parse(xml).iter("testcase"):
+            child = next(iter(case), None)
+            outcomes.append((case.attrib["name"], "passed" if child is None else child.tag))
+        return proc, outcomes
+
+    @parametrize(
+        "mode",
+        [subtest(mode, name=mode) for mode in ("capture", "write", "name", "cache")],
+    )
+    def test_writer_error_does_not_change_tests(self, mode) -> None:
+        args = ["-p", "torch.testing._internal.torchci.plugin", f"--torchci-report-dir={self.dir / mode}"]
+        if mode == "cache":
+            # The in-flight run is only published through the stepcurrent cache.
+            args += ["--sc=report-failure", "-o", f"cache_dir={self.dir / 'cache'}"]
+        else:
+            args += ["-p", "no:cacheprovider"]
+        proc, outcomes = self._run(mode, args, {"FAIL_MODE": mode})
+        baseline_proc, baseline_outcomes = self.baseline
+        self.assertEqual(proc.returncode, baseline_proc.returncode, proc.stdout + proc.stderr)
+        self.assertEqual(outcomes, baseline_outcomes)
+        self.assertEqual(proc.stderr.count("torchci: report disabled after error:"), 1, proc.stderr)
+
+
+instantiate_parametrized_tests(TestReportFailureIsolation)
+
+
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "report enablement doesn't need GPU coverage")
+class TestReportEnablement(TestCase):
+    SOURCE = """
+from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+class TestOne(TestCase):
+    def test_pass(self):
+        pass
+
+
+if __name__ == "__main__":
+    run_tests()
+"""
+
+    def _run_one(self, tmp: str, args: list[str]) -> subprocess.CompletedProcess:
+        (Path(tmp) / "one.py").write_text(textwrap.dedent(self.SOURCE))
+        return subprocess.run(
+            [sys.executable, "one.py", "--use-pytest", "-p", "no:cacheprovider", *args],
+            cwd=tmp,
+            env=_REPORT_CHILD_ENV,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+    def test_basic(self) -> None:
+        # Below test/ so pytest loads the same conftest chain as CI.
+        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+            report_dir = Path(tmp) / "reports"
+            t0_ms = int(time.time() * 1000)
+            proc = self._run_one(tmp, [f"--save-test-run-reports={report_dir}"])
+            t1_ms = int(time.time() * 1000)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            reports = _report_files(report_dir / "one")
+            self.assertEqual(len(reports), 1)
+            self.assertRegex(reports[0].name, r"^one-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.jsonl$")
+            records = [json.loads(line) for line in reports[0].read_text().splitlines()]
+        self.assertEqual([record["type"] for record in records], ["report", "run"])
+        _assert_run_line(records[1], t0_ms, t1_ms)
+        self.assertEqual(records[1]["outcome"], "passed")
+
+    def test_off_is_noop(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+            proc = self._run_one(tmp, [])
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertEqual([path.name for path in Path(tmp).iterdir()], ["one.py"])
+
+    def test_common_utils_parsing(self) -> None:
+        source = """
+import json
+import sys
+
+from torch.testing._internal import common_utils
+
+
+result = []
+for in_ci, args in [
+    (False, []),
+    (True, []),
+    (False, ["--save-test-run-reports"]),
+    (False, ["--save-test-run-reports=custom"]),
+    (True, ["--no-save-test-run-reports"]),
+]:
+    common_utils.IS_CI = in_ci
+    sys.argv = ["case.py", *args]
+    common_utils.parse_cmd_line_args()
+    result.append(common_utils.TEST_SAVE_RUN_JSONL)
+print("RESULT=" + json.dumps(result))
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", textwrap.dedent(source)],
+            cwd=_JUNIT_TESTDATA,
+            env=_REPORT_CHILD_ENV,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        result_line = next(line for line in proc.stdout.splitlines() if line.startswith("RESULT="))
+        self.assertEqual(json.loads(result_line[7:]), [None, None, "torchci-reports", "custom", None])
+
+    def test_run_test_parsing_and_forwarding(self) -> None:
+        run_test_module = importlib.import_module("run_test")
+        default_dir = str(run_test_module.REPO_ROOT / "test/torchci-reports")
+        absolute_dir = str(Path(tempfile.gettempdir()) / "absolute-reports")
+        cases = [
+            (False, [], None),
+            (True, [], None),
+            (False, ["--save-test-run-reports"], default_dir),
+            (False, ["--save-test-run-reports=custom"], str(Path(default_dir).parent / "custom")),
+            (False, [f"--save-test-run-reports={absolute_dir}"], absolute_dir),
+            (True, ["--no-save-test-run-reports"], None),
+        ]
+        for in_ci, args, expected in cases:
+            with self.subTest(in_ci=in_ci, args=args):
+                with unittest.mock.patch.object(run_test_module, "IS_CI", in_ci):
+                    with unittest.mock.patch.object(sys, "argv", ["run_test.py", *args]):
+                        actual = run_test_module.parse_args().save_test_run_reports
+                self.assertEqual(actual, expected)
+
+        with unittest.mock.patch.object(run_test_module, "HAS_TEST_RUN_REPORTS", True):
+            self.assertEqual(run_test_module._test_run_report_args(absolute_dir), [f"--save-test-run-reports={absolute_dir}"])
+            self.assertEqual(run_test_module._test_run_report_args(None), [])
+        with unittest.mock.patch.object(run_test_module, "HAS_TEST_RUN_REPORTS", False):
+            self.assertEqual(run_test_module._test_run_report_args(absolute_dir), [])
+
+
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "crash recording doesn't need GPU coverage")
+class TestReportCrashes(TestCase):
+    XDIST_SOURCE = """
+import os
+
+
+def test_before():
+    pass
+
+
+def test_crash():
+    os._exit(1)
+
+
+def test_after():
+    pass
+
+
+def test_fail_last():
+    raise AssertionError("expected failure")
+"""
+
+    def test_xdist_worker_crash(self) -> None:
+        # Below test/ so pytest loads the same conftest chain as CI.
+        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+            (Path(tmp) / "crash_report.py").write_text(textwrap.dedent(self.XDIST_SOURCE))
+            # -x, as run_test.py passes for C++ tests, stops xdist after the last
+            # test's final failure, before its teardown.
+            args = ["crash_report.py", "-n", "1", "--reruns", "1", "-x"]
+            proc, report = _run_plugin(tmp, args, Path(tmp) / "crash")
+            runs = _runs(report)
+        # 2: xdist reports a session stopped by -x as interrupted.
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        # pytest-rerunfailures reschedules the crashed test once.
+        self.assertEqual(
+            [(run["case_name"], run["outcome"], run["rerun_number"]) for run in runs],
+            [
+                ("test_before", "passed", 0),
+                ("test_crash", "crashed", 0),
+                ("test_crash", "crashed", 1),
+                ("test_after", "passed", 0),
+                ("test_fail_last", "failed", 0),
+                ("test_fail_last", "failed", 1),
+            ],
+        )
+        self.assertIn("crashed while running", runs[1]["outcome_summary"])
+
+    SUBPROCESS_SOURCE = """
+import os
+import signal
+
+from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+class TestCrash(TestCase):
+    def test_crash(self):
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+if __name__ == "__main__":
+    run_tests()
+"""
+
+    def test_subprocess_crash(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+            (Path(tmp) / "crash.py").write_text(textwrap.dedent(self.SUBPROCESS_SOURCE))
+            report_dir = Path(tmp) / "reports"
+            t0_ms = int(time.time() * 1000)
+            proc = subprocess.run(
+                [
+                    sys.executable, "crash.py", "--use-pytest", "--subprocess",
+                    f"--save-test-run-reports={report_dir}", "-p", "no:cacheprovider",
+                ],
+                cwd=tmp,
+                env=_REPORT_CHILD_ENV,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            t1_ms = int(time.time() * 1000)
+            reports = _report_files(report_dir / "crash")
+            runs = [run for report in reports for run in _runs(report)]
+            # The node id the child gets, relative to the repo root.
+            expected_file = (Path(tmp) / "crash.py").resolve().relative_to(_JUNIT_TESTDATA.parents[1]).as_posix()
+        self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        # Both child attempts (retry_shell retries once) wrote a report line before
+        # dying; the parent wrote the third report, with the run.
+        self.assertEqual(len(reports), 3)
+        self.assertEqual(len(runs), 1)
+        _assert_run_line(runs[0], t0_ms, t1_ms)
+        self.assertEqual(
+            (runs[0]["file"], runs[0]["suite"], runs[0]["case_name"], runs[0]["outcome"]),
+            (expected_file, "TestCrash", "test_crash", "crashed"),
+        )
+        self.assertEqual(runs[0]["outcome_summary"], "the test process exited with code -9 (SIGKILL)")
+
+    @staticmethod
+    def _inflight(case_name: str, rerun_number: int) -> dict[str, Any]:
+        return {
+            "nodeid": f"test/test_x.py::TestX::{case_name}[param]",
+            "declared_case_name": case_name,
+            "rerun_number": rerun_number,
+            "started_at": time.time(),
+        }
+
+    @parametrize(
+        "exit_code, outcome",
+        [subtest((-11, "crashed"), name="crashed"), subtest((124, "timed_out"), name="timed_out")],
+    )
+    def test_finish(self, exit_code, outcome) -> None:
+        recovery = importlib.import_module("torch.testing._internal.torchci.recovery")
+        inflight = self._inflight("test_hangs", 1)
+        first = torchci_report.run_record(inflight["nodeid"], 0, "failed", inflight["started_at"], time.time(), "failed")
+        torn = '{"type":"run","file":"test/te'
+        t0_ms = int(inflight["started_at"] * 1000)
+        with TemporaryFileName() as path:
+            # A process that died while writing its last line.
+            Path(path).write_text('{"type":"report"}\n' + torchci_report.line(first) + torn, encoding="utf-8")
+            recovery.finish(path, inflight, exit_code)
+            # With nothing in flight there is nothing to record.
+            recovery.finish(path, None, -11)
+            lines = Path(path).read_text(encoding="utf-8").splitlines()
+        # The torn line stays a line of its own.
+        self.assertEqual(lines[2], torn)
+        runs = [json.loads(line) for line in (lines[1], *lines[3:])]
+        for run in runs:
+            _assert_run_line(run, t0_ms, int(time.time() * 1000))
+        self.assertEqual(
+            [(run["case_name"], run["rerun_number"], run["outcome"]) for run in runs],
+            [("test_hangs[param]", 0, "failed"), ("test_hangs[param]", 1, outcome)],
+        )
+        self.assertEqual(runs[1]["declared_case_name"], "test_hangs")
+        self.assertEqual(runs[1]["outcome_summary"], torchci_report.exit_summary(exit_code))
+
+    def test_finish_skips_a_written_run(self) -> None:
+        recovery = importlib.import_module("torch.testing._internal.torchci.recovery")
+        inflight = self._inflight("test_complete", 0)
+        run = torchci_report.run_record(inflight["nodeid"], 0, "passed", inflight["started_at"], time.time())
+        with TemporaryFileName() as path:
+            Path(path).write_text('{"type":"report"}\n' + torchci_report.line(run), encoding="utf-8")
+            recovery.finish(path, inflight, -11)
+            lines = Path(path).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 2)
+
+    @parametrize("grace_times_out", [subtest(False, name="grace_exit"), subtest(True, name="grace_timeout")])
+    def test_wait_for_process_keeps_the_timeout(self, grace_times_out) -> None:
+        common_utils = importlib.import_module("torch.testing._internal.common_utils")
+        first = subprocess.TimeoutExpired(["test"], 1)
+        process = unittest.mock.Mock()
+        process.wait.side_effect = [first, subprocess.TimeoutExpired(["test"], 5), -9] if grace_times_out else [first, 2, 2]
+        with self.assertRaises(subprocess.TimeoutExpired) as error:
+            common_utils.wait_for_process(process, timeout=1)
+        self.assertIs(error.exception, first)
+        process.send_signal.assert_called_once()
+        self.assertEqual(process.kill.called, grace_times_out)
+
+    def _run_test_retries(self, tmp: str, ret_code: int, cache: dict[str, str]) -> str:
+        run_test_module = importlib.import_module("run_test")
+        cache_dir = Path(tmp) / ".pytest_cache/v/cache/stepcurrent/key"
+        cache_dir.mkdir(parents=True)
+        for name, value in cache.items():
+            (cache_dir / name).write_text(value, encoding="utf-8")
+        output = io.StringIO()
+        with unittest.mock.patch.object(run_test_module, "REPO_ROOT", Path(tmp)):
+            with unittest.mock.patch.object(run_test_module, "retry_shell", return_value=(ret_code, False)):
+                run_test_module.run_test_retries([], tmp, {}, None, "key", output, False, "test_file", object())
+        return output.getvalue()
+
+    def test_run_test_finishes_the_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.jsonl"
+            report.write_text('{"type":"report"}\n', encoding="utf-8")
+            cache = {"report_path": json.dumps(str(report)), "report_inflight": json.dumps(self._inflight("test_t", 0))}
+            self._run_test_retries(tmp, 124, cache)
+            run = json.loads(report.read_text(encoding="utf-8").splitlines()[1])
+            left = [path.name for path in (Path(tmp) / ".pytest_cache/v/cache/stepcurrent/key").iterdir()]
+        self.assertEqual(run["outcome"], "timed_out")
+        # Removed, so the next retry process doesn't finish this report again.
+        self.assertEqual(left, [])
+
+    def test_run_test_survives_a_corrupt_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = self._run_test_retries(tmp, -11, {"report_path": "{"})
+        self.assertIn("Could not finish the test run report:", output)
+
+
+instantiate_parametrized_tests(TestReportCrashes)
+
+
+class TestReportHelpers(TestCase):
+    @parametrize(
+        "nodeid, expected",
+        [
+            subtest(
+                ("test/test_torch.py::TestTorch::test_add", ("test/test_torch.py", "TestTorch", "test_add", "python")),
+                name="python_method",
+            ),
+            subtest(
+                ("test/test_x.py::Outer::Inner::test_n", ("test/test_x.py", "Inner", "test_n", "python")),
+                name="nested_class",
+            ),
+            subtest(
+                ("test/test_x.py::test_fn", ("test/test_x.py", "", "test_fn", "python")),
+                name="python_function",
+            ),
+            subtest(
+                ("test/test_x.py::TestP::test_p[a::b-1]", ("test/test_x.py", "TestP", "test_p[a::b-1]", "python")),
+                name="pytest_parameter",
+            ),
+        ],
+    )
+    def test_identity(self, nodeid, expected):
+        self.assertEqual(torchci_report.identity(nodeid), expected)
+
+    def test_declared_case_name_fallback(self):
+        record = torchci_report.run_record("test/test_x.py::TestX::test_case[param]", 0, "passed", 1.0, 2.0)
+        self.assertEqual(record["declared_case_name"], "test_case")
+
+    def test_declared_case_name_raising_item(self):
+        plugin = importlib.import_module("torch.testing._internal.torchci.plugin")
+
+        class RaisingItem:
+            nodeid = "test/test_x.py::TestX::test_case[param]"
+
+            @property
+            def obj(self):
+                raise RuntimeError("no object")
+
+        self.assertEqual(plugin._item_declared_case_name(RaisingItem()), "test_case")
+
+    def test_lone_surrogate_is_escaped(self) -> None:
+        now = time.time()
+        line = torchci_report.line(
+            torchci_report.run_record("test/test_x.py::test_surrogate", 0, "failed", now, now, outcome_summary="\ud800")
+        )
+        line.encode("utf-8")
+        run = json.loads(line)
+        _assert_run_line(run, int(now * 1000), int(now * 1000))
+        self.assertEqual(run["outcome_summary"], r"\ud800")
+
+
+instantiate_parametrized_tests(TestReportHelpers)
 
 
 class TestPeriodicDecorator(TestCase):
