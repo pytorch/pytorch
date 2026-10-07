@@ -5584,6 +5584,16 @@ class PropertyVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    def _doc_setter(
+        self,
+        tx: "InstructionTranslatorBase",
+        value: VariableTracker | None,
+    ) -> None:
+        # Deleting this T_OBJECT member leaves it readable as None.
+        if value is None:
+            value = ConstantVariable.create(None)
+        store_attr_mutation(tx, self, "__doc__", value)
+
     tp_members = {
         "fget": Member(
             getset_load_or_build(
@@ -5615,7 +5625,7 @@ class PropertyVariable(VariableTracker):
                 "__doc__",
                 lambda s: s.source and AttrSource(s.source, "__doc__"),
             ),
-            getset_set("__doc__"),
+            _doc_setter,
         ),
     }
 
@@ -5666,6 +5676,31 @@ class PropertyVariable(VariableTracker):
 
     def as_python_constant(self) -> property:
         return self.descriptor
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if (
+            name in ("__setattr__", "__delattr__")
+            and len(args) == (2 if name == "__setattr__" else 1)
+            and not kwargs
+            and args[0].is_python_constant()
+        ):
+            attr = args[0].as_python_constant()
+            if isinstance(attr, str):
+                descriptor = inspect.getattr_static(property, attr, None)
+                if isinstance(
+                    descriptor, (types.MemberDescriptorType, types.GetSetDescriptorType)
+                ):
+                    value = args[1] if name == "__setattr__" else None
+                    return VariableTracker.build(tx, descriptor).tp_descr_set_impl(
+                        tx, self, value
+                    )
+        return super().call_method(tx, name, args, kwargs)
 
     def tp_descr_set_impl(
         self,
