@@ -138,10 +138,12 @@ class TestKernelGeneral(TestCase):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
         # check on its documented invalid input.
         trait = T.SumOps(acc=cutlass.Float32)
-        # reduce-all needs a flat view, so a transposed input has to be refused, not reshaped.
+        # reduce-all has no flat view of a transposed input, so it ROUTES that through the general
+        # path (which addresses via the TI decode) rather than refusing it.
         xt = torch.randn(64, 128, device="cuda").t()
-        with self.assertRaisesRegex(AssertionError, "contiguous CUDA input"):
-            kg._reduce_all(trait, "inv", xt, [torch.float32], 1, 128, 4)
+        (flat,) = kg._reduce_all(trait, "inv", xt, [torch.float32], 1, 128, 4)
+        with torch.backends.python_native.cutedsl.disabled():
+            self.assertEqual(flat, xt.double().sum().float(), atol=1e-5, rtol=1e-5)
         # The general path needs a CUDA input; a CPU tensor is refused, not silently run.
         with self.assertRaisesRegex(AssertionError, "need a CUDA input"):
             kg._reduce(trait, "inv", torch.randn(8, 8), [1], [torch.float32], 1)
