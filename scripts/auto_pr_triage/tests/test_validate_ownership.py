@@ -138,9 +138,15 @@ class OwnershipResultMainTest(unittest.TestCase):
         self.assertIn("| Bypass intake owners | none |", step_summary)
         self.assertIn(
             "- Additional owner `extra` (accepted, high confidence): "
-            "extra owns a distinct changed contract. Evidence: torch/file.py",
+            "extra owns a distinct changed contract. Evidence: <code>torch/file.py</code>",
             step_summary,
         )
+        self.assertTrue(
+            step_summary.startswith(
+                "<details><summary>Auto PR Triage analysis</summary>\n\n"
+            )
+        )
+        self.assertTrue(step_summary.endswith("\n</details>\n\n"))
 
     def test_uncovered_concern_is_published_as_completed(self) -> None:
         prepared = llm_input(
@@ -192,7 +198,7 @@ class OwnershipResultMainTest(unittest.TestCase):
         self.assertIn(
             "- Codepath owner concern (`@pytorch/baseline`): Changes behavior the "
             "codepath owners review. Why covered: The codepath owners already review "
-            "this API surface. Evidence: torch/file.py\n",
+            "this API surface. Evidence: <code>torch/file.py</code>\n",
             step_summary,
         )
 
@@ -212,7 +218,7 @@ class OwnershipResultMainTest(unittest.TestCase):
         self.assertIn(
             "- Uncovered concern: !\\[x\\](x.png) \\<img src=x\\> "
             "\\#\\# Heading Why uncovered: \\`code\\` \\| cell "
-            "Evidence: torch/file.py\n",
+            "Evidence: <code>torch/file.py</code>\n",
             step_summary,
         )
 
