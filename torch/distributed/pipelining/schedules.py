@@ -8,7 +8,7 @@ import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict, deque
+from collections import Counter, defaultdict, deque, OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -23,6 +23,7 @@ from torch.cuda.graph_annotations import mark_kernels
 from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
+from torch.utils.hooks import RemovableHandle
 
 from ._p2p import (
     _build_p2p_edge_groups,
@@ -315,6 +316,9 @@ class _PipelineSchedule(ABC):
         # Derived
         self._has_backward = self._loss_fn is not None
         self._p2p_initialized = False
+        self._post_metadata_inference_cleanups: OrderedDict[int, Callable[[], None]] = (
+            OrderedDict()
+        )
 
         # Holds the losses for each microbatch.
         self._internal_losses: list[torch.Tensor] = []
@@ -500,6 +504,24 @@ class _PipelineSchedule(ABC):
                 stage_device,
             )
 
+    def register_post_metadata_inference_cleanup(
+        self, callback: Callable[[], None]
+    ) -> RemovableHandle:
+        """Register a callback after dynamic metadata inference is cleaned up.
+
+        The callback runs after all local stages restore their metadata-inference
+        state. It does not run when stages use constructor-provided static metadata.
+
+        Args:
+            callback: Zero-argument cleanup called after dynamic metadata inference.
+
+        Returns:
+            A handle that removes the callback when no longer needed.
+        """
+        handle = RemovableHandle(self._post_metadata_inference_cleanups)
+        self._post_metadata_inference_cleanups[handle.id] = callback
+        return handle
+
     def _initialize_pp_stages(
         self,
         stages: list[_PipelineStageBase],
@@ -560,6 +582,9 @@ class _PipelineSchedule(ABC):
         pipeline_stages = [
             stage for stage in stages if isinstance(stage, PipelineStage)
         ]
+        uses_dynamic_metadata = any(
+            stage._inference_mode == InferenceMode.DYNAMIC for stage in pipeline_stages
+        )
         for stage in pipeline_stages:
             stage._pre_metadata_inference_backup()
 
@@ -591,6 +616,9 @@ class _PipelineSchedule(ABC):
         finally:
             for stage in pipeline_stages:
                 stage._post_metadata_inference_cleanup()
+            if uses_dynamic_metadata:
+                for cleanup in tuple(self._post_metadata_inference_cleanups.values()):
+                    cleanup()
 
         return fwd_initialized, bwd_initialized
 
