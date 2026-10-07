@@ -407,6 +407,38 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(TypeError, "can't extend bytearray with float"):
             a.extend(1.0)
 
+    def test_extend_consumes_iterator(self):
+        def f(ba):
+            it = iter([1, 2])
+            ba.extend(it)
+            return next(it, "done")
+
+        b, expected = bytearray(b"a"), bytearray(b"a")
+        out = torch.compile(f, backend="eager", fullgraph=True)(b)
+        self.assertEqual(out, f(expected))
+        self.assertEqual(b, expected)
+
+    def test_extend_stops_at_first_out_of_range_byte(self):
+        def f(ba):
+            seen = []
+
+            def gen():
+                for x in (1, 300, 2):
+                    seen.append(x)
+                    yield x
+                raise RuntimeError("drained past the bad byte")
+
+            try:
+                ba.extend(gen())
+            except ValueError as e:
+                return str(e), seen
+            return None, seen
+
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(bytearray()),
+            f(bytearray()),
+        )
+
     def test_append_extend_arg_mutation(self):
         @torch.compile(backend="eager", fullgraph=True)
         def f(ba, x):
@@ -421,16 +453,23 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_y, torch.ones(1) + 1)
 
     def test_append_graph_break(self):
-        @torch.compile(backend="eager")
-        def f(ba):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(ba, x):
+            x = x + 1
             ba.append(1)
+            x = x * 2
             torch._dynamo.graph_break()
             ba.extend(ba)
-            return ba
+            return x - 1
 
         b = bytearray(b"a")
-        self.assertIs(f(b), b)
+        self.assertEqual(f(b, torch.ones(1)), torch.full((1,), 3.0))
         self.assertEqual(b, bytearray(b"a\x01a\x01"))
+        # One frame on each side of the explicit graph break: append and extend
+        # are traced, and their mutations are replayed on the input.
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_repr(self):
         @torch.compile(backend="eager")

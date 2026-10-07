@@ -21,6 +21,7 @@ from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch
+
 import torch.fx
 from torch.utils._pytree import SequenceKey
 
@@ -2430,16 +2431,33 @@ class ByteArrayVariable(VariableTracker):
         if not self.is_mutable():
             return None
         iterable = args[0]
-        if iterable.is_python_constant():
+        # Only literal constants take the fast path: iterator variables are also
+        # python constants, but reading one returns a copy and would leave the
+        # traced iterator unconsumed.
+        if isinstance(iterable, ConstantVariable):
             values = iterable.as_python_constant()
         elif vt_is_iterable(iterable):
-            items: list[VariableTracker] = []
-            unpack_and_apply_fn(
-                tx, iterable, lambda item: items.append(pynumber_index(tx, item))
-            )
-            if not all(item.is_python_constant() for item in items):
+            values = []
+            non_constant = False
+
+            def add(item: VariableTracker) -> None:
+                nonlocal non_constant
+                item = pynumber_index(tx, item)
+                if not item.is_python_constant():
+                    non_constant = True
+                    return
+                value = item.as_python_constant()
+                # Like CPython, stop at the first out-of-range byte instead of
+                # draining the rest of the iterable first.
+                if not 0 <= value < 256:
+                    raise_observed_exception(
+                        ValueError, tx, args=["byte must be in range(0, 256)"]
+                    )
+                values.append(value)
+
+            unpack_and_apply_fn(tx, iterable, add)
+            if non_constant:
                 return None
-            values = [item.as_python_constant() for item in items]
         else:
             raise_type_error(
                 tx, f"can't extend bytearray with {iterable.python_type_name()}"
