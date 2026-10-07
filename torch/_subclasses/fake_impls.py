@@ -748,14 +748,14 @@ def dyn_shape(
 def _unique(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: torch.Tensor,
+    arg: FakeTensor,
     dim: int | None,
     sorted: bool = True,
     return_inverse: bool = False,
     return_counts: bool = False,
     *,
     unique_consecutive: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -763,20 +763,7 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    memo_name = "unique_consecutive_memo" if unique_consecutive else "unique_memo"
-    nnz = getattr(arg, memo_name, None)
-    if (
-        nnz is not None
-        and not isinstance(arg, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
-        and (
-            (
-                not arg.is_inference()
-                and getattr(arg, f"_{memo_name}_vc", None) != arg._version
-            )
-            or getattr(arg, f"_{memo_name}_epoch", None) != fake_mode.epoch
-        )
-    ):
-        nnz = None
+    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
 
     # Do not use a memo for unique_dim
     if dim is not None or nnz is None:
@@ -808,12 +795,10 @@ def _unique(
             _constrain_range_for_size(nnz, max=maxval)
 
         if dim is None:
-            arg_any = typing_cast(Any, arg)
-            setattr(arg_any, memo_name, nnz)
-            if not isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-                if not arg.is_inference():
-                    setattr(arg_any, f"_{memo_name}_vc", arg._version)
-                setattr(arg_any, f"_{memo_name}_epoch", fake_mode.epoch)
+            if unique_consecutive:
+                arg.unique_consecutive_memo = nnz  # pyrefly: ignore[bad-assignment]
+            else:
+                arg.unique_memo = nnz  # pyrefly: ignore[bad-assignment]
 
     if dim is None:
         # pyrefly: ignore[no-matching-overload]
@@ -841,18 +826,18 @@ def _unique(
         counts = arg.new_empty(0, dtype=torch.int64)
     ret.append(counts)
 
-    return ret[0], ret[1], ret[2]
+    return tuple(ret)
 
 
 @register_op_impl(aten._unique2.default)
 def unique2(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: torch.Tensor,
+    arg: FakeTensor,
     sorted: bool = True,
     return_inverse: bool = False,
     return_counts: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
 
 
@@ -860,10 +845,10 @@ def unique2(
 def unique(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: torch.Tensor,
+    arg: FakeTensor,
     sorted: bool = True,
     return_inverse: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[FakeTensor, FakeTensor]:
     uniques, inverse, _counts = _unique(
         fake_mode, func, arg, None, sorted, return_inverse, False
     )
@@ -931,12 +916,12 @@ def meta_select(
 def unique_dim(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: torch.Tensor,
+    arg: FakeTensor,
     dim: int,
     sorted: bool = True,
     return_inverse: bool = False,
     return_counts: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(
         fake_mode,
         func,
@@ -953,11 +938,11 @@ def unique_dim(
 def unique_consecutive(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    arg: torch.Tensor,
+    arg: FakeTensor,
     return_inverse: bool = False,
     return_counts: bool = False,
     dim: int | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[FakeTensor, FakeTensor, FakeTensor]:
     return _unique(
         fake_mode,
         func,
