@@ -109,7 +109,8 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 pexpr = PythonPrinter().doprint
 
-all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
+all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_", "r2_"])
+TRITON_MAX_TENSOR_DIMS = 5
 
 
 def get_max_tiles(default: int = 2) -> int:
@@ -503,10 +504,9 @@ def batch_reduction_partials(
 def reduction_output_name(node: scheduler.BaseSchedulerNode) -> str:
     """The buffer a reduction node computes; for the first stage of a split
     reduction, that of the second stage."""
-    if (
-        isinstance(node, scheduler.SchedulerNode)
-        and node.unsplit_reduction() is not node
-    ):
+    if isinstance(
+        node, scheduler.SchedulerNode
+    ) and scheduler.MixOrderReduction.is_split_reduction(node):
         stage2 = node.get_outputs()[0].users[0].node
         return stage2.get_outputs()[0].node.get_name()
     return node.get_outputs()[0].node.get_name()
@@ -517,15 +517,23 @@ def finishes_from_partials(
 ) -> bool:
     """Whether reduction node over an (m, n) template output can store fp32
     per-tile partials. Python wrapper code finishes them, so buffer sizes must
-    be static."""
+    be static; SizeHintMultiKernel never emits that code."""
     return (
         not V.graph.cpp_wrapper
+        and not config.multi_kernel_hints
         and isinstance(m, sympy.Integer)
         and isinstance(n, sympy.Integer)
         and isinstance(node.node, ir.ComputedBuffer)
         and node.node.get_reduction_type() in PARTIAL_REDUCTION_OPS
         and node.node.get_dtype() in (torch.float32, torch.bfloat16, torch.float16)
     )
+
+
+def is_row_major_read(dep: MemoryDep, numel: sympy.Expr) -> bool:
+    """Whether dep reads all numel elements of a buffer in row-major order.
+    Loop merging may have collapsed a contiguous read to a single var."""
+    dep = dep.normalize()
+    return dep.is_contiguous() and dep.get_numel() == numel
 
 
 def template_reduction_axis(
@@ -549,11 +557,6 @@ def template_reduction_axis(
             if dep.name in produced
         )
 
-    # Loop merging may have collapsed a contiguous read to a single var.
-    def row_major(dep):
-        dep = dep.normalize()
-        return dep.is_contiguous() and dep.get_numel() == m * n
-
     # Columns outermost, then rows in row-major order.
     def col_major(dep):
         strides = ir.FlexibleLayout.contiguous_strides(dep.size[1:])
@@ -563,7 +566,9 @@ def template_reduction_axis(
             and dep.index == sympy_dot((1, *(n * s for s in strides)), dep.var_names)
         )
 
-    if node.group[1] == (m, n) and reads(node, row_major):
+    if node.group[1] == (m, n) and reads(
+        node, functools.partial(is_row_major_read, numel=m * n)
+    ):
         return 0
     if not (isinstance(node, scheduler.SchedulerNode) and node.is_reduction()):
         return None
@@ -646,9 +651,7 @@ def finished_after_kernel(
     results = OrderedSet().union(*(node.get_buffer_names() for node in partials))
     after = []
     for node in epilogue_nodes:
-        if node not in partials and any(
-            dep.name in results for dep in node.read_writes.reads
-        ):
+        if any(dep.name in results for dep in node.read_writes.reads):
             after.append(node)
             results |= node.get_buffer_names()
     return partials, after
@@ -672,6 +675,7 @@ def tile_fits_reduction_epilogue(
     # Meta automatic warp specialization can hoist a subtile's tmem_load above
     # the accumulator-ready wait when the epilogue reduces over subtiles, which
     # gives wrong, nondeterministic results.
+    # TODO: drop once facebookexperimental/triton#3803 lands.
     if reductions and tile[2] > 1 and meta_ws_enabled():
         return False
     axes = [template_reduction_axis(node, template, produced) for node in reductions]
@@ -704,23 +708,31 @@ def tile_fits_reduction_epilogue(
             for dep in node.read_writes.reads
         ) or any(node.group[1] != (m * n, 1) for node in epilogue_nodes[:first_row]):
             return False
+        # The column pass transposes the stored tile, so the other nodes must
+        # read it and the nodes before the row reductions in place.
+        if not all(
+            isinstance(dep, MemoryDep) and is_row_major_read(dep, m * n)
+            for node in epilogue_nodes
+            if not node.is_reduction()
+            for dep in node.read_writes.reads
+            if dep.name in available
+        ):
+            return False
         if first_row == len(epilogue_nodes):
             return True
-    if not V.graph.sizevars.statically_known_geq(tile[1] * tile[2], n):
+    if tile[2] == 1 or not V.graph.sizevars.statically_known_geq(tile[1] * tile[2], n):
         return True
     # Across subtiles, a reduction is only complete after the last one, so
     # nothing over (rows, cols) may read a reduction result.
     after_reduction: OrderedSet[str] = OrderedSet()
     for node in epilogue_nodes:
         over_cols = node.group[1] != (m, sympy.S.One)
-        if tile[2] > 1 and over_cols and node.used_buffer_names() & after_reduction:
+        if over_cols and node.used_buffer_names() & after_reduction:
             return False
         # A looped multi-output reduction (e.g. welford) finishes with a
         # multi-result tl.reduce, which automatic warp specialization rejects.
-        if (
-            tile[2] > 1
-            and isinstance(node.node, ir.ComputedBuffer)
-            and isinstance(node.node.data, ir.MultiOutputReduction)
+        if isinstance(node.node, ir.ComputedBuffer) and isinstance(
+            node.node.data, ir.MultiOutputReduction
         ):
             return False
         if node.is_reduction() or not over_cols:
@@ -995,7 +1007,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         grid_dims = ["x", "y", "z"]
         pointwise_tensor_dims = list(reversed(grid_dims))
-        reduction_dims = ["r0_", "r1_"]
+        reduction_dims = ["r0_", "r1_", "r2_"]
         if no_x_dim:
             tensor_dims = reduction_dims
         elif no_r_dim:
@@ -3789,9 +3801,53 @@ class SIMDScheduling(BaseScheduling):
         )
         return converted_nodes, SIMDKernelFeatures(node_schedule, numel, rnumel)
 
+    def _benchmark_mix_order_kernel(
+        self, kernel_features, split_size
+    ) -> tuple[float, str]:
+        kernel = self._create_kernel_for_mix_order_reduction(
+            kernel_features, split_size
+        )
+        _, src_code = self._generate_kernel_code_for_mix_order_reduction(
+            kernel, for_benchmark=True
+        )
+        return self.benchmark_codegened_module(PyCodeCache.load(src_code))
+
+    def _tuned_mix_order_split_size(self, kernel_features, initial_split_size):
+        """The split size codegen_mix_order_reduction uses: initial_split_size,
+        autotuned when enabled."""
+        kernel = self._create_kernel_for_mix_order_reduction(
+            kernel_features, initial_split_size
+        )
+
+        # The autotuning is skipped in deterministic mode
+        if (
+            not torch._inductor.config.deterministic
+            and config.triton.mix_order_reduction_split_size is None
+            and not kernel.fixed_config
+            and (
+                config.triton.mix_order_reduction_autotune_split_size
+                or config.max_autotune
+                or config.coordinate_descent_tuning
+            )
+        ):
+
+            def _bench(candidate_split_size):
+                ms, _ = self._benchmark_mix_order_kernel(
+                    kernel_features, candidate_split_size
+                )
+                return ms
+
+            kernel.rsplit_size = CoordescTuner.autotune_single_field(
+                _bench,
+                kernel.rsplit_size,
+                8,
+            )
+        return kernel.rsplit_size
+
     def benchmark_mix_order_reduction(self, node) -> tuple[float, str] | None:
-        """Time the kernel codegen_mix_order_reduction would emit for node,
-        leaving node's loops unchanged. None if node2 has epilogue nodes."""
+        """Time the kernel codegen_mix_order_reduction would emit for node, at
+        the split size it would pick, leaving node's loops unchanged. None if
+        node2 has epilogue nodes."""
         node1, node2 = node.node1, node.node2
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
         node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
@@ -3804,18 +3860,15 @@ class SIMDScheduling(BaseScheduling):
             _, kernel_features = self._mix_order_kernel_features(
                 node1, node2_reductions, numel, rnumel
             )
-            kernel = self._create_kernel_for_mix_order_reduction(
+            split_size = self._tuned_mix_order_split_size(
                 kernel_features, self._mix_order_split_size(node1, numel)
             )
-            _, src_code = self._generate_kernel_code_for_mix_order_reduction(
-                kernel, for_benchmark=True
-            )
+            return self._benchmark_mix_order_kernel(kernel_features, split_size)
         finally:
             snapshot.restore()
             for subnode in node2_reductions:
                 # cancel_reduction_split caches the unsplit body.
                 subnode.node.get_default_sizes_body.clear_cache(subnode.node)
-        return self.benchmark_codegened_module(PyCodeCache.load(src_code))
 
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
@@ -3834,38 +3887,9 @@ class SIMDScheduling(BaseScheduling):
         )
         node_schedule = kernel_features.node_schedule
         kernel = self._create_kernel_for_mix_order_reduction(
-            kernel_features, initial_split_size
+            kernel_features,
+            self._tuned_mix_order_split_size(kernel_features, initial_split_size),
         )
-
-        # The autotuning is skipped in deterministic mode
-        if (
-            not torch._inductor.config.deterministic
-            and config.triton.mix_order_reduction_split_size is None
-            and not kernel.fixed_config
-            and (
-                config.triton.mix_order_reduction_autotune_split_size
-                or config.max_autotune
-                or config.coordinate_descent_tuning
-            )
-        ):
-
-            def _bench(candidate_split_size):
-                candidate_kernel = self._create_kernel_for_mix_order_reduction(
-                    kernel_features, candidate_split_size
-                )
-                _, src_code = self._generate_kernel_code_for_mix_order_reduction(
-                    candidate_kernel,
-                    for_benchmark=True,
-                )
-                mod = PyCodeCache.load(src_code)
-                ms, _ = self.benchmark_codegened_module(mod)
-                return ms
-
-            kernel.rsplit_size = CoordescTuner.autotune_single_field(
-                _bench,
-                kernel.rsplit_size,
-                8,
-            )
 
         ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel,
@@ -5105,6 +5129,7 @@ class SIMDScheduling(BaseScheduling):
         self,
         node_info: NodeInfo,
         only_gen_src_code: bool,
+        is_first_combo_launch: bool,
     ) -> tuple[str, TritonKernel]:
         kernel_kwargs: dict[str, Any] = {}
         self.kernel_type.apply_feature_required_overrides(
@@ -5116,6 +5141,8 @@ class SIMDScheduling(BaseScheduling):
             tiling_scores=node_info.tiling_scores,
             **kernel_kwargs,
         )
+        kernel._from_combo_codegen = True
+        kernel._is_first_combo_launch = is_first_combo_launch
         self.process_kernel(kernel, node_info.node_schedule, only_gen_src_code)
         with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
@@ -5547,7 +5574,7 @@ class SIMDScheduling(BaseScheduling):
                     kernel_code_list.append((None, None, node_group))
                 else:
                     src_code, kernel = self._codegen_standalone_kernel(
-                        node_info, only_gen_src_code
+                        node_info, only_gen_src_code, not kernel_code_list
                     )
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
@@ -5602,7 +5629,9 @@ class SIMDScheduling(BaseScheduling):
                         carve_out = list(group)
                     for pn in carve_out:
                         co_src, co_kernel = self._codegen_standalone_kernel(
-                            node_schedule_map[pn], only_gen_src_code
+                            node_schedule_map[pn],
+                            only_gen_src_code,
+                            not kernel_code_list,
                         )
                         # pyrefly: ignore [bad-argument-type]
                         kernel_code_list.append((co_src, co_kernel, [pn]))
@@ -5665,7 +5694,9 @@ class SIMDScheduling(BaseScheduling):
 
                 for pn in carve_out_pns:
                     co_src_code, co_kernel = self._codegen_standalone_kernel(
-                        node_schedule_map[pn], only_gen_src_code
+                        node_schedule_map[pn],
+                        only_gen_src_code,
+                        not kernel_code_list,
                     )
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((co_src_code, co_kernel, [pn]))
@@ -5844,7 +5875,7 @@ class SIMDScheduling(BaseScheduling):
         Create a tiling dict from pointwise and reduction splits.
         """
         pw_prefixes = ("z", "y", "x")
-        reduction_prefixes = ("r0_", "r1_")
+        reduction_prefixes = ("r0_", "r1_", "r2_")
         if len(pw_tiling) > len(pw_prefixes):
             raise AssertionError(
                 f"expected len(pw_tiling) <= len(pw_prefixes), "
@@ -5910,20 +5941,16 @@ class SIMDScheduling(BaseScheduling):
         """
 
         def collapse_dims(
-            dims: Sequence[sympy.Expr], fallback_numel: sympy.Expr
+            dims: Sequence[sympy.Expr],
+            fallback_numel: sympy.Expr,
+            max_tiles: int | None = None,
         ) -> tuple[sympy.Expr, ...]:
             """
             Collapse dimensions to the maximum allowed number of tiles.
             """
             if not dims:
                 return (fallback_numel,)
-            max_tiles = get_max_tiles(2)
-            if V.graph.sizevars.statically_known_equals(
-                pointwise_numel, 1
-            ) and V.graph.sizevars.statically_known_gt(reduction_numel, 1):
-                # We only have at most two dimensions to tile over when emitting a
-                # reduction-only kernel.
-                max_tiles = min(max_tiles, 2)
+            max_tiles = min(max_tiles if max_tiles is not None else get_max_tiles(2), 3)
             num_leading_dims = max(0, len(dims) - max_tiles)
             first_trailing_dim = num_leading_dims + 1
             collapsed_leading_dim = sympy_product(dims[:first_trailing_dim])
@@ -6033,6 +6060,15 @@ class SIMDScheduling(BaseScheduling):
             for pointwise_tiling, reduction_tiling in itertools.product(
                 *zip(*node_tilings)
             ):
+                if (
+                    len(pointwise_tiling) + len(reduction_tiling)
+                    > TRITON_MAX_TENSOR_DIMS
+                ):
+                    pointwise_tiling = collapse_dims(
+                        pointwise_tiling,
+                        pointwise_numel,
+                        TRITON_MAX_TENSOR_DIMS - len(reduction_tiling),
+                    )
                 tilings.add(cls.create_tiling(pointwise_tiling, reduction_tiling))
 
         # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
