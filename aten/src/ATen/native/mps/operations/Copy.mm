@@ -65,27 +65,27 @@ void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
 }
 
 // Byte-erased compute copy, not a blit: faster at small sizes and avoids the encoder switch.
-// One dispatch per <=2GB chunk keeps chunk_bytes in uint. Callers must pass contiguous src and
-// dst with equal nbytes (both are treated as flat byte runs).
-static void contiguous_copy_kernel_mps(at::Tensor& dst, const at::Tensor& src, bool non_blocking) {
+// One dispatch per <=2GB chunk keeps chunk_bytes in uint.
+static void copy_bytes_kernel(void* dst,
+                              const void* src,
+                              size_t size,
+                              at::OptionalTensorRef dst_tensor,
+                              at::OptionalTensorRef src_tensor,
+                              bool non_blocking) {
   MPSStream* stream = getCurrentMPSStream();
-  uint64_t profile_id = getMPSProfiler().beginProfileCopy(getMTLBufferStorage(src),
-                                                          getMTLBufferStorage(dst),
-                                                          src,
-                                                          dst,
-                                                          src.nbytes(),
-                                                          stream,
-                                                          non_blocking,
-                                                          /*usesBlitter=*/false);
+  uint64_t profile_id = getMPSProfiler().beginProfileCopy(
+      src, dst, src_tensor, dst_tensor, size, stream, non_blocking, /*usesBlitter=*/false);
   auto* kernel = lib.getCachedKernelFunctionPtr("contiguous_byte_copy");
   constexpr size_t max_chunk = 0x80000000; // 2GB
-  const size_t total = src.nbytes();
   kernel->runCommandBlock([&] {
     kernel->startEncoding();
-    kernel->setArg(0, dst);
-    kernel->setArg(1, src);
-    for (size_t base = 0; base < total;) {
-      const uint32_t chunk = static_cast<uint32_t>(std::min(max_chunk, total - base));
+    auto encoder = stream->commandEncoder();
+    auto dst_offset = dst_tensor ? dst_tensor->storage_offset() * dst_tensor->itemsize() : 0;
+    auto src_offset = src_tensor ? src_tensor->storage_offset() * src_tensor->itemsize() : 0;
+    [encoder setBuffer:(id<MTLBuffer>)dst offset:dst_offset atIndex:0];
+    [encoder setBuffer:(id<MTLBuffer>)src offset:src_offset atIndex:1];
+    for (size_t base = 0; base < size;) {
+      const uint32_t chunk = static_cast<uint32_t>(std::min(max_chunk, size - base));
       kernel->setArg(2, chunk);
       kernel->setArg(3, static_cast<uint64_t>(base));
       kernel->dispatch((chunk + 15) / 16);
@@ -192,15 +192,21 @@ static std::pair<id<MTLBuffer>, NSUInteger> buffer_with_offset_from_tensor(const
   const void* host = static_cast<const char*>(cpu_tensor.storage().data()) + byte_offset;
   NSUInteger alignedLength = 0;
   void* alignedPtr = pageAlignedBlockPtr(host, (NSUInteger)nbytes, &alignedLength);
-  // Only capture on non_blocking - capturing across waitUntilCompleted would
-  // deadlock Metal's completion thread on the GIL.
+  // Only capture on non_blocking: a blocking copy's caller keeps the tensor alive across the wait.
   auto* storage = non_blocking ? new c10::Storage(cpu_tensor.storage()) : nullptr;
+  // Dropping a Python-owned storage takes the GIL and a thread that holds the GIL may be waiting for Metal's
+  // completion thread, which runs the deallocator. So drop the storage from another thread.
+  static dispatch_queue_t release_queue = dispatch_queue_create("mps host storage release", DISPATCH_QUEUE_SERIAL);
   MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
   id<MTLBuffer> buffer = [[device newBufferWithBytesNoCopy:alignedPtr
                                                     length:alignedLength
                                                    options:options
                                                deallocator:^(void*, NSUInteger) {
-                                                 delete storage;
+                                                 if (storage) {
+                                                   dispatch_async(release_queue, ^{
+                                                     delete storage;
+                                                   });
+                                                 }
                                                }] autorelease];
   return {buffer, static_cast<NSUInteger>(uintptr_t(host) - uintptr_t(alignedPtr))};
 }
@@ -343,13 +349,8 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   return needs_copy ? dst_.copy_(dst) : dst_;
 }
 
-void copy_blit_mps(void* dst, const void* src, size_t size) {
-  MPSStream* stream = getCurrentMPSStream();
-  // we don't have tensors info for profiling here
-  uint64_t profile_id = getMPSProfiler().beginProfileCopy(
-      src, dst, at::OptionalTensorRef(), at::OptionalTensorRef(), size, stream, false);
-
-  stream->copy_and_sync((id<MTLBuffer>)(src), (id<MTLBuffer>)(dst), size, 0, 0, true, profile_id);
+void copy_bytes_mps(void* dst, const void* src, size_t size) {
+  copy_bytes_kernel(dst, src, size, {}, {}, /*non_blocking=*/false);
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
@@ -367,7 +368,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
     return dst_;
   }
   if (sameDataType) {
-    contiguous_copy_kernel_mps(dst_, src_, non_blocking);
+    copy_bytes_kernel(getMTLBufferStorage(dst_), getMTLBufferStorage(src_), src_.nbytes(), dst_, src_, non_blocking);
   } else {
     copy_cast_kernel_mps(dst_, src_);
   }
