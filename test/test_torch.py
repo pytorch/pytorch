@@ -53,6 +53,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXLA,
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA, onlyAccelerator)
@@ -3142,6 +3143,37 @@ class TestTorchDeviceType(TestCase):
             # copy is a shallow copy, only copies the tensor view,
             # not the data
             self.assertEqual(x, y)
+
+    @onlyCPU
+    def test_copy_same_dtype_dense_noncontiguous(self, device):
+        src_storage = torch.arange(26, dtype=torch.float32, device=device)
+        src = src_storage[1:25].view(2, 3, 4).transpose(0, 1)
+        dst_storage = torch.full((26,), -1.0, device=device)
+        dst = dst_storage[1:25].view(2, 3, 4).transpose(0, 1)
+
+        self.assertFalse(src.is_contiguous())
+        self.assertEqual(src.stride(), dst.stride())
+
+        dst.copy_(src)
+
+        self.assertEqual(dst, src)
+        self.assertEqual(dst_storage[[0, 25]], torch.tensor([-1.0, -1.0]))
+
+    @onlyCPU
+    def test_copy_same_dtype_non_standard_bool_values(self, device):
+        src = torch.tensor([0, 2, 3, 255], dtype=torch.uint8, device=device).view(
+            torch.bool
+        )
+        expected = torch.tensor(
+            [False, True, True, True], dtype=torch.bool, device=device
+        )
+        dst = torch.empty_like(src)
+
+        self.assertEqual(src, expected)
+
+        dst.copy_(src)
+
+        self.assertEqual(dst, expected)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16, torch.half)
