@@ -521,6 +521,11 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    # The rewrites below compute in the input dtype, so leave aten.addmm.dtype
+    # to the tuned_addmm lowering.
+    if out_dtype is not None:
+        return NotImplemented
+
     def add_input(out: torch.Tensor) -> torch.Tensor:
         if alpha != 1:
             out = alpha * out
