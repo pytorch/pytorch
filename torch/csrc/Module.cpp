@@ -2880,6 +2880,10 @@ Call this whenever a new thread is created in order to propagate values from
     return py::cast(at::Tensor(std::move(real)));
   });
 
+  py_module.def("_clear_fake_real_tensor", [](const at::Tensor& fake) {
+    fake.unsafeGetTensorImpl()->set_real_tensor(nullptr);
+  });
+
   py_module.def("_get_fake_constant", [](const at::Tensor& t) -> py::object {
     TORCH_CHECK(t.defined(), "Expected a defined tensor");
     TORCH_CHECK(t.is_fake(), "Expected a fake tensor");
