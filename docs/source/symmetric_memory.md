@@ -115,9 +115,15 @@ correct synchronizations to make sure that peers are ready for communication,
 and signal to them that this GPU is ready.
 
 PyTorch Symmetric Memory provides CUDA Graph-compatible synchronization
-primitives that operate on the signal pad accompanying each symmetric memory
-allocation. Kernels using symmetric memory can be written both in CUDA and in
-Triton. Here’s an example allocating symmetric tensor and exchanging handles:
+primitives, and each symmetric memory allocation comes with a signal pad that
+kernels like the one below can use for their own synchronization. On the CUDA
+backend, PyTorch's own operations synchronize through a separate pad that
+belongs to the process group on the device, so they do not use or disturb the
+allocation's pad. The group's operations share that pad whatever allocation they
+run on, and replays of captured graphs are not ordered against each other, so
+graphs that use the same group must not replay concurrently. Kernels using
+symmetric memory can be written both in CUDA and in Triton. Here’s an example
+allocating symmetric tensor and exchanging handles:
 
 ```python
 import torch.distributed._symmetric_memory as symm_mem
