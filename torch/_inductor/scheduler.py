@@ -7543,6 +7543,15 @@ class Scheduler:
                     epilogue
                 )
 
+            # The fastest unfused choice is often not the fastest with a
+            # reduction fused, so benchmark more of the choices that fit it.
+            max_benchmarked_choices = config.max_template_fusion_benchmarked_choices
+            if reduction_epilogue and config.benchmark_template_fusion:
+                max_benchmarked_choices = max(
+                    max_benchmarked_choices,
+                    config.max_template_reduction_fusion_benchmarked_choices,
+                )
+
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
                 for hint_override in config.multi_kernel_hints:
@@ -7615,8 +7624,7 @@ class Scheduler:
             get_choice_timings_async = (
                 use_pipelined_autotuning()
                 and not benchmark_template_fusion
-                and num_fusible_callers
-                <= config.max_template_fusion_benchmarked_choices
+                and num_fusible_callers <= max_benchmarked_choices
             )
 
             ms1, ms2 = float("inf"), float("inf")
@@ -7775,7 +7783,7 @@ class Scheduler:
                 if benchmark_template_fusion and unfused_time >= ms1 + ms2:
                     break
 
-                if template_choices >= config.max_template_fusion_benchmarked_choices:
+                if template_choices >= max_benchmarked_choices:
                     break
 
                 try:

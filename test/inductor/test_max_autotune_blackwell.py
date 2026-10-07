@@ -933,8 +933,9 @@ class TestBlackwellTMALoadFusion(TestCase):
     ):
         """Compile fn with only the given configs as Triton choices. Under
         template autoWS, only the (DATA_PARTITION_FACTOR, TWO_CTAS) = autows
-        variants of them. Fused epilogue benchmarks report fused_ms, so by
-        default every fusion the gates allow is kept."""
+        variants of them. Fused epilogue benchmarks report fused_ms, or call
+        it if it's a function, so by default every fusion the gates allow is
+        kept."""
         keys = [
             ("triton::blackwell_ws_persistent_tma", "cuda", op)
             for op in ("mm", "addmm")
@@ -979,7 +980,12 @@ class TestBlackwellTMALoadFusion(TestCase):
                     type(heuristic), "_generate_autows_configs", autows_configs
                 ),
                 mock.patch.object(
-                    Scheduler, "benchmark_codegened_module", return_value=(fused_ms, "")
+                    Scheduler,
+                    "benchmark_codegened_module",
+                    side_effect=lambda mod, device: (
+                        fused_ms() if callable(fused_ms) else fused_ms,
+                        "",
+                    ),
                 ),
             ):
                 return run_and_get_code(torch.compile(fn, dynamic=dynamic), *args)
@@ -1871,6 +1877,90 @@ class TestBlackwellTMALoadFusion(TestCase):
             all(tile is not None and tile[2] > 1 for tile in rejected_tiles),
             rejected_tiles,
         )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("max_choices", (None, 1, 3))
+    def test_blackwell_mm_row_reduction_epilogue_benchmarks_several_choices(
+        self, max_choices: int | None
+    ):
+        """With a reduction epilogue, the fusion benchmark tries the top
+        max_template_reduction_fusion_benchmarked_choices choices that fit, so
+        it finds a fused winner that ranks last unfused."""
+        orig_choice_timings = MultiTemplateBuffer.choice_timings
+        orig_swap = MultiTemplateBuffer.swap_as_triton_caller
+        swapped, benchmarked, finalized = [], [], []
+
+        def narrow(choice):
+            return choice.output_tile is not None and choice.output_tile[1] == 64
+
+        def choice_timings(self, hint_override=None):
+            # Rank the BLOCK_N=64 choice last.
+            timings = orig_choice_timings(self, hint_override)
+            ranked = sorted(timings, key=narrow)
+            return dict.fromkeys(ranked, 1.0)
+
+        @contextlib.contextmanager
+        def swap_as_triton_caller(self, caller):
+            swapped.append(caller)
+            try:
+                with orig_swap(self, caller):
+                    yield
+            finally:
+                swapped.pop()
+
+        def fused_ms():
+            # Only the BLOCK_N=64 choice beats the unfused kernels.
+            benchmarked.append(swapped[-1])
+            return 0.5 if narrow(swapped[-1]) else 1e3
+
+        orig_finalize = MultiTemplateBuffer.finalize_as_triton_caller
+
+        def finalize_as_triton_caller(self, caller):
+            finalized.append(caller)
+            return orig_finalize(self, caller)
+
+        with (
+            mock.patch.object(MultiTemplateBuffer, "choice_timings", choice_timings),
+            mock.patch.object(
+                MultiTemplateBuffer, "swap_as_triton_caller", swap_as_triton_caller
+            ),
+            mock.patch.object(
+                MultiTemplateBuffer,
+                "finalize_as_triton_caller",
+                finalize_as_triton_caller,
+            ),
+        ):
+            kernels, code = self._run_reduction(
+                self.ROW_OPS["sum"],
+                1024,
+                128,
+                128,
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                BlackwellGPUGemmConfig(128, 64, 64, 3, 8),
+                fused_ms=fused_ms,
+                **{"triton.template_reduction_epilogue": True},
+                **(
+                    {}
+                    if max_choices is None
+                    else {
+                        "max_template_reduction_fusion_benchmarked_choices": max_choices
+                    }
+                ),
+            )
+        # Unfused templates are finalized as their top choice.
+        found = max_choices != 1
+        self.assertEqual(any(narrow(c) for c in benchmarked), found, benchmarked)
+        self.assertEqual(any(narrow(c) for c in finalized), found, finalized)
+        if found:
+            self._assert_row_fused(kernels, code)
+        else:
+            self.assertTrue(
+                any(k.startswith(("triton_per", "triton_red")) for k in kernels),
+                kernels,
+            )
 
     def _run_stale_pending_fusion(self, compile_mode: str, **patches):
         """Compile a GEMM whose epilogue fusion with a pointwise node is

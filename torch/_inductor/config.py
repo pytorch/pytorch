@@ -1098,6 +1098,12 @@ benchmark_epilogue_fusion: bool = Config(
 # Maximum number of top template choices to benchmark with fusion.
 max_template_fusion_benchmarked_choices: int = 1
 
+# Minimum number of top template choices to benchmark with a reduction
+# epilogue fused, raising max_template_fusion_benchmarked_choices. Only choices
+# whose output tile can host the reduction count, and the fastest fused choice
+# is often not the fastest unfused one.
+max_template_reduction_fusion_benchmarked_choices: int = 3
+
 # Deprecated compatibility alias for max_template_fusion_benchmarked_choices.
 max_epilogue_benchmarked_choices: int = Config(
     alias="torch._inductor.config.max_template_fusion_benchmarked_choices",

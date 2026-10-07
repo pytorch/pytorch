@@ -887,6 +887,126 @@ class TestScheduler(TestCase):
         supported.assert_called_once()
         self.assertEqual(fits.call_count, 2)
 
+    def _benchmark_template_fusion(self, fits, fused_ms, reduction=True):
+        """Run speedup_by_fusion on a mocked MultiTemplateBuffer whose Triton
+        choices take 1.0, 1.1, ... ms unfused, and fits[i] says whether choice
+        i can host the reduction. Returns the choices compiled fused, the
+        choice finalized, and the fusion decision."""
+        device = torch.device("cuda")
+        template = self._mock_base_snode("template", device)
+        template.is_template.return_value = True
+        epilogue = self._mock_base_snode("epilogue", device)
+        epilogue.is_reduction.return_value = reduction
+        epilogue.get_template_node.return_value = None
+        for node in (template, epilogue):
+            node.is_foreach.return_value = False
+
+        choices = []
+        for i, fit in enumerate(fits):
+            choice = ir.TritonTemplateCallerBase(f"choice{i}", [], Mock(), "")
+            choice.supports_reduction_epilogue = lambda epilogue, fit=fit: fit
+            choices.append(choice)
+        timings = {choice: 1.0 + 0.1 * i for i, choice in enumerate(choices)}
+        multi_node = Mock(spec=ir.MultiTemplateBuffer)
+        multi_node.choices = choices
+        multi_node.output_tile = None
+        multi_node._choice_timings = {}
+        multi_node.choice_timings.return_value = timings
+        multi_node.get_min_choice.return_value = (choices[0], 1.0)
+        template.get_template_node.return_value = multi_node
+
+        swapped = []
+
+        @contextlib.contextmanager
+        def swap_as_triton_caller(choice):
+            swapped.append(choice)
+            try:
+                yield
+            finally:
+                swapped.pop()
+
+        multi_node.swap_as_triton_caller.side_effect = swap_as_triton_caller
+
+        compiled = []
+
+        def compile_kernel(nodes, hint_override=None):
+            compiled.append(swapped[-1])
+            return None, swapped[-1]
+
+        scheduler = object.__new__(Scheduler)
+        scheduler.get_backend = Mock(
+            return_value=Mock(
+                can_fuse_reduction_epilogue=Mock(return_value=False),
+                has_sub_parent_epilogue=Mock(return_value=False),
+            )
+        )
+        scheduler._any_atomic_add = Mock(return_value=False)
+        scheduler._has_layout_conflict_for_template = Mock(return_value=False)
+        scheduler.compile_kernel = compile_kernel
+        # The epilogue alone takes 1.0 ms, so fusing must beat 2.0 ms.
+        scheduler.benchmark_fused_nodes = Mock(return_value=(1.0, ""))
+        scheduler.benchmark_codegened_module = Mock(
+            side_effect=lambda mod, device: (fused_ms[choices.index(mod)], "")
+        )
+        with (
+            inductor_config.patch(
+                {
+                    "benchmark_template_fusion": True,
+                    "triton.template_reduction_epilogue": True,
+                    "multi_kernel_hints": [],
+                }
+            ),
+            patch.object(
+                NestedReduction, "_is_dependent_reduction_pair", return_value=False
+            ),
+            patch(
+                "torch._inductor.scheduler._is_atomic_add_mutation_epilogue",
+                return_value=False,
+            ),
+        ):
+            result = scheduler.speedup_by_fusion(template, epilogue)
+            fused = result.should_fuse
+            if result.callable_fn is not None:
+                fused = result.callable_fn()
+        finalized = [
+            call.args[0] for call in multi_node.finalize_as_triton_caller.call_args_list
+        ]
+        return (
+            [choices.index(c) for c in compiled],
+            [choices.index(c) for c in finalized],
+            fused,
+        )
+
+    def test_reduction_epilogue_benchmarks_several_fitting_choices(self):
+        fits = [True, False, True, True, True]
+        # The third choice that fits is the fastest fused.
+        fused_ms = [2.5, 0.1, 2.2, 1.5, 0.1]
+        # Choice 1 doesn't fit, so it's skipped without counting toward the
+        # cap of 3, and choice 4 is past the cap.
+        self.assertEqual(
+            self._benchmark_template_fusion(fits, fused_ms), ([0, 2, 3], [3], True)
+        )
+        with inductor_config.patch(max_template_reduction_fusion_benchmarked_choices=1):
+            self.assertEqual(
+                self._benchmark_template_fusion(fits, fused_ms), ([0], [], False)
+            )
+        with inductor_config.patch(max_template_reduction_fusion_benchmarked_choices=5):
+            self.assertEqual(
+                self._benchmark_template_fusion(fits, fused_ms),
+                ([0, 2, 3, 4], [4], True),
+            )
+        # A larger max_template_fusion_benchmarked_choices still applies.
+        with inductor_config.patch(max_template_fusion_benchmarked_choices=5):
+            self.assertEqual(
+                self._benchmark_template_fusion(fits, fused_ms),
+                ([0, 2, 3, 4], [4], True),
+            )
+        # Epilogues without reductions keep max_template_fusion_benchmarked_choices.
+        self.assertEqual(
+            self._benchmark_template_fusion(fits, fused_ms, reduction=False),
+            ([0], [], False),
+        )
+
     def test_tile_fits_reduction_epilogue(self):
         M = N = 64
         x, r = sympy.symbols("x r", integer=True, nonnegative=True)
