@@ -220,6 +220,56 @@ softmax(
   }
 }
 
+#define REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, NAME, LOG_SOFTMAX)       \
+  template [[host_name(#NAME "_row_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
+  softmax_row<DTYPE, IDX_T, LOG_SOFTMAX>(                                  \
+      constant DTYPE * input,                                              \
+      device DTYPE * output,                                               \
+      constant SoftmaxParams<IDX_T> & params,                              \
+      uint tptg [[threads_per_threadgroup]],                               \
+      uint tgid [[threadgroup_position_in_grid]],                          \
+      uint lane [[thread_index_in_simdgroup]],                             \
+      uint sg [[simdgroup_index_in_threadgroup]]);                         \
+  template                                                                 \
+      [[host_name(#NAME "_finalize_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
+      softmax_finalize<DTYPE, IDX_T, LOG_SOFTMAX>(                         \
+          constant DTYPE * input,                                          \
+          device DTYPE * output,                                           \
+          constant float2 * partials,                                      \
+          constant SoftmaxParams<IDX_T> & params,                          \
+          uint2 tgid [[threadgroup_position_in_grid]],                     \
+          uint2 tid [[thread_position_in_threadgroup]],                    \
+          uint2 tptg [[threads_per_threadgroup]]);                         \
+  template [[host_name(#NAME "_" #DTYPE "_" #SUFFIX)]] [[kernel]] void     \
+  softmax<DTYPE, IDX_T, LOG_SOFTMAX>(                                      \
+      constant DTYPE * input,                                              \
+      device DTYPE * output,                                               \
+      constant SoftmaxParams<IDX_T> & params,                              \
+      uint2 tid [[thread_position_in_threadgroup]],                        \
+      uint2 tptg [[threads_per_threadgroup]],                              \
+      uint2 tgid [[threadgroup_position_in_grid]]);
+
+#define REGISTER_SOFTMAX_IDX(DTYPE, IDX_T, SUFFIX)                         \
+  REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, softmax, false)                \
+  REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, log_softmax, true)             \
+  template                                                                 \
+      [[host_name("softmax_partial_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
+      softmax_partial<DTYPE, IDX_T>(                                       \
+          constant DTYPE * input,                                          \
+          device float2 * partials,                                        \
+          constant SoftmaxParams<IDX_T> & params,                          \
+          uint2 tgid [[threadgroup_position_in_grid]],                     \
+          uint2 tid [[thread_position_in_threadgroup]],                    \
+          uint2 tptg [[threads_per_threadgroup]]);
+
+#define REGISTER_SOFTMAX(DTYPE)          \
+  REGISTER_SOFTMAX_IDX(DTYPE, uint, u32) \
+  REGISTER_SOFTMAX_IDX(DTYPE, ulong, u64)
+
+REGISTER_SOFTMAX(float);
+REGISTER_SOFTMAX(half);
+REGISTER_SOFTMAX(bfloat);
+
 template <typename T, typename idx_t, uint values_per_thread = 4>
 [[max_total_threads_per_threadgroup(kSoftmaxMaxThreads)]] [[kernel]] void
 softmax_backward_row(
@@ -323,53 +373,3 @@ REGISTER_SOFTMAX_BACKWARD(bfloat, uint, u32, softmax_backward_looped);
 REGISTER_SOFTMAX_BACKWARD(float, ulong, u64, softmax_backward_looped);
 REGISTER_SOFTMAX_BACKWARD(half, ulong, u64, softmax_backward_looped);
 REGISTER_SOFTMAX_BACKWARD(bfloat, ulong, u64, softmax_backward_looped);
-
-#define REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, NAME, LOG_SOFTMAX)       \
-  template [[host_name(#NAME "_row_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
-  softmax_row<DTYPE, IDX_T, LOG_SOFTMAX>(                                  \
-      constant DTYPE * input,                                              \
-      device DTYPE * output,                                               \
-      constant SoftmaxParams<IDX_T> & params,                              \
-      uint tptg [[threads_per_threadgroup]],                               \
-      uint tgid [[threadgroup_position_in_grid]],                          \
-      uint lane [[thread_index_in_simdgroup]],                             \
-      uint sg [[simdgroup_index_in_threadgroup]]);                         \
-  template                                                                 \
-      [[host_name(#NAME "_finalize_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
-      softmax_finalize<DTYPE, IDX_T, LOG_SOFTMAX>(                         \
-          constant DTYPE * input,                                          \
-          device DTYPE * output,                                           \
-          constant float2 * partials,                                      \
-          constant SoftmaxParams<IDX_T> & params,                          \
-          uint2 tgid [[threadgroup_position_in_grid]],                     \
-          uint2 tid [[thread_position_in_threadgroup]],                    \
-          uint2 tptg [[threads_per_threadgroup]]);                         \
-  template [[host_name(#NAME "_" #DTYPE "_" #SUFFIX)]] [[kernel]] void     \
-  softmax<DTYPE, IDX_T, LOG_SOFTMAX>(                                      \
-      constant DTYPE * input,                                              \
-      device DTYPE * output,                                               \
-      constant SoftmaxParams<IDX_T> & params,                              \
-      uint2 tid [[thread_position_in_threadgroup]],                        \
-      uint2 tptg [[threads_per_threadgroup]],                              \
-      uint2 tgid [[threadgroup_position_in_grid]]);
-
-#define REGISTER_SOFTMAX_IDX(DTYPE, IDX_T, SUFFIX)                         \
-  REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, softmax, false)                \
-  REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, log_softmax, true)             \
-  template                                                                 \
-      [[host_name("softmax_partial_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
-      softmax_partial<DTYPE, IDX_T>(                                       \
-          constant DTYPE * input,                                          \
-          device float2 * partials,                                        \
-          constant SoftmaxParams<IDX_T> & params,                          \
-          uint2 tgid [[threadgroup_position_in_grid]],                     \
-          uint2 tid [[thread_position_in_threadgroup]],                    \
-          uint2 tptg [[threads_per_threadgroup]]);
-
-#define REGISTER_SOFTMAX(DTYPE)          \
-  REGISTER_SOFTMAX_IDX(DTYPE, uint, u32) \
-  REGISTER_SOFTMAX_IDX(DTYPE, ulong, u64)
-
-REGISTER_SOFTMAX(float);
-REGISTER_SOFTMAX(half);
-REGISTER_SOFTMAX(bfloat);
