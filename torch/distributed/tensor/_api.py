@@ -6,7 +6,7 @@ import hashlib
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -43,10 +43,6 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-
-
-if TYPE_CHECKING:
-    from torch.distributed.checkpoint.protocol import CheckpointableTensor
 
 
 __all__ = [
@@ -911,33 +907,39 @@ class DTensor(torch.Tensor):
             return []
         return _block_shard_local_boxes(layout, mesh.shape, coordinate)
 
-    def _block_shard_checkpointable(self) -> "CheckpointableTensor | None":
-        """The local tensor declaring its BlockShard boxes as a ``CheckpointableTensor``.
-
-        A rank may own up to ``2k - 1`` boxes of the global tensor, each a run of
-        rows of the merged-view local tensor.
-        """
-        if (boxes := self._block_shard_boxes()) is None:
-            return None
-        # A view keeps the fields off the local tensor; loads still land in it
-        local: Any = self._local_tensor.view(self._local_tensor.shape)
-        local.global_shape = tuple(self.shape)
-        local.global_offsets = tuple(offset for offset, _, _, _ in boxes)
-        local.local_offsets = tuple(
-            (start,) + (0,) * (local.dim() - 1) for _, _, start, _ in boxes
-        )
-        local.local_sizes = tuple(size for _, size, _, _ in boxes)
-        return local
-
     def __create_write_items__(self, fqn: str, object: Any):
         self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_write_items_for_dtensor,
-            _get_checkpointable_tensor_write_items,
         )
 
-        if (local := self._block_shard_checkpointable()) is not None:
-            return _get_checkpointable_tensor_write_items(fqn, local)
+        if (boxes := self._block_shard_boxes()) is not None:
+            from torch.distributed.checkpoint.metadata import (
+                ChunkStorageMetadata,
+                MetadataIndex,
+                TensorProperties,
+            )
+            from torch.distributed.checkpoint.planner import (
+                TensorWriteData,
+                WriteItem,
+                WriteItemType,
+            )
+
+            properties = TensorProperties.create_from_tensor(self._local_tensor)
+            return [
+                WriteItem(
+                    index=MetadataIndex(fqn, offset, idx),
+                    type=WriteItemType.SHARD,
+                    tensor_data=TensorWriteData(
+                        chunk=ChunkStorageMetadata(
+                            offsets=torch.Size(offset), sizes=torch.Size(size)
+                        ),
+                        properties=properties,
+                        size=self.size(),
+                    ),
+                )
+                for idx, (offset, size, _, _) in enumerate(boxes)
+            ]
         if hasattr(self._local_tensor, "__create_write_items__"):
             return self._local_tensor.__create_write_items__(fqn, object)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
@@ -960,12 +962,15 @@ class DTensor(torch.Tensor):
         from torch.distributed.checkpoint.planner_helpers import (
             _create_chunk_from_dtensor,
         )
-        from torch.distributed.checkpoint.protocol import (
-            _get_checkpointable_tensor_chunks,
-        )
 
-        if (local := self._block_shard_checkpointable()) is not None:
-            return _get_checkpointable_tensor_chunks(local)
+        if (boxes := self._block_shard_boxes()) is not None:
+            # A BlockShard rank may own up to 2k - 1 boxes of the global tensor.
+            from torch.distributed.checkpoint.metadata import ChunkStorageMetadata
+
+            return [
+                ChunkStorageMetadata(offsets=torch.Size(offset), sizes=torch.Size(size))
+                for offset, size, _, _ in boxes
+            ]
         if hasattr(self._local_tensor, "__create_chunk_list__"):
             return self._local_tensor.__create_chunk_list__()  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
@@ -975,12 +980,24 @@ class DTensor(torch.Tensor):
 
     def __get_tensor_shard__(self, index):
         self._raise_if_contains_partial_placements()
-        if (local := self._block_shard_checkpointable()) is not None:
-            from torch.distributed.checkpoint.protocol import (
-                _get_checkpointable_tensor_shard,
+        if (boxes := self._block_shard_boxes()) is not None:
+            # Each box is a contiguous row range of the merged-view local tensor,
+            # so the view is writable and loads land in place.
+            if index.offset is None and len(boxes) != 1:
+                raise ValueError(
+                    f"Cannot look up {index.fqn} with {len(boxes)} BlockShard boxes "
+                    "and no offset"
+                )
+            if index.index is not None and index.index < len(boxes):
+                candidates = [boxes[index.index], *boxes]
+            else:
+                candidates = boxes
+            for offset, size, row_start, row_stop in candidates:
+                if index.offset is None or torch.Size(offset) == index.offset:
+                    return self._local_tensor[row_start:row_stop].view(size)
+            raise ValueError(
+                f"Could not find BlockShard shard at {index.offset} for FQN: {index.fqn}"
             )
-
-            return _get_checkpointable_tensor_shard(local, index)
         if hasattr(self._local_tensor, "__get_tensor_shard__"):
             return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
