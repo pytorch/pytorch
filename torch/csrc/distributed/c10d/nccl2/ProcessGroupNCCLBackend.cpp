@@ -216,6 +216,10 @@ void ProcessGroupNCCL::setBoundDeviceId(std::optional<at::Device> device) {
   if (!device.has_value() && init_state_ == InitializationState::INITIALIZED) {
     device = device_;
   }
+  // ProcessGroup::setBackend passes the group's (unset) binding; stay lazy.
+  if (!device.has_value() && lazy_init_) {
+    return;
+  }
   if (!device.has_value()) {
     const auto deviceCount = c10::cuda::device_count_ensure_non_zero();
     uint64_t deviceRank = static_cast<uint64_t>(getRank());
@@ -228,6 +232,19 @@ void ProcessGroupNCCL::setBoundDeviceId(std::optional<at::Device> device) {
   }
   Backend::setBoundDeviceId(device);
   ensureInitialized(*device);
+}
+
+void ProcessGroupNCCL::setLazyDevice(at::Device device) {
+  TORCH_CHECK(
+      device.is_cuda(), "ProcessGroupNCCL requires CUDA tensors/devices");
+  TORCH_CHECK(
+      init_state_ == InitializationState::UNINITIALIZED,
+      "ProcessGroupNCCL is already initialized");
+  if (options_c10d_->enable_reconfigure) {
+    return;
+  }
+  device_ = device;
+  lazy_init_ = true;
 }
 
 void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {

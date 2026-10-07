@@ -4323,14 +4323,19 @@ Returns:
                           int size,
                           c10::intrusive_ptr<
                               ::c10d::nccl2::ProcessGroupNCCL::Options> options,
-                          std::optional<at::Device> device_id) {
+                          std::optional<at::Device> device_id,
+                          bool lazy_init) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
                 auto backend =
                     c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
                         store, rank, size, std::move(options));
-                backend->setBoundDeviceId(device_id);
+                if (lazy_init && device_id.has_value()) {
+                  backend->setLazyDevice(*device_id);
+                } else {
+                  backend->setBoundDeviceId(device_id);
+                }
                 return backend;
               }),
               py::arg("store"),
@@ -4338,6 +4343,7 @@ Returns:
               py::arg("size"),
               py::arg("options"),
               py::arg("device_id") = std::nullopt,
+              py::arg("lazy_init") = false,
               R"(Create a new ProcessGroupNCCL2 instance.)")
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -4378,8 +4384,10 @@ Returns:
               R"(
             This process group's ``ncclComm_t``, as an opaque handle.
 
-            The process group holds a single communicator, created in its
-            constructor, so the value does not depend on the current device.
+            The process group holds a single communicator, so the value does
+            not depend on the current device. The communicator is created in
+            the constructor when the group is bound to a device and otherwise
+            by the first operation; the value is 0 until then.
 
             .. warning ::
                 The communicator is owned by the process group. Do not modify
@@ -4402,12 +4410,17 @@ Returns:
                       int size,
                       const c10::intrusive_ptr<
                           ::c10d::nccl2::ProcessGroupNCCL::Options>& options,
-                      std::optional<at::Device> device_id) {
+                      std::optional<at::Device> device_id,
+                      bool lazy_init) {
             py::gil_scoped_release nogil{};
             auto backend =
                 c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
                     store, rank, size, options);
-            backend->setBoundDeviceId(device_id);
+            if (lazy_init && device_id.has_value()) {
+              backend->setLazyDevice(*device_id);
+            } else {
+              backend->setBoundDeviceId(device_id);
+            }
             return backend;
           }),
           py::arg("store"),
@@ -4415,6 +4428,7 @@ Returns:
           py::arg("size"),
           py::arg("options"),
           py::arg("device_id") = std::nullopt,
+          py::arg("lazy_init") = false,
           R"(Create a new ProcessGroupNCCLLazy instance.)")
       .def(
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,

@@ -278,6 +278,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void setTimeout(std::chrono::milliseconds timeout) override;
   void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
   void setBoundDeviceId(std::optional<at::Device> device) override;
+  // Records `device` for the communicator without creating it. The first
+  // operation that needs the communicator bootstraps it on `device`, so groups
+  // that never communicate allocate no NCCL resources. Members-only: unlike
+  // split(), the lazy bootstrap never involves ranks outside the group.
+  void setLazyDevice(at::Device device);
   void eagerConnectSingleDevice(at::Device device) override;
   uint64_t getSequenceNumberForGroup() override {
     return sequence_number_;
@@ -597,7 +602,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclComm_t comm,
       const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
-  void checkInitialized() const;
+  // Bootstraps a lazily deferred communicator (see setLazyDevice) and checks
+  // that the communicator is ready.
+  void checkInitialized();
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
   void drainRetiredGraphWork();
@@ -645,6 +652,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     INITIALIZED,
     FINALIZED,
   } init_state_{InitializationState::UNINITIALIZED};
+  // Set by setLazyDevice(): the first checkInitialized() creates the
+  // communicator on device_.
+  bool lazy_init_{false};
   std::mutex reconfigure_mutex_;
 
   c10::intrusive_ptr<::c10d::Store> store_;

@@ -23,8 +23,11 @@ c10::intrusive_ptr<ProcessGroupNCCL> makePrimary(
 
 ProcessGroupNCCLLazy::PairFactory makePairFactory(
     c10::intrusive_ptr<::c10d::Store> store,
-    c10::intrusive_ptr<ProcessGroupNCCL::Options> options) {
-  return [store = std::move(store), options = std::move(options)](
+    c10::intrusive_ptr<ProcessGroupNCCL::Options> options,
+    std::shared_ptr<std::optional<at::Device>> lazy_device) {
+  return [store = std::move(store),
+          options = std::move(options),
+          lazy_device = std::move(lazy_device)](
              int pair_rank, const std::string& pair_name) {
     auto pair_store =
         c10::make_intrusive<::c10d::PrefixStore>(pair_name, store);
@@ -33,8 +36,12 @@ ProcessGroupNCCLLazy::PairFactory makePairFactory(
     pair_options->is_high_priority_stream = options->is_high_priority_stream;
     pair_options->config = cloneNcclConfig(options->config);
     pair_options->group_name = pair_name;
-    return c10::make_intrusive<ProcessGroupNCCL>(
+    auto pair = c10::make_intrusive<ProcessGroupNCCL>(
         pair_store, pair_rank, /*size=*/2, pair_options);
+    if (lazy_device->has_value()) {
+      pair->setLazyDevice(**lazy_device);
+    }
+    return pair;
   };
 }
 
@@ -45,6 +52,19 @@ ProcessGroupNCCLLazy::ProcessGroupNCCLLazy(
     int rank,
     int size,
     const c10::intrusive_ptr<ProcessGroupNCCL::Options>& options)
+    : ProcessGroupNCCLLazy(
+          store,
+          rank,
+          size,
+          options,
+          std::make_shared<std::optional<at::Device>>()) {}
+
+ProcessGroupNCCLLazy::ProcessGroupNCCLLazy(
+    const c10::intrusive_ptr<::c10d::Store>& store,
+    int rank,
+    int size,
+    const c10::intrusive_ptr<ProcessGroupNCCL::Options>& options,
+    std::shared_ptr<std::optional<at::Device>> lazy_device)
     : LazyBackend(
           rank,
           size,
@@ -55,7 +75,14 @@ ProcessGroupNCCLLazy::ProcessGroupNCCLLazy(
               options ? options : ProcessGroupNCCL::Options::create()),
           makePairFactory(
               store,
-              options ? options : ProcessGroupNCCL::Options::create())) {}
+              options ? options : ProcessGroupNCCL::Options::create(),
+              lazy_device)),
+      lazy_device_(std::move(lazy_device)) {}
+
+void ProcessGroupNCCLLazy::setLazyDevice(at::Device device) {
+  getPrimary()->setLazyDevice(device);
+  *lazy_device_ = device;
+}
 
 } // namespace c10d::nccl2
 

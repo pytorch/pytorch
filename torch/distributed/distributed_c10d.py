@@ -832,6 +832,22 @@ def _nccl2_options(
     return backend_options
 
 
+def _nccl2_lazy_init(opts: _DistributedBackendOptions) -> bool:
+    """Whether to defer the communicator to its first operation.
+
+    Matches the stock backend: a group is only initialized eagerly when the
+    caller bound it to a device (``device_id``). Otherwise each communicator is
+    bootstrapped among the group's members on first use, so groups that never
+    communicate allocate no NCCL resources.
+    """
+    process_group = opts.process_group
+    return (
+        not opts.enable_reconfigure
+        and process_group is not None
+        and process_group.bound_device_id is None
+    )
+
+
 def _nccl2_device(
     opts: _DistributedBackendOptions,
 ) -> torch.device | None:
@@ -857,11 +873,9 @@ def _nccl2_device(
         )
         device_index = global_rank % device_count
 
-    device = torch.device("cuda", device_index)
-    if process_group is not None:
-        process_group.bound_device_id = device
-
-    return device
+    # Not bound on the process group: an unbound group is lazily initialized
+    # (see _nccl2_lazy_init) and must not be split from.
+    return torch.device("cuda", device_index)
 
 
 def _create_nccl2_process_group(
@@ -888,6 +902,7 @@ def _create_nccl2_process_group(
         opts.group_size,
         pg_options,
         _nccl2_device(opts),
+        lazy_init=_nccl2_lazy_init(opts),
     )
     return backend
 
@@ -916,6 +931,7 @@ def _create_nccl_lazy_process_group(
         opts.group_size,
         pg_options,
         _nccl2_device(opts),
+        lazy_init=_nccl2_lazy_init(opts),
     )
     return backend
 

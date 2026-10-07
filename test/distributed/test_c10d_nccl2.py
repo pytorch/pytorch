@@ -385,6 +385,44 @@ class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
         return "nccl-legacy"
 
 
+class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
+    """Without device_id, communicators are created on first use."""
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_new_group_defers_comm(self) -> None:
+        group = dist.new_group(list(range(self.world_size)))
+        backend = group._get_backend(self.device)
+        self.assertEqual(backend.comm_ptr, 0)
+
+        t = torch.ones(1, device=self.device)
+        dist.all_reduce(t, group=group)
+        self.assertNotEqual(backend.comm_ptr, 0)
+        self.assertEqual(t, torch.full_like(t, self.world_size))
+        dist.destroy_process_group(group)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_new_group_with_nonmembers(self) -> None:
+        # Only members bootstrap the lazy communicator, so non-members need not
+        # take part.
+        group = dist.new_group(ranks=[0])
+        if self.rank == 0:
+            t = torch.ones(1, device=self.device)
+            dist.all_reduce(t, group=group)
+            self.assertEqual(t, torch.ones_like(t))
+            dist.destroy_process_group(group)
+        else:
+            self.assertEqual(group, dist.GroupMember.NON_GROUP_MEMBER)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCLLazyLazyInitTest(ProcessGroupNCCL2LazyInitTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
@@ -1412,7 +1450,7 @@ assert not torch._C._cuda_hasPrimaryContext(0), "watchdog created a CUDA context
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
-    def test_eager_init_without_device_id(self) -> None:
+    def test_init_without_device_id(self) -> None:
         self._run_child(device_id="None")
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")

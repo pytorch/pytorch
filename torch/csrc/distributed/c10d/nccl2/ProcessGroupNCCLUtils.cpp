@@ -353,7 +353,11 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread exiting for rank: " << rank_;
 }
 
-void ProcessGroupNCCL::checkInitialized() const {
+void ProcessGroupNCCL::checkInitialized() {
+  if (lazy_init_ && init_state_ == InitializationState::UNINITIALIZED) {
+    lazy_init_ = false;
+    ensureInitialized(device_);
+  }
   TORCH_CHECK(
       init_state_ == InitializationState::INITIALIZED,
       options_c10d_->enable_reconfigure
