@@ -7,6 +7,7 @@ Uses the vendored quack subset at ``torch._vendor.quack``.
 from __future__ import annotations
 
 import math
+from functools import cache
 
 import torch
 
@@ -40,6 +41,7 @@ _TILE_ROUND_ELEMS = 2048
 _BWD_SMEM_STAGES = 2
 
 
+@cache
 def _smem_budget_bytes(device: torch.device) -> int:
     return caps(device).smem_per_block_optin - _SMEM_RESERVED_BYTES
 
@@ -48,6 +50,7 @@ def _max_cluster_n(device: torch.device) -> int:
     return 8 if caps(device).cc[0] == 12 else 16
 
 
+@cache
 def _row_tile_elems(device: torch.device, n: int) -> int:
     per_cta = -(-n // _max_cluster_n(device))
     return -(-per_cta // _TILE_ROUND_ELEMS) * _TILE_ROUND_ELEMS
@@ -97,6 +100,7 @@ def _misaligned_clone_unprofitable(t: torch.Tensor, n: int) -> bool:
     return t.numel() < _MISALIGNED_MIN_NUMEL
 
 
+@cache
 def _n_yields_valid_cp_size(n: int, dtype: torch.dtype) -> bool:
     # quack picks vecsize = gcd(N, 128 // dtype_bits) and lowers each thread's
     # gmem->smem copy to cp.async, whose PTX cp_size only accepts 32, 64, or
