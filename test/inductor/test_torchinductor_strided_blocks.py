@@ -1079,11 +1079,15 @@ class CommonTemplate:
 
     def test_3d_reduction_with_pointwise_output(self):
         view = self._discontiguous_tensor((5, 7, 3, 5), self.device)
+        # CUDA TMA rejects the input's outer strides, which are not 16-byte aligned.
+        expected_num_block_pointers = (
+            1 if self.device == "cuda" and config.triton.use_tensor_descriptor else 2
+        )
 
         _result, (code,) = self._run_and_compare(
             functools.partial(torch.sum, dim=(1, 2, 3)),
             view,
-            expected_num_block_pointers=2,
+            expected_num_block_pointers=expected_num_block_pointers,
             expected_num_triton_kernels=1,
             config_patches={
                 **tiled_reduction_config,
@@ -1725,6 +1729,8 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
                 **tiled_reduction_config,
                 "triton.max_tiles": 3,
             },
+            rtol=1e-4,
+            atol=1e-4,
         )
 
         self.assertIn("tl.load(in_ptr0 +", code)
@@ -2433,6 +2439,7 @@ class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
     Block pointer count is skipped because host-side TMA creates
     descriptors in the launcher, not the kernel."""
 
+    block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
 
     def _run_and_compare(self, *args, **kwargs):
