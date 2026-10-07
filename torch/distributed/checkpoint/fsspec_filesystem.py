@@ -8,8 +8,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fsspec.core import url_to_fs
-
 from torch.distributed.checkpoint._extension import StreamTransformExtension
 from torch.distributed.checkpoint.filesystem import (
     FileSystemBase,
@@ -59,6 +57,8 @@ class _FileSystem(FileSystemBase):
         return os.path.join(path, suffix)
 
     def init_path(self, path: str | os.PathLike, **kwargs) -> str | os.PathLike:
+        from fsspec.core import url_to_fs
+
         self.fs, _ = url_to_fs(path, **kwargs)
         return path
 
@@ -71,6 +71,11 @@ class _FileSystem(FileSystemBase):
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         if isinstance(checkpoint_id, Path):
+            return False
+
+        try:
+            from fsspec.core import url_to_fs
+        except ImportError:
             return False
 
         try:
