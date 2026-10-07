@@ -4333,11 +4333,14 @@ class SubgraphTracer(fx.Tracer):
     ) -> fx.Proxy:
         if isinstance(example_value, torch.Tensor):
             self._input_versions_at_beginning.append(example_value._version)
+            ev_str = f"{example_value.__class__.__name__}(..., size={tuple(example_value.shape)})"
+        else:
+            ev_str = example_value
         log.debug(
             "create_graph_input %s %s %s at debug_level %s before=%s",
             name,
             source.name if source is not None else "(none)",
-            example_value,
+            ev_str,
             self.debug_level,
             before,
         )
