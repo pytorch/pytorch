@@ -49,6 +49,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakIdKeyDictionary
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -216,14 +217,25 @@ class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: bool | None
-    non_strict_export_fake_tensor_tracker: weakref.WeakSet[FakeTensor]
+    non_strict_export_fake_tensor_tracker: WeakIdKeyDictionary
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
-        self.non_strict_export_fake_tensor_tracker = weakref.WeakSet()
+        self.non_strict_export_fake_tensor_tracker = WeakIdKeyDictionary()
 
 
 fake_tensor_tls = FakeTensorTLS()
+
+
+# C++ fake tensors have no Python __init__, and constructor-only tracking misses
+# memoized tensors reused during non-strict export.
+def track_fake_tensor_for_export(t: object) -> None:
+    if (
+        torch.compiler.is_exporting()
+        and torch._export.config.detect_non_strict_fake_tensor_leaks
+        and is_fake_tensor(t)
+    ):
+        fake_tensor_tls.non_strict_export_fake_tensor_tracker[t] = None
 
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
@@ -1193,7 +1205,7 @@ class FakeTensor(Tensor):
             torch.compiler.is_exporting()
             and torch._export.config.detect_non_strict_fake_tensor_leaks
         ):
-            fake_tensor_tls.non_strict_export_fake_tensor_tracker.add(self)
+            fake_tensor_tls.non_strict_export_fake_tensor_tracker[self] = None
 
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
