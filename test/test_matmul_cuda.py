@@ -977,6 +977,30 @@ class TestMatmulCuda(InductorTestCase):
                 self.skipTest(f"grouped_mm rejects {dtype_AB} under compile: {e}")
             self.assertEqual(C, C_ref)
 
+    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @parametrize("backend", ["TRITON", "GLUON"])
+    def test_grouped_gemm_compiled_epilogue(self, backend):
+        if backend == "GLUON":
+            major, minor = torch.cuda.get_device_capability()
+            if not (major == 10 and minor in [0, 3]):
+                self.skipTest("Supported only on CC 10.0 and 10.3")
+        if not IS_BIG_GPU:
+            self.skipTest("max-autotune requires a big GPU")
+
+        device = "cuda"
+        G, M, N, K = 4, 256, 128, 64
+        A = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        B = torch.randn(G, K, N, device=device, dtype=torch.bfloat16)
+        offs = torch.tensor([32, 96, 96, 256], device=device, dtype=torch.int32)
+
+        def f(a, b, offs):
+            return F.grouped_mm(a, b, offs=offs).relu() * 2
+
+        f_compiled = torch.compile(
+            f, options={"max_autotune": True, "max_autotune_gemm_backends": backend}
+        )
+        self.assertEqual(f_compiled(A, B, offs), f(A, B, offs))
+
     def grouped_gemm_cublaslt_common(self, op, jagged_size, a_row_major, b_row_major, dtype):
         device = "cuda"
         element_size = dtype.itemsize

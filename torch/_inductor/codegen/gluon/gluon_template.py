@@ -247,4 +247,6 @@ class GluonTemplate(KernelTemplate):
         )
         if result is not None:
             result.log_info["backend"] = "Gluon"
+            # Gluon templates store their output directly, not via store_output().
+            result.supports_epilogue_fusion = False
         return result

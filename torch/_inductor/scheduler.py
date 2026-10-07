@@ -7625,6 +7625,8 @@ class Scheduler:
                     choice, torch._inductor.select_algorithm.TritonTemplateCaller
                 ):
                     return False
+                if not choice.supports_epilogue_fusion:
+                    return False
                 # For producer fusion, the choice must support every input in
                 # the multi-template buffer's allowed set.
                 # TODO: Remove this check after all Triton templates support prologue fusion.
@@ -7719,7 +7721,7 @@ class Scheduler:
                     continue
 
                 # pyrefly: ignore [missing-attribute]
-                if is_nvgemm and not choice.supports_epilogue_fusion:
+                if not choice.supports_epilogue_fusion:
                     continue
 
                 # NVGEMM doesn't support producer fusion. Skip NVGEMM choices in

@@ -3738,6 +3738,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             else OrderedSet()
         )
         self.hint_override = hint_override
+        self.supports_epilogue_fusion = True
 
         self.n_regs = None
 
@@ -3786,6 +3787,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 self.store_output_fusion_allowed_inputs
             ),
         )
+        if not self.supports_epilogue_fusion:
+            buffer.allow_epilogue_fusion = False
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
             buffer.annotations["ktc"] = self.annotations["ktc"]
