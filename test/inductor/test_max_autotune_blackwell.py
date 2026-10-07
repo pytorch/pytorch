@@ -1803,6 +1803,34 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    def test_blackwell_mm_reduction_epilogue_plain_stores_extra_outputs(self):
+        """With a reduction epilogue, only the template's own output keeps its
+        TMA store: one staged fp32 128x128 tile per extra output would overflow
+        shared memory."""
+
+        def fn(a, b):
+            c = a @ b
+            x = c.float()
+            return (c, *(x * i for i in range(1, 7)), x.sum(-1))
+
+        kernels, code = self._run_reduction(
+            fn,
+            1024,
+            64,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{
+                "triton.template_reduction_epilogue": True,
+                "triton.enable_template_tma_store": True,
+            },
+        )
+        self._assert_row_fused(kernels, code)
+        self.assertEqual(len(re.findall(r"tma_descriptor\d+\.store\(", code)), 1)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     def test_blackwell_mm_row_reduction_epilogue_skips_misfit_tile(self):
         """The fusion benchmark skips choices whose tile can't host the
         reduction epilogue, even when they rank first, and fuses into one that
