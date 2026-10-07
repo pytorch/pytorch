@@ -19,6 +19,7 @@ from torch._dynamo.repro.after_aot import (
     _get_compile_args,
     InputReader,
     InputWriter,
+    repro_common,
     repro_minify,
     repro_run,
     save_graph_repro,
@@ -26,6 +27,10 @@ from torch._dynamo.repro.after_aot import (
 from torch._functorch.fx_minifier import MinifierSanityCheckFailed
 from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import (
+    find_symbol_binding_fx_nodes,
+    free_symbols,
+)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -38,6 +43,25 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
+
+
+def _insert_live_dtype_node(gm):
+    """Route the add through a runtime torch.dtype so the graph keeps a node
+    whose meta["val"] is a dtype rather than a tensor or SymInt."""
+    x_node = next(n for n in gm.graph.nodes if n.op == "placeholder")
+    add_node = next(n for n in gm.graph.nodes if n.target is torch.ops.aten.add.Tensor)
+    with gm.graph.inserting_before(add_node):
+        dtype_node = gm.graph.call_function(
+            torch.ops.aten.result_type.Tensor, (x_node, x_node)
+        )
+        dtype_node.meta["val"] = torch.float32
+        cast_node = gm.graph.call_function(
+            torch.ops.aten._to_copy.default, (x_node,), {"dtype": dtype_node}
+        )
+        cast_node.meta["val"] = x_node.meta["val"]
+    add_node.args = (cast_node, *add_node.args[1:])
+    gm.recompile()
+    return gm
 
 
 def strip_trailing_whitespace(r):
@@ -630,7 +654,8 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         self.assertIsInstance(result[1], torch.SymInt)
 
     def test_get_compile_args_preserves_shapes(self):
-        """_get_compile_args preserves symbolic shape info from traced graph."""
+        """_get_compile_args preserves symbolic shape info from traced graph,
+        including for graphs whose only inputs are tensors."""
 
         def f(x):
             return (x * 2,)
@@ -638,7 +663,9 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         args = [torch.randn(4, 8)]
         gm = make_fx(f, tracing_mode="symbolic")(*args)
         result = _get_compile_args(gm, args)
-        # FakeTensor should preserve the shape
+        self.assertIsNot(result, args)
+        self.assertIsInstance(result[0], torch._subclasses.FakeTensor)
+        self.assertTrue(free_symbols(result[0]))
         self.assertEqual(result[0].shape, torch.Size([4, 8]))
 
     def test_get_compile_args_real_tracing_returns_concrete(self):
@@ -695,7 +722,22 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         result = compiled(list(concrete_args))
         self.assertEqual(result[0].shape, torch.Size([N]))
 
-    def test_get_compile_args_e2e_real_no_fake_mode_mismatch(self):
+    def test_get_compile_args_e2e_tensor_only_symbolic_compile(self):
+        """E2E: tensor-only symbolic graphs compile with dynamic shapes, so
+        the compiled artifact accepts a different batch size."""
+        from torch._inductor.compile_fx import compile_fx_inner
+
+        def f(x):
+            return (x * 2,)
+
+        concrete_args = [torch.randn(4, 8)]
+        gm = make_fx(f, tracing_mode="symbolic")(*concrete_args)
+
+        compiled = compile_fx_inner(gm, _get_compile_args(gm, concrete_args))
+        self.assertNotIsInstance(compiled, str)
+        other = torch.randn(6, 8)
+        self.assertEqual(compiled([other])[0], other * 2)
+
         """E2E: compile_fx_inner fails when given FakeTensors from
         different FakeTensorModes (extracted from real-mode traced graph
         placeholder metadata) but succeeds with _get_compile_args which
@@ -777,6 +819,41 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         derived_expr = reader.symint_exprs.get(1)
         self.assertIsNotNone(derived_expr)
         self.assertIn("//", derived_expr)
+
+    def test_save_graph_repro_ignores_dtype_metadata(self):
+        def f(x):
+            return (x + 1,)
+
+        # A static graph makes the tracing-mode scan visit every node.
+        inp = torch.randn(2)
+        gm = _insert_live_dtype_node(make_fx(f, tracing_mode="fake")(inp))
+
+        buf = io.StringIO()
+        save_graph_repro(buf, gm, [inp], "inductor", command="get_args")
+        self.assertIn("tracing_mode='real'", buf.getvalue())
+
+    def test_save_graph_repro_uses_symbolic_placeholder_metadata(self):
+        def f(n, x):
+            return (x + 1,)
+
+        inp = torch.randn(2)
+        gm = make_fx(f, tracing_mode="symbolic")(2, inp)
+
+        buf = io.StringIO()
+        save_graph_repro(buf, gm, [2, inp], "inductor", command="get_args")
+        repro_src = buf.getvalue()
+
+        self.assertIn("reader.symint(2, expr=", repro_src)
+        self.assertIn("tracing_mode='symbolic'", repro_src)
+
+        ns = {"__name__": "not_main", "__compile_source__": repro_src}
+        exec(compile(repro_src, "<test>", "exec"), ns)
+        options = SimpleNamespace(save_dir=None, tracing_mode="symbolic")
+        repro_gm, _ = repro_common(options, ns["mod"], ns["load_args"])
+        placeholders = [n for n in repro_gm.graph.nodes if n.op == "placeholder"]
+        bindings = find_symbol_binding_fx_nodes(repro_gm.graph)
+        tensor_symbols = free_symbols(placeholders[1].meta["val"])
+        self.assertTrue(set(tensor_symbols).issubset(bindings.keys()))
 
     @unittest.skipIf(IS_FBCODE, "Subprocess spawning doesn't work in fbcode")
     def test_symint_expr_e2e_repro(self):
