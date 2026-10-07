@@ -17,6 +17,7 @@ from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from typing import Any, cast, TYPE_CHECKING, TypeVar
+from typing_extensions import override
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -1339,6 +1340,15 @@ class TritonOverrides(OpOverrides):
     _LOG_2_E = math.log2(math.e)
 
     @staticmethod
+    def _strict_cuda_pointwise() -> bool:
+        return (
+            config.strict_pointwise
+            and torch.version.hip is None
+            and V.graph.get_current_device_or_throw().type == "cuda"
+        )
+
+    @staticmethod
+    @override
     def to_dtype(
         x,
         dtype: torch.dtype,
@@ -1390,6 +1400,15 @@ class TritonOverrides(OpOverrides):
         ):
             x = f"triton_helpers.fp8e4m3fn_to_float32({x})"
             src_dtype = torch.float32
+
+        if (
+            dtype in (torch.uint8, torch.int8, torch.int16)
+            and (src_dtype is None or src_dtype.is_floating_point)
+            and TritonOverrides._strict_cuda_pointwise()
+        ):
+            # CUDA narrows through int32; c10 routes uint8 through int64 instead.
+            intermediate = "tl.int64" if dtype == torch.uint8 else "tl.int32"
+            return f"{x}.to({intermediate}).to({triton_type(dtype)})"
 
         if dtype == torch.bool:
             return f"({x} != 0)"
@@ -2273,6 +2292,9 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sigmoid(x):
+        if TritonOverrides._strict_cuda_pointwise():
+            # CUDA eager uses exp and correctly rounded division at opmath precision.
+            return f"libdevice.rcp_rn(1.0 + libdevice.exp(-({x})))"
         return f"tl.sigmoid({x})"
 
     @staticmethod
@@ -3471,6 +3493,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
         self.is_combo_kernel: bool = is_combo_kernel
+        self._from_combo_codegen = False
+        self._is_first_combo_launch = False
+        self._in_multi_kernel = False
+        self._nvgemm_pdl_enabled = False
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
@@ -4935,8 +4961,60 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
 
     @staticmethod
+    def _has_pdl_dependency(
+        previous_node: BaseSchedulerNode, current_node: BaseSchedulerNode
+    ) -> bool:
+        mutation_renames = getattr(current_node, "mutation_renames", {})
+        previous_writes = OrderedSet(
+            mutation_renames.get(dep.name, dep.name)
+            for dep in previous_node.read_writes.writes
+            if not isinstance(dep, dependencies.WeakDep)
+        )
+        return any(
+            not isinstance(dep, dependencies.WeakDep) and dep.name in previous_writes
+            for dep in current_node.read_writes.reads
+        )
+
+    @staticmethod
     def _enable_pdl_codegen():
-        if not torch._inductor.config.triton.enable_pdl:
+        enable_pdl = torch._inductor.config.triton.enable_pdl
+        selective_pdl = not enable_pdl and torch._inductor.config.nvgemm_pdl != "0"
+        if selective_pdl:
+            kernel = V.kernel
+            if not isinstance(kernel, TritonKernel):
+                return False
+            enable_pdl = kernel._nvgemm_pdl_enabled
+            current_node = getattr(kernel, "current_node", None)
+            is_single_launch_kernel = (
+                kernel.__class__ is TritonKernel
+                and not getattr(kernel, "is_combo_kernel", False)
+                and (not kernel._from_combo_codegen or kernel._is_first_combo_launch)
+                and not getattr(kernel, "_in_multi_kernel", False)
+                and not getattr(kernel, "cooperative_reduction", False)
+                and not getattr(kernel, "mix_order_reduction", False)
+            )
+            if current_node is not None and is_single_launch_kernel:
+                scheduler = V.graph.scheduler
+                previous_node = (
+                    scheduler.previous_node if scheduler is not None else None
+                )
+                if previous_node is not None:
+                    from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+                        NVUniversalGemmScheduling,
+                    )
+
+                    current_node_enables_pdl = (
+                        NVUniversalGemmScheduling.is_pdl_enabled_template(previous_node)
+                        and TritonKernel._has_pdl_dependency(
+                            previous_node, current_node
+                        )
+                    )
+                    enable_pdl = enable_pdl or current_node_enables_pdl
+                    kernel._nvgemm_pdl_enabled = enable_pdl
+            kernel_args = getattr(kernel, "args", None)
+            if getattr(kernel_args, "workspace_args", ()):
+                return False
+        if not enable_pdl:
             return False
         if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
             return False
@@ -6366,11 +6444,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         shape=accumulator.shape,
                     )
 
+                # Cast the int8 result back to tl.int1, otherwise result_var is
+                # tracked as torch.bool but holds int8 (e.g. `~` yields -2, not 0)
                 final_reduction_define(
                     self.post_loop_combine,
                     cast(CSEVariable, result_var),
                     accumulator,
-                    None,
+                    torch.bool if src_dtype == torch.bool else None,
                 )
 
         if self.cooperative_reduction:
@@ -9158,6 +9238,8 @@ class TritonScheduling(SIMDScheduling):
                     )
 
         if len(kernels) > 1:
+            for kernel2 in kernels:
+                kernel2._in_multi_kernel = True
             for kernel2 in kernels[1:]:
                 # Keep buffers needed by the non-persistent reduction so both kernels have the same arguments
                 kernel2.must_keep_buffers = kernel.must_keep_buffers
