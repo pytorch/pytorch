@@ -294,8 +294,9 @@ struct C10_API PyInterpreterVTable {
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       PyObject* real) const = 0;
-  // Needs an active mode. Non-fake outputs are converted to fakes on
-  // common_device; this is the only callback that converts its outputs.
+  // Needs an active mode. Non-fake Meta outputs are converted to fakes on
+  // common_device; this is the only callback that converts its outputs. See
+  // Note [C++ fake op_impl outputs] in torch/csrc/PyInterpreter.cpp.
   virtual bool fake_try_op_impl(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
