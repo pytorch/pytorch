@@ -51,6 +51,7 @@ def _get_launcher(dispatch_args, compile_only):
                     dk_stride=DK_STRIDE,
                     dv_stride=DV_STRIDE,
                     lse_in_log2=True,
+                    dq_accum_fp32=DQ_ACCUM_FP32,
                 )
                 compile_args = tuple(
                     flyc.from_torch_tensor(tensor) for tensor in dispatch_args[:-1]

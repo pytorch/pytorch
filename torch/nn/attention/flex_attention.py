@@ -274,6 +274,14 @@ class FlexKernelOptions(TypedDict, total=False):
     the control for callers that cannot reach this option, and it does not
     affect NVIDIA or Intel selection."""
 
+    FLYDSL_DQ_ACCUM_FP32: NotRequired[bool]
+    """Use FP32 for the private dQ accumulation workspace in FlyDSL backward.
+    Specify as ``bwd_FLYDSL_DQ_ACCUM_FP32`` with ``BACKEND="FLYDSL"``.
+    Default: True. False uses BF16 intermediate storage to reduce workspace
+    traffic, rounding after each KV owner and potentially increasing gradient
+    error for long sequences. Both modes use fixed-order, non-atomic accumulation
+    and return gradients in the input dtype. This option does not affect forward."""
+
     # ROCm-specific options
 
     kpack: NotRequired[int]

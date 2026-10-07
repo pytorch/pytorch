@@ -971,6 +971,13 @@ def flex_attention_backward(*args, **kwargs):
             kv_indices=kv_indices,
             full_kv_num_blocks=full_kv_num_blocks,
             full_kv_indices=full_kv_indices,
+            dq_accum_fp32=cast(
+                bool,
+                kernel_options.get(
+                    "bwd_FLYDSL_DQ_ACCUM_FP32",
+                    kernel_options.get("FLYDSL_DQ_ACCUM_FP32", True),
+                ),
+            ),
         )
 
     fwd_placeholder_inps = [

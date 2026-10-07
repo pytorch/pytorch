@@ -858,8 +858,11 @@ def create_flydsl_flex_attention_backward_kernel(
     kv_indices: TensorBox | None = None,
     full_kv_num_blocks: TensorBox | None = None,
     full_kv_indices: TensorBox | None = None,
+    dq_accum_fp32: bool = True,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a FlyDSL flex attention backward kernel for supported inputs."""
+    if not isinstance(dq_accum_fp32, bool):
+        raise ValueError("FlyDSL FLYDSL_DQ_ACCUM_FP32 must be a bool")
     if not runtime_available():
         raise RuntimeError(_flydsl_unavailable_message())
     if fw_subgraph is None or mask_graph is None:
@@ -1005,9 +1008,12 @@ def create_flydsl_flex_attention_backward_kernel(
         sequence_length=s,
     )
     key_rows = 128 if traversal == MASK_TRAVERSAL_BLOCK_LIST else 192
-    dq_partitions = choose_dq_partitions(bh, s, key_rows)
+    config["DQ_ACCUM_FP32"] = dq_accum_fp32
+    workspace_dtype = torch.float32 if dq_accum_fp32 else torch.bfloat16
+    workspace_element_bytes = 4 if dq_accum_fp32 else 2
+    dq_partitions = choose_dq_partitions(bh, s, key_rows, workspace_element_bytes)
     grad_query_workspace = make_scratch(
-        bh * dq_partitions * s * config["QK_HEAD_DIM"], torch.float32
+        bh * dq_partitions * s * config["QK_HEAD_DIM"], workspace_dtype
     )
     if traversal != MASK_TRAVERSAL_BLOCK_LIST:
         kv_chunks = q_chunks = 1

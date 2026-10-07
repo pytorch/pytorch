@@ -11,12 +11,15 @@ DIRECT_RANGE_CAUSAL = "causal"
 
 
 
-def choose_dq_partitions(batch_heads, sequence_length, key_rows):
+def choose_dq_partitions(batch_heads, sequence_length, key_rows, workspace_element_bytes=4):
     owners = (sequence_length + key_rows - 1) // key_rows
     if key_rows == 128:
         # Bound sparse slot traffic and each buffer view for both supported dimensions.
         head_group = min(32, batch_heads & -batch_heads)
-        max_slots = min(32, 0xFFFFFFFF // (sequence_length * 192 * head_group * 4))
+        max_slots = min(
+            32,
+            0xFFFFFFFF // (sequence_length * 192 * head_group * workspace_element_bytes),
+        )
         return min(owners, 1 << (max_slots.bit_length() - 1))
     # Keep long owner loops distributed even when heads fill the device.
     target = max(1 if owners <= 8 else 2, (256 + batch_heads - 1) // batch_heads)

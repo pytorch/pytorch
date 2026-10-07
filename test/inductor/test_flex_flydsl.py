@@ -243,6 +243,23 @@ class TestFlexFlyDSLGates(TestCase):
 
 @instantiate_parametrized_tests
 class TestFlexFlyDSLConfig(TestCase):
+    @parametrize("value", (None, 0, 1, "bf16", torch.float32))
+    def test_invalid_dq_accumulation_option(self, value):
+        with self.assertRaisesRegex(ValueError, "DQ_ACCUM_FP32 must be a bool"):
+            flex_flydsl_attention.create_flydsl_flex_attention_backward_kernel(
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                1.0,
+                128,
+                128,
+                dq_accum_fp32=value,
+            )
+
     @parametrize("mode", ("off", "strict", "warn_only"))
     def test_deterministic_backward(self, mode):
         with DeterministicGuard(mode != "off", warn_only=mode == "warn_only"):
@@ -702,6 +719,8 @@ class TestFlexFlyDSLRuntime(TestCase):
         scale=None,
         atol=0.1,
         rtol=0.05,
+        flydsl_options=None,
+        dq_atol=None,
     ):
         def clone(tensor):
             result = torch.empty_strided(
@@ -722,7 +741,10 @@ class TestFlexFlyDSLRuntime(TestCase):
                     v_,
                     block_mask=block_mask,
                     scale=scale,
-                    kernel_options={"BACKEND": backend},
+                    kernel_options={
+                        "BACKEND": backend,
+                        **((flydsl_options or {}) if backend == "FLYDSL" else {}),
+                    },
                 ),
                 fullgraph=True,
             )
@@ -738,9 +760,82 @@ class TestFlexFlyDSLRuntime(TestCase):
         ):
             # FlyDSL rounds intermediate probability and dS fragments to bf16.
             self.assertEqual(
-                actual, expected, atol=atol, rtol=rtol, msg=f"{name} mismatch"
+                actual,
+                expected,
+                atol=dq_atol if name == "dQ" and dq_atol is not None else atol,
+                rtol=rtol,
+                msg=f"{name} mismatch",
             )
         return flydsl
+
+    @parametrize("dq_accum_fp32", (True, False))
+    @parametrize("qk_dim", (128, 192))
+    @parametrize("mask_kind", ("dense", "causal", "two_buffer_document"))
+    def test_dq_accumulation_modes(self, device, dq_accum_fp32, qk_dim, mask_kind):
+        self._require_runtime()
+        # The sequence and head count reuse private slots in both traversals.
+        q, k, v, grad_out = self._make_inputs(
+            device=device, heads=16, seq=4352, qk_dim=qk_dim, seed=41
+        )
+        block_mask = self._make_mask(mask_kind, device=device, heads=16, seq=4352)
+        with DeterministicGuard(True):
+            first = self._compare_backward(
+                q,
+                k,
+                v,
+                grad_out,
+                block_mask=block_mask,
+                rtol=0.02,
+                flydsl_options={"bwd_FLYDSL_DQ_ACCUM_FP32": dq_accum_fp32},
+                dq_atol=0.02,
+            )
+            inputs = tuple(tensor.detach().requires_grad_(True) for tensor in (q, k, v))
+            compiled = torch.compile(
+                lambda q_, k_, v_: flex_attention(
+                    q_,
+                    k_,
+                    v_,
+                    block_mask=block_mask,
+                    kernel_options={
+                        "BACKEND": "FLYDSL",
+                        "bwd_FLYDSL_DQ_ACCUM_FP32": dq_accum_fp32,
+                    },
+                ),
+                fullgraph=True,
+            )
+            from torch._inductor.utils import run_and_get_code
+
+            def run():
+                output = compiled(*inputs)
+                grads = torch.autograd.grad(output, inputs, grad_out, retain_graph=True)
+                return output, grads
+
+            (output, second), code = run_and_get_code(run)
+            self.assertIn(
+                f"DQ_ACCUM_FP32: fx.Constexpr = {dq_accum_fp32}", "\n".join(code)
+            )
+            third = torch.autograd.grad(output, inputs, grad_out)
+            for expected, actual, repeated in zip(first, second, third, strict=True):
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+                self.assertEqual(repeated, actual, atol=0, rtol=0)
+
+            other_mode = torch.compile(
+                lambda q_, k_, v_: flex_attention(
+                    q_,
+                    k_,
+                    v_,
+                    block_mask=block_mask,
+                    kernel_options={
+                        "BACKEND": "FLYDSL",
+                        "bwd_FLYDSL_DQ_ACCUM_FP32": not dq_accum_fp32,
+                    },
+                ),
+                fullgraph=True,
+            )
+            other_grads = torch.autograd.grad(other_mode(*inputs), inputs, grad_out)
+            # Only dQ storage changes; retain exact dK/dV agreement across modes.
+            for actual, expected in zip(second[1:], other_grads[1:], strict=True):
+                self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @parametrize("case", _MASK_CASES, name_fn=lambda case: case[0])
     def test_masks_match_triton(self, device, case):

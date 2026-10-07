@@ -60,12 +60,18 @@ def build_flex_attn_bwd_module(
     dk_stride=None,
     dv_stride=None,
     lse_in_log2=False,
+    dq_accum_fp32=True,
 ):
     """Build the three-kernel deterministic BF16 backward launcher."""
     # Keep standalone entry-point validation even though Inductor checks these
     # constraints before registering the vendored kernel.
     if dtype_str != "bf16":
         raise ValueError(f"unsupported dtype {dtype_str}")
+    if not isinstance(dq_accum_fp32, bool):
+        raise ValueError("dq_accum_fp32 must be a bool")
+    dq_workspace_dtype = fx.Float32 if dq_accum_fp32 else fx.BFloat16
+    dq_copy_op = fx.rocdl.BufferCopy128b if dq_accum_fp32 else fx.rocdl.BufferCopy64b
+    dq_workspace_bytes = 4 if dq_accum_fp32 else 2
     if (qk_head_dim, value_head_dim) not in ((128, 128), (192, 128)):
         raise ValueError(
             "FlyDSL backward requires (qk_head_dim, value_head_dim) to be (128, 128) or (192, 128)"
@@ -118,7 +124,9 @@ def build_flex_attn_bwd_module(
     batch_heads = batch_size * num_heads
     workspace_head_group = min(32, batch_heads & -batch_heads)
     cta_head_group = min(16, batch_heads & -batch_heads)
-    dq_partitions = choose_dq_partitions(batch_heads, sequence_length, key_rows)
+    dq_partitions = choose_dq_partitions(
+        batch_heads, sequence_length, key_rows, dq_workspace_bytes
+    )
     num_sparse_blocks = sequence_length // sparse_q_block_size
     metadata_chunks = sequence_length // sparse_q_block_size
     max_partial_blocks_limit = (
@@ -359,7 +367,8 @@ def build_flex_attn_bwd_module(
             (unmasked_traversal or block_list_traversal)
             and dq_partitions < (sequence_length + key_rows - 1) // key_rows
         ):
-            zero_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Float32)
+            zero_elements = 16 // dq_workspace_bytes
+            zero_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), dq_workspace_dtype)
             clear_elements = dq_partitions * delta_rows_per_block * qk_head_dim
             zero_view = make_global_view(
                 grad_query,
@@ -367,14 +376,14 @@ def build_flex_attn_bwd_module(
                 (delta_grid * batch_heads, clear_elements),
                 (clear_elements, 1),
             )
-            zero_packs = fx.logical_divide(zero_view, fx.make_layout(4, 1))
-            zero = fx.make_rmem_tensor(4, fx.Float32)
-            zero.store(fx.Vector.filled(4, 0.0, fx.Float32).ir_value())
+            zero_packs = fx.logical_divide(zero_view, fx.make_layout(zero_elements, 1))
+            zero = fx.make_rmem_tensor(zero_elements, dq_workspace_dtype)
+            zero.store(fx.Vector.filled(zero_elements, 0.0, dq_workspace_dtype).ir_value())
             for part in fx.range_constexpr(
                 dq_partitions
                 * delta_rows_per_block
                 * qk_head_dim
-                // (compute_threads * 4)
+                // (compute_threads * zero_elements)
             ):
                 index = tid + fx.Int32(part * compute_threads)
                 fx.copy(zero_copy, zero, fx.slice(zero_packs, (None, index)))
@@ -619,7 +628,7 @@ def build_flex_attn_bwd_module(
                     )
                 )
                 g64 = fx.make_copy_atom(fx.rocdl.BufferCopy64b(), fx.BFloat16)
-                dq_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Float32)
+                dq_copy = fx.make_copy_atom(dq_copy_op(), dq_workspace_dtype)
                 read128 = fx.make_copy_atom(fx.UniversalCopy128b(), fx.BFloat16)
                 tr16 = fx.make_copy_atom(
                     fx.rocdl.cdna4.LDSReadTrans(16, 64), fx.BFloat16
@@ -928,7 +937,7 @@ def build_flex_attn_bwd_module(
                     return ds_fragment, key_fragments
 
                 previous_dq = [
-                    fx.make_rmem_tensor(4, fx.Float32)
+                    fx.make_rmem_tensor(4, dq_workspace_dtype)
                     for _ in fx.range_constexpr(2 * dq_phase_tiles)
                 ]
                 packed_dq = fx.logical_divide(dqview, fx.make_layout(4, 1))
@@ -968,9 +977,9 @@ def build_flex_attn_bwd_module(
                         4, softmax_scale, fx.Float32
                     )
                     if const_expr(not initialize):
-                        values = values + fx.Vector(previous_dq[part].load())
-                    output = fx.make_rmem_tensor(4, fx.Float32)
-                    output.store(values.ir_value())
+                        values = values + fx.Vector(previous_dq[part].load()).to(fx.Float32)
+                    output = fx.make_rmem_tensor(4, dq_workspace_dtype)
+                    output.store(values.to(dq_workspace_dtype).ir_value())
                     offset = (
                         (
                             (query_tile * fx.Int32(dq_partitions) + partial_slot)
@@ -1605,7 +1614,7 @@ def build_flex_attn_bwd_module(
         wave = tid // fx.Int32(64)
         query_base = query_tile * fx.Int32(64) + wave * fx.Int32(16)
         row_base = lane // fx.Int32(16) * fx.Int32(4)
-        load = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Float32)
+        load = fx.make_copy_atom(dq_copy_op(), dq_workspace_dtype)
         store = fx.make_copy_atom(fx.rocdl.BufferCopy64b(), fx.BFloat16)
         packed_source = fx.logical_divide(
             fx.make_view(
@@ -1680,7 +1689,7 @@ def build_flex_attn_bwd_module(
                         16 * qk_head_dim * workspace_head_group
                     )
                     for row in fx.range_constexpr(4):
-                        fragment = fx.make_rmem_tensor(4, fx.Float32)
+                        fragment = fx.make_rmem_tensor(4, dq_workspace_dtype)
                         fx.copy(
                             load,
                             fx.slice(
@@ -1693,10 +1702,10 @@ def build_flex_attn_bwd_module(
                 for index in fx.range_constexpr(qk_head_dim // 16):
                     accumulator = fragments[index]
                     if const_expr(owner == 0):
-                        accumulator.store(loaded[index].load())
+                        accumulator.store(fx.Vector(loaded[index].load()).to(fx.Float32).ir_value())
                     else:
                         accumulator.store(
-                            (fx.Vector(accumulator.load()) + fx.Vector(loaded[index].load())).ir_value()
+                            (fx.Vector(accumulator.load()) + fx.Vector(loaded[index].load()).to(fx.Float32)).ir_value()
                         )
         for block in fx.range_constexpr(qk_head_dim // 64):
             column = lane % fx.Int32(16) * fx.Int32(4) + fx.Int32(block * 64)
