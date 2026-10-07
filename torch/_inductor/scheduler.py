@@ -3373,53 +3373,53 @@ class BaseSchedulerNode:
             else:
                 continue
 
-            def get_buf_bytes(
-                buf: ir.Buffer | ir.TensorBox | ir.TorchBindObject | None,
-            ) -> int:
-                if not buf:
-                    return 0
-
-                if isinstance(buf, ir.TorchBindObject):
-                    return buf.get_buf_bytes()
-                elif isinstance(buf.layout, MultiOutputLayout):
-                    # Kind of a lazy way to get the MultiOutput nodes corresponding to
-                    # a MultiOutputLayout
-                    users = self.scheduler.name_to_buf[buf.get_name()].users
-                    tot = 0
-                    for user in users:
-                        if isinstance(user.node, OutputNode):
-                            continue
-                        if not isinstance(user.node, BaseSchedulerNode):
-                            raise AssertionError(
-                                "expected user.node to be a BaseSchedulerNode"
-                            )
-                        if isinstance(user.node.node, MultiOutput):
-                            for sched_buf in user.node.get_outputs():
-                                tot += get_buf_bytes(sched_buf.node)
-                        else:
-                            # Buf is a MultiOutputLayout but not all of its
-                            # users are MultiOutputs...
-                            # TODO: Figure out what's going on
-                            return 0
-                    return tot
-                elif isinstance(buf.layout, ir.NoneLayout):
-                    return sum(
-                        get_buf_bytes(V.graph.get_buffer(mut_name))
-                        for mut_name in buf.get_mutation_names()
-                    )
-                else:
-                    buf_elems = try_size_hint(sympy_product(buf.get_size()))
-                    return get_dtype_size(buf.get_dtype()) * min(
-                        buf_accessed_elems, buf_elems
-                    )
-
-            buf_bytes = get_buf_bytes(buf)
+            buf_bytes = self._get_buf_bytes(buf, buf_accessed_elems)
             if buf_name not in buf_byte_accesses:
                 buf_byte_accesses[buf_name] = buf_bytes
             else:
                 buf_byte_accesses[buf_name] += buf_bytes
 
         return buf_byte_accesses
+
+    def _get_buf_bytes(
+        self,
+        buf: ir.Buffer | ir.TensorBox | ir.TorchBindObject | None,
+        buf_accessed_elems: int,
+    ) -> int:
+        if not buf:
+            return 0
+
+        if isinstance(buf, ir.TorchBindObject):
+            return buf.get_buf_bytes()
+        elif isinstance(buf.layout, MultiOutputLayout):
+            # Kind of a lazy way to get the MultiOutput nodes corresponding to
+            # a MultiOutputLayout
+            users = self.scheduler.name_to_buf[buf.get_name()].users
+            tot = 0
+            for user in users:
+                if isinstance(user.node, OutputNode):
+                    continue
+                if not isinstance(user.node, BaseSchedulerNode):
+                    raise AssertionError("expected user.node to be a BaseSchedulerNode")
+                if isinstance(user.node.node, MultiOutput):
+                    for sched_buf in user.node.get_outputs():
+                        tot += self._get_buf_bytes(sched_buf.node, buf_accessed_elems)
+                else:
+                    # Buf is a MultiOutputLayout but not all of its
+                    # users are MultiOutputs...
+                    # TODO: Figure out what's going on
+                    return 0
+            return tot
+        elif isinstance(buf.layout, ir.NoneLayout):
+            return sum(
+                self._get_buf_bytes(V.graph.get_buffer(mut_name), buf_accessed_elems)
+                for mut_name in buf.get_mutation_names()
+            )
+        else:
+            buf_elems = V.graph.sizevars.optimization_hint(
+                sympy_product(buf.get_size()), fallback=0
+            )
+            return get_dtype_size(buf.get_dtype()) * min(buf_accessed_elems, buf_elems)
 
     @cache_on_self
     def estimate_flops(self) -> int | None:
@@ -5921,6 +5921,24 @@ class _LoopMutationTracker:
 _TILING_MEMORY_MISS = object()
 
 
+def _topological_sort_schedule_visit(
+    n: BaseSchedulerNode,
+    seen: OrderedSet[BaseSchedulerNode],
+    name_to_node: dict[str, BaseSchedulerNode],
+    result: list[BaseSchedulerNode],
+) -> None:
+    if n not in seen:
+        seen.add(n)
+        for dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
+            # We only care about doing toposort within `nodes`
+            if dep.name not in name_to_node:
+                continue
+            _topological_sort_schedule_visit(
+                name_to_node[dep.name], seen, name_to_node, result
+            )
+        result.append(n)
+
+
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -6477,6 +6495,11 @@ class Scheduler:
             node for node in self.nodes if node.get_name() not in removed_node_names
         ] + list(fe_nodes)
 
+    def _follow_mutation_renames(self, n: str) -> str:
+        if n in self.mutation_renames:
+            return self._follow_mutation_renames(self.mutation_renames[n])
+        return n
+
     def compute_dependencies(self) -> None:
         """
         Create dependency edges between nodes, handling aliasing and
@@ -6551,12 +6574,6 @@ class Scheduler:
                     else:
                         name_to_users[buf1_name] = name_to_users[buf2_name]
 
-        # pyrefly: ignore [not-a-type]
-        def rename(n: str) -> str:
-            if n in self.mutation_renames:
-                return rename(self.mutation_renames[n])
-            return n
-
         def add_user(
             # pyrefly: ignore [not-a-type]
             used_by_name: str,
@@ -6564,7 +6581,7 @@ class Scheduler:
             can_inplace: bool = False,
             is_weak: bool = False,
         ) -> None:
-            name_to_users[rename(used_by_name)].append(
+            name_to_users[self._follow_mutation_renames(used_by_name)].append(
                 NodeUser(user_node, can_inplace, is_weak)
             )
 
@@ -6643,7 +6660,7 @@ class Scheduler:
                         f"expected at most one mutation, got {len(buf.get_mutations())}"
                     )
                 for alt_name in buf.get_mutations():
-                    alt_name = rename(alt_name)
+                    alt_name = self._follow_mutation_renames(alt_name)
                     is_ordering_only = buf.is_ordering_only()
                     if is_ordering_only:
                         add_user(alt_name, node, is_weak=True)
@@ -6665,7 +6682,7 @@ class Scheduler:
                         for out_buf in user.node.get_outputs():
                             other_name = out_buf.get_name()
                             # this node must run after all prior readers
-                            other_name = rename(other_name)
+                            other_name = self._follow_mutation_renames(other_name)
                             # Check if the prior reader is a true alias (view) vs a clone.
                             # Views share underlying storage with the mutated buffer, so we
                             # need a real dependency (is_fake=False) to keep the view's
@@ -6698,7 +6715,9 @@ class Scheduler:
             # update our renaming scheme for the next iteration
             for buf in node.get_outputs():
                 for alt_name in buf.get_mutations():
-                    self.mutation_renames[rename(alt_name)] = buf.get_name()
+                    self.mutation_renames[self._follow_mutation_renames(alt_name)] = (
+                        buf.get_name()
+                    )
                     self.mutation_renames[alt_name] = buf.get_name()
                     self.mutation_real_name[buf.get_name()] = (
                         self.mutation_real_name.get(alt_name, alt_name)
@@ -6897,21 +6916,11 @@ class Scheduler:
         name_to_node: dict[str, BaseSchedulerNode] = dict()
         result: list[BaseSchedulerNode] = []
 
-        def visit(n: BaseSchedulerNode) -> None:
-            if n not in seen:
-                seen.add(n)
-                for dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
-                    # We only care about doing toposort within `nodes`
-                    if dep.name not in name_to_node:
-                        continue
-                    visit(name_to_node[dep.name])
-                result.append(n)
-
         for node in nodes:
             for name in node.get_buffer_names():
                 name_to_node[name] = node
         for node in nodes:
-            visit(node)
+            _topological_sort_schedule_visit(node, seen, name_to_node, result)
         return result
 
     @staticmethod
@@ -12006,6 +12015,28 @@ class Scheduler:
 
         return OrderedSet(sorted(res, key=operator.attrgetter("name")))
 
+    def _is_unallocated_buffer(self, buf_name: str) -> bool:
+        """
+        Checks if buf_name resolves to a NoneLayout buffer (following mutation_real_name).
+        Buffers with NoneLayout are not allocated so graph partition should not
+        take them as inputs or outputs.
+        """
+        buf = self.name_to_buf.get(buf_name, None)
+
+        if buf is None:
+            return False
+
+        if isinstance(buf.node.layout, NoneLayout):
+            # If there's a mutation real name, check the underlying buffer
+            # This handles both MutationOutput and other mutation ops like
+            # IndexPutFallback that have NoneLayout but mutate real buffers
+            if real_name := self.mutation_real_name.get(buf_name, None):
+                return self._is_unallocated_buffer(real_name)
+
+            return True
+
+        return False
+
     def get_graph_partition_signature(
         self, partitions: list[PartitionType], skip_cudagraphs: list[bool]
     ) -> list[GraphPartitionSignature]:
@@ -12017,28 +12048,6 @@ class Scheduler:
 
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
-
-        def is_unallocated_buffer(buf_name: str) -> bool:
-            """
-            Checks if buf_name resolves to a NoneLayout buffer (following mutation_real_name).
-            Buffers with NoneLayout are not allocated so graph partition should not
-            take them as inputs or outputs.
-            """
-            buf = self.name_to_buf.get(buf_name, None)
-
-            if buf is None:
-                return False
-
-            if isinstance(buf.node.layout, NoneLayout):
-                # If there's a mutation real name, check the underlying buffer
-                # This handles both MutationOutput and other mutation ops like
-                # IndexPutFallback that have NoneLayout but mutate real buffers
-                if real_name := self.mutation_real_name.get(buf_name, None):
-                    return is_unallocated_buffer(real_name)
-
-                return True
-
-            return False
 
         for partition, skip_cudagraph in zip(
             reversed(partitions), reversed(skip_cudagraphs)
@@ -12112,7 +12121,7 @@ class Scheduler:
             output_nodes = [
                 name_to_node[name]
                 for name in returned_output_names
-                if not is_unallocated_buffer(name)
+                if not self._is_unallocated_buffer(name)
             ]
 
             constant_names = [
