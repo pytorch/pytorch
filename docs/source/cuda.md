@@ -97,7 +97,31 @@
     Stream
     ExternalStream
     Event
+    execute_on_streams
 ```
+
+### Fork/join execution
+
+`torch.cuda.execute_on_streams(streams, fn, *inputs)` calls `fn` with corresponding
+items from each input sequence on each supplied stream, and returns a list of
+results in stream order. Each input sequence must have one item per stream.
+Ordinary streams, green-context streams, and mixtures are supported.
+Callbacks run sequentially on the host, but their CUDA work can run concurrently.
+Each stream waits for work already queued on the caller's current stream;
+subsequent caller-stream work waits for all work queued by the callbacks.
+This also applies to a single stream and to work queued before a callback raises.
+
+On the caller's device, the helper switches directly between streams and restores
+the caller once. Cross-device execution uses `torch.cuda.stream` to restore
+per-device stream state. Neither path synchronizes the host. After an exception,
+remaining callbacks are not invoked. Callbacks must enqueue work on the supplied
+stream or explicitly join other streams they use. The caller stream is the
+fork/join point, not every device's current stream.
+
+Keep tensors and any owning green contexts alive until their work completes;
+the usual cross-stream tensor lifetime rules still apply.
+Callbacks can enter `torch.cuda.use_mem_pool` themselves to choose the allocator
+used for their results.
 
 ## Graphs (beta)
 
@@ -589,6 +613,27 @@ it does not poison subsequent forks.
 Actual splitting and context creation always use CUDA, independently of this
 capability check.
 
+### Fork/join execution with green contexts
+
+Use `torch.cuda.execute_on_streams` with green-context streams to localize the
+execution of each callback's CUDA work:
+
+```python
+from torch.cuda.green_contexts import GreenContext
+
+contexts = GreenContext.split(num_sms=(24, 24), device_id=0)
+streams = [ctx.Stream() for ctx in contexts]
+inputs = [torch.randn(1024, device="cuda:0") for _ in streams]
+
+def compute(value: torch.Tensor) -> torch.Tensor:
+    return value * 2
+
+with torch.cuda.device(0):
+    outputs = torch.cuda.execute_on_streams(streams, compute, inputs)
+    result = outputs[0] + outputs[1]
+    torch.cuda.current_stream().synchronize()
+```
+
 ### Localized allocations
 
 With CUDA driver and cuda.bindings 13.4+, `LocalizedAllocator` allocates physical
@@ -622,6 +667,37 @@ with this allocator. The ctypes callbacks acquire the GIL while holding the
 native allocator mutex; an allocator-state query can acquire these locks in the
 opposite order and deadlock.
 ```
+
+#### Fork/join execution with localized outputs
+
+On GPUs with at least two locality domains, one can pair each green-context
+stream with a memory pool for the same domain, along with `execute_on_streams`
+to return localized outputs in stream order.
+
+```python
+from torch.cuda.green_contexts import GreenContext
+
+def compute(value: torch.Tensor, pool: torch.cuda.MemPool) -> torch.Tensor:
+    with torch.cuda.use_mem_pool(pool, device="cuda:0"):
+        return value * 2
+
+with torch.cuda.device(0):
+    domains = (0, 1)
+    contexts = GreenContext.split(locality_domain_ids=domains, device_id=0)
+    streams = [ctx.Stream() for ctx in contexts]
+    allocators = [torch.cuda.LocalizedAllocator(d, device="cuda:0") for d in domains]
+    pools = []
+    for allocator in allocators:
+        with torch.cuda.device(allocator.device_id):
+            pools.append(torch.cuda.MemPool(allocator=allocator.allocator()))
+    # non-localized inputs
+    inputs = [torch.randn(1024, device="cuda:0") for _ in streams]
+    # localized outputs: callback `compute` uses local pool for its allocations
+    outputs = torch.cuda.execute_on_streams(streams, compute, inputs, pools)
+    torch.cuda.current_stream().synchronize()
+```
+
+Keep the contexts, pools, and tensors alive until their GPU work completes.
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
