@@ -2610,6 +2610,10 @@ class CachingAutotuner(KernelInterface):
             and not debug_mode
             and not autograd_profiler._is_profiler_enabled
             and len(self.launchers) == 1
+            # The fast path skips save_gpu_kernel. A later AOTI compile that reuses
+            # this kernel must save its params again, because CudaKernelParamCache
+            # is keyed by kernel name and shared by every compile in the process.
+            and not launcher.store_cubin
         ):
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result

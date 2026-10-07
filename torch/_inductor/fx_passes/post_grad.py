@@ -818,6 +818,10 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         num_init_leaves = len(fx_init)
         _, ys_outputs = _extract_carry_and_out(cur_node.meta["val"], num_init_leaves)
 
+        # The nesting is what makes replace_by_example treat the list as the scan node's
+        # unpacked outputs. Otherwise, a single flat output (one carry,
+        # no ys) looks like a 1:1 replacement and leaves getitem on a tensor.
+        # TODO: error-prone for any tuple-valued node; disambiguate on its meta["val"].
         def lower_to_while_loop(*args, **kwargs):
             """
             The traced graph of this function will be used to replace the original scan fx_node.
@@ -841,7 +845,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                     )
                     for ys_out in ys_outputs
                 ]
-                return list(init) + empty_ys
+                return (list(init) + empty_ys,)
 
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
@@ -912,7 +916,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 ),
                 operands_spec,
             )
-            return list(last_carry) + list(ys_outs)
+            return (list(last_carry) + list(ys_outs),)
 
         lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
             (
@@ -1116,14 +1120,8 @@ def pointless_cumsum_check(match: Match) -> bool:
     if len(match.kwargs["shape"]) == 0:
         return False
     # A symbolic fill_value arrives as an fx Node, which the replacement's int() and
-    # * both reject. A boolean full stays folded: bool(Node) is True, the right
-    # saturation for every nonzero fill and the wrong one for a zero fill, but
-    # declining is worse today - inductor's own full(..., dtype=bool) lowering drops
-    # the bool cast for a symbolic int fill (#194062). Drop the exemption when that
-    # lands.
-    return is_boolean_dtype(match.kwargs["dtype"]) or not isinstance(
-        match.kwargs["fill_value"], torch.fx.Node
-    )
+    # * both reject.
+    return not isinstance(match.kwargs["fill_value"], torch.fx.Node)
 
 
 @register_graph_pattern(
@@ -1140,13 +1138,16 @@ def pointless_cumsum_check(match: Match) -> bool:
             _users=MULTIPLE,
         ),
         KeywordArg("dim"),
+        dtype=KeywordArg("out_dtype"),
         _users=MULTIPLE,
     ),
     extra_check=pointless_cumsum_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )
-def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype, dim):
+def pointless_cumsum_replacement(
+    match: Match, shape, fill_value, device, dtype, dim, out_dtype
+):
     """Based on a pattern in OPTForCausalLM"""
 
     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
@@ -1155,7 +1156,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
         # cumsum promotes all integral types to int64
         dtype = torch.int64
 
-    out_dtype = match.output_node().kwargs.get("dtype") or dtype
+    out_dtype = out_dtype or dtype
     bool_out = is_boolean_dtype(out_dtype)  # pyrefly: ignore[bad-argument-type]
     # pyrefly: ignore[bad-argument-type]
     integral_out = bool_out or is_integer_dtype(out_dtype)

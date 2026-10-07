@@ -29,6 +29,7 @@ from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
+    _producer_fusion_enabled_inputs,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
@@ -48,7 +49,11 @@ from torch._inductor.scheduler import (
     SubParentOutputGroup,
 )
 from torch._inductor.sizevars import SizeVarAllocator
-from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
+from torch._inductor.utils import (
+    fresh_inductor_cache,
+    run_and_get_code,
+    snode_args_kwargs,
+)
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -2283,6 +2288,41 @@ class TestScheduler(TestCase):
             None,
         )
 
+    @inductor_config.patch(reorder_for_peak_memory=True)
+    @parametrize("cpp_wrapper", (False, True))
+    @dtypes(torch.complex64, torch.complex128)
+    @xfailIfNoAcceleratorTriton
+    def test_mutating_fallback_returned_alias_ordering(
+        self, device, dtype, cpp_wrapper
+    ):
+        def fn(x, index, values, replacement):
+            x.index_put_((index,), values)
+            result = x.real[:, None].expand(-1, 128).square()
+            x.copy_(torch.cat((replacement, replacement)))
+            return result, x
+
+        args = (
+            torch.zeros(32, device=device, dtype=dtype),
+            torch.arange(0, 32, 2, device=device),
+            torch.full((16,), 1 + 2j, device=device, dtype=dtype),
+            torch.full((16,), 3 + 4j, device=device, dtype=dtype),
+        )
+        expected = fn(*(arg.clone() for arg in args))
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(cpp_wrapper=cpp_wrapper),
+        ):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), *(arg.clone() for arg in args)
+            )
+        self.assertEqual(actual, expected)
+        fallback_call = (
+            'findSchemaOrThrow("aten::index_put_", "")'
+            if cpp_wrapper
+            else "= torch.ops.aten.index_put_.default("
+        )
+        self.assertIn(fallback_call, "\n".join(code))
+
     def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
         scheduler = Scheduler.__new__(Scheduler)
 
@@ -2512,6 +2552,35 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
+    @parametrize(
+        "prologue_enabled,epilogue_enabled,expected",
+        (
+            (True, True, ("load", "both", "store")),
+            (True, False, ("load",)),
+            (False, True, ("store",)),
+            (False, False, ()),
+        ),
+    )
+    def test_producer_fusion_allowed_inputs_respect_placement_flags(
+        self,
+        prologue_enabled: bool,
+        epilogue_enabled: bool,
+        expected: tuple[str, ...],
+    ):
+        template = Mock()
+        template.allow_prologue_fusion = prologue_enabled
+        template.allow_epilogue_fusion = epilogue_enabled
+        template.load_input_fusion_allowed_inputs = OrderedSet(("load", "both"))
+        template.store_output_fusion_allowed_inputs = OrderedSet(("store", "both"))
+
+        template_node = Mock()
+        template_node.get_template_node.return_value = template
+
+        self.assertEqual(
+            _producer_fusion_enabled_inputs(template_node),
+            OrderedSet(expected),
+        )
+
     def test_prologue_fusion_uses_template_aliasing_hook(self):
         def make_prologue_and_template(hook_blocks: bool):
             prologue_node = Mock()
@@ -2538,8 +2607,10 @@ class TestScheduler(TestCase):
             input_node.get_name.return_value = "x"
             template.inputs = [input_node]
             template.allow_prologue_fusion = True
-            template.get_allowed_prologue_inps.return_value = OrderedSet(["x"])
-            template.has_aliasing_or_mutation_for_prologue_fusion.return_value = (
+            template.allow_epilogue_fusion = False
+            template.load_input_fusion_allowed_inputs = OrderedSet(["x"])
+            template.store_output_fusion_allowed_inputs = OrderedSet()
+            template.has_aliasing_or_mutation_for_producer_fusion.return_value = (
                 hook_blocks
             )
             template_node.get_template_node.return_value = template
@@ -2582,7 +2653,7 @@ class TestScheduler(TestCase):
             with V.set_graph_handler(graph), V.set_choices_handler(choices):
                 result = Scheduler._can_fuse(scheduler, prologue_node, template_node)
 
-            template.has_aliasing_or_mutation_for_prologue_fusion.assert_called_once_with(
+            template.has_aliasing_or_mutation_for_producer_fusion.assert_called_once_with(
                 template_node
             )
             template_node.has_aliasing_or_mutation.assert_not_called()
