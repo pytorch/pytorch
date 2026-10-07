@@ -189,6 +189,19 @@ class WelfordOps:
         return (mean, m2, nn)
 
     @cute.jit
+    def combine_uniform(self, a, b, index, count: cutlass.Constexpr, weight=None):
+        # Preserve Chan's arithmetic; derive exact counts outside the accumulator chain.
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        na, nb = self.acc(index) * self.acc(count), self.acc(count)
+        nn = na + nb
+        nb_over_n = nb / nn if const_expr(weight is None) else weight
+        delta = mb - ma
+        mean = ma + delta * nb_over_n
+        m2 = m2a + m2b + delta * delta * na * nb_over_n
+        return (mean, m2, nn)
+
+    @cute.jit
     def combine_equal(self, a, b, count: cutlass.Constexpr):
         """Combine two nonempty states containing the same number of values."""
         ma, m2a, _ = a
