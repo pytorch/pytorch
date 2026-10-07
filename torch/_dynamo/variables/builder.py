@@ -233,6 +233,7 @@ from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
+    ClassMethodDescriptorVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
@@ -1974,6 +1975,8 @@ class VariableBuilder:
                 cv_obj=value,
                 source=self.source,
             )
+        elif isinstance(value, types.ClassMethodDescriptorType):
+            return ClassMethodDescriptorVariable(value, source=self.source)
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
@@ -3763,7 +3766,9 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
-        wrapped_value = torch.tensor(value)
+        # Match the runtime calling convention: codegen passes graph args with
+        # pass_arg_as_tensor=True through torch._as_tensor_fullprec.
+        wrapped_value = torch._as_tensor_fullprec(value)
         if not isinstance(self.get_source(), RandomValueSource):
             install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
@@ -5528,6 +5533,12 @@ class SourcelessBuilder:
             return UserDefinedObjectVariable(value)
         elif isinstance(value, (re.Pattern, re.Match)):
             return ConstantLikeVariable(value)
+        elif type(value) is types.DynamicClassAttribute:
+            # DynamicClassAttribute is a pure-Python descriptor. Instances created
+            # while tracing (for example in a class body) are ephemeral and need no
+            # source-backed reconstruction; model them as ordinary user objects so
+            # raw __dict__ descriptor reads can follow their Python attributes.
+            return UserDefinedObjectVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             try:
                 return ConstantVariable.create(str(value))
