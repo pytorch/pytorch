@@ -2417,6 +2417,9 @@ class GraphLowering(torch.fx.Interpreter):
                 f"fx node is: {n.format_node()}\n"
                 f"new operations are:\n\n{format_new_defs()}"
             )
+        # Track defined unbacked symbols even when runtime asserts are disabled;
+        # layout reconciliation uses this to decide which strides codegen can bind.
+        self.bound_unbacked_symbols |= new_unbacked_defs
         self.create_deferred_runtime_asserts(n, new_unbacked_defs)
         return result
 
@@ -2480,11 +2483,6 @@ class GraphLowering(torch.fx.Interpreter):
             if assert_expr != True:  # noqa: E712
                 make_assert(assert_expr, f"{assert_expr} to be True")
         else:
-            # bound_unbacked_symbols tracks the symbols that are created so far,
-            # we use it to make sure that runtime assertions are added after all
-            # symbols used in them are defined.
-            self.bound_unbacked_symbols |= new_unbacked_defs
-
             shape_env = V.graph.sizevars.shape_env
 
             # Emit code for runtime asserts that can be inserted at this point.
