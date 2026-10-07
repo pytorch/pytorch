@@ -1173,6 +1173,7 @@ class TileReduce:
         grp = const_expr(self.itree.combine_grp)
         rpb = const_expr(self.itree.rows_per_block)
         tile_n = const_expr(self.itree.combine_tile)  # partials per row per tile
+        unroll = const_expr(self.itree.combine_unroll)
         mult = const_expr(tile_n // (WARP * grp))  # cp.async per lane per row
         ntiles = const_expr(nbatch // tile_n)
         # Pad each row's run by `grp` so a lane's run stays transfer-aligned while the runs start in
@@ -1202,7 +1203,7 @@ class TileReduce:
         live_lane = lane if lane < Int32(const_expr(rpb)) else Int32(0)
         run = live_lane * Int32(const_expr(pitch))
         take = lambda j: tuple(  # noqa: E731
-            fdtypes[f](sbuf[f][run + Int32(const_expr(j))]) for f in range(nf)
+            fdtypes[f](sbuf[f][run + Int32(j)]) for f in range(nf)
         )
 
         # A tile of every row in the block, one coalesced cp.async per (row, lane). INLINED at both
@@ -1226,8 +1227,12 @@ class TileReduce:
         # Tile 0 SEEDS the chain from partial 0 -- never from the identity, since `0.0 + -0.0` is
         # `+0.0` and this fold's first value can be a negative zero.
         acc = take(0)
-        for j in cutlass.range_constexpr(tile_n - 1):
-            acc = combine_fn(acc, take(const_expr(j + 1)))
+        if const_expr(unroll):
+            for j in cutlass.range(1, tile_n, unroll=unroll):
+                acc = combine_fn(acc, take(j))
+        else:
+            for j in cutlass.range_constexpr(tile_n - 1):
+                acc = combine_fn(acc, take(const_expr(j + 1)))
         for t in cutlass.range(1, ntiles):
             cute.arch.barrier()  # the refill overwrites what the previous fold just read
             for i in cutlass.range_constexpr(rpb):
@@ -1248,8 +1253,12 @@ class TileReduce:
             cute.arch.cp_async_commit_group()
             cute.arch.cp_async_wait_group(0)
             cute.arch.barrier()
-            for j in cutlass.range_constexpr(tile_n):
-                acc = combine_fn(acc, take(j))
+            if const_expr(unroll):
+                for j in cutlass.range(tile_n, unroll=unroll):
+                    acc = combine_fn(acc, take(j))
+            else:
+                for j in cutlass.range_constexpr(tile_n):
+                    acc = combine_fn(acc, take(j))
         return acc
 
     @cute.jit
