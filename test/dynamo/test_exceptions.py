@@ -2102,6 +2102,35 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             gc.enable()
         self.assertEqual(leaked, 0)
 
+    def test_jump_graph_break_no_reference_cycle(self):
+        # A data-dependent branch graph-breaks via an Unsupported caught in
+        # generic_jump; it must not stay bound there, where its traceback would
+        # pin that frame and the rest of the Dynamo stack until the next gc.
+        def fn(x):
+            if x.sum() > 0:
+                return x + 1
+            return x - 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(8)
+
+        torch._dynamo.reset()
+        gc.collect()
+        gc.disable()
+        gc.set_debug(gc.DEBUG_SAVEALL)
+        try:
+            opt_fn(x)
+            gc.collect()
+            leaked = sum(
+                type(o) is types.FrameType and o.f_code.co_name == "jump_graph_break"
+                for o in gc.garbage
+            )
+        finally:
+            gc.set_debug(0)
+            gc.garbage.clear()
+            gc.enable()
+        self.assertEqual(leaked, 0)
+
     def test_exception_subclass_super_init_with_kwargs(self):
         class MyError(RuntimeError):
             def __init__(self, msg, *, context=None):
