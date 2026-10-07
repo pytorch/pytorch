@@ -10,6 +10,7 @@ import torch
 import torch.nn.attention as attention
 import torch.nn.functional as F
 from torch.nn.attention import _cudnn, _registry, sdpa_kernel, SDPBackend
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_CUDNN_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -19,6 +20,7 @@ from torch.testing._internal.common_utils import (
 
 
 _SHAPE = (2, 8, 256, 64)
+_NO_CUDNN_ATTENTION = "cuDNN attention unsupported"
 
 
 def _cudnn_python_available() -> bool:
@@ -45,29 +47,65 @@ def _fake_impl(live, tag):
     return register
 
 
+def _counting_cudnn_provider(calls):
+    """A register_fn that, like cudnn.torch, overrides the cuDNN SDPA op.
+
+    The override counts its calls and forwards to the built-in worker op, so it
+    exercises the dispatcher without nvidia-cudnn-frontend.
+    """
+
+    def forward(q, k, v, bias, lse, dropout_p=0.0, causal=False, debug=False, **kw):
+        calls.append(1)
+        max_q, max_k = q.size(-2), k.size(-2)
+        args = (q, k, v, bias, None, None, max_q, max_k, lse, dropout_p, causal, debug)
+        return torch.ops.aten._cudnn_attention_forward(*args, **kw)
+
+    class Handle:
+        def __init__(self, lib):
+            self.lib = lib
+
+        def remove(self):
+            # Dropping the last reference would also deregister, but only once
+            # it is collected.
+            self.lib._destroy()
+
+    def register():
+        lib = torch.library.Library("aten", "IMPL")
+        lib.impl("_scaled_dot_product_cudnn_attention", forward, "CUDA")
+        return Handle(lib)
+
+    return register
+
+
+def _isolate_switch_state(test):
+    """Empty the flash registry and turn the switch off until ``test`` ends."""
+    impls = _registry._FLASH_ATTENTION_IMPLS
+    saved = (
+        dict(impls),
+        _registry._FLASH_ATTENTION_ACTIVE,
+        _cudnn._PROVIDER_REGISTER_FN,
+        _cudnn._ACTIVE_HANDLE,
+    )
+
+    def restore():
+        impls.clear()
+        impls.update(saved[0])
+        _registry._FLASH_ATTENTION_ACTIVE = saved[1]
+        _cudnn._PROVIDER_REGISTER_FN, _cudnn._ACTIVE_HANDLE = saved[2:]
+
+    test.addCleanup(restore)
+    impls.clear()
+    _registry._FLASH_ATTENTION_ACTIVE = None
+    _cudnn._PROVIDER_REGISTER_FN = _cudnn._ACTIVE_HANDLE = None
+
+
 class TestCuDNNPythonSDPALifecycle(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
-        self._saved = (
-            dict(_registry._FLASH_ATTENTION_IMPLS),
-            _registry._FLASH_ATTENTION_ACTIVE,
-            _cudnn._PROVIDER_REGISTER_FN,
-            _cudnn._ACTIVE_HANDLE,
-        )
-        _registry._FLASH_ATTENTION_IMPLS.clear()
-        _registry._FLASH_ATTENTION_ACTIVE = None
-        _cudnn._PROVIDER_REGISTER_FN = _cudnn._ACTIVE_HANDLE = None
+        _isolate_switch_state(self)
         self.live = []
-
-    def tearDown(self):
-        impls, active, register_fn, handle = self._saved
-        _registry._FLASH_ATTENTION_IMPLS.clear()
-        _registry._FLASH_ATTENTION_IMPLS.update(impls)
-        _registry._FLASH_ATTENTION_ACTIVE = active
-        _cudnn._PROVIDER_REGISTER_FN, _cudnn._ACTIVE_HANDLE = register_fn, handle
-        super().tearDown()
 
     def _register_provider(self):
         # What importing the provider does; "types" then stands in for it.
@@ -81,6 +119,7 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
             with self.assertRaises(ImportError):
                 torch.backends.cuda.enable_cudnn_sdp_python(True)
         self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
+        torch.backends.cuda.enable_cudnn_sdp_python(False)
 
     def test_provider_without_registration_raises(self):
         with self.assertRaisesRegex(RuntimeError, "did not register"):
@@ -102,13 +141,30 @@ class TestCuDNNPythonSDPALifecycle(TestCase):
         self.assertTrue(_cudnn.is_enabled())
         self.assertEqual(sorted(self.live), ["cudnn", "flash"])
 
-    def test_enable_takes_over_a_registry_activated_provider(self):
+    def test_enable_adopts_a_registry_activated_provider(self):
         self._register_provider()
         attention.activate_flash_attention_impl("CUDNN")
+        handle = _registry._FLASH_ATTENTION_ACTIVE[1]
         _cudnn.enable("types")
+        # Adopted, not reinstalled: there is no window in which a failing
+        # reinstall could leave cuDNN off.
+        self.assertIs(_cudnn._ACTIVE_HANDLE, handle)
         self.assertEqual(self.live, ["cudnn"])
         self.assertIsNone(attention.current_flash_attention_impl())
-        self.assertTrue(_cudnn.is_enabled())
+
+    def test_registry_activated_provider_is_reported_enabled(self):
+        self._register_provider()
+        attention.activate_flash_attention_impl("CUDNN")
+        self.assertTrue(torch.backends.cuda.cudnn_sdp_python_enabled())
+        self.assertIsNone(attention.current_flash_attention_impl())
+
+    def test_disable_removes_a_registry_activated_provider(self):
+        self._register_provider()
+        attention.activate_flash_attention_impl("CUDNN")
+        torch.backends.cuda.enable_cudnn_sdp_python(False)
+        self.assertEqual(self.live, [])
+        self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
+        self.assertIsNone(attention.current_flash_attention_impl())
 
     def test_enable_is_idempotent(self):
         self._register_provider()
@@ -147,6 +203,44 @@ class TestCuDNNPythonSDPA(TestCase):
     def tearDown(self):
         torch.backends.cuda.enable_cudnn_sdp_python(False)
         super().tearDown()
+
+    def _sdpa(self, q, backend=SDPBackend.CUDNN_ATTENTION):
+        with sdpa_kernel(backend):
+            return F.scaled_dot_product_attention(q, q, q, is_causal=True)
+
+    @unittest.skipUnless(PLATFORM_SUPPORTS_CUDNN_ATTENTION, _NO_CUDNN_ATTENTION)
+    def test_switch_routes_the_cudnn_op(self, device):
+        _isolate_switch_state(self)
+        calls = []
+        register = _counting_cudnn_provider(calls)
+        attention.register_flash_attention_impl("CUDNN", register_fn=register)
+        q = torch.randn(_SHAPE, device=device, dtype=torch.bfloat16)
+
+        ref = self._sdpa(q)
+        torch.backends.cuda.enable_cudnn_sdp_python(True)
+        self.assertEqual(self._sdpa(q), ref)
+        self.assertEqual(len(calls), 1)
+        # sdpa_kernel(MATH) turns enable_cudnn_sdp off, which must still win.
+        self._sdpa(q, SDPBackend.MATH)
+        self.assertEqual(len(calls), 1)
+        torch.backends.cuda.enable_cudnn_sdp_python(False)
+        self.assertEqual(self._sdpa(q), ref)
+        self.assertEqual(len(calls), 1)
+
+    @unittest.skipUnless(PLATFORM_SUPPORTS_CUDNN_ATTENTION, _NO_CUDNN_ATTENTION)
+    def test_switch_turns_off_a_registry_activated_provider(self, device):
+        _isolate_switch_state(self)
+        calls = []
+        register = _counting_cudnn_provider(calls)
+        attention.register_flash_attention_impl("CUDNN", register_fn=register)
+        q = torch.randn(_SHAPE, device=device, dtype=torch.bfloat16)
+
+        attention.activate_flash_attention_impl("CUDNN")
+        self._sdpa(q)
+        self.assertEqual(len(calls), 1)
+        torch.backends.cuda.enable_cudnn_sdp_python(False)
+        self._sdpa(q)
+        self.assertEqual(len(calls), 1)
 
     @unittest.skipUnless(_cudnn_python_available(), "cuDNN Python SDPA unavailable")
     def test_selected_backend_serves_forward_and_backward(self, device):

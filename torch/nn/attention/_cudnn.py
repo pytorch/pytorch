@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 
 # Set while the provider's kernels are installed.
 _ACTIVE_HANDLE: _ProviderHandle | None = None
-# The provider's register_fn, captured once; see _capture_provider().
+# The provider's register_fn, taken from the flash registry; see
+# _take_over_registration().
 _PROVIDER_REGISTER_FN: _registry._RegisterFn | None = None
 
 
@@ -44,49 +45,58 @@ def is_available(module_path: str = _CUDNN_MODULE_PATH) -> bool:
 
 
 def is_enabled() -> bool:
+    _take_over_registration()
     return _ACTIVE_HANDLE is not None
 
 
 def enable(module_path: str = _CUDNN_MODULE_PATH) -> None:
     global _ACTIVE_HANDLE
+    _take_over_registration()
+    if _PROVIDER_REGISTER_FN is None:
+        # Importing the provider registers it in the flash registry.
+        importlib.import_module(module_path)
+        _take_over_registration()
     if _ACTIVE_HANDLE is not None:
         return
     register_fn = _PROVIDER_REGISTER_FN
-    if register_fn is None:
-        register_fn = _capture_provider(module_path)
-    _ACTIVE_HANDLE = register_fn()
-
-
-def disable() -> None:
-    global _ACTIVE_HANDLE
-    handle, _ACTIVE_HANDLE = _ACTIVE_HANDLE, None
-    if handle is not None:
-        handle.remove()
-
-
-def _capture_provider(module_path: str) -> _registry._RegisterFn:
-    """Import the provider and take its register_fn out of the flash registry.
-
-    The package registers "CUDNN" as a flash attention impl on import. Left
-    there, it would be a second switch whose state this module cannot see:
-    activating another flash impl would remove cuDNN's kernels, and disabling
-    here would leave the registry reporting "CUDNN" as active.
-    """
-    global _PROVIDER_REGISTER_FN
-    importlib.import_module(module_path)
-    register_fn = _registry._FLASH_ATTENTION_IMPLS.pop("CUDNN", None)
     if register_fn is None:
         raise RuntimeError(
             f"'{module_path}' did not register a 'CUDNN' implementation; "
             "a newer nvidia-cudnn-frontend is required"
         )
-    # Already activated through the registry: uninstall it so only one copy of
-    # the kernels is ever installed, owned here.
+    _ACTIVE_HANDLE = register_fn()
+
+
+def disable() -> None:
+    global _ACTIVE_HANDLE
+    _take_over_registration()
+    handle, _ACTIVE_HANDLE = _ACTIVE_HANDLE, None
+    if handle is not None:
+        handle.remove()
+
+
+def _take_over_registration() -> None:
+    """Move the provider's "CUDNN" flash registry entry, and its activation, here.
+
+    The package registers "CUDNN" as a flash attention impl on import. Left
+    there, it is a second switch whose state this module cannot see:
+    activating another flash impl would remove cuDNN's kernels, and disabling
+    here would leave them installed. Every entry point above calls this first.
+    """
+    global _ACTIVE_HANDLE, _PROVIDER_REGISTER_FN
+    register_fn = _registry._FLASH_ATTENTION_IMPLS.pop("CUDNN", None)
+    if register_fn is not None:
+        _PROVIDER_REGISTER_FN = register_fn
     active = _registry._FLASH_ATTENTION_ACTIVE
-    if active is not None and active[0] == "CUDNN":
-        _registry.restore_flash_attention_impl()
-    _PROVIDER_REGISTER_FN = register_fn
-    return register_fn
+    if active is None or active[0] != "CUDNN":
+        return
+    # Adopt the installed kernels rather than reinstall them, so there is
+    # nothing left to fail between removing one copy and installing another.
+    _registry._FLASH_ATTENTION_ACTIVE = None
+    if _ACTIVE_HANDLE is None:
+        _ACTIVE_HANDLE = active[1]
+    else:
+        active[1].remove()
 
 
 def _enable_from_env() -> None:
