@@ -2200,6 +2200,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             device_id=device_idx,
         )
         dist.all_reduce(torch.empty(1, device=torch.device("cuda", device_idx)))
+        # Tear down explicitly so the nccl2 watchdog is stopped before
+        # interpreter shutdown unloads CUDA (avoids a teardown race).
+        dist.destroy_process_group()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
