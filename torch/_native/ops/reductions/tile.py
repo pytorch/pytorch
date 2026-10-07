@@ -258,6 +258,54 @@ def fold_decoded(
 
 
 @cute.jit
+def fold_decoded_uniform_tree(
+    trait,
+    mX,
+    obase,
+    rstrides,
+    threads_per_block: cutlass.Constexpr,
+    tidx,
+    count: cutlass.Constexpr,
+):
+    """Fold equal-size Welford leaves without runtime divisions."""
+    tree = []
+    nloads = const_expr(count // threads_per_block)
+    remainder = const_expr(count % threads_per_block)
+    stride = rstrides[0]
+    for load in cutlass.range_constexpr(nloads):
+        r = tidx + Int32(const_expr(load * threads_per_block))
+        carry = trait.leaf(
+            _load_reduction_value(trait, mX, obase + Int64(r) * stride, False),
+            r,
+        )
+        width = 1
+        merges = ((load + 1) & -(load + 1)).bit_length() - 1
+        for _ in cutlass.range_constexpr(merges):
+            carry = trait.combine_equal(tree.pop(), carry, const_expr(width))
+            width *= 2
+        tree.append(carry)
+    acc = tree[0]
+    for i in cutlass.range_constexpr(1, len(tree)):
+        acc = trait.combine(acc, tree[i])
+    if const_expr(remainder):
+        r = Int32(const_expr(nloads * threads_per_block)) + tidx
+        valid = tidx < Int32(remainder)
+        safe = r if valid else Int32(0)
+        leaf = trait.leaf(
+            _load_reduction_value(trait, mX, obase + Int64(safe) * stride, False),
+            safe,
+        )
+        ident = trait.init()
+        acc = trait.combine(
+            acc,
+            tuple(
+                leaf[f] if valid else ident[f] for f in range(const_expr(trait.nfields))
+            ),
+        )
+    return acc
+
+
+@cute.jit
 def fold_partials_run(
     trait, mIns, obase, rb, threads_per_block: cutlass.Constexpr, tidx, in_base
 ):
@@ -696,11 +744,25 @@ class TileReduce:
         # Duck-typed because its driver-owned type would invert the dependency.
         itree: Any = None,
         ragged_vector=False,
+        general_tree_count: int = 0,
     ) -> None:
         if axis not in ("row", "col", "general"):
             raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
         if order not in ("linear", "inner_tree"):
             raise ValueError(f"order must be 'linear' or 'inner_tree', got {order!r}")
+        if general_tree_count and (
+            axis != "general"
+            or order != "linear"
+            or combine
+            or npairs_red != 1
+            or wide_gidx
+            or wide_red
+            or gidx_from != "r"
+            or getattr(trait, "complex_input", False)
+            or not hasattr(trait, "combine_equal")
+            or general_tree_count < threads_per_block
+        ):
+            raise ValueError("general tree needs a nonempty Welford thread fold")
         if ragged_vector and (
             axis != "row"
             or order != "linear"
@@ -779,6 +841,7 @@ class TileReduce:
         self.final = final
         self.unroll = unroll
         self.ragged_vector = ragged_vector
+        self.general_tree_count = general_tree_count
         self.use_tma = use_tma
         self.combine = combine
         self.batched_col = batched_col
@@ -873,6 +936,7 @@ class TileReduce:
             self.flat_tail,
             self.ragged_chunk,
             self.ragged_vector,
+            self.general_tree_count,
             self.order,
             # Fixed DAGs key on N, requiring one kernel per shape instead of per vec class.
             self.itree.sig if self.itree is not None else None,
@@ -1695,6 +1759,18 @@ class TileReduce:
                         const_expr(self.threads_per_block),
                         Int64(lane) if const_expr(self.wide_count) else lane,
                         in_base,
+                    ),
+                )
+            elif const_expr(self.general_tree_count):
+                accs = (
+                    fold_decoded_uniform_tree(
+                        trait,
+                        mIns[0],
+                        obase,
+                        rstrides,
+                        const_expr(self.threads_per_block),
+                        lane,
+                        const_expr(self.general_tree_count),
                     ),
                 )
             else:

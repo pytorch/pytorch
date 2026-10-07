@@ -114,6 +114,24 @@ class TestKernelGeneral(TestCase):
             expected = torch.tensor([r * strides[0] + q * strides[1]], device="cuda")
             self.assertEqual(out, expected)
 
+    def test_uniform_welford_tree(self):
+        """Equal-count trees must retain Welford accuracy without serial counts."""
+        rows, count = 17, 1024
+        x = torch.randn(rows, count, device="cuda")
+        out = torch.empty(rows, device="cuda")
+        op = kg.ReduceBlock(
+            T.WelfordOps(correction=1, acc=cutlass.Float32),
+            count=count,
+            num_o=rows,
+            red_pairs=((count, 1),),
+            kept_pairs=((rows, count),),
+            tree_count=count,
+        )
+        kg._launch(
+            op, ("test_uniform_welford_tree",) + op.cache_sig, [x.flatten()], [out]
+        )
+        self.assertEqual(out, x.var(dim=1), atol=1e-5, rtol=1e-5)
+
     def test_internal_invariants_raise(self):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
         # check on its documented invalid input.
