@@ -1062,6 +1062,17 @@ def _get_inductor_debug_symbol_cflags() -> tuple[list[str], list[str]]:
     return cflags, ldflags
 
 
+# torch.cpu.get_capabilities() names mapped to GCC -march extension names, used
+# when the arch has to be spelled out instead of using -march=native.
+_AARCH64_GCC_EXTENSIONS = {
+    "dot": "dotprod",
+    "fp16_arith": "fp16",
+    "fhm": "fp16fml",
+    "bf16": "bf16",
+    "i8mm": "i8mm",
+}
+
+
 @functools.cache
 def _get_linux_aarch64_cpu_flags() -> OrderedSet[str]:
     flags: OrderedSet[str] = OrderedSet()
@@ -1075,7 +1086,7 @@ def _get_linux_aarch64_cpu_flags() -> OrderedSet[str]:
     capabilities = torch.cpu.get_capabilities()
     flags.update(
         capability
-        for capability in ("bf16", "sve", "sve2")
+        for capability in ("bf16", "sve", "sve2", "sme", *_AARCH64_GCC_EXTENSIONS)
         if capabilities.get(capability, False)
     )
 
@@ -1092,6 +1103,19 @@ def _get_linux_aarch64_arch_flag(cpp_compiler: str) -> str:
 
         if OrderedSet(["bf16", "sve"]).issubset(flags):
             return "march=armv8.6-a+sve+bf16"
+
+    # GCC does not support SME without SVE2, and GCC 15 enables SME under
+    # -march=native, so CPUs with SME but no SVE2 (e.g. Apple M4 in a Linux VM)
+    # fail every compile with "no support for 'sme' without 'sve2'". GCC also
+    # rejects -march=native+nosme, so spell out the detected extensions instead.
+    # Any SME CPU implements Armv9.2, so the armv8.2-a base is always available.
+    if _is_gcc(cpp_compiler) and "sme" in flags and "sve2" not in flags:
+        extensions = [
+            gcc_name
+            for capability, gcc_name in _AARCH64_GCC_EXTENSIONS.items()
+            if capability in flags
+        ]
+        return "march=" + "+".join(["armv8.2-a", *extensions])
 
     return "march=native"
 

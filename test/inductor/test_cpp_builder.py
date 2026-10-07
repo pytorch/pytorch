@@ -170,6 +170,54 @@ class TestMsvcLanguageCheck(TestCase):
         version_info.assert_not_called()
 
 
+class TestLinuxAarch64ArchFlag(TestCase):
+    def setUp(self):
+        super().setUp()
+        cpp_builder._get_linux_aarch64_arch_flag.cache_clear()
+
+    def tearDown(self):
+        cpp_builder._get_linux_aarch64_arch_flag.cache_clear()
+        super().tearDown()
+
+    def _arch_flag(self, cpu_flags, *, is_gcc=True, gcc_older_than_13=False):
+        with (
+            mock.patch.object(
+                cpp_builder,
+                "_get_linux_aarch64_cpu_flags",
+                return_value=cpp_builder.OrderedSet(cpu_flags),
+            ),
+            mock.patch.object(cpp_builder, "_is_gcc", return_value=is_gcc),
+            mock.patch.object(
+                cpp_builder,
+                "_is_gcc_version_less_than",
+                return_value=gcc_older_than_13,
+            ),
+        ):
+            return cpp_builder._get_linux_aarch64_arch_flag("g++")
+
+    def test_gcc_sme_without_sve2_spells_out_detected_extensions(self):
+        # Apple M4 as seen from a Linux VM: SME and SME2, no SVE.
+        flags = ["bf16", "sme", "dot", "fp16_arith", "fhm", "i8mm"]
+        self.assertEqual(
+            self._arch_flag(flags),
+            "march=armv8.2-a+dotprod+fp16+fp16fml+bf16+i8mm",
+        )
+
+    def test_gcc_sme_without_sve2_omits_undetected_extensions(self):
+        self.assertEqual(self._arch_flag(["sme", "dot"]), "march=armv8.2-a+dotprod")
+
+    def test_gcc_sme_with_sve2_keeps_native(self):
+        flags = ["bf16", "sve", "sve2", "sme", "dot", "i8mm"]
+        self.assertEqual(self._arch_flag(flags), "march=native")
+
+    def test_gcc_without_sme_keeps_native(self):
+        self.assertEqual(self._arch_flag(["bf16", "dot", "i8mm"]), "march=native")
+
+    def test_clang_sme_without_sve2_keeps_native(self):
+        flags = ["bf16", "sme", "dot", "i8mm"]
+        self.assertEqual(self._arch_flag(flags, is_gcc=False), "march=native")
+
+
 class TestCppTorchDeviceOptionsCompiler(TestCase):
     class StopAfterSuperCall(Exception):
         pass
