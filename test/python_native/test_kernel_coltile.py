@@ -7,6 +7,7 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
@@ -91,7 +92,7 @@ class TestKernelColTile(TestCase):
             x,
             torch.float32,
         )
-        torch.testing.assert_close(out, x.var(dim=0), atol=1e-4, rtol=1e-4)
+        self.assertEqual(out, x.var(dim=0), atol=1e-4, rtol=1e-4)
 
     def test_dispatcher_routes_a_column_reduction(self):
         # Numerics cannot distinguish the column arm from K0; assert routing and reshape.
@@ -157,6 +158,33 @@ class TestColTileHost(TestCase):
             ct.reduce_col_tile(trait, "badvec0", x, torch.float32, vec=0)
         with self.assertRaisesRegex(ValueError, "npar must be positive"):
             ct.reduce_col_tile(trait, "badnpar0", x, torch.float32, npar=0)
+
+
+@unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
+class TestOrderedColDevice(TestCase):
+    def test_direct_plan_matches_the_indexed_tree(self, device):
+        x = torch.randn(2, 128, 33, device=device)
+        trait = T.SumOps(acc=cutlass.Float32)
+        got = ct.reduce_ordered_col(trait, "ordered_direct", x, [torch.float32], 1)
+        reference = kg._try_indexed_itree(
+            trait,
+            "ordered_direct_reference",
+            x,
+            [(128, 33)],
+            [(33, 1), (2, 128 * 33)],
+            2 * 33,
+            128,
+            [torch.float32],
+            1,
+        )
+        self.assertIsNotNone(got)
+        self.assertIsNotNone(reference)
+        self.assertEqual(
+            got[0].flatten().view(torch.uint8), reference[0].view(torch.uint8)
+        )
+
+
+instantiate_device_type_tests(TestOrderedColDevice, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
