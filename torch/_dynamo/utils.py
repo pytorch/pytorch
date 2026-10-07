@@ -4542,8 +4542,14 @@ def run_node(
     with set_current_node(node):
 
         def make_error_message(e: object) -> str:
+            try:
+                args_str = repr(args)
+                kwargs_str = repr(kwargs)
+            except Exception:
+                args_str = f"<{len(args)} args>"
+                kwargs_str = f"<{len(kwargs)} kwargs>"
             return (
-                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
+                f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args_str}, **{kwargs_str}): got "
                 + repr(e)
             )
 
