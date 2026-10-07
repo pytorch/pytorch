@@ -3247,7 +3247,9 @@ class FakeTensorMode(TorchDispatchMode):
             if op_impl_out is not NotImplemented:
                 return maybe_propagate_real_tensors(cast(FakeTensor, op_impl_out))
 
-        # If there's a Python meta, prefer that over the decomposition
+        # If there's a Python meta, prefer that over the decomposition.
+        # fake_try_decomp in torch/csrc/PyInterpreter.cpp mirrors this block for
+        # C++ FakeTensor; keep the two in sync.
         from torch._decomp import meta_table
 
         if (
