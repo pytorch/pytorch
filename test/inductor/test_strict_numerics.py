@@ -111,8 +111,10 @@ EFFECTIVE_NUMERICS = (
 
 def _numerics_options(numerics, enabled):
     return {
-        key: numerics if key == "numerics" else enabled
-        for key in ("numerics", *EFFECTIVE_NUMERICS)
+        "numerics": numerics,
+        "strict_pointwise": False,
+        "strict_reduction": False,
+        **dict.fromkeys(EFFECTIVE_NUMERICS, enabled),
     }
 
 
@@ -129,22 +131,43 @@ class StrictNumericsConfigTest(TestCase):
     @parametrize("numerics", NUMERICS_MODES)
     def test_config_patch_enables_eager_numerics(self, numerics):
         enabled = numerics in ("strict_pointwise", "strict")
+        reduction_enabled = numerics in ("strict_reduction", "strict")
         with config.patch(_numerics_options("strict", False)):
             with config.patch(numerics=numerics):
+                self.assertEqual(config.strict_pointwise, enabled)
+                self.assertEqual(config.strict_reduction, reduction_enabled)
                 self.assertEqual(
                     _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, enabled)
                 )
+            self.assertTrue(config.strict_pointwise)
+            self.assertTrue(config.strict_reduction)
             self.assertEqual(
                 _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
             )
         with config.patch(_numerics_options(numerics, True)):
+            self.assertEqual(config.strict_pointwise, enabled)
+            self.assertEqual(config.strict_reduction, reduction_enabled)
             self.assertEqual(
                 _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, True)
+            )
+
+    @parametrize("enabled", (False, True))
+    def test_strict_pointwise_enables_eager_numerics(self, enabled):
+        with config.patch(_numerics_options("default", False)):
+            with config.patch(strict_pointwise=enabled):
+                self.assertEqual(config.numerics, "default")
+                self.assertEqual(
+                    _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, enabled)
+                )
+            self.assertFalse(config.strict_pointwise)
+            self.assertEqual(
+                _effective_numerics(), dict.fromkeys(EFFECTIVE_NUMERICS, False)
             )
 
     @parametrize("numerics", NUMERICS_MODES)
     def test_env_enables_eager_numerics(self, numerics):
         enabled = numerics in ("strict_pointwise", "strict")
+        reduction_enabled = numerics in ("strict_reduction", "strict")
         env = os.environ.copy()
         env["TORCHINDUCTOR_NUMERICS"] = numerics
         env["TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING"] = "0"
@@ -155,7 +178,8 @@ class StrictNumericsConfigTest(TestCase):
                 "-c",
                 (
                     "from torch._inductor import config; "
-                    "print(config.eager_numerics.division_rounding, "
+                    "print(config.strict_reduction, config.strict_pointwise, "
+                    "config.eager_numerics.division_rounding, "
                     "config.eager_numerics.disable_ftz, "
                     "config.emulate_precision_casts)"
                 ),
@@ -163,7 +187,10 @@ class StrictNumericsConfigTest(TestCase):
             env=env,
             text=True,
         )
-        self.assertEqual(output.split(), [str(enabled)] * len(EFFECTIVE_NUMERICS))
+        self.assertEqual(
+            output.split(),
+            [str(reduction_enabled)] + [str(enabled)] * (1 + len(EFFECTIVE_NUMERICS)),
+        )
 
 
 @unittest.skipUnless(
@@ -171,6 +198,136 @@ class StrictNumericsConfigTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    @ops(
+        [op for op in op_db if op.name in ("byte", "char", "short")],
+        allowed_dtypes=(
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.int64,
+        ),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_narrow_integer_cast(self, device, dtype, op, numerics, upcast):
+        if dtype in (torch.float16, torch.bfloat16):
+            x = _exhaustive_16bit(dtype, device)
+        elif dtype == torch.float32:
+            x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)
+        else:
+            values: list[int | float] = [
+                sign * 2**power + delta
+                for power in (7, 8, 15, 16, 31, 32)
+                for sign in (-1, 1)
+                for delta in (-1, 0, 1)
+            ]
+            values += [torch.iinfo(torch.int64).min, torch.iinfo(torch.int64).max]
+            if dtype == torch.float64:
+                limit = torch.finfo(dtype).max
+                values += [
+                    sign * value
+                    for value in (0.5, 257.999999999, 2.0**63, 2.0**64, limit)
+                    for sign in (-1, 1)
+                ]
+                values += [float("nan"), float("inf"), -float("inf")]
+            x = torch.tensor(values, device=device, dtype=dtype)
+        result, codes = run_and_get_code(
+            torch.compile(
+                op.op,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+        )
+        self.assertEqual(result, op.op(x))
+        intermediate = "int64" if op.name == "byte" else "int32"
+        target = {"byte": "uint8", "char": "int8", "short": "int16"}[op.name]
+        marker = f".to(tl.{intermediate}).to(tl.{target})"
+        self.assertEqual(marker in "\n".join(codes), dtype.is_floating_point)
+
+    @ops(
+        [op for op in op_db if op.name == "sigmoid"],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_sigmoid(self, device, dtype, op, numerics, upcast):
+        x = (
+            _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)
+            if dtype == torch.float32
+            else _exhaustive_16bit(dtype, device)
+        )
+        result, codes = run_and_get_code(
+            torch.compile(
+                op.op,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+        )
+        code = "\n".join(codes)
+        int_dtype = _BIT_VIEW[dtype]
+        self.assertEqual(result.view(int_dtype), op.op(x).view(int_dtype))
+        self.assertIn("libdevice.exp", code)
+        self.assertIn("libdevice.rcp_rn", code)
+        self.assertNotIn("tl.sigmoid", code)
+
+    @ops(
+        [op for op in op_db if op.name == "nn.functional.relu"],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_relu_shared_predicate(self, device, dtype, op, numerics, upcast):
+        if dtype in (torch.float16, torch.bfloat16):
+            x = _exhaustive_16bit(dtype, device)
+        elif dtype == torch.float32:
+            x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)
+        else:
+            bits = torch.tensor(
+                [
+                    0,
+                    1,
+                    0x0010000000000000,
+                    0x3FF0000000000000,
+                    0x7FEFFFFFFFFFFFFF,
+                    0x7FF0000000000000,
+                    0x7FF0000000000001,
+                    0x7FF8123456789ABC,
+                    0x7FFFFFFFFFFFFFFF,
+                ],
+                dtype=torch.int64,
+                device=device,
+            )
+            x = torch.cat((bits, bits | torch.iinfo(torch.int64).min)).view(dtype)
+
+        def fn(x):
+            return op.op(x), x < 0
+
+        (result, negative), codes = run_and_get_code(
+            torch.compile(
+                fn,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+        )
+        expected, expected_negative = fn(x)
+        int_dtype = _BIT_VIEW[dtype]
+        self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+        self.assertEqual(negative, expected_negative)
+        self.assertIn("tl.where", "\n".join(codes))
+
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
         x = torch.full((1024,), 11.0, device=device)
@@ -733,12 +890,6 @@ POINTWISE_XFAIL = frozenset(
         ("angle", "bfloat16"),
         ("angle", "float16"),
         ("angle", "float32"),
-        ("byte", "bfloat16"),
-        ("byte", "float16"),
-        ("byte", "float32"),
-        ("char", "bfloat16"),
-        ("char", "float16"),
-        ("char", "float32"),
         ("clamp", "bfloat16"),
         ("clamp", "float16"),
         ("clamp", "float32"),
@@ -803,8 +954,6 @@ POINTWISE_XFAIL = frozenset(
         ("neg", "bfloat16"),
         ("neg", "float16"),
         ("neg", "float32"),
-        ("nextafter", "bfloat16"),
-        ("nextafter", "float16"),
         ("nn_functional_gelu", "float32"),
         ("nn_functional_hardtanh", "bfloat16"),
         ("nn_functional_hardtanh", "float16"),
@@ -812,9 +961,6 @@ POINTWISE_XFAIL = frozenset(
         ("nn_functional_relu6", "bfloat16"),
         ("nn_functional_relu6", "float16"),
         ("nn_functional_relu6", "float32"),
-        ("nn_functional_relu", "bfloat16"),
-        ("nn_functional_relu", "float16"),
-        ("nn_functional_relu", "float32"),
         ("nn_functional_softplus", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),
@@ -834,11 +980,6 @@ POINTWISE_XFAIL = frozenset(
         ("rsub", "bfloat16"),
         ("rsub", "float16"),
         ("rsub", "float32"),
-        ("short", "bfloat16"),
-        ("short", "float16"),
-        ("short", "float32"),
-        ("sigmoid", "float16"),
-        ("sigmoid", "float32"),
         ("special_bessel_j0", "float32"),
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
@@ -933,7 +1074,6 @@ BACKWARD_XFAIL = frozenset(
         ("nn_functional_mish", "bfloat16"),
         ("nn_functional_mish", "float16"),
         ("nn_functional_mish", "float32"),
-        ("nn_functional_silu", "bfloat16"),
         ("nn_functional_silu", "float16"),
         ("nn_functional_silu", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
