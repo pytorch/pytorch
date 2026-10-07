@@ -6098,10 +6098,10 @@ class FinalizeCodegenResult:
 
 
 class _HasAliasingOrMutation(Protocol):
-    """Minimal view of scheduler.BaseSchedulerNode used by prologue fusion.
+    """Minimal view of scheduler.BaseSchedulerNode used by producer fusion.
 
     ir.py cannot import scheduler (circular), so this documents the single
-    method consumed by has_aliasing_or_mutation_for_prologue_fusion instead
+    method consumed by has_aliasing_or_mutation_for_producer_fusion instead
     of typing the argument as Any.
     """
 
@@ -6121,7 +6121,8 @@ class TemplateBuffer(OperationBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[..., Any] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
-        allowed_prologue_inps: OrderedSet[str] | None = None,
+        load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         named_inputs: dict[str, IRNode] | None = None,
     ) -> None:
         super().__init__(name=None, layout=layout)
@@ -6157,12 +6158,17 @@ class TemplateBuffer(OperationBuffer):
                 MutationOutput(NoneLayout(device=device), buf, self)
                 for buf in mutated_inputs
             ]
-        # Input buffer names eligible for prologue fusion.
-        self.allowed_prologue_inps: OrderedSet[str] = (
-            allowed_prologue_inps or OrderedSet()
+        # Input buffer names eligible for producer fusion, separated by where
+        # the producer code is emitted inside the template.
+        self.load_input_fusion_allowed_inputs: OrderedSet[str] = (
+            load_input_fusion_allowed_inputs or OrderedSet()
         )
-        # Per-template fusion overrides.  None means fall back to global
-        # config.epilogue_fusion / config.prologue_fusion.
+        self.store_output_fusion_allowed_inputs: OrderedSet[str] = (
+            store_output_fusion_allowed_inputs or OrderedSet()
+        )
+        # Per-template overrides; None falls back to the corresponding global flag.
+        # Prologue controls load-input producer fusion. Epilogue controls both
+        # downstream consumer fusion and store-output producer fusion.
         self.allow_epilogue_fusion: bool | None = None
         self.allow_prologue_fusion: bool | None = None
 
@@ -6263,17 +6269,14 @@ class TemplateBuffer(OperationBuffer):
         """Whether this template produces multiple outputs via MultiOutputLayout."""
         return isinstance(self.layout, MultiOutputLayout)
 
-    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
-        return self.allowed_prologue_inps
-
-    def has_aliasing_or_mutation_for_prologue_fusion(
+    def has_aliasing_or_mutation_for_producer_fusion(
         self, scheduler_node: _HasAliasingOrMutation
     ) -> bool:
-        """Return whether this template's aliasing/mutation blocks prologue fusion.
+        """Return whether this template's aliasing/mutation blocks producer fusion.
 
         The default preserves the scheduler's conservative behavior. External
-        template subclasses may override this when they can prove a prologue
-        producer only feeds independent, non-mutated template inputs.
+        template subclasses may override this when they can prove a producer only
+        feeds independent, non-mutated template inputs.
         """
         return scheduler_node.has_aliasing_or_mutation()
 
@@ -6355,7 +6358,8 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
-        allowed_prologue_inps: OrderedSet[str] | None = None,
+        load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6371,7 +6375,8 @@ class TritonTemplateBuffer(TemplateBuffer):
             inputs,
             make_kernel_render,
             mutated_inputs=mutated_inputs,
-            allowed_prologue_inps=allowed_prologue_inps,
+            load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
         )
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
@@ -6531,13 +6536,15 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: Sequence[IRNode],
         choice_timings_fn: Callable[[int | None], dict[ChoiceCaller, float]],
         unfiltered_choices: list[ChoiceCaller],
-        allowed_prologue_inps: OrderedSet[str],
+        load_input_fusion_allowed_inputs: OrderedSet[str],
+        store_output_fusion_allowed_inputs: OrderedSet[str],
     ) -> None:
         super().__init__(
             layout=layout,
             inputs=inputs,
             make_kernel_render=None,
-            allowed_prologue_inps=allowed_prologue_inps,
+            load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
         )
         self._choice_timings_fn = choice_timings_fn
         self._choice_timings: dict[int | None, dict[ChoiceCaller, float]] = {}
@@ -9726,8 +9733,6 @@ class FallbackKernel(ExternKernelAlloc):
 
         # args that are aliased
         self.alias_names: list[str] = []
-        # args that are mutated AND returned from the op
-        self.mutation_names: list[str] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             # We assume here that HOPs with FallbackKernel are functional.
@@ -9757,10 +9762,16 @@ class FallbackKernel(ExternKernelAlloc):
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
-            self.mutation_names.append(tensor_args[0].get_name())
-            # Record aliasing relationship so memory planning doesn't wrongly
-            # reuse its storage.
-            self.alias_names.append(tensor_args[0].get_name())
+            # The returned tensor aliases arg0; it is not a rename of it.
+            # Track the write separately via a MutationOutput.
+            arg = tensor_args[0]
+            mutation_output = MutationOutput(
+                NoneLayout(device=arg.get_device()), arg, self
+            )
+            self.mutation_outputs.append(mutation_output)
+            # Include the sibling mutation version so compute_dependencies merges
+            # its reader list with those of arg0 and the returned alias.
+            self.alias_names.extend((arg.get_name(), mutation_output.get_name()))
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
@@ -9968,11 +9979,6 @@ class FallbackKernel(ExternKernelAlloc):
             return []
         else:
             return self.alias_names
-
-    def get_mutation_names(self) -> Sequence[str]:
-        if len(self.mutation_names) > 1:
-            raise AssertionError("Expected len(self.mutation_names) <= 1")
-        return self.mutation_names
 
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
         """
