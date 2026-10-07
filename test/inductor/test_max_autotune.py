@@ -3270,6 +3270,100 @@ class TestMaxAutotune(TestCase):
             # should force fallback to extern_kernels.bmm
             FileCheck().check_not("triton_tem").run(code[0])
 
+    # Two cat inputs would lower to a pointwise cat; force a ConcatKernel so
+    # each input is a copy into its cat slot.
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "max_pointwise_cat_inputs": 1,
+            "max_complex_pointwise_cat_inputs": 1,
+            "benchmark_template_fusion": False,
+            "triton.tlx_mode": None,
+        }
+    )
+    @parametrize("case", ("bmm_permute_cat", "mm_cat", "mm_transpose"))
+    def test_layout_copy_epilogue(self, case):
+        dtype = torch.bfloat16
+        if case == "bmm_permute_cat":
+            # The permute keeps N innermost: one fused bmm kernel plus the x copy.
+
+            def fn(a, b, x):
+                o = torch.bmm(a, b).view(64, 2, 32, 128).permute(0, 2, 1, 3)
+                return torch.cat([x, o.reshape(64, 8192)], 1)
+
+            args = (
+                torch.randn(128, 32, 16, device=GPU_TYPE, dtype=dtype),
+                torch.randn(128, 128, 16, device=GPU_TYPE, dtype=dtype).transpose(1, 2),
+                torch.randn(64, 1024, device=GPU_TYPE, dtype=dtype),
+            )
+        elif case == "mm_cat":
+
+            def fn(a, w, x):
+                return torch.cat([x, torch.mm(a, w)], 1)
+
+            args = (
+                torch.randn(512, 256, device=GPU_TYPE, dtype=dtype),
+                torch.randn(256, 1024, device=GPU_TYPE, dtype=dtype),
+                torch.randn(512, 128, device=GPU_TYPE, dtype=dtype),
+            )
+        else:
+            # The copy would store the template's tiles transposed, so it stays
+            # a separate kernel.
+
+            def fn(a, w):
+                return torch.mm(a, w).view(4, 256, 72).permute(0, 2, 1).contiguous()
+
+            args = (
+                torch.randn(1024, 64, device=GPU_TYPE, dtype=dtype),
+                torch.randn(64, 72, device=GPU_TYPE, dtype=dtype),
+            )
+
+        with fresh_cache():
+            out, (code,) = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(code.count(".run("), 2, code)
+        self.assertEqual(
+            out, fn(*[a.float() for a in args]).to(dtype), atol=2e-2, rtol=2e-2
+        )
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "max_pointwise_cat_inputs": 1,
+            "max_complex_pointwise_cat_inputs": 1,
+            "triton.tlx_mode": None,
+        }
+    )
+    @parametrize("benchmark_fusion", (False, True))
+    def test_tlx_skips_layout_copy_epilogue(self, benchmark_fusion):
+        # TLX templates store through a TMA descriptor built from the template
+        # output's layout, so a cat slot epilogue would be stored at the wrong
+        # rows. Pretend every template choice is TLX: the copy must stay
+        # unfused, both for a finalized template and when benchmarking fused
+        # choices.
+        def fn(a, w, x):
+            return torch.cat([x, torch.mm(a, w)], 1)
+
+        args = (
+            torch.randn(512, 256, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randn(256, 1024, device=GPU_TYPE, dtype=torch.bfloat16),
+            torch.randn(512, 128, device=GPU_TYPE, dtype=torch.bfloat16),
+        )
+        with (
+            fresh_cache(),
+            config.patch(benchmark_template_fusion=benchmark_fusion),
+            mock.patch(
+                "torch._inductor.scheduler._is_tlx_choice",
+                side_effect=lambda annotations: "ktc" in annotations,
+            ),
+        ):
+            out, (code,) = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(code.count(".run("), 3, code)
+        self.assertEqual(
+            out, fn(*[a.float() for a in args]).to(out.dtype), atol=2e-2, rtol=2e-2
+        )
+
     @parametrize("always_freeze", [True, False])
     def test_mm_layout_freezing_behavior(self, always_freeze):
         """Test that mm layout freezing behavior depends on always_freeze_layout.
