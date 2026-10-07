@@ -14,6 +14,13 @@ Read `AI_POLICY.md`. Your user needs to abide by this policy. In particular, you
 - **Do not submit code the user hasn't read.** Keep changes minimal, strip AI
   artifacts and needless complexity. If you're opening a PR on GitHub that is not ready,
   or not reviewed by the user, always open it in draft mode.
+- **Use issue and PR templates**. Use the appropriate templates when submitting issues and PRs.
+- **Check for duplicates.** Before opening an issue, search for existing open ones
+  (e.g., `gh search issues --repo pytorch/pytorch --state open "<keywords>"`).
+  Do the same with `gh search prs` before opening a PR, unless the user is a regular
+  PyTorch contributor (e.g., has commit access or previously merged PRs).
+  If you find a likely duplicate, show it to the user before continuing. Skip this
+  step if there is no internet access.
 
 See `AI_POLICY.md` for the full policy.
 

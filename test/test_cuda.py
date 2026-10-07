@@ -1242,7 +1242,6 @@ print("RECOVERED")
         torch._C._cuda_clearCublasWorkspaces()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
-    @unittest.skipIf(TEST_WITH_ROCM, "eager workspaces are CUDA-only")
     @serialTest()
     @parametrize("backend", ("cublas", "cublaslt"))
     def test_cublas_workspace_cache_env(self, backend):
@@ -1281,7 +1280,13 @@ print(public_active, active, allocated)
                 [sys.executable, "-c", test_script], env=env, text=True
             ).split()
         )
-        self.assertEqual(eager_public, 0)
+        if TEST_WITH_ROCM:
+            # ROCm binds each public handle to a caching-allocator buffer.
+            self.assertGreaterEqual(
+                eager_public, torch.backends.cuda.cublas_workspace_size()
+            )
+        else:
+            self.assertEqual(eager_public, 0)
         self.assertEqual(eager_active, 0)
         self.assertGreater(eager_allocated, 0)
         self.assertGreater(cached_public, 0)
@@ -1289,7 +1294,6 @@ print(public_active, active, allocated)
         self.assertGreater(cached_allocated, 0)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
-    @unittest.skipIf(TEST_WITH_ROCM, "eager workspaces are CUDA-only")
     @serialTest()
     @blas_library_context("cublaslt")
     def test_cublaslt_workspace_eager_resize_and_zero(self):
@@ -1489,7 +1493,6 @@ print(mem_after_first, torch.cuda.memory_allocated())
             torch.backends.cuda.blas_workspace_size(backend=42)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
-    @unittest.skipIf(TEST_WITH_ROCM, "workspace cache env is CUDA-only")
     @serialTest()
     @parametrize("backend", ("cublas", "cublaslt"))
     def test_cublas_workspace_cached_lazy_reallocation(self, backend):
@@ -2094,6 +2097,29 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
             "Both events must be created with argument 'enable_timing=True'",
         ):
             event1.elapsed_time(event2)
+
+    @skipIfRocm(msg="Does not actually block the host thread on ROCm.")
+    def test_events_blocking_synchronize(self):
+        # blocking=False busy-spins in synchronize() (CPU time ~= wall time);
+        # blocking=True (cudaEventBlockingSync) sleeps instead (CPU time ~= 0).
+        torch.cuda.synchronize()
+        for event_cls in [torch.cuda.Event, torch.Event]:
+            for blocking in [True, False]:
+                event = event_cls(blocking=blocking)
+                torch.cuda._sleep(int(500 * get_cycles_per_ms()))
+                event.record()
+
+                cpu_start = time.thread_time()
+                wall_start = time.perf_counter()
+                event.synchronize()
+                cpu_elapsed = time.thread_time() - cpu_start
+                wall_elapsed = time.perf_counter() - wall_start
+
+                ratio = cpu_elapsed / wall_elapsed
+                if blocking:
+                    self.assertLess(ratio, 0.1)
+                else:
+                    self.assertGreater(ratio, 0.5)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("cuda")
@@ -2790,9 +2816,6 @@ raise RuntimeError("device assert did not fire")
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
-    # gfx950 (MI350) SIGFPEs in histogram sizing at nbins > INT_MAX; the int32
-    # overflow fix is still exercised on CUDA and other ROCm archs.
-    @skipIfRocmArch(MI350_ARCH)
     @largeTensorTest("18GB", "cuda")
     @serialTest()
     def test_bincount_int32_overflow(self):
@@ -4543,7 +4566,6 @@ exit(2)
             with torch.cuda.graph(torch.cuda.CUDAGraph()):
                 torch.zeros(2**40, device="cuda")
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4551,48 +4573,60 @@ exit(2)
     @blas_library_context("cublas")
     def test_graph_capture_cublas_workspace_separate_graphs(self):
         if torch.cuda.get_device_capability()[0] != 9:
-            self.skipTest("The regression requires an SM90 cuBLAS kernel")
+            self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
 
-        rows = 32768
-        width = 640
-        stream = torch.cuda.Stream()
-        left = torch.zeros(
-            (rows, width), device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
-        right = torch.zeros(
-            (width, width), device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
-        stream.wait_stream(torch.cuda.current_stream())
-
-        def capture_eval():
-            eval_left = torch.zeros((rows, width), device="cuda", dtype=torch.bfloat16)
-            eval_right = torch.zeros(
-                (width, width), device="cuda", dtype=torch.bfloat16
+        # With TORCH_CUBLAS_WORKSPACE_CACHE=1 the first shape faults on SM90 and
+        # gfx90a, and on gfx950 corrupts the canary through the backward's weight
+        # gradient (K=32768). The second shape does so in the forward on gfx950.
+        # On gfx942 (MI308X) both shapes corrupt the canary.
+        shapes = [(32768, 640, 640)]
+        if TEST_WITH_ROCM:
+            shapes.append((32, 65536, 2048))
+        for rows, depth, width in shapes:
+            stream = torch.cuda.Stream()
+            left = torch.zeros(
+                (rows, depth), device="cuda", dtype=torch.bfloat16, requires_grad=True
             )
-            eval_left @ eval_right
-            graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph, stream=stream):
+            right = torch.zeros(
+                (depth, width), device="cuda", dtype=torch.bfloat16, requires_grad=True
+            )
+            stream.wait_stream(torch.cuda.current_stream())
+
+            def capture_eval():
+                eval_left = torch.zeros(
+                    (rows, depth), device="cuda", dtype=torch.bfloat16
+                )
+                eval_right = torch.zeros(
+                    (depth, width), device="cuda", dtype=torch.bfloat16
+                )
                 eval_left @ eval_right
-            graph.replay()
-            graph.reset()
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph, stream=stream):
+                    eval_left @ eval_right
+                graph.replay()
+                graph.reset()
 
-        with torch.cuda.stream(stream):
-            output = left @ right
-            torch.autograd.grad(output, (left, right), torch.ones_like(output))
-
-            output_grad = torch.ones_like(output)
-            training_graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(training_graph, stream=stream):
+            with torch.cuda.stream(stream):
                 output = left @ right
-                torch.autograd.grad(output, (left, right), output_grad)
+                torch.autograd.grad(output, (left, right), torch.ones_like(output))
 
-            capture_eval()
-            capture_eval()
-            training_graph.replay()
+                output_grad = torch.ones_like(output)
+                training_graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(training_graph, stream=stream):
+                    output = left @ right
+                    torch.autograd.grad(output, (left, right), output_grad)
 
-        stream.synchronize()
+                capture_eval()
+                capture_eval()
+                # A replay that writes a freed workspace can land in memory that
+                # was reallocated since, without faulting.
+                canary = torch.full((128 << 20,), 7, device="cuda", dtype=torch.uint8)
+                training_graph.replay()
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
+            stream.synchronize()
+            with self.subTest(shape=(rows, depth, width)):
+                self.assertEqual((canary != 7).sum().item(), 0)
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4601,6 +4635,10 @@ exit(2)
     def test_graph_capture_cublas_workspace_cross_thread(self):
         if torch.cuda.get_device_capability()[0] != 9:
             self.skipTest("The regression requires an SM90 split-K cuBLAS kernel")
+        # On ROCm this has not been shown to catch the cached-workspace hazard:
+        # it passes with TORCH_CUBLAS_WORKSPACE_CACHE=1 on gfx950 and gfx942. There
+        # it checks that a worker whose handles were created before the capture
+        # can run a GEMM on the capture stream while another thread captures.
 
         torch._C._cuda_clearCublasWorkspaces()
         x = torch.randn(32, 10944, device="cuda", dtype=torch.bfloat16)
@@ -4646,7 +4684,105 @@ exit(2)
         stream.synchronize()
         self.assertEqual(state["output"], expected, rtol=1e-2, atol=2e-1)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/144922")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(not TEST_WITH_ROCM, "Only ROCm keeps a BLAS handle per stream")
+    def test_blas_handle_new_stream_under_capture(self):
+        # ROCm keeps a BLAS handle per stream, so the capture stream's first
+        # request creates one unless capture_begin stocked a spare. A fresh
+        # process, because handles released by exited threads would otherwise
+        # satisfy the request.
+        script = """
+import torch
+
+torch.cuda.current_blas_handle()
+x = torch.ones(1, device="cuda")
+graph = torch.cuda.CUDAGraph()
+with torch.cuda.graph(graph, stream=torch.cuda.Stream()):
+    torch.cuda.current_blas_handle()
+    x.add_(1)
+graph.replay()
+torch.cuda.synchronize()
+assert x.item() == 2
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(not TEST_WITH_ROCM, "Only ROCm keeps a BLAS handle per stream")
+    def test_blas_handle_new_thread_under_capture(self):
+        # A thread that first touches BLAS inside the capture must get the spare
+        # capture handle rather than create a handle, which allocates on the
+        # capturing device. A fresh process, so no released handle satisfies
+        # the request.
+        script = """
+import threading
+import torch
+
+torch.cuda.current_blas_handle()
+x = torch.ones(1, device="cuda")
+stream = torch.cuda.Stream()
+graph = torch.cuda.CUDAGraph()
+state = {}
+
+def worker():
+    try:
+        with torch.cuda.stream(stream):
+            torch.cuda.current_blas_handle()
+    except BaseException as error:
+        state["error"] = error
+
+with torch.cuda.graph(graph, stream=stream):
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+    if "error" in state:
+        raise state["error"]
+    x.add_(1)
+graph.replay()
+torch.cuda.synchronize()
+assert x.item() == 2
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    @unittest.skipIf(not TEST_WITH_ROCM, "Only ROCm binds public handles to a buffer")
+    def test_blas_handle_workspace_outside_private_pools(self):
+        # A new stream's public handle is created, and its permanent buffer
+        # allocated, by its first request. A fresh process, because handles
+        # released by exited threads would otherwise satisfy the request.
+        script = """
+import torch
+from torch._inductor.cudagraph_trees import _use_cuda_memory_pool_manager
+
+pool = torch.cuda.MemPool()
+with torch.cuda.stream(torch.cuda.Stream()), torch.cuda.use_mem_pool(pool):
+    torch.cuda.current_blas_handle()
+assert pool.snapshot() == [], pool.snapshot()
+
+device = torch.cuda.current_device()
+graph_pool = torch.cuda.graph_pool_handle()
+x = torch.ones(4, device="cuda")
+graph = torch.cuda.CUDAGraph()
+with torch.cuda.graph(graph, pool=graph_pool):
+    y = x * 2
+state = torch._C._cuda_getCheckpointState(device, graph_pool)
+with _use_cuda_memory_pool_manager(device, graph_pool, torch.cuda.Stream()):
+    torch.cuda.current_blas_handle()
+torch._C._cuda_setCheckpointPoolState(device, state, [], [])
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4673,6 +4809,58 @@ exit(2)
         used_gb_after = (total_bytes - free_bytes_after) / 1e9
 
         self.assertGreater(0.005 + used_gb_before, used_gb_after)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(not TEST_WITH_ROCM, "TunableOp only tunes rocBLAS gemms")
+    @serialTest()
+    @blas_library_context("cublas")
+    def test_graph_capture_tunableop_cublas_workspace(self):
+        # TunableOp issues rocBLAS gemms through its own solution-index call, so
+        # it has to reach the eager workspace through the scoped accessor to stay
+        # capture safe. Tuning benchmarks candidates and cannot run under
+        # capture, so tune first and let the capture replay the chosen solution.
+        a = torch.randn(512, 512, device="cuda")
+        b = torch.randn(512, 512, device="cuda")
+        was_enabled = torch.cuda.tunable.is_enabled()
+        was_tuning = torch.cuda.tunable.tuning_is_enabled()
+        results_filename = torch.cuda.tunable.get_filename()
+        max_duration = torch.cuda.tunable.get_max_tuning_duration()
+        max_iterations = torch.cuda.tunable.get_max_tuning_iterations()
+        try:
+            with tempfile.TemporaryDirectory() as results_dir:
+                torch.cuda.tunable.set_filename(
+                    os.path.join(results_dir, "tunableop_results.csv")
+                )
+                torch.cuda.tunable.enable(True)
+                torch.cuda.tunable.tuning_enable(True)
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                expected = a @ b
+                torch.cuda.synchronize()
+                self.assertTrue(torch.cuda.tunable.get_results())
+                if not any(
+                    kernel.startswith("Gemm_Rocblas")
+                    for _, _, kernel, _ in torch.cuda.tunable.get_results()
+                ):
+                    self.skipTest("TunableOp picked no rocBLAS solution to replay")
+
+                torch.cuda.tunable.tuning_enable(False)
+                stream = torch.cuda.Stream()
+                stream.wait_stream(torch.cuda.current_stream())
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph, stream=stream):
+                    captured = a @ b
+                graph.replay()
+                stream.synchronize()
+                self.assertEqual(captured, expected)
+        finally:
+            torch.cuda.tunable.set_max_tuning_iterations(max_iterations)
+            torch.cuda.tunable.set_max_tuning_duration(max_duration)
+            torch.cuda.tunable.tuning_enable(was_tuning)
+            torch.cuda.tunable.enable(was_enabled)
+            torch.cuda.tunable.set_filename(results_filename)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -9361,6 +9549,55 @@ for args in ((a, b), (a, b, False)):
         called_dummy_free.value = 0
         called_dummy_alloc.value = 0
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    @parametrize("limit_before_allocator", [False, True])
+    @serialTest()
+    def test_mempool_allocator_failure_message(self, limit_before_allocator):
+        alloc_calls = 0
+
+        @ctypes.CFUNCTYPE(
+            ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        def alloc(size, device, stream):
+            nonlocal alloc_calls
+            alloc_calls += 1
+            return None
+
+        @ctypes.CFUNCTYPE(
+            None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        def free(ptr, size, device, stream):
+            pass
+
+        allocator = torch._C._cuda_customAllocator(
+            ctypes.cast(alloc, ctypes.c_void_p).value,
+            ctypes.cast(free, ctypes.c_void_p).value,
+        )
+        pool = torch.cuda.MemPool(allocator)
+        device = torch.cuda.current_device()
+        initial_fraction = torch.cuda.get_per_process_memory_fraction(device)
+        _, total_memory = torch.cuda.mem_get_info(device)
+        try:
+            fraction = 1.0 / total_memory if limit_before_allocator else 1.0
+            torch.cuda.set_per_process_memory_fraction(fraction, device)
+            with torch.cuda.use_mem_pool(pool, device=device):
+                with self.assertRaises(torch.OutOfMemoryError) as error:
+                    torch.empty(1, dtype=torch.uint8, device=device)
+
+            message = str(error.exception)
+            if limit_before_allocator:
+                self.assertEqual(alloc_calls, 0)
+                self.assertNotIn("custom allocator", message)
+            else:
+                self.assertGreater(alloc_calls, 0)
+                self.assertIn(
+                    "The custom allocator backing this MemPool returned nullptr.",
+                    message,
+                )
+                self.assertIn("Check preceding allocator warnings or logs", message)
+        finally:
+            torch.cuda.set_per_process_memory_fraction(initial_fraction, device)
+
     @serialTest()
     def test_tensor_delete_after_allocator_delete(self):
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
@@ -10038,6 +10275,38 @@ for args in ((a, b), (a, b, False)):
             num_expandable_segments, 1, "Expected to have 1 expandable segment only"
         )
 
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "not using the native caching allocator")
+    def test_mempool_snapshot_reports_runs_after_a_hole(self):
+        # An expandable segment with an unmapped hole is reported as one entry
+        # per mapped run; filtering the snapshot by pool must keep every run.
+        script = """
+import json, torch
+pool = torch.cuda.MemPool()
+pool_id = pool.id
+with torch.cuda.use_mem_pool(pool):
+    # 40 MiB is two whole 20 MiB mapping granules, so freeing the middle
+    # allocation really unmaps and leaves a hole.
+    keep = [torch.empty(40 << 20, dtype=torch.uint8, device="cuda") for _ in range(3)]
+# empty_cache only unmaps in pools no MemPool refers to anymore; the live
+# tensors keep this one around.
+del pool
+del keep[1]
+torch.cuda.empty_cache()
+def runs(snapshot):
+    return sorted((s["address"], s["total_size"]) for s in snapshot if s["segment_type"] == "large")
+print(json.dumps([
+    runs(torch.cuda.memory_snapshot(include_traces=False)),
+    runs(torch.cuda.memory_snapshot(mempool_id=pool_id, include_traces=False)),
+]))
+"""
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        out = subprocess.check_output([sys.executable, "-c", script], env=env)
+        everything, in_pool = json.loads(out.decode().strip().splitlines()[-1])
+        self.assertEqual(len(everything), 2)
+        self.assertEqual(in_pool, everything)
+
     @serialTest()
     def test_mempool_ctx_multithread(self):
         # Collect first: a tensor leaked by a prior test that is only reachable
@@ -10048,6 +10317,19 @@ for args in ((a, b), (a, b, False)):
         torch._C._cuda_clearCublasWorkspaces()
         torch.cuda.empty_cache()
         segments = torch.cuda.memory._snapshot()["segments"]
+        # On ROCm the workspace of each public hipBLAS handle lives in a
+        # per-device pool for the life of the process, so ignore pools that
+        # already exist; only the default pool must be empty here.
+        persistent_pools = {s["segment_pool_id"] for s in segments} - {(0, 0)}
+
+        def snapshot_segments():
+            return [
+                s
+                for s in torch.cuda.memory._snapshot()["segments"]
+                if s["segment_pool_id"] not in persistent_pools
+            ]
+
+        segments = snapshot_segments()
         self.assertEqual(len(segments), 0, "Expected empty pool in the beginning")
 
         nelem = 1024 * 1024
@@ -10066,8 +10348,7 @@ for args in ((a, b), (a, b, False)):
         def side_thread_fn(segments):
             trigger_alloc.wait()
             out = torch.empty(nelem, dtype=torch.int8, device="cuda")
-            s = torch.cuda.memory._snapshot()["segments"]
-            segments.append(s)
+            segments.append(snapshot_segments())
             done_allocation.set()
 
         segments = []
@@ -12476,6 +12757,28 @@ class TestFXMemoryProfiler(TestCase):
                 self.assertIn("e = self.relu(d)", frame["fx_original_trace"])
 
 
+class TestCudaGreenContextsPlatformCheck(TestCase):
+    # Not gated on PLATFORM_SUPPORTS_GREEN_CONTEXT: this checks that evaluating it on
+    # a machine without libcuda (the nogpu CI configs) does not raise.
+    def test_missing_driver_library(self):
+        from torch.cuda import green_contexts
+        from torch.testing._internal.common_cuda import (
+            evaluate_platform_supports_green_context,
+        )
+
+        green_contexts._get_driver_version.cache_clear()
+        try:
+            with (
+                patch.object(green_contexts, "_HAS_CUDA_BINDINGS", True),
+                patch.object(
+                    green_contexts, "_get_cuda_library", side_effect=OSError("missing")
+                ),
+            ):
+                self.assertFalse(evaluate_platform_supports_green_context())
+        finally:
+            green_contexts._get_driver_version.cache_clear()
+
+
 @unittest.skipIf(
     not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported"
 )
@@ -13142,6 +13445,7 @@ class TestCudaArchList(TestCase):
 
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaAllocator)
+instantiate_parametrized_tests(TestMemPool)
 instantiate_parametrized_tests(TestCompileKernel)
 instantiate_parametrized_tests(TestCachingHostAllocatorCudaGraph)
 instantiate_parametrized_tests(TestCachingHostAllocatorConfig)

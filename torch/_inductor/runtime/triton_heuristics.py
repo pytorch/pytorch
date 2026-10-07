@@ -1113,6 +1113,7 @@ class CachingAutotuner(KernelInterface):
                         )
                         and self.inductor_meta.get("dynamic_disable_pipelining", True)
                     ):
+                        log.debug("Retrying with num_stages=1 after: %s", exc)
                         self.launchers = [self.compile_by_disabling_pipelining(config)]
                         return
                     raise RuntimeError(
@@ -2609,6 +2610,10 @@ class CachingAutotuner(KernelInterface):
             and not debug_mode
             and not autograd_profiler._is_profiler_enabled
             and len(self.launchers) == 1
+            # The fast path skips save_gpu_kernel. A later AOTI compile that reuses
+            # this kernel must save its params again, because CudaKernelParamCache
+            # is keyed by kernel name and shared by every compile in the process.
+            and not launcher.store_cubin
         ):
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result
@@ -3847,9 +3852,10 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys():
+        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK", "R2_BLOCK")) & cfg.kwargs.keys():
             raise AssertionError(
-                f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
+                "min_xblock/min_rblock do not support YBLOCK, ZBLOCK, "
+                f"R1_BLOCK, or R2_BLOCK configs: {cfg}"
             )
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
