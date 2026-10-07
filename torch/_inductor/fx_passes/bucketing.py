@@ -272,6 +272,7 @@ def _meta_arg(arg: object) -> object:
     return arg
 
 
+# TODO: Unify with same_tensor_meta in fx_utils.py
 def _same_tensor_metadata(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
     def same_dim(lhs_dim: object, rhs_dim: object) -> bool:
         from torch.fx.experimental.symbolic_shapes import statically_known_true
