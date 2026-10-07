@@ -1287,8 +1287,44 @@ class TestUserDefinedSetitem(TestCase):
         self.assertEqual(_DelClassMeta["y"], 2)
 
 
+class _InitReturnValue:
+    pass
+
+
+_INIT_RETURN_TYPES = {"int": int, "str": str, "user_class": _InitReturnValue}
+
+
 class TestObjectConstruction(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("value_kind", list(_INIT_RETURN_TYPES))
+    @parametrize("via_super", [False, True])
+    def test_init_must_return_none(self, value_kind, via_super):
+        def init(self):
+            return _INIT_RETURN_TYPES[value_kind]()
+
+        def child_init(self):
+            return super(Child, self).__init__()
+
+        class Base:
+            __init__ = init
+
+        class Child(Base):
+            __init__ = child_init
+
+        cls = Child if via_super else Base
+
+        def fn():
+            try:
+                cls()
+            except TypeError as exc:
+                return str(exc)
+            return "constructor succeeded"
+
+        type_name = _INIT_RETURN_TYPES[value_kind].__name__
+        expected = f"__init__() should return None, not {type_name!r}"
+        self.assertEqual(fn(), expected)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
 
     def test_privateuse1_tensor_class_without_tensor_classes_registration(self):
         from torch._dynamo.variables.user_defined import UserDefinedClassVariable

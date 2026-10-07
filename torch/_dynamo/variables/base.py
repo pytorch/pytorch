@@ -954,7 +954,11 @@ def _wrap_descr_get(
     if all(a.is_constant_none() for a in args):
         raise_type_error(tx, "__get__(None, None) is invalid")
     obj = args[0]
-    owner = args[1] if len(args) > 1 else obj.tp_getattro_impl(tx, "__class__")
+    owner = (
+        args[1]
+        if len(args) > 1 and not args[1].is_constant_none()
+        else obj.tp_getattro_impl(tx, "__class__")
+    )
     return func(self, tx, obj, owner)
 
 

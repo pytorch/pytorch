@@ -58,6 +58,11 @@ def pyanyset_check(obj: VariableTracker) -> TypeIs["BaseSetVariable"]:
     return issubclass(obj.python_type(), (set, frozenset))
 
 
+def pyanyset_checkexact(obj: VariableTracker) -> TypeIs["BaseSetVariable"]:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/setobject.h#L28-L29
+    return obj.python_type() in (set, frozenset)
+
+
 def pyset_check(obj: VariableTracker) -> TypeIs["SetVariable"]:
     # ref: https://github.com/python/cpython/blob/v3.13.0/Include/setobject.h#L36-L38
     return issubclass(obj.python_type(), set)

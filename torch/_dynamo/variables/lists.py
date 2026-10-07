@@ -2067,11 +2067,11 @@ class TupleVariable(BaseListVariable):
         # subclassed) cls.
         from .builtin import BuiltinVariable
 
-        if len(args) != 2:
+        if not 1 <= len(args) <= 2:
             return VariableTracker.tp_new_impl(self, tx, args, kwargs)
         no_keywords(tx, "tuple", kwargs)
         if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
-            init_args = unpack_iterable(tx, args[1])
+            init_args = unpack_iterable(tx, args[1]) if len(args) == 2 else []
             return TupleVariable(init_args, mutation_type=ValueMutationNew())
         return tx.output.side_effects.track_new_user_defined_object(
             self, args[0], args[1:], tx=tx
@@ -2406,9 +2406,45 @@ class ByteArrayVariable(VariableTracker):
                 kwargs,
             )
 
+    def bytearray_hex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            result = self.data.hex(*const_args, **const_kwargs)
+        except (OverflowError, TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(result)
+
+    def bytearray_decode(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            result = self.data.decode(*const_args, **const_kwargs)
+        except (LookupError, TypeError, UnicodeError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(result)
+
     tp_methods = {
         "index": Method(bytearray_index),
         "count": Method(bytearray_count),
+        "hex": Method(bytearray_hex),
+        "decode": Method(bytearray_decode),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
