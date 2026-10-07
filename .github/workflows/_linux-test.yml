@@ -401,6 +401,7 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Upload test artifacts
+        # DO NOT MERGE: this PR's copy of the action, so its Linux jobs upload test run reports.
         uses: pytorch/pytorch/.github/actions/upload-test-artifacts@gh/georgehong/8/head
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
