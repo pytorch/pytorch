@@ -1,0 +1,49 @@
+diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
+index 97c52cf..99d1b63 100644
+--- a/quack/epilogue/frontend.py
++++ b/quack/epilogue/frontend.py
+@@ -1336 +1336,3 @@ class EpiMod:
+-            bufs[name] = epi_args[name] = torch.empty(shape, dtype=torch.float32, device=device)
++            bufs[name] = epi_args[name] = torch.empty(
++                shape, dtype=op.sink_alloc_dtype(), device=device
++            )
+@@ -1599 +1601 @@ class EpiMod:
+-                for name, shape in sink_shapes:
++                for name, shape, dtype in sink_shapes:
+@@ -1601 +1603 @@ class EpiMod:
+-                        buf = _t.empty(shape, dtype=_t.float32, device=A.device)
++                        buf = _t.empty(shape, dtype=dtype, device=A.device)
+@@ -1670 +1672,5 @@ class EpiMod:
+-                        epi_args[name] = torch.empty(shape, dtype=torch.float32, device=A.device)
++                        epi_args[name] = torch.empty(
++                            shape,
++                            dtype=self.sinks[name].sink_alloc_dtype(),
++                            device=A.device,
++                        )
+@@ -1775 +1781,3 @@ class EpiMod:
+-            sink_shapes = tuple((name, tuple(b.shape)) for name, b in sink_bufs.items())
++            sink_shapes = tuple(
++                (name, tuple(buf.shape), buf.dtype) for name, buf in sink_bufs.items()
++            )
+diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
+index 75f2e18..f83c2d2 100644
+--- a/quack/epilogue/ops.py
++++ b/quack/epilogue/ops.py
+@@ -393,0 +394,4 @@ class EpiOp:
++    def sink_alloc_dtype(self):
++        """Return the torch dtype for graph-owned sink storage."""
++        return torch.float32
++
+diff --git a/quack/gemm_runtime/torch_op.py b/quack/gemm_runtime/torch_op.py
+index 3cd074d..c533fed 100644
+--- a/quack/gemm_runtime/torch_op.py
++++ b/quack/gemm_runtime/torch_op.py
+@@ -217,2 +217,3 @@ def _alloc_outs_from_meta(digest: str, ins: list, meta: str) -> list:
+-            shape = mod.sinks[name].sink_alloc_shape(lead, n, cta_tile_m, cfg.tile_n)
+-            outs.append(torch.empty(shape, dtype=torch.float32, device=A.device))
++            op = mod.sinks[name]
++            shape = op.sink_alloc_shape(lead, n, cta_tile_m, cfg.tile_n)
++            outs.append(torch.empty(shape, dtype=op.sink_alloc_dtype(), device=A.device))
+@@ -354 +355 @@ def compile_call(
+-            partials[name] = torch.empty(shape, dtype=torch.float32, device=A.device)
++            partials[name] = torch.empty(shape, dtype=op.sink_alloc_dtype(), device=A.device)
