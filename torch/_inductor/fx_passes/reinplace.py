@@ -255,6 +255,19 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     return False
 
 
+def should_reinplace_all_reduce(node: torch.fx.Node) -> bool:
+    """
+    The symmetric-memory one-shot all-reduce lowering is out-of-place, so
+    reinplacing an all_reduce it may pick only adds a copy back into the input.
+    """
+    if not config._collective.auto_select:
+        return True
+    from torch.distributed._symmetric_memory import is_symm_mem_enabled_for_group
+
+    group_name = cast("torch.distributed.distributed_c10d.GroupName", node.args[2])
+    return not is_symm_mem_enabled_for_group(group_name)
+
+
 def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
     """Replace _generalized_scatter with normal aten ops"""
     for node in itertools.chain(
@@ -456,7 +469,9 @@ try:
     c10d_functional = torch.ops._c10d_functional
     inplaceable_collective_ops: dict[Callable[..., Any], InplaceableOp] = {
         c10d_functional.all_reduce.default: InplaceableOp(
-            c10d_functional.all_reduce_.default, 0
+            c10d_functional.all_reduce_.default,
+            0,
+            extra_check=should_reinplace_all_reduce,
         ),
         c10d_functional.all_reduce_coalesced.default: InplaceableOp(
             c10d_functional.all_reduce_coalesced_.default, 0

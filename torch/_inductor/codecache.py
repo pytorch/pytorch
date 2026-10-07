@@ -1057,6 +1057,16 @@ def torch_key() -> bytes:
         return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
+# Bound at import so tests that mock.patch torch_key/triton_key don't break it.
+_cache_key_prefetchers = (torch_key.prefetch, triton_key.prefetch)  # type: ignore[attr-defined]
+
+
+def prefetch_cache_keys() -> None:
+    """Start computing torch_key and triton_key in a background thread."""
+    for prefetch in _cache_key_prefetchers:
+        prefetch()
+
+
 def get_inductor_root() -> str:
     return os.path.dirname(__file__)
 
@@ -1817,8 +1827,6 @@ def compiled_fx_graph_hash(
     # cache in this module.
     key = pickler.get_key(details)
     debug_lines = pickler.debug_lines(details)
-    debug_str = "\n".join(debug_lines)
-    log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
     return key, debug_lines
 
 
@@ -3176,6 +3184,14 @@ end
                                 pass
 
                         del buf_view
+
+                        if torch.accelerator.is_available():
+                            # Constants have just been copied to host, so most of
+                            # the caching allocator's pool is now free-but-reserved
+                            # slack. Hand it back before packaging, which otherwise
+                            # reserves its own allocation on top and sets a new
+                            # high-water mark.
+                            torch.accelerator.empty_cache()
                     else:
                         serialized_weights = b""
             else:
