@@ -87,7 +87,7 @@ from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
 from . import config, decorators, exc, graph_break_hints, trace_rules
 from .backends.registry import _is_registered_backend
-from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
+from .bytecode_analysis import remove_dead_code
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
     Instruction,
@@ -981,7 +981,7 @@ def trace_frame(
         code_options.update(output.code_options)
         propagate_inst_exn_table_entries(instructions)
         check_inst_exn_tab_entries_valid(instructions)
-        instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
+        instructions[:] = remove_dead_code(instructions)
     except Exception as e:
         e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
         raise
@@ -2566,8 +2566,6 @@ def replay(filename: str) -> None:
 
 
 def first_real_inst_idx(code: CodeType) -> int:
-    if sys.version_info < (3, 11):
-        return 0
     for inst in dis.get_instructions(code):
         if inst.opname == "RESUME":
             return inst.offset // 2

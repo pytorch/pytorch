@@ -290,19 +290,18 @@ Backend compiler exception
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0219.html""",
         )
 
-        if sys.version_info >= (3, 11):
-            msg_with_carets = munge_exc(
-                cm.exception,
-                suppress_suffix=True,
-                strip_carets=False,
-            )
-            self.assertIn(
-                """\
+        msg_with_carets = munge_exc(
+            cm.exception,
+            suppress_suffix=True,
+            strip_carets=False,
+        )
+        self.assertIn(
+            """\
       File "test_error_messages.py", line N, in fn
         return x + 1
         ^^^^^^^^^^^^""",
-                msg_with_carets,
-            )
+            msg_with_carets,
+        )
 
     @make_logging_test()
     def test_backend_fake_tensor_exc_no_warning(self, records):
