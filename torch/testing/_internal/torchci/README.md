@@ -59,10 +59,10 @@ physical RAM; it is omitted where neither is available.
 |---|---|---|
 | `type` | string | `"run"` |
 | `schema_version` | string | `"0.1"` |
-| `file` | string | Launched Python file |
-| `suite` | string | Innermost Python class |
+| `file` | string | Launched Python file, or `cpp/<binary>` |
+| `suite` | string | Innermost Python class or gtest suite |
 | `case_name` | string | Collected test name, including generated parameters |
-| `language` | string | `python` |
+| `language` | string | `python` or `cpp` |
 | `declared_case_name` | string | Source test name before generated device, dtype, op, or parameter suffixes |
 | `rerun_number` | int | Execution number within one process, starting at `0` |
 | `outcome` | string | `passed`, `failed`, `error`, `skipped`, `xfailed`, `xpassed`, `crashed`, or `timed_out` |
@@ -73,7 +73,8 @@ physical RAM; it is omitted where neither is available.
 
 Pytest reruns and flakefinder repeats within one process count up
 `rerun_number`. A test's subtests share its run line, and a failing subtest fails
-it.
+it. For gtest value-parameterized tests, `declared_case_name` drops the `/N`
+suffix, and a gtest whose process crashed is `crashed`.
 
 ## Crash recording
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import os
+import re
 import sys
 import time
 import uuid
@@ -30,6 +31,9 @@ if TYPE_CHECKING:
 
 # Set where the test runs; xdist ships it to the controller with the report.
 _DECLARED_CASE_NAME = "_torchci_declared_case_name"
+# pytest-cpp runs each gtest in a process of its own and reports a crash as an
+# ordinary failure.
+_GTEST_CRASH = re.compile(r"Internal Error: calling .+ failed \(returncode=(-\d+)\)")
 # Where run_test.py reads test/conftest.py's stepcurrent files; the report's path
 # and in-flight run (recovery.finish) are published next to them.
 STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
@@ -197,6 +201,9 @@ class ReportWriter:
             if not run.failed_phase:
                 run.failed_phase = test_report.when
                 run.outcome_summary = _failure_summary(test_report)
+                if crash := _GTEST_CRASH.match(run.outcome_summary):
+                    run.crashed = True
+                    run.outcome_summary = report.exit_summary(int(crash.group(1)))
         elif test_report.skipped and not subtest and not run.skipped:
             from _pytest.terminal import _get_raw_skip_reason
 

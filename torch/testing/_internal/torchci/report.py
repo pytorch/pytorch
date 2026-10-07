@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
+from pathlib import Path
 from typing import Any, NamedTuple
 
 
@@ -24,8 +26,13 @@ class TestId(NamedTuple):
 
 def identity(nodeid: str) -> TestId:
     """Launched file, innermost class and parametrized name of a node id. Classes
-    that test_jit.py imports from jit/ keep test_jit.py as their file."""
+    that test_jit.py imports from jit/ keep test_jit.py as their file. A pytest-cpp
+    node id, ``build/bin/test_api::ModulesTest.Linear``, is ``cpp/<binary>``, the
+    gtest suite and the test name."""
     path, _, rest = nodeid.partition("::")
+    if not path.endswith(".py"):
+        suite, _, case_name = rest.partition(".")
+        return TestId(f"cpp/{Path(path).stem}", suite, case_name, "cpp")
     head, bracket, params = rest.partition("[")
     parts = head.split("::")
     suite = parts[-2] if len(parts) > 1 else ""
@@ -33,8 +40,11 @@ def identity(nodeid: str) -> TestId:
 
 
 def fallback_declared_case_name(nodeid: str) -> str:
-    """The case name without pytest parameters."""
-    return identity(nodeid).case_name.partition("[")[0]
+    """The case name without pytest parameters or a gtest ``/N`` suffix."""
+    test = identity(nodeid)
+    if test.language == "cpp":
+        return re.sub(r"/\d+$", "", test.case_name)
+    return test.case_name.partition("[")[0]
 
 
 def report_path(directory: str, report_uuid: str) -> str:
