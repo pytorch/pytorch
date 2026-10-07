@@ -98,12 +98,3 @@
                 val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
                 block_indexing=True
             )}}
-
-@triton.jit
-def _compute_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr, NUM_SMS: tl.constexpr):
-    group_id = tile_id // num_pid_in_group
-    first_pid_m = group_id * GROUP_M
-    GROUP_M = min(grid_m - first_pid_m, GROUP_M)
-    pid_m = first_pid_m + (tile_id % GROUP_M)
-    pid_n = (tile_id % num_pid_in_group) // GROUP_M
-    return pid_m, pid_n

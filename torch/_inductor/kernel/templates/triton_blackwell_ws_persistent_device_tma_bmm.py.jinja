@@ -73,8 +73,8 @@
     {%- endif %}
         batch = tile_id // num_tiles_per_batch
         batch_tile_id = tile_id % num_tiles_per_batch
-        pid_m, pid_n = _blackwell_bmm_pid(
-            batch_tile_id, num_pid_in_group, grid_m, GROUP_M
+        pid_m, pid_n = _compute_pid(
+            batch_tile_id, num_pid_in_group, grid_m, GROUP_M, NUM_SMS
         )
         offs_am = (pid_m * BLOCK_M).to(tl.int32)
         offs_bn = (pid_n * BLOCK_N).to(tl.int32)
@@ -112,8 +112,8 @@
 
         batch = tile_id // num_tiles_per_batch
         batch_tile_id = tile_id % num_tiles_per_batch
-        pid_m, pid_n = _blackwell_bmm_pid(
-            batch_tile_id, num_pid_in_group, grid_m, GROUP_M
+        pid_m, pid_n = _compute_pid(
+            batch_tile_id, num_pid_in_group, grid_m, GROUP_M, NUM_SMS
         )
         offs_cm = pid_m * BLOCK_M
         offs_cn = pid_n * BLOCK_N
@@ -142,13 +142,3 @@
                 val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE")
             )}}
             {%- endif %}
-
-
-@triton.jit
-def _blackwell_bmm_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr):
-    group_id = tile_id // num_pid_in_group
-    first_pid_m = group_id * GROUP_M
-    group_m = min(grid_m - first_pid_m, GROUP_M)
-    pid_m = first_pid_m + tile_id % group_m
-    pid_n = (tile_id % num_pid_in_group) // group_m
-    return pid_m, pid_n
