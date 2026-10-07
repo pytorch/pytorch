@@ -1,8 +1,11 @@
 diff --git a/quack/gemm_config.py b/quack/gemm_config.py
-index 3156c2b..2d98613 100644
+index 3156c2b..71f028c 100644
 --- a/quack/gemm_config.py
 +++ b/quack/gemm_config.py
-@@ -207,0 +208,7 @@ def _get_sm100_configs(
+@@ -205,6 +205,13 @@ def _get_sm100_configs(
+         + [(256, tile_n, (2, 1)) for tile_n in tile_n_vals]
+         + [(256, tile_n, (2, 2)) for tile_n in tile_n_vals]
+         + [(256, 512, (2, 1))]
 +        # 1-CTA M64 MMA: half the rows per CTA, so twice the CTAs along M (or
 +        # along N under swap_ab) for skinny decode problems.
 +        + [(64, tile_n, (1, cn)) for tile_n in tile_n_vals for cn in (1, 2, 4)]
@@ -10,3 +13,6 @@ index 3156c2b..2d98613 100644
 +        + [(64, tile_n, (4, cn)) for tile_n in (16, 32) for cn in (1, 2)]
 +        # 2-CTA M256 tiles with a 4x1 cluster: long-K prefill.
 +        + [(256, tile_n, (4, 1)) for tile_n in (224, 256)]
+     )
+     swap_ab_vals = [False, True]
+     if epilogue in ["lse", "gated"]:
