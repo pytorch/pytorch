@@ -2230,10 +2230,8 @@ class MetaConverter(Generic[_TensorT]):
                             maybe_fake_mgr: AbstractContextManager[None] = (
                                 contextlib.nullcontext()
                             )
-                            from torch._subclasses.fake_impls import (
-                                in_kernel_invocation_manager,
-                            )
                             from torch._subclasses.fake_tensor import (
+                                in_kernel_invocation_manager,
                                 maybe_get_fake_mode,
                             )
 
