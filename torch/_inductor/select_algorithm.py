@@ -2174,26 +2174,41 @@ class TritonTemplateKernel(TritonKernel):
                 return super().store(name, index, value, mode)
         return super().store(name, index, value, mode)
 
+    def _staged_tile_elems(self) -> int | None:
+        """Elements in one TMA store's shared-memory staging buffer: an
+        epilogue subtile, BLOCK_M x BLOCK_N / EPILOGUE_SUBTILE, single-buffered."""
+        bm, bn = self.meta.get("BLOCK_M"), self.meta.get("BLOCK_N")
+        if bm is None or bn is None:
+            return None
+        return bm * (bn // self.meta.get("EPILOGUE_SUBTILE", 1))
+
     def _epilogue_tma_store_budget(self) -> int:
         """Shared memory left for staging the TMA stores of epilogue outputs,
         after the operand ring and the template output's own staging."""
         device = self.output_node.get_device()
         tile = [self.meta.get(k) for k in ("BLOCK_M", "BLOCK_N", "BLOCK_K")]
-        if device is None or device.type != "cuda" or None in tile:
+        staged = self._staged_tile_elems()
+        if device is None or device.type != "cuda" or None in tile or staged is None:
             return 0
         bm, bn, bk = tile
         props = torch.cuda.get_device_properties(device)
-        limit = getattr(props, "shared_memory_per_block_optin", 0)
+        # ROCm reports only shared_memory_per_block. With neither, budget
+        # nothing: all-plain costs ~2%, an overflow costs the fused choice.
+        limit = getattr(
+            props,
+            "shared_memory_per_block_optin",
+            getattr(props, "shared_memory_per_block", 0),
+        )
         operands = self.input_nodes[
             self.prefix_args : len(self.input_nodes) - self.suffix_args
         ]
         elem = max(node.get_dtype().itemsize for node in operands)
         ring = self.num_stages * (bm * bk + bk * bn) * elem
-        template_out = bm * bn * self.output_node.get_dtype().itemsize
+        template_out = staged * self.output_node.get_dtype().itemsize
         # Err toward tl.store: an overflow fails the fused choice outright. The
         # margin covers the epilogue's layout-conversion and reduction scratch
-        # and the barriers, measured at under BM * BN bytes plus 1 KB on B200,
-        # and staging is counted as a whole tile even when subtiled.
+        # and the barriers, measured at under BM * BN / EPILOGUE_SUBTILE bytes
+        # plus 1 KB on B200.
         margin = bm * bn + 16 * 1024
         return limit - ring - template_out - margin
 
@@ -2201,11 +2216,12 @@ class TritonTemplateKernel(TritonKernel):
         self, template_node, epilogue_nodes
     ) -> list[tuple[str, int]]:
         """The epilogue outputs a TMA store can write whole, with the bytes of
-        their staged tile: materialized, the template output's shape, row-major
-        and 16-byte aligned. Smaller or irregular outputs use tl.store."""
-        bm, bn = self.meta.get("BLOCK_M"), self.meta.get("BLOCK_N")
+        their staged (sub)tile: materialized, the template output's shape,
+        row-major and 16-byte aligned. Smaller or irregular outputs use
+        tl.store."""
+        staged = self._staged_tile_elems()
         scheduler = V.graph.scheduler
-        if bm is None or bn is None or scheduler is None:
+        if staged is None or scheduler is None:
             return []
         fused = OrderedSet(
             [template_node.get_name(), *(n.get_name() for n in epilogue_nodes)]
@@ -2221,19 +2237,19 @@ class TritonTemplateKernel(TritonKernel):
                 layout = V.graph.get_buffer(name).get_layout()
                 dtype = layout.dtype
                 if (
-                    dtype not in _TMA_SUPPORTED_DTYPES
+                    dtype not in _TMA_SUPPORTED_DTYPES  # unsupported dtype
                     or not all(
                         isinstance(x, (int, sympy.Integer))
                         for x in (*layout.size, *layout.stride, layout.offset)
-                    )
-                    or list(layout.size) != list(size)
-                    or layout.offset != 0
-                    or layout.stride[-1] != 1
-                    or (layout.stride[0] * dtype.itemsize) % 16 != 0
-                    or (layout.size[-1] * dtype.itemsize) < 16
+                    )  # dynamic layout
+                    or list(layout.size) != list(size)  # not full-tile
+                    or layout.offset != 0  # irregular output
+                    or layout.stride[-1] != 1  # irregular output
+                    or (layout.stride[0] * dtype.itemsize) % 16 != 0  # irregular output
+                    or (layout.size[-1] * dtype.itemsize) < 16  # small output
                 ):
                     continue
-                outputs.append((name, bm * bn * dtype.itemsize))
+                outputs.append((name, staged * dtype.itemsize))
         return outputs
 
     def _compute_fusion_metadata(
