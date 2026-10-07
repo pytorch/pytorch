@@ -2403,7 +2403,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
             self.assertEqual(impl._foreach_mm_route(A, B), expected)
 
     @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+        torch.cuda.is_available() and (SM90OrLater or torch.version.hip), "requires CUDA SM90+"
     )
     @parametrize(
         "label,a_shape,b_shape,a_dtype,b_dtype",
@@ -2426,7 +2426,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         self.assertFalse(_foreach_mm_cond(A, B))
 
     @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+        torch.cuda.is_available() and (SM90OrLater or torch.version.hip), "requires CUDA SM90+"
     )
     @parametrize(
         "label,shapes",
@@ -2460,7 +2460,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
 
     @skipIfNoNvmath
     @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
+        torch.cuda.is_available() and (SM90OrLater or torch.version.hip), "requires CUDA SM90+"
     )
     @parametrize(
         "label,shapes",

@@ -2408,7 +2408,7 @@ class TestScheduler(TestCase):
         self.assertFalse(cleaned.skip_cudagraph)
 
     @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
     @xfailIfNoAcceleratorTriton
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
@@ -2430,7 +2430,7 @@ class TestScheduler(TestCase):
 
     @xfailIfNoAcceleratorTriton
     @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIf(not (SM70OrLater or torch.version.hip), "GPU capability is < SM70")
     @parametrize(
         "options",
         [

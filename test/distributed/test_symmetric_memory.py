@@ -1551,7 +1551,7 @@ class AsyncTPTest(MultiProcContinuousTest):
                 )
 
     @skipIf(
-        not SM90OrLater,
+        not (SM90OrLater or torch.version.hip),
         "_fused_all_gather_matmul_native currently only supports sm>=90",
     )
     @skip_if_lt_x_gpu(2)
@@ -1700,7 +1700,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
+    @skipUnless(SM89OrLater or torch.version.hip, "Requires compute capability >= 8.9")
     @parametrize("gather_dim", [0, 1])
     @parametrize(
         "scale_mode", ["tensor-wise", "row-wise-replicated", "row-wise-sharded"]
@@ -1856,7 +1856,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         self.assertEqual(output_0.stride(), output_2.stride())
 
     @skip_if_lt_x_gpu(2)
-    @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
+    @skipUnless(SM89OrLater or torch.version.hip, "Requires compute capability >= 8.9")
     @parametrize("scatter_dim", [0, 1])
     @parametrize("rowwise", [True, False])
     @skipIf(

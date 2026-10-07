@@ -3510,7 +3510,7 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires sm80 or later.")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "Requires sm80 or later.")
     def test_sdpa(self):
         @nested_compile_region
         def gn(q, k, v):

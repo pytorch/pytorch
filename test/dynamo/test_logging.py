@@ -1363,7 +1363,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 
     @make_logging_test(autotuning=True)
     @requires_gpu
-    @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
+    @unittest.skipIf(not (SM90OrLater or torch.version.hip), "requires H100+ GPU")
     def test_autotuning(self, records):
         with torch._inductor.utils.fresh_cache():
 

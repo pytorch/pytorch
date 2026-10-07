@@ -2006,7 +2006,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
     not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
 )
 @requires_nccl_version((2, 28), "Need NCCL 2.28+ for CE collectives")
-@skipCUDAIf(not SM90OrLater, "requires sm90+")
+@skipCUDAIf(not (SM90OrLater or torch.version.hip), "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str | None:

@@ -2546,7 +2546,7 @@ def get_new_module_tests():
             check_gradgrad=False,
             desc='gelu_activation',
             with_tf32=True,
-            tf32_precision=0.08 if SM90OrLater else 0.05,
+            tf32_precision=0.08 if SM90OrLater or torch.version.hip else 0.05,
             default_dtype=torch.double,
         ),
         dict(
@@ -2591,7 +2591,7 @@ def get_new_module_tests():
             check_gradgrad=False,
             desc='multilayer_coder',
             with_tf32=True,
-            tf32_precision=0.05 if SM90OrLater else 0.03,
+            tf32_precision=0.05 if SM90OrLater or torch.version.hip else 0.03,
             # gfx942 runs TF32 on the XF32 hardware path; this K=4 multilayer entry
             # amplifies the TF32-class per-gemm error to 4e-3..2e-2 relative on every
             # compare, which no absolute tolerance describes. The _fp32 sibling keeps

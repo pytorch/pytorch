@@ -12857,7 +12857,8 @@ class TestCompileKernel(TestCase):
 class TestCudaDeviceParametrized(TestCase):
     @skipIfRocmVersionLessThan((7, 0))
     @skipCUDAIf(
-        not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
+        not (SM70OrLater or torch.version.hip),
+        "Compute capability >= SM70 required for relaxed ptx flag",
     )
     def test_graph_external_wait_and_record(self):
         torch.cuda.empty_cache()

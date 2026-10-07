@@ -132,7 +132,7 @@ class TestCutlassEVT(TestCase):
     device_type = GPU_TYPE
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not (SM90OrLater or torch.version.hip), "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_accumulator_return(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -194,7 +194,7 @@ return tmp_0, tmp_2, D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not (SM90OrLater or torch.version.hip), "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_disjoint_read_indexing(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -244,7 +244,7 @@ index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
             )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not (SM90OrLater or torch.version.hip), "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_broadcasting(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -308,7 +308,7 @@ return tmp_0, tmp_2, D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not (SM90OrLater or torch.version.hip), "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -368,7 +368,7 @@ return tmp_1, D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not (SM90OrLater or torch.version.hip), "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_neg_constant(self):
         """Test EVT codegen for neg and constant ops (used in decomposed SiLU)."""
@@ -408,7 +408,7 @@ return D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not (SM90OrLater or torch.version.hip), "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_sigmoid_decomposed(self):
         """Test EVT codegen for decomposed sigmoid: 1/(1+exp(-x))."""
@@ -454,7 +454,7 @@ return D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not (SM90OrLater or torch.version.hip), "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_silu_fused(self):
         """Test EVT codegen for SiLU: x/(1+exp(-x)) is folded to silu(x)."""
@@ -494,7 +494,7 @@ return D""",
         )
 
     @skipXPUIf(not Xe2_Or_Later, "Unsupported platform")
-    @skipCUDAIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not (SM90OrLater or torch.version.hip), "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cutlass.lib_extensions.evt_extensions import (
