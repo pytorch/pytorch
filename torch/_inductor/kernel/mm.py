@@ -2,7 +2,7 @@
 import functools
 import logging
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any, cast, Literal
 
 import torch
 from torch._dynamo.utils import counters
@@ -52,13 +52,16 @@ from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     KernelTemplate,
+    NoValidChoicesError,
     realize_inputs,
     TritonTemplate,
 )
 from ..utils import (
     _IntLike,
+    _use_autotune_backend,
     _use_cutlass_for_op,
     ceildiv,
+    FOLDED_SCALED_MM_OUTPUT_SCALE,
     GPU_ALIGN_BYTES,
     is_bf16x9_matmul,
     use_aten_gemm_kernels,
@@ -85,6 +88,7 @@ from .mm_common import (
     mm_grid,
     persistent_mm_grid,
     use_native_matmul,
+    zero_addmm_input,
 )
 
 
@@ -115,7 +119,7 @@ mm_template = TritonTemplate(
     # See more details in https://github.com/pytorch/pytorch/pull/146293
     else load_kernel_template("triton_mm_rocm"),
     cache_codegen_enabled_for_template=True,
-    prologue_loads_all_inputs=True,
+    prologue_loads_all_named_inputs=True,
 )
 
 persistent_tma_mm_template = TritonTemplate(
@@ -197,6 +201,34 @@ aten__sparse_semi_structured_mm = ExternKernelChoice(
 
 aten__fp8_mm = ExternKernelChoice(
     torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
+)
+
+
+def scaled_mm_with_output_scale(
+    mat_a,
+    mat_b,
+    scale_a,
+    scale_b,
+    output_scale,
+    *,
+    out_dtype,
+    use_fast_accum,
+    out=None,
+):
+    result = torch._scaled_mm(
+        mat_a,
+        mat_b,
+        scale_a=scale_a,
+        scale_b=scale_b,
+        out_dtype=out_dtype,
+        use_fast_accum=use_fast_accum,
+        out=out,
+    )
+    return torch.mul(result, output_scale, out=result)
+
+
+aten__scaled_mm_with_output_scale = ExternKernelChoice(
+    scaled_mm_with_output_scale, None
 )
 
 
@@ -441,17 +473,6 @@ def get_flydsl_mm_template_kwargs(
 
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
-
-
-def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
-    torch._check(
-        inp.get_dtype() == mat1.get_dtype() and inp.get_dtype() == mat2.get_dtype(),
-        lambda: "input dtypes must be the same",
-    )
-    torch._check(
-        inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
-        lambda: "all inputs must be on the same device",
-    )
 
 
 def decomposeK(a, b, k_splits):
@@ -910,9 +931,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
-    if not use_bf16x9 and beta == 0 and mat1.get_device().type == "cuda":
-        _check_addmm_input_metadata(inp, mat1, mat2)
-        if alpha == 0:
+    template_inp = inp
+    if not use_bf16x9 and beta == 0:
+        # The addmm decomposition already checked inp's shape where eager does.
+        template_inp = zero_addmm_input(inp, mat1, mat2)
+        # Matches cuBLAS, which doesn't read mat1 and mat2 when alpha == 0.
+        if alpha == 0 and mat1.get_device().type == "cuda":
             _, _, _, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
             return lowerings[aten.full](
                 layout.size,
@@ -920,17 +944,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 dtype=layout.dtype,
                 device=layout.device,
             )
-        if layout is not None:
-            result = lowerings[aten.mm](mat1, mat2, layout=layout)
-        else:
-            result = lowerings[aten.mm](mat1, mat2)
-        if alpha != 1:
-            result = lowerings[aten.mul](alpha, result)
-        return result
 
     if use_native_matmul(mat1, mat2):
         if beta == 0:
-            _check_addmm_input_metadata(inp, mat1, mat2)
             arg1 = 0
         else:
             arg1 = lowerings[aten.mul](beta, inp)
@@ -943,7 +959,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         return lowerings[aten.add](arg1, arg2)
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
-    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
+    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(
+        mat1, mat2, template_inp, layout=layout
+    )
     inp = realize_inputs(inp)
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "addmm"
@@ -1024,11 +1042,13 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                     templates_to_use.append(persistent_mm_template)
 
         # Manually call get_template_configs as use 1-D bias if possible
-        choices.extend(
-            V.choices.get_template_configs(
-                kernel_inputs_aten, [addmm_contiguous_subgraph_template], name
+        # contiguous_addmm calls addmm without alpha and beta.
+        if alpha == 1 and beta == 1:
+            choices.extend(
+                V.choices.get_template_configs(
+                    kernel_inputs_aten, [addmm_contiguous_subgraph_template], name
+                )
             )
-        )
     # Single unified call for all templates
     choices.extend(
         V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
@@ -1931,6 +1951,23 @@ def tuned_scaled_mm(
     check_supported_striding(mat_a, mat_b)
 
     scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
+    folded_output_scale = bool(
+        V.graph.current_node.meta.get(FOLDED_SCALED_MM_OUTPUT_SCALE, False)
+    )
+    folded_output_scale_real = (
+        realize_inputs(scale_result)
+        if folded_output_scale and scale_result is not None
+        else None
+    )
+
+    def apply_folded_output_scale(node):
+        if folded_output_scale_real is None:
+            return node
+        # The matched scale is a 0-D FP32 tensor, so eager treats it as a
+        # wrapped scalar and keeps the matrix result dtype during promotion.
+        scale = L.to_dtype(folded_output_scale_real, layout.dtype)
+        scale = L.expand(scale, node.get_size())
+        return lowerings[aten.mul.Tensor](node, scale)
 
     bias_real = realize_inputs(bias) if bias else None
 
@@ -1959,6 +1996,54 @@ def tuned_scaled_mm(
         )
 
     _, is_nonzero = _is_static_problem(layout)
+
+    # The vendored Blackwell block-scaled NVGEMM kernel has a native FP32
+    # output-scale argument. Prefer that semantic path only for the private
+    # graph-level ``_scaled_mm(...) * scalar`` rewrite. A public ``scale_result``
+    # argument has different ATen semantics and must not be treated as alpha.
+    if (
+        folded_output_scale_real is not None
+        and is_nonzero
+        and _use_autotune_backend("NVGEMM")
+        and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b)
+    ):
+        from ..codegen.nv_universal_gemm import (
+            add_nv_universal_scaled_gemm_choices,
+            NVUniversalGemmCaller,
+        )
+
+        scaled_choices: list[ChoiceCaller] = []
+        add_nv_universal_scaled_gemm_choices(
+            scaled_choices,
+            layout,
+            input_nodes,
+            kernel_inputs=kernel_inputs,
+            output_scale_node=folded_output_scale_real,
+        )
+        scaled_input_nodes = [*input_nodes, folded_output_scale_real]
+        if scaled_choices and use_aten_gemm_kernels():
+            native_request = cast(NVUniversalGemmCaller, scaled_choices[0]).bmreq
+            aten__scaled_mm_with_output_scale.maybe_append_choice(
+                scaled_choices,
+                input_nodes=scaled_input_nodes,
+                layout=layout,
+                out_dtype=out_dtype,
+                use_fast_accum=use_fast_accum,
+                benchmark_request_kwargs={
+                    "cudagraph_unroll": native_request.cudagraph_unroll,
+                    "cudagraph_cold_cache_input_indices": (
+                        native_request.cudagraph_cold_cache_input_indices
+                    ),
+                },
+            )
+        if scaled_choices:
+            try:
+                node, _ = autotune_select_algorithm(
+                    name, scaled_choices, scaled_input_nodes, layout
+                )
+                return node
+            except NoValidChoicesError:
+                pass
 
     if (
         # We don't have triton lowerings for the MX variants yet
@@ -2057,7 +2142,7 @@ def tuned_scaled_mm(
     # Early return for MX variants
     if scale_a.dtype != torch.float32:
         node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
-        return node
+        return apply_folded_output_scale(node)
 
     if (
         is_nonzero
@@ -2075,7 +2160,7 @@ def tuned_scaled_mm(
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
     node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
-    return node
+    return apply_folded_output_scale(node)
 
 
 @functools.cache
