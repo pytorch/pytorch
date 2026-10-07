@@ -25,7 +25,6 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
-#include <c10/core/Contiguity.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
@@ -2986,31 +2985,6 @@ Call this whenever a new thread is created in order to propagate values from
       TORCH_CHECK(false, "Valgrind is not supported.");
 #endif
   });
-
-  py_module.def(
-      "_is_contiguous_or_false",
-      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
-        TORCH_CHECK(
-            sizes.size() == strides.size(),
-            "sizes and strides must have the same length");
-        return c10::_is_contiguous_or_false(sizes, strides);
-      });
-  py_module.def(
-      "_is_channels_last_contiguous_2d_or_false",
-      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
-        TORCH_CHECK(
-            sizes.size() == strides.size(),
-            "sizes and strides must have the same length");
-        return c10::_is_channels_last_contiguous_2d_or_false(sizes, strides);
-      });
-  py_module.def(
-      "_is_channels_last_contiguous_3d_or_false",
-      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
-        TORCH_CHECK(
-            sizes.size() == strides.size(),
-            "sizes and strides must have the same length");
-        return c10::_is_channels_last_contiguous_3d_or_false(sizes, strides);
-      });
 
   py::class_<WeakTensorRef>(py_module, "_WeakTensorRef")
       .def(py::init([](const py::object& tensor) {
