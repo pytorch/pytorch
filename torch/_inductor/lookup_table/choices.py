@@ -34,7 +34,9 @@ class LookupTableChoices(InductorChoices):
         Get the template lookup table from config.
         Override this method to use custom lookup table sources (database, API, etc.).
         """
-        if not torch.cuda.is_available() or config.lookup_table.table is None:
+        if config.lookup_table.table is None or not (
+            torch.cuda.is_available() or torch.xpu.is_available()
+        ):
             return {}
         return config.lookup_table.table
 
@@ -45,15 +47,15 @@ class LookupTableChoices(InductorChoices):
         Generate a device key for lookup table indexing.
         For CPU devices, returns None.
         For CUDA devices, returns the props.gcnArchName string.
+        For XPU devices, returns the props.name string.
         """
-        if device.type != "cuda":
-            # only cuda devices are supported, this indicates that the system is not in use
-            # for this device
-            return None
-
-        # Get CUDA device properties
-        props = torch.cuda.get_device_properties(device.index)
-        return props.gcnArchName
+        if device.type == "cuda":
+            return torch.cuda.get_device_properties(device.index).gcnArchName
+        if device.type == "xpu":
+            return torch.xpu.get_device_properties(device.index).name
+        # only cuda and xpu devices are supported, this indicates that the system
+        # is not in use for this device
+        return None
 
     @staticmethod
     def _generate_kernel_inputs_key(kernel_inputs: KernelInputs) -> str:
@@ -226,7 +228,7 @@ class LookupTableChoices(InductorChoices):
         """
         lookup_table = self._get_lookup_table()
         if not lookup_table:
-            log.debug("Lookup table: no table configured or CUDA unavailable")
+            log.debug("Lookup table: no table configured or no CUDA/XPU device")
             return {}
 
         # Try both key variants: device-specific first, then device-agnostic
