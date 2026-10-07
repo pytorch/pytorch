@@ -6704,11 +6704,14 @@ def geometric(self, p, generator=None):
         0 < p and p < 1,
         lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
     )
-    rand_dtype = (
-        torch.get_default_dtype()
-        if utils.is_integer_dtype(self.dtype)
-        else self.dtype
-    )
+    # Integer dtypes cannot represent a uniform sample in [0, 1): under
+    # inductor, rand_like(self) for an integer self lowers to a float32
+    # random followed by a cast to self.dtype, truncating every sample to 0
+    # and making the result all ones. Sample in float32 instead (matching
+    # the eager CUDA kernel and inductor's float32-only random prim, and
+    # independent of torch.set_default_dtype) and let the type promotion
+    # wrapper cast the result back to self.dtype.
+    rand_dtype = torch.float32 if utils.is_integer_dtype(self.dtype) else self.dtype
     u = torch.rand_like(self, dtype=rand_dtype)
     return torch.floor(torch.log1p(-u) / math.log1p(-p)) + 1
 
