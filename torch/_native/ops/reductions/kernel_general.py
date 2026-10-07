@@ -279,16 +279,46 @@ def _kernel_outs(outs: Sequence[torch.Tensor]) -> list[torch.Tensor]:
 
 
 def fast_kind(red_pairs: Pairs, kept_pairs: Pairs, nouts: int) -> str | None:
-    """Select row or single-output column reduction by a dense 2D TI view's stride-one pair."""
+    """Select row or column reduction by a dense 2D TI view's stride-one pair."""
     if len(kept_pairs) == 0:
         return "all"
     if len(red_pairs) != 1 or len(kept_pairs) != 1:
         return None
     if red_pairs[0][1] == 1:  # reduced run is innermost/contiguous -> row
         return "row"
-    if kept_pairs[0][1] == 1 and nouts == 1:  # kept innermost -> col
+    if kept_pairs[0][1] == 1 and nouts in (1, 2):  # kept innermost -> col
         return "col"
     return None
+
+
+def _physical_col_view(
+    x: torch.Tensor,
+    red_axes: set[int],
+    red_pairs: Pairs,
+    kept_pairs: Pairs,
+    count: int,
+    num_o: int,
+) -> torch.Tensor | None:
+    if red_pairs == [(count, num_o)] and kept_pairs == [(num_o, 1)]:
+        return torch.as_strided(
+            x,
+            (count, num_o),
+            (num_o, 1),
+            storage_offset=x.storage_offset(),
+        )
+    dims = sorted(red_axes)
+    if (
+        not x.is_contiguous()
+        or not dims
+        or dims != list(range(dims[0], dims[-1] + 1))
+        or dims[0] == 0
+        or dims[-1] + 1 == x.dim()
+    ):
+        return None
+    B = math.prod(x.shape[: dims[0]])
+    R = math.prod(x.shape[dims[0] : dims[-1] + 1])
+    C = math.prod(x.shape[dims[-1] + 1 :])
+    return x.reshape(B, R, C)
 
 
 # Largest one-block register-loaded row; only merging uses smem. Larger uses multi-CTA.
@@ -534,6 +564,7 @@ def _two_stage_general(
 
 
 def _indexed_itree_plan(
+    trait: Any,
     count: int,
     num_o: int,
     itemsize: int,
@@ -541,7 +572,9 @@ def _indexed_itree_plan(
 ) -> "_ItreePlan | None":
     from . import kernel_rowtile as rt
 
-    plan = rt.itree_plan(count, num_o, itemsize, stage=False, device=device)
+    plan = rt.trait_itree_plan(
+        trait, count, num_o, itemsize, stage=False, device=device
+    )
     if plan is None:
         return None
     # General addressing cannot stage physically adjacent rows.
@@ -562,7 +595,7 @@ def _try_indexed_itree(
     """Apply the fixed logical-row DAG through arbitrary storage strides."""
     from . import kernel_rowtile as rt
 
-    plan = _indexed_itree_plan(count, num_o, x.element_size(), x.device)
+    plan = _indexed_itree_plan(trait, count, num_o, x.element_size(), x.device)
     if plan is None:
         return None
     nbatch = plan.split[0] if plan.shape == "split" else 1
@@ -710,32 +743,43 @@ def _reduce(
         outs = reduce_all2(trait, trait_key, x, out_dtypes, block=block, order=order)
         return tuple(_as_shape(o, out_shape) for o in outs)
 
-    # Reshape post-TI contiguous innermost reductions onto a fast kernel; general remains
-    # the fallback for direct calls and declines.
+    # Reshape dense TensorIterator row/column views onto fast kernels; general remains
+    # the fallback for other layouts and declines.
     if (
         not complex_input
         and len(out_shape) > 0
-        and x.is_contiguous()
         and count < _INT32_LIMIT
         and num_o < _INT32_LIMIT
     ):
         kind = fast_kind(red_pairs, kept_pairs, nouts)
         red_n = x.numel() // max(1, math.prod(out_shape))
-        if kind == "row":
+        if kind == "row" and x.is_contiguous():
             x2 = x.reshape(math.prod(out_shape), red_n)
             fast = _try_fast_row(
                 trait, trait_key, x2, out_dtypes, nouts, order=order, tune=tune
             )
             if fast is not None:
                 return tuple(_as_shape(o, out_shape) for o in fast)
-        elif kind == "col":
-            # Splitting the reduced axis supplies parallelism for tall-narrow inputs:
-            # 7.24x, 2.53x, and 1.49x of ATen at (65536, 256), (16384, 1024), and (4096, 4096).
+        col_view = _physical_col_view(x, red_axes, red_pairs, kept_pairs, red_n, num_o)
+        if col_view is not None:
             from . import kernel_coltile as ct
 
-            x2 = x.reshape(red_n, math.prod(out_shape))
-            out = ct.reduce_col_tile(trait, trait_key, x2, out_dtypes[0])
-            return (_as_shape(out, out_shape),)
+            if col_view.dim() == 2:
+                if nouts == 1:
+                    fast = (
+                        ct.reduce_col_tile(
+                            trait, trait_key, col_view, out_dtypes[0], order=order
+                        ),
+                    )
+                else:
+                    fast = ct.reduce_col_tile_2out(
+                        trait, trait_key, col_view, out_dtypes, order=order
+                    )
+            else:
+                fast = ct.reduce_batched_col_tile(
+                    trait, trait_key, col_view, out_dtypes, nouts, order=order
+                )
+            return tuple(_as_shape(out, out_shape) for out in fast)
 
     config = _GeneralConfig(block=block)
     if tune:
