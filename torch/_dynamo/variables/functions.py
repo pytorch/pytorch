@@ -416,11 +416,6 @@ class BaseUserFunctionVariable(VariableTracker):
     closure: VariableTracker | None = None
     annotations: VariableTracker | None = None
 
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def self_args(self) -> list[VariableTracker]:
         return []
 
@@ -1394,15 +1389,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def python_type(self) -> type:
         return types.GeneratorType
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        # Generators have no tp_richcompare: identity for ==/!=, TypeError for
-        # ordering.
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def pygen_yf(self) -> VariableTracker | None:
         if self.inline_tracer.frame_state == FrameState.FRAME_SUSPENDED_YIELD_FROM:
@@ -2666,11 +2652,6 @@ class SkipFunctionVariable(VariableTracker):
             return None
         return self.value
 
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def as_python_constant(self) -> Any:
         return self.value
 
@@ -2976,6 +2957,11 @@ class SkipFunctionVariable(VariableTracker):
         raise NotImplementedError(
             "Python codegen not implemented for sourceless SkipFunctionVariable"
         )
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
 
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
@@ -3614,11 +3600,6 @@ class FunctoolsPartialVariable(VariableTracker):
         # Store cache_hash from the original partial for SAC context_fn caching
         self.original_cache_hash = original_cache_hash
 
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def python_type(self) -> type:
         return functools.partial
 
@@ -3702,6 +3683,11 @@ class FunctoolsPartialVariable(VariableTracker):
         if self.original_cache_hash is not None:
             result.cache_hash = self.original_cache_hash  # type: ignore[missing-attribute]
         return result
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
 
 
 class PolyfilledFunctionVariable(VariableTracker):
@@ -3862,6 +3848,11 @@ class PolyfilledFunctionVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.fn
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
 
 
 class SysFunctionVariable(VariableTracker):
@@ -4946,11 +4937,6 @@ class BoundBuiltinMethodVariable(VariableTracker):
         except AsPythonConstantNotImplementedError:
             return id(self), True
 
-    def tp_richcompare_impl(self, tx, other, op):
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def as_python_constant(self) -> Any:
         obj = self.obj.as_python_constant()
         if isinstance(self.descriptor, types.ClassMethodDescriptorType):
@@ -5147,6 +5133,11 @@ class StaticMethodVariable(VariableTracker):
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
 
 class ClassMethodVariable(VariableTracker):
     """classmethod descriptor wrapping a callable.
@@ -5256,6 +5247,11 @@ class ClassMethodVariable(VariableTracker):
         )
         codegen(self.descriptor)
         codegen.extend_output(create_call_function(1, False))
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
 
 
 class ClassAttrClassMethodVariable(ClassMethodVariable):
@@ -5739,3 +5735,8 @@ class TupleGetterVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2665-L2673
         msg = "can't delete attribute" if value is None else "can't set attribute"
         raise_observed_exception(AttributeError, tx, args=[msg])
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)

@@ -641,13 +641,6 @@ class BaseTorchVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
@@ -678,6 +671,11 @@ class BaseTorchVariable(VariableTracker):
             return True
 
         return getattr(self.value, "__module__", None) in ("math", "cmath")
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
 
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):

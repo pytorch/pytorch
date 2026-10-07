@@ -499,6 +499,11 @@ class SuperVariable(VariableTracker):
             ],
         )
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
 
 class UnknownVariable(VariableTracker):
     """
@@ -681,6 +686,11 @@ class CellVariable(VariableTracker):
             ConstantVariable.create(self_contents is None),
             op,
         )
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
 
 
 class NewGlobalVariable(VariableTracker):
@@ -1489,6 +1499,11 @@ class GetAttrVariable(VariableTracker):
             return self.obj.get_dict_vt(tx).mp_subscript_impl(tx, key)
         return super().mp_subscript_impl(tx, key)
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
 
 class CallMethodVariable(VariableTracker):
     """A method bound to a VT instance.
@@ -1530,16 +1545,6 @@ class CallMethodVariable(VariableTracker):
         except AsPythonConstantNotImplementedError:
             return id(self), True
 
-    def tp_richcompare_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
@@ -1564,6 +1569,11 @@ class CallMethodVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.method_name))
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
 
 
 class PythonModuleVariable(VariableTracker):
@@ -1611,12 +1621,10 @@ class PythonModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, attr_value, source)
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
 
-        return object_richcompare(self, tx, other, op)
+        return python_constant_repr_impl(self, tx)
 
 
 class TypingVariable(VariableTracker):
@@ -1737,6 +1745,11 @@ class TypingVariable(VariableTracker):
         # Let's skip all that noise and just emit it as a simple const.
         #
         codegen.append_output(codegen.create_load_const(self.value))
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
 
 
 @functools.lru_cache(maxsize=1)
@@ -2090,13 +2103,6 @@ class ObjectVariable(VariableTracker):
     def python_type(self) -> type[object]:
         return object
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
-    ) -> "VariableTracker":
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
 
 if sys.version_info >= (3, 15):
 
@@ -2273,6 +2279,11 @@ class LoggingLoggerVariable(VariableTracker):
                 f"If you need the log side effect to run, then you can try one of (1) create the logger outside the compiled region and add the method to `torch._dynamo.config.reorderable_logging_functions` (e.g. `torch._dynamo.config.reorderable_logging_functions.add(logger.{name})`) so that it runs after the compiled region, as long as it is called without kwargs and its arguments are tensors, constants, or string formatters, (2) `torch._higher_order_ops.print(...)`, (3) wrap the logging call in a custom op (marked as mutable), or (4) preserve the logging contents and move the logging call outside the compiled region.",
             ],
         )
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
 
 
 class ConstantLikeVariable(VariableTracker):
@@ -2549,6 +2560,11 @@ class RandomClassVariable(VariableTracker):
         return RandomVariable(
             seed=seed, mutation_type=variables.base.ValueMutationNew()
         )
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
 
 
 class RandomVariable(VariableTracker):

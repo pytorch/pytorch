@@ -114,6 +114,7 @@ from .base import (
     MutationType,
     NO_SUCH_SUBOBJ,
     readonly_setter,
+    REPR_ADDRESS_PLACEHOLDER,
     ValueMutationNew,
     VariableTracker,
 )
@@ -125,7 +126,6 @@ from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
     _resolve_descriptor_get,
     generic_is_true,
-    generic_repr,
     is_nb_not_implemented,
     mro_attr_source,
     mro_lookup,
@@ -576,9 +576,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return self.call_method(tx, "__repr__", [], {})
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # type has no tp_str of its own: unless the metaclass defines __str__,
+        # this is object_str, which calls tp_repr.
         metaclass = type(self.value)
-        if metaclass is type or metaclass.__str__ is type.__str__:
-            return generic_repr(tx, self)
+        if metaclass.__str__ is object.__str__:
+            return super().tp_str_impl(tx)
 
         type_attr = self.lookup_metaclass_attr("__str__")
         if type_attr is None:
@@ -2252,22 +2254,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
-        # ref: slot_tp_repr in https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10687-L10698
-        if self.inherits_base_slot("__repr__"):
+        # The type's tp_repr is its C base's or object_repr unless the class
+        # defines __repr__, which installs slot_tp_repr.
+        cls = type(self.value)
+        if self.inherits_base_slot("__repr__") or cls.__repr__ is object.__repr__:
             return super().tp_repr_impl(tx)
-        if type(self.value).__repr__ is object.__repr__:
-            return VariableTracker.build(tx, repr(self.value))
-        # A C-implemented __repr__ (e.g. `__repr__ = str.upper`) has no Python
-        # body to trace and graph breaks in _maybe_call_special.
+        # slot_tp_repr: https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L10687-L10698
         res = self._maybe_call_special(tx, "__repr__", [])
         if res is not None:
             return res
-        unimplemented(
-            gb_type="untraceable user-defined __repr__",
-            context=f"Could not trace __repr__ override for {type(self.value).__name__}",
-            explanation="Dynamo could not safely trace this user-defined __repr__ override.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-            skip_frame=True,
+        return VariableTracker.build(
+            tx, f"<{cls.__name__} object at {REPR_ADDRESS_PLACEHOLDER}>"
         )
 
     def tp_str_impl(
@@ -2275,9 +2272,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         tx: "InstructionTranslatorBase",
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/typeobject.c#L9475
-        if type(self.value).__str__ is object.__str__:
-            return generic_repr(tx, self)
-        if self.inherits_base_slot("__str__"):
+        if type(self.value).__str__ is object.__str__ or self.inherits_base_slot(
+            "__str__"
+        ):
             return super().tp_str_impl(tx)
         return self.SLOT0(tx, "__str__")
 
@@ -4370,7 +4367,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9421-L9468
         """
         from .constant import ConstantVariable
-        from .object_protocol import object_richcompare
 
         obj_type = type(self.value)
 
@@ -4442,7 +4438,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self._base_methods is not None:
             return super().tp_richcompare_impl(tx, other, op)
 
-        return object_richcompare(self, tx, other, op)
+        return VariableTracker.tp_richcompare_impl(self, tx, other, op)
 
     def call_tree_map_branch(
         self,
@@ -5093,32 +5089,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
             )
             return f"{type(self.value).__name__}({{{contents}}})"
         return super().debug_repr()
-
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # https://github.com/python/cpython/blob/3.13/Lib/collections/__init__.py#L748-L757
-        if self.inherits_base_slot("__repr__"):
-            return super().tp_repr_impl(tx)
-        if type(self.value).__repr__ is collections.Counter.__repr__:
-            base_vt = cast(ConstDictVariable, self)
-            items = list(base_vt.items.items())
-            try:
-                items = sorted(
-                    items,
-                    key=lambda item: item[1].as_python_constant(),
-                    reverse=True,
-                )
-            except (NotImplementedError, TypeError):
-                pass
-            if not items:
-                return VariableTracker.build(tx, f"{type(self.value).__name__}()")
-            contents = ", ".join(
-                f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-                for key, value in items
-            )
-            return VariableTracker.build(
-                tx, f"{type(self.value).__name__}({{{contents}}})"
-            )
-        return super().tp_repr_impl(tx)
 
 
 class UserDefinedOrderedDictVariable(UserDefinedDictVariable, OrderedDictVariable):
@@ -6099,8 +6069,10 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
         return variables.ConstantVariable.create(None)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        repr_slot = types.SimpleNamespace.__repr__
-        if self._maybe_get_baseclass_method("__repr__") is not repr_slot:
+        if (
+            self._maybe_get_baseclass_method("__repr__")
+            is not types.SimpleNamespace.__repr__
+        ):
             return super().tp_repr_impl(tx)
         contents = ", ".join(
             f"{attr}={tracked_repr(tx, value)}" for attr, value in self._attr_items(tx)
