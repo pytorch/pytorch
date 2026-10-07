@@ -1188,7 +1188,8 @@ def parse_cmd_line_args():
                         const=_get_test_report_path(),
                         default=_get_test_report_path() if IS_CI else None)
     parser.add_argument('--save-test-run-reports', nargs='?', type=str,
-                        const=TEST_RUN_REPORTS_DIR, default=None)
+                        const=TEST_RUN_REPORTS_DIR,
+                        default=TEST_RUN_REPORTS_DIR if IS_CI else None)
     parser.add_argument('--no-save-test-run-reports', dest='save_test_run_reports',
                         action='store_const', const=None, default=argparse.SUPPRESS)
     parser.add_argument('--discover-tests', action='store_true')
@@ -1558,6 +1559,8 @@ def run_tests(argv=None):
             other_args += ['--save-xml', TEST_SAVE_XML]
         if TEST_SAVE_RUN_JSONL:
             other_args.append(f'--save-test-run-reports={TEST_SAVE_RUN_JSONL}')
+        else:
+            other_args.append('--no-save-test-run-reports')
         if HW_CLASSIFICATION is not None:
             other_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
 

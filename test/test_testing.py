@@ -1233,7 +1233,7 @@ print("RESULT=" + json.dumps(result))
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         result_line = next(line for line in proc.stdout.splitlines() if line.startswith("RESULT="))
-        self.assertEqual(json.loads(result_line[7:]), [None, None, "torchci-reports", "custom", None])
+        self.assertEqual(json.loads(result_line[7:]), [None, "torchci-reports", "torchci-reports", "custom", None])
 
     def test_run_test_parsing_and_forwarding(self) -> None:
         run_test_module = importlib.import_module("run_test")
@@ -1241,7 +1241,7 @@ print("RESULT=" + json.dumps(result))
         absolute_dir = str(Path(tempfile.gettempdir()) / "absolute-reports")
         cases = [
             (False, [], None),
-            (True, [], None),
+            (True, [], default_dir),
             (False, ["--save-test-run-reports"], default_dir),
             (False, ["--save-test-run-reports=custom"], str(Path(default_dir).parent / "custom")),
             (False, [f"--save-test-run-reports={absolute_dir}"], absolute_dir),
@@ -1262,7 +1262,7 @@ print("RESULT=" + json.dumps(result))
                 args("cpp/test_api", True, absolute_dir),
                 ["-p", "torch.testing._internal.torchci.plugin", f"--torchci-report-dir={absolute_dir}/cpp.test_api"],
             )
-            self.assertEqual(args("test_type_info", False, None), [])
+            self.assertEqual(args("test_type_info", False, None), ["--no-save-test-run-reports"])
             self.assertEqual(args("cpp/test_api", True, None), [])
         with unittest.mock.patch.object(run_test_module, "HAS_TEST_RUN_REPORTS", False):
             self.assertEqual(args("test_type_info", False, absolute_dir), [])
