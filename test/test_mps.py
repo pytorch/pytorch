@@ -9578,6 +9578,10 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(np.array([1.0000, 1.3000, 1.6000, 1.9000], dtype=np.float32), torch.range(1, 2, .3, device='mps'))
         self.assertEqual(np.arange(6.3, dtype=np.float32), torch.arange(0, 6.3, device='mps'))
 
+        # https://github.com/pytorch/pytorch/issues/186233
+        with self.assertRaisesRegex(RuntimeError, "step must be nonzero and representable in the target dtype"):
+            torch.range(0, 20, 1e-6, dtype=torch.int8, device='mps')
+
     # Test softmax
     def test_softmax(self):
         def helper(shape, dim, channels_last=False):

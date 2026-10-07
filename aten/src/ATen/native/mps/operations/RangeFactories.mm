@@ -141,12 +141,6 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    // arange_check_bounds only validates the double-converted step, which can
-    // be nonzero while xstep underflows to zero after conversion (e.g. a
-    // fractional step with an integral dtype). Without this check the size is
-    // silently computed from the double step and a nonsense tensor is filled.
-    TORCH_CHECK(xstep != 0, "step must be nonzero and representable in the target dtype");
-
     // double size_d = ((xend - xstart) / xstep) + 1;
     double size_d;
     if constexpr (std::is_same_v<scalar_t, int64_t>) {
@@ -156,6 +150,12 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
     }
 
     arange_check_bounds(start, end, step);
+
+    // arange_check_bounds validates only the double-converted step, which can
+    // be nonzero while xstep underflows to zero after dtype conversion (e.g.
+    // a fractional step with an integral dtype); a zero xstep would silently
+    // produce a nonsense tensor.
+    TORCH_CHECK(xstep != 0, "step must be nonzero and representable in the target dtype");
 
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
                 "invalid size, possible overflow?");
