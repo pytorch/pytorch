@@ -4152,11 +4152,13 @@ class WorkHookTest(MultiProcessTestCase):
 
         c10d.destroy_process_group(pg)
 
-        self.assertTrue(OpType.ALLGATHER in num_hook_fired)
+        self.assertTrue(OpType._ALLGATHER_BASE in num_hook_fired)
         self.assertEqual(len(num_hook_fired), 1)
-        # two allgathers, one for size and another for values
-        self.assertEqual(num_hook_fired[OpType.ALLGATHER], 2)
-        self.assertTrue(all(duration > 0 for duration in durations[OpType.ALLGATHER]))
+        # two all_gather_single, one for size and another for values
+        self.assertEqual(num_hook_fired[OpType._ALLGATHER_BASE], 2)
+        self.assertTrue(
+            all(duration > 0 for duration in durations[OpType._ALLGATHER_BASE])
+        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -5753,7 +5755,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_broadcast_float8(self, float8_dtype):
         device = torch.device(f"cuda:{self.rank}")
-        if sm_is_or_higher_than(device, 9, 0):
+        if not sm_is_or_higher_than(device, 9, 0):
             self.skipTest("FP8 broadcast natively supported on sm90+")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(

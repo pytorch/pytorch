@@ -195,6 +195,25 @@ class GraphModule(torch.nn.Module):
                 torch._C.DispatchKey.PythonTLSSnapshot, saved_python_tls_snapshot
             )
 
+    def test_dispatch_key_set_guard_sees_fake(self):
+        # Tensor guards mask Fake, but an explicit DispatchKeySet argument must
+        # keep it since the program can branch on it.
+        def fn(x, dks):
+            if dks.has(torch._C.DispatchKey.Fake):
+                return x + 1
+            return x - 1
+
+        cpu = torch._C.DispatchKeySet(torch._C.DispatchKey.CPU)
+        with_fake = cpu | torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+        x = torch.randn(2, 3)
+        for order in ((cpu, with_fake), (with_fake, cpu)):
+            torch._dynamo.reset()
+            counter = CompileCounter()
+            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            for dks in order:
+                self.assertEqual(compiled(x, dks), fn(x, dks))
+            self.assertEqual(counter.frame_count, 2)
+
 
 class PythonDispatcherTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
