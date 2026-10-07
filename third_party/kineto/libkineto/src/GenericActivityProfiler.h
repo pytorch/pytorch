@@ -34,7 +34,7 @@
 
 namespace KINETO_NAMESPACE {
 
-// TODO: Move ConfigDerivedState and its implemenation into separate header and
+// TODO: Move ConfigDerivedState and its implementation into separate header and
 //       source files.
 class Config;
 
