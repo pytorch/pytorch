@@ -236,6 +236,12 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
+
+# FX metadata marking a compiler-created ``_scaled_mm(..., scale_result=...)``
+# that represents an explicit post-GEMM scalar multiply.  Unlike the public
+# operator argument, this scale must still be applied for BF16 output.
+FOLDED_SCALED_MM_OUTPUT_SCALE = "inductor_folded_scaled_mm_output_scale"
+
 # Scanned exactly once, when this module is imported. Safe because both
 # registration paths precede any import of inductor: autoloaded out-of-tree
 # backends register during `import torch` (TORCH_DEVICE_BACKEND_AUTOLOAD, end
@@ -2227,6 +2233,17 @@ def _use_autotune_backend(backend: str) -> bool:
     return backend.upper() in [
         x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
     ]
+
+
+def _is_only_autotune_backend(backend: str) -> bool:
+    """Return whether ``backend`` is the only configured GEMM autotune backend."""
+    return OrderedSet(
+        [
+            x.strip()
+            for x in config.max_autotune_gemm_backends.upper().split(",")
+            if x.strip()
+        ]
+    ) == OrderedSet([backend.upper()])
 
 
 def _use_conv_autotune_backend(backend: str) -> bool:
@@ -4427,7 +4444,9 @@ def device_need_guard(device: str) -> bool:
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
-    if dtype == torch.bfloat16 and torch.cuda.is_available():
+    if dtype == torch.bfloat16 and torch.version.hip:
+        return True
+    elif dtype == torch.bfloat16 and torch.cuda.is_available():
         return torch.cuda.get_device_capability() < (9, 0)
     elif dtype == torch.bfloat16 and torch.xpu.is_available():
         return True
@@ -5113,6 +5132,22 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     return False
 
 
+def fx_node_crosses_devices(fx_node: torch.fx.Node) -> bool:
+    """
+    Check if an FX node reads or produces tensors on more than one device.
+
+    A CUDA graph cannot record such an op: whatever it touches on the other
+    device lives outside the graph's memory pool. Meta tensors have no storage
+    and are ignored.
+    """
+    devices: OrderedSet[torch.device] = OrderedSet()
+    for node in (*fx_node.all_input_nodes, fx_node):
+        for val in pytree.tree_leaves(node.meta.get("val")):
+            if isinstance(val, torch.Tensor) and val.device.type != "meta":
+                devices.add(val.device)
+    return len(devices) > 1
+
+
 def is_cudagraph_unsafe_op(node: Operation) -> bool:
     """
     Returns True if the node is an op that is not cudagraphable.
@@ -5677,27 +5712,36 @@ def is_collective_op(op_name: str) -> bool:
 
 
 @lru_cache
+def _tlx_registry() -> Any:
+    try:
+        # Succeeds only when fbtriton (a Triton fork) is installed
+        from triton.language.extra.tlx.inductor import registry
+
+        return registry
+    except ImportError:
+        return None
+
+
+def _tlx_registry_options(name: str) -> list[str]:
+    from torch._inductor import config
+    from torch._inductor.compile_worker.utils import in_toplevel_process
+
+    # Importing the registry replaces config.inductor_choices_class, which keys
+    # the FX graph cache, so the parent must not import it while TLX is off.
+    # Compile workers do not inherit config.patch'd tlx_mode, so they stay
+    # ungated to avoid dropping enabled TLX options.
+    if config.triton.tlx_mode is None and in_toplevel_process():
+        return []
+    registry = _tlx_registry()
+    return [] if registry is None else getattr(registry, name, [])
+
+
 def tlx_only_cuda_options() -> list[str]:
-    try:
-        # Succeeds only when fbtriton (a Triton fork) is installed
-        from triton.language.extra.tlx.inductor.registry import tlx_only_cuda_options
-
-        return tlx_only_cuda_options
-
-    except ImportError:
-        return []
+    return _tlx_registry_options("tlx_only_cuda_options")
 
 
-@lru_cache
 def tlx_only_hip_options() -> list[str]:
-    try:
-        # Succeeds only when fbtriton (a Triton fork) is installed
-        from triton.language.extra.tlx.inductor.registry import tlx_only_hip_options
-
-        return tlx_only_hip_options
-
-    except ImportError:
-        return []
+    return _tlx_registry_options("tlx_only_hip_options")
 
 
 def _round_up(x: int, y: int) -> int:

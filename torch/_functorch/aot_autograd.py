@@ -163,12 +163,12 @@ from .partitioners import default_partition
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from torch._inductor.compile_fx import CompilerConfigExtra
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
-    from torch._ops import OpOverload
+    from torch._ops import OperatorBase, OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 _P = ParamSpec("_P")
@@ -1549,6 +1549,32 @@ def aot_compile_joint_with_descriptors(
     return unflattened_compiled_fn
 
 
+@contextlib.contextmanager
+def _aot_export_decomposition_context(
+    decompositions: dict[OpOverload, Callable[..., Any]] | None,
+) -> Iterator[dict[OpOverload, Callable[..., Any]] | None]:
+    if decompositions is None:
+        yield decompositions
+        return
+
+    from torch.export.decomp_utils import CustomDecompTable
+    from torch.export.exported_program import (
+        _override_composite_implicit_decomp,
+        _split_decomp_table_to_cia_and_python_decomp,
+    )
+
+    decomp_table = (
+        decompositions.materialize()
+        if isinstance(decompositions, CustomDecompTable)
+        else cast("dict[OperatorBase, Callable[..., Any]]", dict(decompositions))
+    )
+    cia_to_decomp, python_decomp_table = _split_decomp_table_to_cia_and_python_decomp(
+        decomp_table
+    )
+    with _override_composite_implicit_decomp(cia_to_decomp):
+        yield cast("dict[OpOverload, Callable[..., Any]]", python_decomp_table)
+
+
 def aot_export_module(
     mod: nn.Module,
     args: Iterable[Any],
@@ -1801,14 +1827,22 @@ def aot_export_joint_simple(
         # Run under no_grad, so our tracing machinery only traces an inference graph.
         ctx = torch.no_grad
 
-    with ctx():
-        fx_g, metadata, in_spec, out_spec = _aot_export_function(
-            func,
-            args,
-            decompositions=decompositions,
-            trace_joint=trace_joint,
-        )
-        in_spec, _kw_in_spec = in_spec.children()
+    # Preserved CIA ops only receive autograd_not_implemented kernels, so a
+    # joint graph would lose its gradients; keep raw decompositions there.
+    decomp_ctx = (
+        contextlib.nullcontext(decompositions)
+        if trace_joint
+        else _aot_export_decomposition_context(decompositions)
+    )
+    with decomp_ctx as decompositions_for_aot:
+        with ctx():
+            fx_g, metadata, in_spec, out_spec = _aot_export_function(
+                func,
+                args,
+                decompositions=decompositions_for_aot,
+                trace_joint=trace_joint,
+            )
+            in_spec, _kw_in_spec = in_spec.children()
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
