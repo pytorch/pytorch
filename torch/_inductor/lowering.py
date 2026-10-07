@@ -2867,6 +2867,7 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
                 aten.clone.default,
                 aten._scaled_mm.default,
                 aten._scaled_mm_v2.default,
+                aten._scaled_grouped_mm_v2.default,
                 prims.convert_element_type.default,
             )
             or (isinstance(node.target, torch._ops.OpOverload) and is_view(node.target))
@@ -2887,6 +2888,9 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
             aten.clone.default,
             aten._scaled_mm.default,
             aten._scaled_mm_v2.default,
+            # MXFP8 grouped GEMM: the e8m0 scales are consumed by the kernel,
+            # never read arithmetically by generated Triton.
+            aten._scaled_grouped_mm_v2.default,
         ) or is_view(node.target):
             return False
         if node.target == torch.ops.prims.convert_element_type.default:
@@ -3503,6 +3507,16 @@ def require_contiguous(_, *args, **kwargs):
     return args, kwargs
 
 
+def require_contiguous_adaptive_max_pool3d_indices(_, *args, **kwargs):
+    # Native adaptive max-pool 3D backward reads indices as packed memory.
+    args = list(args)
+    if len(args) >= 3:
+        args[2] = ir.ExternKernel.require_contiguous(args[2])
+    else:
+        kwargs["indices"] = ir.ExternKernel.require_contiguous(kwargs["indices"])
+    return args, kwargs
+
+
 def require_contiguous_strides(_, *args, **kwargs):
     # TODO: combine this with require_contiguous after
     # https://github.com/pytorch/pytorch/pull/148235 lands.
@@ -3837,7 +3851,10 @@ make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
-make_fallback(aten.adaptive_max_pool3d_backward)
+make_fallback(
+    aten.adaptive_max_pool3d_backward,
+    require_contiguous_adaptive_max_pool3d_indices,
+)
 make_fallback(aten.fractional_max_pool2d_backward)
 make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten.replication_pad1d_backward)
@@ -4460,7 +4477,9 @@ def _full(fill_value, device, dtype, size):
     elif isinstance(value, sympy.Basic):
 
         def inner_fn(index):
-            return ops.index_expr(value, dtype)
+            if dtype in (torch.int32, torch.int64):
+                return ops.index_expr(value, dtype)
+            return ops.value_expr(value, dtype)
 
     else:
         if len(value.get_size()) != 0:

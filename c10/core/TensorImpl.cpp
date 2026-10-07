@@ -4,7 +4,6 @@
 #include <c10/core/CopyBytes.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -193,9 +192,12 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
 }
 
 void TensorImpl::set_fake_device(c10::Device fake_device) {
-  TORCH_CHECK(
-      fake_device.type() != c10::DeviceType::Meta,
-      "FakeTensor does not support meta device");
+  if (fake_device.type() == c10::DeviceType::Meta && extra_meta_ != nullptr) {
+    const auto& mode = extra_meta_->fake_tensor_mode_;
+    TORCH_CHECK(
+        mode == nullptr || mode->allow_meta_,
+        "device.type must not be 'meta' when allow_meta is False");
+  }
 
   // in python FakeTensor, it checks whether or not
   // we are in in_kernel_invocation manager to determine
@@ -212,22 +214,9 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   // where the fake device logic is instead of just calling device_default()
   set_custom_device(true);
 
-  // change backend key from Meta to the fake device
+  // change backend key from Meta to the fake device; a no-op when fake_device
+  // is itself meta, since the tensor is already backed by MetaBit
   _change_backend_component_keys(fake_device);
-}
-
-void TensorImpl::set_and_normalize_fake_device(c10::Device fake_device) {
-  // normalize device index for indexed device types (not CPU)
-  if (fake_device.index() == -1 && fake_device.type() != c10::DeviceType::CPU) {
-    const auto* guard_impl = c10::impl::getDeviceGuardImpl(fake_device.type());
-    if (guard_impl) {
-      fake_device = guard_impl->getDevice();
-    }
-    if (fake_device.index() == -1) {
-      fake_device = c10::Device(fake_device.type(), 0);
-    }
-  }
-  set_fake_device(fake_device);
 }
 
 void TensorImpl::HandleResize() {
@@ -330,6 +319,7 @@ void TensorImpl::release_resources() {
     storage_ = {};
   }
   if (extra_meta_) {
+    extra_meta_->real_tensor_.reset();
     extra_meta_->fake_tensor_mode_.reset();
   }
 }
@@ -641,6 +631,7 @@ void TensorImpl::copy_generic_tensor_metadata(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
+  dest_impl->custom_device_ = src_impl->custom_device_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ =
       src_impl->is_channels_last_contiguous_;
@@ -954,13 +945,13 @@ void TensorImpl::set_sizes_and_strides(
 
   has_symbolic_sizes_strides_ = true;
   refresh_sizes_strides_policy();
-  if (!extra_meta_) {
-    extra_meta_ = std::make_unique<ExtraMeta>();
-    extra_meta_->symbolic_shape_meta_ =
+  auto& extra_meta{get_extra_meta()};
+  if (extra_meta.symbolic_shape_meta_ == nullptr) {
+    extra_meta.symbolic_shape_meta_ =
         std::make_unique<c10::SymbolicShapeMeta>();
-    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
+    extra_meta.symbolic_shape_meta_->strides_valid_ = !is_sparse();
     if (!storage_offset.has_value()) {
-      extra_meta_->symbolic_shape_meta_->storage_offset_ = storage_offset_;
+      extra_meta.symbolic_shape_meta_->storage_offset_ = storage_offset_;
     }
   }
 
@@ -972,6 +963,7 @@ void TensorImpl::set_sizes_and_strides(
 
   refresh_numel();
   refresh_contiguous();
+  symbolic_shape_meta().refresh_materialized();
 }
 
 void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
@@ -1047,6 +1039,7 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
   // exclusive see #24090
   refresh_contiguous();
+  sym_shape_meta.refresh_materialized();
   // hard code some known true settings, for unbacked case
   // TODO: avoid chundering into the guards for computing these
   switch (memory_format) {
