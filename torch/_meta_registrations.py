@@ -9430,7 +9430,6 @@ cpp_meta_supports_symint_ops = {
     aten.as_strided_.default,
     aten.zeros.default,
     aten.detach.default,
-    aten.alias.default,
     aten.view_as_real.default,
     aten.view_as_complex.default,
     aten.set_.source_Storage_storage_offset,
@@ -9439,16 +9438,6 @@ cpp_meta_supports_symint_ops = {
     aten.arange.default,
     aten.arange.start,
     aten.arange.start_step,
-    aten.add.Tensor,
-    aten.sub.Tensor,
-    aten.mul.Tensor,
-    aten.div.Tensor,
-    aten.add_.Tensor,
-    aten.bitwise_and.Tensor,
-    aten.le.Tensor,
-    aten.le.Scalar,
-    aten.eq.Tensor,
-    aten.ne.Scalar,
 }
 
 
