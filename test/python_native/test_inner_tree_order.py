@@ -192,6 +192,48 @@ class TestInnerTreeOrder(TestCase):
                     f"{(m, n)}: signed zero differs from upstream",
                 )
 
+    def test_staged_split_preserves_reduction_trees(self):
+        """Ensure split staging keeps the same tree as the corresponding direct fold."""
+        if not rt._itree_arch(torch.device("cuda")).split_stage_rows:
+            self.skipTest("split staging is disabled on this architecture")
+        m, n = 3, 1 << 18
+        x = torch.randn(m, n, device="cuda")
+        self.assertEqual(rt.itree_plan(n + 1, m, 4, device=x.device).stage_e, 0)
+        self.assertEqual(rt.itree_plan(n, m, 8, device=x.device).stage_e, 0)
+        cases = (
+            ("float16_sum", T.SumOps(), x.to(torch.float16), [torch.float16]),
+            ("var_mean", T.VarMeanOps(), x, [torch.float32, torch.float32]),
+        )
+        for name, trait, src, out_dtypes in cases:
+            with self.subTest(op=name):
+                staged = rt.itree_plan(n, m, src.element_size(), device=x.device)
+                unstaged = rt.itree_plan(
+                    n, m, src.element_size(), stage=False, device=x.device
+                )
+                self.assertGreater(staged.stage_e, 0)
+                got = rt._run_itree(
+                    trait,
+                    f"staged_split_{name}",
+                    src,
+                    out_dtypes,
+                    staged,
+                    len(out_dtypes),
+                )
+                ref = rt._run_itree(
+                    trait,
+                    f"unstaged_split_{name}",
+                    src,
+                    out_dtypes,
+                    unstaged,
+                    len(out_dtypes),
+                )
+                torch.cuda.synchronize()
+                for actual, expected in zip(got, ref):
+                    self.assertEqual(
+                        actual.cpu().view(torch.uint8),
+                        expected.cpu().view(torch.uint8),
+                    )
+
     def test_order_is_reproducible_across_batch(self):
         # An N-only DAG makes each row independent of batch size, unlike the default order.
         n = 4096
@@ -215,6 +257,22 @@ class TestInnerTreeOrder(TestCase):
                     torch.equal(sub.view(torch.int32), whole[:m].view(torch.int32)),
                     f"rows={m}: the order's bits changed with the batch size",
                 )
+
+    def test_async_combine_short_blocks_match_upstream(self):
+        """Handle short async-combine blocks without reading padded partials as data."""
+        n = 1 << 20
+        for m in (1, 33):
+            with self.subTest(rows=m):
+                torch.manual_seed(0)
+                x = torch.randn(m, n, device="cuda")
+                plan = rt.itree_plan(n, m, 4, device=x.device)
+                combine = rt.itree_combine_plan(plan, 4, x.device, nrows=m)
+                self.assertGreater(combine.combine_tile, 0)
+                got = self._run(T.SumOps, x)
+                ref = torch.empty(m, device="cuda")
+                up.inner_tree_sum_into(ref, x)
+                torch.cuda.synchronize()
+                self.assertEqual(got.view(torch.int32), ref.view(torch.int32))
 
     def test_no_plan_pairs_an_exact_tile_with_a_bound_or_an_offset_base(self):
         # Exact only covers the tile's N from column 0; a bound or offset invalidates its
@@ -344,6 +402,14 @@ class TestInnerTreeOrder(TestCase):
                 self.assertEqual(
                     got.reshape(-1).view(torch.int32), want.view(torch.int32)
                 )
+
+    def test_ragged_plan_fusion_is_trait_aware(self):
+        """Select ragged fusion from trait precision so low-precision sums stay accurate."""
+        n, m = 4097, 4096
+        default = rt.itree_plan(n, m, 2)
+        lowp = rt.trait_itree_plan(T.SumOps(), n, m, 2)
+        self.assertEqual(default.kchunk, 4)
+        self.assertEqual(lowp.kchunk, 2)
 
     def test_multi_field_and_two_output_traits_under_the_order(self):
         # Exercise per-field staging/partials, two outputs from one accumulator, and ragged
