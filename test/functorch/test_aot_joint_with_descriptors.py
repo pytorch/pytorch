@@ -12,6 +12,7 @@ import torch
 import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 import torch.utils._pytree as pytree
+import torch.utils.checkpoint
 from torch._decomp import decomposition_table
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import normalize_gm
@@ -35,6 +36,7 @@ from torch._functorch._aot_autograd.fx_utils import (
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
+    boxed_nop_preserve_node_meta,
 )
 from torch._guards import tracing, TracingContext
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
@@ -1350,6 +1352,71 @@ class TestAOTJointWithDescriptorsDevice(TestCase):
         self.assertTrue(
             "('call_function', 'flex_attention_backward', {'compile_with_inductor': 'flex_attention'})"
             in custom_metadata
+        )
+
+    @onlyAccelerator
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    def test_export_compile_rng_hop_has_no_graphsafe_rng_inputs(self, device):
+        def inner(x):
+            return torch.nn.functional.dropout(torch.sin(x), p=0.5)
+
+        @torch.compiler.nested_compile_region
+        def region(x):
+            return torch.utils.checkpoint.checkpoint(inner, x, use_reentrant=False)
+
+        class CheckpointedDropout(nn.Module):
+            def forward(self, x):
+                return region(x)
+
+        model = CheckpointedDropout().to(device)
+        inputs = (torch.randn(8, device=device, requires_grad=True),)
+        fw_graphs = []
+        bw_graphs = []
+
+        def fw_compiler(gm, example_inputs):
+            fw_graphs.append(gm)
+            return boxed_nop_preserve_node_meta(gm, example_inputs)
+
+        def bw_compiler(gm, example_inputs):
+            bw_graphs.append(gm)
+            return boxed_nop_preserve_node_meta(gm, example_inputs)
+
+        gm = dynamo_graph_capture_for_export(model)(*inputs)
+        with tracing(gm.meta.get("tracing_context", None)):
+            with ExitStack() as stack:
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack, gm, inputs
+                )
+                compiled_fn = aot_compile_joint_with_descriptors(
+                    joint_with_descriptors,
+                    fw_compiler=fw_compiler,
+                    bw_compiler=bw_compiler,
+                )
+
+        compiled_fn(*inputs).sum().backward()
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertEqual(len(bw_graphs), 1)
+
+        fw_placeholder_names = [
+            node.name
+            for module in fw_graphs[0].modules()
+            if isinstance(module, torch.fx.GraphModule)
+            for node in module.graph.find_nodes(op="placeholder")
+        ]
+        self.assertFalse(
+            any("fwd_rng_state" in name for name in fw_placeholder_names),
+            fw_placeholder_names,
+        )
+
+        bw_placeholder_names = [
+            node.name
+            for module in bw_graphs[0].modules()
+            if isinstance(module, torch.fx.GraphModule)
+            for node in module.graph.find_nodes(op="placeholder")
+        ]
+        self.assertFalse(
+            any("bwd_rng_state" in name for name in bw_placeholder_names),
+            bw_placeholder_names,
         )
 
 
