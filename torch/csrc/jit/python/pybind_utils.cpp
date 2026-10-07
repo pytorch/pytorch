@@ -88,7 +88,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           throw py::cast_error(
               c10::str("Unable to cast ", py::str(obj), " to Tensor"));
         }
-        c10::SymNode symbolic_node;
+        bool save_symint = false;
         at::Scalar scalar;
         if (PyBool_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackBool(obj.ptr()));
@@ -99,13 +99,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         } else if (THPUtils_checkDouble(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackDouble(obj.ptr()));
         } else if (torch::is_symint(py::handle(obj))) {
-          symbolic_node = obj.cast<c10::SymInt>().toSymNode();
+          save_symint = true;
           scalar = at::Scalar(7777777);
         } else if (torch::is_symfloat(py::handle(obj))) {
-          symbolic_node = obj.cast<c10::SymFloat>().toSymNodeImpl();
+          save_symint = true;
           scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
         } else if (torch::is_symbool(py::handle(obj))) {
-          symbolic_node = obj.cast<c10::SymBool>().toSymNodeImpl();
+          save_symint = true;
           scalar = at::Scalar(true);
         } else {
           throw py::cast_error(
@@ -114,9 +114,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         at::Tensor tensor = at::scalar_to_tensor(scalar);
         tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
 
-        if (symbolic_node) {
-          tensor.unsafeGetTensorImpl()->set_symbolic_wrapped_number(
-              std::move(symbolic_node));
+        if (save_symint) {
           auto py_tensor = py::cast(tensor);
           TORCH_CHECK_PYTHON(
               PyObject_SetAttrString(
