@@ -696,10 +696,10 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             model.set_requires_gradient_sync(sync)
             inp = torch.full((8,), value, device=device_type)
             model(inp).backward()
-            self.assertEqual(unsharded_weight.grad_dtype, torch.float32)
-        # Only the gradient that starts accumulation is cast; AccumulateGrad
-        # adds the later ones to it in place
-        self.assertEqual(grad_dtypes, [torch.float32, torch.bfloat16, torch.bfloat16])
+            self.assertIsNone(unsharded_weight.grad_dtype)
+        # Autograd casts no gradient: post-backward widens the one that starts
+        # accumulation, and AccumulateGrad adds the later ones to it in place
+        self.assertEqual(grad_dtypes, [torch.bfloat16] * 3)
         self.assertEqual(model.weight.grad.full_tensor(), torch.ones_like(inp))
 
     @skip_if_lt_x_gpu(2)
@@ -737,17 +737,18 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_grad_dtype_restored_after_deferred_upcast(self):
+    def test_grad_dtype_upcasts_unreduced_grad(self):
         model = nn.Linear(8, 8, bias=False, device=device_type)
         fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
         inp = torch.ones(2, 8, device=device_type)
-        # The output hooks run after pre-backward defers the upcast
+        # Disabling gradient sync during the backward leaves the BF16 gradient
+        # unreduced, so post-backward widens it
         out = model(inp)
         out.register_hook(lambda grad: model.set_requires_gradient_sync(False))
         out.sum().backward()
         model.unshard()
         self.assertEqual(model.weight.grad.dtype, torch.float32)
-        self.assertEqual(model.weight.grad_dtype, torch.float32)
+        self.assertIsNone(model.weight.grad_dtype)
         model.reshard()
 
         def abort_backward(grad: torch.Tensor):
@@ -760,7 +761,32 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             out.sum().backward()
         model.reset_iter_state()
         model.unshard()
-        self.assertEqual(model.weight.grad_dtype, torch.float32)
+        self.assertIsNone(model.weight.grad)
+        self.assertIsNone(model.weight.grad_dtype)
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_fixed_across_interleaved_microbatches(self):
+        # As in a pipeline schedule's cooldown, the second forward's backward
+        # runs after the first backward's post-backward
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
+        model.unshard()
+        unsharded_weight = model.weight
+        model.reshard()
+        backward_grad_dtypes = []
+        unsharded_weight.register_hook(
+            lambda grad: backward_grad_dtypes.append(unsharded_weight.grad_dtype)
+        )
+        model.set_requires_gradient_sync(False)
+        outs = [model(torch.full((2, 8), v, device=device_type)) for v in (1.0, 2.0)]
+        self.assertIsNone(unsharded_weight.grad_dtype)
+        outs[0].sum().backward()
+        model.set_requires_gradient_sync(True)
+        outs[1].sum().backward()
+        self.assertEqual(backward_grad_dtypes, [None, None])
+        self.assertEqual(
+            model.weight.grad.full_tensor(), torch.full((8, 8), 6.0, device=device_type)
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_grad_pending_all_reduce_buffer(self):

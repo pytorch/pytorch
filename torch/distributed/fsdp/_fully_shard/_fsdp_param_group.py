@@ -355,18 +355,8 @@ class FSDPParamGroup:
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
-        # A larger floating-point dtype holds a smaller one exactly (e.g. fp32
-        # and bf16). Compare sizes since torch.promote_types rejects float8.
-        # Gradients reduced outside DP keep autograd's upcast so that reduction
-        # runs in the wider dtype too.
         self._fsdp_params_with_wider_grad_dtype = [
-            p
-            for p in self.fsdp_params
-            if (grad_dtype := p.unsharded_grad_dtype) is not None
-            and (compute_dtype := p.param_dtype or p.orig_dtype).is_floating_point
-            and grad_dtype.is_floating_point
-            and grad_dtype.itemsize > compute_dtype.itemsize
-            and not p.may_reduce_grad_outside_dp
+            p for p in self.fsdp_params if p.defers_grad_upcast
         ]
 
     def _init_reduce_scatter_param_order(self) -> None:
@@ -623,7 +613,6 @@ class FSDPParamGroup:
             leaf = getattr(fsdp_param, "_unsharded_param", None)
             if leaf is not None:
                 leaf.grad = None
-        self._set_unsharded_grad_dtypes(defer_upcast=False)
         self._partial_reduce_output = None
         self._post_backward_pending = False
         self._partial_reduce_output_layout.clear()
@@ -684,7 +673,6 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
-            self._set_unsharded_grad_dtypes(defer_upcast=True)
             if default_prefetch:
                 self._backward_prefetch()
 
@@ -708,7 +696,7 @@ class FSDPParamGroup:
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
                     self._post_backward_pending = True
-                    self._set_unsharded_grad_dtypes(defer_upcast=False)
+                    self._upcast_unreduced_grads()
                     if self.reshard_after_backward:
                         self.reshard()
                     return
@@ -719,7 +707,7 @@ class FSDPParamGroup:
                 fsdp_params_with_grad, unsharded_grads = (
                     self._take_unsharded_grads_to_reduce()
                 )
-                self._set_unsharded_grad_dtypes(defer_upcast=False)
+                self._upcast_unreduced_grads()
                 if self.reshard_after_backward:
                     self.reshard()
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
@@ -924,24 +912,16 @@ class FSDPParamGroup:
                     "Set reduce_dtype to the dtype its gradients already have."
                 )
 
-    def _set_unsharded_grad_dtypes(self, defer_upcast: bool) -> None:
-        # Leave gradients in the dtype autograd produces, saving a cast per
-        # parameter: AccumulateGrad adds them in place to existing wider
-        # gradients, and the reduce-scatter copy-in upcasts the rest. Only a
-        # gradient that starts accumulating across backwards needs the cast.
+    def _upcast_unreduced_grads(self) -> None:
+        # Deferred gradients stay in the dtype autograd produces. Widen a fresh
+        # one that this backward doesn't reduce, so the next backward adds to
+        # it in the unsharded gradient dtype.
         for fsdp_param in self._fsdp_params_with_wider_grad_dtype:
             param = getattr(fsdp_param, "_unsharded_param", None)
-            if param is None or not param.requires_grad:
+            if param is None or (grad := param.grad) is None:
                 continue
-            grad, dtype = param.grad, fsdp_param.unsharded_grad_dtype
-            if defer_upcast:
-                if grad is not None or self.reduce_grads:
-                    param.grad_dtype = None
-                continue
-            if grad is not None and grad.dtype != dtype:
-                # Created while deferred but not reduced
+            if grad.dtype != (dtype := fsdp_param.unsharded_grad_dtype):
                 param.grad = grad.to(dtype)
-            param.grad_dtype = dtype
 
     def _get_reduce_dtype(
         self, fsdp_params: list[FSDPParam], grads: list[torch.Tensor]
