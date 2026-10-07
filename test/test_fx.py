@@ -381,6 +381,31 @@ class TestFX(JitTestCase):
         x, y = torch.rand(1), torch.rand(1)
         self.assertEqual(torch.sin(x + y), gm(x, y))
 
+    def test_codegen_with_invalid_keyword_arguments(self):
+        for name in ("from", "not-an-identifier"):
+            with self.subTest(name=name):
+                graph = torch.fx.Graph()
+                result = graph.call_function(dict, kwargs={name: 1})
+                graph.output(result)
+                gm = GraphModule(torch.nn.Module(), graph)
+
+                self.assertEqual(gm(), {name: 1})
+                self.assertIn(f"**{{{name!r}: 1}}", gm.code)
+
+    def test_boxed_codegen_with_invalid_keyword_argument(self):
+        def boxed_call(values, **kwargs):
+            return values[0] + kwargs["from"]
+
+        graph = torch.fx.Graph()
+        value = graph.placeholder("value")
+        result = graph.call_function(boxed_call, ([value],), {"from": 2})
+        result.meta["boxed_arg_indices"] = (0,)
+        graph.output(result)
+        gm = GraphModule(torch.nn.Module(), graph)
+
+        self.assertEqual(gm(1), 3)
+        self.assertIn("**{'from': 2}", gm.code)
+
     def test_tuple_return_annotation_for_schemas(self):
 
         # Target an op that returns multiple tensors (e.g., var_mean)
