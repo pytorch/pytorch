@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocmVersionInRange,
+    skipIfXpu,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -701,6 +702,9 @@ class ElasticLaunchVirtualRankTest(TestCase):
     # multigpu explicitly.
     @pytest.mark.multigpu
     @skipIfRocmVersionInRange([7, 14], [10, 2], "rocprofiler-sdk visibility conflict")
+    @skipIfXpu(
+        msg="--virtual-local-rank does not set ZE_AFFINITY_MASK, so XPU workers are not isolated: https://github.com/intel/torch-xpu-ops/issues/5613"
+    )
     def test_virtual_local_rank(self, device):
         """
         Test that virtual-local-rank ensures consistent device IDs across ranks.
