@@ -4104,6 +4104,300 @@ class TestConvolutionNNCPU(NNTestCase):
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
 
+def _log_conv3d_hipblaslt_heuristic(device):
+    # The naive conv is one NN GEMM. An empty hipBLASLt heuristic falls back to
+    # rocBLAS, so log the library identity and that query before comparing.
+    import ctypes
+
+    def loaded(soname):
+        try:
+            with open("/proc/self/maps") as maps:
+                for line in maps:
+                    if soname in line:
+                        return line.split()[-1]
+        except OSError:
+            return None
+        return None
+
+    def quoted(line):
+        out = []
+        rest = line
+        while True:
+            start = rest.find('"')
+            if start < 0:
+                break
+            end = rest.find('"', start + 1)
+            if end < 0:
+                break
+            out.append(rest[start + 1 : end])
+            rest = rest[end + 1 :]
+        return out
+
+    def header_strings(libpath, relative, name):
+        if not libpath:
+            return None
+        header = os.path.join(os.path.dirname(os.path.dirname(libpath)), relative)
+        if not os.path.isfile(header):
+            return None
+        with open(header) as fh:
+            for line in fh:
+                if line.startswith("#define") and name in line.split():
+                    return quoted(line)
+        return None
+
+    HIP_R_16F = 2
+    HIP_R_16BF = 14
+    HIP_R_32F = 0
+    HIPBLAS_OP_N = 111
+    HIPBLAS_COMPUTE_32F = 2
+    HIPBLASLT_MATMUL_DESC_TRANSA = 0
+    HIPBLASLT_MATMUL_DESC_TRANSB = 1
+    HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1
+    m, n, k = 114278400, 16, 144
+    # Matches parseCUDABlasLtWorkspaceSize: KiB, CUBLASLT then HIPBLASLT, else 80 MiB.
+    raw = os.environ.get("CUBLASLT_WORKSPACE_SIZE")
+    if raw is None:
+        raw = os.environ.get("HIPBLASLT_WORKSPACE_SIZE")
+    workspace_kib = 80 * 1024
+    if raw is not None:
+        try:
+            workspace_kib = int(raw)
+        except ValueError:
+            pass
+    workspace = workspace_kib * 1024
+    torch.cuda.set_device(device)
+
+    try:
+        hipblaslt = ctypes.CDLL("libhipblaslt.so.1")
+        rocblas = ctypes.CDLL("librocblas.so.5")
+    except OSError as exc:
+        print(f"conv3d_cudnn_broken heuristic: failed to load libraries: {exc}")
+        return
+
+    c_void_pp = ctypes.POINTER(ctypes.c_void_p)
+    for fn, args in (
+        (hipblaslt.hipblasLtCreate, [c_void_pp]),
+        (hipblaslt.hipblasLtDestroy, [ctypes.c_void_p]),
+        (
+            hipblaslt.hipblasLtGetVersion,
+            [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)],
+        ),
+        (hipblaslt.hipblasLtGetGitRevision, [ctypes.c_void_p, ctypes.c_char_p]),
+        (hipblaslt.hipblasLtMatmulDescCreate, [c_void_pp, ctypes.c_int, ctypes.c_int]),
+        (hipblaslt.hipblasLtMatmulDescDestroy, [ctypes.c_void_p]),
+        (
+            hipblaslt.hipblasLtMatmulDescSetAttribute,
+            [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t],
+        ),
+        (
+            hipblaslt.hipblasLtMatrixLayoutCreate,
+            [c_void_pp, ctypes.c_int, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int64],
+        ),
+        (hipblaslt.hipblasLtMatrixLayoutDestroy, [ctypes.c_void_p]),
+        (hipblaslt.hipblasLtMatmulPreferenceCreate, [c_void_pp]),
+        (hipblaslt.hipblasLtMatmulPreferenceDestroy, [ctypes.c_void_p]),
+        (
+            hipblaslt.hipblasLtMatmulPreferenceSetAttribute,
+            [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t],
+        ),
+    ):
+        fn.argtypes = args
+        fn.restype = ctypes.c_int
+    hipblaslt.hipblasLtMatmulAlgoGetHeuristic.restype = ctypes.c_int
+    rocblas.rocblas_get_version_string_size.argtypes = [ctypes.POINTER(ctypes.c_size_t)]
+    rocblas.rocblas_get_version_string_size.restype = ctypes.c_int
+    rocblas.rocblas_get_version_string.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+    rocblas.rocblas_get_version_string.restype = ctypes.c_int
+    rocblas.rocblas_get_commit_hash_string.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+    rocblas.rocblas_get_commit_hash_string.restype = ctypes.c_int
+
+    handle = ctypes.c_void_p()
+    status = hipblaslt.hipblasLtCreate(ctypes.byref(handle))
+    if status != 0:
+        print(f"conv3d_cudnn_broken heuristic: hipblasLtCreate status {status}")
+        return
+    try:
+        version = ctypes.c_int()
+        revision = ctypes.create_string_buffer(128)
+        hipblaslt.hipblasLtGetVersion(handle, ctypes.byref(version))
+        hipblaslt.hipblasLtGetGitRevision(handle, revision)
+        packed = version.value
+        major, rem = divmod(packed, 100000)
+        minor, patch = divmod(rem, 100)
+        version_len = ctypes.c_size_t()
+        rocblas.rocblas_get_version_string_size(ctypes.byref(version_len))
+        rocblas_version = ctypes.create_string_buffer(max(version_len.value, 8))
+        rocblas.rocblas_get_version_string(rocblas_version, len(rocblas_version))
+        rocblas_commit = ctypes.create_string_buffer(128)
+        rocblas.rocblas_get_commit_hash_string(rocblas_commit, len(rocblas_commit))
+        rocblas_path = loaded("librocblas.so")
+        tensile_ids = (
+            header_strings(
+                rocblas_path,
+                os.path.join("include", "rocblas", "internal", "rocblas-version.h"),
+                "ROCBLAS_TENSILE_COMMIT_ID",
+            )
+            or []
+        )
+        # The header lists the rocBLAS commit, then the Tensile commit. This
+        # packaging leaves the Tensile string empty; the catalog hash below is
+        # the identity of the kernels hipBLASLt actually searches.
+        rocblas_id = tensile_ids[0] if len(tensile_ids) > 0 else ""
+        tensile_id = tensile_ids[1] if len(tensile_ids) > 1 else ""
+        props = torch.cuda.get_device_properties(device)
+        arch = getattr(props, "gcnArchName", "").split(":")[0]
+
+        def tensile_library(libpath, component):
+            import hashlib
+
+            if not libpath or not arch:
+                return "unavailable"
+            base = os.path.join(os.path.dirname(libpath), component, "library")
+            names = (
+                f"TensileLibrary_lazy_{arch}.dat.zlib",
+                f"TensileLibrary_lazy_{arch}.dat",
+                f"TensileLibrary_lazy_{arch}.yaml",
+            )
+            for folder in (os.path.join(base, arch), base):
+                for name in names:
+                    path = os.path.join(folder, name)
+                    if os.path.isfile(path):
+                        with open(path, "rb") as catalog:
+                            data = catalog.read()
+                        digest = hashlib.sha256(data).hexdigest()[:16]
+                        return f"{path} bytes {len(data)} sha256 {digest}"
+            return f"unavailable under {base}"
+
+        print(
+            "conv3d_cudnn_broken heuristic:"
+            f" device {props.name} {getattr(props, 'gcnArchName', '')}"
+            f" hipBLASLt {major}.{minor}.{patch}-{revision.value.decode()}"
+            f" lib {loaded('libhipblaslt.so')}"
+        )
+        print(
+            "conv3d_cudnn_broken heuristic:"
+            f" rocBLAS {rocblas_version.value.decode()} commit {rocblas_commit.value.decode()}"
+            f" header rocblas {rocblas_id or 'empty'} tensile {tensile_id or 'empty'}"
+            f" lib {rocblas_path}"
+        )
+        hipblaslt_path = loaded("libhipblaslt.so")
+        print(
+            "conv3d_cudnn_broken heuristic:"
+            f" hipBLASLt tensile {tensile_library(hipblaslt_path, 'hipblaslt')}"
+        )
+        print(
+            "conv3d_cudnn_broken heuristic:"
+            f" rocBLAS tensile {tensile_library(rocblas_path, 'rocblas')}"
+        )
+
+        class HeuristicResult(ctypes.Structure):
+            _fields_ = [
+                ("algo_data", ctypes.c_uint8 * 16),
+                ("algo_max_workspace", ctypes.c_size_t),
+                ("workspaceSize", ctypes.c_size_t),
+                ("state", ctypes.c_int),
+                ("wavesCount", ctypes.c_float),
+                ("reserved", ctypes.c_int * 4),
+            ]
+
+        def query(name, ab_type, requested):
+            compute = ctypes.c_void_p()
+            mat_a = ctypes.c_void_p()
+            mat_b = ctypes.c_void_p()
+            mat_c = ctypes.c_void_p()
+            pref = ctypes.c_void_p()
+            owned = []
+            try:
+                st = hipblaslt.hipblasLtMatmulDescCreate(
+                    ctypes.byref(compute), HIPBLAS_COMPUTE_32F, HIP_R_32F
+                )
+                if st != 0:
+                    print(f"conv3d_cudnn_broken heuristic: {name} desc status {st}")
+                    return
+                owned.append((hipblaslt.hipblasLtMatmulDescDestroy, compute))
+                op = ctypes.c_int(HIPBLAS_OP_N)
+                hipblaslt.hipblasLtMatmulDescSetAttribute(
+                    compute,
+                    HIPBLASLT_MATMUL_DESC_TRANSA,
+                    ctypes.byref(op),
+                    ctypes.sizeof(op),
+                )
+                hipblaslt.hipblasLtMatmulDescSetAttribute(
+                    compute,
+                    HIPBLASLT_MATMUL_DESC_TRANSB,
+                    ctypes.byref(op),
+                    ctypes.sizeof(op),
+                )
+                hipblaslt.hipblasLtMatrixLayoutCreate(
+                    ctypes.byref(mat_a), ab_type, m, k, m
+                )
+                owned.append((hipblaslt.hipblasLtMatrixLayoutDestroy, mat_a))
+                hipblaslt.hipblasLtMatrixLayoutCreate(
+                    ctypes.byref(mat_b), ab_type, k, n, k
+                )
+                owned.append((hipblaslt.hipblasLtMatrixLayoutDestroy, mat_b))
+                hipblaslt.hipblasLtMatrixLayoutCreate(
+                    ctypes.byref(mat_c), ab_type, m, n, m
+                )
+                owned.append((hipblaslt.hipblasLtMatrixLayoutDestroy, mat_c))
+                hipblaslt.hipblasLtMatmulPreferenceCreate(ctypes.byref(pref))
+                owned.append((hipblaslt.hipblasLtMatmulPreferenceDestroy, pref))
+                ws = ctypes.c_uint64(workspace)
+                hipblaslt.hipblasLtMatmulPreferenceSetAttribute(
+                    pref,
+                    HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                    ctypes.byref(ws),
+                    ctypes.sizeof(ws),
+                )
+                results = (HeuristicResult * requested)()
+                returned = ctypes.c_int(-1)
+                st = hipblaslt.hipblasLtMatmulAlgoGetHeuristic(
+                    handle,
+                    compute,
+                    mat_a,
+                    mat_b,
+                    mat_c,
+                    mat_c,
+                    pref,
+                    requested,
+                    results,
+                    ctypes.byref(returned),
+                )
+                extra = ""
+                if returned.value > 0:
+                    extra = (
+                        f" algoWorkspace {results[0].workspaceSize}"
+                        f" algoState {results[0].state}"
+                    )
+                print(
+                    "conv3d_cudnn_broken heuristic:"
+                    f" {name} requested {requested} status {st}"
+                    f" returnedResult {returned.value}"
+                    f" workspace {workspace}{extra}"
+                )
+            finally:
+                for destroy, obj in reversed(owned):
+                    if obj.value:
+                        destroy(obj)
+
+        hipblaslt.hipblasLtMatmulAlgoGetHeuristic.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.POINTER(HeuristicResult),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        query("bf16", HIP_R_16BF, 1)
+        query("fp16", HIP_R_16F, 1)
+    finally:
+        hipblaslt.hipblasLtDestroy(handle)
+
+
 class TestConvolutionNNCUDA(NNTestCase):
     """CUDA/cuDNN-specific convolution tests."""
 
@@ -4549,6 +4843,8 @@ class TestConvolutionNNCUDA(NNTestCase):
     @serialTest()
     @dtypes(*(torch.half, torch.bfloat16))
     def test_conv3d_cudnn_broken(self, device, dtype):
+        if TEST_WITH_ROCM:
+            _log_conv3d_hipblaslt_heuristic(device)
         x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device)
         m = torch.nn.Conv3d(
             16,
