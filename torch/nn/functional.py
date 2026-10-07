@@ -7398,8 +7398,8 @@ def quantize_tensor_dual(
           Default: ``False``.
 
     Returns:
-        tuple[Tensor, Tensor, Tensor, Tensor]: ``(qdata_k, scale_k, qdata_m,
-          scale_m)``. For example, for input of shape ``(M, K)`` and the
+        tuple[Tensor, Tensor, Tensor, Tensor]: ``(qdata_k, scale_k, qdata_m, scale_m)``.
+          For example, for input of shape ``(M, K)`` and the
           ``mxfp8`` format, the quantized tensors have shapes ``(M, K)`` and
           ``(K, M)``. Their E8M0 scales have shapes
           ``(ceil(M / 128), ceil(K / 128), 32, 16)`` and
