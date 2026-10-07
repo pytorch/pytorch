@@ -33,15 +33,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class TestSortAndSelectCPU(TestCase):
-    def test_complex_unsupported_cpu(self, device):
-        x = torch.tensor([3.0 + 2j, 4.0 + 3j], device=device)
-        with self.assertRaisesRegex(
-            TypeError, " Sort does not support complex dtypes on CPU"
-        ):
-            torch.sort(input=x)
-
-
 class TestSortAndSelect(TestCase):
     def test_sort_stable_none(self):
         # Called sort with stable=None used to trigger an assertion
@@ -58,6 +49,23 @@ class TestSortAndSelect(TestCase):
 
 
 class TestSortAndSelectDevice(TestCase):
+    def test_sort_complex_unsupported(self, device):
+        x = torch.tensor([1.0 + 1j, 2.0 + 0j], device=device)
+        with self.assertRaisesRegex(TypeError, "Sort does not support complex dtypes"):
+            torch.sort(x)
+
+    def test_topk_complex_unsupported(self, device):
+        x = torch.tensor([1.0 + 1j, 2.0 + 0j], device=device)
+        with self.assertRaisesRegex(TypeError, "topk does not support complex dtypes"):
+            torch.topk(x, 1)
+
+    def test_topk_bool_unsupported(self, device):
+        x = torch.tensor([True, False], device=device)
+        with self.assertRaisesRegex(
+            NotImplementedError, "topk does not support bool dtypes"
+        ):
+            torch.topk(x, 1)
+
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = x.size(1)
         if order == "descending":
@@ -1523,7 +1531,6 @@ class TestSortAndSelectCUDA(TestCase):
             )
 
 
-instantiate_device_type_tests(TestSortAndSelectCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestSortAndSelectDevice, globals())
 instantiate_device_type_tests(TestSortAndSelectCUDA, globals(), only_for="cuda")
 
