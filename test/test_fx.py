@@ -744,6 +744,21 @@ class TestFX(JitTestCase):
         self.assertIn("wrapped_decorated_fn", m.code)
         self.assertEqual(m(1), 1)
 
+    def test_trace_does_not_keep_tracer_alive(self):
+        # The wrappers patched in while tracing close over the patcher and the
+        # tracer; once tracing finishes they must not keep the tracer (and the
+        # real tensors in its tensor_attrs) alive in a cycle until the next gc.
+        tracer = Tracer()
+        tracer_ref = weakref.ref(tracer)
+        gc.collect()
+        gc.disable()
+        try:
+            tracer.trace(torch.nn.Linear(2, 2))
+            del tracer
+            self.assertIsNone(tracer_ref())
+        finally:
+            gc.enable()
+
     def test_wrap_does_not_keep_caller_frames_alive(self):
         # A module can be imported lazily from deep inside a running op; wrap()
         # must not form a frame cycle that pins that stack until the next gc.
