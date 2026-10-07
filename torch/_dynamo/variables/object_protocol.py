@@ -9,13 +9,13 @@ etc.) live in their respective VT files.
 
 import abc
 import collections
+import contextlib
 import enum
-import inspect
 import operator
 import sys
 import types
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
 
@@ -457,45 +457,49 @@ def generic_is_true(
 _repr_running: set[int] = set()
 
 
+@contextlib.contextmanager
+def repr_guard(obj: VariableTracker) -> Generator[bool]:
+    """Py_ReprEnter/Py_ReprLeave: yields True if obj's repr is already running.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L2803-L2875
+
+    Like CPython, only the tp_repr of containers that can be self-referential
+    (list, dict, set, ...) use this, writing their own placeholder on a cycle.
+    """
+    key = id(obj)
+    if key in _repr_running:
+        yield True
+        return
+    _repr_running.add(key)
+    try:
+        yield False
+    finally:
+        _repr_running.discard(key)
+
+
 def generic_repr(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> VariableTracker:
-    """Mirrors PyObject_Repr with Py_ReprEnter/Py_ReprLeave cycle detection.
+    """Mirrors PyObject_Repr.
 
     https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L745-L778
 
     Resolution order: tp_repr -> TypeError if the result is not str.
     """
-    obj_type = maybe_get_python_type(obj)
+    if obj.tp_repr is None:
+        raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
 
-    tp_repr = obj.tp_repr
-    if tp_repr is not None:
-        obj_id = id(obj)
-        if obj_id in _repr_running:
-            sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
-            if obj_type in sentinel:
-                return ConstantVariable.create(sentinel[obj_type])
-            return ConstantVariable.create(obj.repr_recursive_sentinel())
-        # UserList/UserDict.__repr__ is `repr(self.data)`; PyObject_Repr does not
-        # register it, so the inner list/dict catches the cycle.
-        repr_fn = inspect.getattr_static(obj_type, "__repr__")
-        user_reprs = (collections.UserList.__repr__, collections.UserDict.__repr__)
-        if repr_fn not in user_reprs:
-            _repr_running.add(obj_id)
-        try:
-            result = obj.tp_repr_impl(tx)
-        finally:
-            _repr_running.discard(obj_id)
-        result_type = maybe_get_python_type(result)
-        if not issubclass(result_type, str):
-            if sys.version_info >= (3, 15):
-                err_str = f"{obj.python_qualified_name()}.__repr__() must return a str, not int"
-            else:
-                err_str = f"__repr__ returned non-string (type {result_type.__name__})"
-            raise_type_error(tx, err_str)
-        return result
-
-    raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
+    result = obj.tp_repr_impl(tx)
+    result_type = maybe_get_python_type(result)
+    if not issubclass(result_type, str):
+        if sys.version_info >= (3, 15):
+            err_str = (
+                f"{obj.python_qualified_name()}.__repr__() must return a str, not int"
+            )
+        else:
+            err_str = f"__repr__ returned non-string (type {result_type.__name__})"
+        raise_type_error(tx, err_str)
+    return result
 
 
 def generic_str(

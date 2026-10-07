@@ -2890,13 +2890,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             )
         return VariableTracker.build(tx, f"<{py_type.__name__} object at {addr}>")
 
-    def repr_recursive_sentinel(self) -> str:
-        """What repr() emits for this object when it contains itself.
-
-        Mirrors what a tp_repr writes after Py_ReprEnter reports a cycle.
-        """
-        return "..."
-
     def tp_str_impl(
         self,
         tx: InstructionTranslatorBase,
@@ -2907,11 +2900,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         VT subclasses override this for types with their own tp_str.
         """
-        from .object_protocol import generic_repr
-
-        # object_str calls tp_repr directly; go through generic_repr instead
-        # because Dynamo's repr cycle detection (Py_ReprEnter) lives there.
-        return generic_repr(tx, self)
+        return self.tp_repr_impl(tx)
 
     def nb_int_impl(
         self,

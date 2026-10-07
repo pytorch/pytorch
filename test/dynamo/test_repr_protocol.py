@@ -34,6 +34,14 @@ class _FrozenSetSubclass(frozenset):
     pass
 
 
+class _ListSubclass(list):
+    pass
+
+
+class _DictSubclass(dict):
+    pass
+
+
 @instantiate_parametrized_tests
 class TpReprTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -443,6 +451,26 @@ class TpReprTests(TestCase):
 
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
         self.assertEqual(compiled(), fn())
+
+    @parametrize(
+        "container_type",
+        (_ListSubclass, _DictSubclass, collections.deque, collections.OrderedDict),
+        name_fn=lambda t: t.__name__.lstrip("_"),
+    )
+    def test_self_ref_container_subclass_repr(self, container_type):
+        # Each container's tp_repr writes its own cycle placeholder, so a
+        # subclass reprs like its base ("[[...]]", not "[...]").
+        def fn(x):
+            c = container_type()
+            if isinstance(c, dict):
+                c["k"] = c
+            else:
+                c.append(c)
+            return x + 1, repr(c)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
 
     def test_self_ref_userlist_repr(self):
         def fn():

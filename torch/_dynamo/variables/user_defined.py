@@ -131,6 +131,7 @@ from .object_protocol import (
     mro_lookup,
     pynumber_as_ssize_t,
     pynumber_index,
+    repr_guard,
     type_disallows_instantiation,
     type_implements_nb_slot,
     type_implements_sq_inplace_concat,
@@ -5181,13 +5182,13 @@ class DefaultDictVariable(ConstDictVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Modules/_collectionsmodule.c#L2373-L2405
-        # defdict_repr calls PyDict_Type.tp_repr directly, so use the base impl
-        # instead of generic_repr: the cycle guard already holds this object and
-        # would report a false cycle.
+        # defdict_repr calls PyDict_Type.tp_repr directly and guards only the
+        # default_factory repr.
         base = super().tp_repr_impl(tx).as_python_constant()
+        with repr_guard(self.default_factory) as recursive:
+            factory = "..." if recursive else tracked_repr(tx, self.default_factory)
         return VariableTracker.build(
-            tx,
-            f"{self.python_type_name()}({tracked_repr(tx, self.default_factory)}, {base})",
+            tx, f"{self.python_type_name()}({factory}, {base})"
         )
 
     def _set_default_factory(
@@ -5955,9 +5956,6 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
         cls = type(self.value)
         return "namespace" if cls is types.SimpleNamespace else cls.__name__
 
-    def repr_recursive_sentinel(self) -> str:
-        return f"{self._repr_name()}(...)"
-
     def _merge_args(
         self,
         tx: "InstructionTranslatorBase",
@@ -6074,9 +6072,14 @@ class SimpleNamespaceVariable(UserDefinedObjectVariable):
             is not types.SimpleNamespace.__repr__
         ):
             return super().tp_repr_impl(tx)
-        contents = ", ".join(
-            f"{attr}={tracked_repr(tx, value)}" for attr, value in self._attr_items(tx)
-        )
+        # https://github.com/python/cpython/blob/3.13/Objects/namespaceobject.c#L72-L143
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, f"{self._repr_name()}(...)")
+            contents = ", ".join(
+                f"{attr}={tracked_repr(tx, value)}"
+                for attr, value in self._attr_items(tx)
+            )
         return VariableTracker.build(tx, f"{self._repr_name()}({contents})")
 
     def tp_richcompare_impl(

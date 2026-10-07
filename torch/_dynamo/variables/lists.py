@@ -76,6 +76,8 @@ from .object_protocol import (
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
+    python_constant_repr_impl,
+    repr_guard,
     type_implements_nb_index,
     vt_is_iterable,
 )
@@ -1180,7 +1182,11 @@ class ListVariable(BaseListVariable):
         return self.debug_repr_helper("[", "]")
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/listobject.c#L452-L503
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "[...]")
+            items = ", ".join(tracked_repr(tx, item) for item in self.items)
         return VariableTracker.build(tx, f"[{items}]")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -1676,7 +1682,11 @@ class DequeVariable(BaseListVariable):
         )
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
+        # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1471-L1500
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "[...]")
+            items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if self.maxlen.as_python_constant() is None:
             return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
         return VariableTracker.build(
@@ -2023,7 +2033,11 @@ class TupleVariable(BaseListVariable):
         return self.debug_repr_helper("(", ")")
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/tupleobject.c#L226-L282
+        with repr_guard(self) as recursive:
+            if recursive:
+                return VariableTracker.build(tx, "(...)")
+            items = ", ".join(tracked_repr(tx, item) for item in self.items)
         if len(self.items) == 1:
             items += ","
         return VariableTracker.build(tx, f"({items})")
@@ -2262,8 +2276,6 @@ class ByteArrayVariable(VariableTracker):
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # bytearray_str warns under -b (BytesWarning), then returns the repr.
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx, str)
 
     def nb_remainder_impl(
