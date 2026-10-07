@@ -92,7 +92,7 @@ def quack_rmsnorm_bwd(
     hw = caps(x.device.index)
     arch = hw.cc
     if N in NORMALIZED_SIZES and arch in ((9, 0), (10, 0)) and dout.dtype == x.dtype:
-        blocks = backward_launch(N, compute_dw).blocks(M, hw.sm_count)
+        blocks = backward_launch(N, compute_dw, x.element_size()).blocks(M, hw.sm_count)
     else:
         from torch._vendor.quack.rmsnorm_config import get_sm_count
 

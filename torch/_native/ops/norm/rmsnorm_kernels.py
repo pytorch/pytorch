@@ -109,11 +109,19 @@ class RmsNormBackward:
         )
         norm(x, mW, dout, None, rstd, None, dx, partial, None, None, blocks, stream)
         if cutlass.const_expr(self.compute_dw):
-            reduce_rows(partial, mdW, 32, 128).launch(
-                grid=[cute.ceil_div(self.n, 32), 1, 1],
-                block=[128, 1, 1],
-                stream=stream,
-            )
+            if blocks <= 32:
+                reduce_rows(partial, mdW, 32, 128).launch(
+                    grid=[cute.ceil_div(self.n, 32), 1, 1],
+                    block=[128, 1, 1],
+                    stream=stream,
+                )
+            else:
+                cols = 4 if self.n <= 1024 else 8 if self.n <= 4096 else 16
+                reduce_rows(partial, mdW, cols, 256).launch(
+                    grid=[cute.ceil_div(self.n, cols), 1, 1],
+                    block=[256, 1, 1],
+                    stream=stream,
+                )
 
 
 def kernel_spec(

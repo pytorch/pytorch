@@ -15,6 +15,7 @@ from ... import cutedsl_utils as cu
 from ...cutedsl.hw_caps import caps
 from ...utils.capability import device_ok, is_traced
 from ...utils.tensor import const_data_ptr, row_alignment
+from .rmsnorm_launch import NORMALIZED_SIZES, weight_grad_min_rows
 
 
 def _is_supported(input: torch.Tensor) -> bool:
@@ -180,6 +181,16 @@ def _fused_rms_norm_backward_cond(
     n = _supported_size(input, normalized_shape, weight)
     if n is None:
         return False
+    if (
+        not output_mask[0]
+        and weight is not None
+        and output_mask[1]
+        and n in NORMALIZED_SIZES
+        and caps(input.device.index).cc in ((9, 0), (10, 0))
+    ):
+        min_rows = weight_grad_min_rows(n, input.element_size())
+        if min_rows is None or input.numel() // n < min_rows:
+            return False
     if not _n_yields_valid_cp_size(n, input.dtype):
         return False
     if not _bwd_fits_smem(input, grad_out, n):

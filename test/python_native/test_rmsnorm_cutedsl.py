@@ -91,7 +91,7 @@ class TestRmsNormJit(TestCase):
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("n", [128, 512, 1024, 2048, 4096, 8192])
-    @parametrize("m", [513])
+    @parametrize("m", [1, 513])
     @parametrize("has_weight", [False, True])
     def test_shared_kernels(
         self, device: str, dtype: torch.dtype, n: int, m: int, has_weight: bool
@@ -284,6 +284,80 @@ class TestRmsNormJit(TestCase):
         for kernel in ("RMSNorm_", "RMSNormBackward", "reduce_rows"):
             self.assertTrue(any(kernel in name for name in names), (kernel, names))
         self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize(
+        "m,n",
+        [
+            (4096, 128),
+            (4096, 1024),
+            (4096, 8192),
+            (16384, 128),
+            (1024, 4096),
+            (16384, 8192),
+        ],
+    )
+    def test_persistent_weight_gradient(
+        self, device: str, dtype: torch.dtype, m: int, n: int
+    ) -> None:
+        from torch._native.ops.norm.norms import quack_rmsnorm_bwd
+
+        x = torch.randn(m, n, device=device, dtype=dtype)
+        dy = torch.randn_like(x)
+        w = torch.randn(n, device=device, dtype=dtype)
+        with torch.backends.python_native.cutedsl.disabled():
+            _, rstd = torch.ops.aten._fused_rms_norm(x, [n], w, 1e-5)
+            expected = torch.ops.aten._fused_rms_norm_backward(
+                dy, x, [n], rstd, w, [True, True]
+            )
+        actual = quack_rmsnorm_bwd(dy, x, rstd, w, [n])
+        tol = _TOLERANCES[dtype]
+        self.assertEqual(actual, expected, atol=tol, rtol=tol)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize(
+        "n,m,native_low_precision,native_fp32",
+        [
+            (128, 8191, False, False),
+            (128, 8192, True, True),
+            (512, 8192, True, True),
+            (1024, 8192, True, False),
+            (1024, 16384, True, True),
+            (2048, 16383, False, False),
+            (2048, 16384, True, True),
+            (4096, 16384, False, False),
+            (8192, 16384, False, False),
+        ],
+    )
+    def test_weight_only_dispatch(
+        self,
+        device: str,
+        dtype: torch.dtype,
+        n: int,
+        m: int,
+        native_low_precision: bool,
+        native_fp32: bool,
+    ) -> None:
+        from torch.profiler import profile, ProfilerActivity
+
+        if torch.cuda.get_device_capability() not in ((9, 0), (10, 0)):
+            self.skipTest("weight-only crossover is tuned for SM90 and SM100")
+        x = torch.randn(m, n, device=device, dtype=dtype)
+        w = torch.randn(n, device=device, dtype=dtype)
+        dy = torch.randn_like(x)
+        with torch.backends.python_native.cutedsl.disabled():
+            _, rstd = torch.ops.aten._fused_rms_norm(x, [n], w, 1e-5)
+            args = (dy, x, [n], rstd, w, [False, True])
+            expected = torch.ops.aten._fused_rms_norm_backward(*args)
+        native = native_fp32 if dtype == torch.float32 else native_low_precision
+        with jit_only():
+            torch.ops.aten._fused_rms_norm_backward(*args)
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                actual = torch.ops.aten._fused_rms_norm_backward(*args)
+        names = [e.name for e in prof.events() if e.device_type.name == "CUDA"]
+        self.assertEqual(any("RMSNormBackward" in name for name in names), native)
+        tol = _TOLERANCES[dtype]
+        self.assertEqual(actual, expected, atol=tol, rtol=tol)
 
 
 instantiate_device_type_tests(TestRmsNormJit, globals(), only_for="cuda")
