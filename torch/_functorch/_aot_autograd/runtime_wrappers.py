@@ -118,9 +118,9 @@ if typing.TYPE_CHECKING:
 def _snapshot_external_objects(ctx: Any) -> None:
     """Snapshot the external object registry onto ctx for backward restore."""
     ctx._external_objects = {
-        k: r
+        k: ref()
         for k, ref in enumerate(index_to_external_object_weakref)
-        if (r := ref()) is not None
+        if ref() is not None
     }
 
 
@@ -879,29 +879,26 @@ def _codegen_compiled_fn_invocation(
         buf.emit(
             "prev_view_replay_enabled = torch._C._is_view_replay_enabled()", indent=2
         )
-        buf.emit("prev_grad_enabled = torch.is_grad_enabled()", indent=2)
         buf.emit("try:", indent=2)
-        buf.emit(
-            "if not prev_view_replay_enabled: torch._C._set_view_replay_enabled(True)",
-            indent=3,
-        )
-        buf.emit("if not prev_grad_enabled: torch._C._set_grad_enabled(True)", indent=3)
-        buf.emit("_on_before_call_()", indent=3)
+        buf.emit("if not prev_view_replay_enabled:", indent=3)
+        buf.emit("torch._C._set_view_replay_enabled(True)", indent=4)
+        buf.emit("with torch.enable_grad():", indent=3)
+        buf.emit("_on_before_call_()", indent=4)
         if disable_amp:
             buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
-            buf.emit("with _DisableAutocast_():", indent=3)
+            buf.emit("with _DisableAutocast_():", indent=4)
+            buf.emit("all_outs = _compiled_fn_(args_)", indent=5)
+            _codegen_normalize_as_list(buf, "all_outs", indent_level=5)
+        else:
             buf.emit("all_outs = _compiled_fn_(args_)", indent=4)
             _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
-        else:
-            buf.emit("all_outs = _compiled_fn_(args_)", indent=3)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=3)
         buf.emit("finally:", indent=2)
         buf.emit(
-            "if not prev_view_replay_enabled: torch._C._set_view_replay_enabled(False)",
+            "if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:",
             indent=3,
         )
         buf.emit(
-            "if not prev_grad_enabled: torch._C._set_grad_enabled(False)", indent=3
+            "torch._C._set_view_replay_enabled(prev_view_replay_enabled)", indent=4
         )
     else:
         buf.emit("grad_enabled = torch.is_grad_enabled()", indent=2)
@@ -2635,8 +2632,6 @@ class AOTDispatchAutogradCompileSpec:
 class _AutogradSavedState:
     metadata: ViewAndMutationMeta
 
-    # Readable reference for _codegen_save_from_forward, which replaces it on the
-    # hot path. Keep the two in sync.
     def save_from_forward(self, ctx: Any, fw_outs: Sequence[Any]) -> None:
         tensors_saved_with_vc_check = fw_outs[
             self.metadata.tensors_saved_for_backwards_with_vc_check_slice
@@ -3284,82 +3279,6 @@ def _codegen_compiled_forward(
     return buf.build()
 
 
-def _codegen_save_from_forward(fw_metadata: ViewAndMutationMeta) -> Callable[..., Any]:
-    """Codegen'd _AutogradSavedState.save_from_forward with the saved-output slices
-    and per-tensor detach decisions resolved at compile time."""
-    from .codegen import PySourceBuilder
-
-    def slice_src(s: slice) -> str:
-        start = "" if s.start is None else s.start
-        stop = "" if s.stop is None else s.stop
-        return f"{start}:{stop}"
-
-    vc_slice = fw_metadata.tensors_saved_for_backwards_with_vc_check_slice
-    no_vc_slice = fw_metadata.tensors_saved_for_backwards_no_vc_check_slice
-    symints_slice = fw_metadata.symints_saved_for_backwards_slice
-    opaque_slice = fw_metadata.opaque_objects_saved_for_backwards_slice
-    is_graph_input = fw_metadata.saved_tensor_is_graph_input
-    num_no_vc_check = fw_metadata.num_tensors_saved_with_no_vc_check
-    if num_no_vc_check is None:
-        raise AssertionError("num_tensors_saved_with_no_vc_check must not be None")
-    num_vc_check = len(is_graph_input) - num_no_vc_check
-
-    buf = PySourceBuilder(
-        "_save_from_forward",
-        args="ctx, fw_outs",
-        artifact_name="compiled_function_save_from_forward",
-    )
-    buf.bind(
-        torch=torch,
-        is_custom_class=is_custom_class,
-        CustomClassBase=CustomClassBase,
-        _mark_dynamic_=mark_dynamo_propagated_dynamic_indices,
-    )
-
-    with buf.indent():
-        buf.writeline(f"_vc = fw_outs[{slice_src(vc_slice)}]")
-        buf.writeline(f"_no_vc = fw_outs[{slice_src(no_vc_slice)}]")
-        buf.writeline(f"_symints = fw_outs[{slice_src(symints_slice)}]")
-        buf.writeline(f"_opaque = fw_outs[{slice_src(opaque_slice)}]")
-        if config.debug_assert:
-            checks = (
-                ("_vc", "isinstance(x, torch.Tensor)", "tensors_saved_with_vc_check to be Tensors"),
-                ("_no_vc", "isinstance(x, torch.Tensor)", "tensors_saved_no_vc_check to be Tensors"),
-                ("_symints", "isinstance(x, (int, float, torch.SymInt, torch.SymFloat))", "symint_outs to be int/float/SymInt/SymFloat"),
-                ("_opaque", "is_custom_class(type(x)) or isinstance(x, CustomClassBase)", "opaque_object_outs to be opaque types"),
-            )  # fmt: skip
-            for name, cond, expected in checks:
-                buf.writeline(f"if not all({cond} for x in {name}):")
-                with buf.indent():
-                    buf.writeline(
-                        f"raise AssertionError(f'expected all {expected}, "
-                        f"got types: {{[type(x) for x in {name}]}}')"
-                    )
-
-        # See Note [Detaching saved tensors in AOTAutograd]
-        names = []
-        for i, graph_input in enumerate(is_graph_input):
-            name = f"_t{i}"
-            names.append(name)
-            src = f"_vc[{i}]" if i < num_vc_check else f"_no_vc[{i - num_vc_check}]"
-            buf.writeline(f"{name} = {src}")
-            if not graph_input:
-                buf.writeline(f"if {name}._is_view():")
-                with buf.indent():
-                    buf.writeline(f"{name} = {name}.detach()")
-
-        for idx, dims in fw_metadata.dynamic_saved_tensors_idxs.items():
-            dims_name = buf.bind_value("_dyn_dims", dims)
-            buf.writeline(f"_mark_dynamic_({names[idx]}, {dims_name})")
-
-        buf.writeline(f"ctx.save_for_backward({', '.join(names[:num_vc_check])})")
-        buf.writeline(f"ctx._tensors_no_vc_check = [{', '.join(names[num_vc_check:])}]")
-        buf.writeline("ctx.symints = _symints")
-        buf.writeline("ctx.opaque_objects = _opaque")
-
-    return buf.build()
-
-
 def _codegen_compiled_backward(
     num_rng: int,
     num_tensors_no_vc_check: int | None,
@@ -3496,7 +3415,6 @@ class _AOTDispatchAutogradFunctionFactory:
             disable_amp,
             rng_state.num_rng,
         )
-        saved_state.save_from_forward = _codegen_save_from_forward(fw_metadata)  # type: ignore[method-assign]
 
         _codegen_bwd = _codegen_compiled_backward(
             rng_state.num_rng,
@@ -3564,15 +3482,13 @@ class _AOTDispatchAutogradFunctionFactory:
             buf.writeline("return non_diff")
 
         _codegen_transform_raw_returns: Callable[..., list[Any]] = buf.build()  # type: ignore[assignment]
-        # Config variable resolution is expensive; get it off the hot path.
-        do_debug_assert = config.debug_assert
 
         # Monkey-patch forward_epilogue.finalize to use codegen'd transform
         def _codegen_finalize(ctx: Any, fw_outs: Any) -> tuple[Any, ...]:
             num_forward_returns = fw_metadata.num_forward_returns
             raw_returns = list(fw_outs[:num_forward_returns])
             fw_outs_not_requiring_grad = _codegen_transform_raw_returns(raw_returns)
-            if do_debug_assert:
+            if config.debug_assert:
                 if num_mutated_runtime_inps > 0:
                     user_mutated_inputs_raw = raw_returns[0:num_mutated_runtime_inps]
                     mut_inp_infos = [
