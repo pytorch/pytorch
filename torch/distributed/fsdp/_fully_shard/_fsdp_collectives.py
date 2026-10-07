@@ -687,6 +687,11 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
+    for i, fsdp_param in enumerate(fsdp_params):
+        if (block_shard := fsdp_param._block_shard) is not None:
+            # Pad and scatter merged rows, not dim 0 of the parameter
+            grad = unsharded_grads[i]
+            unsharded_grads[i] = grad.reshape(block_shard._merged_shape(grad.shape))
     shard_dims = [fsdp_param.fsdp_placement.dim for fsdp_param in fsdp_params]
     padded_sharded_numels = [
         fsdp_param.padded_sharded_param_size.numel() for fsdp_param in fsdp_params

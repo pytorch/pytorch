@@ -218,7 +218,7 @@ def fully_shard(
             - Modifying the parameters between forward and backward is not
               supported: the backward all-gather is not ordered after such
               writes, so backward may see the old values.
-        shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard | ShardPlacementResult]]]):
+        shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard | BlockShard | ShardPlacementResult]]]):
             This callable can be used to override the sharding placement and/or
             mesh for a parameter. It can return:
 
@@ -226,6 +226,10 @@ def fully_shard(
               ``fully_shard``.
             - :class:`Shard`: Shard the parameter on the specified dimension
               using the mesh passed to ``fully_shard``.
+            - :class:`BlockShard`: Shard the parameter's merged leading dims,
+              e.g. ``BlockShard.split_leading(param.shape, 2)`` for MoE expert
+              weights ``[E, O, I]`` with fewer experts than ranks. The sharded
+              local tensor has the merged-view shape ``[local_rows, *shape[k:]]``.
             - :class:`ShardPlacementResult`: Specify both the shard placement
               and a custom :class:`FSDPMeshInfo`. This allows different
               parameters to be sharded across different process groups, enabling
