@@ -8,7 +8,13 @@ from unittest import mock
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_CUTEDSL,
+    TestCase,
+)
 
 
 if not TEST_CUTEDSL:
@@ -160,9 +166,35 @@ class TestColTileHost(TestCase):
             ct.reduce_col_tile(trait, "badnpar0", x, torch.float32, npar=0)
 
 
+class TestOrderedColHost(TestCase):
+    @parametrize(
+        "updates",
+        [
+            {"worker_warps": 3},
+            {"tile_columns": 7},
+            {"column_pack": 3},
+            {"column_pack": 4, "C": 131},
+            {"column_pack": 4, "nouts": 2},
+        ],
+    )
+    def test_mapping_guards(self, updates):
+        """Reject column mappings that violate load, layout, or ordered-plan constraints."""
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        plan = rt.trait_itree_plan(
+            trait, 32768, 132, 4, stage=False, arch=rt._ITREE_ARCH["default"]
+        )
+        kwargs = dict(R=32768, C=132, B=1, nouts=1)
+        kwargs.update(updates)
+        with self.assertRaises(ValueError):
+            ct._OrderedColReduce(trait, plan, **kwargs)
+
+
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
     def test_direct_plan_matches_the_indexed_tree(self, device):
+        """The unsplit baseline must preserve the reference DAG bit for bit."""
         x = torch.randn(2, 128, 33, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
         got = ct.reduce_ordered_col(trait, "ordered_direct", x, [torch.float32], 1)
@@ -211,8 +243,109 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNotNone(reference)
         self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
 
+    @parametrize(
+        "op,dtype,rows,columns,pack,workers,width,offset",
+        [
+            ("sum", torch.float32, 128, 132, 2, 8, 16, 4),
+            ("argmax", torch.float32, 32769, 33, 1, 8, 8, 4),
+            ("var_mean", torch.bfloat16, 32768, 33, 1, 16, 32, 4),
+            ("mean", torch.bfloat16, 32769, 36, 4, 16, 8, 1),
+        ],
+    )
+    def test_ordered_mapping_bits(
+        self, device, op, dtype, rows, columns, pack, workers, width, offset
+    ):
+        """Keep packed, indexed, and multi-output column mappings bitwise exact."""
+        from torch import _native as native
 
+        batches = 2
+        storage = torch.empty(
+            batches * rows * columns + offset, dtype=dtype, device=device
+        )
+        x = storage[offset:].view(batches, rows, columns)
+        x.uniform_(-0.5, 0.5)
+        trait = {
+            "sum": T.SumOps(),
+            "mean": T.MeanOps(),
+            "argmax": T.ArgMaxOps(),
+            "var_mean": T.VarMeanOps(correction=0),
+        }[op]
+        output = torch.int64 if op == "argmax" else torch.float32
+        outputs = [output] * (2 if op == "var_mean" else 1)
+        parts = {}
+        original = kg._launch
+
+        def record(block, key, ins, outs):
+            if key[0] in ("genitree2", "ordered_col2"):
+                parts[key[0]] = ins
+            return original(block, key, ins, outs)
+
+        cfg = ct.OrderedColConfig(
+            0,
+            worker_warps=workers,
+            tile_columns=width,
+            full_tiles=True,
+            column_pack=pack,
+        )
+
+        def run(**kwargs):
+            return ct.reduce_ordered_col(
+                trait,
+                "mapping_" + op,
+                x,
+                outputs,
+                len(outputs),
+                **kwargs,
+            )
+
+        with (
+            native._unconditional_masked(),
+            torch.backends.python_native.cutedsl.disabled(),
+            mock.patch.object(ct, "_launch", record),
+            mock.patch.object(kg, "_launch", record),
+            mock.patch.object(ct, "select_ordered_col_config", return_value=cfg),
+        ):
+            if offset % pack:
+                with self.assertRaisesRegex(ValueError, "aligned contiguous"):
+                    run(column_pack=pack)
+            with mock.patch.object(
+                ct, "_OrderedColReduce", wraps=ct._OrderedColReduce
+            ) as kernel:
+                actual = run()
+            self.assertEqual(
+                kernel.call_args.kwargs["column_pack"], 1 if offset % pack else pack
+            )
+            self.assertEqual(
+                kernel.call_args.kwargs["tile_columns"], 32 if offset % pack else width
+            )
+            self.assertIsNotNone(actual)
+            reference = kg._try_indexed_itree(
+                trait,
+                "mapping_" + op,
+                x,
+                [(rows, columns)],
+                [(columns, 1), (batches, rows * columns)],
+                batches * columns,
+                rows,
+                outputs,
+                len(outputs),
+            )
+            self.assertIsNotNone(reference)
+            self.assertEqual(len(actual), len(reference))
+            for got, expected in zip(actual, reference):
+                self.assertEqual(
+                    got.flatten().view(torch.uint8), expected.view(torch.uint8)
+                )
+            self.assertEqual("ordered_col2" in parts, "genitree2" in parts)
+            if "genitree2" in parts:
+                self.assertEqual(len(parts["ordered_col2"]), trait.nfields)
+                for got, expected in zip(parts["ordered_col2"], parts["genitree2"]):
+                    self.assertEqual(got.view(torch.uint8), expected.view(torch.uint8))
+
+
+instantiate_parametrized_tests(TestOrderedColHost)
 instantiate_device_type_tests(TestOrderedColDevice, globals(), only_for="cuda")
+instantiate_parametrized_tests(TestKernelColTile)
 
 
 if __name__ == "__main__":
