@@ -37,7 +37,7 @@ from torch.testing._internal.common_device_type import \
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal import opinfo
+from torch.testing._internal import common_cuda, opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
 from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 from torch.testing._internal.opinfo.core import SampleInput, DecorateInfo, OpInfo
@@ -580,6 +580,17 @@ class TestFrameworkUtils(TestCase):
         ):
             self.assertEqual(_get_torch_rocm_version(), (7, 15, 26306))
             self.assertEqual(getRocmVersion(), (7, 15, 26306))
+
+    def test_windows_sm89_xfail_excludes_rocm(self):
+        def test_fn():
+            pass
+
+        with unittest.mock.patch.multiple(
+            common_cuda, IS_WINDOWS=True, TEST_WITH_ROCM=True, SM89OrLater=True
+        ):
+            self.assertIs(
+                common_cuda.xfailCUDAIfSM89OrLaterOnWindows(test_fn), test_fn
+            )
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
@@ -3020,6 +3031,7 @@ class TestImports(TestCase):
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",  # depends on cutlass
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
+                           "torch._native.ops.norm.rmsnorm_kernels",  # depends on cutlass
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_general",  # depends on cutlass
