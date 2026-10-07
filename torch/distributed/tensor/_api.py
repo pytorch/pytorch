@@ -35,7 +35,9 @@ from torch.distributed.tensor._utils import (
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
+    _block_shard_local_boxes,
     _StridedShard,
+    _validate_block_shard_placements,
     Partial,
     Placement,
     Replicate,
@@ -890,12 +892,54 @@ class DTensor(torch.Tensor):
                 "DTensor with partial placements!"
             )
 
+    def _block_shard_boxes(
+        self,
+    ) -> list[tuple[tuple[int, ...], tuple[int, ...], int, int]] | None:
+        """Boxes of the global tensor owned by this rank under BlockShard, if used."""
+        mesh = self.device_mesh
+        layout = _validate_block_shard_placements(
+            self._spec.placements, self.shape, mesh.shape
+        )
+        if layout is None:
+            return None
+        coordinate = mesh.get_coordinate()
+        if coordinate is None:
+            return []
+        return _block_shard_local_boxes(layout, mesh.shape, coordinate)
+
     def __create_write_items__(self, fqn: str, object: Any):
         self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_write_items_for_dtensor,
         )
 
+        if (boxes := self._block_shard_boxes()) is not None:
+            from torch.distributed.checkpoint.metadata import (
+                ChunkStorageMetadata,
+                MetadataIndex,
+                TensorProperties,
+            )
+            from torch.distributed.checkpoint.planner import (
+                TensorWriteData,
+                WriteItem,
+                WriteItemType,
+            )
+
+            properties = TensorProperties.create_from_tensor(self._local_tensor)
+            return [
+                WriteItem(
+                    index=MetadataIndex(fqn, offset, idx),
+                    type=WriteItemType.SHARD,
+                    tensor_data=TensorWriteData(
+                        chunk=ChunkStorageMetadata(
+                            offsets=torch.Size(offset), sizes=torch.Size(size)
+                        ),
+                        properties=properties,
+                        size=self.size(),
+                    ),
+                )
+                for idx, (offset, size, _, _) in enumerate(boxes)
+            ]
         if hasattr(self._local_tensor, "__create_write_items__"):
             return self._local_tensor.__create_write_items__(fqn, object)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
@@ -919,6 +963,14 @@ class DTensor(torch.Tensor):
             _create_chunk_from_dtensor,
         )
 
+        if (boxes := self._block_shard_boxes()) is not None:
+            # A BlockShard rank may own up to 2k - 1 boxes of the global tensor.
+            from torch.distributed.checkpoint.metadata import ChunkStorageMetadata
+
+            return [
+                ChunkStorageMetadata(offsets=torch.Size(offset), sizes=torch.Size(size))
+                for offset, size, _, _ in boxes
+            ]
         if hasattr(self._local_tensor, "__create_chunk_list__"):
             return self._local_tensor.__create_chunk_list__()  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
@@ -928,6 +980,24 @@ class DTensor(torch.Tensor):
 
     def __get_tensor_shard__(self, index):
         self._raise_if_contains_partial_placements()
+        if (boxes := self._block_shard_boxes()) is not None:
+            # Each box is a contiguous row range of the merged-view local tensor,
+            # so the view is writable and loads land in place.
+            if index.offset is None and len(boxes) != 1:
+                raise ValueError(
+                    f"Cannot look up {index.fqn} with {len(boxes)} BlockShard boxes "
+                    "and no offset"
+                )
+            if index.index is not None and index.index < len(boxes):
+                candidates = [boxes[index.index], *boxes]
+            else:
+                candidates = boxes
+            for offset, size, row_start, row_stop in candidates:
+                if index.offset is None or torch.Size(offset) == index.offset:
+                    return self._local_tensor[row_start:row_stop].view(size)
+            raise ValueError(
+                f"Could not find BlockShard shard at {index.offset} for FQN: {index.fqn}"
+            )
         if hasattr(self._local_tensor, "__get_tensor_shard__"):
             return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
