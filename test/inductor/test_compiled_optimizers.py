@@ -1108,7 +1108,6 @@ class CompiledOptimizerTests(TestCase):
         self.assertEqual(opt.param_groups[0]["capturable"], original_capturable)
 
 
-@skipIfRocm(msg="ROCm may have different numerical behavior")
 @requires_gpu_and_triton
 class CompiledOptimizerBitwiseTests(TestCase):
     """
@@ -1237,7 +1236,6 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
 
 
 def _make_bitwise_test(optim_cls, kernel_count=None, **optim_kwargs):
-    @skipIfRocm(msg="ROCm may have different numerical behavior")
     @skipIfXpu(msg="AttributeError, torch-xpu-ops: #2999")
     @requires_gpu_and_triton
     @config.patch(
