@@ -127,13 +127,12 @@ def _copy_uses_tiled_transpose(dst, src):
     return any("transpose_copy_tiled_kernel" in e.name for e in prof.events())
 
 
-# Returns dispatched strided-unit widths in bytes; empty if none launched.
-def _copy_strided_unit_widths(dst, src):
+# Runs dst.copy_(src) and reports whether the strided 16-byte chunk kernel ran.
+def _copy_uses_strided_chunks(dst, src):
     with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
         dst.copy_(src)
         torch.cuda.synchronize()
-    matches = (re.search(r"launch_strided_unit_copy<(\d+)>", e.name) for e in prof.events())
-    return {int(m.group(1)) for m in matches if m}
+    return any("maybe_strided_chunk_copy" in e.name for e in prof.events())
 
 
 # Arbitrary bits may include NaNs; compare bytewise.
@@ -3463,14 +3462,14 @@ class TestTorchDeviceType(TestCase):
         out = src.t().contiguous()
         self.assertEqual(out.view(torch.uint8).unique().tolist(), [1])
 
-    # At the 4 MiB gate, require 16-byte units, exact bytes and untouched padding.
+    # At the 4 MiB gate, require the chunk kernel, exact bytes and untouched padding.
     # CPU backing views keep expected bytes independent of the kernel under test.
     @onlyCUDA
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @dtypes(torch.uint8, torch.bfloat16, torch.float32, torch.float64)
     @parametrize("layout", ("src_pitch", "dst_pitch", "both_pitch", "permute_4d", "permute_4d_back",
                             "permute_5d", "broadcast"))
-    def test_copy_strided_unit(self, device, dtype, layout):
+    def test_copy_strided_chunk(self, device, dtype, layout):
         element_size = torch.empty((), dtype=dtype).element_size()
         rows, width, pad = (4 << 20) // 512, 512 // element_size, 128 // element_size
         b, s, h, d = 8, 256, 16, 128 // element_size
@@ -3508,23 +3507,24 @@ class TestTorchDeviceType(TestCase):
         dst_bytes = (*dst_shape[:-1], dst_shape[-1] * element_size)
         dst_base = torch.full(dst_bytes, 7, dtype=torch.uint8, device=device).view(dtype)
         dst = dst_view(dst_base)
-        self.assertEqual(_copy_strided_unit_widths(dst, src_view(src_base)), {16})
+        self.assertTrue(_copy_uses_strided_chunks(dst, src_view(src_base)))
         expected = src_view(src_base.cpu()).contiguous().view(torch.uint8)
         actual = dst_base.cpu()
         self.assertEqual(dst_view(actual).contiguous().view(torch.uint8), expected)
         if dst_view is pitched:
             self.assertTrue((actual[:, width:].contiguous().view(torch.uint8) == 7).all().item())
 
-    # Use the widest aligned unit (16/8/4/2 bytes) larger than an element.
-    # Source and destination misalignment must constrain it independently.
+    # Row bytes, pitch and base offset must all be 16-byte multiples, on the
+    # source and on the destination independently; otherwise the generic kernel runs.
     @onlyCUDA
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @dtypes(torch.uint8, torch.bfloat16, torch.float32)
-    def test_copy_strided_unit_width(self, device, dtype):
+    def test_copy_strided_chunk_alignment(self, device, dtype):
         element_size = torch.empty((), dtype=dtype).element_size()
-        cases = (((512, 520, 0), 8), ((3780, 3840, 0), 4), ((512, 640, 4), 4),
-                 ((512, 514, 0), 2), ((512, 640, 2), 2), ((513, 640, 0), 1))
-        for ((row_bytes, pitch_bytes, offset_bytes), unit), side in product(cases, ("src", "dst")):
+        # (row bytes, pitch bytes, offset bytes) -> chunk kernel used
+        cases = (((512, 640, 16), True), ((512, 520, 0), False), ((3780, 3840, 0), False),
+                 ((512, 640, 4), False), ((512, 514, 0), False), ((513, 640, 0), False))
+        for ((row_bytes, pitch_bytes, offset_bytes), used), side in product(cases, ("src", "dst")):
             if row_bytes % element_size or pitch_bytes % element_size or offset_bytes % element_size:
                 continue
             rows = (4 << 20) // row_bytes + 1
@@ -3536,29 +3536,27 @@ class TestTorchDeviceType(TestCase):
             else:
                 src, dst = dense, base[:, offset:offset + width]
             expected = (base.cpu()[:, offset:offset + width] if side == "src" else dense.cpu()).contiguous()
-            widths = _copy_strided_unit_widths(dst, src)
-            expected_widths = {unit} if unit > element_size else set()
-            self.assertEqual(widths, expected_widths, (row_bytes, pitch_bytes, offset_bytes, side))
+            self.assertEqual(_copy_uses_strided_chunks(dst, src), used, (row_bytes, pitch_bytes, offset_bytes, side))
             actual = dense.cpu() if side == "src" else base.cpu()[:, offset:offset + width].contiguous()
             self.assertEqual(actual.view(torch.uint8), expected.view(torch.uint8))
-        # Only the outermost stride limits alignment to 4 bytes.
+        # Only the outermost stride is off a 16-byte multiple.
         rows, width = (2 << 20) // 512, 512 // element_size
         batch_stride = (rows * 640 + 4) // element_size
         base = _random_bytes((2 * batch_stride,), dtype, device)
         strides = (batch_stride, 640 // element_size, 1)
         src = base.as_strided((2, rows, width), strides)
         dst = torch.empty((2, rows, width), dtype=dtype, device=device)
-        self.assertEqual(_copy_strided_unit_widths(dst, src), {4} if 4 > element_size else set())
+        self.assertFalse(_copy_uses_strided_chunks(dst, src))
         expected = base.cpu().as_strided((2, rows, width), strides).contiguous()
         self.assertEqual(dst.cpu().view(torch.uint8), expected.view(torch.uint8))
 
     # Copies that must stay on the generic kernel and still be correct.
     @onlyCUDA
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_copy_strided_unit_rejects(self, device):
+    def test_copy_strided_chunk_rejects(self, device):
         def check(dst, src):
             expected = src.cpu()
-            self.assertEqual(_copy_strided_unit_widths(dst, src), set())
+            self.assertFalse(_copy_uses_strided_chunks(dst, src))
             self.assertEqual(dst.cpu(), expected, atol=0, rtol=0, exact_dtype=False)
 
         def pitched_src(rows, dtype=torch.float32, width=128):
@@ -3568,7 +3566,7 @@ class TestTorchDeviceType(TestCase):
         for rows in (0, 1, 8191):
             src = pitched_src(rows)
             check(torch.empty(src.shape, device=device), src)
-        # 16-byte elements: no wider unit exists
+        # 16-byte elements: a chunk would be a single element
         src = pitched_src(16384, torch.complex128)
         check(torch.empty(src.shape, dtype=torch.complex128, device=device), src)
         # Raw bytes bypass bool normalization (NOTE [Loading boolean values]).
@@ -3582,27 +3580,29 @@ class TestTorchDeviceType(TestCase):
         base = make_tensor((32768, 160), dtype=torch.float32, device=device)
         check(base[16384:, :128], base[:16384, :128])
 
-    # Rows over 2**31 bytes force intrarow splits of 2**30 + 8 bytes.
-    # Rechecking split alignment must reduce the unit width to 8 bytes.
+    # Rows over 2**31 bytes force splits inside a row. With 2**31 + 32-byte rows
+    # every piece stays 16-byte aligned and uses chunks; with 2**31 + 16 the
+    # pieces start 8 bytes off and must fall back after rechecking alignment.
     @onlyCUDA
     @largeTensorTest("12GB", "cuda")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_copy_strided_unit_64bit(self, device):
-        width = 2**31 + 16
-        src = torch.randint(0, 256, (1, width), dtype=torch.uint8, device=device).expand(2, width)
-        dst_base = torch.zeros((2, width + 16), dtype=torch.uint8, device=device)
-        dst = dst_base[:, :width]
-        self.assertEqual(_copy_strided_unit_widths(dst, src), {8})
-        for row in range(2):
-            self.assertTrue(torch.equal(dst[row], src[row]))
-        self.assertEqual(dst_base[:, width:].count_nonzero().item(), 0)
+    def test_copy_strided_chunk_64bit(self, device):
+        for width, used in ((2**31 + 32, True), (2**31 + 16, False)):
+            src = torch.randint(0, 256, (1, width), dtype=torch.uint8, device=device).expand(2, width)
+            dst_base = torch.zeros((2, width + 16), dtype=torch.uint8, device=device)
+            dst = dst_base[:, :width]
+            self.assertEqual(_copy_uses_strided_chunks(dst, src), used, width)
+            for row in range(2):
+                self.assertTrue(torch.equal(dst[row], src[row]))
+            self.assertEqual(dst_base[:, width:].count_nonzero().item(), 0)
+            del src, dst, dst_base
 
     # Random 2D-6D copies with a contiguous inner dim: outer dims permuted
     # independently per side, padded rows, offset bases, random dtype and size.
     # The CPU repeats each copy on the dst backing buffer as the reference.
     @onlyCUDA
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_copy_strided_unit_fuzz(self, device):
+    def test_copy_strided_chunk_fuzz(self, device):
         rng = random.Random(0)
         dtypes = (torch.uint8, torch.int16, torch.bfloat16, torch.float32, torch.float64, torch.complex64)
 
@@ -3611,7 +3611,7 @@ class TestTorchDeviceType(TestCase):
             inverse = [perm.index(i) for i in range(len(perm))]
             return base[..., offset:offset + width].permute(*inverse, len(perm))
 
-        widths_seen = set()
+        used = []
         for _ in range(100):
             dtype = rng.choice(dtypes)
             element_size = torch.empty((), dtype=dtype).element_size()
@@ -3634,12 +3634,12 @@ class TestTorchDeviceType(TestCase):
             expected = dst_base.cpu()
             strided(expected, dst_perm, dst_offset, width).copy_(strided(src_base.cpu(), src_perm, src_offset, width))
 
-            widths_seen |= _copy_strided_unit_widths(strided(dst_base, dst_perm, dst_offset, width),
-                                                     strided(src_base, src_perm, src_offset, width))
+            used.append(_copy_uses_strided_chunks(strided(dst_base, dst_perm, dst_offset, width),
+                                                  strided(src_base, src_perm, src_offset, width)))
             self.assertEqual(dst_base.cpu().view(-1).view(torch.uint8), expected.view(-1).view(torch.uint8),
                              msg=f"{dtype} outer={outer} width={width} src={sides[0]} dst={sides[1]}")
-        # the fixed seed must reach more than one unit width
-        self.assertGreater(len(widths_seen), 1, widths_seen)
+        # the fixed seed must exercise both the chunk kernel and the fallback
+        self.assertTrue(any(used) and not all(used), sum(used))
 
     def test_clone_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
