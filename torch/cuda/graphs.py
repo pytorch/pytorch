@@ -1219,7 +1219,10 @@ class graph:
             recording on entry and automatically calls
             :func:`~torch.cuda._graph_annotations.resolve_pending_annotations` before
             the capture ends.  Annotations are **not** cleared on exit so that multiple
-            graphs in the same workload can accumulate annotations.
+            graphs in the same workload can accumulate annotations. The kernels of
+            captured c10d collectives are tagged with the fields ``record_param_comms``
+            gives them in eager mode (``"Collective name"``, ``"Process Group Name"``,
+            ``"Seq"``, ...).
             Requires ``cuda.bindings`` package and cuda-compat >= 13.1 or CUDA driver >= 13.1.
             Requires single-threaded autograd; wrap the capture in
             ``torch.autograd.grad_mode.set_multithreading_enabled(False)``.
@@ -1307,6 +1310,7 @@ class graph:
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
+        self._collective_kernel_scopes: list[Any] = []
         self.check_input_liveness = check_input_liveness
 
     def __enter__(self) -> None:
@@ -1444,7 +1448,14 @@ class graph:
                     )
                 backend = "edge_walk"
             _set_annotation_backend(backend)
+            if self._enable_annotations and torch.distributed.is_available():
+                from torch.distributed.distributed_c10d import (
+                    _set_collective_annotation_hooks,
+                )
+
+                _set_collective_annotation_hooks(self)
         except BaseException:
+            self._unset_collective_hooks()
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
             try:
@@ -1454,6 +1465,26 @@ class graph:
                 pass
             self.stream_ctx.__exit__(None, None, None)
             raise
+
+    def _push_collective_kernel_metadata(self, metadata: dict[str, Any]) -> None:
+        from torch.cuda._graph_annotations import mark_kernels
+
+        # Backward attribution would tag whatever autograd node launched the
+        # collective, not the collective itself.
+        scope = mark_kernels(metadata, backward=False)
+        scope.__enter__()
+        self._collective_kernel_scopes.append(scope)
+
+    def _pop_collective_kernel_metadata(self) -> None:
+        self._collective_kernel_scopes.pop().__exit__(None, None, None)
+
+    def _unset_collective_hooks(self) -> None:
+        if self._enable_annotations and torch.distributed.is_available():
+            from torch.distributed.distributed_c10d import (
+                _unset_collective_annotation_hooks,
+            )
+
+            _unset_collective_annotation_hooks(self)
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda import _graph_node_callbacks
@@ -1492,6 +1523,7 @@ class graph:
             # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
             # idempotent, so repeating it here just covers a capture that raised before the
             # call above (it must not stay armed past this context either way).
+            self._unset_collective_hooks()
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
