@@ -545,21 +545,31 @@ def dispatch_torch_function(
     fn: VariableTracker,
     args: Iterable[Any],
     kwargs: dict[str, Any],
+    relevant_args: Iterable[VariableTracker] | None = None,
 ) -> Any:
-    """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
+    """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args
 
-    all_args = _get_all_args(args, kwargs)
-    overloaded_args = _get_overloaded_args(
-        [arg for arg in all_args if has_torch_function(arg)],
-        _get_subclass_type,
-    )
+    ``relevant_args`` restricts the overload search to an explicit set of
+    values, matching ``torch.overrides.handle_torch_function``.
+    """
+
+    tf_state = tx.symbolic_torch_function_state
+    overloaded_args: list[Any]
+    if tf_state.torch_function_subclass_enabled:
+        all_args = (
+            _get_all_args(args, kwargs) if relevant_args is None else relevant_args
+        )
+        overloaded_args = _get_overloaded_args(
+            [arg for arg in all_args if has_torch_function(arg)],
+            _get_subclass_type,
+        )
+    else:
+        overloaded_args = []
 
     types = TupleVariable([_get_subclass_type_var(tx, arg) for arg in overloaded_args])
 
-    if tx.symbolic_torch_function_state.in_torch_function_mode():
-        res = tx.symbolic_torch_function_state.call_torch_function_mode(
-            tx, fn, types, args, kwargs
-        )
+    if tf_state.torch_function_mode_enabled and tf_state.in_torch_function_mode():
+        res = tf_state.call_torch_function_mode(tx, fn, types, args, kwargs)
         if not res.is_constant_match(NotImplemented):
             return res
 
