@@ -73,7 +73,14 @@ def select_ordered_col_config(
         cfg = configs.get("varmean0" if welford == 2 else "var0")
     if (
         cfg is None
-        or dtype not in (torch.float32, torch.bfloat16)
+        and cc == (10, 0)
+        and dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and (partials > 1 or full_tiles)
+    ):
+        cfg = OrderedColConfig(0, tile_columns=WARP, full_tiles=True)
+    if (
+        cfg is None
+        or dtype not in (torch.float32, torch.bfloat16, torch.float16)
         or batches != 1
         or columns < WARP
         or partials < 1
@@ -82,7 +89,7 @@ def select_ordered_col_config(
     fields = 3 if welford else 2 if trait_key == "argmaxi32" else 1
     output = (
         dtype
-        if trait_key == "amax" or fields == 3
+        if trait_key in ("amax", "amin") or fields == 3
         else torch.int64
         if fields == 2
         else torch.float32
@@ -90,6 +97,24 @@ def select_ordered_col_config(
     nouts = max(welford, 1)
     if field_bits != (32,) * fields or out_dtypes != (output,) * nouts:
         return None
+    if full_tiles and rows is not None:
+        if rows == 65536 and columns == 1024 and fields != 2:
+            cfg = cfg._replace(tile_columns=16, full_tiles=True)
+        elif 32768 <= rows <= 131072 and 33 <= columns <= 257:
+            minimum = 0 if fields == 3 else 16
+            if dtype == torch.bfloat16 and partials >= 8:
+                minimum //= 2
+            width = WARP if partials >= 16 and columns == 257 else 16
+            cfg = OrderedColConfig(minimum, tile_columns=width, full_tiles=True)
+        elif rows == 16384 and columns == 4096 and fields == 3:
+            cfg = cfg._replace(min_blocks=0, full_tiles=True)
+        if dtype == torch.bfloat16 and columns == 4096:
+            if rows == 32768 and trait_key == "amax":
+                cfg = cfg._replace(tile_columns=16)
+            elif rows == 262144 and trait_key in ("amax", "mean", "vnorm2"):
+                pack = 2 if trait_key == "amax" else 4
+                cfg = cfg._replace(tile_columns=WARP // pack, column_pack=pack)
+    # Count useful column lanes, excluding padding in the last output tile.
     if partials * columns < WARP * cfg.min_blocks:
         return None
     return cfg
@@ -155,6 +180,110 @@ def select_col_config(
         min(tile.vec_size(columns, itemsize), _VEC_MAX) if vec is None else vec,
         "partition" if batches * columns >= _C_THREAD_STAGE2 else "column",
     )
+    size = rows * columns * itemsize
+    b200_size = -(-size // (1 << 20)) * (1 << 20)
+    if (
+        not explicit
+        and cc == (10, 0)
+        and dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and columns in (257, 4095)
+        and b200_size in (16 << 20, 64 << 20, 256 << 20, 2 << 30)
+        and acc_bits == 32
+        and batches == 1
+        and contiguous
+        and alignment >= itemsize
+    ):
+        narrow = dtype in (torch.float16, torch.bfloat16)
+        welford = nfields == 3 and welford_nouts(trait_key) == nouts
+        index = (trait_key, nfields, nouts) == ("argmaxi32", 2, 1)
+        one_field = (
+            nfields == 1
+            and nouts == 1
+            and trait_key in ("sum", "prod", "mean", "amax", "amin", "vnorm2")
+        )
+        if columns == 4095 and b200_size == 16 << 20 and (one_field or welford):
+            return cfg._replace(
+                rule="b200_ragged_c4095_ordered",
+                kernel_order="inner_tree",
+            )
+        if columns == 257 and welford:
+            npars = {
+                16 << 20: 512,
+                64 << 20: 512,
+                256 << 20: 1024 if narrow else 512,
+                2 << 30: 4096,
+            }
+            return cfg._replace(
+                rule="b200_ragged_welford_c257",
+                threads_per_block=64,
+                npar=npars[b200_size],
+                vec=1,
+                group=16 if narrow else 8,
+            )
+        if columns == 4095 and welford:
+            return cfg._replace(
+                rule="b200_ragged_welford_c4095",
+                threads_per_block=64,
+                npar=1928 if b200_size == 2 << 30 else 128,
+                vec=1,
+                group=8,
+            )
+        if columns == 257 and (one_field or index):
+            npars = {
+                16 << 20: 1024,
+                64 << 20: 2048,
+                256 << 20: 4096,
+                2 << 30: 16384 if narrow else 8192,
+            }
+            return cfg._replace(
+                rule="b200_ragged_c257",
+                threads_per_block=64,
+                npar=npars[b200_size],
+                vec=1,
+            )
+        if columns == 4095 and one_field:
+            npar = (
+                512
+                if b200_size == 2 << 30 or b200_size == 256 << 20 and narrow
+                else 256
+            )
+            return cfg._replace(
+                rule="b200_ragged_c4095",
+                threads_per_block=64,
+                npar=npar,
+                vec=1,
+                partial_layout=(
+                    "partition"
+                    if narrow and b200_size == 256 << 20
+                    else cfg.partial_layout
+                ),
+                combine_columns=(
+                    8 if narrow and b200_size == 256 << 20 else cfg.combine_columns
+                ),
+                unroll=16 if narrow and b200_size == 256 << 20 else cfg.unroll,
+            )
+        if columns == 4095 and index and b200_size == 16 << 20 and not narrow:
+            return cfg._replace(
+                rule="b200_ragged_argmax_c4095_small",
+                threads_per_block=32,
+                npar=8,
+                vec=1,
+                unroll=64,
+            )
+        if columns == 4095 and index and b200_size >= 256 << 20:
+            npar = (
+                1024
+                if narrow and b200_size == 2 << 30
+                else 512
+                if narrow or b200_size == 2 << 30
+                else 128
+            )
+            return cfg._replace(
+                rule="b200_ragged_argmax_c4095",
+                threads_per_block=64,
+                npar=npar,
+                vec=1,
+            )
     return cfg
 
 
