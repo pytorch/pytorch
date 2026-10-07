@@ -3368,6 +3368,100 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_lazy_clone_materialize(self):
+        # Materializing a lazy clone during capture must capture the copy, so
+        # that every replay copies the current contents of the source.
+        for materialize in (lambda t: t.data_ptr(), lambda t: t.add_(0)):
+            static_in = torch.full((1024,), float("nan"), device="cuda")
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                y = static_in._lazy_clone()
+                materialize(y)
+                out = y * 2
+            for _ in range(2):
+                static_in.copy_(torch.randn(1024, device="cuda"))
+                g.replay()
+                self.assertEqual(out, static_in * 2)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
+    )
+    def test_graph_lazy_clone_materialize_errors(self):
+        x = torch.randn(1024, device="cuda")
+
+        # A lazy clone made before capture stands for a copy made before
+        # capture, which can't be materialized inside of the graph.
+        y = x._lazy_clone()
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(RuntimeError, "not the stream it was lazily"):
+            with torch.cuda.graph(g):
+                y.add_(1)
+        self.assertTrue(torch._C._is_cow_tensor(y))
+        del y
+
+        # Materializing a graph input inside of the graph would move it to a
+        # new allocation, which the graph would then copy into on replay.
+        g = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(RuntimeError, "not the stream it was lazily"):
+            with torch.cuda.graph(g):
+                y = x._lazy_clone()
+                x.add_(1)
+        self.assertTrue(torch._C._is_cow_tensor(x))
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
+    )
+    def test_lazy_clone_cross_stream_errors(self):
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+
+        # Lazily cloning on a stream other than the allocation stream.
+        x = torch.randn(1024, device="cuda")
+        with torch.cuda.stream(s):
+            with self.assertRaisesRegex(RuntimeError, "Lazily cloning a tensor"):
+                x._lazy_clone()
+        self.assertFalse(torch._C._is_cow_tensor(x))
+
+        # Materializing a lazy clone on a stream other than the one it was
+        # lazily cloned on.
+        y = x._lazy_clone()
+        with torch.cuda.stream(s):
+            with self.assertRaisesRegex(RuntimeError, "not the stream it was lazily"):
+                y.add_(1)
+        self.assertTrue(torch._C._is_cow_tensor(y))
+        # Same for the tensor that was lazily cloned from.
+        with torch.cuda.stream(s):
+            with self.assertRaisesRegex(RuntimeError, "not the stream it was lazily"):
+                x.add_(1)
+        self.assertTrue(torch._C._is_cow_tensor(x))
+
+        # Stealing the data on another stream while a copy of it may be pending.
+        y.add_(1)
+        self.assertFalse(torch._C._is_cow_tensor(y))
+        with torch.cuda.stream(s):
+            with self.assertRaisesRegex(RuntimeError, "on a different stream"):
+                x.add_(1)
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        x.add_(1)
+        self.assertFalse(torch._C._is_cow_tensor(x))
+        self.assertEqual(y, x)
+
+        # Without a pending copy, the last reference can be written on any
+        # stream.
+        z = torch.randn(1024, device="cuda")
+        w = z._lazy_clone()
+        del w
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            z.add_(1)
+        self.assertFalse(torch._C._is_cow_tensor(z))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     @unittest.skipIf(
         not torch.cuda.get_arch_list(),
         "torch was built without CUDA kernels (GPU sections stripped)",

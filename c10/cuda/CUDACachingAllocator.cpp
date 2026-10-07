@@ -5493,8 +5493,24 @@ class NativeCachingAllocator : public CUDAAllocator {
     return "native";
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
-    C10_CUDA_CHECK(
-        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
+    C10_CUDA_CHECK(cudaMemcpyAsync(
+        dest,
+        src,
+        count,
+        cudaMemcpyKind::cudaMemcpyDeviceToDevice,
+        cuda::getCurrentCUDAStream()));
+  }
+  std::optional<bool> was_allocated_on_stream(
+      const void* ptr,
+      const c10::Stream& stream) override {
+    Block* block = ptr ? get_allocated_block(ptr) : nullptr;
+    // Blocks in private pools (e.g., CUDA graph pools) are not reused by
+    // ordinary allocations on their stream, so their stream says nothing about
+    // when they may be reused.
+    if (block == nullptr || block->pool->owner_PrivatePool != nullptr) {
+      return std::nullopt;
+    }
+    return block->stream == cuda::CUDAStream(stream).stream();
   }
 };
 

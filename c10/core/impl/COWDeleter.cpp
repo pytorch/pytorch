@@ -5,7 +5,8 @@
 namespace c10::impl {
 
 void cow::cow_deleter(void* ctx) {
-  static_cast<cow::COWDeleterContext*>(ctx)->decrement_refcount();
+  std::unique_ptr<cow::COWReference> ref(static_cast<cow::COWReference*>(ctx));
+  ref->context->decrement_refcount();
 }
 
 cow::COWDeleterContext::COWDeleterContext(
@@ -33,6 +34,25 @@ auto cow::COWDeleterContext::decrement_refcount()
   }
 
   return std::shared_lock(mutex_);
+}
+
+auto cow::COWDeleterContext::is_unique() const -> bool {
+  return refcount_ == 1;
+}
+
+auto cow::COWDeleterContext::record_copy_stream(c10::Stream stream) -> void {
+  std::lock_guard lock(copy_stream_mutex_);
+  if (!copy_stream_.has_value()) {
+    copy_stream_ = stream;
+  } else if (*copy_stream_ != stream) {
+    copy_streams_differ_ = true;
+  }
+}
+
+auto cow::COWDeleterContext::copies_ordered_before(c10::Stream stream) -> bool {
+  std::lock_guard lock(copy_stream_mutex_);
+  return !copy_streams_differ_ &&
+      (!copy_stream_.has_value() || *copy_stream_ == stream);
 }
 
 cow::COWDeleterContext::~COWDeleterContext() {

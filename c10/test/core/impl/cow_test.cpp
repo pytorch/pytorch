@@ -79,8 +79,30 @@ TEST_F(ContextTest, cow_deleter) {
   auto& context = *new cow::COWDeleterContext(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
-  cow::cow_deleter(&context);
+  cow::cow_deleter(new cow::COWReference{&context, std::nullopt});
   ASSERT_THAT(delete_count(), testing::Eq(1));
+}
+
+TEST_F(ContextTest, copies_ordered_before) {
+  auto& context = *new cow::COWDeleterContext(new_delete_tracker());
+  Device device(DeviceType::CUDA, 0);
+  Stream s0(Stream::UNSAFE, device, 0);
+  Stream s1(Stream::UNSAFE, device, 1);
+
+  // No copies yet: any stream is fine.
+  ASSERT_TRUE(context.copies_ordered_before(s0));
+  ASSERT_TRUE(context.copies_ordered_before(s1));
+
+  context.record_copy_stream(s0);
+  ASSERT_TRUE(context.copies_ordered_before(s0));
+  ASSERT_FALSE(context.copies_ordered_before(s1));
+
+  // Copies on different streams can't both be ordered before a single stream.
+  context.record_copy_stream(s1);
+  ASSERT_FALSE(context.copies_ordered_before(s0));
+  ASSERT_FALSE(context.copies_ordered_before(s1));
+
+  cow::cow_deleter(new cow::COWReference{&context, std::nullopt});
 }
 
 MATCHER(is_copy_on_write, "") {
@@ -155,7 +177,9 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
       /*size_bytes=*/5,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
+          /*ctx=*/
+          new cow::COWReference{
+              new cow::COWDeleterContext(std::move(data)), std::nullopt},
           cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
@@ -199,7 +223,9 @@ TEST(materialize_test, copy_on_write_single_reference) {
       /*size_bytes=*/4,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
+          /*ctx=*/
+          new cow::COWReference{
+              new cow::COWDeleterContext(std::move(data)), std::nullopt},
           cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
@@ -239,8 +265,8 @@ TEST(materialize_test, copy_on_write) {
   auto new_storage = cow::lazy_clone_storage(original_storage);
   ASSERT_THAT(new_storage, testing::NotNull());
 
-  auto context = new_storage->data_ptr().cast_context<cow::COWDeleterContext>(
-      cow::cow_deleter);
+  auto context =
+      new_storage->data_ptr().cast_context<cow::COWReference>(cow::cow_deleter);
   ASSERT_THAT(context, testing::NotNull());
 
   // Materialized storage has new copy of data.
