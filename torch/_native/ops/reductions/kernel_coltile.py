@@ -42,6 +42,69 @@ _WIDE_ACC_THREADS_PER_BLOCK = 64  # 3-field traits (Welford): see above
 _ORDERED_WORKER_WARPS = 16
 
 
+class OrderedColConfig(NamedTuple):
+    min_blocks: int
+    worker_warps: int = _ORDERED_WORKER_WARPS
+    tile_columns: int = WARP
+    full_tiles: bool = False
+    column_pack: int = 1
+
+
+_ORDERED_COL_CONFIGS: dict[tuple[int, int], dict[str, OrderedColConfig]] = {}
+
+
+def select_ordered_col_config(
+    cc: tuple[int, int],
+    dtype: torch.dtype,
+    trait_key: str,
+    columns: int,
+    batches: int,
+    partials: int,
+    *,
+    field_bits: tuple[int, ...],
+    out_dtypes: tuple[torch.dtype, ...],
+    rows: int | None = None,
+    full_tiles: bool = False,
+) -> OrderedColConfig | None:
+    cfg = _ORDERED_COL_CONFIGS.get(cc, {}).get(trait_key)
+    if (
+        cfg is None
+        or dtype not in (torch.float32, torch.bfloat16)
+        or batches != 1
+        or columns < WARP
+        or partials < 1
+    ):
+        return None
+    fields = (
+        3 if trait_key in ("var0", "varmean0") else 2 if trait_key == "argmaxi32" else 1
+    )
+    output = (
+        dtype
+        if trait_key == "amax" or fields == 3
+        else torch.int64
+        if fields == 2
+        else torch.float32
+    )
+    nouts = 2 if trait_key == "varmean0" else 1
+    if field_bits != (32,) * fields or out_dtypes != (output,) * nouts:
+        return None
+    if partials * columns < WARP * cfg.min_blocks:
+        return None
+    return cfg
+
+
+def _full_column_tiles(plan: Any, rows: int) -> bool:
+    if not plan.batches:
+        return False
+    if plan.shape == "multirow":
+        return plan.batches[0][2] * plan.vec <= rows
+    limit = plan.split[1] if plan.shape == "split" else rows
+    return all(
+        off + (plan.wpr - 1) * chunk + loads * WARP * plan.vec <= limit
+        for off, _, loads, chunk in plan.batches
+    )
+
+
 class ColConfig(NamedTuple):
     order: str
     rule: str
@@ -251,7 +314,7 @@ class _OrderedColReduce:
         # Each worker traverses an original warp tree, even with fewer column lanes.
         self.workers = 1 if plan.shape == "multirow" else min(worker_warps, plan.wpr)
         self.outputs_per_block = 128 if plan.shape == "multirow" else tile_columns
-        self.full_tiles = False
+        self.full_tiles = full_tiles and _full_column_tiles(plan, R)
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
@@ -567,6 +630,10 @@ def reduce_ordered_col(
     *,
     order: str = "inner_tree",
     allow_split: bool | None = None,
+    worker_warps: int | None = None,
+    tile_columns: int | None = None,
+    full_tiles: bool | None = None,
+    column_pack: int | None = None,
 ) -> tuple[torch.Tensor, ...] | None:
     """Reduce the middle axis of a contiguous (B, R, C) physical view."""
     if order != "inner_tree":
@@ -581,6 +648,9 @@ def reduce_ordered_col(
         return None
     if x.stride(-1) != 1 or C < WARP:
         return None
+    if column_pack not in (None, 1, 2, 4):
+        raise ValueError("column_pack must be one of 1, 2, 4")
+    explicit_pack = column_pack is not None
     from . import kernel_rowtile as rt
 
     plan = rt.trait_itree_plan(
@@ -590,7 +660,7 @@ def reduce_ordered_col(
         return None
     split = plan.shape == "split"
     if split and (
-        allow_split is not True
+        allow_split is False
         or not x.is_contiguous()
         or x.dtype not in (torch.float32, torch.bfloat16, torch.float16)
         or plan.vec_linear
@@ -598,16 +668,90 @@ def reduce_ordered_col(
         or plan.split[0] > 65535
     ):
         return None
-    ops = (
-        _OrderedColReduce(
-            trait,
-            plan,
-            R,
+    cfg = None
+    if allow_split is None:
+        cfg = select_ordered_col_config(
+            _hw.caps(x.device).cc,
+            x.dtype,
+            trait_key,
             C,
             B,
-            trait.nfields if split else nouts,
-        ),
-    )
+            plan.split[0] if split else 1,
+            field_bits=tuple(dt.width for dt in trait.fdtypes),
+            out_dtypes=tuple(out_dtypes[:nouts]),
+            rows=R,
+            full_tiles=full_tiles is not False and _full_column_tiles(plan, R),
+        )
+        if cfg is None and split:
+            return None
+    if column_pack is None:
+        column_pack = 1 if cfg is None else cfg.column_pack
+    if column_pack > 1 and (
+        not x.is_contiguous()
+        or x.dtype not in (torch.float32, torch.bfloat16)
+        or x.storage_offset() % column_pack
+        or _L.supported_alignment(_flat(x), column_pack * x.element_size())
+        < column_pack * x.element_size()
+    ):
+        if explicit_pack:
+            raise ValueError(
+                "column packing requires aligned contiguous FP32/BF16 storage"
+            )
+        column_pack = 1
+        if cfg is not None:
+            cfg = cfg._replace(tile_columns=WARP)
+    if cfg is not None:
+        if worker_warps is None:
+            worker_warps = cfg.worker_warps
+        if tile_columns is None:
+            tile_columns = cfg.tile_columns
+        if full_tiles is None:
+            full_tiles = cfg.full_tiles
+    if worker_warps is None:
+        worker_warps = _ORDERED_WORKER_WARPS
+    op_kwargs = {
+        "worker_warps": worker_warps,
+        "tile_columns": WARP if tile_columns is None else tile_columns,
+        "column_pack": column_pack,
+    }
+    if split and full_tiles and plan.split[0] > 1 and plan.split[1] != plan.split[2]:
+        ops = (
+            _OrderedColReduce(
+                trait,
+                plan,
+                R,
+                C,
+                B,
+                trait.nfields,
+                full_tiles=True,
+                partition_count=plan.split[0] - 1,
+                **op_kwargs,
+            ),
+            _OrderedColReduce(
+                trait,
+                plan,
+                R,
+                C,
+                B,
+                trait.nfields,
+                partition_begin=plan.split[0] - 1,
+                partition_count=1,
+                **op_kwargs,
+            ),
+        )
+    else:
+        ops = (
+            _OrderedColReduce(
+                trait,
+                plan,
+                R,
+                C,
+                B,
+                trait.nfields if split else nouts,
+                full_tiles=False if full_tiles is None else full_tiles,
+                **op_kwargs,
+            ),
+        )
     outs = [
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
@@ -624,6 +768,7 @@ def reduce_ordered_col(
     fake_in = _L.fake_compact(
         torch2cute[kernel_x.dtype],
         (_L.sym_int64(),),
+        align=column_pack * x.element_size() if column_pack > 1 else None,
     )
     fake_outs = [
         _L.fake_compact(torch2cute[out.dtype], (_L.sym(),)) for out in kernel_outs
