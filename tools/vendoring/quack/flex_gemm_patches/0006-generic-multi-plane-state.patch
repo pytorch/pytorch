@@ -1,0 +1,213 @@
+diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
+index 76d6f17..a73a355 100644
+--- a/quack/epilogue/frontend.py
++++ b/quack/epilogue/frontend.py
+@@ -61,2 +61,3 @@ guesses about vectorization.
+-  ``outs={name: sink_op}`` is the general form for any sink op
+-  (e.g. OnlineLSEReduce's coupled (max, sum) accumulator).
++  ``outs={name: sink_op}`` is the general form for any sink op. A sink declares
++  ``sink_arity``; arity greater than one means the fn returns a tuple of
++  independently collected value planes for the sink to combine.
+@@ -359,2 +359,0 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+-        # Scaled sinks return a (value, scale) pair; see _make_sink_tmps.
+-        planes = value if isinstance(value, tuple) else (value,)
+@@ -362 +361 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+-        for plane in planes:
++        for plane in self._value_planes(op.name, op.sink_arity, value):
+@@ -500 +499,3 @@ class EpiMod:
+-            if getattr(op, "scaled", False) and self.mode == "acc_pair":
++            if not isinstance(op.sink_arity, int) or op.sink_arity < 1:
++                raise ValueError(f"sink {name!r}: sink_arity must be a positive integer")
++            if op.sink_arity > 1 and self.mode == "acc_pair":
+@@ -502 +503 @@ class EpiMod:
+-                    f"sink {name!r}: scaled reduces are not supported in acc_pair mode yet "
++                    f"sink {name!r}: multi-plane sinks are not supported in acc_pair mode "
+@@ -504,0 +506,8 @@ class EpiMod:
++        for name in self.prepass_outs:
++            op = self.ops.get(name)
++            if op is None:
++                op = self.sinks.get(name)
++            if op is not None and op.sink_arity > 1:
++                raise ValueError(
++                    f"sink {name!r}: multi-plane sinks are not supported in prepass_outs"
++                )
+@@ -833 +842 @@ class EpiMod:
+-                raise ValueError("swap_ab requires element mode and orientation-aware epilogue ops")
++                raise ValueError("swap_ab requires element-mode and orientation-aware epilogue ops")
+diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
+index f83c2d2..b846b40 100644
+--- a/quack/epilogue/ops.py
++++ b/quack/epilogue/ops.py
+@@ -18,2 +17,0 @@ import operator
+-import hashlib
+-import inspect
+@@ -34,0 +33 @@ from quack.cute_dsl_utils import torch2cute_dtype_map
++from quack.gemm_runtime.identity import semantic_value_key
+@@ -105,13 +104,2 @@ def _callable_config_key(fn):
+-    """Stable, picklable identity for a callable stored in an EpiOp config."""
+-    if fn is None:
+-        return None
+-    try:
+-        source = inspect.getsource(fn).encode()
+-    except (OSError, TypeError):
+-        code = getattr(fn, "__code__", None)
+-        source = code.co_code if code is not None else repr(fn).encode()
+-    return (
+-        getattr(fn, "__module__", ""),
+-        getattr(fn, "__qualname__", repr(fn)),
+-        hashlib.sha256(source).hexdigest(),
+-    )
++    """Fail-closed semantic identity for a callable stored in an EpiOp config."""
++    return None if fn is None else semantic_value_key(fn, set(), force_source=True)
+@@ -320,0 +309 @@ class EpiOp:
++    sink_arity = 1
+@@ -334,4 +323,6 @@ class EpiOp:
+-    def fn_sink_flush(self, gemm, state, frag):
+-        """Fold a fragment of fn-produced values into this op's accumulator.
+-        ``state`` is the begin_loop result; ``frag`` is elementwise-congruent
+-        with the accumulator tile fragment."""
++    def fn_sink_flush(self, gemm, state, *fragments):
++        """Fold the declared sink value planes into this op's accumulator.
++
++        ``state`` is the begin_loop result. Each fragment is elementwise-congruent
++        with the accumulator tile and corresponds to one of ``sink_arity`` planes.
++        """
+@@ -1486,0 +1478,5 @@ class VecReduce(EpiOp):
++    @property
++    def sink_arity(self):
++        """Number of value planes returned to this sink by the epilogue fn."""
++        return 2 if self.scaled else 1
++
+diff --git a/quack/epilogue/visit.py b/quack/epilogue/visit.py
+index 953ef2f..ede70e7 100644
+--- a/quack/epilogue/visit.py
++++ b/quack/epilogue/visit.py
+@@ -55,0 +56,13 @@ class _EpiModMixinBase(ComposableEpiMixin):
++    def _value_planes(self, name, arity, value):
++        """Normalize one fn return to its declared tuple of value planes."""
++        if arity == 1:
++            return (value,)
++        assert not isinstance(value, (F2, F16Lanes, Pair)), (
++            f"output {name!r} returned one packed-lane value where {arity} "
++            "state planes are required"
++        )
++        assert isinstance(value, tuple) and len(value) == arity, (
++            f"output {name!r} must return {arity} value planes"
++        )
++        return value
++
+@@ -57,2 +70 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-        """One collection fragment per sink op; scaled reduces get a
+-        (val, scale) fragment pair so the fold can be a single fused FMA."""
++        """Allocate each sink's fixed tuple of collection fragments."""
+@@ -60,7 +72,3 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-            (
+-                (
+-                    cute.make_rmem_tensor(shape, self.acc_dtype),
+-                    cute.make_rmem_tensor(shape, self.acc_dtype),
+-                )
+-                if getattr(ops_by_name[s], "scaled", False)
+-                else cute.make_rmem_tensor(shape, self.acc_dtype)
++            tuple(
++                cute.make_rmem_tensor(shape, self.acc_dtype)
++                for _ in range(ops_by_name[name].sink_arity)
+@@ -68 +76 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-            for s in self._epi_mod_sinks
++            for name in self._epi_mod_sinks
+@@ -73,7 +81,2 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-        for sname, stmp in zip(self._epi_mod_sinks, sink_tmps):
+-            if const_expr(isinstance(stmp, tuple)):
+-                ops_by_name[sname].fn_sink_flush(
+-                    self, epi_loop_tensors[sname], stmp[0], scale=stmp[1]
+-                )
+-            else:
+-                ops_by_name[sname].fn_sink_flush(self, epi_loop_tensors[sname], stmp)
++        for name, fragments in zip(self._epi_mod_sinks, sink_tmps):
++            ops_by_name[name].fn_sink_flush(self, epi_loop_tensors[name], *fragments)
+@@ -220 +223 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-            val_frags = outs + sink_tmps
++            val_frags = tuple((out,) for out in outs) + sink_tmps
+@@ -236,7 +239,4 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-                for vname, vfrag in zip(val_names, val_frags):
+-                    if const_expr(isinstance(vfrag, tuple)):
+-                        # Scaled sink: the fn returns the (val, scale) factors.
+-                        v, s = res[vname]
+-                        vfrag[0][i], vfrag[1][i] = v, s
+-                    else:
+-                        vfrag[i] = res[vname]
++                for vname, vfrags in zip(val_names, val_frags):
++                    values = self._value_planes(vname, len(vfrags), res[vname])
++                    for plane, value in zip(vfrags, values):
++                        plane[i] = value
+@@ -259,2 +259,2 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-            # (Scaled sinks are rejected in acc_pair mode at EpiMod init: a
+-            # tuple return already means the two lanes here.)
++            # Multi-plane sinks are rejected in acc_pair mode because a tuple
++            # return already means the two adjacent accumulator lanes here.
+@@ -262 +262 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-                cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype)
++                (cute.make_rmem_tensor(tRS_rD.layout.shape, self.acc_dtype),)
+@@ -267 +267 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-                for p in (cute.flat_divide(t, cute.make_layout(2)) for t in sink_tmps)
++                for p in (cute.flat_divide(t[0], cute.make_layout(2)) for t in sink_tmps)
+@@ -320,2 +320 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-            for sname, stmp in zip(self._epi_mod_sinks, sink_tmps):
+-                ops_by_name[sname].fn_sink_flush(self, epi_loop_tensors[sname], stmp)
++            self._flush_sinks(ops_by_name, epi_loop_tensors, sink_tmps)
+@@ -328,4 +327,3 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-        # Sink values are collected into a plain fragment per sink op (a
+-        # (val, scale) fragment pair for scaled reduces), then handed to the
+-        # op's fn_sink_flush (fragment-level: the op owns the fold into its —
+-        # possibly aliased, possibly coupled — accumulators).
++        # Sink values are collected into one or more fragments per sink, then
++        # handed to fn_sink_flush (fragment-level: the op owns the fold into
++        # its possibly aliased or coupled accumulators).
+@@ -335 +333 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-        val_frags = outs + sink_tmps
++        val_frags = tuple((out,) for out in outs) + sink_tmps
+@@ -355,8 +353,7 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-                for vname, vfrag in zip(val_names, val_frags):
+-                    if const_expr(isinstance(vfrag, tuple)):
+-                        v, s = res[vname]
+-                        vfrag[0][2 * i], vfrag[0][2 * i + 1] = v[0], v[1]
+-                        vfrag[1][2 * i], vfrag[1][2 * i + 1] = s[0], s[1]
+-                    else:
+-                        v = res[vname]
+-                        vfrag[2 * i], vfrag[2 * i + 1] = v[0], v[1]
++                for vname, vfrags in zip(val_names, val_frags):
++                    values = self._value_planes(vname, len(vfrags), res[vname])
++                    for plane, value in zip(vfrags, values):
++                        if const_expr(isinstance(value, tuple)):
++                            plane[2 * i], plane[2 * i + 1] = value[0], value[1]
++                        else:
++                            plane[2 * i], plane[2 * i + 1] = value, value
+@@ -376,6 +373,4 @@ class _EpiModMixinBase(ComposableEpiMixin):
+-                for vname, vfrag in zip(val_names, val_frags):
+-                    if const_expr(isinstance(vfrag, tuple)):
+-                        v, s = res[vname]
+-                        vfrag[0][i], vfrag[1][i] = v, s
+-                    else:
+-                        vfrag[i] = res[vname]
++                for vname, vfrags in zip(val_names, val_frags):
++                    values = self._value_planes(vname, len(vfrags), res[vname])
++                    for plane, value in zip(vfrags, values):
++                        plane[i] = value
+diff --git a/quack/gemm_runtime/identity.py b/quack/gemm_runtime/identity.py
+index f9861a1..a698fae 100644
+--- a/quack/gemm_runtime/identity.py
++++ b/quack/gemm_runtime/identity.py
+@@ -121,0 +122,7 @@ def semantic_value_key(value, seen, *, force_source=False):
++        if force_source and not (
++            value.__module__ == "quack" or value.__module__.startswith("quack.")
++        ):
++            raise TypeError(
++                f"cannot fingerprint callable class {value!r}; use a function wrapper "
++                "or a callable instance implementing __quack_semantic_key__"
++            )
+@@ -123,0 +131,6 @@ def semantic_value_key(value, seen, *, force_source=False):
++        if callable(value) and not (
++            type(value).__module__ == "quack" or type(value).__module__.startswith("quack.")
++        ):
++            raise TypeError(
++                f"cannot fingerprint callable dataclass {value!r}; implement __quack_semantic_key__"
++            )

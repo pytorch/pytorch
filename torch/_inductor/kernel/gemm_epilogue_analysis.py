@@ -43,7 +43,9 @@ from torch._inductor.kernel.gemm_epilogue import (
     GemmEpilogueGraph,
     GemmReductionGeometry,
     iter_fx_node_inputs,
+    NormalizedGemmReduction,
     NormalizedGetItem,
+    NormalizedPrepareSoftmax,
     NormalizedReduction,
     NormalizedSqueeze,
     NormalizedUnsupportedReduction,
@@ -114,7 +116,7 @@ class GemmLocalReduceMatch:
         matches: list["GemmLocalReduceMatch"],
         mixed_match_error: str,
     ) -> "GemmLocalReduceMatch | None":
-        """Return the common match when all values use one reduction geometry."""
+        """Return the common match when all values share one geometry."""
         if not matches:
             return None
         match = matches[0]
@@ -408,7 +410,9 @@ class GemmLocalReduceAnalysis:
             node
             for node in self.graph.dependencies
             if (node is match.value_node or node in dependencies)
-            and isinstance(self.graph.normalized_nodes.get(node), NormalizedReduction)
+            and isinstance(
+                self.graph.normalized_nodes.get(node), NormalizedGemmReduction
+            )
             and node in self.matches
         )
 
@@ -425,7 +429,7 @@ class GemmLocalReduceAnalysis:
             )
             if propagated or domain or grouped:
                 return
-        if isinstance(normalized, NormalizedReduction):
+        if isinstance(normalized, NormalizedGemmReduction):
             if self.bind_grouped_reduction(node, normalized):
                 return
             if (
@@ -433,7 +437,11 @@ class GemmLocalReduceAnalysis:
                 and self.gemm is not None
                 and self.graph.depends_on(normalized.source, self.gemm)
             ):
-                op_name = str(getattr(node.target, "overloadpacket", node.target))
+                op_name = (
+                    "softmax/logsumexp"
+                    if isinstance(normalized, NormalizedPrepareSoftmax)
+                    else str(getattr(node.target, "overloadpacket", node.target))
+                )
                 raise ungrouped_reduction_error(op_name)
         elif isinstance(normalized, NormalizedUnsupportedReduction):
             raise unsupported_reduction_op_error(normalized.target)
@@ -581,16 +589,18 @@ class GemmLocalReduceAnalysis:
     def bind_grouped_reduction(
         self,
         node: torch.fx.Node,
-        reduction: NormalizedReduction,
+        reduction: NormalizedGemmReduction,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
         layout = self.grouped_tensors.get(reduction.source)
         if layout is None:
             return False
-        if reduction.dtype is not None:
+        if isinstance(reduction, NormalizedReduction) and reduction.dtype is not None:
             raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
         validate_local_reduce_tensorssa_group_size(layout.axis, layout.group)
         if not layout.matches_reduction_dim(reduction.dim):
+            if isinstance(reduction, NormalizedPrepareSoftmax):
+                return False
             raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
         self.matches[node] = GemmLocalReduceMatch(
             node, layout, self.reduction_physical_span(reduction.source, layout.axis)
