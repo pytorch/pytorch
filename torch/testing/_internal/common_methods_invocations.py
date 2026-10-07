@@ -12034,7 +12034,7 @@ op_db: list[OpInfo] = [
                             dtypes=(torch.int64,)),
 
                # MPS arange does not support complex dtypes yet
-               DecorateInfo(unittest.skip("MPS arange does not support complex dtypes yet"), None, None, device_type='mps',
+               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
                             dtypes=(torch.complex64, torch.complex128)),
            )),
     OpInfo('cauchy',
@@ -23425,6 +23425,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+            DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps', dtypes=(torch.complex64, torch.complex128)),
         ),
     ),
     PythonRefInfo(
