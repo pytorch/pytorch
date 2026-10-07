@@ -34,9 +34,7 @@ class LookupTableChoices(InductorChoices):
         Get the template lookup table from config.
         Override this method to use custom lookup table sources (database, API, etc.).
         """
-        if config.lookup_table.table is None or not (
-            torch.cuda.is_available() or torch.xpu.is_available()
-        ):
+        if not torch.accelerator.is_available() or config.lookup_table.table is None:
             return {}
         return config.lookup_table.table
 
