@@ -680,8 +680,9 @@ def is_cudnn_sdp_python_available() -> bool:
     r"""
     .. warning:: This flag is beta and subject to change.
 
-    Returns whether the cuDNN frontend Python package is importable, i.e.
-    whether :func:`enable_cudnn_sdp_python` can succeed.
+    Returns whether the cuDNN frontend Python package is importable. An
+    installed package that is too old still makes
+    :func:`enable_cudnn_sdp_python` raise.
     """
     from torch.nn.attention import _cudnn
 
@@ -710,11 +711,14 @@ def enable_cudnn_sdp_python(enabled: bool):
 
     This chooses an *implementation*, so it is orthogonal to
     :func:`enable_cudnn_sdp`, which chooses whether the cuDNN *backend* is
-    eligible for selection at all. It is likewise independent of the active
-    flash attention implementation -- the two override disjoint operators, so
-    enabling this does not disturb FA3/FA4.
+    eligible for selection at all: with that off, neither implementation runs.
+    It is likewise independent of the active flash attention implementation --
+    the two override disjoint operators, so enabling this does not disturb
+    FA3/FA4.
 
-    Enabling imports the provider package; it is not imported otherwise.
+    The provider module ``cudnn.torch`` is imported on the first enable, not
+    before; :func:`is_cudnn_sdp_python_available` imports only its parent
+    package ``cudnn``.
 
     Setting ``TORCH_CUDNN_SDPA_USE_PYTHON=1`` enables this at import, so an
     existing script can be switched over without a source change.
