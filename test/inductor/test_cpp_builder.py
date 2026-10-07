@@ -173,18 +173,21 @@ class TestMsvcLanguageCheck(TestCase):
 class TestLinuxAarch64ArchFlag(TestCase):
     def setUp(self):
         super().setUp()
+        cpp_builder._get_linux_aarch64_cpu_flags.cache_clear()
         cpp_builder._get_linux_aarch64_arch_flag.cache_clear()
 
     def tearDown(self):
+        cpp_builder._get_linux_aarch64_cpu_flags.cache_clear()
         cpp_builder._get_linux_aarch64_arch_flag.cache_clear()
         super().tearDown()
 
-    def _arch_flag(self, cpu_flags, *, is_gcc=True, gcc_older_than_13=False):
+    def _arch_flag(self, capabilities, *, is_gcc=True, gcc_older_than_13=False):
         with (
-            mock.patch.object(
-                cpp_builder,
-                "_get_linux_aarch64_cpu_flags",
-                return_value=cpp_builder.OrderedSet(cpu_flags),
+            mock.patch("sys.platform", "linux"),
+            mock.patch("platform.machine", return_value="aarch64"),
+            mock.patch(
+                "torch.cpu.get_capabilities",
+                return_value=dict.fromkeys(capabilities, True),
             ),
             mock.patch.object(cpp_builder, "_is_gcc", return_value=is_gcc),
             mock.patch.object(
@@ -197,25 +200,32 @@ class TestLinuxAarch64ArchFlag(TestCase):
 
     def test_gcc_sme_without_sve2_spells_out_detected_extensions(self):
         # Apple M4 as seen from a Linux VM: SME and SME2, no SVE.
-        flags = ["bf16", "sme", "dot", "fp16_arith", "fhm", "i8mm"]
+        capabilities = ["bf16", "sme", "sme2", "dot", "fp16_arith", "fhm", "i8mm"]
         self.assertEqual(
-            self._arch_flag(flags),
+            self._arch_flag(capabilities),
             "march=armv8.2-a+dotprod+fp16+fp16fml+bf16+i8mm",
         )
 
     def test_gcc_sme_without_sve2_omits_undetected_extensions(self):
         self.assertEqual(self._arch_flag(["sme", "dot"]), "march=armv8.2-a+dotprod")
 
+    def test_gcc_older_than_13_sme_without_sve2_spells_out_extensions(self):
+        # The GCC < 13 SVE flags do not apply without SVE, so this falls through.
+        self.assertEqual(
+            self._arch_flag(["bf16", "sme", "i8mm"], gcc_older_than_13=True),
+            "march=armv8.2-a+bf16+i8mm",
+        )
+
     def test_gcc_sme_with_sve2_keeps_native(self):
-        flags = ["bf16", "sve", "sve2", "sme", "dot", "i8mm"]
-        self.assertEqual(self._arch_flag(flags), "march=native")
+        capabilities = ["bf16", "sve", "sve2", "sme", "dot", "i8mm"]
+        self.assertEqual(self._arch_flag(capabilities), "march=native")
 
     def test_gcc_without_sme_keeps_native(self):
         self.assertEqual(self._arch_flag(["bf16", "dot", "i8mm"]), "march=native")
 
     def test_clang_sme_without_sve2_keeps_native(self):
-        flags = ["bf16", "sme", "dot", "i8mm"]
-        self.assertEqual(self._arch_flag(flags, is_gcc=False), "march=native")
+        capabilities = ["bf16", "sme", "dot", "i8mm"]
+        self.assertEqual(self._arch_flag(capabilities, is_gcc=False), "march=native")
 
 
 class TestCppTorchDeviceOptionsCompiler(TestCase):

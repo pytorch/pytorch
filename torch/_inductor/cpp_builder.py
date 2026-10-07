@@ -1086,7 +1086,7 @@ def _get_linux_aarch64_cpu_flags() -> OrderedSet[str]:
     capabilities = torch.cpu.get_capabilities()
     flags.update(
         capability
-        for capability in ("bf16", "sve", "sve2", "sme", *_AARCH64_GCC_EXTENSIONS)
+        for capability in ("sve", "sve2", "sme", *_AARCH64_GCC_EXTENSIONS)
         if capabilities.get(capability, False)
     )
 
