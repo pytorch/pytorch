@@ -1351,6 +1351,24 @@ def helper(x):
                 sig, expected_sig, lambda msg: f"{msg}\nwrong signature for {dtype}"
             )
 
+    def test_mtia_rank_zero_tensor_signature_uses_pointer(self):
+        class FakeGraph:
+            mutated_buffers = set()
+            wrapper_code = SimpleNamespace(preserve_zero_dim_tensor_args=True)
+
+            def is_unspec_arg(self, name):
+                return True
+
+            def get_current_device_or_throw(self):
+                return torch.device("cpu")
+
+        arg = TensorArg(name="in_ptr0", buffer="buf0", dtype=torch.float32)
+        with V.set_graph_handler(FakeGraph()):
+            self.assertFalse(triton_utils.should_unwrap_unspec_arg(arg.buffer))
+            self.assertEqual(
+                triton_utils.signature_of(arg, size_dtype=None), "*fp32"
+            )
+
     @unittest.skipUnless(has_triton_package(), "requires Triton package")
     def test_fp8_dtype_support_matrix(self):
         self.assertFalse(
