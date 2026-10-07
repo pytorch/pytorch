@@ -42,7 +42,7 @@ open-ended string-to-string maps.
 | `accelerator` | string | `cpu`, `cuda`, `rocm`, `xpu`, or `mps` |
 | `accelerator_version` | string | Accelerator major.minor version |
 | `device_count` | int | Visible accelerator count |
-| `device_name` | string | Raw NVML, amdsmi, xpu-smi, or MPS device string; empty with no device |
+| `device_name` | string | Normalized model of the first visible device (`l4`, `h100`, `mi350x`, `m2`, `max1100`); an unknown name lower-cased with dashes; empty with no device |
 
 `flags` includes every setting registered with `include_in_repro`. Flags use
 `"1"` or `"0"`, other settings use their value, and unset settings use `""`.
