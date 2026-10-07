@@ -2805,19 +2805,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 256,
                 {"tile_m": 64, "tile_n": 32, "cluster_n": 2},
             ),
-            (
-                "interleaved_group2_cluster_n2",
-                2,
-                False,
-                False,
-                256,
-                {"tile_m": 128, "tile_n": 64, "cluster_n": 2},
-            ),
+            ("swiglu_group2_m64", 2, False, False, 256, {"tile_m": 64, "tile_n": 32}),
         ),
         name_fn=lambda case: case[0],
     )
     def test_mm_output_contraction_matches_reference(self, case):
-        _, group, chunked, tuned, n, config = case
+        name, group, chunked, tuned, n, config = case
         if group == 4 and torch.cuda.get_device_capability()[0] != 10:
             self.skipTest("group-4 grouped main outputs are currently SM100-only")
         m, k = 128, 64
@@ -2834,6 +2827,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             else:
                 grouped = acc.view(acc.shape[0], acc.shape[1] // group, group)
                 lanes = tuple(grouped.select(-1, index) for index in range(group))
+            if name == "swiglu_group2_m64":
+                return F.silu(lanes[0]) * lanes[1]
             return sum(lanes[1:], lanes[0])
 
         def fn(lhs, rhs):
