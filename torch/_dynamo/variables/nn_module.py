@@ -573,11 +573,12 @@ class NNModuleVariable(VariableTracker):
                 )
             elif istype(subobj, types.FunctionType):
                 if inspect.getattr_static(subobj, "_torchdynamo_inline", False):
+                    func_source = source and AttrSource(source, "__func__")
+                    fn_vt = variables.WrapperUserFunctionVariable(
+                        subobj, "_torchdynamo_inline", source=func_source
+                    )
                     return variables.WrapperUserMethodVariable(
-                        subobj,
-                        "_torchdynamo_inline",
-                        self,
-                        source=AttrSource(source, "__func__"),
+                        fn_vt, self, source=source
                     )
                 return variables.UserMethodVariable(
                     variables.UserFunctionVariable(
@@ -1586,8 +1587,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker
     ) -> VariableTracker | None:
         dict_vt = self.tp_getattro_impl(tx, field)
-        if isinstance(dict_vt, variables.UserDefinedDictVariable):
-            dict_vt = dict_vt._base_vt
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None

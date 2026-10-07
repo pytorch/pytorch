@@ -69,12 +69,12 @@ import torch._guards
 from torch._utils_internal import get_file_path_2
 
 from . import config
-from .utils import counters
+from .utils import counters, format_source_range
 
 
 if TYPE_CHECKING:
     import weakref
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
@@ -152,8 +152,11 @@ class TorchDynamoException(RuntimeError):
             instead of the default behavior. This allows exceptions to signal specific
             execution strategies (e.g., SKIP, RUN_ONLY) without requiring separate
             exception types for control flow.
-        frame_exec_strategy_apply_to_code: Whether the custom strategy should be
-            cached on the code object or only apply to the current frame invocation.
+        apply_to_code: Whether frame_exec_strategy should be cached on the code
+            object and applied to future invocations. If frame_exec_strategy is
+            unset, False requests a non-cached SKIP/DEFAULT strategy while True
+            uses normal exception handling. If it is set, the supplied strategy
+            is either cached or limited to the current invocation accordingly.
         frame_exec_strategy_cache_key_ref: Optional weak reference to the object
             identity used to cache a non-code-global strategy.
         frame_exec_strategy_cache_locator: Side-effect-free locator used to
@@ -164,7 +167,7 @@ class TorchDynamoException(RuntimeError):
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: DynamoTracerOutput | None = None
         self.frame_exec_strategy: FrameExecStrategy | None = None
-        self.frame_exec_strategy_apply_to_code = True
+        self.apply_to_code = True
         self.frame_exec_strategy_cache_key_ref: weakref.ReferenceType[object] | None = (
             None
         )
@@ -191,6 +194,15 @@ class InternalTorchDynamoError(TorchDynamoException):
 
 class ResumePrologueTracingError(TorchDynamoException):
     pass
+
+
+class CompileOnOneRankUnsupported(TorchDynamoException):
+    """Something a rank-portable graph cannot express under compile_on_one_rank.
+
+    Deliberately not a graph break. Breaking out drops the frame back to eager,
+    which silently forfeits the rank-portability the feature was turned on for, so
+    these propagate whether or not graph breaks are allowed.
+    """
 
 
 class RestartAnalysis(TorchDynamoException):
@@ -333,6 +345,8 @@ class Unsupported(TorchDynamoException):
         *,
         case_name: str | None = None,
         real_stack: StackSummary | None = None,
+        preserve_skip_frame_after_inline: bool = False,
+        apply_to_code: bool = True,
     ) -> None:
         super().__init__(msg)
         if not real_stack:
@@ -340,6 +354,8 @@ class Unsupported(TorchDynamoException):
         self.real_stack = real_stack
         self.msg = msg
         self.skip_frame = skip_frame
+        self.preserve_skip_frame_after_inline = preserve_skip_frame_after_inline
+        self.apply_to_code = apply_to_code
         self.category: str | None = None
         self.add_to_stats()
         self.gb_type: str | None = gb_type
@@ -410,6 +426,7 @@ class UserError(TorchDynamoException):
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.skip_frame = False
+        self.preserve_skip_frame_after_inline = False
         self.logged = False
         self.error_type = error_type
         self.msg = msg
@@ -575,14 +592,20 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: list[VariableTracker] | list[str] | None = None,
+    args: Sequence[object] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
+    from .variables.base import VariableTracker
     from .variables.builder import SourcelessBuilder
 
     if args:
+        # Callers commonly forward a real exception's .args, whose members are
+        # not all strings (TypeError("msg", 42)). Anything that is not already
+        # a VariableTracker has to be wrapped, or it reaches the VT machinery raw.
         args_ = [
-            SourcelessBuilder.create(tx, arg) if isinstance(arg, str) else arg
+            arg
+            if isinstance(arg, VariableTracker)
+            else SourcelessBuilder.create(tx, arg)
             for arg in args
         ]
     else:
@@ -778,6 +801,8 @@ def unimplemented(
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
     skip_frame: bool = False,
+    preserve_skip_frame_after_inline: bool = False,
+    apply_to_code: bool = True,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.
@@ -787,26 +812,32 @@ def unimplemented(
         context: Developer context for the graph break. It can contain tracing context/dynamic strings.
         explanation: User-facing context-dependent explanation for the graph break. Can be dynamic.
         hints: List of user-facing hints for the graph break.
+        preserve_skip_frame_after_inline: Keep skip_frame=True if this graph break
+                 is raised from an inlined function and bubbles to the parent frame.
+        apply_to_code: Cache the resulting frame execution strategy on the code object.
     """
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
 
     if log_warning:
         log.warning(msg)
+    options: dict[str, Any] = {
+        "preserve_skip_frame_after_inline": preserve_skip_frame_after_inline,
+        "apply_to_code": apply_to_code,
+    }
     if from_exc is not _NOTHING:
         past_real_stack = None
         if hasattr(from_exc, "real_stack"):
             past_real_stack = from_exc.real_stack
+        options["real_stack"] = past_real_stack
         if isinstance(from_exc, Unsupported):
             msg = f"{from_exc.msg}\n\n*** While handling this graph break, another graph break occurred: ***\n\n{msg}"
             # noqa: GB_REGISTRY
-            raise Unsupported(msg, gb_type, skip_frame, real_stack=past_real_stack)
+            raise Unsupported(msg, gb_type, skip_frame, **options)
         # noqa: GB_REGISTRY
-        raise Unsupported(
-            msg, gb_type, skip_frame, real_stack=past_real_stack
-        ) from from_exc
+        raise Unsupported(msg, gb_type, skip_frame, **options) from from_exc
     # noqa: GB_REGISTRY
-    raise Unsupported(msg, gb_type, skip_frame)
+    raise Unsupported(msg, gb_type, skip_frame, **options)
 
 
 # KeyError has special handling for its args
@@ -835,14 +866,12 @@ def augment_exc_message_with_hop_name(exc: Exception, msg: str) -> str:
 
 
 def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -> None:
-    import traceback
-
     exc.innermost_user_frame_summary = None  # type: ignore[attr-defined]
 
     real_stack = get_real_stack(exc)
     if real_stack is not None and len(real_stack) > 0:
         exc.innermost_user_frame_summary = real_stack[-1]  # type: ignore[attr-defined]
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
+        msg += f"\nfrom user code:\n {format_user_stack(real_stack)}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += (
@@ -889,6 +918,68 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
         exc.args = (new_msg,) + exc.args[1:]
 
 
+_MAX_USER_STACK_SOURCE_LINES = 5
+
+
+def _format_frame_summary(frame: FrameSummary) -> str:
+    lineno = frame.lineno
+    colno = getattr(frame, "colno", None)
+    end_colno = getattr(frame, "end_colno", None)
+    end_lineno = getattr(frame, "end_lineno", None)
+    if end_lineno is None:
+        end_lineno = lineno
+
+    line_count = (
+        end_lineno - lineno + 1
+        if lineno is not None and end_lineno is not None
+        else None
+    )
+    if (
+        lineno is not None
+        and colno is not None
+        and end_colno is not None
+        and line_count is not None
+        and 1 <= line_count <= _MAX_USER_STACK_SOURCE_LINES
+        and (end_lineno != lineno or end_colno > colno)
+    ):
+        source_range = format_source_range(
+            frame.filename,
+            lineno,
+            end_lineno,
+            colno,
+            end_colno,
+            function_name=frame.name,
+        )
+        if source_range:
+            header = f'  File "{frame.filename}", line {lineno}, in {frame.name}\n'
+            source_range = textwrap.dedent(source_range).rstrip("\n")
+            return header + textwrap.indent(source_range, "    ") + "\n"
+
+    if line_count is not None and line_count > _MAX_USER_STACK_SOURCE_LINES:
+        # Keep the fallback bounded and avoid markers that bypass our display-width
+        # handling.
+        frame = FrameSummary(
+            frame.filename,
+            frame.lineno,
+            frame.name,
+            line=frame.line,
+        )
+    return "".join(format_list([frame]))
+
+
+class _UserStackSummary(StackSummary):
+    def format_frame_summary(self, frame_summary: FrameSummary, **kwargs: Any) -> str:
+        return _format_frame_summary(frame_summary)
+
+
+def format_user_stack(stack: StackSummary | list[FrameSummary]) -> str:
+    summary = _UserStackSummary()
+    # StackSummary.from_list() normalizes any legacy tuple entries, but it
+    # constructs StackSummary directly rather than preserving subclasses.
+    summary.extend(StackSummary.from_list(stack))
+    return "".join(summary.format())
+
+
 def get_exc_message(
     e: Exception, compile_id: CompileId
 ) -> tuple[str | None, int | None]:
@@ -913,15 +1004,21 @@ def _extract_stack_with_positions() -> StackSummary:
         code = frame.f_code
         # colno/end_colno kwargs were added to FrameSummary in 3.11
         kwargs: dict[str, Any] = {}
+        lineno = frame.f_lineno
         if sys.version_info >= (3, 11) and frame.f_lasti >= 0:
             positions = list(code.co_positions())
             idx = frame.f_lasti // 2
             if idx < len(positions):
-                _, _, kwargs["colno"], kwargs["end_colno"] = positions[idx]
+                start_lineno, end_lineno, colno, end_colno = positions[idx]
+                if start_lineno is not None:
+                    lineno = start_lineno
+                kwargs["end_lineno"] = end_lineno
+                kwargs["colno"] = colno
+                kwargs["end_colno"] = end_colno
         stack.append(
             FrameSummary(
                 code.co_filename,
-                frame.f_lineno,
+                lineno,
                 code.co_name,
                 lookup_line=False,
                 **kwargs,
@@ -1049,7 +1146,7 @@ def format_error_msg_verbose(
             + "=" * 10
             + "\n\n"
         )
-        msg += "".join(format_list(real_stack))
+        msg += format_user_stack(real_stack)
         msg += "\n"
         msg += "=" * 10
 

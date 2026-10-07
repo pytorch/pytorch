@@ -6,6 +6,7 @@ import importlib
 import inspect
 import itertools
 import math
+import os
 import struct
 import subprocess
 import sys
@@ -295,6 +296,22 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = False
         with self.assertRaisesRegex(NotImplementedError, r"fp32_precision is 'ieee'"):
             lowering.check_quack_fp32_operand(fp32)
+
+    def test_quack_cache_dir_follows_inductor_cache_dir(self):
+        from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
+        from torch._inductor.utils import fresh_cache
+
+        # Memoization must respect fresh_cache() changes to TORCHINDUCTOR_CACHE_DIR.
+        seen = set()
+        for _ in range(2):
+            with fresh_cache():
+                root = os.environ["TORCHINDUCTOR_CACHE_DIR"]
+                self.assertEqual(
+                    inductor_quack_cache_dir(),
+                    os.path.join(os.path.abspath(root), "quack"),
+                )
+                seen.add(root)
+        self.assertEqual(len(seen), 2)
 
     def test_clamp_codegen_uses_public_cutlass_api(self):
         from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
@@ -846,7 +863,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
     def test_grouped_layout_rejects_inexact_inferred_preserved_dimension(self):
-        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
+        from torch._inductor.kernel.gemm_epilogue_layout import grouped_tensor_layout
 
         with self.assertRaisesRegex(
             NotImplementedError, "grouped reshape must split exactly"
@@ -855,7 +872,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     @parametrize("unbacked_dim", (1, 2))
     def test_grouped_layout_rejects_unbacked_structural_dimensions(self, unbacked_dim):
-        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
+        from torch._inductor.kernel.gemm_epilogue_layout import grouped_tensor_layout
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape = [4, -1, 2]
@@ -864,7 +881,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     def test_grouped_layout_rejected_backed_group_does_not_guard(self):
         from torch._dynamo.source import ConstantSource
-        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
+        from torch._inductor.kernel.gemm_epilogue_layout import grouped_tensor_layout
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape_env = ShapeEnv()

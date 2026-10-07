@@ -352,7 +352,7 @@ def raise_mutated_nn_module_container_index(
         # lookup but not the later mutation. Intercepting that helper on its own
         # would specialize the selector and recreate the recompile loop.
         exc.frame_exec_strategy = FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
-        exc.frame_exec_strategy_apply_to_code = False
+        exc.apply_to_code = False
         if cache_key is not None:
             try:
                 exc.frame_exec_strategy_cache_key_ref = weakref.ref(cache_key)
