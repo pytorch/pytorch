@@ -46,6 +46,7 @@ class GuardFilterEntry:
     guard_type: str
     derived_guard_types: tuple[str, ...]
     is_global: bool
+    is_input: bool
     orig_guard: Guard
     # Snapshot of orig_guard.code_list (the rendered checks, as GuardFn's
     # code_parts) as of the inspection build. A later build_guards over the

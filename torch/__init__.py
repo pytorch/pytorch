@@ -3111,6 +3111,7 @@ def compile(
     recompile_limit: builtins.int | None = None,
     isolate_recompiles: builtins.bool = False,
     dynamic_shapes: _Any = None,
+    guarding_strategy: str | None = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -3193,7 +3194,8 @@ def compile(
 
         - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
           This is an unsafe feature and there is no backward compatibility guarantee provided
-          for dynamo guards as data types.
+          for dynamo guards as data types. When used with the guarding_strategy compile kwarg,
+          the set of guards saved is the intersection of the two sets.
           For stable helper functions to use, see the documentation in `torch.compiler`, for example:
           - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
           - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
@@ -3222,6 +3224,14 @@ def compile(
         by a non-isolated region hitting its recompile limit does NOT bleed
         into isolated regions — each region manages its own RUN_ONLY state.
         Default False.
+       guarding_strategy (str): Set a strategy for guard generation
+        - "defensive" is the default guarding strategy, this produces the maximal
+            set of guards to be used when the user wants to ensure they get the
+            correct compiled artifact without considering the properties of their
+            compiled artifact.
+        - "inference" limits the set of guards to only include those coming from
+            inputs to the compiled artifact. It is assumed any model used is static
+            and produces no guards for global variables, context, or nn.Module
 
     Example::
 
@@ -3307,11 +3317,19 @@ def compile(
         ):
             backend = bisect_backend
 
-    guard_filter_fn = None
+    user_guard_filter_fn = None
     use_aoti = False
     if options and isinstance(options, dict):
-        guard_filter_fn = options.pop("guard_filter_fn", None)
+        user_guard_filter_fn = options.pop("guard_filter_fn", None)
         use_aoti = options.pop("use_aoti", False)
+
+    guarding_strategy_fn = torch.compiler.get_guarding_strategy_fn(guarding_strategy)
+
+    guard_filter_fn = (
+        lambda guards: (user_guard_filter_fn(guards) and guarding_strategy_fn(guards))
+        if user_guard_filter_fn
+        else guarding_strategy_fn(guards)
+    )
 
     if torch.compiler.is_exporting():
         from torch._higher_order_ops.utils import _in_hop_compile
