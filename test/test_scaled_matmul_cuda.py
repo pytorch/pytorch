@@ -1878,7 +1878,10 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
+    @skipCUDAIf(
+        not (SM89OrLater or torch.version.hip),
+        "rowwise implementation is currently sm89-sm100 specific",
+    )
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
 
@@ -2014,7 +2017,10 @@ class TestFP8Matmul(TestCase):
                 e5m2()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
+    @skipCUDAIf(
+        not (SM89OrLater or torch.version.hip),
+        "rowwise implementation is currently sm89-sm100 specific",
+    )
     @parametrize("base_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("shapes", [
         (128, 512, 256),
@@ -2087,7 +2093,10 @@ class TestFP8Matmul(TestCase):
         test()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
+    @skipCUDAIf(
+        not (SM89OrLater or torch.version.hip),
+        "rowwise implementation is currently sm89-sm100 specific",
+    )
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("wrap_v2", [True, False])
     @with_tf32_off
@@ -2134,7 +2143,10 @@ class TestFP8Matmul(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
+    @skipCUDAIf(
+        not (SM89OrLater or torch.version.hip),
+        "rowwise implementation is currently sm89-sm100 specific",
+    )
     @parametrize("wrap_v2", [True, False])
     def test_scaled_mm_row_wise_fp32_out_with_bias_errors(self, wrap_v2, device):
         # fp32 output combined with a bias is not supported on the row-wise path.
@@ -2593,7 +2605,10 @@ class TestFP8Matmul(TestCase):
     @onlyCUDA
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    @unittest.skipIf(
+        not (SM90OrLater or torch.version.hip),
+        "sm89 kernel isn't opted into carveout yet",
+    )
     def test_honor_sm_carveout(self, device) -> None:
         torch.manual_seed(42)
 

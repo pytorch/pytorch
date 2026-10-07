@@ -506,7 +506,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             sfdp_pattern_7,
             args,
-            contains=SM80OrLater,
+            contains=SM80OrLater or torch.version.hip,
             has_dropout=True,
             override_check_equal=True,
             atol=atol,
@@ -533,7 +533,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_7),
             args,
-            contains=SM80OrLater,
+            contains=SM80OrLater or torch.version.hip,
             has_dropout=True,
             override_check_equal=True,
             atol=atol,
@@ -546,7 +546,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_7_v2),
             args,
-            contains=SM80OrLater,
+            contains=SM80OrLater or torch.version.hip,
             has_dropout=True,
             override_check_equal=True,
             atol=atol,
@@ -644,7 +644,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             sfdp_pattern_9,
             args,
-            contains=SM80OrLater,
+            contains=SM80OrLater or torch.version.hip,
             has_dropout=True,
             override_check_equal=True,
             atol=2e-3,
@@ -657,7 +657,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             sfdp_pattern_9_v2,
             args,
-            contains=SM80OrLater,
+            contains=SM80OrLater or torch.version.hip,
             has_dropout=True,
             override_check_equal=True,
             atol=2e-3,
@@ -670,7 +670,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_9),
             args,
-            contains=SM80OrLater,
+            contains=SM80OrLater or torch.version.hip,
             has_dropout=True,
             override_check_equal=True,
             atol=2e-3,
@@ -683,7 +683,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_9_v2),
             args,
-            contains=SM80OrLater,
+            contains=SM80OrLater or torch.version.hip,
             has_dropout=True,
             override_check_equal=True,
             atol=2e-3,

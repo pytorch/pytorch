@@ -168,7 +168,7 @@ class TestPatternMatcher(TestCase):
                 ref[indices], test[indices]
             )  # also checks that dtype is correct
 
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "need sm_80")
     @inductor_config.patch(
         {
             "benchmark_template_fusion": False,
@@ -267,7 +267,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(f(inp), f_replaced(inp))
         self.assertEqual(count, 2)
 
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "need sm_80")
     @inductor_config.patch(
         {
             "benchmark_template_fusion": False,
@@ -314,7 +314,7 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn1, args, True)
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "need sm_80")
     @inductor_config.patch(
         {
             "benchmark_template_fusion": False,
@@ -361,7 +361,7 @@ class TestPatternMatcher(TestCase):
                 "triton_tem" if not extern_mm else "extern_kernels.mm"
             ).run(code)
 
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "need sm_80")
     @inductor_config.patch(
         {
             "benchmark_fusion": False,
@@ -397,7 +397,7 @@ class TestPatternMatcher(TestCase):
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
 
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "need sm_80")
     @inductor_config.patch(
         {
             "benchmark_fusion": False,
@@ -421,7 +421,7 @@ class TestPatternMatcher(TestCase):
         )
         self._test_mixed_impl(fn, args, True, False, rtol=0.16, atol=1e-4)
 
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "need sm_80")
     @inductor_config.patch(
         {
             "benchmark_fusion": False,
@@ -453,7 +453,7 @@ class TestPatternMatcher(TestCase):
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
 
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "need sm_80")
     @inductor_config.patch(
         {
             "benchmark_fusion": False,
@@ -491,7 +491,7 @@ class TestPatternMatcher(TestCase):
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
 
-    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "need sm_80")
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_mixed_mm_gating(self):
         def fn(a, b):

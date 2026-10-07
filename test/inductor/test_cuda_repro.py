@@ -2898,8 +2898,11 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     tl.store(out_ptr0 + (x3), tmp2, xmask)""",
         )
 
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    @skipCUDAIf(not SM90OrLater, "needs at least 6 GiB of GPU memory headroom")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(
+        not (SM90OrLater or torch.version.hip),
+        "needs at least 6 GiB of GPU memory headroom",
+    )
     def test_chunked_unrolled_slice_gather_int32_overflow(self):
         # Regression for an int32-indexing miscompile when an unrolled chunked
         # loop containing a per-chunk F.linear and a gather gets fused into one
@@ -2982,7 +2985,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
 
     @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+        not (SM90OrLater or torch.version.hip),
+        "uses bfloat16 atomic add instrs which requires SM >= 90",
     )
     def test_float8_e8m0fnu(self):
         device = device_type

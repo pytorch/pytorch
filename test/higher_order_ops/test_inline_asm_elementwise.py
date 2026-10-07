@@ -318,7 +318,7 @@ TEST_CASE_NAMES = [tc.name for tc in TEST_CASES]
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-@unittest.skipIf(not SM70OrLater, "Requires SM70+")
+@unittest.skipIf(not (SM70OrLater or torch.version.hip), "Requires SM70+")
 @instantiate_parametrized_tests
 class TestInlineAsmElementwise(TestCase):
     """Parametrized tests for inline_asm_elementwise."""
@@ -617,7 +617,7 @@ class TestInlineAsmElementwiseMultipleOutputs(TestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-@unittest.skipIf(not SM70OrLater, "Requires SM70+")
+@unittest.skipIf(not (SM70OrLater or torch.version.hip), "Requires SM70+")
 class TestInlineAsmElementwiseEdgeCases(TestCase):
     """Tests for edge cases."""
 
@@ -762,7 +762,7 @@ class TestInlineAsmElementwiseEdgeCases(TestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-@unittest.skipIf(not SM70OrLater, "Requires SM70+")
+@unittest.skipIf(not (SM70OrLater or torch.version.hip), "Requires SM70+")
 @xfailIfNoAcceleratorTriton
 class TestInlineAsmPackPadding(TestCase):
     """Test that pack padding works when block size < pack."""

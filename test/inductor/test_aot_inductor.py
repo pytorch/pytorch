@@ -1562,7 +1562,11 @@ class AOTInductorTestsTemplate:
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
     def test_conv_freezing(self):
-        dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
+        dtypes = (
+            [torch.bfloat16, torch.float]
+            if SM80OrLater or torch.version.hip
+            else [torch.float]
+        )
         for dtype, groups in itertools.product(dtypes, [1, 2]):
             iC = 2
             oC = 3
@@ -1618,7 +1622,11 @@ class AOTInductorTestsTemplate:
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
     def test_linear_freezing(self):
-        dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
+        dtypes = (
+            [torch.bfloat16, torch.float]
+            if SM80OrLater or torch.version.hip
+            else [torch.float]
+        )
         for dtype in dtypes:
 
             class LinearModel(torch.nn.Module):
@@ -2370,7 +2378,7 @@ class AOTInductorTestsTemplate:
 
     # scaled_dot_product_flash_attention
     @unittest.skipIf(
-        not SM80OrLater and not HAS_XPU_AND_TRITON,
+        not (SM80OrLater or torch.version.hip) and not HAS_XPU_AND_TRITON,
         "bfloat16 only supported in sm80+ or XPU",
     )
     def test_sdpa(self):
@@ -2389,7 +2397,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(
-        not SM80OrLater and not HAS_XPU_AND_TRITON,
+        not (SM80OrLater or torch.version.hip) and not HAS_XPU_AND_TRITON,
         "bfloat16 only supported in sm80+ or XPU",
     )
     @unittest.skipIf(
@@ -6003,7 +6011,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @unittest.skipIf(not SM90OrLater, "FA3 requires SM90+")
+    @unittest.skipIf(not (SM90OrLater or torch.version.hip), "FA3 requires SM90+")
     def test_varlen_attn_paged_kv_cache(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -6185,7 +6193,7 @@ class AOTInductorTestsTemplate:
 
         if not TEST_MPS:
             dtypes.append(torch.float64)
-        if SM80OrLater:
+        if SM80OrLater or torch.version.hip:
             dtypes.append(torch.bfloat16)
 
         for dtype in dtypes:
@@ -6208,7 +6216,7 @@ class AOTInductorTestsTemplate:
         }
         if not TEST_MPS:
             dynamic_shapes["x_torch.float64"] = {0: dim0}
-        if SM80OrLater:
+        if SM80OrLater or torch.version.hip:
             dynamic_shapes["x_torch.bfloat16"] = {1: dim1}
 
         m = Model()
@@ -6221,7 +6229,7 @@ class AOTInductorTestsTemplate:
 
         # Expected results for the following checks:
         # ("unmatched dtype", "unmatched dim value at", "dim value is too", "unmatched stride value at")
-        if SM80OrLater:
+        if SM80OrLater or torch.version.hip:
             # 10 dynamic dims
             expected_results = (10, 21, 18, 21)
         elif TEST_MPS:

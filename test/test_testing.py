@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import unittest
 import unittest.mock
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -31,7 +32,19 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA, TEST_WITH_CROSSREF, TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
     getRocmVersion, TemporaryFileName, sanitize_pytest_xml,
 )
-from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
+from torch.testing._internal.common_cuda import (
+    SM100OrLater,
+    SM120OrLater,
+    SM53OrLater,
+    SM60OrLater,
+    SM70OrLater,
+    SM75OrLater,
+    SM80OrLater,
+    SM89OrLater,
+    SM90OrLater,
+    _get_torch_rocm_version,
+    has_device_side_assert,
+)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
@@ -3425,6 +3438,25 @@ class TestHardwareClassifications(TestCase):
         suite = loader.loadTestsFromModule(mod)
 
         self.assertEqual(self._suite_test_names(suite), {"test_a", "test_b"})
+
+
+@unittest.skipUnless(TEST_WITH_ROCM, "ROCm only")
+class TestSMOrLater(TestCase):
+    def test_sm_or_later_is_nvidia_only(self):
+        # On ROCm, get_device_capability() is a gfx version, not an SM number.
+        flags = (
+            SM53OrLater,
+            SM60OrLater,
+            SM70OrLater,
+            SM75OrLater,
+            SM80OrLater,
+            SM89OrLater,
+            SM90OrLater,
+            SM100OrLater,
+            SM120OrLater,
+        )
+        for flag in flags:
+            self.assertFalse(bool(flag))
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())

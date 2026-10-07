@@ -62,7 +62,10 @@ def _inputs(num_rows, V, device="cuda", logits_dtype=torch.float32):
 # These tests call the kernel directly, with no `cond` to decline an
 # unsupported device, so they need the CuTeDSL runtime's floor, sm_80.
 @unittest.skipIf(not TEST_CUDA, "CuTeDSL kernels are CUDA-only")
-@unittest.skipIf(not SM80OrLater, "the CuTeDSL runtime requires sm_80 or later")
+@unittest.skipIf(
+    not (SM80OrLater or torch.version.hip),
+    "the CuTeDSL runtime requires sm_80 or later",
+)
 class TestFusedGradLogitsKernel(TestCase):
     def setUp(self):
         super().setUp()

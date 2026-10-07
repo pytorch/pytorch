@@ -1465,7 +1465,7 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(o_ref.dtype, o.dtype)
 
     @onlyCUDA
-    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not (SM70OrLater or torch.version.hip), "triton")
     def test_rms_norm_decomp_cuda(self, device):
         @torch.compile
         def rms_norm_sinh(a, b, c):

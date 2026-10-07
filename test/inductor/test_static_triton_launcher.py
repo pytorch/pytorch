@@ -1016,7 +1016,10 @@ class TestFastCudaLauncher(TestCase):
         fast(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
         self.assertEqual(new_arg0, expected)
 
-    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @unittest.skipIf(
+        not (SM80OrLater or torch.version.hip),
+        "uses bfloat16 which requires SM >= 80",
+    )
     def test_bfloat16_scalar(self):
         @triton.jit
         def bfloat16(arg0, arg1: tl.bfloat16, arg2: tl.float32, arg3: tl.float64):

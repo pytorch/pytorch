@@ -687,7 +687,7 @@ class TestCuteDSLSmoketest(TestCase):
             cutedsl_utils._CUTEDSL_REQUIRED_VERSIONS,
         )
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_elementwise_add(self):
         _host, from_dlpack = _build_elementwise_add()
         import cutlass.cute as cute
@@ -707,7 +707,7 @@ class TestCuteDSLSmoketest(TestCase):
 
         torch.testing.assert_close(c, a + b)
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_sgemm(self):
         SGemm, from_dlpack = _build_sgemm()
         import cutlass.cute as cute
@@ -748,7 +748,7 @@ class TestCuteDSLSmoketest(TestCase):
         ref = torch.einsum("mk,nk->mn", a, b)
         torch.testing.assert_close(c.cpu(), ref.cpu(), atol=1e-3, rtol=1e-5)
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_cta_rmsnorm(self):
         CtaNorm, from_dlpack, cutlass_torch = _build_cta_norm()
         import cutlass
@@ -775,7 +775,7 @@ class TestCuteDSLSmoketest(TestCase):
         ref = torch.rms_norm(x, (N,), weight, eps)
         torch.testing.assert_close(y, ref, atol=1e-3, rtol=1e-3)
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_cta_layernorm(self):
         CtaNorm, from_dlpack, cutlass_torch = _build_cta_norm()
         import cutlass
@@ -815,7 +815,7 @@ class TestCuteDSLReadOnlyWrapper(TestCase):
     tensor is not materialized) and advertises DLPACK_FLAG_BITMASK_READ_ONLY.
     """
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_readonly_wrapper_tvm_ffi_kernel(self):
         _host, from_dlpack = _build_elementwise_add()
         import cutlass.cute as cute
@@ -862,7 +862,7 @@ class TestCuteDSLReadOnlyWrapper(TestCase):
         self.assertEqual(a_cow.const_data_ptr(), a_addr)
         self.assertEqual(b_cow.const_data_ptr(), b_addr)
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_readonly_wrapper_routes_to_const_exchange_api(self):
         # tvm-ffi / cuteDSL discover __dlpack_c_exchange_api__ on the type. The
         # wrapper must expose the const (read-only) API rather than the default.
@@ -896,7 +896,7 @@ class TestCuteDSLReadOnlyWrapper(TestCase):
     # valid (numpy and torch consume the versioned read-only capsule correctly;
     # see test_dlpack.py). The tvm-ffi path avoids this entirely by going
     # through the C exchange API rather than parsing a capsule.
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_readonly_wrapper_bare_capsule_is_valid(self):
         # Verify the wrapper's bare (non-tvm-ffi) capsule is a well-formed,
         # read-only, copy-on-write-preserving export -- the thing cuteDSL's bare
