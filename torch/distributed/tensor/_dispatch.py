@@ -14,7 +14,11 @@ from torch._logging import LazyString
 from torch._prims.rng_prims import run_dtensor_rng_op
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._dtensor_spec import (
+    _lower_block_shard_spec,
+    DTensorSpec,
+    TensorMeta,
+)
 from torch.distributed.tensor._nonlinear_redux import argminmax_handler
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -420,7 +424,8 @@ class OpDispatcher:
                         )
                     ):
                         with random._rng_tracker._distribute_region(
-                            first_arg._spec, generator=maybe_user_generator
+                            _lower_block_shard_spec(first_arg._spec),
+                            generator=maybe_user_generator,
                         ):
                             with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                                 output_sharding.output_spec
@@ -435,7 +440,9 @@ class OpDispatcher:
                         ):
                             raise AssertionError
                         start_offset_incr, end_offset_incr = (
-                            random._rng_tracker._compute_rng_offsets(first_arg._spec)
+                            random._rng_tracker._compute_rng_offsets(
+                                _lower_block_shard_spec(first_arg._spec)
+                            )
                         )
                         with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                             output_sharding.output_spec

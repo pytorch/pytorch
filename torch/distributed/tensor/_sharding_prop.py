@@ -15,7 +15,11 @@ from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._decompositions import DecompShardingStrategy
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._dtensor_spec import (
+    _lower_block_shard_spec,
+    DTensorSpec,
+    TensorMeta,
+)
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -36,7 +40,7 @@ from torch.distributed.tensor._utils import (
     compute_local_stride,
     try_find_mesh_from_args,
 )
-from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.distributed.tensor.placement_types import _StridedShard, BlockShard, Shard
 from torch.utils._pytree import tree_map
 
 
@@ -357,6 +361,27 @@ def _select_min_cost_strategy(
         )
 
     return strategy.strategies[selected_strategy_index]
+
+
+# Besides pointwise-tagged and foreach/fused ops, the ops FSDP2 storage uses on
+# BlockShard DTensors: optimizer state init (zeros_like), state dict save and
+# load (detach, copy_), and trunc_normal_ init (empty_like, normal_, any).
+_BLOCK_SHARD_OPS: set[OpOverload] = {
+    aten.any.default,
+    aten.copy_.default,
+    aten.detach.default,
+    aten.empty_like.default,
+    aten.normal_.default,
+    aten.zeros_like.default,
+}
+
+
+def _has_block_shard(arg: object) -> bool:
+    if isinstance(arg, DTensorSpec):
+        return any(isinstance(p, BlockShard) for p in arg.placements)
+    if isinstance(arg, (list, tuple)):
+        return any(_has_block_shard(a) for a in arg)
+    return False
 
 
 class ShardingPropagator:
@@ -745,6 +770,11 @@ class ShardingPropagator:
         if op_schema.op is aten._local_scalar_dense.default:
             return OutputSharding(None, op_schema)
 
+        if _has_block_shard(
+            (*op_schema.args_schema, *op_schema.kwargs_schema.values())
+        ):
+            return self._propagate_block_shard(op_schema)
+
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
 
         single_dim_strategy_info = self.op_single_dim_strategy_funcs.get(op_schema.op)
@@ -1045,6 +1075,121 @@ class ShardingPropagator:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             ) from decomp_exception
+
+    def _propagate_block_shard(self, op_schema: OpSchema) -> OutputSharding:
+        """Propagate an op whose operands use BlockShard.
+
+        BlockShard is FSDP2 storage, so only elementwise ops, foreach ops, and
+        ``_BLOCK_SHARD_OPS`` are supported, with every non-scalar operand on the
+        same BlockShard spec (per list index for foreach ops). They run as
+        Shard(0) on the merged view, and the outputs map back to the BlockShard
+        spec.
+        """
+        op = op_schema.op
+        foreach = op._schema.name.startswith(("aten::_foreach_", "aten::_fused_"))
+        supported = torch.Tag.pointwise in op.tags or foreach or op in _BLOCK_SHARD_OPS
+        if not supported:
+            raise NotImplementedError(
+                f"{op} is not supported on BlockShard DTensors; redistribute them "
+                "first, e.g. with full_tensor()."
+            )
+
+        # The BlockShard spec of each group of operands that interact: one per
+        # list index for foreach ops, else one for the whole op.
+        groups: dict[int | None, DTensorSpec] = {}
+
+        def collect(arg: object, group: int | None) -> None:
+            if isinstance(arg, DTensorSpec):
+                if any(isinstance(p, BlockShard) for p in arg.placements):
+                    block_spec = groups.setdefault(group, arg)
+                    if (block_spec.placements, block_spec.shape) != (
+                        arg.placements,
+                        arg.shape,
+                    ):
+                        raise NotImplementedError(
+                            f"{op} mixes BlockShard specs {block_spec} and {arg}"
+                        )
+            elif isinstance(arg, (list, tuple)):
+                for i, a in enumerate(arg):
+                    collect(a, i if foreach else group)
+
+        def lower(arg: object, group: int | None) -> object:
+            if isinstance(arg, DTensorSpec):
+                block_spec = groups.get(group)
+                if block_spec is None and not (foreach and group is None):
+                    return arg
+                if arg.ndim == 0:
+                    return arg
+                if block_spec is not None and (arg.placements, arg.shape) == (
+                    block_spec.placements,
+                    block_spec.shape,
+                ):
+                    return _lower_block_shard_spec(arg)
+                raise NotImplementedError(
+                    f"{op} mixes BlockShard with the non-scalar operand {arg}"
+                )
+            if isinstance(arg, (list, tuple)):
+                return type(arg)(
+                    lower(a, i if foreach else group) for i, a in enumerate(arg)
+                )
+            return arg
+
+        def unlower(spec: object, group: int | None) -> object:
+            # A spec on the merged view maps back if it is the lowered BlockShard
+            # spec, or Replicate/Partial (e.g. inputs a reduction all-gathers).
+            if isinstance(spec, DTensorSpec):
+                block_spec = groups.get(group)
+                if block_spec is None or spec.ndim == 0:
+                    return spec
+                lowered = _lower_block_shard_spec(block_spec)
+                if spec.shape != lowered.shape:
+                    raise NotImplementedError(
+                        f"{op} produced {spec}, which does not map back to {block_spec}"
+                    )
+                if spec.placements == lowered.placements:
+                    placements = block_spec.placements
+                elif all(p.is_replicate() or p.is_partial() for p in spec.placements):
+                    placements = spec.placements
+                else:
+                    raise NotImplementedError(
+                        f"{op} produced {spec}, which does not map back to {block_spec}"
+                    )
+                meta = TensorMeta(
+                    block_spec.shape,
+                    torch._prims_common.make_contiguous_strides_for(block_spec.shape),
+                    cast(TensorMeta, spec.tensor_meta).dtype,
+                )
+                return DTensorSpec(spec.mesh, placements, tensor_meta=meta)
+            if isinstance(spec, (list, tuple)):
+                return type(spec)(
+                    unlower(s, i if foreach else group) for i, s in enumerate(spec)
+                )
+            return spec
+
+        for arg in (*op_schema.args_schema, *op_schema.kwargs_schema.values()):
+            collect(arg, None)
+        lowered_schema = OpSchema(
+            op,
+            tuple(lower(a, None) for a in op_schema.args_schema),
+            {k: lower(v, None) for k, v in op_schema.kwargs_schema.items()},
+            schema_info=op_schema.schema_info,
+        )
+        result = self.propagate_op_sharding_non_cached(lowered_schema)
+        if result.use_val_from_redistribute_schema:
+            raise NotImplementedError(f"{op} is not supported on BlockShard DTensors")
+        redistribute_schema = None
+        if (redist := result.redistribute_schema) is not None:
+            redistribute_schema = OpSchema(
+                op,
+                tuple(unlower(a, None) for a in redist.args_schema),
+                {k: unlower(v, None) for k, v in redist.kwargs_schema.items()},
+                schema_info=op_schema.schema_info,
+            )
+        return OutputSharding(
+            unlower(result.output_spec, None),  # type: ignore[arg-type]
+            redistribute_schema=redistribute_schema,
+            needs_redistribute=result.needs_redistribute,
+        )
 
     def _adjust_shape_and_stride_args(
         self,
