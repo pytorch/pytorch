@@ -761,6 +761,12 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              std::optional<std::string_view> driver) {
   at::native::checkIsMatrix(A, "linalg.svd");
   at::native::checkFloatingOrComplex(A, "linalg.svd");
+  if (driver.has_value()) {
+    TORCH_CHECK(
+        *driver == "gesvd" || *driver == "gesvdj" || *driver == "gesvda",
+        "torch.linalg.svd: unknown svd driver ", *driver,
+        ". Expected one of gesvd, gesvdj, or gesvda.");
+  }
 
   auto sizes = A.sizes().vec();
   const auto m = sizes.cend()[-2];
@@ -3142,6 +3148,14 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
                                  const Tensor & U,
                                  const Tensor & S,
                                  const Tensor & Vh) {
+  TORCH_CHECK(at::native::svd_uses_cusolver(A) || !driver.has_value(),
+    "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
+  if (driver.has_value() && at::globalContext().hasROCM()) {
+    TORCH_WARN_ONCE(
+        "torch.linalg.svd: the `driver` argument is ignored on ROCm; "
+        "the default algorithm and fallback behavior are unchanged.");
+  }
+
   // Half optimisation half precondition for some parts of the LAPACK / cuSOLVER
   // In particular, the call to lapackSvd to compute lwork fails otherwise
   if (A.numel() == 0) {
@@ -3159,12 +3173,6 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
     }
     return;
   }
-
-  // We need to distinguish the cuSOLVER case, as cuSOLVER expects F-contig matrices, but
-  // it computes V rather than Vh
-  const bool use_cusolver = at::native::svd_uses_cusolver(A);
-  TORCH_CHECK(use_cusolver || !driver.has_value(),
-    "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
 
   // A always needs to be copied as its contents will be destroyed during the computation of the SVD
   // Now, MAGMA needs the copy to be on CPU, while cuSOLVER needs it to be on CUDA, so we'll defer

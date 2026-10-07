@@ -1829,6 +1829,10 @@ def _linalg_svd_meta(
 ):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
+    torch._check(
+        driver is None or driver in ("gesvd", "gesvdj", "gesvda"),
+        lambda: f"torch.linalg.svd: unknown svd driver {driver}. Expected one of gesvd, gesvdj, or gesvda.",
+    )
 
     batch_dims = list(A.shape[:-2])
     m = A.shape[-2]

@@ -753,8 +753,10 @@ void svd_cusolver(const Tensor& A,
   // The default heuristic is to use gesvdj driver
 #ifdef USE_ROCM
   const auto driver_v = std::string_view("gesvdj");
+  const bool user_selected_driver = false;
 #else
   const auto driver_v = driver.value_or("gesvdj");
+  const bool user_selected_driver = driver.has_value();
 #endif
 
   if (driver_v == "gesvd") {
@@ -777,7 +779,7 @@ void svd_cusolver(const Tensor& A,
     // We do a transpose here to make it also work for (m < n) matrices.
     svd_cusolver_gesvdaStridedBatched(A, U, S, V, info, full_matrices, compute_uv);
   } else {
-    TORCH_CHECK(false, "torch.linalg.svd: unknown svd driver ", driver_v, " in svd_cusolver computation. ", check_svd_doc);
+    TORCH_INTERNAL_ASSERT(false, "Unexpected SVD driver: ", driver_v);
   }
 
   // Need convergence check
@@ -790,14 +792,14 @@ void svd_cusolver(const Tensor& A,
       TORCH_WARN_ONCE("torch.linalg.svd: During SVD computation with the selected cusolver driver, ",
                       _format_non_converging_batches(svd_non_converging_batches),
                       " failed to converge. ",
-                      (driver.has_value()
+                      (user_selected_driver
                         ?  "It is recommended to redo this SVD with another driver. "
                         : "A more accurate method will be used to compute the SVD as a fallback. "),
                       check_svd_doc);
 
-      // We'll do the fallback if user doesn't specify a driver and the default heuristic doesn't converge well.
-      // However, if user manually chooses a driver, should we just do a warning or a hard crash?
-      if (!driver.has_value()) {
+      // Fall back when using the default driver. On ROCm, the unsupported driver
+      // argument is ignored and must not suppress the fallback.
+      if (!user_selected_driver) {
         svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv, false, svd_non_converging_batches);
       }
     }
