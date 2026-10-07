@@ -4370,7 +4370,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L9421-L9468
         """
         from .constant import ConstantVariable
-        from .object_protocol import object_richcompare
 
         obj_type = type(self.value)
 
@@ -4442,7 +4441,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self._base_methods is not None:
             return super().tp_richcompare_impl(tx, other, op)
 
-        return object_richcompare(self, tx, other, op)
+        return VariableTracker.tp_richcompare_impl(self, tx, other, op)
 
     def call_tree_map_branch(
         self,
