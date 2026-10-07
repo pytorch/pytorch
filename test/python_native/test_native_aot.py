@@ -3,15 +3,15 @@
 
 Three-layer routing under test (declaration: torch/_native/ops/topk/aot.py):
 
-  * covered calls (fp32/bf16 on the exported grid) -> the AOT kernel in the
-    structured wrapper, because the JIT layer's conds subtract AOT coverage
-  * uncovered but JIT-eligible calls (off-grid fp32) -> the JIT override
+  * covered calls -> the AOT kernel in the structured wrapper, because the JIT
+    layer's conds subtract AOT coverage
+  * JIT-only exact-N register calls and covered calls without AOT -> the JIT override
   * everything else -> stock aten
 
 Layers are isolated with the process-level switches TORCH_DISABLE_NATIVE_JIT and
-TORCH_DISABLE_NATIVE_AOT in subprocesses: with the JIT layer off, a RadixSelectTopK
-kernel in a profile can only come from the AOT hook. Values are checked against a
-sort-based reference, which topk routing cannot affect.
+TORCH_DISABLE_NATIVE_AOT in subprocesses: with the JIT layer off, a top-k DSL kernel
+in a profile can only come from the AOT hook. Values are checked against a sort-based
+reference, which topk routing cannot affect.
 
 Tests needing the AOT kernels skip unless this build embedded them; the
 correctness tests run everywhere, since covered calls must be correct through stock
@@ -26,38 +26,28 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
-
-
-def _aot_lib_loaded() -> bool:
-    from torch._native import _native_aot_embedded
-
-    return _native_aot_embedded()
-
-
-def skipIfNoAotLib(fn):
-    return unittest.skipUnless(
-        _aot_lib_loaded(), "AOT kernels not embedded in this build"
-    )(fn)
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfNoCuteDSL,
+    skipIfNoNativeAot,
+    TestCase,
+)
 
 
 def skipIfNoJitTopk(fn):
-    """The JIT topk override is gated to sm_100+ (cutedsl_impl._sm100_or_above), while
-    this declaration's AOT kernels cover Hopper as well, so only the tests that assert
-    the JIT layer serves a shape need the narrower device."""
+    """Both top-k routes require Hopper or newer."""
     capability = (
         torch.cuda.get_device_capability() if torch.cuda.is_available() else (0, 0)
     )
-    return unittest.skipUnless(capability[0] >= 10, "JIT topk override needs sm_100+")(
-        fn
-    )
+    return unittest.skipUnless(capability[0] >= 9, "JIT topk override needs sm_90+")(fn)
 
 
-# The exported grid (must match the manifest specs).
+# Representative points in the original measured grid.
 GRID_N = (2048, 4096, 8192, 16384)
 GRID_K = (64, 128, 256)
 # Enough rows to pass the full-wave perf gate on any current GPU.
 M = 256
+JIT_ONLY_REGISTER = ((16, 2048), (32, 256))
 
 # Subprocess probe with the JIT layer disabled and the AOT hooks live. Both layers
 # launch the same CuTeDSL kernel, so the name in the profile says a DSL kernel ran
@@ -85,7 +75,7 @@ for case in json.loads({cases!r}):
         v, i = torch.topk(x, case["k"], dim=-1, **kwargs)
         torch.cuda.synchronize()
     ran_dsl = any(
-        "RadixSelectTopK" in e.name
+        "RadixSelectTopK" in e.name or "RegisterTopK" in e.name
         for e in prof.events()
         if e.device_type.name == "CUDA"
     )
@@ -100,6 +90,23 @@ for case in json.loads({cases!r}):
     )
 print("PROBE_RESULTS=" + json.dumps(results))
 """
+
+
+def _runs_dsl(x, k=64) -> bool:
+    """Whether topk(x, k) launched a DSL kernel, in this process.
+
+    Which layer served it is decided by the caller's environment: both launch the
+    same kernel, so the name in the profile only says that one of them did."""
+    from torch.profiler import profile, ProfilerActivity
+
+    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+        torch.topk(x, k, dim=-1)
+        torch.cuda.synchronize()
+    return any(
+        "RadixSelectTopK" in e.name or "RegisterTopK" in e.name
+        for e in prof.events()
+        if e.device_type.name == "CUDA"
+    )
 
 
 def _run_probe(cases, extra_env):
@@ -120,10 +127,42 @@ def _run_probe(cases, extra_env):
     return json.loads(line[len("PROBE_RESULTS=") :])
 
 
+class TestNativeAotTopKDeclaration(TestCase):
+    def test_dispatch_alignment_is_radix_only(self):
+        from torch._native.ops.topk import aot
+
+        prelude = aot.cpp_dispatch_prelude()
+        self.assertNotIn("N % 4", prelude)
+        self.assertNotIn("getCurrentDeviceProperties", prelude)
+        self.assertIn("_naot_props->major", prelude)
+        self.assertIn("_naot_props->multiProcessorCount", prelude)
+
+        register = aot.cpp_dispatch(
+            {
+                "kernel": "register",
+                "dtype": "float32",
+                "K": 16,
+                "N_rung": "64_128_256_512_1024",
+            }
+        )
+        radix = aot.cpp_dispatch(
+            {
+                "kernel": "radix",
+                "dtype": "float32",
+                "K": 64,
+                "deterministic": False,
+                "fixed_vec_iters": None,
+            }
+        )
+        self.assertNotIn("N % 4", register)
+        self.assertIn("cc_major < 10 || N != 1024", register)
+        self.assertIn("N % 4 == 0", radix)
+
+
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoCuteDSL
 class TestNativeAotTopK(TestCase):
-    @skipIfNoAotLib
+    @skipIfNoNativeAot("topk")
     def test_covered_grid_routes_to_aot(self):
         cases = [
             {"dtype": dtype, "n": n, "k": k}
@@ -138,7 +177,52 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
             self.assertEqual(r["index_dtype"], "torch.int64")
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot("topk")
+    def test_register_grid_routing(self):
+        cases = [
+            {"dtype": "float32", "n": n, "k": 16} for n in (64, 128, 256, 512, 1024)
+        ]
+        results = _run_probe(cases, {"TORCH_DISABLE_NATIVE_JIT": "1"})
+        major = torch.cuda.get_device_capability()[0]
+        for case, r in zip(cases, results):
+            self.assertEqual(
+                r["ran_dsl"],
+                not (major >= 10 and case["n"] == 1024),
+                f"unexpected AOT register routing for {case}",
+            )
+            self.assertTrue(r["values_ok"], f"values mismatch for {case}")
+            self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
+            self.assertEqual(r["index_dtype"], "torch.int64")
+
+    @skipIfNoNativeAot("topk")
+    def test_dynamic_n_and_work_rungs_route_to_aot(self):
+        shapes = (
+            (64, 3072),
+            (64, 4100),
+            (64, 4356),
+            (64, 4612),
+            (64, 4868),
+            (512, 4096),
+            (512, 5120),
+            (512, 6140),
+            (512, 6144),
+            (1024, 32772),
+            (1024, 34820),
+            (1024, 36860),
+        )
+        cases = [
+            {"dtype": dtype, "n": n, "k": k, "det": deterministic}
+            for dtype in ("float32", "bfloat16")
+            for deterministic in (False, True)
+            for k, n in shapes
+        ]
+        results = _run_probe(cases, {"TORCH_DISABLE_NATIVE_JIT": "1"})
+        for case, r in zip(cases, results):
+            self.assertTrue(r["ran_dsl"], f"AOT kernel did not fire for {case}")
+            self.assertTrue(r["values_ok"], f"values mismatch for {case}")
+            self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
+
+    @skipIfNoNativeAot("topk")
     def test_deterministic_mode_routes_to_aot_bit_exact(self):
         # Det mode is on the grid, so its kernel must fire and match aten bit-exactly.
         # Probe values are torch.randn; ties are exercised in the next test.
@@ -152,7 +236,7 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot("topk")
     def test_deterministic_ties_bit_exact(self):
         # Tie-heavy input, so det-mode indices must match aten's exactly. The
         # reference runs under disabled(), or it would come from the route under test.
@@ -170,7 +254,7 @@ class TestNativeAotTopK(TestCase):
         finally:
             torch.use_deterministic_algorithms(prior)
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot("topk")
     def test_out_variant_routes_to_aot(self):
         results = _run_probe(
             [{"dtype": "float32", "n": 4096, "k": 64, "out_variant": True}],
@@ -179,11 +263,15 @@ class TestNativeAotTopK(TestCase):
         self.assertTrue(results[0]["ran_dsl"])
         self.assertTrue(results[0]["values_ok"])
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot("topk")
     def test_uncovered_calls_avoid_aot(self):
         cases = [
-            {"dtype": "float32", "n": 3072, "k": 64},  # off-grid N
+            *({"dtype": "float32", "n": n, "k": k} for k, n in JIT_ONLY_REGISTER),
+            {"dtype": "float32", "n": 124, "k": 64},  # below every radix range
+            {"dtype": "float32", "n": 4101, "k": 64},  # not vector-aligned
             {"dtype": "float32", "n": 4096, "k": 100},  # off-grid K
+            {"dtype": "float32", "n": 512, "k": 32},  # off-grid register N
+            {"dtype": "bfloat16", "n": 256, "k": 16},  # register is fp32-only
             {"dtype": "float16", "n": 4096, "k": 64},
             {"dtype": "float64", "n": 4096, "k": 64},
         ]
@@ -192,51 +280,88 @@ class TestNativeAotTopK(TestCase):
             self.assertFalse(r["ran_dsl"], f"{case} must not route to AOT")
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
 
-    @skipIfNoAotLib
+    @skipIfNoNativeAot("topk")
     @skipIfNoJitTopk
-    def test_uncovered_fp32_served_by_jit_layer(self):
-        # JIT layer live in this process, and off-grid fp32 is uncovered, so the cond
-        # is not subtracted and the JIT DSL kernel runs.
-        from torch.profiler import profile, ProfilerActivity
+    def test_aot_coverage_is_subset_of_jit_eligibility(self):
+        from torch._native import aot_manifest
+        from torch._native.ops.topk import cutedsl_impl
+        from torch._native.ops.topk.aot import _radix_min_n
 
-        x = torch.randn(M, 3072, device="cuda")
-        torch.topk(x, 64, dim=-1)  # trigger lazy compile outside profile
-        with profile(activities=[ProfilerActivity.CUDA]) as prof:
-            torch.topk(x, 64, dim=-1)
-            torch.cuda.synchronize()
-        self.assertTrue(
-            any(
-                "RadixSelectTopK" in e.name
-                for e in prof.events()
-                if e.device_type.name == "CUDA"
-            )
-        )
+        major = torch.cuda.get_device_capability()[0]
+        cases = [
+            (torch.float32, 16, 64),
+            (torch.float32, 16, 2048),
+            (torch.float32, 32, 256),
+            (torch.float32, 32, 512),
+            (torch.bfloat16, 16, 256),
+        ]
+        for dtype_name, dtype in (
+            ("float32", torch.float32),
+            ("bfloat16", torch.bfloat16),
+        ):
+            for k in (64, 128, 256, 512, 1024):
+                min_n = _radix_min_n(dtype_name, k, major)
+                cases.extend(
+                    (
+                        (dtype, k, min_n - 4),
+                        (dtype, k, min_n),
+                        (dtype, k, min_n + 4),
+                    )
+                )
+        for dtype, k, n in cases:
+            with self.subTest(dtype=dtype, k=k, n=n):
+                x = torch.empty(M, n, dtype=dtype, device="cuda")
+                jit_eligible = cutedsl_impl._eligible(x, k, -1, True, True)
+                aot_covered = aot_manifest.covers("topk", "CUDA", (x, k), {})
+                if dtype == torch.float32 and (k, n) in JIT_ONLY_REGISTER:
+                    self.assertTrue(jit_eligible)
+                    self.assertFalse(aot_covered)
+                else:
+                    self.assertEqual(aot_covered, jit_eligible)
 
-    @skipIfNoAotLib
+    @skipIfNoJitTopk
+    def test_exact_n_register_cases_route_to_jit(self):
+        cases = [{"dtype": "float32", "n": n, "k": k} for k, n in JIT_ONLY_REGISTER]
+        results = _run_probe(cases, {})
+        for case, r in zip(cases, results):
+            self.assertTrue(r["ran_dsl"], f"JIT kernel did not fire for {case}")
+            self.assertTrue(r["values_ok"], f"values mismatch for {case}")
+            self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
+
+    @skipIfNoJitTopk
+    def test_shared_policy_cases_route_to_jit_without_aot(self):
+        cases = [
+            *({"dtype": "float32", "n": n, "k": 16} for n in (64, 128, 256, 512, 1024)),
+            {"dtype": "float32", "n": 4100, "k": 64},
+            {"dtype": "float32", "n": 5120, "k": 512, "det": True},
+            {"dtype": "bfloat16", "n": 2048, "k": 64},
+            {
+                "dtype": "bfloat16",
+                "n": 2048,
+                "k": 64,
+                "out_variant": True,
+            },
+        ]
+        results = _run_probe(cases, {"TORCH_DISABLE_NATIVE_AOT": "1"})
+        for case, r in zip(cases, results):
+            self.assertTrue(r["ran_dsl"], f"JIT kernel did not fire for {case}")
+            self.assertTrue(r["values_ok"], f"values mismatch for {case}")
+            self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
+
+    @skipIfNoNativeAot("topk")
     def test_disabled_context_masks_aot_in_process(self):
         # cutedsl.disabled() flips the native-AOT Context switch as well as the JIT
         # layer, so no DSL kernel may run inside the block.
         from torch import _native
-        from torch.profiler import profile, ProfilerActivity
-
-        def ran_dsl():
-            with profile(activities=[ProfilerActivity.CUDA]) as prof:
-                torch.topk(x, 64, dim=-1)
-                torch.cuda.synchronize()
-            return any(
-                "RadixSelectTopK" in e.name
-                for e in prof.events()
-                if e.device_type.name == "CUDA"
-            )
 
         x = torch.randn(M, 4096, device="cuda")
         pn = torch.backends.python_native
         self.assertTrue(_native.aot_enabled())
         with pn.cutedsl.disabled():
             self.assertFalse(_native.aot_enabled())
-            self.assertFalse(ran_dsl())
+            self.assertFalse(_runs_dsl(x))
         self.assertTrue(_native.aot_enabled())
-        self.assertTrue(ran_dsl())
+        self.assertTrue(_runs_dsl(x))
 
     def test_covered_call_correct_regardless_of_routing(self):
         # Correct whichever layer serves it, including stock aten with no AOT lib.
@@ -257,28 +382,80 @@ class TestNativeAotTopK(TestCase):
         self.assertTrue(results[0]["values_ok"])
 
     def test_covered_axes_function_directly(self):
-        # covered_axes() is plain Python, loaded by file path since the module is
-        # stdlib-only at import.
+        # covered_axes() is plain Python, loaded by file path (through the loader the
+        # declaration tooling itself uses) since the module is stdlib-only at import.
+        import os
+
+        from torchgen.native_aot_decl import load_by_path
+
+        path = os.path.join(
+            os.path.dirname(torch.__file__), "_native", "ops", "topk", "aot.py"
+        )
+        mod = load_by_path("topk_aot_t", path)
+
+        x = torch.empty(M, 4100, device="cuda")
+        v = mod.covered_axes(x, 64)
+        self.assertEqual(v["kernel"], "radix")
+        self.assertEqual(v["N"], None)
+        self.assertEqual(v["K"], 64)
+        self.assertEqual(v["dtype"], torch.float32)
+        self.assertEqual(v["scalar_tail_iters"], None)
+        self.assertEqual(v["fixed_vec_iters"], None)
+        self.assertTrue(v["eligible"])
+        register = mod.covered_axes(torch.empty(M, 256, device="cuda"), 16)
+        self.assertEqual(register["kernel"], "register")
+        self.assertEqual(register["N"], None)
+        self.assertEqual(register["N_rung"], "64_128_256_512_1024")
+        self.assertTrue(register["eligible"])
+        register_1024 = mod.covered_axes(torch.empty(M, 1024, device="cuda"), 16)
+        if torch.cuda.get_device_capability()[0] >= 10:
+            self.assertIsNone(register_1024["N_rung"])
+            self.assertFalse(register_1024["eligible"])
+        else:
+            self.assertEqual(register_1024["N_rung"], "64_128_256_512_1024")
+            self.assertTrue(register_1024["eligible"])
+        base = torch.empty(M, 4096, device="cuda")
+        cow = base._lazy_clone()
+        data_ptr = cow.const_data_ptr()
+        uncovered = mod.covered_axes(cow, 100)
+        self.assertFalse(uncovered["eligible"])
+        self.assertTrue(torch._C._is_cow_tensor(cow))
+        self.assertEqual(cow.const_data_ptr(), data_ptr)
+        # Schema defaults come from the function signature itself.
+        self.assertEqual(
+            mod.covered_axes(x, 64), mod.covered_axes(x, 64, -1, True, True)
+        )
+
+    def test_covered_axes_selects_work_rungs(self):
         import importlib.util
         import os
 
         path = os.path.join(
             os.path.dirname(torch.__file__), "_native", "ops", "topk", "aot.py"
         )
-        spec = importlib.util.spec_from_file_location("topk_aot_t", path)
+        spec = importlib.util.spec_from_file_location("topk_aot_work_t", path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        x = torch.empty(4, 4096)
-        v = mod.covered_axes(x, 64)
-        self.assertEqual(v["N"], 4096)
-        self.assertEqual(v["K"], 64)
-        self.assertEqual(v["dtype"], torch.float32)
-        # Schema defaults come from the function signature itself.
-        self.assertEqual(
-            mod.covered_axes(x, 64), mod.covered_axes(x, 64, -1, True, True)
-        )
+        prior = torch.are_deterministic_algorithms_enabled()
+        try:
+            torch.use_deterministic_algorithms(True)
+            for n, k, expected in (
+                (4100, 64, (mod._ARCH_TAIL_ITERS, None)),
+                (5120, 512, (4, 2)),
+                (6144, 512, (mod._ARCH_TAIL_ITERS, None)),
+                (36860, 1024, (mod._ARCH_TAIL_ITERS, None)),
+            ):
+                x = torch.empty(M, n, device="cuda")
+                axes = mod.covered_axes(x, k)
+                self.assertEqual(
+                    (axes["scalar_tail_iters"], axes["fixed_vec_iters"]), expected
+                )
+                self.assertTrue(axes["eligible"])
+        finally:
+            torch.use_deterministic_algorithms(prior)
 
+    @skipIfNoNativeAot("topk")
     def test_flags_the_stub_declines_are_uncovered(self):
         # The stub takes only dim=last, largest and sorted; coverage must agree, or such
         # a call declines on both routes and lands on stock aten instead of the JIT one.
@@ -292,6 +469,7 @@ class TestNativeAotTopK(TestCase):
         # dim spelled as the last axis is the covered case, however it is written.
         self.assertTrue(aot_manifest.covers("topk", "CUDA", (x, 64), {"dim": 1}))
 
+    @skipIfNoNativeAot("topk")
     def test_manifest_covers_matches_grid(self):
         # CUDA tensors, because coverage includes the prelude's full-wave M gate, so
         # a CPU probe is always uncovered.
@@ -301,8 +479,32 @@ class TestNativeAotTopK(TestCase):
             for k in GRID_K:
                 x = torch.empty(M, n, dtype=torch.float32, device="cuda")
                 self.assertTrue(aot_manifest.covers("topk", "CUDA", (x, k), {}))
-        x = torch.empty(M, 3072, dtype=torch.float32, device="cuda")
+        for k, n in (
+            (16, 64),
+            (64, 3072),
+            (64, 4100),
+            (512, 4096),
+            (512, 6140),
+            (1024, 32772),
+            (1024, 36860),
+        ):
+            x = torch.empty(M, n, dtype=torch.float32, device="cuda")
+            self.assertTrue(aot_manifest.covers("topk", "CUDA", (x, k), {}))
+        for k, n in JIT_ONLY_REGISTER:
+            x = torch.empty(M, n, dtype=torch.float32, device="cuda")
+            self.assertFalse(aot_manifest.covers("topk", "CUDA", (x, k), {}))
+        from torch._native.ops.topk.aot import _radix_min_n
+
+        major = torch.cuda.get_device_capability()[0]
+        min_n = _radix_min_n("float32", 64, major)
+        x = torch.empty(M, min_n - 4, dtype=torch.float32, device="cuda")
         self.assertFalse(aot_manifest.covers("topk", "CUDA", (x, 64), {}))
+        x = torch.empty(M, 4101, dtype=torch.float32, device="cuda")
+        self.assertFalse(aot_manifest.covers("topk", "CUDA", (x, 64), {}))
+        x = torch.empty(M, 4092, dtype=torch.float32, device="cuda")
+        self.assertFalse(aot_manifest.covers("topk", "CUDA", (x, 512), {}))
+        x = torch.empty(M, 32764, dtype=torch.float32, device="cuda")
+        self.assertFalse(aot_manifest.covers("topk", "CUDA", (x, 1024), {}))
         xh = torch.empty(M, 4096, dtype=torch.float16, device="cuda")
         self.assertFalse(aot_manifest.covers("topk", "CUDA", (xh, 64), {}))
         # Below the full-wave gate: on-grid but NOT covered (JIT keeps it).

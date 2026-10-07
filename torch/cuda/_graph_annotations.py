@@ -36,14 +36,15 @@ Usage during capture::
     annotations = get_kernel_annotations()
 
 When you need to drive this outside the context manager's automatic path,
-``resolve_and_remap(graph)`` is shorthand for ``resolve_pending_annotations()``
-followed by ``remap_to_exec_graph(graph)``; call those directly for finer
-control (e.g. resolving once before remapping several graphs).
+``resolve_and_remap(graph)`` resolves pending annotations and applies the graph's
+selected keying mode, as instantiation does.
 """
 
 from __future__ import annotations
 
+import gzip
 import importlib.metadata
+import json
 import threading
 import warnings
 from collections.abc import Mapping
@@ -257,6 +258,7 @@ def maybe_stamp_capture_root(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
         return
     _capture_root_graph_id = _graph_id(state[0])
     torch_cuda_graph._capture_graph_id = _capture_root_graph_id
+    torch_cuda_graph._recorded_exec_ids.add(_capture_root_graph_id)
     # Fresh capture: annotations are keyed by this capture id until remapped.
     torch_cuda_graph._remapped_exec_id = None
 
@@ -474,10 +476,30 @@ def _collect_descendants(
     return descendants
 
 
-# toolsId -> the node's merged annotation. Exactly one dict per node: every writer goes
-# through _merge_annotation, and a node is only written more than once when scopes overlap
-# on it, which is precisely what the merge resolves.
-_kernel_annotations: dict[int, dict[str, Any]] = {}
+class _GraphAnnotations:
+    def __init__(self) -> None:
+        self.annotations: dict[int, dict[str, Any]] = {}
+        self.sourceless_nodes: set[int] = set()
+        # Annotations go into profiler traces; Python stacks are dumped separately.
+        self.py_stacks: dict[int, str] = {}
+
+
+# toolsIds pack the graph id into the high 32 bits and the node id into the low 32.
+# Keeping each graph in its own bucket makes rekeying and removal independent of
+# the number of other live graphs.
+_GRAPH_ANNOTATIONS: dict[int, _GraphAnnotations] = {}
+_REGISTRY_LOCK = threading.RLock()
+
+
+def note_sourceless_node(tools_id: int) -> None:
+    """Record that this node's type carries no source node id, so a source-keyed capture
+    still aliases it into exec space. Called by whichever backend discovered the node (it
+    has the node type in hand; the registry does not). Not a public API."""
+    if not source_keyed():
+        return
+    with _REGISTRY_LOCK:
+        graph = _GRAPH_ANNOTATIONS.setdefault(tools_id >> 32, _GraphAnnotations())
+        graph.sourceless_nodes.add(tools_id & 0xFFFFFFFF)
 
 
 def _merge_annotation(tools_id: int, annotation: Any) -> None:
@@ -490,33 +512,40 @@ def _merge_annotation(tools_id: int, annotation: Any) -> None:
     already does that for strings, but the store is written by other callers too.
     """
     incoming = annotation if isinstance(annotation, dict) else {"name": annotation}
-    entry = _kernel_annotations.get(tools_id)
-    if entry is None:
-        _kernel_annotations[tools_id] = dict(incoming)
-        return
-    for key, value in incoming.items():
-        entry.setdefault(key, value)
+    with _REGISTRY_LOCK:
+        graph = _GRAPH_ANNOTATIONS.setdefault(tools_id >> 32, _GraphAnnotations())
+        node_id = tools_id & 0xFFFFFFFF
+        entry = graph.annotations.get(node_id)
+        if entry is None:
+            graph.annotations[node_id] = dict(incoming)
+            return
+        for key, value in incoming.items():
+            entry.setdefault(key, value)
+
+
+def record_node_py_stack(tools_id: int, stack: str) -> None:
+    with _REGISTRY_LOCK:
+        graph = _GRAPH_ANNOTATIONS.setdefault(tools_id >> 32, _GraphAnnotations())
+        graph.py_stacks[tools_id & 0xFFFFFFFF] = stack
 
 
 def annotation_for(tools_id: int) -> dict[str, Any] | None:
     """The merged annotation recorded for one graph node, or ``None``. The in-process
     accessor behind the profiler's graph annotation resolver, handing out the stored dict
     rather than the list-wrapped public view. Not a public API."""
-    return _kernel_annotations.get(tools_id)
+    with _REGISTRY_LOCK:
+        graph = _GRAPH_ANNOTATIONS.get(tools_id >> 32)
+        return None if graph is None else graph.annotations.get(tools_id & 0xFFFFFFFF)
 
 
 # Node types we annotate (kernels, memcpys, memsets, batch mem ops, event
 # record/wait nodes, and host nodes), as driver node-type enums. Event and host
 # nodes are stream-ordered but do not occupy the device; annotating them lets the
-# profiler place their spans on the intended stream lane. Initialized lazily to
-# avoid touching cuda.bindings at import time.
+# profiler place their spans on the intended stream lane. The enums are int subclasses, so
+# membership also answers for the runtime enum the edge walk has and for the plain int
+# CUPTI reports as ``GraphData.node_type``. Initialized lazily to avoid touching
+# cuda.bindings at import time.
 _ANNOTATABLE_TYPES: set[Any] | None = None
-
-# The same set as raw driver enum values, for callers handed a plain int rather than a
-# CUgraphNodeType (CUPTI reports ``GraphData.node_type`` that way). Derived from
-# _get_annotatable_types so the membership is defined in exactly one place; cached because
-# the CUPTI backend consults it once per node created.
-_ANNOTATABLE_TYPE_VALUES: frozenset[int] | None = None
 
 
 def _get_annotatable_types() -> set[Any]:
@@ -535,14 +564,6 @@ def _get_annotatable_types() -> set[Any]:
     return _ANNOTATABLE_TYPES
 
 
-def _get_annotatable_type_values() -> frozenset[int]:
-    """:func:`_get_annotatable_types` as raw driver enum values."""
-    global _ANNOTATABLE_TYPE_VALUES
-    if _ANNOTATABLE_TYPE_VALUES is None:
-        _ANNOTATABLE_TYPE_VALUES = frozenset(int(t) for t in _get_annotatable_types())
-    return _ANNOTATABLE_TYPE_VALUES
-
-
 # Node types whose work lives in a separate cudaGraph_t (child graphs, conditional
 # bodies). The edge walk does not descend into a body, so it can only warn that the work
 # is unannotated; the CUPTI backend is told about body nodes as they are created and
@@ -552,6 +573,33 @@ def _get_annotatable_type_values() -> frozenset[int]:
 # lazily, like _ANNOTATABLE_TYPES above: _cuda_driver is None when cuda.bindings is
 # absent, so reading the enum at import time would break `import torch`.
 _NESTED_GRAPH_TYPES: set[Any] | None = None
+
+# Node types CUPTI reports with no sourceGraphNodeId, so a consumer can only ever name them
+# by their exec node id (see records.SOURCE_GRAPH_NODE_FIELD). MEMCPY is here because a
+# graph memcpy node surfaces as either the MEMCPY or the MEMCPY2 (peer-to-peer) activity
+# kind depending on where its endpoints live, and only MEMCPY2 lacks the field -- the graph
+# node type cannot tell the two apart, so both get the alias and the non-P2P case just
+# carries a duplicate key. Lazily initialized like the sets above.
+_SOURCELESS_NODE_TYPES: set[Any] | None = None
+
+
+def _get_sourceless_node_types() -> set[Any]:
+    global _SOURCELESS_NODE_TYPES
+    if _SOURCELESS_NODE_TYPES is None:
+        node_types = _cuda_driver.CUgraphNodeType  # pyrefly: ignore[missing-attribute]
+        _SOURCELESS_NODE_TYPES = {
+            node_types.CU_GRAPH_NODE_TYPE_HOST,
+            node_types.CU_GRAPH_NODE_TYPE_MEMCPY,
+        }
+    return _SOURCELESS_NODE_TYPES
+
+
+def node_type_has_source_id(node_type: Any) -> bool:
+    """Whether CUPTI reports a source (capture-graph) node id for this node type, i.e.
+    whether an annotation kept on the capture graph can name it. The driver enums are int
+    subclasses, so this takes the runtime enum the walk has or the plain int CUPTI reports
+    just as well. Not a public API."""
+    return node_type not in _get_sourceless_node_types()
 
 
 def _get_nested_graph_types() -> set[Any]:
@@ -683,13 +731,14 @@ def _end_kernel_scope(scope: _KernelScope) -> list[int]:
             nested_seen.add(node_type.name)
         if node_type not in annotatable:
             continue
-        tools_ids.append(
-            _check_cuda_bindings(
-                _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
-                    node
-                )
+        tools_id = _check_cuda_bindings(
+            _cuda_runtime.cudaGraphNodeGetToolsId(  # pyrefly: ignore[missing-attribute]
+                node
             )
         )
+        if not node_type_has_source_id(node_type):
+            note_sourceless_node(tools_id)
+        tools_ids.append(tools_id)
 
     if nested_seen:
         # The annotations recorded above are still correct -- the exec graph preserves
@@ -1026,26 +1075,10 @@ def resolve_pending_annotations() -> None:
 
 
 def discard_capture_annotations(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
-    """Drop what this capture recorded, for a capture that never reached an exec graph.
-
-    ``resolve_pending_annotations`` runs before ``capture_end`` because the rekey in
-    ``instantiate()`` consumes what it writes, so entries land keyed by the capture
-    graph's id. If ``capture_end`` then raises, that rekey never happens and the entries
-    keep an id no exec graph will ever hold: the graph-destroy path is handed the ids the
-    graph recorded under, which only happens at instantiate, so nothing would ever reach
-    them and they last for the life of the process. Body graph ids go too -- they are keys
-    of the same kind, recorded under ``key_by="source"``. Only called on that error path.
-    Not a public API."""
+    """Discard entries if capture_end failed before creating an executable graph."""
     _pending_scopes.clear()
-    capture_graph_id = torch_cuda_graph._capture_graph_id
-    # An exec graph exists (keep_graph=False instantiates inside capture_end, and a later
-    # hook is what raised), so the entries -- rekeyed to it under "exec", still on the
-    # capture graph under "source" -- are live and the graph's to purge on destroy.
-    if capture_graph_id is None or torch_cuda_graph._has_graph_exec:
-        return
-    remove_kernel_annotations(
-        {capture_graph_id} | torch_cuda_graph._annotated_body_graph_ids
-    )
+    if not torch_cuda_graph._has_graph_exec:
+        remove_kernel_annotations(torch_cuda_graph._recorded_exec_ids)
 
 
 def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
@@ -1072,7 +1105,7 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     matches the live exec id (e.g. replay after instantiate) this is a no-op.
     """
     capture_graph_id = torch_cuda_graph._capture_graph_id
-    if not _kernel_annotations or capture_graph_id is None:
+    if capture_graph_id is None:
         return
 
     exec_graph_id = _check_cuda_bindings(
@@ -1089,45 +1122,65 @@ def remap_to_exec_graph(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
     if current_key_id == exec_graph_id:
         return
 
-    remapped = _rekey_annotations(_kernel_annotations, current_key_id, exec_graph_id)
-    _kernel_annotations.clear()
-    _kernel_annotations.update(remapped)
-    torch_cuda_graph._remapped_exec_id = exec_graph_id
+    with _REGISTRY_LOCK:
+        graph = _GRAPH_ANNOTATIONS.pop(current_key_id, None)
+        if graph is not None:
+            _GRAPH_ANNOTATIONS[exec_graph_id] = graph
+        torch_cuda_graph._remapped_exec_id = exec_graph_id
 
 
-def _rekey_annotations(
-    annotations: dict[int, dict[str, Any]],
-    capture_graph_id: int,
-    exec_graph_id: int,
-) -> dict[int, dict[str, Any]]:
-    """Rekey one graph's annotations from its capture id to its exec id.
+def alias_sourceless_to_exec_graph(
+    torch_cuda_graph: torch.cuda.CUDAGraph,
+) -> int | None:
+    """Give this graph's source-id-less nodes an exec-keyed copy of their annotation.
 
-    A toolsId packs the graph id in the upper 32 bits and the node id in the
-    lower 32. Only entries whose upper bits match ``capture_graph_id`` are
-    rewritten to ``exec_graph_id``; entries from other graphs (already remapped
-    to their own exec ids, or pending their own remap) are kept as-is. The
-    rewritten keys cannot collide with anything: they share their upper bits and
-    differ in node id, and the driver mints graph and exec ids from one counter
-    that it does not reuse, so no other entry is keyed on a freshly minted exec id.
+    The counterpart of :func:`remap_to_exec_graph` for a capture that chose
+    ``annotation_config={"key_by": "source"}``: its annotations stay on the capture graph,
+    but host and (peer-to-peer) memcpy nodes are reported by CUPTI without a source node
+    id, so a consumer can only name them by their exec node id. Those entries -- and only
+    those -- are copied to the exec key, leaving the capture key in place: the two keys
+    share one annotation dict, so a later merge into either is seen through both.
+
+    Each instantiate() mints a fresh exec id, so the previous instantiate's aliases are
+    dropped first rather than left behind. Returns the exec graph id the aliases are under
+    (for the caller's destroy bookkeeping), or None when there was nothing to alias.
     """
-    remapped: dict[int, dict[str, Any]] = {}
-    for tools_id, annotation in annotations.items():
-        if tools_id >> 32 != capture_graph_id:
-            remapped[tools_id] = annotation
-            continue
-        node_id = tools_id & 0xFFFFFFFF
-        remapped[(exec_graph_id << 32) | node_id] = annotation
-    return remapped
+    capture_graph_id = torch_cuda_graph._capture_graph_id
+    if capture_graph_id is None:
+        return None
+    with _REGISTRY_LOCK:
+        graph = _GRAPH_ANNOTATIONS.get(capture_graph_id)
+        if graph is None or not graph.sourceless_nodes:
+            return None
+
+        exec_graph_id = _check_cuda_bindings(
+            _cuda_runtime.cudaGraphExecGetId(  # pyrefly: ignore[missing-attribute]
+                torch_cuda_graph.raw_cuda_graph_exec()
+            )
+        )
+        previous = torch_cuda_graph._remapped_exec_id
+        if previous == exec_graph_id:
+            return exec_graph_id
+        aliases = _GraphAnnotations()
+        for node_id in graph.sourceless_nodes.copy():
+            if node_id in graph.annotations:
+                aliases.annotations[node_id] = graph.annotations[node_id]
+            if node_id in graph.py_stacks:
+                aliases.py_stacks[node_id] = graph.py_stacks[node_id]
+        if previous is not None:
+            _GRAPH_ANNOTATIONS.pop(previous, None)
+        _GRAPH_ANNOTATIONS[exec_graph_id] = aliases
+        torch_cuda_graph._remapped_exec_id = exec_graph_id
+        return exec_graph_id
 
 
 def resolve_and_remap(torch_cuda_graph: torch.cuda.CUDAGraph) -> None:
-    """Resolve any pending scopes and remap one graph in a single call.
+    r"""Resolve pending scopes and apply the graph's selected annotation keying.
 
-    Shorthand for ``resolve_pending_annotations()`` followed by
-    ``remap_to_exec_graph(graph)``; the pair normally run after a capture.
+    Source keying retains capture IDs and adds exec aliases where needed.
     """
     resolve_pending_annotations()
-    remap_to_exec_graph(torch_cuda_graph)
+    torch_cuda_graph._maybe_remap_annotations()
 
 
 class _AnnotationsView(Mapping[int, "list[Any]"]):
@@ -1141,16 +1194,32 @@ class _AnnotationsView(Mapping[int, "list[Any]"]):
     """
 
     def __getitem__(self, tools_id: int) -> list[Any]:
-        return [_kernel_annotations[tools_id]]
+        with _REGISTRY_LOCK:
+            return [
+                _GRAPH_ANNOTATIONS[tools_id >> 32].annotations[tools_id & 0xFFFFFFFF]
+            ]
 
     def __iter__(self) -> Iterator[int]:
-        return iter(_kernel_annotations)
+        return iter(self.copy())
 
     def __len__(self) -> int:
-        return len(_kernel_annotations)
+        with _REGISTRY_LOCK:
+            return sum(
+                len(graph.annotations) for graph in _GRAPH_ANNOTATIONS.copy().values()
+            )
 
     def __repr__(self) -> str:
-        return repr(dict(self))
+        return repr(self.copy())
+
+    def copy(self) -> dict[int, list[Any]]:
+        with _REGISTRY_LOCK:
+            # Exact dict copies tolerate same-thread GC finalizers removing graphs.
+            graphs = _GRAPH_ANNOTATIONS.copy()
+            return {
+                (graph_id << 32) | node_id: [annotation]
+                for graph_id, graph in graphs.items()
+                for node_id, annotation in graph.annotations.copy().items()
+            }
 
 
 _annotations_view = _AnnotationsView()
@@ -1174,6 +1243,15 @@ def get_kernel_annotations() -> Mapping[int, list[Any]]:
     graphs have been instantiated. The mapping is read-only; snapshot it
     with ``dict(...)`` if isolation is needed.
 
+    .. note::
+        Keep graphs alive until all profiles using their annotations have been
+        exported. For asynchronous Cuspy exports, also call
+        :meth:`~torch.profiler.profile.wait_for_exports` before resetting or
+        destroying the graphs. Stopping the profiler or synchronizing CUDA alone
+        does not guarantee that buffered profiling records have been processed.
+        Graph cleanup removes entries from this live view; it can leave pending
+        profiles without annotations.
+
     .. warning::
         This API is in prototype and may change in future releases.
 
@@ -1187,6 +1265,79 @@ def get_kernel_annotations() -> Mapping[int, list[Any]]:
     return _annotations_view
 
 
+class _PyStacksView(Mapping[int, str]):
+    def __getitem__(self, tools_id: int) -> str:
+        with _REGISTRY_LOCK:
+            return _GRAPH_ANNOTATIONS[tools_id >> 32].py_stacks[tools_id & 0xFFFFFFFF]
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self.copy())
+
+    def __len__(self) -> int:
+        with _REGISTRY_LOCK:
+            return sum(
+                len(graph.py_stacks) for graph in _GRAPH_ANNOTATIONS.copy().values()
+            )
+
+    def copy(self) -> dict[int, str]:
+        with _REGISTRY_LOCK:
+            graphs = _GRAPH_ANNOTATIONS.copy()
+            return {
+                (graph_id << 32) | node_id: stack
+                for graph_id, graph in graphs.items()
+                for node_id, stack in graph.py_stacks.copy().items()
+            }
+
+
+_PY_STACKS_VIEW = _PyStacksView()
+
+
+def get_kernel_py_stacks() -> Mapping[int, str]:
+    r"""Return Python launch stacks recorded during CUDA graph capture.
+
+    Enable recording with ``torch.cuda.graph(..., enable_annotations=True,
+    annotation_config={"record_py_stacks": True})``. Values contain user launch
+    frames as newline-separated ``filename:line:function`` strings, innermost
+    first. Framework and generated Inductor frames are omitted by default;
+    ``annotation_config["py_stack_filter_paths"]`` can replace the excluded
+    directories, or disable filtering with an empty list.
+
+    With the default ``key_by="exec"``, match a Cuspy Chrome trace event using
+    ``(args["graph id"] << 32) | args["graph node id"]``. For consumers reading
+    CUPTI's ``sourceGraphNodeId``, set ``annotation_config["key_by"]="source"``
+    and use that ID directly (requires CUPTI and driver >= 13.4).
+    Conditional/child-body stacks require ``"source"`` keying; they are omitted
+    with ``"exec"``.
+
+    The mapping is a live, read-only view. Save it with
+    :func:`dump_kernel_py_stacks` after instantiation and before resetting or
+    destroying the graph, which removes its entries.
+
+    .. warning::
+        This API is in prototype and may change in future releases.
+    """
+    return _PY_STACKS_VIEW
+
+
+def dump_kernel_py_stacks(path: str) -> None:
+    r"""Save recorded CUDA graph launch stacks as gzip-compressed JSON.
+
+    The file maps decimal node-id strings to the stack strings described by
+    :func:`get_kernel_py_stacks`.
+    Call after instantiation and before resetting or destroying the graphs.
+
+    Args:
+        path (str): Output file path.
+
+    .. warning::
+        This API is in prototype and may change in future releases.
+    """
+    # JSON encoding and gzip writes can trigger finalizers that remove graph entries.
+    snapshot = _PY_STACKS_VIEW.copy()
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        json.dump(snapshot, f)
+
+
 def _reset_kernel_annotations() -> None:
     """Empty the annotation registry.
 
@@ -1195,7 +1346,8 @@ def _reset_kernel_annotations() -> None:
     implementation behind the deprecated :func:`clear_kernel_annotations`, and what tests
     use to isolate themselves without tripping its deprecation warning. Not a public
     API."""
-    _kernel_annotations.clear()
+    with _REGISTRY_LOCK:
+        _GRAPH_ANNOTATIONS.clear()
     _body_graph_ids.clear()
     _pending_scopes.clear()
 
@@ -1232,15 +1384,11 @@ def clear_kernel_annotations() -> None:
     _reset_kernel_annotations()
 
 
-def remove_kernel_annotations(exec_graph_ids: Iterable[int]) -> None:
-    """Drop kernel-annotation entries whose exec graph id (tools_id >> 32) is in
-    exec_graph_ids, so the map does not grow across the run. Run by the annotation
-    resolver's graph-destroy handler."""
-    ids = set(exec_graph_ids)
-    if not ids:
-        return
-    for key in [k for k in _kernel_annotations if k >> 32 in ids]:
-        del _kernel_annotations[key]
+def remove_kernel_annotations(graph_ids: Iterable[int]) -> None:
+    """Drop the destroyed graph's capture, body, and executable graph entries."""
+    with _REGISTRY_LOCK:
+        for graph_id in graph_ids:
+            _GRAPH_ANNOTATIONS.pop(graph_id, None)
 
 
 # Counter-based stream ID registry. IDs start at 60 (above the highest

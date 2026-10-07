@@ -5,6 +5,7 @@ import gc
 import importlib
 import os
 import pickle
+import subprocess
 import sys
 import tempfile
 import types
@@ -18,6 +19,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -26,6 +28,7 @@ from torch._dynamo.package import (
     DynamoCache,
 )
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.symbolic_convert import _import_module
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -170,6 +173,46 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "xpu")
         self.assertEqual(_collapse_device_types(frozenset(("hpu", "mps"))), "hpu")
 
+    def test_code_source_walk_skips_non_code_constants(self):
+        # Python 3.10 has no co_qualname, so the walk visits every constant of the
+        # module's functions. b"" and 2**61 - 1 both hash to 0, and putting both in
+        # one set compares them: a BytesWarning, which CI's python -bb raises. (0
+        # would too, but newer Pythons keep small ints out of co_consts.)
+        source = """
+def f():
+    a = b""
+    b = 2305843009213693951
+
+    class C:
+        def g(self):
+            return a, b
+
+    return C
+"""
+        script = """
+import sys
+from unittest import mock
+
+import torch._dynamo.package as package
+import bbmod
+
+code = bbmod.f().g.__code__
+with mock.patch.object(package.sys, "version_info", (3, 10, 0)):
+    name, path = package._get_code_source(code)
+print(eval(f"bbmod.{name}.{path}") is code)
+"""
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "bbmod.py"), "w") as f:
+                f.write(source)
+            out = subprocess.run(
+                [sys.executable, "-bb", "-c", script],
+                cwd=d,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.strip(), "True")
+
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
         # stand-in for a dynamic-shape cuda capture, whose first meta value is a
@@ -231,7 +274,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
         # frozenset(), one cpu-only recompile after a reload re-snapshotted the
         # entry as "cpu" and the cuda code still in it lost its GPU load check.
         # The graphs are fake and never run; is_available is patched so
-        # check_versions accepts the cuda entry on a host without one.
+        # check_versions accepts the cuda entry on a host without one. Save and
+        # reload share the patch so both SystemInfo snapshots see the same
+        # accelerator state.
         with FakeTensorMode():
             cuda = torch.empty(2, device="cuda")
             cpu = torch.empty(2)
@@ -246,9 +291,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         package = CompilePackage(fn)
         package.update_device_type(cuda_graph)
-        saved = pickle.loads(pickle.dumps(package.cache_entry()))
-        self.assertEqual(saved.device_type, "cuda")
         with patch.object(torch.cuda, "is_available", return_value=True):
+            saved = pickle.loads(pickle.dumps(package.cache_entry()))
+            self.assertEqual(saved.device_type, "cuda")
             package = CompilePackage(fn, dynamo=saved)
         self.assertEqual(package.cache_entry().device_type, "cuda")
         package.update_device_type(cpu_graph)
@@ -1068,6 +1113,41 @@ def add(x, y):
         source = ImportSource("torch")
         reloaded = pickle.loads(pickle.dumps(source))
         self.assertEqual(reloaded, source)
+
+    def test_import_alias_is_not_bound_to_a_non_module_import(self):
+        # sys.modules accepts any object and __import__ hands it back verbatim.
+        # IMPORT_NAME rejects it before import_source binds the alias, so the
+        # traced globals never hold the non-module, and a later trace after a
+        # real module has replaced the entry binds the alias to that module
+        # rather than tracing it through a slot still holding the non-module.
+        name = "torch_test_package_import_alias_non_module"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 1
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            import torch_test_package_import_alias_non_module as taken
+
+            return x + taken.VALUE
+
+        try:
+            sys.modules[name] = object()
+            with self.assertRaisesRegex(Unsupported, "Bad import result"):
+                torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            self.assertNotIn(alias, fn.__globals__)
+            torch._dynamo.reset()
+            sys.modules[name] = module
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(*args), compiled(*args))
+            self.assertIs(fn.__globals__[alias], module)
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            # The memo outlives the sys.modules entry: a same-process rerun would
+            # otherwise resolve this run's module from it.
+            _import_module.cache_clear()
+            torch._dynamo.reset()
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)

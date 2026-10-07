@@ -105,6 +105,7 @@ from torch._inductor.utils import (
     ALIGN_BYTES,
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
+    fp32_matmul_precision_key,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -467,10 +468,7 @@ class PersistentCache(CacheBase):
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
-        precision = torch.backends.cuda.matmul.fp32_precision
-        # bfx9 has no legacy equivalent, and the legacy getter may reject it.
-        if precision != "bfx9":
-            precision = torch.get_float32_matmul_precision()
+        precision = fp32_matmul_precision_key()
         cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}
@@ -1089,6 +1087,16 @@ def torch_key() -> bytes:
         return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
+# Bound at import so tests that mock.patch torch_key/triton_key don't break it.
+_cache_key_prefetchers = (torch_key.prefetch, triton_key.prefetch)  # type: ignore[attr-defined]
+
+
+def prefetch_cache_keys() -> None:
+    """Start computing torch_key and triton_key in a background thread."""
+    for prefetch in _cache_key_prefetchers:
+        prefetch()
+
+
 def get_inductor_root() -> str:
     return os.path.dirname(__file__)
 
@@ -1224,9 +1232,8 @@ class CacheabilityValidator:
     def _check_nested_region_inductor_config_patches(self) -> None:
         # Nested region config patches are hashed by pickling their raw value
         # (see _collect_nested_region_inductor_config_patches_for_hash). Unlike
-        # top-level custom passes there is no uuid() fallback, so any callable or
-        # custom-pass value is conservatively treated as uncacheable, including a
-        # CustomGraphPass that provides a stable uuid().
+        # top-level custom passes there is no uuid() fallback, so any callable is
+        # conservatively treated as uncacheable.
         for _, config_patches in _collect_nested_region_inductor_config_patches(
             self.gm
         ):
@@ -1237,10 +1244,6 @@ class CacheabilityValidator:
                 if any(callable(v) for v in values):
                     self.bypass(
                         f"Uncacheable nested region config '{key}': callable value"
-                    )
-                if key in _NESTED_REGION_UNCACHEABLE_CONFIG_KEYS and value:
-                    self.bypass(
-                        f"Uncacheable nested region config '{key}': custom pass"
                     )
 
     def _check_frozen_params(self) -> None:
@@ -1363,20 +1366,6 @@ def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
 @dataclasses.dataclass
 class HashableOpaqueValue:
     ordinal: int
-
-
-_NESTED_REGION_UNCACHEABLE_CONFIG_KEYS = OrderedSet(
-    [
-        "custom_partitioner_fn",
-        "joint_custom_post_pass",
-        "joint_custom_pre_pass",
-        "post_grad_custom_post_pass",
-        "post_grad_custom_pre_pass",
-        "pre_grad_custom_pass",
-        "_post_fusion_custom_pass",
-        "_pre_fusion_custom_pass",
-    ]
-)
 
 
 def _collect_nested_region_inductor_config_patches(
@@ -1868,8 +1857,6 @@ def compiled_fx_graph_hash(
     # cache in this module.
     key = pickler.get_key(details)
     debug_lines = pickler.debug_lines(details)
-    debug_str = "\n".join(debug_lines)
-    log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
     return key, debug_lines
 
 
@@ -3227,6 +3214,14 @@ end
                                 pass
 
                         del buf_view
+
+                        if torch.accelerator.is_available():
+                            # Constants have just been copied to host, so most of
+                            # the caching allocator's pool is now free-but-reserved
+                            # slack. Hand it back before packaging, which otherwise
+                            # reserves its own allocation on top and sets a new
+                            # high-water mark.
+                            torch.accelerator.empty_cache()
                     else:
                         serialized_weights = b""
             else:
