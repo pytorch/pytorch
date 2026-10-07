@@ -481,15 +481,13 @@ struct ExpandableSegment {
       std::vector<c10::DeviceIndex> peers,
       Expandable_Segments_Handle_Type handle_type =
           Expandable_Segments_Handle_Type::UNSPECIFIED,
-      // When set, reserve exactly this many handles instead of growth headroom
-      // derived from device memory. fromShared() passes the producer's count:
-      // an imported segment cannot grow, since map() is reachable only from
-      // map_block() on segments the allocator owns in expandable_segments_, and
-      // an imported segment is never inserted there. Reserving headroom for one
-      // strands 1 1/8 of device memory worth of address space apiece, which
-      // exhausts the 128 TiB user VA after a few hundred imports.
-      // restore_expandable_segment passes the count its original process
-      // reserved, so the recreated range matches it exactly.
+      // If set, reserve exactly max_handles * segment_size bytes of virtual
+      // address space. Otherwise, derive the reservation size from device
+      // memory and allocator settings.
+      //
+      // IPC imports pass the number of imported handles because they cannot
+      // grow. Restoration passes the saved reservation's capacity to reproduce
+      // its size. These slots need not all have physical memory mapped.
       std::optional<size_t> max_handles = std::nullopt,
       // When set, reserve at this exact address rather than letting the driver
       // choose, and fail rather than fall back. See
@@ -3529,6 +3527,11 @@ class DeviceCachingAllocator {
         " byte expandable reservation cannot be made of ",
         segment_size,
         " byte segments");
+    // A reservation with nothing mapped would never be released: release_blocks
+    // only visits mapped blocks.
+    TORCH_CHECK(
+        !mapped_ranges.empty(),
+        "restoring an expandable segment needs at least one mapped range");
     // Ranges are a snapshot's maximal mapped runs, so never adjacent. Requiring
     // that keeps each one a separate block: one cudaMalloc_count each, matched
     // by one unmap.
