@@ -505,6 +505,7 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 15)
+    @skipIfTorchDynamo("Dynamo intercepts the spoofed __class__")
     def test_pyobject_spoofed_tensor_class(self, device):
         import libtorch_agn_2_14
         import libtorch_agn_2_15
