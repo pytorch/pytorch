@@ -72,6 +72,19 @@ class TestCoordinateDescentTuner(TestCase):
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 16, str(best_config))
 
+    def test_reduction_blocks(self):
+        tuner = CoordescTuner()
+        for reduction_dim in range(3):
+            block = f"R{reduction_dim}_BLOCK"
+            with self.subTest(block=block):
+                baseline_config = triton.Config({block: 1}, num_warps=8, num_stages=1)
+
+                def func(config, block=block):
+                    return abs(config.kwargs[block] - 15)
+
+                best_config = tuner.autotune(func, baseline_config)
+                self.assertEqual(best_config.kwargs[block], 16)
+
     def test_no_neighbors(self):
         """
         Test the case that there is no available neighbor values for a field.
@@ -121,8 +134,11 @@ class TestCoordinateDescentTuner(TestCase):
         max_block = TRITON_MAX_BLOCK
         self.assertFalse(tuner.value_too_large("XBLOCK", max_block["X"]))
         self.assertTrue(tuner.value_too_large("XBLOCK", max_block["X"] * 2))
-        self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
-        self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
+        for prefix in ("R0_", "R1_", "R2_"):
+            with self.subTest(prefix=prefix):
+                block = f"{prefix}BLOCK"
+                self.assertFalse(tuner.value_too_large(block, max_block[prefix]))
+                self.assertTrue(tuner.value_too_large(block, max_block[prefix] * 2))
 
     def test_native_matmul_block_numel_limit(self):
         tuner = CoordescTuner(is_native_matmul=True)
