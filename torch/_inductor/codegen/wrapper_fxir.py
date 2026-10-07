@@ -287,6 +287,45 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         return cls()
 
 
+def _convert_unbacked_key(
+    graph: torch.fx.Graph, node: torch.fx.Node, path: pytree.KeyPath
+) -> torch.fx.Node:
+    """
+    Generate FX IR for each key entry.
+    """
+    # Base case.
+    if len(path) == 0:
+        return node
+
+    # Process the first entry and recurse.
+    entry = path[0]
+    if isinstance(entry, CallMethodKey):
+        target = {
+            "size": aten.sym_size.int,
+            "stride": aten.sym_stride.int,
+            "storage_offset": aten.sym_storage_offset,
+        }[entry.name]
+        if not callable(target):
+            raise AssertionError(f"target is not callable: {target}")
+        node = graph.call_function(
+            target,
+            args=(
+                (node, path[1].idx)
+                if len(path) > 1 and isinstance(path[1], pytree.SequenceKey)
+                else (node,)
+            ),
+        )
+        return _convert_unbacked_key(graph, node, path[1 + len(node.args) :])
+    elif isinstance(entry, pytree.SequenceKey):
+        node = graph.call_function(operator.getitem, args=(node, entry.idx))
+        return _convert_unbacked_key(graph, node, path[1:])
+    elif isinstance(entry, DivideByKey):
+        node = graph.call_function(operator.floordiv, args=(node, entry.divisor))
+        return _convert_unbacked_key(graph, node, path[1:])
+    else:
+        raise NotImplementedError(f"Unrecognized entry type: {type(entry)}")
+
+
 @dataclasses.dataclass
 class FxConverter:
     """
@@ -575,44 +614,44 @@ class FxConverter:
             # Generate FX nodes to compute the shape expression.
             return self._sympy_interp(node.expr).node
 
-        def generate_to_buffer(node: ir.IRNode) -> BufferLike | None:
-            if isinstance(node, (ir.Buffer, WorkspaceArg)):
-                return node
-            elif isinstance(node, ir.NoneAsConstantBuffer):
-                return None
-            elif isinstance(node, ir.MutableBox):
-                return generate_to_buffer(node.data)
-            elif isinstance(node, ir.ReinterpretView):
-                # We need to introduce a new symbol if the output is a ReinterpretView.
-                # Use a WorkspaceArg for this.
-                buffer = self._get_buffer(node.data)
-                if not isinstance(buffer, (ir.Buffer, WorkspaceArg)):
-                    raise AssertionError(
-                        f"expected ir.Buffer or WorkspaceArg, got {type(buffer)}"
-                    )
-                unique_name = self.gm.graph._graph_namespace.create_name(
-                    f"{buffer.get_name()}_view", None
-                )
-                device = buffer.get_device()
-                if not device:
-                    raise AssertionError(f"buffer has no device: {buffer}")
-                reused_as = WorkspaceArg(
-                    count=buffer.get_size(),
-                    zero_mode=WorkspaceZeroMode.UNINITIALIZED,
-                    device=device,
-                    outer_name=unique_name,
-                    dtype=buffer.get_dtype(),
-                )
-
-                # Generate FX IR for the view.
-                self._generate_reinterpret_helper(buffer, reused_as, node.layout)
-
-                return reused_as
-            else:
-                raise NotImplementedError(f"Unrecognized buffer/view node: {node}")
-
-        buffer = generate_to_buffer(node)
+        buffer = self._generate_to_buffer(node)
         return self.buffer_to_node[buffer.get_name()] if buffer is not None else None
+
+    def _generate_to_buffer(self, node: ir.IRNode) -> BufferLike | None:
+        if isinstance(node, (ir.Buffer, WorkspaceArg)):
+            return node
+        elif isinstance(node, ir.NoneAsConstantBuffer):
+            return None
+        elif isinstance(node, ir.MutableBox):
+            return self._generate_to_buffer(node.data)
+        elif isinstance(node, ir.ReinterpretView):
+            # We need to introduce a new symbol if the output is a ReinterpretView.
+            # Use a WorkspaceArg for this.
+            buffer = self._get_buffer(node.data)
+            if not isinstance(buffer, (ir.Buffer, WorkspaceArg)):
+                raise AssertionError(
+                    f"expected ir.Buffer or WorkspaceArg, got {type(buffer)}"
+                )
+            unique_name = self.gm.graph._graph_namespace.create_name(
+                f"{buffer.get_name()}_view", None
+            )
+            device = buffer.get_device()
+            if not device:
+                raise AssertionError(f"buffer has no device: {buffer}")
+            reused_as = WorkspaceArg(
+                count=buffer.get_size(),
+                zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+                device=device,
+                outer_name=unique_name,
+                dtype=buffer.get_dtype(),
+            )
+
+            # Generate FX IR for the view.
+            self._generate_reinterpret_helper(buffer, reused_as, node.layout)
+
+            return reused_as
+        else:
+            raise NotImplementedError(f"Unrecognized buffer/view node: {node}")
 
     def _generate_outputs(
         self,
@@ -1383,44 +1422,6 @@ class FxConverter:
             raise AssertionError(f"expected UnbackedSymbolDefsLine, got {type(line)}")
         graph = self.gm.graph
 
-        def convert_key(node: torch.fx.Node, path: pytree.KeyPath) -> torch.fx.Node:
-            """
-            Generate FX IR for each key entry.
-            """
-            # Base case.
-            if len(path) == 0:
-                return node
-
-            # Process the first entry and recurse.
-            entry = path[0]
-            if isinstance(entry, CallMethodKey):
-                target = {
-                    "size": aten.sym_size.int,
-                    "stride": aten.sym_stride.int,
-                    "storage_offset": aten.sym_storage_offset,
-                }[entry.name]
-                if not callable(target):
-                    raise AssertionError(f"target is not callable: {target}")
-                node = graph.call_function(
-                    target,
-                    args=(
-                        (node, path[1].idx)
-                        if len(path) > 1 and isinstance(path[1], pytree.SequenceKey)
-                        else (node,)
-                    ),
-                )
-                return convert_key(node, path[1 + len(node.args) :])
-            elif isinstance(entry, pytree.SequenceKey):
-                node = graph.call_function(operator.getitem, args=(node, entry.idx))
-                return convert_key(node, path[1:])
-            elif isinstance(entry, DivideByKey):
-                node = graph.call_function(
-                    operator.floordiv, args=(node, entry.divisor)
-                )
-                return convert_key(node, path[1:])
-            else:
-                raise NotImplementedError(f"Unrecognized entry type: {type(entry)}")
-
         unbacked_bindings = line.unbacked_bindings
         if unbacked_bindings is None:
             raise AssertionError("line.unbacked_bindings must not be None")
@@ -1435,7 +1436,7 @@ class FxConverter:
             if s.name in self.buffer_to_node:
                 continue
 
-            node = convert_key(root_node, keypath)
+            node = _convert_unbacked_key(graph, root_node, keypath)
             out_buffer = SymbolBuffer(s)
             self._record_allocation(out_buffer, node)
             self._generate_size_proxy(node, s)

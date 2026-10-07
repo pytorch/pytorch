@@ -281,41 +281,40 @@ class LoopIRCuteDSLCodegen:
             )
         return op(*lowered_args, **lowered_kwargs)
 
+    def _load_info(self, expr: Any) -> tuple[str, torch.dtype] | None:
+        if isinstance(expr, GemmEpilogueIRExpression) and expr.op == "identity":
+            return self._load_info(expr.args[0])
+        if isinstance(expr, GemmEpilogueIRExpression) and expr.op == "to_dtype":
+            loaded = self._load_info(expr.args[0])
+            if loaded is None or len(expr.args) < 2 or expr.args[1] != loaded[1]:
+                return None
+            src_dtype = (
+                expr.args[2]
+                if len(expr.args) > 2
+                else dict(expr.kwargs).get("src_dtype")
+            )
+            return loaded if src_dtype in (None, loaded[1]) else None
+        if (
+            isinstance(expr, GemmEpilogueIRExpression)
+            and expr.op == "load"
+            and expr.args[2] is None
+        ):
+            name = expr.args[0]
+            if name == self.accumulator:
+                dtype = self.accumulator_value.dtype
+                return None if dtype is None else (name, dtype)
+            buffer = V.graph.name_to_buffer.get(name)
+            if buffer is None:
+                buffer = V.graph.graph_inputs.get(name)
+            return None if buffer is None else (name, buffer.get_dtype())
+        return None
+
     def _output_scale_name(self, value: Any) -> str | None:
         """Recognize a pure accumulator-times-scalar epilogue."""
-
-        def load_info(expr: Any) -> tuple[str, torch.dtype] | None:
-            if isinstance(expr, GemmEpilogueIRExpression) and expr.op == "identity":
-                return load_info(expr.args[0])
-            if isinstance(expr, GemmEpilogueIRExpression) and expr.op == "to_dtype":
-                loaded = load_info(expr.args[0])
-                if loaded is None or len(expr.args) < 2 or expr.args[1] != loaded[1]:
-                    return None
-                src_dtype = (
-                    expr.args[2]
-                    if len(expr.args) > 2
-                    else dict(expr.kwargs).get("src_dtype")
-                )
-                return loaded if src_dtype in (None, loaded[1]) else None
-            if (
-                isinstance(expr, GemmEpilogueIRExpression)
-                and expr.op == "load"
-                and expr.args[2] is None
-            ):
-                name = expr.args[0]
-                if name == self.accumulator:
-                    dtype = self.accumulator_value.dtype
-                    return None if dtype is None else (name, dtype)
-                buffer = V.graph.name_to_buffer.get(name)
-                if buffer is None:
-                    buffer = V.graph.graph_inputs.get(name)
-                return None if buffer is None else (name, buffer.get_dtype())
-            return None
-
         if not isinstance(value, GemmEpilogueIRExpression) or value.op != "mul":
             return None
         lhs, rhs = value.args[:2]
-        lhs_info, rhs_info = load_info(lhs), load_info(rhs)
+        lhs_info, rhs_info = self._load_info(lhs), self._load_info(rhs)
         lhs_name = None if lhs_info is None else lhs_info[0]
         rhs_name = None if rhs_info is None else rhs_info[0]
         scale_name = None
