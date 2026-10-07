@@ -2,12 +2,15 @@
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/util/Exception.h>
 
+#include <algorithm>
+
 namespace c10 {
 
 namespace {
 thread_local CPUCachingAllocator* caching_allocator_ptr{nullptr};
 } // namespace
 
+// The mutex must outlive the allocation map during static teardown.
 std::mutex CPUCachingAllocator::mutex_;
 ska::flat_hash_map<void*, size_t> CPUCachingAllocator::allocation_map_;
 
@@ -88,6 +91,15 @@ void CPUCachingAllocator::free_cached() {
 }
 
 CPUCachingAllocator::~CPUCachingAllocator() {
+  // Empty caches can outlive the global mutex and allocation map.
+  const bool has_cached_allocations = std::any_of(
+      available_map_.begin(), available_map_.end(), [](const auto& entry) {
+        return !entry.second.empty();
+      });
+  if (!has_cached_allocations) {
+    return;
+  }
+  std::lock_guard<std::mutex> guard(mutex_);
   free_cached();
 }
 

@@ -1,0 +1,36 @@
+diff --git a/test/cpython/v3_13/test_dictviews.py b/test/cpython/v3_13/test_dictviews.py
+index d9881611c19c437868647f2e6309f6aca79a2344..7d12a24bf3d8f76af52308fcd498b3baee1ebf05 100644
+--- a/test/cpython/v3_13/test_dictviews.py
++++ b/test/cpython/v3_13/test_dictviews.py
+@@ -1,10 +1,24 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_dictviews.py
++
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import collections.abc
+ import copy
+ import pickle
+ import unittest
+ from test.support import get_c_recursion_limit
+ 
+-class DictSetTest(unittest.TestCase):
++class DictSetTest(CPythonTestCase):
+ 
+     def test_constructors_not_callable(self):
+         kt = type({}.keys())
+@@ -351,4 +365,4 @@ class DictSetTest(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

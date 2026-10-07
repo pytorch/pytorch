@@ -59,11 +59,16 @@ FROM base as libpng
 ADD ./common/install_libpng.sh install_libpng.sh
 RUN bash ./install_libpng.sh && rm install_libpng.sh
 
+FROM base as llvm
+COPY ./common/install_llvm_tools.sh install_llvm_tools.sh
+RUN bash ./install_llvm_tools.sh && rm install_llvm_tools.sh
+
 FROM ${GPU_IMAGE} as common
 ARG DEVTOOLSET_VERSION=13
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
+ENV PIP_NO_CACHE_DIR=1
 RUN yum -y install epel-release
 RUN yum -y update
 RUN yum install -y \
@@ -110,6 +115,7 @@ COPY --from=libpng             /usr/local/include/libpng*            /usr/local/
 COPY --from=libpng             /usr/local/lib/libpng*                /usr/local/lib/
 COPY --from=libpng             /usr/local/lib/pkgconfig              /usr/local/lib/pkgconfig
 COPY --from=jni                /usr/local/include/jni.h              /usr/local/include/jni.h
+COPY --from=llvm               /llvm/install/                        /usr/local/
 
 # Install Rust toolchain (needed to build the torch._rust extension when building
 # the Python wheels). In `common` so all *_final wheel-builder targets inherit it.
@@ -178,5 +184,6 @@ RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 ADD ./common/install_xpu.sh install_xpu.sh
 ENV XPU_VERSION 2026.1
+ENV OMIX_VERSION 0.4.0
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd

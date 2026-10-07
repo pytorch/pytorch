@@ -24,6 +24,36 @@ namespace c10d::nccl2 {
 
 namespace {
 
+#if defined(USE_ROCM)
+struct NcclAllocatorSegmentRegistry {
+  std::mutex mutex;
+  std::map<std::pair<int, uintptr_t>, size_t> segments;
+};
+
+NcclAllocatorSegmentRegistry& ncclAllocatorSegmentRegistry() {
+  static auto* registry = new NcclAllocatorSegmentRegistry();
+  return *registry;
+}
+
+void trackNcclAllocatorSegment(void* ptr, size_t size, int device) {
+  auto& registry = ncclAllocatorSegmentRegistry();
+  std::lock_guard<std::mutex> lock(registry.mutex);
+  const auto key = std::make_pair(device, reinterpret_cast<uintptr_t>(ptr));
+  TORCH_INTERNAL_ASSERT(
+      registry.segments.emplace(key, size).second,
+      "NCCL allocator returned an address that is already live");
+}
+
+void untrackNcclAllocatorSegment(void* ptr, int device) {
+  auto& registry = ncclAllocatorSegmentRegistry();
+  std::lock_guard<std::mutex> lock(registry.mutex);
+  const auto key = std::make_pair(device, reinterpret_cast<uintptr_t>(ptr));
+  TORCH_INTERNAL_ASSERT(
+      registry.segments.erase(key) == 1,
+      "NCCL allocator freed an address that was not tracked");
+}
+#endif
+
 std::vector<uint64_t> normalizeSplitSizes(
     const std::vector<int64_t>& split_sizes,
     const at::Tensor& tensor,
@@ -88,9 +118,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       device_(at::kCUDA),
       store_(std::move(store)),
-      event_cache_enabled_(
-          getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true)),
-      timing_enabled_(getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false)),
+      event_pool_(std::make_shared<NCCLEventPool>(
+          getCvarBool(::c10d::TORCH_NCCL_CUDA_EVENT_CACHE, true),
+          getCvarBool(::c10d::TORCH_NCCL_ENABLE_TIMING, false),
+          kDefaultMaxEventPoolSize)),
       async_error_handling_(static_cast<::c10d::ErrorHandlingMode>(getCvarInt(
           ::c10d::TORCH_NCCL_ASYNC_ERROR_HANDLING,
           ::c10d::SkipCleanUp))),
@@ -99,16 +130,16 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
 
+  setGroupUid(options_c10d_->group_name);
+
   if (options_c10d_->config.blocking == NCCL_CONFIG_UNDEF_INT) {
     auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
     options_c10d_->config.blocking = nonblocking.value_or(false) ? 0 : 1;
   }
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 28, 0) || defined(USE_ROCM)
   TORCH_CHECK(
-      !options_c10d_->enable_reconfigure,
-      "nccl2 reconfigure requires NCCL 2.28 or later and is not supported "
-      "with RCCL");
-#endif
+      !options_c10d_->enable_reconfigure || supportsReconfigure(),
+      "nccl2 reconfigure requires NCCL 2.28 or later (RCCL 2.30.7 or later "
+      "on ROCm)");
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
@@ -312,6 +343,9 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
               result == ncclSuccess,
               "ncclMemAlloc failed: ",
               nccl_api->getErrorString(result));
+#if defined(USE_ROCM)
+          trackNcclAllocatorSegment(ptr, size, device);
+#endif
           return ptr;
         },
         [nccl_api](void* ptr, size_t size, int device, cudaStream_t stream) {
@@ -321,10 +355,25 @@ std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
               result == ncclSuccess,
               "ncclMemFree failed: ",
               nccl_api->getErrorString(result));
+#if defined(USE_ROCM)
+          untrackNcclAllocatorSegment(ptr, device);
+#endif
         });
   }();
   return allocator;
 }
+
+#if defined(USE_ROCM)
+bool ProcessGroupNCCL::isNcclAllocatorSegment(const void* ptr, size_t len)
+    const {
+  auto& registry = ncclAllocatorSegmentRegistry();
+  std::lock_guard<std::mutex> lock(registry.mutex);
+  const auto key = std::make_pair(
+      static_cast<int>(device_.index()), reinterpret_cast<uintptr_t>(ptr));
+  auto it = registry.segments.find(key);
+  return it != registry.segments.end() && len <= it->second;
+}
+#endif
 
 bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
   return ::c10d::cuda::deviceSupportsMulticast(deviceIdx);
@@ -382,9 +431,7 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
 c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
     const std::optional<at::Tensor>& tensor) {
   TORCH_CHECK(
-      supportsWindow(),
-      "ProcessGroupNCCL windows require NCCL 2.29 or later and are not "
-      "supported on ROCm");
+      supportsWindow(), "ProcessGroupNCCL windows require NCCL 2.29 or later");
   checkInitialized();
   auto window = c10::make_intrusive<WindowNCCL>(
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(
@@ -396,7 +443,7 @@ c10::intrusive_ptr<::c10d::Window> ProcessGroupNCCL::new_window(
 }
 
 bool ProcessGroupNCCL::supportsWindow() const {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0) && !defined(USE_ROCM)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
   int runtime_version = 0;
   return ncclGetVersion(&runtime_version) == ncclSuccess &&
       runtime_version >= NCCL_VERSION(2, 29, 0);
@@ -598,6 +645,15 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_allgather_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::AllgatherOptions& opts) {
+  if (inputBuffer.dtype() != outputBuffer.dtype()) {
+    C10_THROW_ERROR(
+        TypeError, "output tensor must have the same type as input tensor");
+  }
+  if (inputBuffer.numel() * getSize() != outputBuffer.numel()) {
+    C10_THROW_ERROR(
+        ValueError,
+        "output tensor size must be equal to world_size times input tensor size");
+  }
   ++sequence_number_;
   auto work = allGatherSingleImpl(
       outputBuffer, inputBuffer, opts.asyncOp, operationTimeout(opts.timeout));

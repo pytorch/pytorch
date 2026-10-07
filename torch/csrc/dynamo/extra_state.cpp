@@ -17,7 +17,14 @@
 
 namespace {
 // Short-term fix for: https://github.com/pytorch/pytorch/issues/166926
+#ifdef Py_GIL_DISABLED
+// move_to_front splices the cache list on every hit and nothing synchronises
+// it, so concurrent hits lose entries and a hot function recompiles forever.
+// Off until the list is locked; _set_lru_cache(true) still forces it back on.
+bool use_lru = false;
+#else
 bool use_lru = true;
+#endif
 } // namespace
 
 Py_ssize_t extra_index = -1;
@@ -112,9 +119,10 @@ FrameExecStrategy extra_state_get_region_exec_strategy(
   if (isolate_recompiles_id < 0) {
     return extra_state->strategy;
   }
+  FrameExecStrategy result{DEFAULT, DEFAULT};
   auto it = extra_state->region_strategy_map.find(isolate_recompiles_id);
   if (it != extra_state->region_strategy_map.end()) {
-    return it->second;
+    result = it->second;
   }
   // Isolated regions inherit SKIP from the global strategy (deliberate
   // "do not trace" marks from skip_code / @torch._dynamo.skip / FX
@@ -122,7 +130,6 @@ FrameExecStrategy extra_state_get_region_exec_strategy(
   // RUN_ONLY, which can only come from a prior non-isolated
   // recompile-limit hit and would otherwise poison every new region.
   FrameExecStrategy global = extra_state->strategy;
-  FrameExecStrategy result{DEFAULT, DEFAULT};
   if (global.cur_action == FrameAction::SKIP) {
     result.cur_action = FrameAction::SKIP;
   }
@@ -498,12 +505,10 @@ void _load_precompile_entry(
   extra->precompile_entries.push_back(std::move(entry));
 }
 
-void _set_lru_cache(py::object boolean) {
-  if (py::cast<bool>(boolean)) {
-    use_lru = true;
-  } else {
-    use_lru = false;
-  }
+bool _set_lru_cache(py::object boolean) {
+  bool prior = use_lru;
+  use_lru = py::cast<bool>(boolean);
+  return prior;
 }
 
 py::list _debug_get_precompile_entries(const py::handle& code_obj) {

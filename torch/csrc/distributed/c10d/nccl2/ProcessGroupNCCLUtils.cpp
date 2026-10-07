@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
@@ -82,7 +83,7 @@ ncclDataType_t getNcclDataTypeInternal(const at::Tensor& tensor) {
     case at::ScalarType::Float4_e2m1fn_x2:
       return ncclUint8;
     default:
-      throw std::runtime_error("Unsupported tensor data type for NCCL");
+      TORCH_CHECK(false, "Unsupported tensor data type for NCCL");
   }
 }
 
@@ -142,8 +143,8 @@ ProcessGroupNCCL::RedOpRAII::RedOpRAII(
           &ncclRedOp_, factor, comm, nccl_api_.get());
       break;
     default:
-      throw std::runtime_error(
-          "PreMulSum Data type must be half, float, bfloat16 or double");
+      TORCH_CHECK(
+          false, "PreMulSum Data type must be half, float, bfloat16 or double");
   }
 }
 
@@ -186,8 +187,7 @@ size_t ProcessGroupNCCL::wordSize(ncclDataType_t type) const {
       // case ncclFloat64:
       return 8;
     default:
-      throw std::runtime_error(
-          "Unsupported ncclDataType_t in wordSize: " + std::to_string(type));
+      TORCH_CHECK(false, "Unsupported ncclDataType_t in wordSize: ", type);
   }
 }
 
@@ -224,11 +224,11 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
     case ::c10d::ReduceOp::MAX:
       return ncclMax;
     case ::c10d::ReduceOp::BAND:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
     case ::c10d::ReduceOp::BOR:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BOR with NCCL");
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
     case ::c10d::ReduceOp::BXOR:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with NCCL");
+      C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
     case ::c10d::ReduceOp::PREMUL_SUM:
       return RedOpRAII(op, comm, getNcclDataType(tensor), nccl_api_);
     case ::c10d::ReduceOp::AVG:
@@ -239,6 +239,7 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
 }
 
 void ProcessGroupNCCL::checkWorkQueue() {
+  drainRetiredGraphWork();
   WorkNCCL::WorkStatus status = workq_.garbageCollect();
 
   // Abort hooks run where a failure is DETECTED, not only where the process is
@@ -265,14 +266,16 @@ void ProcessGroupNCCL::checkWorkQueue() {
   }
 }
 
-// The timeout thread cannot make NCCL calls.  The only CUDA call it can make
-// it cudaEventQuery.
+// Retire completed work and graph states and check for timeouts.
 void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread starting for rank: " << rank_;
 
   // Honor the noexcept contract: the loop issues NCCL probes (NCCL_CHECK) and
   // abort paths that can throw; swallow here so nothing escapes this thread.
   try {
+    // A new thread defaults to device 0; even setting capture mode can create
+    // a CUDA context, so bind the communicator device first.
+    c10::cuda::CUDAGuard device_guard(device_);
     c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
         cudaStreamCaptureModeThreadLocal);
     while (!shutdown_) {
@@ -371,18 +374,16 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
   if (comm_state_ == CommState::TIMEOUT) {
     if (options_c10d_->enable_reconfigure) {
       revokeNcclComm();
-      throw std::runtime_error("NCCL operation timed out");
+      TORCH_CHECK(false, "NCCL operation timed out");
     } else {
       handleWatchdogFailure("timeout - collective operation timed out");
-      throw std::runtime_error("NCCL operation timed out");
+      TORCH_CHECK(false, "NCCL operation timed out");
     }
   } else if (comm_state_ == CommState::ERROR) {
     // CleanUpOnly may have already removed the communicator on the watchdog
     // thread, so a later collective cannot query the original NCCL error.
-    if (!nccl_comm_) {
-      throw std::runtime_error(
-          "NCCL communicator was aborted after a previous error");
-    }
+    TORCH_CHECK(
+        nccl_comm_, "NCCL communicator was aborted after a previous error");
     ncclResult_t asyncErr{};
     NCCL_CHECK(
         nccl_api_,
@@ -395,9 +396,14 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       // In reconfigurable mode we never abort the process: revoke the comm so
       // it can be reconfigured and surface the error to the caller.
       revokeNcclComm();
+      // The constructor reads the communicator's last error, which the
+      // commRevoke() inside revokeNcclComm() overwrites, so the exception has
+      // to be built first. A check macro would raise before the revoke ran.
+      // @allow-raw-throw: the revoke above clobbers its last error
       throw std::move(ncclException);
     }
     handleWatchdogFailure(std::string("error - ") + ncclException.what());
+    // @allow-raw-throw: its what() is an argument to the call above
     throw std::move(ncclException);
   }
 }
@@ -488,26 +494,39 @@ void ProcessGroupNCCL::enqueueWork(
 // Static callback function for CUDA user object cleanup
 void ProcessGroupNCCL::graphCleanupCallback(void* userData) {
   auto* cleanup_data = static_cast<GraphCleanupData*>(userData);
-  if (cleanup_data == nullptr || cleanup_data->comm == nullptr) {
-    throw std::runtime_error("Invalid cleanup data");
-  }
+  TORCH_CHECK(
+      cleanup_data != nullptr && cleanup_data->comm != nullptr,
+      "Invalid cleanup data");
 
-  // Clear the work references for this graph
+  // CUDA user-object callbacks cannot call CUDA APIs, including event destroy.
   std::lock_guard<std::mutex> lock(
       cleanup_data->comm->graph_capture_work_mutex_);
-  cleanup_data->comm->graph_capture_work_refs_.erase(cleanup_data->graph_id);
+  auto& comm = *cleanup_data->comm;
+  auto it = comm.graph_capture_work_refs_.find(cleanup_data->graph_id);
+  if (it != comm.graph_capture_work_refs_.end()) {
+    comm.retired_graph_work_refs_.emplace_back(std::move(it->second));
+    comm.graph_capture_work_refs_.erase(it);
+  }
 
   // Clean up the cleanup data itself
   delete cleanup_data;
+}
+
+void ProcessGroupNCCL::drainRetiredGraphWork() {
+  std::list<std::vector<std::shared_ptr<WorkNCCL::State>>> retired;
+  {
+    std::lock_guard<std::mutex> lock(graph_capture_work_mutex_);
+    retired.swap(retired_graph_work_refs_);
+  }
 }
 
 cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
   c10::cuda::CUDAGuard gpuGuard(device_);
   if (async_op) {
     auto current_stream = at::cuda::getCurrentCUDAStream(device_.index());
-    if (!dependency_event_.has_value() || !internal_stream_.has_value()) {
-      throw std::runtime_error("NCCL stream resources are not initialized");
-    }
+    TORCH_CHECK(
+        dependency_event_.has_value() && internal_stream_.has_value(),
+        "NCCL stream resources are not initialized");
     auto& dependency_event = dependency_event_.value();
     auto& internal_stream = internal_stream_.value();
 
@@ -542,41 +561,8 @@ void ProcessGroupNCCL::checkTensorsDevice(
   }
 }
 
-// Protected methods (not in the private section of the header)
-std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::getEvent(
-    bool timing_enabled) {
-  std::lock_guard<std::mutex> lock(event_pool_mutex_);
-
-  if (event_cache_enabled_ && timing_enabled == timing_enabled_.load() &&
-      !event_pool_.empty()) {
-    auto event = std::move(event_pool_.front());
-    event_pool_.pop();
-    return event;
-  }
-
-  return std::make_unique<at::cuda::CUDAEvent>(
-      timing_enabled ? cudaEventDefault : cudaEventDisableTiming);
-}
-
-void ProcessGroupNCCL::returnEvent(
-    std::unique_ptr<at::cuda::CUDAEvent> event,
-    bool timing_enabled) {
-  std::lock_guard<std::mutex> lock(event_pool_mutex_);
-
-  if (event_cache_enabled_ && timing_enabled == timing_enabled_.load() &&
-      event_pool_.size() < max_event_pool_size_) {
-    event_pool_.push(std::move(event));
-  }
-}
-
 void ProcessGroupNCCL::enableCollectivesTiming() {
-  std::lock_guard<std::mutex> lock(event_pool_mutex_);
-  if (timing_enabled_.exchange(true)) {
-    return;
-  }
-  // Pooled events were created with timing disabled and cannot serve
-  // getDuration(); drop them so later works get timing-capable events.
-  std::queue<std::unique_ptr<at::cuda::CUDAEvent>>().swap(event_pool_);
+  event_pool_->enableTiming();
 }
 
 void ProcessGroupNCCL::attachMemoryHook() {
@@ -650,21 +636,33 @@ void ProcessGroupNCCL::deregister_address(
   memoryRegistrationHandles_.erase(it);
 }
 
-std::pair<ncclWindow_t, size_t> ProcessGroupNCCL::lookupSegmentWindow(
-    const void* ptr) {
-  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+ProcessGroupNCCL::RegistrationMap::iterator ProcessGroupNCCL::
+    findContainingRegistrationLocked(const void* ptr) {
   const auto target = reinterpret_cast<uintptr_t>(ptr);
-  // memoryRegistrationHandles_ is sorted by base address; upper_bound + step
-  // back finds the segment whose base <= target.
+  // memoryRegistrationHandles_ is sorted by base address. upper_bound + step
+  // back finds the segment whose base is less than or equal to target.
   auto it = memoryRegistrationHandles_.upper_bound(ptr);
   if (it == memoryRegistrationHandles_.begin()) {
-    return {nullptr, 0};
+    return memoryRegistrationHandles_.end();
   }
   --it;
   const auto base = reinterpret_cast<uintptr_t>(it->first);
-  if (target >= base + it->second.len || it->second.winHandle == nullptr) {
+  if (target < base || target - base >= it->second.len) {
+    return memoryRegistrationHandles_.end();
+  }
+  return it;
+}
+
+std::pair<ncclWindow_t, size_t> ProcessGroupNCCL::lookupSegmentWindow(
+    const void* ptr) {
+  std::lock_guard<std::mutex> lock(memory_registration_mutex_);
+  auto it = findContainingRegistrationLocked(ptr);
+  if (it == memoryRegistrationHandles_.end() ||
+      it->second.winHandle == nullptr) {
     return {nullptr, 0};
   }
+  const auto target = reinterpret_cast<uintptr_t>(ptr);
+  const auto base = reinterpret_cast<uintptr_t>(it->first);
   return {it->second.winHandle, target - base};
 }
 
@@ -673,16 +671,20 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
     return ncclInvalidUsage;
   }
   std::lock_guard<std::mutex> lock(memory_registration_mutex_);
-  const auto target = reinterpret_cast<uintptr_t>(ptr);
-  auto it = memoryRegistrationHandles_.upper_bound(ptr);
-  if (it == memoryRegistrationHandles_.begin()) {
+  auto it = findContainingRegistrationLocked(ptr);
+  if (it == memoryRegistrationHandles_.end()) {
     return ncclInvalidArgument;
   }
-  --it;
-  const auto base = reinterpret_cast<uintptr_t>(it->first);
-  if (target >= base + it->second.len) {
+#if defined(USE_ROCM)
+  // RCCL can create host-RMA windows for ordinary HIP allocations. Enforce the
+  // NCCL2 allocator contract for every path that creates a window. Return
+  // ncclInvalidArgument because registerMemPool reserves ncclInvalidUsage for
+  // unavailable transports and keeps those segments registered as plain
+  // buffers.
+  if (!isNcclAllocatorSegment(it->first, it->second.len)) {
     return ncclInvalidArgument;
   }
+#endif
   if (it->second.winHandle != nullptr) {
     return ncclSuccess;
   }
@@ -750,12 +752,35 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
   TC_LOG(INFO, this) << "Registering MemPool " << pool->id().first << ":"
                      << pool->id().second << " (symm=" << symm << ") on "
                      << device_;
+  // One snapshot for both the ROCm provenance pre-check and the registration
+  // loop: taking it twice would let a concurrent allocation change the segment
+  // set between validation and use.
+  const auto segments = poolSegments(pool->id());
+#if defined(USE_ROCM)
+  if (symm) {
+    // RCCL can window-register ordinary HIP allocations, but the NCCL2
+    // symmetric contract requires ncclMemAlloc provenance. Reject up front,
+    // before any state mutation, so a rejected pool never lands in
+    // registeredMemPools_ or leaves plain registrations behind.
+    for (const auto& segment : segments) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
+      void* addr = reinterpret_cast<void*>(segment.address);
+      TORCH_CHECK(
+          isNcclAllocatorSegment(addr, segment.total_size),
+          "register_mem_pool(symm=True) on ROCm requires a MemPool created "
+          "with the NCCL backend allocator: MemPool(backend.mem_allocator). "
+          "Segment ",
+          addr,
+          " was not allocated by ncclMemAlloc.");
+    }
+  }
+#endif
   {
     std::lock_guard<std::mutex> lock(memory_registration_mutex_);
     registeredMemPools_.insert(pool->id());
   }
   bool symmUnsupported = false;
-  for (const auto& segment : poolSegments(pool->id())) {
+  for (const auto& segment : segments) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     void* addr = reinterpret_cast<void*>(segment.address);
     {

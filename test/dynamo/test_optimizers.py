@@ -103,6 +103,32 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(params, opt_params)
 
+    def test_stock_optimizer_init_group_after_disable_patch(self):
+        # TorchPatcher wraps stock Optimizer._init_group with compiler.disable.
+        # Compiling the inner step must still constant-fold _init_group via
+        # OptimizerVariable.tp_methods, not inline the disable wrapper.
+        torch._dynamo.eval_frame.TorchPatcher.patch()
+
+        # Adadelta is the inductor compiled-optimizer shard that failed; Adamax
+        # is the dynamo-wrapped test_optim case. Both wrap _init_group.
+        for opt_cls in (torch.optim.Adadelta, torch.optim.Adamax):
+            with self.subTest(opt_cls=opt_cls.__name__):
+                p = Parameter(torch.ones(2, 2), requires_grad=True)
+                opt = opt_cls([p])
+                p.grad = torch.ones_like(p)
+
+                step_fn = opt.step.__wrapped__.__wrapped__
+
+                @torch.compile(backend="eager", fullgraph=True)
+                def compiled_step():
+                    step_fn(opt)
+
+                before = p.detach().clone()
+                with torch.no_grad():
+                    compiled_step()
+                self.assertFalse(torch.equal(p, before))
+                torch._dynamo.reset()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

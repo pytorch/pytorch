@@ -11,6 +11,7 @@ from torch._inductor import config, metrics
 from torch._inductor.fx_passes.reduced_atomic_contention import _compute_num_partitions
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -227,11 +228,11 @@ class TestScatterOpt(TestCase):
                 raise unittest.SkipTest(
                     "torch.xpu.reset_peak_memory_stats not implemented."
                 )
-            torch.cuda.reset_peak_memory_stats()
+            torch.accelerator.reset_peak_memory_stats()
             for _ in range(3):
                 opt_f(opt_model, x, label)
             ms = benchmarker.benchmark_gpu(lambda: opt_f(opt_model, x, label))
-            peak_mem = torch.cuda.max_memory_allocated() / 10**9
+            peak_mem = torch.accelerator.max_memory_allocated() / 10**9
             print(f"{ms=:.3f}, {peak_mem=:.3f} GB")
 
 
@@ -340,6 +341,162 @@ class TestPartitionedScatterOpt(TestCase):
         vals = torch.randn(N, D, dtype=torch.float32)
 
         self._check_accuracy(f, (out, idx, vals), atol=1.0, rtol=1e-2)
+
+    def test_unsorted_graph_from_earlier_pass(self):
+        """post_grad only sorts the graph after this pass runs, so an earlier pass
+        can leave a node positioned after one of its users. Both stages of this pass
+        read the graph in list order, so it has to sort before it looks."""
+        torch.manual_seed(42)
+        N, n, D = 8192, 8, 4
+        desorted = False
+
+        def desort(graph):
+            """Stand in for an earlier post_grad pass: clone a node just before its
+            last user and redirect every use to the clone, leaving the first user
+            reading a definition that now comes later in the list."""
+            nonlocal desorted
+            nodes = list(graph.nodes)
+            position = {node: i for i, node in enumerate(nodes)}
+            for node in nodes:
+                if node.op != "call_function" or "val" not in node.meta:
+                    continue
+                users = sorted(
+                    (u for u in node.users if u.op == "call_function"),
+                    key=position.__getitem__,
+                )
+                if len(users) < 2 or position[users[-1]] - position[users[0]] < 2:
+                    continue
+                with graph.inserting_before(users[-1]):
+                    clone = graph.call_function(node.target, node.args, node.kwargs)
+                clone.meta.update(node.meta)
+                node.replace_all_uses_with(
+                    clone, delete_user_cb=lambda u: u is not clone
+                )
+                desorted = True
+                return
+
+        def f(out, idx, vals, x):
+            # y has two users far enough apart for desort to have something to move.
+            y = x.permute(1, 0)
+            return (
+                out.index_put([idx], vals, accumulate=True),
+                (y * 2).sum(),
+                torch.relu(y).sum(),
+            )
+
+        out = torch.zeros(n, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+        vals = torch.randn(N, D, dtype=torch.float32)
+        x = torch.randn(16, 32, dtype=torch.float32)
+
+        with config.patch(post_grad_custom_pre_pass=desort):
+            self._check_accuracy(f, (out, idx, vals, x), atol=1.0, rtol=1e-2)
+
+        self.assertTrue(
+            desorted,
+            "desort found no node to move; the test no longer exercises the sort",
+        )
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+    def test_broadcast_values_multidim_index(self):
+        """A multi-dimensional index makes the replacement flatten values against
+        the index shape. index_put only requires values to broadcast, so operands
+        that are merely broadcastable have to be skipped, not reshaped."""
+        torch.manual_seed(42)
+        rows, D, B, T = 512, 4, 16, 512
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out = torch.zeros(rows, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (B, T), dtype=torch.int64)
+
+        # Fully materialized values: the flatten is valid, so the pass applies.
+        self._check_accuracy(
+            f, (out, idx, torch.randn(B, T, D, dtype=torch.float32)), atol=1.0
+        )
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+        for vals in (
+            torch.randn(B, 1, D, dtype=torch.float32),
+            torch.randn(D, dtype=torch.float32),
+        ):
+            counters.clear()
+            torch._dynamo.reset()
+            self._check_accuracy(f, (out, idx, vals), atol=1.0)
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+            self.assertGreater(
+                counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"],
+                0,
+                "broadcast values must be rejected by a gate, not reshaped",
+            )
+
+    def test_broadcast_values_multidim_dynamic_index(self):
+        """A symbolic index shape must not install a guard in the shape gate."""
+        torch.manual_seed(42)
+        rows, D, B, T = 512, 4, 16, 512
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out = torch.zeros(rows, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (B, T), dtype=torch.int64)
+        vals = torch.randn(B, T, D, dtype=torch.float32)
+        torch._dynamo.mark_dynamic(idx, 0)
+
+        self._check_accuracy(f, (out, idx, vals), atol=1.0)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"],
+            0,
+        )
+
+        counters.clear()
+        torch._dynamo.reset()
+
+        def f_matching_symbol(out, idx, seed):
+            vals = seed.expand(idx.shape[0], idx.shape[1], -1)
+            return out.index_put([idx], vals, accumulate=True)
+
+        seed = torch.randn(1, 1, D, dtype=torch.float32)
+        self._check_accuracy(f_matching_symbol, (out, idx, seed), atol=1.0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_applied"],
+            0,
+            "equal symbolic index/value dimensions should remain optimizable",
+        )
+
+    def test_broadcast_values_multidim_nonzero_scatter_dim(self):
+        """Only values without an explicit input prefix can use the leading flatten."""
+        torch.manual_seed(42)
+        config.partitioned_scatter_force = True
+
+        def f(out, idx, vals):
+            return torch.ops.aten.index_put.default(
+                out, [None, idx], vals, accumulate=True
+            )
+
+        out = torch.zeros(3, 8, 4, dtype=torch.float32)
+        idx = torch.randint(0, 4, (8, 8), dtype=torch.int64)
+
+        # The input prefix is implicit, so flattening [8, 8] to [64] remains
+        # broadcastable while preserving the replacement's trailing dimension.
+        vals = torch.randn(8, 8, 4, dtype=torch.float32)
+        self._check_accuracy(f, (out, idx, vals), atol=1.0)
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+        counters.clear()
+        torch._dynamo.reset()
+
+        # An explicit input prefix is valid for index_put but the replacement
+        # would flatten it into the wrong axis order, so it must be rejected.
+        vals = torch.randn(3, 8, 8, 4, dtype=torch.float32)
+        self._check_accuracy(f, (out, idx, vals), atol=1.0)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"],
+            0,
+        )
 
     def test_skip_accumulate_false(self):
         """index_put with accumulate=False doesn't match the registered patterns."""
@@ -540,6 +697,7 @@ class TestPartitionedScatterOpt(TestCase):
             "output_numel instead of scatter_dim_size",
         )
 
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
     @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
     @config.patch(partitioned_scatter_min_contention_ratio=1.0)
     def test_memory_aware_partition_count(self):
@@ -575,7 +733,9 @@ class TestPartitionedScatterOpt(TestCase):
         with torch.no_grad():
             expected = f(out, idx, vals, persistent)
 
-        _, total_gpu = torch.cuda.mem_get_info()
+        _, total_gpu = (
+            torch.xpu.mem_get_info() if GPU_TYPE == "xpu" else torch.cuda.mem_get_info()
+        )
 
         out_bytes = output_size * 4
         baseline_peak = out_bytes + N * 8 + N * 4 + persist_n * 4 + out_bytes
@@ -631,6 +791,7 @@ class TestPartitionedScatterOpt(TestCase):
             "floor=total_gpu: output should still be correct (pass gracefully skips)",
         )
 
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
     @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
     @config.patch(partitioned_scatter_min_contention_ratio=1.0)
     def test_memory_budget_shared_across_scatters(self):
@@ -662,7 +823,9 @@ class TestPartitionedScatterOpt(TestCase):
         with torch.no_grad():
             expected = f(*args)
 
-        _, total_gpu = torch.cuda.mem_get_info()
+        _, total_gpu = (
+            torch.xpu.mem_get_info() if GPU_TYPE == "xpu" else torch.cuda.mem_get_info()
+        )
 
         # Each out dies right after its own scatter, so the peak at every
         # index_put is the three inputs plus that node's 20 MB output.
