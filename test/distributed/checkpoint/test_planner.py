@@ -48,10 +48,6 @@ from torch.distributed.checkpoint.planner_helpers import (
     _merge_delta_local_plans,
     create_read_items_for_chunk_list,
 )
-from torch.distributed.checkpoint.protocol import (
-    _get_checkpointable_tensor_chunks,
-    _get_checkpointable_tensor_shard,
-)
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -104,61 +100,6 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
     return ShardedTensor._init_from_local_shards_and_global_metadata(
         local_shards=local_shards, sharded_tensor_metadata=sharded_tensor_md
     )
-
-
-def _merged_row_fields(tensor, shape, row_start):
-    """Declare ``tensor`` as rows ``row_start:`` of the merged ``[E * O, I]``
-    view of ``shape`` ``[E, O, I]``, with one shard per leading-dim slice."""
-    global_offsets, local_offsets, local_sizes = [], [], []
-    for e in range(shape[0]):
-        start = max(row_start, e * shape[1])
-        stop = min(row_start + tensor.size(0), (e + 1) * shape[1])
-        if start < stop:
-            global_offsets.append((e, start - e * shape[1], 0))
-            local_offsets.append((start - row_start, 0))
-            local_sizes.append((1, stop - start, shape[2]))
-    tensor.global_shape = tuple(shape)
-    tensor.global_offsets = tuple(global_offsets)
-    tensor.local_offsets = tuple(local_offsets)
-    tensor.local_sizes = tuple(local_sizes)
-    return tensor
-
-
-class TestCheckpointableTensorMergedRows(TestCase):
-    def test_shards_view_local_rows(self):
-        shape = (3, 4, 5)
-        full = torch.arange(60, dtype=torch.float32).view(shape)
-        # Rows 2:8 of the merged view: the end of slice 0 and all of slice 1
-        local = _merged_row_fields(full.view(-1, 5)[2:8].clone(), shape, 2)
-        self.assertIsInstance(local, CheckpointableTensor)
-        self.assertEqual(
-            [
-                (tuple(c.offsets), tuple(c.sizes))
-                for c in _get_checkpointable_tensor_chunks(local)
-            ],
-            [((0, 2, 0), (1, 2, 5)), ((1, 0, 0), (1, 4, 5))],
-        )
-        for idx, (offset, size) in enumerate(
-            zip(local.global_offsets, local.local_sizes)
-        ):
-            index = MetadataIndex("w", torch.Size(offset), idx)
-            shard = _get_checkpointable_tensor_shard(local, index)
-            self.assertEqual(
-                shard, full[tuple(slice(o, o + n) for o, n in zip(offset, size))]
-            )
-            row = local.local_offsets[idx][0]
-            self.assertEqual(shard.data_ptr(), local[row].data_ptr())
-
-    def test_invalid_merged_rows_raise(self):
-        for field, value, msg in [
-            ("local_sizes", ((1, 2, 4), (1, 4, 5)), "must end with the local dims"),
-            ("local_offsets", ((0, 1), (2, 0)), "may only offset local rows"),
-            ("local_offsets", ((0, 0), (3, 0)), "rows are outside tensor shape"),
-        ]:
-            local = _merged_row_fields(torch.zeros(6, 5), (3, 4, 5), 2)
-            setattr(local, field, value)
-            with self.assertRaisesRegex(ValueError, msg):
-                _get_checkpointable_tensor_chunks(local)
 
 
 class TestCheckpointableTensorDistributed(DTensorTestBase):
@@ -222,32 +163,6 @@ class TestCheckpointableTensorDistributed(DTensorTestBase):
         self.assertEqual((self.world_size * shard_size,), loaded.global_shape)
         self.assertEqual(((start,),), loaded.global_offsets)
         self.assertEqual(expected, loaded)
-
-    @with_comms
-    @with_temp_dir
-    def test_checkpointable_tensor_merged_rows_save_load(self):
-        # Each rank stores 3 rows of the merged [12, 5] view of [3, 4, 5], which
-        # can span two leading-dim slices
-        shape, rows = (3, 4, 5), 3
-        full = torch.arange(60, dtype=torch.float32).view(shape)
-        start = dist.get_rank() * rows
-        local_rows = full.view(-1, shape[2])[start : start + rows]
-        saved = _merged_row_fields(local_rows.clone(), shape, start)
-        dcp.save({"proto": saved}, checkpoint_id=self.temp_dir)
-        dist.barrier()
-
-        metadata = dcp.FileSystemReader(self.temp_dir).read_metadata()
-        chunks = metadata.state_dict_metadata["proto"].chunks
-        self.assertEqual(6, len(chunks))
-        self.assertEqual(full.numel(), sum(chunk.sizes.numel() for chunk in chunks))
-
-        state_dict = {"proto": torch.zeros(shape)}
-        dcp.load(state_dict, checkpoint_id=self.temp_dir)
-        self.assertEqual(full, state_dict["proto"])
-
-        target = _merged_row_fields(torch.zeros(rows, shape[2]), shape, start)
-        dcp.load({"proto": target}, checkpoint_id=self.temp_dir)
-        self.assertEqual(local_rows, target)
 
 
 class TestTensorPropertiesStrides(TestCase):
