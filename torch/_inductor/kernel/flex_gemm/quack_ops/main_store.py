@@ -138,7 +138,7 @@ class GroupedMainStore(TileStore):
             supported_arch
             and not config.swap_ab
             and supported_m_cluster
-            and config.cluster_n in ((1, 2, 4) if config.tile_m == 64 else (1, 2))
+            and config.cluster_n in ((1, 2, 4) if config.tile_m == 64 else (1,))
             and config.tile_n >= min_tile_n
             and config.tile_n % self.group == 0
         )
