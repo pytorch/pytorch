@@ -3871,11 +3871,8 @@ def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
             )
             or value.is_nested
         ):
-            # NB: ensure strides are preserved.
-            from torch._subclasses.fake_tensor import unset_fake_temporarily
-
-            with unset_fake_temporarily():
-                value = clone_input(value)
+            # NB: ensure strides are preserved
+            value = clone_input(value)
 
     return value
 

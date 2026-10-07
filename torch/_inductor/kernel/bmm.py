@@ -35,6 +35,7 @@ from .mm_common import (
     is_batch_stride_largest_or_zero,
     mm_args,
     use_native_matmul,
+    zero_addmm_input,
 )
 
 
@@ -390,6 +391,10 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+    template_inp = inp
+    if not use_bf16x9 and beta == 0:
+        template_inp = zero_addmm_input(inp, mat1, mat2)
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
             arg1 = 0
@@ -449,6 +454,13 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+        if beta == 0:
+            # bmm_template reads inp, and autotuning benchmarks every baddbmm
+            # choice on the same inputs, so ATen gets the zeros too.
+            *_, inp = mm_args(mat1, mat2, template_inp, layout=layout)
+            kernel_inputs = MMKernelInputs(
+                [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+            )
 
     # Single unified call for all templates
     choices.extend(
