@@ -109,6 +109,11 @@ def _rocm_compiler_options() -> list[str]:
         opts += ["-fgpu-flush-denormals-to-zero"]
     if config.rocm.use_fast_math:
         opts += ["-ffast-math"]
+        # Works around a gfx950 codegen issue that gives wrong CK addmm results.
+        # -Xarch_ must match the offload-arch spelling exactly; plain gfx950 also
+        # covers --offload-arch=native.
+        for arch in ["gfx950", *(a for a in arch_list if a.startswith("gfx950:"))]:
+            opts += [f"-Xarch_{arch}", "-fno-associative-math"]
     return opts
 
 
