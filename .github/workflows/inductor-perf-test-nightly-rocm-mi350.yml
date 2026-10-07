@@ -81,54 +81,53 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
-      check_experiments: amd-do
 
-  linux-jammy-rocm-py3_10-inductor-benchmark-build:
+  linux-jammy-rocm-py3_11-inductor-benchmark-build:
     if: github.repository_owner == 'pytorch'
-    name: linux-jammy-rocm-py3.10-mi350
+    name: linux-jammy-rocm-py3.11-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      build-environment: linux-jammy-rocm-py3.10-mi350
+      build-environment: linux-jammy-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf_rocm_mi350", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_huggingface_perf_rocm_mi350", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_huggingface_perf_rocm_mi350", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_huggingface_perf_rocm_mi350", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_huggingface_perf_rocm_mi350", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 1, num_shards: 9, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 2, num_shards: 9, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 3, num_shards: 9, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 4, num_shards: 9, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 5, num_shards: 9, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 6, num_shards: 9, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 7, num_shards: 9, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 8, num_shards: 9, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 9, num_shards: 9, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_huggingface_perf_rocm_mi350", shard: 1, num_shards: 5, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_huggingface_perf_rocm_mi350", shard: 2, num_shards: 5, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_huggingface_perf_rocm_mi350", shard: 3, num_shards: 5, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_huggingface_perf_rocm_mi350", shard: 4, num_shards: 5, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_huggingface_perf_rocm_mi350", shard: 5, num_shards: 5, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 1, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 2, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 3, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 4, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 5, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 6, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 7, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 1, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 2, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 3, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 4, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 5, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 6, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 7, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 8, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 9, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
         ]}
     secrets: inherit
 
   test-periodically:
-    name: linux-jammy-rocm-py3.10-mi350
+    name: linux-jammy-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-jammy-rocm-py3_10-inductor-benchmark-build
+    needs: linux-jammy-rocm-py3_11-inductor-benchmark-build
     if: github.event.schedule == '15 0 * * 1-6'
     with:
-      build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.build-environment }}
+      build-environment: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.build-environment }}
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 720
       # Disable monitor in perf tests for more investigation
       disable-monitor: true
@@ -137,15 +136,15 @@ jobs:
     secrets: inherit
 
   test-weekly:
-    name: linux-jammy-rocm-py3.10-mi350
+    name: linux-jammy-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-jammy-rocm-py3_10-inductor-benchmark-build
+    needs: linux-jammy-rocm-py3_11-inductor-benchmark-build
     if: github.event.schedule == '0 7 * * 0'
     with:
-      build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.build-environment }}
+      build-environment: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.build-environment }}
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 1440
       # Disable monitor in perf tests for more investigation
       disable-monitor: true
@@ -154,15 +153,15 @@ jobs:
     secrets: inherit
 
   test:
-    name: linux-jammy-rocm-py3.10-mi350
+    name: linux-jammy-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-jammy-rocm-py3_10-inductor-benchmark-build
+    needs: linux-jammy-rocm-py3_11-inductor-benchmark-build
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     with:
-      build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.build-environment }}
+      build-environment: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.build-environment }}
       dashboard-tag: training-${{ github.event_name != 'workflow_dispatch' || inputs.training }}-inference-${{ github.event_name != 'workflow_dispatch' || inputs.inference }}-default-${{ github.event_name != 'workflow_dispatch' || inputs.default }}-dynamic-${{ github.event_name != 'workflow_dispatch' || inputs.dynamic }}-cudagraphs-${{ github.event_name != 'workflow_dispatch' || inputs.cudagraphs }}-cppwrapper-${{ github.event_name != 'workflow_dispatch' || inputs.cppwrapper }}-aotinductor-${{ github.event_name != 'workflow_dispatch' || inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ github.event_name != 'workflow_dispatch' || inputs.freezing_cudagraphs }}
-      docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-rocm-py3_11-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 720
       # Disable monitor in perf tests for more investigation
       disable-monitor: true

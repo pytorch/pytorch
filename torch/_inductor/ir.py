@@ -107,6 +107,7 @@ from .dependencies import (
     SymbolUsageCollectorOpsHandler,
     var_builder,
 )
+from .fx_utils import get_node_storage
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
@@ -148,7 +149,7 @@ if TYPE_CHECKING:
     from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
-    from .kernel.gemm_epilogue import GemmReductionPlan
+    from .kernel.gemm_epilogue import GemmEpiloguePlan, GemmReductionPlan
     from .utils import IndentedBuffer
 
 else:
@@ -343,13 +344,42 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
+def _get_shape_env_for_symbolic_stride_order(
+    seq: Sequence[int | torch.SymInt | Expr],
+) -> ShapeEnv | None:
+    for s in seq:
+        # ConstantIntNode and other non-ShapeEnv SymNodes have no shape_env.
+        if isinstance(s, torch.SymInt):
+            shape_env = getattr(s.node, "shape_env", None)
+            if shape_env is not None:
+                return shape_env
+
+    try:
+        graph = V.graph
+    except (AttributeError, RuntimeError):
+        return None
+
+    sizevars = getattr(graph, "sizevars", None)
+    shape_env = getattr(sizevars, "shape_env", None)
+    if shape_env is None:
+        shape_env = getattr(graph, "_shape_env", None)
+    return shape_env
+
+
 def get_fill_order(
     seq: Sequence[int | torch.SymInt | Expr], shape_env: ShapeEnv | None = None
 ) -> Sequence[int]:
     """
     Convert strides to fill order (argsort)
     """
-    if shape_env is None or all(isinstance(s, (int, sympy.Integer)) for s in seq):
+    if shape_env is None:
+        if all(isinstance(s, (int, sympy.Integer)) for s in seq):
+            return argsort(seq)
+        shape_env = _get_shape_env_for_symbolic_stride_order(seq)
+    elif all(isinstance(s, (int, sympy.Integer)) for s in seq):
+        return argsort(seq)
+
+    if shape_env is None:
         sorted_idx: Sequence[int] = argsort(seq)
     else:
         # argsort_sym handles unbacked symints (with the help of the shape_env)
@@ -3604,6 +3634,8 @@ class BaseView(IRNode):
 
 @ir_dataclass
 class ExpandView(BaseView):
+    """Broadcast `data` to `size`; input dims of size 1 always read index 0."""
+
     size: Sequence[Expr]
 
     @staticmethod
@@ -3688,6 +3720,10 @@ class ExpandView(BaseView):
         target = self.get_size()
         actual = self.data.get_size()
         skip = len(target) - len(actual)
+        # A symbolic size such as TruncToInt(s0/300) can be known to be 1 by
+        # the shape env without being the literal 1, so decide broadcast dims
+        # the same way create() does when zeroing strides.
+        broadcast = [V.graph.sizevars.is_size_one_or_false(s) for s in actual]
 
         def reindex(
             index: Sequence[Expr],
@@ -3696,7 +3732,7 @@ class ExpandView(BaseView):
             if len(index) != len(actual):
                 raise AssertionError("Expected len(index) == len(actual)")
             for i in range(len(actual)):
-                if actual[i] == 1:
+                if broadcast[i]:
                     # zero out broadcast dimension
                     index[i] = sympy.S.Zero
             return index
@@ -4096,6 +4132,17 @@ class View(GenericView):
 
             raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
 
+        def check_equals_or_raise(a: Expr, b: Expr) -> None:
+            if V.graph.sizevars.statically_known_equals(a, b):
+                return
+            # For unbacked symbols check_equals() adds a runtime assert instead
+            # of raising. That is only safe when both stacks are empty: every
+            # other size has been matched, and for a valid reshape the total
+            # sizes must match, so a == b must hold.
+            if stack_old or stack_new:
+                raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
+            V.graph.sizevars.check_equals(a, b)
+
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -4134,7 +4181,7 @@ class View(GenericView):
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
+                check_equals_or_raise(size_new, size_old)
             elif compare_sizes(size_new, size_old) > 0:
                 divisor = sympy.S.One
                 modulus = size_old
@@ -4145,7 +4192,7 @@ class View(GenericView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                V.graph.sizevars.check_equals(size_new, size_old)
+                check_equals_or_raise(size_new, size_old)
             else:
                 raise AssertionError
 
@@ -4204,6 +4251,9 @@ class ReinterpretView(BaseView):
     def get_name(self) -> str:
         return self.data.get_name()
 
+    def get_read_names(self) -> OrderedSet[str]:
+        return OrderedSet([self.get_name()])
+
     def get_device(self) -> torch.device | None:
         return self.layout.device
 
@@ -4223,7 +4273,11 @@ class ReinterpretView(BaseView):
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
-            tmp_loader = ops.load(self.get_name(), indexer(index))
+            name = self.get_name()
+            device = ConstantBuffer.override_device
+            if device is not None and name in V.graph.constants:
+                name = V.graph.constant_name(name, device)
+            tmp_loader = ops.load(name, indexer(index))
             if self.layout.dtype != self.data.dtype:
                 return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
             else:
@@ -5087,7 +5141,11 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
-    """Is a view into the storage of another tensor"""
+    """Layout for a named buffer that aliases another tensor or view.
+
+    This layout does not add a view transformation. ``view`` is the logical
+    tensor being aliased and carries any view-specific layout metadata.
+    """
 
     def __init__(self, view: BaseView | TensorBox) -> None:
         layout = view.get_layout()
@@ -5188,6 +5246,14 @@ class NoneLayout(OutputSpec):
 
 
 class MutationLayoutSHOULDREMOVE(Layout):
+    """Layout for an operation that writes into an existing tensor or view.
+
+    A buffer with this layout does not own a new allocation or add a view
+    transformation. ``target`` is the logical mutation destination and carries
+    any view-specific layout metadata. ``get_buffer()`` unwraps it to the buffer
+    whose storage is mutated.
+    """
+
     def __init__(self, target: IRNode) -> None:
         super().__init__(
             target.get_device_or_error(),
@@ -5231,6 +5297,32 @@ class MutationLayoutSHOULDREMOVE(Layout):
             raise AssertionError("Expected isinstance(layout, Layout)")
         return layout
 
+    @staticmethod
+    def _reads_only_where_it_writes(node: Pointwise, dst: IRNode) -> bool:
+        """
+        Whether the kernel that computes node, storing straight into dst's
+        buffer, reads that buffer only at the element it writes: x + y does,
+        x + x.flip(0) does not. This is the same index rule that
+        Scheduler.fusable_weak_dep applies to a read and a later in-place write
+        of the same buffer.
+        """
+        name = dst.get_name()
+        if name not in node.get_read_names():
+            return True
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            loader, indexer = node.make_loader(), dst.make_indexer()
+
+            def body(index: Sequence[Expr]) -> None:
+                ops.store(name, indexer(index), loader(index))
+
+            read_writes = extract_read_writes(body, node.get_size())
+        (write,) = read_writes.writes
+        return all(
+            isinstance(read, dependencies.MemoryDep) and read.index == write.index
+            for read in read_writes.reads
+            if read.name == name
+        )
+
     @classmethod
     def realize_into(
         cls, src: IRNode, dst: IRNode, unsafe_alias: bool = False
@@ -5251,6 +5343,20 @@ class MutationLayoutSHOULDREMOVE(Layout):
         # dst would effect users of src. However if there are no more users of
         # dst, we can alias src to dst.
         src.realize_hint()
+
+        if unsafe_alias:
+            # The kernel that computes src would write dst itself. Unless it is
+            # a pointwise one that reads dst only where it writes, compute src
+            # into a buffer of its own and copy that into dst.
+            loops = src.data if isinstance(src, StorageBox) else src
+            if isinstance(loops, ComputedBuffer):
+                loops = loops.data
+            if not (
+                isinstance(loops, Pointwise)
+                and cls._reads_only_where_it_writes(loops, dst)
+            ):
+                src.realize()
+                unsafe_alias = False
 
         if not unsafe_alias:
             node = Pointwise.create(
@@ -5992,10 +6098,10 @@ class FinalizeCodegenResult:
 
 
 class _HasAliasingOrMutation(Protocol):
-    """Minimal view of scheduler.BaseSchedulerNode used by prologue fusion.
+    """Minimal view of scheduler.BaseSchedulerNode used by producer fusion.
 
     ir.py cannot import scheduler (circular), so this documents the single
-    method consumed by has_aliasing_or_mutation_for_prologue_fusion instead
+    method consumed by has_aliasing_or_mutation_for_producer_fusion instead
     of typing the argument as Any.
     """
 
@@ -6015,7 +6121,8 @@ class TemplateBuffer(OperationBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[..., Any] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
-        allowed_prologue_inps: OrderedSet[str] | None = None,
+        load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         named_inputs: dict[str, IRNode] | None = None,
     ) -> None:
         super().__init__(name=None, layout=layout)
@@ -6051,12 +6158,17 @@ class TemplateBuffer(OperationBuffer):
                 MutationOutput(NoneLayout(device=device), buf, self)
                 for buf in mutated_inputs
             ]
-        # Input buffer names eligible for prologue fusion.
-        self.allowed_prologue_inps: OrderedSet[str] = (
-            allowed_prologue_inps or OrderedSet()
+        # Input buffer names eligible for producer fusion, separated by where
+        # the producer code is emitted inside the template.
+        self.load_input_fusion_allowed_inputs: OrderedSet[str] = (
+            load_input_fusion_allowed_inputs or OrderedSet()
         )
-        # Per-template fusion overrides.  None means fall back to global
-        # config.epilogue_fusion / config.prologue_fusion.
+        self.store_output_fusion_allowed_inputs: OrderedSet[str] = (
+            store_output_fusion_allowed_inputs or OrderedSet()
+        )
+        # Per-template overrides; None falls back to the corresponding global flag.
+        # Prologue controls load-input producer fusion. Epilogue controls both
+        # downstream consumer fusion and store-output producer fusion.
         self.allow_epilogue_fusion: bool | None = None
         self.allow_prologue_fusion: bool | None = None
 
@@ -6157,17 +6269,14 @@ class TemplateBuffer(OperationBuffer):
         """Whether this template produces multiple outputs via MultiOutputLayout."""
         return isinstance(self.layout, MultiOutputLayout)
 
-    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
-        return self.allowed_prologue_inps
-
-    def has_aliasing_or_mutation_for_prologue_fusion(
+    def has_aliasing_or_mutation_for_producer_fusion(
         self, scheduler_node: _HasAliasingOrMutation
     ) -> bool:
-        """Return whether this template's aliasing/mutation blocks prologue fusion.
+        """Return whether this template's aliasing/mutation blocks producer fusion.
 
         The default preserves the scheduler's conservative behavior. External
-        template subclasses may override this when they can prove a prologue
-        producer only feeds independent, non-mutated template inputs.
+        template subclasses may override this when they can prove a producer only
+        feeds independent, non-mutated template inputs.
         """
         return scheduler_node.has_aliasing_or_mutation()
 
@@ -6249,7 +6358,8 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
-        allowed_prologue_inps: OrderedSet[str] | None = None,
+        load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
+        store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6265,7 +6375,8 @@ class TritonTemplateBuffer(TemplateBuffer):
             inputs,
             make_kernel_render,
             mutated_inputs=mutated_inputs,
-            allowed_prologue_inps=allowed_prologue_inps,
+            load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
         )
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
@@ -6425,13 +6536,15 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: Sequence[IRNode],
         choice_timings_fn: Callable[[int | None], dict[ChoiceCaller, float]],
         unfiltered_choices: list[ChoiceCaller],
-        allowed_prologue_inps: OrderedSet[str],
+        load_input_fusion_allowed_inputs: OrderedSet[str],
+        store_output_fusion_allowed_inputs: OrderedSet[str],
     ) -> None:
         super().__init__(
             layout=layout,
             inputs=inputs,
             make_kernel_render=None,
-            allowed_prologue_inps=allowed_prologue_inps,
+            load_input_fusion_allowed_inputs=load_input_fusion_allowed_inputs,
+            store_output_fusion_allowed_inputs=store_output_fusion_allowed_inputs,
         )
         self._choice_timings_fn = choice_timings_fn
         self._choice_timings: dict[int | None, dict[ChoiceCaller, float]] = {}
@@ -6701,6 +6814,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         supports_epilogue_fusion: bool = False,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
+        output_scale_node: Buffer | None = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6718,10 +6832,27 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         # When set, the last entry of `inputs` is an addmm bias consumed as a
         # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
         self.bias_node = bias_node
+        # Native scaled-GEMM alpha is kept as a TemplateBuffer input so the
+        # scheduler tracks the dependency, then separated from GEMM operands
+        # when rendering the runtime call.
+        self.output_scale_node = output_scale_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
+        kernel_impl = getattr(kernel, "impl", None)
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
             "min_cc": kernel.designed_for_min_cc,
+            "supports_output_scale": getattr(kernel, "supports_output_scale", False),
+            "use_prefetch": getattr(
+                kernel_impl,
+                "use_prefetch",
+                getattr(kernel.metadata.design, "use_prefetch", False),
+            ),
+            "use_pdl": getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(kernel.metadata.design, "use_pdl", False),
+            ),
+            "output_dtype": layout.dtype,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
@@ -6738,10 +6869,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self,
         out_node: Any,
         hint_override: int | None = None,
-        epilogue_fn_code: str | None = None,
-        epilogue_reads: list[str] | None = None,
-        epilogue_writes: list[str] | None = None,
-        epilogue_var_renames: dict[str, Any] | None = None,
+        epilogue: GemmEpiloguePlan | None = None,
         local_reduce: GemmReductionPlan | None = None,
     ) -> tuple[Any, Any]:
         """
@@ -6751,10 +6879,6 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         - kernel: NVUniversalGemmKernel object with call_kernel() method
         - render: function that returns source code string
         """
-        if epilogue_fn_code is not None:
-            if epilogue_var_renames is None:
-                raise AssertionError("epilogue_fn_code requires epilogue_var_renames")
-
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
         )
@@ -6767,6 +6891,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             if isinstance(inp, StorageBox):
                 inp = inp.data
             input_nodes.append(inp)
+
+        output_scale_node = None
+        if self.output_scale_node is not None:
+            output_scale_node = input_nodes[-1]
+            input_nodes = input_nodes[:-1]
 
         # For a baked addmm bias, the bias is the last input and is consumed by
         # the epilogue, not as a GEMM operand.
@@ -6789,19 +6918,26 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             scale_type_b=self.scale_type_b,
             swizzle_type_a=self.swizzle_type_a,
             swizzle_type_b=self.swizzle_type_b,
-            epilogue_fn_code=epilogue_fn_code,
-            epilogue_reads=epilogue_reads,
-            epilogue_writes=epilogue_writes,
-            epilogue_var_renames=epilogue_var_renames,
+            epilogue=epilogue,
             local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
+            output_scale_node=output_scale_node,
         )
 
         def render():
             return render_kernel.render()
 
         return render_kernel, render
+
+    def gemm_inputs(self) -> Sequence[IRNode]:
+        inputs = cast(Sequence[IRNode], self.inputs)
+        num_auxiliary_inputs = int(self.bias_node is not None) + int(
+            self.output_scale_node is not None
+        )
+        if num_auxiliary_inputs:
+            return inputs[:-num_auxiliary_inputs]
+        return inputs
 
 
 def is_node_sequence(
@@ -7005,6 +7141,14 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
+        # An input computed straight into the concat storage would leak any
+        # in-place mutation of that input into the concat result. Conservative
+        # on purpose: these are the inputs of the node being lowered (for
+        # aten.cat, the cat's own), and a mutation anywhere in the graph, even
+        # before the cat, turns the aliasing off for all of them.
+        nodes = V.graph.current_node.all_input_nodes
+        mutated = V.graph.mutated_storages
+        allow_alias = not any(get_node_storage(n) in mutated for n in nodes)
         op_names = []
         for i, inp in enumerate(inputs):
             if not isinstance(inp, (BaseView, MutableBox)):
@@ -7014,6 +7158,7 @@ class ConcatKernel(NopKernel):
                 SliceView.create(
                     kernel, dim, offsets_start[i], offsets_end[i], clamp=False
                 ),
+                allow_alias=allow_alias,
             )
             if not isinstance(input_buffer, Buffer):
                 raise AssertionError(type(input_buffer))
@@ -7025,13 +7170,18 @@ class ConcatKernel(NopKernel):
                 input_unwrapped = inp.data.unwrap_view()
             else:
                 input_unwrapped = inp.data
-
             if (
                 isinstance(input_unwrapped, StorageBox)
                 and input_unwrapped.is_input_buffer()
                 and (dev := inp.get_device()) is not None
                 and is_gpu(dev.type)
-                and not is_dynamic(input_buffer)
+                and (
+                    not is_dynamic(input_buffer)
+                    or (
+                        dev.type != "mtia"
+                        and config.combo_kernel_foreach_dynamic_shapes
+                    )
+                )
             ):
                 op_names.append(input_buffer.get_operation_name())
 
@@ -7088,7 +7238,7 @@ class ConcatKernel(NopKernel):
         return NopKernel.get_free_symbol_uses(self, unbacked_only)
 
     @classmethod
-    def realize_into(cls, src: IRNode, dst: IRNode) -> IRNode:
+    def realize_into(cls, src: IRNode, dst: IRNode, allow_alias: bool = True) -> IRNode:
         # Attempt to turn this into a ReinterpretView rather than assert.
         # This has concessions around layout, as as_storage_and_layout
         # can cause us to go from flexible to fixed layout.
@@ -7100,9 +7250,9 @@ class ConcatKernel(NopKernel):
             raise AssertionError(type(dst))
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
-            return cls.realize_into(src.data, dst)
+            return cls.realize_into(src.data, dst, allow_alias)
 
-        if isinstance(src, StorageBox):
+        if isinstance(src, StorageBox) and allow_alias:
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             if not hasattr(src.data, "layout"):
@@ -9015,7 +9165,8 @@ class InplaceCopyFallback(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         (dst, src, non_blocking) = self.codegen_args()
-        wrapper.codegen_device_copy(src, dst, non_blocking)
+        with wrapper.profiled_kernel_scope("aoti_torch_copy_", self):
+            wrapper.codegen_device_copy(src, dst, non_blocking)
 
     def should_allocate(self) -> bool:
         return False
@@ -9313,12 +9464,21 @@ class DeviceCopy(ExternKernelOut):
         args = self.codegen_args()
         if len(args) != 2:
             raise AssertionError("Expected len(args) == 2")
-        if self.output_view:
-            wrapper.codegen_device_copy(
-                args[0], self.output_view.codegen_reference(), args[1]
-            )
-        else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+        # copy_(Tensor(a!) self, Tensor src, bool non_blocking): the
+        # destination is this node's own output, not one of its inputs, so
+        # deriving the metadata from inputs would record src in self's place
+        # and drop the destination entirely.
+        destination = self.output_view or self
+        profiling_args = wrapper.make_profiling_args(
+            [destination, self.inputs[0], None]
+        )
+        with wrapper.profiled_kernel_scope("aoti_torch_copy_", self, profiling_args):
+            if self.output_view:
+                wrapper.codegen_device_copy(
+                    args[0], self.output_view.codegen_reference(), args[1]
+                )
+            else:
+                wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
         if isinstance(self.layout, Layout) and self.layout.is_pinned:
             wrapper.sync_d2h_copy(self.get_name())
 
@@ -9573,8 +9733,6 @@ class FallbackKernel(ExternKernelAlloc):
 
         # args that are aliased
         self.alias_names: list[str] = []
-        # args that are mutated AND returned from the op
-        self.mutation_names: list[str] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             # We assume here that HOPs with FallbackKernel are functional.
@@ -9604,10 +9762,16 @@ class FallbackKernel(ExternKernelAlloc):
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
-            self.mutation_names.append(tensor_args[0].get_name())
-            # Record aliasing relationship so memory planning doesn't wrongly
-            # reuse its storage.
-            self.alias_names.append(tensor_args[0].get_name())
+            # The returned tensor aliases arg0; it is not a rename of it.
+            # Track the write separately via a MutationOutput.
+            arg = tensor_args[0]
+            mutation_output = MutationOutput(
+                NoneLayout(device=arg.get_device()), arg, self
+            )
+            self.mutation_outputs.append(mutation_output)
+            # Include the sibling mutation version so compute_dependencies merges
+            # its reader list with those of arg0 and the returned alias.
+            self.alias_names.extend((arg.get_name(), mutation_output.get_name()))
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
@@ -9763,6 +9927,10 @@ class FallbackKernel(ExternKernelAlloc):
             example_output, (torch._C.ScriptObject, FakeScriptObject)
         ) or is_custom_class_obj(example_output):
             return torch.device("cpu")
+        if isinstance(example_output, dict):
+            # generate_output builds a MultiOutput per value, so the values carry
+            # the devices; the keys never do.
+            example_output = list(example_output.values())
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
                 # pyrefly: ignore [bad-argument-type]
@@ -9811,11 +9979,6 @@ class FallbackKernel(ExternKernelAlloc):
             return []
         else:
             return self.alias_names
-
-    def get_mutation_names(self) -> Sequence[str]:
-        if len(self.mutation_names) > 1:
-            raise AssertionError("Expected len(self.mutation_names) <= 1")
-        return self.mutation_names
 
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
         """
@@ -9906,7 +10069,13 @@ class FallbackKernel(ExternKernelAlloc):
             elif isinstance(return_type, torch.IntType):
                 return export_schema.Argument.create(as_int=output)
             else:
-                raise RuntimeError(f"Unsupported return type {type(return_type)}")
+                # Name the op: the bare message gives no way to tell which
+                # extern kernel has the unsupported return. `target` is the op
+                # whose schema produced `return_type`.
+                raise RuntimeError(
+                    f"Unsupported return type {type(return_type)} for "
+                    f"target={target} schema={getattr(target, '_schema', None)}"
+                )
 
         if isinstance(target, torch._higher_order_ops.torchbind.CallTorchBind):
             returns = target.schema(args[0], args[1]).returns
@@ -10244,13 +10413,23 @@ class FallbackKernel(ExternKernelAlloc):
 
         def maybe_wrap(value: Any, arg_info: torch._C.Argument) -> Any:
             # bool is a subclass of int; SymInt/SymFloat/SymBool are not int/float/complex.
-            if not isinstance(value, (int, float, complex)):
+            if not isinstance(value, (int, float, complex, sympy.Expr)):
                 return value
             if not is_tensor_slot(arg_info):
                 return value
             alias = arg_info.alias_info
             if alias is not None and alias.is_write:
                 return value
+            if isinstance(value, sympy.Expr):
+                # A symbolic scalar is only known at runtime, so build the 0-d tensor
+                # at runtime; the proxy executor passes a SymInt in a Scalar slot.
+                dtype = scalar_dtype(0 if value.is_integer else 0.0)
+                return pytree.tree_map(
+                    lambda x: x.wrap_for_lowering() if isinstance(x, IRNode) else x,
+                    cls.create(
+                        aten.scalar_tensor.default, value, dtype=dtype, device=device
+                    ),
+                )
             with torch.utils._python_dispatch._disable_current_modes():
                 const = torch.tensor(value, dtype=scalar_dtype(value), device=device)
             materialized.append(True)
@@ -10360,8 +10539,6 @@ class FallbackKernel(ExternKernelAlloc):
             device = torch.device("cpu")
 
         def create_direct_output(output: torch.Tensor) -> FallbackKernel:
-            if not device:
-                raise AssertionError("Not sure where to find device info")
             packed = cls(
                 cls.tensor_to_layout(output),
                 kernel,
@@ -10415,8 +10592,12 @@ class FallbackKernel(ExternKernelAlloc):
             return create_direct_output(example_output)
 
         else:
+            # No tensor in or out, so there is no device to inherit and nothing to
+            # run on but the host. An op that produces no output keeps None above --
+            # its placement is decided by the scheduler, and forcing a device there
+            # moves stream and event HOPs out of the stream block they belong to.
             if not device:
-                raise AssertionError("Not sure where to find device info")
+                device = torch.device("cpu")
             packed = cls(
                 MultiOutputLayout(device=device),
                 kernel,
@@ -10475,7 +10656,7 @@ class FallbackKernel(ExternKernelAlloc):
         if isinstance(outputs, (list, tuple)):
             packed.outputs = outputs
         elif isinstance(outputs, dict):
-            packed.outputs = tuple(outputs)
+            packed.outputs = tuple(outputs.values())
         else:
             packed.outputs = [outputs]
 
@@ -11801,23 +11982,25 @@ class WhileLoop(ExternKernel):
             stack_output=stack_output,
         )
 
-        if not (
-            body_fn.graph is not None
-            and isinstance(body_fn.graph.module, torch.fx.GraphModule)
-        ):  # to make linter happy
-            raise AssertionError(
-                "Expected body_fn.graph is not None and isinstance( body_fn.graph.module, torch.fx.GraphModule )"
-            )
-
-        # Handling input mutations
-        mutated_idxs = check_input_alias_and_mutation(
-            body_fn.graph.module, fake_all_inputs
-        )[3]
-        mutated_idx_set = OrderedSet(mutated_idxs)
-        mutated_inputs = [all_inputs[idx] for idx in mutated_idx_set]
+        # Handling input mutations. Inputs can be mutated by cond_fn,
+        # body_fn or both (e.g. a captured tensor mutated only in cond_fn).
+        subgraph_mutated_idxs: list[OrderedSet[int]] = []
+        for subgraph in (cond_fn, body_fn):
+            if subgraph.graph is None or not isinstance(
+                subgraph.graph.module, torch.fx.GraphModule
+            ):
+                raise AssertionError(
+                    "Expected lowered subgraph with a GraphModule, got "
+                    f"{subgraph.graph and subgraph.graph.module}"
+                )
+            mutated_idxs = check_input_alias_and_mutation(
+                subgraph.graph.module, fake_all_inputs
+            )[3]
+            subgraph_mutated_idxs.append(OrderedSet(mutated_idxs))
+        cond_mutated_idxs, body_mutated_idxs = subgraph_mutated_idxs
+        mutated_idx_set = cond_mutated_idxs | body_mutated_idxs
 
         # Create all outputs first
-        mutated_inputs_iter = iter(mutated_inputs)
         all_outputs: list[IRNode] = []
         while_loop.outputs = []
         while_loop.mutation_outputs = []
@@ -11840,15 +12023,13 @@ class WhileLoop(ExternKernel):
                 all_outputs.append(multi_out)
         else:
             for idx, output in enumerate(body_outputs):
-                if idx in mutated_idx_set:
-                    if idx >= len(carried_inputs):
-                        raise AssertionError("only carries can be mutated.")
-                    # Create MutationOutput for mutated inputs
-                    mutated_input = next(mutated_inputs_iter)
-                    while_loop.mutation_outputs.append(
-                        MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
-                    )
-                    all_outputs.append(mutated_input)
+                if idx in body_mutated_idxs:
+                    # Carries mutated in place by body_fn: the input buffer
+                    # itself is the output. cond_fn mutations must not take
+                    # this branch: the loop state is rebound to body_fn's
+                    # outputs each iteration, so the carry's final value
+                    # still lives in body_outputs[idx].
+                    all_outputs.append(all_inputs[idx])
                 else:
                     multi_out = MultiOutput(
                         FixedLayout(
@@ -11863,6 +12044,16 @@ class WhileLoop(ExternKernel):
                     )
                     while_loop.outputs.append(multi_out)
                     all_outputs.append(multi_out)
+
+            # Register a MutationOutput for every input mutated by either
+            # subgraph (carried or additional, e.g. captured tensors) so
+            # reads of these buffers in the outer graph are ordered after
+            # the loop.
+            for idx in sorted(mutated_idx_set):
+                mutated_input = all_inputs[idx]
+                while_loop.mutation_outputs.append(
+                    MutationOutput(mutated_input.layout, mutated_input, while_loop)  # type: ignore[attr-defined, union-attr]
+                )
 
         for inp, out in zip(carried_inputs, all_outputs):
             if inp.get_name() in V.graph.graph_inputs:

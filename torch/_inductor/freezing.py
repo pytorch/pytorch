@@ -9,6 +9,7 @@ from typing import Any
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
+from torch._functorch._aot_autograd.input_output_analysis import INPUT_ALIAS_TYPES
 from torch._functorch.aot_autograd import MutationType
 from torch._functorch.compile_utils import fx_graph_cse
 from torch._inductor.constant_folding import constant_fold, replace_node_with_constant
@@ -37,10 +38,12 @@ def replace_params_with_constants(
     params = gm.graph.find_nodes(op="placeholder")
     fake_inp_nodes = params[: len(params)]
     preserved_arg_indices = []
+    # Skipping the non-input index spaces matters here: an output-space base_idx
+    # would preserve whichever parameter happened to share that number.
     aliased_input_args = [
         out_info.base_idx
         for out_info in fw_metadata.output_info
-        if out_info.base_idx is not None
+        if out_info.base_idx is not None and out_info.output_type in INPUT_ALIAS_TYPES
     ]
 
     # TODO (tmanlaibaatar) figure out why this is different

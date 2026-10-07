@@ -198,18 +198,17 @@ bool is_finalizing() {
 void register_allocator(
     c10::DeviceType device_type,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
-  return AllocatorMap::get().register_allocator(
-      device_type, std::move(allocator));
+  AllocatorMap::get().register_allocator(device_type, std::move(allocator));
 }
 
 void register_availability(
     const std::string& name,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
-  return AllocatorMap::get().register_availability(name, std::move(allocator));
+  AllocatorMap::get().register_availability(name, std::move(allocator));
 }
 
 void set_backend(const std::string& name) {
-  return AllocatorMap::get().set_backend(name);
+  AllocatorMap::get().set_backend(name);
 }
 
 std::optional<std::string> get_backend(c10::Device device) {
@@ -359,7 +358,7 @@ class MemPoolAllocatorMap {
 C10_EXPORT void register_mempool_allocator(
     c10::DeviceType device_type,
     std::shared_ptr<c10::Allocator> allocator) {
-  return MemPoolAllocatorMap::get().register_mempool_allocator(
+  MemPoolAllocatorMap::get().register_mempool_allocator(
       device_type, std::move(allocator));
 }
 
@@ -569,8 +568,6 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
   m.def(
       "nccl_all_to_all_nd(Tensor input, Tensor(a!) out, int scatter_dim, int gather_dim, str group_name) -> ()");
-  m.def(
-      "nccl_all_gather_offset(Tensor input, Tensor(a!) out, str group_name, int[] split_sizes, int[]? split_offsets=None) -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(

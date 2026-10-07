@@ -130,16 +130,18 @@ TORCH_META_FUNC(avg_pool3d_backward) (
   const int64_t oheight_for_shape_check = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
   const int64_t owidth_for_shape_check = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
 
-  avg_pool3d_backward_shape_check(
+  pool3d_backward_shape_check(
     input,
     gradOutput_,
+    /*indices=*/std::nullopt,
     nslices,
     kT, kH, kW,
     dT, dH, dW,
     padT, padH, padW,
+    1, 1, 1,
     itime, iheight, iwidth,
     otime_for_shape_check, oheight_for_shape_check, owidth_for_shape_check,
-    "avg_pool3d_backward()");
+    "avg_pool3d_backward()", /*check_input_size=*/true);
 
   /* resize output */
   set_output_raw_strided(0, input.sizes(), {}, input.options());
