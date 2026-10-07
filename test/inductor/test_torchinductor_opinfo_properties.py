@@ -637,8 +637,9 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
     "inductor_default": {
         "nn.functional.linear": {ALL},
         # Triton FP fusion compiles OCML log1p differently in the static-shape
-        # kernel and its dynamic-shape recompile, so slices differ by 1 ULP.
-        # inductor_numerics disables FP fusion and stays batch invariant.
+        # kernel and its dynamic-shape recompile, so slices differ by 1 ULP
+        # (#191552). inductor_numerics disables FP fusion and stays batch
+        # invariant.
         "log1p": {fp32},
     },
     "inductor_numerics": {
@@ -860,9 +861,10 @@ class TestOpInfoProperties(TestCase):
             and backend == "inductor_default"
             and isRocmArchAnyOf(MI200_ARCH)
         ):
-            # The ROCm log1p xfail mismatches on every MI300/MI350 run but only
-            # on some MI200 runs, so a strict xfail would flake there.
-            self.skipTest("log1p fp32 batch invariance is nondeterministic on MI200")
+            # The static- vs dynamic-shape log1p mismatch (#191552) shows up on
+            # every MI300/MI350 run but only on some MI200 runs, so a strict
+            # xfail would flake there.
+            self.skipTest("log1p mismatch is intermittent on MI200 (#191552)")
         torch._dynamo.reset()
         device_type = torch.device(device).type
 
