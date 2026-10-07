@@ -5,7 +5,7 @@
 
 import math
 from collections.abc import Sequence
-from typing import Any, cast, Literal
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 from cutlass import Int32, Int64
 
@@ -17,6 +17,10 @@ from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import _storage, tile
 from .traits import WARP
+
+
+if TYPE_CHECKING:
+    from .kernel_rowtile import _ItreePlan
 
 
 # (extent, element-stride) pairs from TensorIterator, fastest dim first.
@@ -347,6 +351,8 @@ def _as_shape(out: torch.Tensor, out_shape: Sequence[int]) -> torch.Tensor:
     if tuple(out.shape) == tuple(out_shape):
         return out
     reshaped = out.reshape(out_shape)
+    if out._base is not None:
+        return reshaped.clone()
     if reshaped._base is None:
         return reshaped
     out.resize_(out_shape)
@@ -415,6 +421,105 @@ def _two_stage_row(
     return tuple(outs)
 
 
+def _indexed_itree_plan(
+    count: int,
+    num_o: int,
+    itemsize: int,
+    device: torch.device,
+) -> "_ItreePlan | None":
+    from . import kernel_rowtile as rt
+
+    plan = rt.itree_plan(count, num_o, itemsize, stage=False)
+    if plan is None:
+        return None
+    return plan
+
+
+def _try_indexed_itree(
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    red_pairs: Pairs,
+    kept_pairs: Pairs,
+    num_o: int,
+    count: int,
+    out_dtypes: Sequence[torch.dtype],
+    nouts: int,
+) -> tuple[torch.Tensor, ...] | None:
+    """Apply the fixed logical-row DAG through arbitrary storage strides."""
+    from . import kernel_rowtile as rt
+
+    plan = _indexed_itree_plan(count, num_o, x.element_size(), x.device)
+    if plan is None:
+        return None
+    nbatch = plan.split[0] if plan.shape == "split" else 1
+    if num_o * nbatch >= 2**31:
+        return None
+
+    if plan.shape != "split":
+        outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
+        op = ReduceBlock(
+            trait,
+            count=count,
+            num_o=num_o,
+            red_pairs=red_pairs,
+            kept_pairs=kept_pairs,
+            in_base=int(x.storage_offset()),
+            nouts=nouts,
+            order="inner_tree",
+            itree=plan,
+        )
+        key = ("genitree", trait_key, x.dtype, tuple(out_dtypes)) + op.cache_sig
+        _launch(op, key, [_flat(x)], _kernel_outs(outs))
+        return tuple(outs)
+
+    parts = [
+        torch.empty(
+            num_o * nbatch,
+            device=x.device,
+            dtype=cute2torch[trait.fdtypes[f]],
+        )
+        for f in range(trait.nfields)
+    ]
+    s1 = ReduceBlock(
+        trait,
+        count=count,
+        num_o=num_o,
+        red_pairs=red_pairs,
+        kept_pairs=kept_pairs,
+        in_base=int(x.storage_offset()),
+        nouts=trait.nfields,
+        final=False,
+        order="inner_tree",
+        itree=plan,
+    )
+    key1 = ("genitree1", trait_key, x.dtype) + s1.cache_sig
+    _launch(s1, key1, [_flat(x)], parts)
+
+    outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
+    combine = rt.itree_combine_plan(plan)
+    s2 = ReduceBlock(
+        trait,
+        count=nbatch,
+        num_o=num_o,
+        red_pairs=[],
+        kept_pairs=[],
+        project_n=count,
+        nouts=nouts,
+        order="inner_tree",
+        itree=combine,
+    )
+    part_dtypes = tuple(p.dtype for p in parts)
+    key2 = (
+        "genitree2",
+        trait_key,
+        tuple(out_dtypes),
+        part_dtypes,
+    ) + s2.cache_sig
+    _launch(s2, key2, parts, _kernel_outs(outs))
+    return tuple(outs)
+
+
 def _reduce(
     trait: Any,
     trait_key: str,
@@ -432,6 +537,42 @@ def _reduce(
     )
     red_axes = {d % x.dim() for d in red_axes}
     out_shape = [s for i, s in enumerate(x.shape) if i not in red_axes]
+    num_o = max(1, math.prod(out_shape))
+    count = x.numel() // num_o
+    red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
+
+    from . import kernel_rowtile as rt
+
+    if (
+        not getattr(trait, "complex_input", False)
+        and rt.inner_tree_order_enabled()
+        and count < _INT32_LIMIT
+        and num_o < _INT32_LIMIT
+    ):
+        kind = fast_kind(red_pairs, kept_pairs, nouts)
+        if x.is_contiguous() and kind in ("row", "all"):
+            ordered = rt.reduce_row_tile(
+                trait,
+                trait_key,
+                x.reshape(num_o, count),
+                out_dtypes,
+                nouts=nouts,
+                order="inner_tree",
+            )
+        else:
+            ordered = _try_indexed_itree(
+                trait,
+                trait_key,
+                x,
+                red_pairs,
+                kept_pairs,
+                num_o,
+                count,
+                out_dtypes,
+                nouts,
+            )
+        if ordered is not None:
+            return tuple(_as_shape(o, out_shape) for o in ordered)
 
     # One-output reductions use reduce_all's split instead of one block for the entire row.
     # This includes full dims and M=1 rows whose size-one kept axes TI removes.
@@ -442,7 +583,6 @@ def _reduce(
     # Reshape post-TI contiguous innermost reductions onto a fast kernel; general remains
     # the fallback for direct calls and declines.
     if len(out_shape) > 0 and x.is_contiguous():
-        red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
         kind = fast_kind(red_pairs, kept_pairs, nouts)
         red_n = x.numel() // max(1, math.prod(out_shape))
         if kind == "row":
@@ -460,9 +600,6 @@ def _reduce(
             return (_as_shape(out, out_shape),)
 
     outs = [torch.empty(out_shape, device=x.device, dtype=d) for d in out_dtypes]
-    num_o = max(1, math.prod(out_shape))  # blocks (kept coordinates)
-    count = x.numel() // num_o  # elements reduced per output
-    red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
     op = ReduceBlock(
         trait,
         count=count,
