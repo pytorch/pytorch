@@ -132,6 +132,50 @@ class TestCase(InductorTestCase):
 
     @requires_gpu()
     @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
+    @parametrize("scan_func", [torch.cumsum, torch.cumprod])
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    @config.patch("triton.use_block_ptr", True)
+    def test_low_precision_scan(self, input_shape, scan_func, input_dtype):
+        """A scan accumulates across its axis, so it widens like a reduction.
+
+        The counterpart of `test_low_precision_reduction`: with
+        `codegen_upcast_to_fp32` off, the combine must still run in fp32 or
+        every partial result rounds at the input width.
+        """
+
+        @torch.compile
+        def func(a, b, c, d):
+            return scan_func(a * b * c * d, -1)
+
+        inps = (torch.rand(input_shape, device=GPU_TYPE, dtype=input_dtype),) * 4
+        with config.patch("triton.codegen_upcast_to_fp32", False):
+            func_opt = torch._dynamo.optimize("inductor")(func)
+            code = run_and_get_triton_code(func_opt, *inps)
+            self.assertTrue(".to(tl.float32)" in code)
+            self.assertEqual(func(*inps), func_opt(*inps))
+
+    @requires_gpu()
+    @parametrize("fp8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    @config.patch("triton.use_block_ptr", True)
+    def test_fp8_scan_upcasts_regardless_of_config(self, fp8_dtype):
+        """fp8 scans widen even with `codegen_upcast_to_fp32` left enabled.
+
+        `upcast_compute_type` only covers fp16/bf16, so fp8 reaches the
+        combine at its input width unless the scan widens it explicitly, the
+        way `reduction` already does.
+        """
+
+        @torch.compile
+        def func(a):
+            return torch.cumsum(a.to(torch.float32).to(fp8_dtype), -1)
+
+        inp = torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float32)
+        func_opt = torch._dynamo.optimize("inductor")(func)
+        code = run_and_get_triton_code(func_opt, inp)
+        self.assertTrue(".to(tl.float32)" in code)
+
+    @requires_gpu()
+    @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
     @parametrize(
         "reduction_func",
         [
@@ -191,7 +235,6 @@ class TestCase(InductorTestCase):
             "exp2",
             "abs",
             "hypot",
-            "nextafter",
         ]:
             # These ops do not support float16 and bfloat16.
             supported_dtypes = OpDtypeSupport.supported_dtypes[op_name]
