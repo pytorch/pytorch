@@ -1007,6 +1007,23 @@ class TileReduce:
                 raise ValueError(
                     "the inner-tree order needs a row or general axis and a plan"
                 )
+            if itree.combine_weights and not itree.combine_count:
+                raise ValueError("precomputed weights require uniform combine counts")
+            if itree.combine_count and (
+                itree.shape != "combine"
+                or not itree.combine_tile
+                or not hasattr(trait, "combine_uniform")
+                or trait.acc is not cutlass.Float32
+                or len(itree.split) != 5
+                or not (0 < itree.split[0] <= 2**24)
+                or not (0 < itree.combine_count <= 2**24)
+                or itree.combine_count & (itree.combine_count - 1)
+                or itree.split[1] != itree.combine_count
+                or itree.split[2] != itree.combine_count
+            ):
+                raise ValueError(
+                    "uniform combine requires complete FP32 Welford partials"
+                )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
             if itree.stage_e:
@@ -1587,15 +1604,29 @@ class TileReduce:
         return self._fold_itree(sX, r_in_block, lane_w, warp_id, r_in_block, batch_idx)
 
     @cute.jit
+    def _combine_itree_partial(self, a, b, index):
+        if const_expr(self.itree.combine_count):
+            return self.trait.combine_uniform(
+                a,
+                b,
+                index,
+                const_expr(self.itree.combine_count),
+                b[2] if const_expr(self.itree.combine_weights) else None,
+            )
+        return self.trait.combine(a, b)
+
+    @cute.jit
     def _fold_itree_combine_async(self, mIns, row, lane, blk):
         """Coalesce split partials through shared memory without changing fold order."""
-        combine_fn, fdtypes = self.trait.combine, self.trait.fdtypes
+        combine_fn, fdtypes = self._combine_itree_partial, self.trait.fdtypes
         nf = const_expr(self.trait.nfields)
         nbatch = const_expr(self.itree.split[0])
         grp = const_expr(self.itree.combine_grp)
         rpb = const_expr(self.itree.rows_per_block)
         tile_n = const_expr(self.itree.combine_tile)  # partials per row per tile
         unroll = const_expr(self.itree.combine_unroll)
+        # Known counts let the third shared field hold per-index weights instead.
+        weights = const_expr(self.itree.combine_weights)
         mult = const_expr(tile_n // (WARP * grp))  # cp.async per lane per row
         ntiles = const_expr(nbatch // tile_n)
         # Pad each row's run by `grp` so a lane's run stays transfer-aligned while the runs start in
@@ -1642,19 +1673,28 @@ class TileReduce:
                     )
                     dst = Int32(const_expr(i * pitch // grp + u * WARP)) + lane
                     for f in cutlass.range_constexpr(nf):
-                        cute.copy(g2s[f], gv[f][None, src], sv[f][None, dst])
+                        if const_expr(weights and f == 2):
+                            for v in cutlass.range_constexpr(grp):
+                                j = (Int32(u * WARP) + lane) * Int32(grp) + Int32(v)
+                                count = fdtypes[f](const_expr(self.itree.combine_count))
+                                nn = fdtypes[f](j) * count + count
+                                sbuf[f][Int32(i * pitch) + j] = count / nn
+                        else:
+                            cute.copy(g2s[f], gv[f][None, src], sv[f][None, dst])
         cute.arch.cp_async_commit_group()
         cute.arch.cp_async_wait_group(0)
         cute.arch.barrier()
         # Tile 0 SEEDS the chain from partial 0 -- never from the identity, since `0.0 + -0.0` is
         # `+0.0` and this fold's first value can be a negative zero.
         acc = take(0)
+        if const_expr(weights):
+            acc = (acc[0], acc[1], fdtypes[2](self.itree.combine_count))
         if const_expr(unroll):
             for j in cutlass.range(1, tile_n, unroll=unroll):
-                acc = combine_fn(acc, take(j))
+                acc = combine_fn(acc, take(j), j)
         else:
             for j in cutlass.range_constexpr(tile_n - 1):
-                acc = combine_fn(acc, take(const_expr(j + 1)))
+                acc = combine_fn(acc, take(const_expr(j + 1)), Int32(j + 1))
         for t in cutlass.range(1, ntiles):
             cute.arch.barrier()  # the refill overwrites what the previous fold just read
             for i in cutlass.range_constexpr(rpb):
@@ -1671,16 +1711,26 @@ class TileReduce:
                         )
                         dst = Int32(const_expr(i * pitch // grp + u * WARP)) + lane
                         for f in cutlass.range_constexpr(nf):
-                            cute.copy(g2s[f], gv[f][None, src], sv[f][None, dst])
+                            if const_expr(weights and f == 2):
+                                for v in cutlass.range_constexpr(grp):
+                                    j = (Int32(u * WARP) + lane) * Int32(grp) + Int32(v)
+                                    index = t * Int32(tile_n) + j
+                                    count = fdtypes[f](
+                                        const_expr(self.itree.combine_count)
+                                    )
+                                    nn = fdtypes[f](index) * count + count
+                                    sbuf[f][Int32(i * pitch) + j] = count / nn
+                            else:
+                                cute.copy(g2s[f], gv[f][None, src], sv[f][None, dst])
             cute.arch.cp_async_commit_group()
             cute.arch.cp_async_wait_group(0)
             cute.arch.barrier()
             if const_expr(unroll):
                 for j in cutlass.range(tile_n, unroll=unroll):
-                    acc = combine_fn(acc, take(j))
+                    acc = combine_fn(acc, take(j), t * Int32(tile_n) + j)
             else:
                 for j in cutlass.range_constexpr(tile_n):
-                    acc = combine_fn(acc, take(j))
+                    acc = combine_fn(acc, take(j), t * Int32(tile_n) + Int32(j))
         return acc
 
     @cute.jit
