@@ -122,7 +122,10 @@ class FSDPState(_State):
         self._modules = modules
         self._device = device
         self._device_handle = _get_device_handle(device.type)
-        self._mp_policy = replace(mp_policy, param_dtype_override_fn=None)
+        # Duck-typed policies may not define ``param_dtype_override_fn``
+        if getattr(mp_policy, "param_dtype_override_fn", None) is not None:
+            mp_policy = replace(mp_policy, param_dtype_override_fn=None)
+        self._mp_policy = mp_policy
         self._auto_reshard_after_forward = auto_reshard_after_forward
         if len(modules) == 1:
             self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
