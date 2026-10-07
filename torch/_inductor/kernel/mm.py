@@ -88,6 +88,7 @@ from .mm_common import (
     mm_grid,
     persistent_mm_grid,
     use_native_matmul,
+    zero_addmm_input,
 )
 
 
@@ -478,17 +479,6 @@ def get_flydsl_mm_template_kwargs(
 
 
 aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
-
-
-def _check_addmm_input_metadata(inp, mat1, mat2) -> None:
-    torch._check(
-        inp.get_dtype() == mat1.get_dtype() and inp.get_dtype() == mat2.get_dtype(),
-        lambda: "input dtypes must be the same",
-    )
-    torch._check(
-        inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
-        lambda: "all inputs must be on the same device",
-    )
 
 
 def decomposeK(a, b, k_splits):
@@ -959,10 +949,11 @@ def _tuned_addmm_out_dtype(inp, mat1, mat2, out_dtype, *, alpha, beta, layout):
     )
     # TODO: drop the cpp_wrapper fallback once aten.addmm.dtype_out has an AOTI
     # C shim (torchgen/aoti/fallback_ops.py).
-    if beta == 0 or V.graph.cpp_wrapper:
+    if V.graph.cpp_wrapper:
         result = lowerings[aten.mm](mat1, mat2, out_dtype, layout=layout)
         if alpha != 1:
             result = lowerings[aten.mul](alpha, result)
+        # beta == 0 ignores inp, NaN and inf included.
         if beta == 0:
             return result
         inp = lowerings[prims.convert_element_type](inp, out_dtype)
@@ -1008,9 +999,12 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
             inp, mat1, mat2, out_dtype, alpha=alpha, beta=beta, layout=layout
         )
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
-    if not use_bf16x9 and beta == 0 and mat1.get_device().type == "cuda":
-        _check_addmm_input_metadata(inp, mat1, mat2)
-        if alpha == 0:
+    template_inp = inp
+    if not use_bf16x9 and beta == 0:
+        # The addmm decomposition already checked inp's shape where eager does.
+        template_inp = zero_addmm_input(inp, mat1, mat2)
+        # Matches cuBLAS, which doesn't read mat1 and mat2 when alpha == 0.
+        if alpha == 0 and mat1.get_device().type == "cuda":
             _, _, _, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
             return lowerings[aten.full](
                 layout.size,
@@ -1018,17 +1012,9 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
                 dtype=layout.dtype,
                 device=layout.device,
             )
-        if layout is not None:
-            result = lowerings[aten.mm](mat1, mat2, layout=layout)
-        else:
-            result = lowerings[aten.mm](mat1, mat2)
-        if alpha != 1:
-            result = lowerings[aten.mul](alpha, result)
-        return result
 
     if use_native_matmul(mat1, mat2):
         if beta == 0:
-            _check_addmm_input_metadata(inp, mat1, mat2)
             arg1 = 0
         else:
             arg1 = lowerings[aten.mul](beta, inp)
@@ -1041,7 +1027,9 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
         return lowerings[aten.add](arg1, arg2)
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
-    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
+    m, n, k, layout, mat1, mat2, inp_expanded = mm_args(
+        mat1, mat2, template_inp, layout=layout
+    )
     inp = realize_inputs(inp)
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "addmm"
@@ -1122,11 +1110,13 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
                     templates_to_use.append(persistent_mm_template)
 
         # Manually call get_template_configs as use 1-D bias if possible
-        choices.extend(
-            V.choices.get_template_configs(
-                kernel_inputs_aten, [addmm_contiguous_subgraph_template], name
+        # contiguous_addmm calls addmm without alpha and beta.
+        if alpha == 1 and beta == 1:
+            choices.extend(
+                V.choices.get_template_configs(
+                    kernel_inputs_aten, [addmm_contiguous_subgraph_template], name
+                )
             )
-        )
     # Single unified call for all templates
     choices.extend(
         V.choices.get_template_configs(kernel_inputs, templates_to_use, name)

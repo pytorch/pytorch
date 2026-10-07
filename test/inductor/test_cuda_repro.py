@@ -136,6 +136,9 @@ class CudaReproTests(TestCase):
     @parametrize("cpp_wrapper", [False, True])
     def test_addmm_out_dtype_compile(self, self_dtype, beta, cpp_wrapper):
         inp = torch.randn(64, 32, device=device_type, dtype=self_dtype)
+        if beta == 0:
+            # beta == 0 ignores inp, NaN included.
+            inp[0, 0] = float("nan")
         a = torch.randn(64, 16, device=device_type, dtype=torch.bfloat16)
         b = torch.randn(16, 32, device=device_type, dtype=torch.bfloat16)
 
@@ -149,7 +152,7 @@ class CudaReproTests(TestCase):
             )
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
-        if not cpp_wrapper and beta != 0:
+        if not cpp_wrapper:
             FileCheck().check("extern_kernels.addmm_dtype").run(code)
 
     def test_addmm_out_dtype_inplace_compile(self):

@@ -521,17 +521,23 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    if beta == 0 and mat1.device.type != "cuda":
+        # CPU and MPS eager check that self expands to the output even though
+        # beta == 0 ignores its values, XPU checks a looser broadcast and CUDA
+        # doesn't check. tuned_addmm drops self, so check here.
+        utils.check_same_device(self, mat1, allow_cpu_scalar_tensors=False)
+        self.expand(mat1.shape[0], mat2.shape[1])
     # The rewrites below compute in the input dtype, so leave aten.addmm.dtype
     # to the tuned_addmm lowering.
     if out_dtype is not None:
         return NotImplemented
 
     def add_input(out: torch.Tensor) -> torch.Tensor:
-        if alpha != 1:
-            out = alpha * out
-        if beta != 1:
-            return out + beta * self
-        return out + self
+        # Unconditional: `if alpha != 1` would guard on an unbacked alpha.
+        out = alpha * out
+        if beta == 0:
+            return out
+        return out + beta * self.expand(out.shape)
 
     if mat1.device.type not in ["cpu", "mps"]:
         if beta == 0 and mat1.device.type == "cuda":
@@ -553,7 +559,7 @@ def addmm(
             out = torch.sum(
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
-            return alpha * out + beta * self
+            return add_input(out)
         if (
             statically_known_true(mat1.size(0) == 1)
             and guard_or_false(mat2.size(0) <= 16)
@@ -561,7 +567,7 @@ def addmm(
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
-            return alpha * out + beta * self
+            return add_input(out)
     return NotImplemented
 
 
