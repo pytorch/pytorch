@@ -270,6 +270,10 @@ class TestEnvironment:
     # Specifically, this includes env vars that are set to non-default values and
     # are not implied. Maps from env var name -> value (int)
     repro_env_vars: dict = {}
+    # Value in effect of every include_in_repro env var: "1"/"0" for flags (implied
+    # included), the parsed value for settings ("" if unset). Read by
+    # torchci/environment.py.
+    env_var_values: dict = {}
 
     # Defines a flag usable throughout the test suite, determining its value by querying
     # the specified environment variable.
@@ -314,8 +318,10 @@ class TestEnvironment:
         if env_var_val is None:
             implied = implied_by_fn()
             enabled = enabled or implied
-        if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[env_var] = env_var_val
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = "1" if enabled else "0"
+            if (enabled != default) and not implied:
+                TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         if name in globals():
@@ -350,6 +356,8 @@ class TestEnvironment:
     ):
         value = default if env_var is None else os.getenv(env_var)
         value = parse_fn(value)
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = "" if value is None else str(value)
         if include_in_repro and (value != default):
             TestEnvironment.repro_env_vars[env_var] = value
 
