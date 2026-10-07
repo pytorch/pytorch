@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import copy
 import glob
+import importlib.util
 import json
 import os
 import platform
@@ -96,6 +97,10 @@ except ImportError:
 
     def upload_adhoc_failure_json(*args, **kwargs):
         pass
+
+
+# The installed torch (sometimes a nightly) may predate the test run report writer.
+HAS_TEST_RUN_REPORTS = bool(importlib.util.find_spec("torch.testing._internal.torchci"))
 
 
 from torch.testing._internal.common_utils import HardwareClassification
@@ -521,6 +526,12 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     return executable
 
 
+def _test_run_report_args(reports_dir: str | None) -> list[str]:
+    if not HAS_TEST_RUN_REPORTS or not reports_dir:
+        return []
+    return [f"--save-test-run-reports={reports_dir}"]
+
+
 def run_test(
     test_module: ShardedTest,
     test_directory,
@@ -597,6 +608,9 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    if not is_cpp_test:
+        unittest_args.extend(_test_run_report_args(options.save_test_run_reports))
 
     if options.hw_classification:
         # forward hw classification filter to test subprocess
@@ -1473,6 +1487,9 @@ def run_ci_sanity_check(test: ShardedTest, test_directory, options):
         os.remove(file)
     for dirname in glob.glob(f"{test_reports_dir}/**/{test.name}"):
         shutil.rmtree(dirname)
+    if options.save_test_run_reports:
+        name = sanitize_test_filename(test.name)
+        shutil.rmtree(Path(options.save_test_run_reports) / name, ignore_errors=True)
     return 0
 
 
@@ -1652,6 +1669,23 @@ def parse_args():
         help="enable coverage",
         default=PYTORCH_COLLECT_COVERAGE,
     )
+    reports_dir = str(REPO_ROOT / "test/torchci-reports")
+    parser.add_argument(
+        "--save-test-run-reports",
+        nargs="?",
+        const=reports_dir,
+        default=None,
+        metavar="DIR",
+        help="write test run reports (default: test/torchci-reports)",
+    )
+    parser.add_argument(
+        "--no-save-test-run-reports",
+        dest="save_test_run_reports",
+        action="store_const",
+        const=None,
+        default=argparse.SUPPRESS,
+        help="don't write test run reports",
+    )
     parser.add_argument(
         "-i",
         "--include",
@@ -1811,6 +1845,10 @@ def parse_args():
     args, extra = parser.parse_known_args()
     if "--" in extra:
         extra.remove("--")
+    # Tests run from test/, so a relative DIR means test/DIR.
+    reports_dir = args.save_test_run_reports
+    if reports_dir and not os.path.isabs(reports_dir):
+        args.save_test_run_reports = str(REPO_ROOT / "test" / reports_dir)
     args.additional_args = extra
     return args
 
