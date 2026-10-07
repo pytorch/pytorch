@@ -17,6 +17,13 @@ from typing import Any
 import torch
 
 
+# The model in a vendor's device string, e.g. "NVIDIA H100 80GB HBM3", "AMD Instinct
+# MI350X VF", "Apple M2 Pro", "Intel(R) Data Center GPU Max 1100".
+_MODELS = re.compile(
+    r"\b(A10G|A100|H100|H200|B200|B300|L4|L40S|L40|T4|V100|MI\d{3}[A-Z]?|M\d+|Max \d{4}|B\d{2})\b"
+)
+
+
 @dataclass
 class Environment:
     os: str
@@ -77,7 +84,7 @@ def capture() -> Environment:
         accelerator=accelerator,
         accelerator_version=acc_version,
         device_count=device_count,
-        device_name=raw_name,
+        device_name=_normalize_device_name(raw_name) if raw_name else "",
         flags=dict(TestEnvironment.env_var_values),
         properties={k: v for k, v in properties.items() if v},
     )
@@ -155,6 +162,15 @@ def _device(accelerator: str) -> tuple[str, str, str]:
     except Exception:
         pass
     return "", "", ""
+
+
+def _normalize_device_name(raw: str) -> str:
+    """h100, mi350x, m2, max1100, ...; an unknown name is kept whole, lower-cased
+    with dashes."""
+    match = _MODELS.search(raw)
+    if match:
+        return match.group(1).replace(" ", "").lower()
+    return re.sub(r"\s+", "-", raw.strip().lower())
 
 
 def _first_visible_index() -> int:
