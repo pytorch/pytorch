@@ -1291,7 +1291,9 @@ def instantiate_device_type_tests(
         # Two different test templates can map onto the same instantiated name, e.g. a
         # generic "TestFoo" and a device-specific "TestFooCPU". Without this check one
         # silently overwrites the other (or fails later with a confusing MRO error).
-        if class_name in scope:
+        # Non-class bindings are left alone: test files legitimately pre-declare the
+        # instantiated name as a fallback for when the device is filtered out.
+        if isinstance(scope.get(class_name), type):
             raise RuntimeError(
                 f"Cannot instantiate '{class_name}' for '{generic_test_class.__name__}': "
                 f"the name '{class_name}' is already defined in the target scope. "

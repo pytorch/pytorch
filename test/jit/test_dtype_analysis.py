@@ -385,6 +385,8 @@ class TestDtypeCustomRules(TestDtypeBase):
         self.custom_rules_test_base(device, dtype, op)
 
 
+# Fallback for PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda etc., where nothing is instantiated
+# below but test_jit.py still imports this name.
 TestDtypeCustomRulesCPU = None
 # This creates TestDtypeCustomRulesCPU
 instantiate_device_type_tests(TestDtypeCustomRules, globals(), only_for=("cpu",))
