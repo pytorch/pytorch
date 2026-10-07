@@ -6115,10 +6115,34 @@ if HAS_CUDA_AND_TRITON:
             compiled(torch.randn(8, 16, device="cuda", requires_grad=True))
             self.assertEqual(out, mod(x))
 
+        def test_eager_fallback_on_tree_output_backward_transitions(self):
+            # A forward the tree runs eagerly on an input it owns keeps the
+            # generation pending, so its uncaptured backward has to transition it.
+            lin = torch.nn.Linear(16, 16).cuda()
+            weight = torch.randn(16, 16, device="cuda", requires_grad=True)
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=False)
+            def fn(x, counter):
+                with torch.no_grad():
+                    y = lin(x).relu()
+                torch._dynamo.graph_break()
+                counter.add_(1)
+                return (y @ weight).sum()
+
+            compiled = torch.compile(fn, mode="reduce-overhead")
+            counter = torch.zeros(1, device="cuda")
+            for _ in range(3):
+                weight.grad = None
+                out = compiled(torch.randn(8, 16, device="cuda"), counter)
+                manager = self.get_manager()
+                self.assertTrue(manager.running_forwards_with_pending_backwards)
+                out.backward()
+                self.assertFalse(manager.running_forwards_with_pending_backwards)
+
         def test_eager_fallback_alone_leaves_manager_free(self):
-            # A forward the tree runs eagerly leaves nothing pending, so a model
-            # whose forward falls back does not block later generations even
-            # though its uncaptured backward never signals.
+            # A forward the tree runs eagerly on inputs it doesn't own leaves
+            # nothing pending, so a model whose forward falls back does not block
+            # later generations even though its uncaptured backward never signals.
             weight = torch.randn(16, 16, device="cuda", requires_grad=True)
 
             @torch._dynamo.override_cudagraphs(fwd=True, bwd=False)
@@ -6134,6 +6158,42 @@ if HAS_CUDA_AND_TRITON:
             manager = self.get_manager()
             self.assertIsNotNone(manager)
             self.assertFalse(manager.running_forwards_with_pending_backwards)
+
+        def test_eager_fallback_on_tree_output_keeps_generation_pending(self):
+            # A forward the tree runs eagerly can still save an input the tree owns
+            # for its backward, here the output of a no_grad graph from the same
+            # call. The generation has to stay pending until that backward runs.
+            lin = torch.nn.Linear(16, 16).cuda()
+            weight = torch.randn(16, 16, device="cuda", requires_grad=True)
+
+            def fn(x, counter):
+                with torch.no_grad():
+                    y = lin(x).relu()
+                torch._dynamo.graph_break()
+                counter.add_(1)
+                return (y @ weight).sum()
+
+            compiled = torch.compile(fn, mode="reduce-overhead")
+            counter = torch.zeros(1, device="cuda")
+            xs = [torch.randn(8, 16, device="cuda") for _ in range(4)]
+            for x in xs[:2]:
+                weight.grad = None
+                compiled(x, counter).backward()
+
+            weight.grad = None
+            first = compiled(xs[2], counter)
+            self.assertTrue(self.get_manager().running_forwards_with_pending_backwards)
+            # Had it not stayed pending, this call would start a new generation and
+            # free the tree output the first call saved.
+            second = compiled(xs[3], counter)
+            (first + second).backward()
+
+            expected = weight.detach().clone().requires_grad_()
+            for x in xs[2:]:
+                with torch.no_grad():
+                    y = lin(x).relu()
+                (y @ expected).sum().backward()
+            self.assertEqual(weight.grad, expected.grad)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):

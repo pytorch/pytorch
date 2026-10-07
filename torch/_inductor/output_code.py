@@ -210,15 +210,15 @@ def maybe_handle_backward_generation(
             # Look the manager up per call rather than at compile time: the
             # backward can be lowered before the forward has ever run (eager
             # backward lowering), and cudagraphify only creates the manager on
-            # the forward's first invocation. Only a forward call that ran in the
-            # tree left a generation to transition, and the call this backward
+            # the forward's first invocation. Only a forward call that left the
+            # generation pending has one to transition, and the call this backward
             # belongs to is the one with the same autograd invocation. It is owed
             # one transition: a retained graph can run this backward again after
             # another forward is pending.
             manager = get_manager(device_index, create_if_none_exists=False)
             invocation = current_autograd_invocation()
-            if manager is not None and invocation in manager.captured_invocations:
-                manager.captured_invocations.discard(invocation)
+            if manager is not None and invocation in manager.pending_invocations:
+                manager.pending_invocations.discard(invocation)
                 manager.set_to_running_backward()
             return compiled_graph_callable(new_inputs)
 
