@@ -132,13 +132,14 @@ class CudaReproTests(TestCase):
         self.assertEqual(result, expected)
 
     @parametrize("self_dtype", [torch.float32, torch.bfloat16])
+    @parametrize("inp_shape", [(64, 32), (32,)])
     @parametrize("beta", [0.0, 1.0, 2.0])
     @parametrize("cpp_wrapper", [False, True])
-    def test_addmm_out_dtype_compile(self, self_dtype, beta, cpp_wrapper):
-        inp = torch.randn(64, 32, device=device_type, dtype=self_dtype)
+    def test_addmm_out_dtype_compile(self, self_dtype, inp_shape, beta, cpp_wrapper):
+        inp = torch.randn(inp_shape, device=device_type, dtype=self_dtype)
         if beta == 0:
             # beta == 0 ignores inp, NaN included.
-            inp[0, 0] = float("nan")
+            inp.view(-1)[0] = float("nan")
         a = torch.randn(64, 16, device=device_type, dtype=torch.bfloat16)
         b = torch.randn(16, 32, device=device_type, dtype=torch.bfloat16)
 
@@ -154,6 +155,24 @@ class CudaReproTests(TestCase):
         self.assertEqual(result, expected)
         if not cpp_wrapper:
             FileCheck().check("extern_kernels.addmm_dtype").run(code)
+
+    @parametrize("self_dtype", [torch.float32, torch.bfloat16])
+    @parametrize("coordinate_descent_tuning", [False, True])
+    def test_addmm_out_dtype_k1_compile(self, self_dtype, coordinate_descent_tuning):
+        # The Inductor addmm decomposition rewrites K == 1 as a pointwise
+        # multiply in the promoted input dtype, so it must skip out_dtype.
+        inp = torch.randn(64, 32, device=device_type, dtype=self_dtype)
+        a = torch.randn(64, 1, device=device_type, dtype=torch.bfloat16)
+        b = torch.randn(1, 32, device=device_type, dtype=torch.bfloat16)
+
+        def fn(inp, x, y):
+            return torch.addmm(inp, x, y, out_dtype=torch.float32)
+
+        expected = fn(inp, a, b)
+        with config.patch(coordinate_descent_tuning=coordinate_descent_tuning):
+            result = torch.compile(fn, backend="inductor", fullgraph=True)(inp, a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
 
     def test_addmm_out_dtype_inplace_compile(self):
         acc = torch.randn(64, 32, device=device_type, dtype=torch.float32)
