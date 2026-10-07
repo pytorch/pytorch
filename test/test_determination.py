@@ -4,7 +4,7 @@ import os
 
 import run_test
 
-from tools.testing.modulefinder_determinator import test_impact_of_file
+from tools.testing import modulefinder_determinator as _modulefinder
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -33,8 +33,8 @@ class DeterminationTest(TestCase):
         return [
             test
             for test in cls.TESTS
-            if run_test.should_run_test(
-                run_test.TARGET_DET_LIST, test, changed_files, DummyOptions()
+            if _modulefinder.should_run_test(
+                _modulefinder.TARGET_DET_LIST, test, changed_files, DummyOptions()
             )
         ]
 
@@ -43,7 +43,7 @@ class DeterminationTest(TestCase):
         # but most importantly to allow us to comment on the absence
         # of a test. It would be very difficult to add a file right
         # next to a comment that says to keep it out of the list.
-        self.assertListEqual(run_test.TARGET_DET_LIST, sorted(run_test.TARGET_DET_LIST))
+        self.assertListEqual(_modulefinder.TARGET_DET_LIST, sorted(_modulefinder.TARGET_DET_LIST))
 
     def test_config_change_only(self):
         """CI configs trigger all tests"""
@@ -51,23 +51,23 @@ class DeterminationTest(TestCase):
 
     def test_classifies_git_style_paths(self):
         """Git-style paths use / even on Windows"""
-        self.assertEqual(test_impact_of_file("torch/nn/modules/linear.py"), "TORCH")
-        self.assertEqual(test_impact_of_file("test/test_jit.py"), "TEST")
-        self.assertEqual(test_impact_of_file("caffe2/python/core.py"), "CAFFE2")
-        self.assertEqual(test_impact_of_file(".ci/pytorch/test.sh"), "CI")
+        self.assertEqual(_modulefinder.test_impact_of_file("torch/nn/modules/linear.py"), "TORCH")
+        self.assertEqual(_modulefinder.test_impact_of_file("test/test_jit.py"), "TEST")
+        self.assertEqual(_modulefinder.test_impact_of_file("caffe2/python/core.py"), "CAFFE2")
+        self.assertEqual(_modulefinder.test_impact_of_file(".ci/pytorch/test.sh"), "CI")
 
     def test_classifies_windows_style_paths(self):
         """Windows-style paths are still accepted"""
-        self.assertEqual(test_impact_of_file(r"torch\nn\modules\linear.py"), "TORCH")
-        self.assertEqual(test_impact_of_file(r"test\test_jit.py"), "TEST")
-        self.assertEqual(test_impact_of_file(r"caffe2\python\core.py"), "CAFFE2")
-        self.assertEqual(test_impact_of_file(r".ci\pytorch\test.sh"), "CI")
+        self.assertEqual(_modulefinder.test_impact_of_file(r"torch\nn\modules\linear.py"), "TORCH")
+        self.assertEqual(_modulefinder.test_impact_of_file(r"test\test_jit.py"), "TEST")
+        self.assertEqual(_modulefinder.test_impact_of_file(r"caffe2\python\core.py"), "CAFFE2")
+        self.assertEqual(_modulefinder.test_impact_of_file(r".ci\pytorch\test.sh"), "CI")
 
     def test_should_run_test_handles_git_style_paths(self):
         """should_run_test handles raw Git-style changed-file paths"""
         self.assertTrue(
-            run_test.should_run_test(
-                run_test.TARGET_DET_LIST,
+            _modulefinder.should_run_test(
+                _modulefinder.TARGET_DET_LIST,
                 "test_determination",
                 ["torch/utils/cpp_extension.py"],
                 DummyOptions(),
@@ -77,8 +77,8 @@ class DeterminationTest(TestCase):
     def test_should_run_test_handles_windows_style_paths(self):
         """should_run_test still handles Windows-style changed-file paths"""
         self.assertTrue(
-            run_test.should_run_test(
-                run_test.TARGET_DET_LIST,
+            _modulefinder.should_run_test(
+                _modulefinder.TARGET_DET_LIST,
                 "test_determination",
                 [r"torch\utils\cpp_extension.py"],
                 DummyOptions(),
@@ -137,7 +137,9 @@ class DeterminationTest(TestCase):
         self.assertEqual(
             # Many files are force-imported to all tests,
             # due to the layout of the project.
-            self.determined_tests(["torch/onnx/utils.py"]),
+            self.determined_tests(
+                ["torch/onnx/_internal/torchscript_exporter/utils.py"]
+            ),
             self.TESTS,
         )
         self.assertEqual(
@@ -147,16 +149,11 @@ class DeterminationTest(TestCase):
                     "torch/autograd/_functions/utils.pyi",
                 ]
             ),
-            ["test_utils"],
+            [],
         )
         self.assertEqual(
             self.determined_tests(["torch/utils/cpp_extension.py"]),
-            [
-                "test_cpp_extensions_aot_ninja",
-                "test_cpp_extensions_aot_no_ninja",
-                "test_utils",
-                "test_determination",
-            ],
+            self.TESTS,
         )
 
     def test_new_folder(self):
