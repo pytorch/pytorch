@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ctypes
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 import torch
 from torch._utils import _dummy_type
@@ -11,6 +11,10 @@ from torch._utils import _dummy_type
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from typing import Any
+
+
+_T = TypeVar("_T")
 
 
 if not hasattr(torch._C, "_CudaStreamBase"):
@@ -278,16 +282,18 @@ class Event(torch._C._CudaEventBase):
 
 def execute_on_streams(
     streams: Sequence[Stream],
-    fn: Callable[[int], None],
-) -> None:
+    fn: Callable[..., _T],
+    *inputs: Sequence[Any],
+) -> list[_T]:
     r"""Enqueue a callback on each stream and join its work to the caller stream.
 
-    Calls ``fn(index)`` in order with the corresponding stream made current.
+    Calls ``fn(*args)`` for corresponding items from the input sequences, with
+    each stream made current in order. Returns the results in the same order.
     Python callbacks run sequentially; their CUDA work may execute concurrently.
     Each stream waits for work previously submitted to the caller's current
     stream. Subsequent work on the caller stream waits for every callback's
     queued work, including work queued before a callback raises. These waits
-    are asynchronous and do not synchronize the host.
+    do not synchronize the host.
 
     The caller's current stream and device are restored on success or failure.
     After a callback raises, remaining callbacks are not invoked. Callbacks
@@ -299,11 +305,20 @@ def execute_on_streams(
 
     Args:
         streams: Nonempty sequence of ordinary or green-context CUDA streams.
-        fn: Callback receiving the index of the current stream.
+        fn: Callback receiving one item from each input sequence.
+        *inputs: One or more sequences, each with one item per stream.
+
+    Returns:
+        List of callback results in stream order.
     """
     if not streams:
         raise ValueError("Need at least one CUDA stream to execute on")
+    if not inputs:
+        raise ValueError("Need at least one input sequence")
+    if any(len(values) != len(streams) for values in inputs):
+        raise ValueError("Each input sequence must have one item per stream")
 
+    results: list[_T] = []
     caller_stream = torch.cuda.current_stream()
     events = [torch.cuda.Event() for _ in streams]
     start = torch.cuda.Event()
@@ -313,25 +328,26 @@ def execute_on_streams(
         if all(stream.device == caller_stream.device for stream in streams):
             # Restoring the caller stream between launches increases overheads.
             try:
-                for index, (stream, done) in enumerate(zip(streams, events)):
+                for stream, done, args in zip(streams, events, zip(*inputs)):
                     torch.cuda.set_stream(stream)
                     stream.wait_event(start)
                     try:
-                        fn(index)
+                        results.append(fn(*args))
                     finally:
                         done.record(stream)
                         completed += 1
             finally:
                 torch.cuda.set_stream(caller_stream)
         else:
-            for index, (stream, done) in enumerate(zip(streams, events)):
+            for stream, done, args in zip(streams, events, zip(*inputs)):
                 with torch.cuda.stream(stream):
                     stream.wait_event(start)
                     try:
-                        fn(index)
+                        results.append(fn(*args))
                     finally:
                         done.record(stream)
                         completed += 1
     finally:
         for done in events[:completed]:
             caller_stream.wait_event(done)
+    return results
