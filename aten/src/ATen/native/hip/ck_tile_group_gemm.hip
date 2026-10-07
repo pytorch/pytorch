@@ -1,5 +1,6 @@
 #include <ATen/native/hip/ck_tile_group_gemm.h>
 #include <ATen/hip/HIPContext.h>
+#include <ATen/native/GroupedMMUtils.h>
 #include <c10/hip/HIPException.h>
 #include <c10/hip/HIPStream.h>
 #include <ck_tile/core.hpp>
@@ -9,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 
 namespace at::hip::detail {
@@ -315,19 +317,110 @@ namespace at::hip::detail {
 	}
 
 	void group_gemm_ck_tile(
-			const at::Tensor& mat_a,
-			const at::Tensor& mat_b,
+			const at::Tensor& mat_a_in,
+			const at::Tensor& mat_b_in,
 			const std::optional<at::Tensor>& offs,
 			const std::optional<at::Tensor>& /*bias*/,
 			at::Tensor& out) {
-		// 1. Layouts: get transposed flags (check_valid_strides_and_return_transposed in
-		//    ATen/native/GroupedMMUtils.h); .contiguous() any layout we don't instantiate.
-		//    Read strides only from the tensors actually launched with.
-		// 2. M, N, K, group_count: see GroupMM.cu (-1 marks the jagged dim)
-		// 3. Host checks: group_count <= 1024; offs->size(0) == group_count when an operand is 2D;
-		//    sizes and strides fit in int32 (ck_tile::index_t)
-		// 4. group_args = at::empty({group_count * sizeof(ck_tile::GemmTransKernelArg<>)}, out.options().dtype(at::kByte))
-		// 5. Switch on mat_a.scalar_type(): kBFloat16 -> ck_tile::bf16_t, kHalf -> ck_tile::half_t, kFloat -> float,
-		//    and call launch_ck_tile_group_gemm<DataType>(...)
+		if (out.numel() == 0) {
+			return;
+		}
+
+		const bool a_is_2d = mat_a_in.dim() == 2;
+		const bool b_is_2d = mat_b_in.dim() == 2;
+
+		// 1. Layouts. The jagged dim must not be the contiguous one: groups can start at any offset along it,
+		// which breaks the vectorized loads/stores. Copy into a suitable layout only when needed.
+		auto row_major = [](const at::Tensor& t) { return !at::native::check_valid_strides_and_return_transposed(t); };
+		auto to_row_major = [](const at::Tensor& t) { return t.contiguous(); };
+		auto to_col_major = [](const at::Tensor& t) { return t.transpose(-2, -1).contiguous().transpose(-2, -1); };
+		at::Tensor mat_a = mat_a_in;
+		at::Tensor mat_b = mat_b_in;
+		if (a_is_2d && b_is_2d) {
+			// jagged K: K must not be contiguous -> column-major A (M, sumK), row-major B (sumK, N)
+			if (row_major(mat_a)) mat_a = to_col_major(mat_a);
+			if (!row_major(mat_b)) mat_b = to_row_major(mat_b);
+		} else if (a_is_2d) {
+			// jagged M: M must not be contiguous -> row-major A (sumM, K); B can be either
+			if (!row_major(mat_a)) mat_a = to_row_major(mat_a);
+		} else if (b_is_2d) {
+			// jagged N: N must not be contiguous in B -> column-major B (K, sumN); row-major A
+			if (row_major(mat_b)) mat_b = to_col_major(mat_b);
+			if (!row_major(mat_a)) mat_a = to_row_major(mat_a);
+		} else if (!row_major(mat_a) && !row_major(mat_b)) {
+			// 3D x 3D: every layout pair except column-major A with column-major B is instantiated
+			mat_a = to_row_major(mat_a);
+		}
+		const bool a_row_major = row_major(mat_a);
+		const bool b_row_major = row_major(mat_b);
+
+		// 2. Per-group sizes; -1 marks the jagged dim (filled per group from offs on the device).
+		int64_t M = mat_a.size(-2);
+		int64_t K = mat_a.size(-1);
+		int64_t N = mat_b.size(-1);
+		int64_t group_count = 0;
+		if (a_is_2d && b_is_2d) {
+			group_count = offs->size(0);
+			K = -1;
+		} else if (a_is_2d) {
+			group_count = mat_b.size(0);
+			M = -1;
+		} else if (b_is_2d) {
+			group_count = mat_a.size(0);
+			N = -1;
+		} else {
+			group_count = mat_a.size(0);
+		}
+
+		// 3. Host checks.
+		if (group_count == 0) {
+			return;
+		}
+		TORCH_CHECK(group_count <= 1024, "ck_tile group gemm: at most 1024 groups are supported, got ", group_count);
+		if (a_is_2d != b_is_2d) {
+			TORCH_CHECK(offs->size(0) == group_count, "ck_tile group gemm: expected offs to have ", group_count,
+					" entries (one per group), got ", offs->size(0));
+		}
+		// ck_tile stores sizes and leading dims as 32-bit index_t; per-group pointers are computed in 64 bits.
+		constexpr int64_t index_max = std::numeric_limits<index_t>::max();
+		for (const at::Tensor* t : {&mat_a, &mat_b, &out}) {
+			for (int64_t d = 0; d < t->dim(); ++d) {
+				TORCH_CHECK(t->size(d) <= index_max && (d == 0 || t->stride(d) <= index_max),
+						"ck_tile group gemm: sizes and leading dimensions must fit in int32, got sizes ", t->sizes(),
+						" strides ", t->strides());
+			}
+		}
+		// ck_tile's vector loads need the host-known extent along each contiguous dim to be a multiple of 16 bytes.
+		const int64_t vector_elems = 16 / mat_a.element_size();
+		auto aligned = [&](int64_t extent) { return extent < 0 || extent % vector_elems == 0; };
+		TORCH_CHECK_NOT_IMPLEMENTED(aligned(a_row_major ? K : M) && aligned(b_row_major ? N : K),
+				"ck_tile group gemm: the contiguous dims of A and B must be multiples of ", vector_elems,
+				" elements, got M=", M, " N=", N, " K=", K, " (-1 = jagged)");
+
+		// 4. One ck_tile::GemmTransKernelArg per group, filled on the device by prepare_grouped_gemm_data.
+		at::Tensor group_args = at::empty(
+				{group_count * static_cast<int64_t>(sizeof(ck_tile::GemmTransKernelArg<>))},
+				out.options().dtype(at::kByte));
+
+		// 5. Dtype dispatch.
+		auto launch = [&](auto dtype_tag) {
+			using DataType = decltype(dtype_tag);
+			launch_ck_tile_group_gemm<DataType>(
+					mat_a, mat_b, offs, out, group_args, a_row_major, b_row_major,
+					static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count));
+		};
+		switch (mat_a.scalar_type()) {
+			case at::kBFloat16:
+				launch(ck_tile::bf16_t{});
+				break;
+			case at::kHalf:
+				launch(ck_tile::half_t{});
+				break;
+			case at::kFloat:
+				launch(float{});
+				break;
+			default:
+				TORCH_CHECK(false, "ck_tile group gemm: unsupported dtype ", mat_a.scalar_type());
+		}
 	}
 }
