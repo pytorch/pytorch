@@ -55,11 +55,6 @@ class TestExtendedCUDAIsAvail(TestCase):
         _ = torch.cuda.is_available()
         return torch.cuda._is_in_bad_fork()
 
-    @staticmethod
-    def init_cuda_in_child() -> bool:
-        torch.cuda.init()
-        return torch.cuda.is_initialized()
-
     @unittest.skipIf(IS_WINDOWS or torch.version.hip is not None, "NVIDIA fork test")
     def test_triton_driver_probe_does_not_poison_fork(self):
         if not has_triton_package():
@@ -73,8 +68,7 @@ class TestExtendedCUDAIsAvail(TestCase):
             self.assertFalse(torch.cuda.is_initialized())
             self.assertTrue(backends["nvidia"].driver.is_active())
             with multiprocessing.get_context("fork").Pool(1) as pool:
-                result = pool.apply_async(TestExtendedCUDAIsAvail.init_cuda_in_child)
-                self.assertTrue(result.get(timeout=60))
+                pool.apply_async(torch.cuda.init).get(timeout=60)
 
     # These tests validate the behavior and activation of the weaker, NVML-based, user-requested
     # `torch.cuda.is_available()` assessment. The NVML-based assessment should be attempted when
