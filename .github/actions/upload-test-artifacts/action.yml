@@ -93,7 +93,7 @@ runs:
         import zipfile
         from pathlib import Path
 
-        name = f"test-run-reports-{os.environ['FILE_SUFFIX']}.zip"
+        name = f"test-run-reports-{os.environ['FILE_SUFFIX']}.report.zip"
         with zipfile.ZipFile(name, "w", zipfile.ZIP_DEFLATED) as z:
             for f in Path("test/test-run-reports").glob("**/*.jsonl"):
                 z.write(f)
@@ -128,7 +128,7 @@ runs:
       run: |
         # -ir => recursive include all files in pattern
         if (Test-Path test\test-run-reports) {
-          7z a "test-run-reports-$Env:FILE_SUFFIX.zip" -ir'!test\test-run-reports\*.jsonl'
+          7z a "test-run-reports-$Env:FILE_SUFFIX.report.zip" -ir'!test\test-run-reports\*.jsonl'
         }
 
     - name: Zip usage log for upload
@@ -289,7 +289,7 @@ runs:
       continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
-        name: test-run-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
+        name: test-run-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.report.zip
         retention-days: 14
         if-no-files-found: ignore
         # upload-artifact roots the artifact at the path before the first wildcard,
