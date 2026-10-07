@@ -306,4 +306,29 @@ TEST(SymIntTest, MaterializedShapeSurvivesTensorImplCopy) {
   EXPECT_EQ(copy->sizes(), IntArrayRef(expected_sizes));
   EXPECT_EQ(copy->strides(), IntArrayRef(expected_strides));
 }
+
+// ExtraMeta can exist without SymbolicShapeMeta (e.g. it only holds
+// BackendMeta); going symbolic must still create the SymbolicShapeMeta.
+TEST(SymIntTest, SetSymbolicSizesWithExistingExtraMeta) {
+  Storage storage(
+      Storage::use_byte_size_t(), /*size_bytes=*/0, GetCPUAllocator());
+  auto impl = c10::make_intrusive<TensorImpl>(
+      std::move(storage),
+      DispatchKeySet(DispatchKey::CPU),
+      caffe2::TypeMeta::Make<float>());
+  auto backend_meta = c10::make_intrusive<BackendMeta>();
+  impl->set_backend_meta(backend_meta);
+
+  std::vector<SymInt> sizes{
+      create_symbolic_symint(2), create_symbolic_symint(3)};
+  std::vector<SymInt> strides{
+      create_symbolic_symint(3), create_symbolic_symint(1)};
+  impl->set_sizes_and_strides(sizes, strides);
+
+  const std::vector<int64_t> expected_sizes{2, 3};
+  const std::vector<int64_t> expected_strides{3, 1};
+  EXPECT_EQ(impl->sizes(), IntArrayRef(expected_sizes));
+  EXPECT_EQ(impl->strides(), IntArrayRef(expected_strides));
+  EXPECT_EQ(impl->get_backend_meta(), backend_meta.get());
+}
 #endif
