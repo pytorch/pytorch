@@ -6,12 +6,22 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
 from torch.testing._internal.torchci import environment, report
+
+
+def effective_exit_code(returned: int, elapsed: float, timeout: float | None) -> int:
+    """124 for a process that timed out, else ``returned``. When pytest exits in
+    the SIGINT grace period after a timeout, retry_shell returns its exit code
+    instead: 2, or -2 if the SIGINT killed it."""
+    if timeout is not None and elapsed >= timeout and returned in (2, -signal.SIGINT):
+        return 124
+    return returned
 
 
 def _dead_run(inflight: dict[str, Any], exit_code: int) -> dict[str, Any]:
