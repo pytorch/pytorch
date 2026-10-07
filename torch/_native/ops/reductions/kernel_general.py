@@ -12,7 +12,7 @@ from cutlass import Int32, Int64
 import torch
 from torch._tensor_iterator import reduce_op
 
-from ...cutedsl import launch as _L
+from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import _storage, tile
@@ -270,11 +270,12 @@ def fast_kind(red_pairs: Pairs, kept_pairs: Pairs, nouts: int) -> str | None:
 
 # Largest one-block register-loaded row; only merging uses smem. Larger uses multi-CTA.
 _MAX_ROW_BYTES = 192 * 1024
-# Bound loads when odd or prime N collapses vector width. 64 separates measured wins from
-# losses; routing beyond it improved 0.08-0.17x to 1.93-2.41x of ATen.
-_ONESHOT_MAX_LOADS = 64
-# Cap ragged chunks per row and therefore the stage-2 fold.
-_C_MAX_ROW = 64
+# Bound loads when odd or prime N collapses vector width. Width 4097 needs 65 scalar
+# loads for 16-bit inputs; keeping it on rowtile measured 41us instead of 102us.
+_ONESHOT_MAX_LOADS = 65
+# Minimum reduced elements per output before a cross-CTA split is worth its second launch.
+_SPLIT_MIN_COUNT = 256
+_WIDE_SPLIT_MIN_BYTES = 32 * 1024 * 1024
 
 # General-axis occupancy baselines, not a tuned performance surface.
 _K0_BLOCK = 128
@@ -312,37 +313,29 @@ def _try_fast_row(
         return None
     from . import kernel_rowtile as rt
 
-    # Packed rows floor at one warp (25% utilized at N=32), but inner-tree order owns
-    # its thread map. Forcing threads_per_row=1 changed bits at (524288, 16) and (524288, 128).
-    if (
-        rt.narrow_row(N, x.element_size(), x.shape[0])
-        and not rt.inner_tree_order_enabled()
-    ):
+    M, itemsize = x.shape[0], x.element_size()
+    ordered = rt.inner_tree_order_enabled()
+    if ordered and rt.itree_plan(N, M, itemsize) is not None:
+        return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
+    if not ordered and rt.one_thread_row_ok(N, itemsize, M, x.device):
         return rt.reduce_row_tile(
             trait, trait_key, x, out_dtypes, nouts=nouts, threads_per_row=1
         )
     if _oneshot_ok(x):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
-    # Bypass default-order xcta whenever the fold gate has a plan. Otherwise bits differed at
-    # (64, 100000), (8, 200000), and (8, 1000000).
-    if rt.inner_tree_order_enabled() and (
-        rt.itree_plan(N, x.shape[0], x.element_size()) is not None
-    ):
-        return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
+
     from . import kernel_xcta as xc
 
     if nouts == 2:
-        # Project both fields from one fused split; one-block-per-row measured
-        # 0.63x of ATen at N=65536 and 0.20x at 131072.
+        # The same fused split as nouts==1, projecting both fields. Without it a few-row/huge-N
+        # 2-output reduction lands on one-block-per-row: 0.63x of ATen at N=65536, 0.20x at 131072.
         res = xc.reduce_row_xcta_2out(trait, trait_key, x, out_dtypes)
-        if res is not None:
-            return res
-        # Fall back when N has no exact divisor split.
-        return _two_stage_row(trait, trait_key, x, out_dtypes, nouts)
-    res = xc.reduce_row_xcta(trait, trait_key, x, out_dtypes[0])
+    else:
+        res = xc.reduce_row_xcta(trait, trait_key, x, out_dtypes[0])
+        res = None if res is None else (res,)
     if res is not None:
-        return (res,)
-    # Ragged splitting handles prime N and absolute indices without exact divisibility.
+        return res
+    # Prime sizes and index traits fall through to the ragged split.
     return _two_stage_row(trait, trait_key, x, out_dtypes, nouts)
 
 
@@ -367,57 +360,98 @@ def _two_stage_row(
     nouts: int,
     block: int = _K0_ALL_BLOCK,
 ) -> tuple[torch.Tensor, ...] | None:
-    # Ragged chunks handle N without an in-window divisor; stage 1 clamps row tails and
-    # carries global indices, preserving first-wins ties. Prime (8, 131071) measured
-    # 0.28x of ATen without this split. Decline C == 1.
     M, N = x.shape
-    sm = torch.cuda.get_device_properties(x.device).multi_processor_count
-    # Fill the device, then align chunk bases to 16 bytes; C follows from chunk size.
-    C = max(1, min(_C_MAX_ROW, -(-(sm * _K0_ALL_GRID_MULT) // max(1, M))))
-    if C == 1:
-        return None
-    vec = max(1, 16 // x.element_size())
-    s_chunk = max(vec, -(-N // C) // vec * vec)
-    C = -(-N // s_chunk)
-    if C == 1:
-        return None
+    # A row split is the one-reduced-pair case of the general splitter.
+    return _two_stage_general(
+        trait,
+        trait_key,
+        x,
+        [(N, 1)],
+        kept_pairs=[(M, N)],
+        num_o=M,
+        count=N,
+        out_dtypes=out_dtypes,
+        nouts=nouts,
+        block=block,
+    )
 
+
+def _two_stage_general(
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    red_pairs: Pairs,
+    kept_pairs: Pairs,
+    num_o: int,
+    count: int,
+    out_dtypes: Sequence[torch.dtype],
+    nouts: int,
+    block: int = _K0_ALL_BLOCK,
+) -> tuple[torch.Tensor, ...] | None:
+    # Split the slowest-varying reduced run to fill the device when kept coordinates do not.
+    if not red_pairs:
+        return None
+    if getattr(trait, "has_index", False) and len(red_pairs) > 1:
+        # A mixed-radix step index is not a reduced coordinate for multi-run index traits.
+        return None
+    sm = _hw.caps(x.device).sm_count
+    E, S = red_pairs[-1]
+    grid_mult = _K0_ALL_GRID_MULT
+    if count * x.element_size() >= _WIDE_SPLIT_MIN_BYTES:
+        grid_mult = getattr(trait, "split_grid_mult", grid_mult)
+    want = -(-(sm * grid_mult) // max(1, num_o))
+    # Total stage-1 CTAs stay near the architecture's occupancy target because
+    # want scales inversely with num_o. A fixed per-row cap left B200 below one wave.
+    C = max(1, min(want, E))
+    if C == 1:
+        return None
+    e = -(-E // C)
+    if S == 1:
+        # Preserve transfer alignment for unit-stride chunks.
+        vec = max(1, tile.TRANSFER_ALIGNMENT // x.element_size())
+        e = min(E, max(vec, e // vec * vec))
+    C = -(-E // e)
+    if C == 1:
+        return None
+    inner = count // E
     parts = [
-        torch.empty(M * C, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
+        torch.empty(num_o * C, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
-    outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
+    outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
 
-    # Stage 1 emits each (row, chunk); the leading kept pair identifies the chunk.
+    # Put the chunk pair first so each kept coordinate's C partials are contiguous.
     s1 = ReduceBlock(
         trait,
-        count=s_chunk,
-        num_o=M * C,
-        red_pairs=[(s_chunk, 1)],
-        kept_pairs=[(C, s_chunk), (M, N)],
-        limit=N,
+        count=e * inner,
+        num_o=num_o * C,
+        red_pairs=list(red_pairs[:-1]) + [(e, S)],
+        kept_pairs=[(C, e * S)] + list(kept_pairs),
+        in_base=int(x.storage_offset()),
+        limit=count,
         ragged_chunk=True,
         gidx_from="chunk" if getattr(trait, "has_index", False) else "r",
         nouts=trait.nfields,
         final=False,
         block=block,
     )
-    _launch(s1, ("rowrag1", trait_key, x.dtype) + s1.cache_sig, [_flat(x)], parts)
+    _launch(s1, ("gensplit1", trait_key, x.dtype) + s1.cache_sig, [_flat(x)], parts)
 
-    # Stage 2 folds C partials and projects once with the true row length.
     s2 = ReduceBlock(
         trait,
         count=C,
-        num_o=M,
+        num_o=num_o,
         red_pairs=[(C, 1)],
-        kept_pairs=[(M, C)],
+        kept_pairs=[(num_o, C)],
         from_partials=True,
-        project_n=N,
+        project_n=count,
         nouts=nouts,
         final=True,
         block=block,
     )
-    _launch(s2, ("rowrag2", trait_key, tuple(out_dtypes)) + s2.cache_sig, parts, outs)
+    part_dtypes = tuple(p.dtype for p in parts)
+    key = ("gensplit2", trait_key, tuple(out_dtypes), part_dtypes) + s2.cache_sig
+    _launch(s2, key, parts, _kernel_outs(outs))
     return tuple(outs)
 
 
@@ -540,21 +574,23 @@ def _reduce(
     num_o = max(1, math.prod(out_shape))
     count = x.numel() // num_o
     red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
+    complex_input = getattr(trait, "complex_input", False)
 
     from . import kernel_rowtile as rt
 
     if (
-        not getattr(trait, "complex_input", False)
+        not complex_input
         and rt.inner_tree_order_enabled()
         and count < _INT32_LIMIT
         and num_o < _INT32_LIMIT
     ):
         kind = fast_kind(red_pairs, kept_pairs, nouts)
         if x.is_contiguous() and kind in ("row", "all"):
+            x2 = x.reshape(num_o, count)
             ordered = rt.reduce_row_tile(
                 trait,
                 trait_key,
-                x.reshape(num_o, count),
+                x2,
                 out_dtypes,
                 nouts=nouts,
                 order="inner_tree",
@@ -574,22 +610,30 @@ def _reduce(
         if ordered is not None:
             return tuple(_as_shape(o, out_shape) for o in ordered)
 
-    # One-output reductions use reduce_all's split instead of one block for the entire row.
-    # This includes full dims and M=1 rows whose size-one kept axes TI removes.
-    if math.prod(out_shape) == 1 and nouts == 1 and x.is_contiguous():
-        out = reduce_all(trait, trait_key, x, out_dtypes[0], block=block)
-        return (_as_shape(out, out_shape),)
+    # Route one-element outputs through the reduce-all split instead of one general block.
+    if math.prod(out_shape) == 1 and x.is_contiguous():
+        if nouts == 1:
+            out = reduce_all(trait, trait_key, x, out_dtypes[0], block=block)
+            return (_as_shape(out, out_shape),)
+        outs = reduce_all2(trait, trait_key, x, out_dtypes, block=block)
+        return tuple(_as_shape(o, out_shape) for o in outs)
 
     # Reshape post-TI contiguous innermost reductions onto a fast kernel; general remains
     # the fallback for direct calls and declines.
-    if len(out_shape) > 0 and x.is_contiguous():
+    if (
+        not complex_input
+        and len(out_shape) > 0
+        and x.is_contiguous()
+        and count < _INT32_LIMIT
+        and num_o < _INT32_LIMIT
+    ):
         kind = fast_kind(red_pairs, kept_pairs, nouts)
         red_n = x.numel() // max(1, math.prod(out_shape))
         if kind == "row":
             x2 = x.reshape(math.prod(out_shape), red_n)
             fast = _try_fast_row(trait, trait_key, x2, out_dtypes, nouts)
             if fast is not None:
-                return tuple(o.reshape(out_shape) for o in fast)
+                return tuple(_as_shape(o, out_shape) for o in fast)
         elif kind == "col":
             # Splitting the reduced axis supplies parallelism for tall-narrow inputs:
             # 7.24x, 2.53x, and 1.49x of ATen at (65536, 256), (16384, 1024), and (4096, 4096).
@@ -598,6 +642,25 @@ def _reduce(
             x2 = x.reshape(red_n, math.prod(out_shape))
             out = ct.reduce_col_tile(trait, trait_key, x2, out_dtypes[0])
             return (_as_shape(out, out_shape),)
+
+    # One block per kept coordinate is the whole grid, so split the reduced run whenever it
+    # would not fill the SMs and there is enough work per output to pay for a second launch.
+    sm = _hw.caps(x.device).sm_count
+    if num_o < sm * _K0_ALL_GRID_MULT and count >= _SPLIT_MIN_COUNT:
+        split = _two_stage_general(
+            trait,
+            trait_key,
+            x,
+            red_pairs,
+            kept_pairs,
+            num_o,
+            count,
+            out_dtypes,
+            nouts,
+            block,
+        )
+        if split is not None:
+            return tuple(_as_shape(o, out_shape) for o in split)
 
     outs = [torch.empty(out_shape, device=x.device, dtype=d) for d in out_dtypes]
     op = ReduceBlock(
@@ -611,7 +674,7 @@ def _reduce(
         block=block,
     )
     key = ("reduce", trait_key, x.dtype, tuple(out_dtypes)) + op.cache_sig
-    _launch(op, key, [_flat(x)], [o.reshape(-1) for o in outs])
+    _launch(op, key, [_flat(x)], _kernel_outs(outs))
     return tuple(outs)
 
 
@@ -654,6 +717,17 @@ def reduce_all(
     return _reduce_all(trait, trait_key, x, [out_dtype], 1, block, grid_mult)[0]
 
 
+def reduce_all2(
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtypes: Sequence[torch.dtype],
+    block: int = _K0_ALL_BLOCK,
+    grid_mult: int = _K0_ALL_GRID_MULT,
+) -> tuple[torch.Tensor, ...]:
+    return _reduce_all(trait, trait_key, x, list(out_dtypes), 2, block, grid_mult)
+
+
 def _reduce_all(
     trait: Any,
     trait_key: str,
@@ -665,18 +739,32 @@ def _reduce_all(
 ) -> tuple[torch.Tensor, ...]:
     # Try the one-shot row kernel, fused cross-CTA split, then grid-striding fallback.
     # All preserve flat indices because reduce-all is a single row.
-    if not (x.is_cuda and x.is_contiguous()):
-        raise AssertionError(
-            f"reduce-all needs a contiguous CUDA input, got {x.device} {x.stride()}"
-        )
+    if not x.is_cuda:
+        raise AssertionError(f"reduce-all needs a CUDA input, got {x.device}")
+    if not x.is_contiguous():
+        return _reduce(trait, trait_key, x, None, out_dtypes, nouts, block=block)
     L = x.numel()
+    complex_input = getattr(trait, "complex_input", False)
     xf = x.reshape(-1)
+    if L == 1 and xf.stride(0) != 1:
+        # A single element is contiguous at any stride; the wrap still requires unit stride.
+        xf = xf.as_strided((1,), (1,))
     # Keep one-shot inputs out of xcta, which adds a ~1.9us launch or declines them.
     # Direct routing measured 1.2-2.1x over ATen.
     x2 = xf.view(1, -1)
-    if _oneshot_ok(x2):
-        from . import kernel_rowtile as rt
+    from . import kernel_rowtile as rt
 
+    if not complex_input and rt.inner_tree_order_enabled() and L < _INT32_LIMIT:
+        outs = rt.reduce_row_tile(
+            trait,
+            trait_key,
+            x2,
+            out_dtypes,
+            nouts=nouts,
+            order="inner_tree",
+        )
+        return tuple(_as_shape(o, ()) for o in outs)
+    if not complex_input and _oneshot_ok(x2):
         # Avoid row-packing threads for a single-row launch; None keeps the existing config.
         cfg = rt.single_row_config(L, x.element_size() * 8)
         outs = rt.reduce_row_tile(
@@ -691,15 +779,18 @@ def _reduce_all(
         return tuple(_as_shape(o, ()) for o in outs)
     from . import kernel_xcta as xc
 
-    if nouts == 1:
-        res = xc.reduce_row_xcta(trait, trait_key, xf, out_dtypes[0], flatten=True)
-        res = None if res is None else (res,)
-    else:
-        res = xc.reduce_row_xcta_2out(trait, trait_key, xf, out_dtypes, flatten=True)
-    if res is not None:
-        return res
+    if not complex_input:
+        if nouts == 1:
+            res = xc.reduce_row_xcta(trait, trait_key, xf, out_dtypes[0], flatten=True)
+            res = None if res is None else (res,)
+        else:
+            res = xc.reduce_row_xcta_2out(
+                trait, trait_key, xf, out_dtypes, flatten=True
+            )
+        if res is not None:
+            return res
     # If xcta declines, grid-stride any L without reshaping or extent-dependent compile cost.
-    sm = torch.cuda.get_device_properties(x.device).multi_processor_count
+    sm = _hw.caps(x.device).sm_count
     G = _grid_size(L, block, sm, grid_mult)
     chunk = (L + G - 1) // G
 
@@ -710,21 +801,23 @@ def _reduce_all(
     outs = [torch.empty(1, device=x.device, dtype=d) for d in out_dtypes]
 
     # Stage 1 models G contiguous chunks as kept (G, chunk), reduced (chunk, 1);
-    # flat_tail guards the last and gidx_from="flat" preserves global indices.
+    # flat_tail guards the last and chunk indices stay relative to the input view.
+    in_base = int(xf.storage_offset())
     s1 = ReduceBlock(
         trait,
         count=chunk,
         num_o=G,
         red_pairs=[(chunk, 1)],
         kept_pairs=[(G, chunk)],
-        limit=L,
+        in_base=in_base,
+        limit=in_base + L,
         flat_tail=True,
-        gidx_from="flat",
+        gidx_from="chunk",
         nouts=trait.nfields,
         final=False,
         block=block,
     )
-    _launch(s1, ("all1", trait_key, x.dtype) + s1.cache_sig, [xf], parts)
+    _launch(s1, ("all1", trait_key, x.dtype) + s1.cache_sig, [_flat(x)], parts)
 
     # Stage 2 folds G partials and projects with the true element count, keyed in cache_sig.
     s2 = ReduceBlock(
@@ -739,5 +832,9 @@ def _reduce_all(
         final=True,
         block=block,
     )
-    _launch(s2, ("all2", trait_key, tuple(out_dtypes)) + s2.cache_sig, parts, outs)
+    # Key on the PARTIAL dtypes too: for an index trait out_dtypes is the index dtype and does
+    # not track the value accumulator, so fp32 and fp64 argmax would share one cached kernel.
+    part_dtypes = tuple(p.dtype for p in parts)
+    s2_key = ("all2", trait_key, tuple(out_dtypes), part_dtypes) + s2.cache_sig
+    _launch(s2, s2_key, parts, _kernel_outs(outs))
     return tuple(_as_shape(o, ()) for o in outs)
