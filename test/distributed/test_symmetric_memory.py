@@ -2106,6 +2106,66 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
 
+class SymmMemExportCleanupTest(MultiProcessTestCase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @requires_cuda
+    @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported")
+    def test_rejected_rendezvous_closes_exported_descriptor(self) -> None:
+        import gc
+        from datetime import timedelta
+
+        if not dist.is_gloo_available() or not os.path.isdir("/proc/self/fd"):
+            self.skipTest("Gloo and Linux descriptor inventory required")
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TORCH_SYMMMEM": "CUDA",
+                "TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES": "0",
+                "TORCH_SYMM_MEM_DISABLE_MULTICAST": "1",
+            },
+        ):
+            torch.cuda.set_device(0)
+            dist.init_process_group(
+                "gloo",
+                store=dist.FileStore(self.file_name, self.world_size),
+                rank=self.rank,
+                world_size=self.world_size,
+                timeout=timedelta(seconds=30),
+            )
+            try:
+                group = dist.group.WORLD.group_name
+
+                def rejected_cycle():
+                    tensor = _SymmetricMemory.empty_strided_p2p(
+                        (1024,), (1,), torch.float32, torch.device("cuda", 0)
+                    )
+                    with self.assertRaisesRegex(
+                        RuntimeError, "detected allocations from overlapping devices"
+                    ):
+                        _SymmetricMemory.rendezvous(tensor, group)
+                    del tensor
+                    gc.collect()
+                    torch.cuda.synchronize(0)
+                    dist.barrier()
+
+                rejected_cycle()
+                baseline = len(os.listdir("/proc/self/fd"))
+                dist.barrier()
+                for _ in range(3):
+                    rejected_cycle()
+                    self.assertEqual(len(os.listdir("/proc/self/fd")), baseline)
+                    dist.barrier()
+            finally:
+                dist.destroy_process_group()
+
+
 # This Test class is used to test the error handling of SymmetricMemory APIs.
 # Since a process restart is often needed after each test, we use the
 # MultiProcessTestCase instead of MultiProcContinuousTest.

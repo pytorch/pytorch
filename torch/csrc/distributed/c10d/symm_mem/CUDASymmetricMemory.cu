@@ -11,6 +11,7 @@
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/env.h>
 #include <c10/util/error.h>
 
@@ -949,6 +950,12 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
 
+  auto close_exported_handle = c10::make_scope_exit([&]() {
+    if constexpr (!use_fabric_handle) {
+      close(block_handle);
+    }
+  });
+
   auto local_req = RendezvousRequest{
       .device_idx = block->device_idx,
       .pid = getpid(),
@@ -1049,6 +1056,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   } else {
     storeExchange.barrier(store, rank, world_size);
   }
+  close_exported_handle.release();
   if constexpr (!use_fabric_handle) {
     close(block_handle);
   }
