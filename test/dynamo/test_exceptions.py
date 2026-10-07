@@ -5,6 +5,7 @@ import dataclasses
 import gc
 import operator
 import sys
+import types
 import unittest
 
 import torch
@@ -2071,6 +2072,35 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 opt_fn(x)
             alive = sum(type(o) is observed_cls for o in gc.get_objects())
         self.assertEqual(alive, 0)
+
+    def test_fake_value_graph_break_no_reference_cycle(self):
+        # A graph break raised while computing a fake value (here: an op with a
+        # data-dependent output shape) must not leave the exception bound in
+        # the frame that handled it, where its traceback would pin that frame
+        # and the rest of the Dynamo stack until the next gc pass.
+        def fn(x):
+            return torch.nonzero(x).sum() + x.sum()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(8)
+
+        torch._dynamo.reset()
+        gc.collect()
+        gc.disable()
+        gc.set_debug(gc.DEBUG_SAVEALL)
+        try:
+            opt_fn(x)
+            gc.collect()
+            leaked = sum(
+                type(o) is types.FrameType
+                and o.f_code.co_name == "_get_fake_value_impl"
+                for o in gc.garbage
+            )
+        finally:
+            gc.set_debug(0)
+            gc.garbage.clear()
+            gc.enable()
+        self.assertEqual(leaked, 0)
 
     def test_exception_subclass_super_init_with_kwargs(self):
         class MyError(RuntimeError):

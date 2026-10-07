@@ -735,6 +735,20 @@ class TestPatternMatcher(TestCase):
         node = graph.call_function(torch.add, (x, y), {"alpha": 1})
         self.assertFalse(torch_add.match(node))
 
+    def test_failed_match_drops_traceback(self):
+        # A FailedMatch raised mid-match (here: one KeywordArg bound to two
+        # different nodes) is returned to the caller. Its traceback would hold
+        # the matcher frames and, via f_back, the whole calling stack (e.g. the
+        # real tensors of a backward that triggered compilation) in a cycle.
+        add = torch.ops.aten.add.Tensor
+        pattern = CallFunction(add, KeywordArg("x"), KeywordArg("x"))
+        graph = torch.fx.Graph()
+        x, y = graph.placeholder("x"), graph.placeholder("y")
+        m = pattern.match(graph.call_function(add, (x, y)))
+        self.assertFalse(m)
+        self.assertEqual(str(m), "kwarg mismatch: x")
+        self.assertIsNone(m.__traceback__)
+
     def test_addcdiv_fma_keeps_add_alpha(self):
         # https://github.com/pytorch/pytorch/issues/199839
         args = [torch.randn(8, device=GPU_TYPE) for _ in range(3)]
