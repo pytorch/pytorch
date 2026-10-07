@@ -132,19 +132,31 @@ def register_philox_rand():
     )
 
 
-def get_device(args, kwargs):
+def get_device_with_index(args, kwargs):
     if kwargs.get("device"):
         device = kwargs.get("device")
         if isinstance(device, str):
             device = torch.device(device)
-        return device.type
+        return device
 
     for arg in args:
         if isinstance(arg, torch.Tensor):
-            return arg.device.type
+            return arg.device
         if isinstance(arg, torch.device):
-            return arg.type
+            return arg
     return None
+
+
+def get_device(args, kwargs):
+    device = get_device_with_index(args, kwargs)
+    return None if device is None else device.type
+
+
+def _rng_device(args, kwargs, default):
+    # RNG state must be read from the device the op runs on, which may differ
+    # from the current device.
+    device = get_device_with_index(args, kwargs)
+    return default if device is None else device
 
 
 def register_run_and_save_rng_state_op():
@@ -164,7 +176,8 @@ def register_run_and_save_rng_state_op():
 
     @run_and_save_rng_state.py_impl(DispatchKey.CUDA)
     def impl_cuda(op, *args, **kwargs):
-        return torch.cuda.get_rng_state(), op(*args, **kwargs)
+        device = _rng_device(args, kwargs, "cuda")
+        return torch.cuda.get_rng_state(device), op(*args, **kwargs)
 
     @run_and_save_rng_state.py_impl(DispatchKey.CPU)
     def impl_cpu(op, *args, **kwargs):
@@ -178,7 +191,8 @@ def register_run_and_save_rng_state_op():
 
     @run_and_save_rng_state.py_impl(DispatchKey.XPU)
     def impl_xpu(op, *args, **kwargs):
-        return torch.xpu.get_rng_state(), op(*args, **kwargs)
+        device = _rng_device(args, kwargs, "xpu")
+        return torch.xpu.get_rng_state(device), op(*args, **kwargs)
 
     @run_and_save_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, **kwargs):
@@ -229,10 +243,11 @@ def register_run_with_rng_state_op():
 
     @run_with_rng_state.py_impl(DispatchKey.CUDA)
     def impl_cuda(rng_state, op, *args, **kwargs):
-        current_state = torch.cuda.get_rng_state()
-        torch.cuda.set_rng_state(rng_state.cpu())
+        device = _rng_device(args, kwargs, "cuda")
+        current_state = torch.cuda.get_rng_state(device)
+        torch.cuda.set_rng_state(rng_state.cpu(), device)
         out = op(*args, **kwargs)
-        torch.cuda.set_rng_state(current_state)
+        torch.cuda.set_rng_state(current_state, device)
         return out
 
     @run_with_rng_state.py_impl(DispatchKey.CPU)
@@ -255,10 +270,11 @@ def register_run_with_rng_state_op():
 
     @run_with_rng_state.py_impl(DispatchKey.XPU)
     def impl_xpu(rng_state, op, *args, **kwargs):
-        current_state = torch.xpu.get_rng_state()
-        torch.xpu.set_rng_state(rng_state)
+        device = _rng_device(args, kwargs, "xpu")
+        current_state = torch.xpu.get_rng_state(device)
+        torch.xpu.set_rng_state(rng_state, device)
         out = op(*args, **kwargs)
-        torch.xpu.set_rng_state(current_state)
+        torch.xpu.set_rng_state(current_state, device)
         return out
 
     @run_with_rng_state.py_impl(ProxyTorchDispatchMode)
