@@ -193,6 +193,8 @@ Based on that:
 **Stale PRs**: PRs without any update for 60 days get the `Stale` label and are closed 30 days later. PRs labeled `high priority` or `no-stale` are exempt.
 Remove the `Stale` label (or ask a maintainer to) if the PR is still active.
 
+**CI execution and contributor responsibilities**: You are responsible for any code or content you upload. You confirm that you have the right to share any code or content you submit and that it does not include confidential, sensitive, personal, or illegal information. Your code will run automatically without review in environments that are not fully secure. This service does not guarantee that your code is safe or error-free. If you discover a security issue, you must report it promptly.
+
 ### Current status
 
 This workflow is being rolled out. The following parts are still in progress:
