@@ -12,21 +12,18 @@ import cuda.bindings.driver as cuda
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import const_expr, Float32, Float64, Int32, Int64
+from cutlass import const_expr, Int32, Int64
 
 import torch
 
 from ...cutedsl import launch as _L
-from ...cutedsl.dtypes import torch2cute
+from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import (  # safe: kernel_general imports us only lazily
     kernel_general as _RB,
     kernel_rowtile as _rt,
     tile,
 )
-
-
-_PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int32}
 
 
 _C_MAX = 1 << 22  # cap stage-2 partial count (its combine is a dynamic loop -> cheap)
@@ -199,7 +196,16 @@ def _reduce_row_xcta(
     # M only sizes grid and scratch, so one plan serves any batch size. Stage 1 uses Int64
     # tile coordinates beyond 2**31. subrow_target belongs in the geometry key because it changes C.
     out_dtypes = tuple(out_dtypes)
-    gkey = (trait_key, x.dtype, out_dtypes, N, block, subrow_target, str(x.device))
+    gkey = (
+        trait_key,
+        x.dtype,
+        out_dtypes,
+        N,
+        block,
+        subrow_target,
+        _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
+        str(x.device),
+    )
     geom = _GEOM.get(gkey)
     if geom is None and gkey not in _GEOM:
         geom = _GEOM[gkey] = _build_geom(
@@ -212,7 +218,7 @@ def _reduce_row_xcta(
     # Size scratch per M; all operands keep M dynamic for plan reuse.
     sub = x.reshape(M * C, s)
     parts = [
-        torch.empty(M * C, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+        torch.empty(M * C, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
     ]
     outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes]
@@ -271,6 +277,7 @@ def _build_geom(
         threads_per_block % threads_per_row
     )  # rows_per_block must be whole
     unroll = 16 if svec == 1 else 4  # scalar sub-rows want more loads in flight
+    align = _L.supported_alignment(x, svec * elsize)
     pkey = (
         "xcta",
         trait_key,
@@ -281,9 +288,9 @@ def _build_geom(
         threads_per_block,
         unroll,
         block,
+        align,
         str(device),
     )
-    align = svec * elsize
     # Stage-1 rolled-loop counts: vector groups, then waves of threads_per_row.
     s1_counts = (Int32(s // svec), Int32(-(-(s // svec) // threads_per_row)))
 
@@ -332,7 +339,7 @@ def _build_geom(
         return _L.compile_kernel(
             fop,
             _fake_in(),
-            [_fake_1d(_PART_TORCH[trait.fdtypes[f]]) for f in range(trait.nfields)],
+            [_fake_1d(cute2torch[trait.fdtypes[f]]) for f in range(trait.nfields)],
             [_fake_1d(d) for d in out_dtypes],
             *_s2_args(C, M, N),
             *s1_counts,
