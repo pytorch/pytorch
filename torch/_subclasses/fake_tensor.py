@@ -348,8 +348,18 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
 
 
 def maybe_get_real_tensor(x: object) -> Tensor | None:
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.real_tensor
+    elif isinstance(x, FunctionalTensor):
+        return maybe_get_real_tensor(x.elem)
+    elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
+        return maybe_get_real_tensor(unwrapped)
+    elif isinstance(x, Tensor) and is_functorch_wrapped_tensor(x):
+        return maybe_get_real_tensor(torch._C._functorch.get_unwrapped(x))
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         return torch._C._get_real_tensor(x)
     return None
