@@ -1330,24 +1330,104 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    def test_blackwell_mm_row_and_col_reduction_epilogue(self):
-        """Only the column reduction fuses; mixing row and column reductions
-        in one epilogue is not supported."""
+    @parametrize("op", ("sum", "gated", "amax_sum", "mean", "sum_and_out"))
+    # At 4096x128 the split column reduction's group equals the output's; at
+    # 65536 the two reductions form a mix-order reduction when unfused.
+    @parametrize("M", (1000, 4096, 65536))
+    def test_blackwell_mm_row_and_col_reduction_epilogue(self, op: str, M: int):
+        """Row and column reductions of one output fuse into one epilogue,
+        including at sizes where they would otherwise form a mix-order
+        reduction."""
+        source = torch.randint(-2, 3, (M, 128), device=GPU_TYPE).float()
+        gate = torch.randint(0, 3, (M, 128), device=GPU_TYPE) / 2
+        fn = {
+            "sum": lambda a, b: ((c := (a @ b).float()).sum(0), c.sum(1)),
+            "gated": lambda a, b: (
+                (c := (a @ b).float() * source * gate * (1 - gate)).sum(0),
+                c.sum(1),
+            ),
+            "amax_sum": lambda a, b: ((c := (a @ b).float()).sum(0), c.amax(1)),
+            "mean": lambda a, b: ((c := (a @ b).float()).mean(0), c.mean(1)),
+            "sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(0), c.sum(1)),
+        }[op]
+        kernels, code = self._run_reduction(
+            fn,
+            M,
+            128,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            tol=1e-5 if op == "mean" else 0,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        # mean's column division reads the finished column sum.
+        self.assertEqual(len(kernels), 2 if op == "mean" else 1, kernels)
+        if op == "gated":
+            # The column pass reuses the row pass's loads of source and gate.
+            self.assertEqual(code.count("tl.load(in_ptr"), 2, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_row_and_col_reduction_epilogue_masked_load(self):
+        """The column pass doesn't reuse the row pass's masked loads: the row
+        reduction reads source through a pad, which loads it only where the
+        pad's mask holds, the column reduction reads all of it."""
+        M = 1000
+        source = torch.randint(-2, 3, (M, 128), device=GPU_TYPE).float()
 
         def fn(a, b):
             c = (a @ b).float()
-            return c.sum(0), c.sum(1)
+            # A cat's branches also load source under masks, but their
+            # indices don't match the column pass's, so a cat can't catch a
+            # reused masked load.
+            row = torch.nn.functional.pad(source[:, 64:], (64, 0))
+            return (c * source).sum(0), (c * row).sum(1)
 
+        kernels, _ = self._run_reduction(
+            fn,
+            M,
+            128,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("col_reads_row", "row_reads_col", "pw_reads_col"))
+    def test_blackwell_mm_row_and_col_reduction_epilogue_not_fused(self, op: str):
+        """A column reduction may not read a row result, and nothing may read a
+        column result, since column results finish after the kernel."""
+        fn = {
+            "col_reads_row": lambda a, b: (
+                (d := (c := (a @ b).float()) - c.sum(1, keepdim=True)),
+                d.sum(0),
+            ),
+            "row_reads_col": lambda a, b: (
+                (s := (c := (a @ b).float()).sum(0)),
+                (c * s).sum(1),
+            ),
+            "pw_reads_col": lambda a, b: (
+                (s := (c := (a @ b).float()).sum(0)),
+                c * s,
+                c.sum(1),
+            ),
+        }[op]
         kernels, _ = self._run_reduction(
             fn,
             1024,
             128,
-            256,
+            128,
             BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
             **{"triton.template_reduction_epilogue": True},
         )
-        self.assertEqual(len(kernels), 2, kernels)
-        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertGreater(len(kernels), 1, kernels)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
@@ -1370,6 +1450,56 @@ class TestBlackwellTMALoadFusion(TestCase):
             code,
         )
         self.assertEqual(len(finish), 1, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_reduction_epilogue_benchmark_mix_order(self):
+        """Epilogue benchmarking times the real mix-order reduction kernel, and
+        restores its nodes for codegen afterwards."""
+        from torch._inductor.codegen.simd import SIMDScheduling
+
+        timed = []
+        bench = SIMDScheduling.benchmark_mix_order_reduction
+
+        def spy(self, node):
+            timed.append(bench(self, node))
+            return timed[-1]
+
+        with mock.patch.object(SIMDScheduling, "benchmark_mix_order_reduction", spy):
+            self._run_reduction(
+                lambda a, b: ((y := (a @ b).float()).sum(0), y.sum(1)),
+                65536,
+                128,
+                128,
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                BlackwellGPUGemmConfig(128, 64, 64, 3, 8),
+                **{
+                    "triton.template_reduction_epilogue": True,
+                    "benchmark_template_fusion": True,
+                },
+            )
+        self.assertTrue(timed and None not in timed, timed)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_reduction_epilogue_benchmark_unsplit_mix_order(self):
+        """Benchmarking a mix-order reduction whose column reduction isn't
+        split leaves that reduction's loop body unchanged for codegen."""
+        self._run_reduction(
+            lambda a, b: ((y := (a @ b).float()).sum(0), y.sum(1)),
+            65536,
+            128,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{
+                "triton.template_reduction_epilogue": True,
+                "split_reductions": False,
+            },
+        )
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),

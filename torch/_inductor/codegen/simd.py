@@ -540,31 +540,46 @@ def tile_fits_reduction_epilogue(
     for node in epilogue_nodes:
         produced |= node.get_buffer_names()
     reductions = [node for node in epilogue_nodes if node.is_reduction()]
-    axes = OrderedSet(
-        template_reduction_axis(node, template, produced) for node in reductions
-    )
-    if axes == OrderedSet([1]):
+    axes = [template_reduction_axis(node, template, produced) for node in reductions]
+    columns = [node for node, axis in zip(reductions, axes) if axis == 1]
+    if columns:
         # Column results are only complete after the wrapper reduces the
-        # partials, so no epilogue node may read them. The column pass
-        # transposes the stored tile, so the others must read in place.
-        results = OrderedSet().union(*(node.get_buffer_names() for node in reductions))
-        return all(
-            node.is_reduction()
-            or (
-                node.group[1] == (m * n, 1)
-                and not node.used_buffer_names() & results
-                and all(
-                    isinstance(dep, MemoryDep) and is_row_major_read(dep, m * n)
-                    for dep in node.read_writes.reads
-                    if dep.name in produced
-                )
-            )
-            for node in epilogue_nodes
+        # partials, so no epilogue node may read them.
+        results = OrderedSet().union(*(node.get_buffer_names() for node in columns))
+        epilogue_nodes = [node for node in epilogue_nodes if node not in columns]
+        if any(node.used_buffer_names() & results for node in epilogue_nodes):
+            return False
+        # Column reductions run after the row ones and read only the template
+        # output and the nodes before the first row reduction.
+        first_row = next(
+            (i for i, node in enumerate(epilogue_nodes) if node.is_reduction()),
+            len(epilogue_nodes),
         )
+        available = OrderedSet([template.get_name()]).union(
+            *(node.get_buffer_names() for node in epilogue_nodes[:first_row])
+        )
+        if any(
+            dep.name in produced and dep.name not in available
+            for node in columns
+            for dep in node.read_writes.reads
+        ) or any(node.group[1] != (m * n, 1) for node in epilogue_nodes[:first_row]):
+            return False
+        # The column pass transposes the stored tile, so the other nodes must
+        # read it and the nodes before the row reductions in place.
+        if not all(
+            isinstance(dep, MemoryDep) and is_row_major_read(dep, m * n)
+            for node in epilogue_nodes
+            if not node.is_reduction()
+            for dep in node.read_writes.reads
+            if dep.name in available
+        ):
+            return False
+        if first_row == len(epilogue_nodes):
+            return True
     # A row reduction must see whole rows in one store. Reducing across column
     # tiles isn't supported yet.
-    return not axes - OrderedSet([0]) and V.graph.sizevars.statically_known_geq(
-        tile[1], n
+    return not OrderedSet(axes) - OrderedSet([0, 1]) and (
+        V.graph.sizevars.statically_known_geq(tile[1], n)
     )
 
 
@@ -3591,37 +3606,26 @@ class SIMDScheduling(BaseScheduling):
     ) -> tuple[float, str]:
         raise NotImplementedError
 
-    def _codegen_mix_order_reduction(self, node1, node2):
-        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+    def _mix_order_split_size(self, node1, numel):
+        # the overridden has highest priority
+        if config.triton.mix_order_reduction_split_size is not None:
+            return config.triton.mix_order_reduction_split_size
 
-        def _pick_split_size():
-            # the overridden has highest priority
-            if config.triton.mix_order_reduction_split_size is not None:
-                return config.triton.mix_order_reduction_split_size
+        # heuristics based on number of SMs
+        device_prop = DeviceProperties.create(node1.get_device())
+        num_sm = device_prop.multi_processor_count
+        estimated_num_splits = num_sm * 8
 
-            # heuristics based on number of SMs
-            device_prop = DeviceProperties.create(node1.get_device())
-            num_sm = device_prop.multi_processor_count
-            estimated_num_splits = num_sm * 8
+        # split_size is decided based on hint.
+        # optimization_hint is fine here: the result is clamped to [16, 128],
+        # so any fallback value still produces a valid split size.
+        numel_hint = V.graph.sizevars.optimization_hint(numel)
+        split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
+        split_size = min(split_size, 128)
+        return split_size
 
-            # split_size is decided based on hint.
-            # optimization_hint is fine here: the result is clamped to [16, 128],
-            # so any fallback value still produces a valid split size.
-            numel_hint = V.graph.sizevars.optimization_hint(numel)
-            split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
-            split_size = min(split_size, 128)
-            return split_size
-
-        initial_split_size = _pick_split_size()
-
-        # pyrefly: ignore [bad-assignment]
-        metrics.codegen_mix_order_reduction += 1
-
-        # split epilogue out of node2
-        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
-            node2
-        )
-
+    def _mix_order_kernel_features(self, node1, node2_reductions, numel, rnumel):
+        """Convert node2's reductions in place for the mix-order kernel."""
         converted_nodes = []
         for subnode in node2_reductions:
             subnode.cancel_reduction_split()
@@ -3631,7 +3635,22 @@ class SIMDScheduling(BaseScheduling):
         node_schedule = self.generate_node_schedule(
             node1.get_nodes() + converted_nodes, numel, rnumel
         )
-        kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+        return converted_nodes, SIMDKernelFeatures(node_schedule, numel, rnumel)
+
+    def _benchmark_mix_order_kernel(
+        self, kernel_features, split_size
+    ) -> tuple[float, str]:
+        kernel = self._create_kernel_for_mix_order_reduction(
+            kernel_features, split_size
+        )
+        _, src_code = self._generate_kernel_code_for_mix_order_reduction(
+            kernel, for_benchmark=True
+        )
+        return self.benchmark_codegened_module(PyCodeCache.load(src_code))
+
+    def _tuned_mix_order_split_size(self, kernel_features, initial_split_size):
+        """The split size codegen_mix_order_reduction uses: initial_split_size,
+        autotuned when enabled."""
         kernel = self._create_kernel_for_mix_order_reduction(
             kernel_features, initial_split_size
         )
@@ -3649,15 +3668,9 @@ class SIMDScheduling(BaseScheduling):
         ):
 
             def _bench(candidate_split_size):
-                candidate_kernel = self._create_kernel_for_mix_order_reduction(
+                ms, _ = self._benchmark_mix_order_kernel(
                     kernel_features, candidate_split_size
                 )
-                _, src_code = self._generate_kernel_code_for_mix_order_reduction(
-                    candidate_kernel,
-                    for_benchmark=True,
-                )
-                mod = PyCodeCache.load(src_code)
-                ms, _ = self.benchmark_codegened_module(mod)
                 return ms
 
             kernel.rsplit_size = CoordescTuner.autotune_single_field(
@@ -3665,6 +3678,54 @@ class SIMDScheduling(BaseScheduling):
                 kernel.rsplit_size,
                 8,
             )
+        return kernel.rsplit_size
+
+    def benchmark_mix_order_reduction(self, node) -> tuple[float, str] | None:
+        """Time the kernel codegen_mix_order_reduction would emit for node, at
+        the split size it would pick, leaving node's loops unchanged. None if
+        node2 has epilogue nodes."""
+        node1, node2 = node.node1, node.node2
+        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
+            node2
+        )
+        if node2_epilogue:
+            return None
+        snapshot = scheduler._LoopStateSnapshot.create(tuple(node2_reductions))
+        try:
+            _, kernel_features = self._mix_order_kernel_features(
+                node1, node2_reductions, numel, rnumel
+            )
+            split_size = self._tuned_mix_order_split_size(
+                kernel_features, self._mix_order_split_size(node1, numel)
+            )
+            return self._benchmark_mix_order_kernel(kernel_features, split_size)
+        finally:
+            snapshot.restore()
+            for subnode in node2_reductions:
+                # cancel_reduction_split caches the unsplit body.
+                subnode.node.get_default_sizes_body.clear_cache(subnode.node)
+
+    def _codegen_mix_order_reduction(self, node1, node2):
+        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+        initial_split_size = self._mix_order_split_size(node1, numel)
+
+        # pyrefly: ignore [bad-assignment]
+        metrics.codegen_mix_order_reduction += 1
+
+        # split epilogue out of node2
+        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
+            node2
+        )
+
+        converted_nodes, kernel_features = self._mix_order_kernel_features(
+            node1, node2_reductions, numel, rnumel
+        )
+        node_schedule = kernel_features.node_schedule
+        kernel = self._create_kernel_for_mix_order_reduction(
+            kernel_features,
+            self._tuned_mix_order_split_size(kernel_features, initial_split_size),
+        )
 
         ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel,

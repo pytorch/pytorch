@@ -27,7 +27,7 @@ from torch._inductor.codegen.simd_kernel_features import (
 )
 from torch._inductor.dependencies import Dep, MemoryDep, ReadWrites, StarDep, WeakDep
 from torch._inductor.ir import GraphPartitionSignature
-from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
+from torch._inductor.loop_body import LoopBody, MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     BaseSchedulerNode,
@@ -1014,6 +1014,53 @@ class TestScheduler(TestCase):
                 scheduler._template_reduction_epilogue_matches(template, reduction),
                 expected,
             )
+
+    def test_mix_order_benchmark_uses_codegen_split_size(self):
+        """benchmark_mix_order_reduction times the mix-order kernel at the
+        split size codegen_mix_order_reduction picks, including autotuning."""
+        scheduling = object.__new__(SIMDScheduling)
+        node = Mock(node1=self._mock_base_snode("node1"))
+        split_sizes = []
+
+        def create_kernel(kernel_features, split_size):
+            split_sizes.append(split_size)
+            return Mock(fixed_config=None, rsplit_size=split_size)
+
+        simd = "torch._inductor.codegen.simd"
+        with (
+            patch(
+                "torch._inductor.scheduler.MixOrderReduction.get_numel_rnumel",
+                return_value=(4096, 128),
+            ),
+            patch("torch._inductor.scheduler._LoopStateSnapshot.create"),
+            patch.multiple(
+                SIMDScheduling,
+                _split_mix_order_reduction_epilogue=Mock(return_value=([], [])),
+                _mix_order_kernel_features=Mock(return_value=([], Mock())),
+                _mix_order_split_size=Mock(return_value=16),
+                _create_kernel_for_mix_order_reduction=Mock(side_effect=create_kernel),
+                _generate_kernel_code_for_mix_order_reduction=Mock(
+                    return_value=("ws", "src")
+                ),
+                benchmark_codegened_module=Mock(return_value=(1.0, "path")),
+            ),
+            patch(f"{simd}.PyCodeCache.load"),
+            patch(
+                f"{simd}.CoordescTuner.autotune_single_field", return_value=64
+            ) as autotune,
+            inductor_config.patch(
+                {
+                    "deterministic": False,
+                    "triton.mix_order_reduction_split_size": None,
+                    "triton.mix_order_reduction_autotune_split_size": True,
+                }
+            ),
+        ):
+            self.assertEqual(
+                scheduling.benchmark_mix_order_reduction(node), (1.0, "path")
+            )
+        autotune.assert_called_once()
+        self.assertEqual(split_sizes[-1], 64)
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
@@ -3248,6 +3295,34 @@ class TestScoreFusionMemory(TestCase):
         # Should NOT fuse (2 kernels) because overlap_ratio = 0.25 < 0.5 threshold
         # The _score_fusion_memory_by_buffer_overlap returns 0 for this case
         self.assertEqual(metrics.generated_kernel_count, 2)
+
+
+class TestExtractPointwiseFromReduction(TestCase):
+    def test_leaves_original_body(self):
+        """Mix-order benchmarking converts a reduction's body to a partial
+        accumulate and restores the old body from a snapshot afterwards, so
+        the conversion must not mutate it."""
+        x, r = sympy.symbols("x r", integer=True, nonnegative=True)
+
+        def fn(index, rindex):
+            value = V.ops.load("buf0", 8 * index[0] + rindex[0])
+            reduced = V.ops.reduction(torch.float32, torch.float32, "sum", value)
+            V.ops.store_reduction("buf1", index[0], reduced)
+
+        graph = Mock(sizevars=SizeVarAllocator(), cpp_wrapper=False)
+        with V.set_graph_handler(graph):
+            body = LoopBody(fn, ([x], [r]), {x: 4, r: 8}, [x], [r])
+            converted = body.extract_pw_from_reduction()
+
+        def targets(b):
+            return [n.target for n in b.root_block.graph.nodes]
+
+        self.assertIn("reduction", targets(body))
+        self.assertFalse(body.has_partial_accumulate)
+        self.assertEqual((body.iter_vars, body.reduce_vars), ([x], [r]))
+        self.assertIn("partial_accumulate", targets(converted))
+        self.assertNotIn("reduction", targets(converted))
+        self.assertEqual((converted.iter_vars, converted.reduce_vars), ([x, r], []))
 
 
 instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
