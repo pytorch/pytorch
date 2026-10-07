@@ -1653,11 +1653,12 @@ class CPUReproTests(TestCase):
         # AVX2/AVX512 decline to vectorize this kernel and emit a plain
         # scalar loop instead, so the masked tail store only exists on
         # narrower ISAs; check numerics everywhere and the store shape
-        # where the kernel actually vectorizes.
+        # where the kernel actually vectorizes. The exact strings below
+        # are NEON-verified: aarch64 hosts with SVE (Graviton-class) take
+        # the same kernel through VecSVE(128) codegen, whose output does
+        # not carry these lines, so gate the string checks on NEON.
         isa = cpu_vec_isa.pick_vec_isa()
-        kernel_vectorizes = (
-            isa != cpu_vec_isa.invalid_vec_isa and isa.bit_width() <= 128
-        )
+        kernel_vectorizes = isinstance(isa, cpu_vec_isa.VecNEON)
         for tail_vec in (True, False):
             with config.patch({"cpp.enable_loop_tail_vec": tail_vec}):
                 opt_fn = torch.compile(fn)
