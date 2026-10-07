@@ -7521,30 +7521,9 @@ class Scheduler:
                     "expected multi_node to be an ir.MultiTemplateBuffer"
                 )
             template_scheduler_node = node1 if consumer_fusion else node2
-            # Computed for consumer fusion too: a producer may already have been
-            # fused into the template in an earlier fusion round.
-            template_input_names = OrderedSet(
-                typing.cast(ir.IRNode, input_node).get_name()
-                for input_node in multi_node.inputs
+            enabled_multi_inputs = _producer_fusion_enabled_inputs(
+                template_scheduler_node
             )
-            required_producer_inputs = OrderedSet(
-                name
-                for fused_node in node_list_fused
-                for name in fused_node.get_buffer_names()
-                if name in template_input_names
-            )
-
-            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
-                if not isinstance(
-                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ):
-                    return False
-                # Choices can support different inputs, e.g. persistent+TMA
-                # templates cannot fuse producers into TMA-loaded inputs.
-                return required_producer_inputs <= _producer_fusion_enabled_inputs(
-                    template_scheduler_node, choice
-                )
-
             # Check for layout conflicts before committing to Triton template
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
@@ -7559,20 +7538,19 @@ class Scheduler:
                     ] = []
                     choice_timings = multi_node.choice_timings(hint_override)
                     for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
-                        if not choice_supports_fusion(choice):
-                            continue
-                        triton_choice = typing.cast(
-                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                        if not isinstance(
                             choice,
-                        )
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                        ):
+                            continue
                         try:
-                            with multi_node.swap_as_triton_caller(triton_choice):
+                            with multi_node.swap_as_triton_caller(choice):
                                 future_choices.append(
                                     (
-                                        triton_choice,
+                                        choice,
                                         *self.compile_kernel(
                                             node_list_fused,
-                                            hint_override=triton_choice.hint_override,
+                                            hint_override=choice.hint_override,
                                         ),
                                     )
                                 )
@@ -7641,6 +7619,22 @@ class Scheduler:
                 # Use 0 for unfused time, won't be used as benchmark_template_fusion
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
+
+            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
+                if not isinstance(
+                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
+                ):
+                    return False
+                # For producer fusion, the choice must support every input in
+                # the multi-template buffer's allowed set.
+                # TODO: Remove this check after all Triton templates support prologue fusion.
+                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
+                return not (
+                    not consumer_fusion
+                    and hasattr(choice, "load_input_fusion_allowed_inputs")
+                    and _producer_fusion_enabled_inputs(template_scheduler_node, choice)
+                    != enabled_multi_inputs
+                )
 
             def compile_without_benchmarking(
                 choice: torch._inductor.select_algorithm.TritonTemplateCaller,
@@ -7734,7 +7728,17 @@ class Scheduler:
                 if is_nvgemm and not consumer_fusion:
                     continue
 
-                if is_triton and not choice_supports_fusion(choice):
+                # For producer fusion, the choice must support every input in
+                # the multi-template buffer's allowed set.
+                # TODO: Remove this check after all Triton templates support prologue fusion.
+                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
+                if (
+                    is_triton
+                    and not consumer_fusion
+                    and hasattr(choice, "load_input_fusion_allowed_inputs")
+                    and _producer_fusion_enabled_inputs(template_scheduler_node, choice)
+                    != enabled_multi_inputs
+                ):
                     continue
 
                 if benchmark_template_fusion and unfused_time >= ms1 + ms2:
