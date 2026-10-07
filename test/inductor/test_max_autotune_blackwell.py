@@ -2238,6 +2238,57 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    @parametrize("tma_store", (False, True))
+    # A per-element input, and ones broadcast over the batches or the columns.
+    @parametrize("w_shape", ((300, 96, 128), (96, 128), (300, 96, 1)))
+    def test_blackwell_bmm_row_pass_reuses_epilogue_loads(
+        self, tma_store: bool, w_shape: tuple[int, ...]
+    ):
+        """The row pass reuses the extra input that the pointwise epilogue
+        before it loaded, rather than reload it into a second register tile."""
+        kernels, code = self._run_bmm_reduction(
+            lambda a, b, w: ((x := (a @ b).float() * w), (x * w).sum(-1)),
+            300,
+            96,
+            64,
+            128,
+            BlackwellBMMConfig(128, 128, 64, 3, 8),
+            extra_input=w_shape,
+            **{"triton.enable_template_tma_store": tma_store},
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        loads = re.findall(r"tl\.load\((in_ptr\d+) ", code)
+        self.assertEqual(len(loads), len(set(loads)), loads)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("tma_store", (False, True))
+    def test_blackwell_bmm_row_pass_skips_masked_epilogue_loads(self, tma_store: bool):
+        """A load under a mask (here a pad's) is 0 outside it, so the row pass
+        must load the input again rather than reuse it."""
+        kernels, _ = self._run_bmm_reduction(
+            lambda a, b, w: (
+                (c := (a @ b).float()) + torch.nn.functional.pad(w[..., :-16], (0, 16)),
+                (c * w).sum(-1),
+            ),
+            300,
+            96,
+            64,
+            128,
+            BlackwellBMMConfig(128, 128, 64, 3, 8),
+            extra_input=True,
+            **{"triton.enable_template_tma_store": tma_store},
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     def test_blackwell_bmm_reduction_epilogue_plain_stores_extra_outputs(self):
         """With a reduction epilogue, only the template's own output keeps its
         TMA store: one staged fp32 128x128 tile per extra output would overflow

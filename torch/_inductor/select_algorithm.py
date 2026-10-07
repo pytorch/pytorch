@@ -576,6 +576,34 @@ def _partials_finish(ws: str, reduction: _PartialReduction) -> str:
     )
 
 
+# The (batch, row, col) element of a batched template output, for comparing
+# loads generated over different index spaces.
+_TEMPLATE_ELEMENT = sympy.symbols(
+    "element_batch element_row element_col", integer=True, nonnegative=True
+)
+
+
+def row_tile_element(
+    index: sympy.Expr, tile_syms: Sequence[sympy.Symbol], rows_per_batch: int
+) -> sympy.Expr | None:
+    """index, over a row pass's (B * M rows, N cols) tile roots tile_syms, as
+    a function of the batched output element, or None if it isn't one."""
+    batch, row, col = _TEMPLATE_ELEMENT
+    element = index.xreplace(
+        {tile_syms[0]: batch * rows_per_batch + row, tile_syms[1]: col}
+    )
+    return element if element.free_symbols <= OrderedSet(_TEMPLATE_ELEMENT) else None
+
+
+def same_template_element(
+    a: sympy.Expr, b: sympy.Expr, sizes: Sequence[sympy.Expr]
+) -> bool:
+    """Whether element indices a and b agree on every element of a batched
+    output of shape sizes."""
+    ranges = dict(zip(_TEMPLATE_ELEMENT, sizes))
+    return V.graph.sizevars.simplify_with_ranges(a - b, ranges) == 0
+
+
 class TritonTemplateKernel(TritonKernel):
     """
     A specialized kernel class for Triton templates that handles code generation
@@ -737,6 +765,9 @@ class TritonTemplateKernel(TritonKernel):
         # codegen_batch_reduction_epilogue.
         self.batch_loops: dict[int, tuple[tuple[str, str], tuple[str, ...]]] = {}
         self.output_index_symbols: dict[int, list[sympy.Symbol]] = {}
+        # Loads of the current subgraph's epilogue nodes over the template's
+        # own indices: buffer -> [(output element index, value)].
+        self._template_loads: dict[str, list[tuple[sympy.Expr, CSEVariable]]] = {}
         # Lines emitted before the template's persistent loop.
         self.epilogue_loop_init_lines = IndentedBuffer()
         # Reductions fused into the epilogue as per-tile partials, which the
@@ -2480,9 +2511,13 @@ class TritonTemplateKernel(TritonKernel):
                         if matrices_in_tile
                         else []
                     )
-                    for node in nodes[:first_red]:
-                        if node not in matrix_readers:
-                            node.codegen(self.split_and_set_ranges(node.get_ranges()))
+                    self._template_loads = {}
+                    with self._recording_template_loads(i):
+                        for node in nodes[:first_red]:
+                            if node not in matrix_readers:
+                                node.codegen(
+                                    self.split_and_set_ranges(node.get_ranges())
+                                )
                     if batches:
                         self.codegen_batch_reduction_epilogue(batches, i)
                         # Its values have the template's symbolic shape, which
@@ -2637,6 +2672,66 @@ class TritonTemplateKernel(TritonKernel):
         # The sums are only complete after the kernel.
         for name in stored:
             self.cse.store_cache.pop(name, None)
+
+    def _template_element_index(
+        self, index: sympy.Expr, subgraph_idx: int
+    ) -> sympy.Expr | None:
+        """index, over the template's own range trees, as a function of the
+        batched output element (_TEMPLATE_ELEMENT), or None if it isn't one."""
+        if (out_syms := self.output_index_symbols.get(subgraph_idx)) is None:
+            return None
+
+        def to_roots(expr):
+            for _ in range(4):
+                exprs = {
+                    sym: entry.expr
+                    for sym in expr.free_symbols
+                    if (entry := self.range_tree_nodes.get(sym)) is not None
+                    and entry.expr != sym
+                }
+                if not exprs:
+                    break
+                expr = expr.xreplace(exprs)
+            return expr
+
+        dims = [to_roots(sym) for sym in out_syms]
+        if (
+            all(isinstance(d, sympy.Symbol) for d in dims)
+            and len(OrderedSet(dims)) == 3
+            and self.range_trees[0].index_sym() in dims
+        ):
+            # One range tree per output dim, as for TMA stores.
+            subs = dict(zip(dims, _TEMPLATE_ELEMENT))
+        else:
+            # One range tree over the contiguous output (xindex); the output
+            # symbols are then the template's own index variables.
+            strides = ir.FlexibleLayout.contiguous_strides(self.output_node.get_size())
+            subs = {
+                self.range_trees[0].index_sym(): sympy_dot(_TEMPLATE_ELEMENT, strides)
+            }
+        expr = to_roots(index).xreplace(subs)
+        return expr if expr.free_symbols <= OrderedSet(_TEMPLATE_ELEMENT) else None
+
+    @contextlib.contextmanager
+    def _recording_template_loads(self, subgraph_idx: int):
+        """Record the loads of the epilogue nodes generated over the template's
+        own indices by the output element they load, so the tile reduction pass
+        can reuse them. See codegen_tile_reduction_epilogue."""
+        load = self.load
+
+        def recording_load(name, index):
+            var = load(name, index)
+            # A load under a mask (e.g. one branch of a cat) is only valid
+            # where that mask holds, so don't record it.
+            if self._load_mask is not None:
+                return var
+            element = self._template_element_index(index, subgraph_idx)
+            if element is not None and var.shape is not None:
+                self._template_loads.setdefault(name, []).append((element, var))
+            return var
+
+        with patch.object(self, "load", recording_load):
+            yield
 
     def codegen_batch_matrix_reduction_epilogue(
         self, nodes, subgraph_idx: int, in_tile: bool
@@ -2886,6 +2981,33 @@ class TritonTemplateKernel(TritonKernel):
         tile_loads: dict[tuple[str, sympy.Expr], CSEVariable] = {}
         load = self.load
 
+        def reuse_template_load(name, key):
+            # The row pass of a batched output reloads elements that epilogue
+            # nodes before it loaded over the template's own indices; reuse
+            # those, restated as the tile, rather than hold both in registers.
+            # Masked-out lanes may differ, but reductions and stores mask them.
+            if columns or per_batch or len(origin) != 3:
+                return None
+            element = row_tile_element(key, tile_syms, rows_per_batch)
+            if element is None:
+                return None
+            sizes = self.output_node.get_size()
+            for recorded, var in self._template_loads.get(name, ()):
+                if not same_template_element(element, recorded, sizes):
+                    continue
+                shape = tuple(
+                    "1" if str(d) == "1" else str(size)
+                    for d, size in zip(var.shape[-2:], (rows, cols))
+                )
+                return self.cse.generate(
+                    self.loads,
+                    f"tl.reshape({var}, ({', '.join(shape)}))",
+                    bounds=var.bounds,
+                    dtype=var.dtype,
+                    shape=shape,
+                )
+            return None
+
         def tile_load(record, name, index):
             # A load under a mask (e.g. one branch of a cat) is only valid
             # where that mask holds, so neither record nor reuse it.
@@ -2903,7 +3025,7 @@ class TritonTemplateKernel(TritonKernel):
                         dtype=v.dtype,
                         shape=shape,
                     )
-            var = load(name, index)
+            var = reuse_template_load(name, key) or load(name, index)
             if record:
                 tile_loads[(name, key)] = var
             return var

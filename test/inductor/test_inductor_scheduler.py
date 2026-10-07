@@ -2,6 +2,7 @@
 
 import contextlib
 import functools
+from types import SimpleNamespace
 from unittest import skipIf
 from unittest.mock import Mock, patch, PropertyMock
 
@@ -53,6 +54,11 @@ from torch._inductor.scheduler import (
     SubParentEpilogueGrouping,
     SubParentOutputGroup,
 )
+from torch._inductor.select_algorithm import (
+    row_tile_element,
+    same_template_element,
+    TritonTemplateKernel,
+)
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import (
     fresh_inductor_cache,
@@ -80,7 +86,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -3613,6 +3619,93 @@ class TestBMMMatrixReductionEpilogue(TestCase):
         self.assertFalse(
             tile_fits_reduction_epilogue(tile, self.template, [stat, normalize, second])
         )
+
+
+class TestBMMRowPassLoadReuse(TestCase):
+    """The row pass of a batched template output reuses loads that epilogue
+    nodes before it made over the template's own indices, rather than reload
+    them. Index forms are those of an RMSNorm backward epilogue on a
+    (5247, 64, 128) output with 64x64 tiles."""
+
+    B, M, N = 5247, 64, 128
+
+    def setUp(self):
+        super().setUp()
+        graph = Mock(sizevars=SizeVarAllocator(), cpp_wrapper=False)
+        self.enterContext(V.set_graph_handler(graph))
+        self.X, self.R = sympy.symbols("tile_xindex tile_r0_index", integer=True)
+        self.sizes = [sympy.Integer(s) for s in (self.B, self.M, self.N)]
+
+    def kernel(self, out_syms, range_tree_nodes, root):
+        output_node = Mock()
+        output_node.get_size.return_value = self.sizes
+        return SimpleNamespace(
+            output_index_symbols={0: out_syms},
+            range_tree_nodes=range_tree_nodes,
+            range_trees=[Mock(index_sym=Mock(return_value=root))],
+            output_node=output_node,
+        )
+
+    def matches(self, kernel, template_index, row_index):
+        recorded = TritonTemplateKernel._template_element_index(
+            kernel, template_index, 0
+        )
+        element = row_tile_element(row_index, (self.X, self.R), self.M)
+        self.assertIsNotNone(recorded)
+        self.assertIsNotNone(element)
+        return same_template_element(element, recorded, self.sizes)
+
+    def test_tma_store_indices(self):
+        M, N = self.M, self.N
+        x, y, z = sympy.symbols("xindex yindex zindex", integer=True)
+        kernel = self.kernel([x, y, z], {}, x)
+        X, R = self.X, self.R
+        out = z + N * y + M * N * x
+        weight = z + N * y  # broadcast over batches
+        stat = y + M * x  # one per row
+        self.assertTrue(self.matches(kernel, out, R + N * X))
+        self.assertTrue(self.matches(kernel, weight, R + N * ModularIndexing(X, 1, M)))
+        self.assertTrue(self.matches(kernel, stat, X))
+        self.assertFalse(self.matches(kernel, out, R + N * ModularIndexing(X, 1, M)))
+        self.assertFalse(self.matches(kernel, weight, R + N * X))
+        self.assertFalse(self.matches(kernel, stat, R))
+
+    def test_contiguous_indices(self):
+        """The masked tl.store path: one range tree over the contiguous output,
+        with the template's batch, row and col indices derived from it."""
+        M, N = self.M, self.N
+        root = sympy.Symbol("xindex", integer=True)
+        batch, rm, rn = sympy.symbols("batch rm rn", integer=True)
+        nodes = {
+            batch: Mock(expr=FloorDiv(root, M * N)),
+            rm: Mock(expr=ModularIndexing(root, N, M)),
+            rn: Mock(expr=ModularIndexing(root, 1, N)),
+        }
+        kernel = self.kernel([batch, rm, rn], nodes, root)
+        X, R = self.X, self.R
+        self.assertTrue(self.matches(kernel, rn + N * rm + M * N * batch, R + N * X))
+        self.assertTrue(
+            self.matches(kernel, rn + N * rm, R + N * ModularIndexing(X, 1, M))
+        )
+        self.assertFalse(self.matches(kernel, rn + N * rm, R + N * X))
+
+    def test_masked_store_indices(self):
+        """The masked tl.store path as generated: the template's batch, row and
+        col indices are its own variables, and loads index xindex."""
+        M, N = self.M, self.N
+        root = sympy.Symbol("xindex", integer=True)
+        batch, rm, rn = sympy.symbols("batch rm rn", integer=True)
+        kernel = self.kernel([batch, rm, rn], {}, root)
+        X, R = self.X, self.R
+        self.assertTrue(self.matches(kernel, root, R + N * X))
+        self.assertTrue(
+            self.matches(
+                kernel,
+                ModularIndexing(root, 1, M * N),
+                R + N * ModularIndexing(X, 1, M),
+            )
+        )
+        self.assertFalse(self.matches(kernel, root, R + N * ModularIndexing(X, 1, M)))
 
 
 instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
