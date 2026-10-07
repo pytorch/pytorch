@@ -130,7 +130,7 @@ from .simd import (
     PartialAccumulate,
     SIMDKernel,
     SIMDScheduling,
-    tile_fits_reduction_epilogue,
+    TRITON_MAX_TENSOR_DIMS,
 )
 from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
@@ -273,7 +273,7 @@ class TritonSymbols:
     Stores sympy.Symbol instances and constants associated with triton codegen.
     """
 
-    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX])
+    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX, SymT.R2_INDEX])
     block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, *reduction_types])
 
     block_offsets = {
@@ -3529,6 +3529,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
         self.is_combo_kernel: bool = is_combo_kernel
+        self._from_combo_codegen = False
+        self._is_first_combo_launch = False
+        self._in_multi_kernel = False
+        self._nvgemm_pdl_enabled = False
         self.per_subkernel_blocks: bool = per_subkernel_blocks
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
@@ -3721,6 +3725,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             SymT.ZBLOCK,
             SymT.R0_INDEX,
             SymT.R1_INDEX,
+            SymT.R2_INDEX,
         ):
             if symbol_is_type(symbol, symt):
                 return prefix_str[symt]
@@ -4466,6 +4471,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     stride_sorter_cls=stride_sorter_cls,
                 )
                 if isinstance(options, TensorDescriptorOptions):
+                    if len(options.params.block_shape) > TRITON_MAX_TENSOR_DIMS:
+                        return None
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
@@ -4994,8 +5001,60 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
 
     @staticmethod
+    def _has_pdl_dependency(
+        previous_node: BaseSchedulerNode, current_node: BaseSchedulerNode
+    ) -> bool:
+        mutation_renames = getattr(current_node, "mutation_renames", {})
+        previous_writes = OrderedSet(
+            mutation_renames.get(dep.name, dep.name)
+            for dep in previous_node.read_writes.writes
+            if not isinstance(dep, dependencies.WeakDep)
+        )
+        return any(
+            not isinstance(dep, dependencies.WeakDep) and dep.name in previous_writes
+            for dep in current_node.read_writes.reads
+        )
+
+    @staticmethod
     def _enable_pdl_codegen():
-        if not torch._inductor.config.triton.enable_pdl:
+        enable_pdl = torch._inductor.config.triton.enable_pdl
+        selective_pdl = not enable_pdl and torch._inductor.config.nvgemm_pdl != "0"
+        if selective_pdl:
+            kernel = V.kernel
+            if not isinstance(kernel, TritonKernel):
+                return False
+            enable_pdl = kernel._nvgemm_pdl_enabled
+            current_node = getattr(kernel, "current_node", None)
+            is_single_launch_kernel = (
+                kernel.__class__ is TritonKernel
+                and not getattr(kernel, "is_combo_kernel", False)
+                and (not kernel._from_combo_codegen or kernel._is_first_combo_launch)
+                and not getattr(kernel, "_in_multi_kernel", False)
+                and not getattr(kernel, "cooperative_reduction", False)
+                and not getattr(kernel, "mix_order_reduction", False)
+            )
+            if current_node is not None and is_single_launch_kernel:
+                scheduler = V.graph.scheduler
+                previous_node = (
+                    scheduler.previous_node if scheduler is not None else None
+                )
+                if previous_node is not None:
+                    from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+                        NVUniversalGemmScheduling,
+                    )
+
+                    current_node_enables_pdl = (
+                        NVUniversalGemmScheduling.is_pdl_enabled_template(previous_node)
+                        and TritonKernel._has_pdl_dependency(
+                            previous_node, current_node
+                        )
+                    )
+                    enable_pdl = enable_pdl or current_node_enables_pdl
+                    kernel._nvgemm_pdl_enabled = enable_pdl
+            kernel_args = getattr(kernel, "args", None)
+            if getattr(kernel_args, "workspace_args", ()):
+                return False
+        if not enable_pdl:
             return False
         if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
             return False
@@ -5765,9 +5824,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         codegen reduction of value to Triton according the reduction_type
         """
 
-        def should_upcast(d: torch.dtype | None) -> bool:
-            return d is not None and d.is_floating_point and d.itemsize < 4
-
         def maybe_upcast(value: CSEVariable) -> CSEVariable:
             # Math reductions in small floats are less accurate because the Triton
             # compiler does not automatically promote to FP32 for accumulation.
@@ -5775,18 +5831,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # promote to FP32 here.
             return (
                 ops.to_dtype(value, torch.float32)
-                if should_upcast(value.dtype)
+                if low_precision_fp_var(value)
                 else value
             )
 
-        do_upcast = pytree.tree_any(lambda v: should_upcast(v.dtype), value)
+        do_upcast = pytree.tree_any(low_precision_fp_var, value)
         original_dtype = dtype
         original_src_dtype = src_dtype
         if do_upcast:
             # Only promote FB16/BF16; do not promote other integer/boolean dtypes
             value = pytree.tree_map(maybe_upcast, value)
-            src_dtype = torch.float32 if should_upcast(src_dtype) else src_dtype
-            dtype = torch.float32 if should_upcast(dtype) else dtype
+            src_dtype = torch.float32 if low_precision_fp(src_dtype) else src_dtype
+            dtype = torch.float32 if low_precision_fp(dtype) else dtype
 
         if not self.inside_reduction:
             raise AssertionError("expected inside_reduction")
@@ -5808,7 +5864,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         strict_op = "*" if reduction_type == "prod" else "+"
 
         # When we do native matmtul codegen,
-        # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
+        # we don't want to keep reduction blocks in the accumulator.
         # so instead of naively calling dense_size_str(), we filter out
         # reduction block from accumulator and only keep (Y,X).
         # In bmm (Z,Y,R)x(Z,R,X) case, we also remove z dimension from accumulator
@@ -7058,7 +7114,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         broadcasted_values = []
         accumulators = []
 
-        dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
+        # Mirrors the promotion in `reduction()`. A scan accumulates across the
+        # whole scanned axis, so a narrow float rounds at every partial result,
+        # exactly the error `reduction()` avoids by widening. Unlike that one,
+        # `upcast_compute_type` is gated on `codegen_upcast_to_fp32`, so on a
+        # backend that turns the flag off the combine stays at the input width.
+        do_upcast = any(low_precision_fp(dtype) for dtype in dtypes)
+        original_dtypes = dtypes
+        dtypes = tuple(
+            torch.float32 if low_precision_fp(dtype) else upcast_compute_type(dtype)
+            for dtype in dtypes
+        )
         cse_compute = functools.partial(self.cse.generate, self.compute)
         combine_helper_fn = self._lift_helper(combine_fn, values, dtypes)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
@@ -7159,6 +7225,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
         else:
             result_vars = partial_scan_vars
+
+        # If the combine was promoted, narrow each result once now that the
+        # scan is complete, as `reduction()` does for its own results.
+        if do_upcast:
+            for result_var, target_dtype in zip(result_vars, original_dtypes):
+                if result_var.dtype != target_dtype:
+                    self.compute.writeline(
+                        f"{result_var} = {result_var}.to("
+                        f"{triton_compute_type(target_dtype)})"
+                    )
 
         for result_var in result_vars:
             if not isinstance(result_var, TritonCSEVariable):
@@ -8858,6 +8934,39 @@ class FusedUserDefinedTritonKernel(TritonKernel):
         return "\n".join(new_src_lines)
 
 
+def template_reduction_epilogue_supported(
+    template: ir.TemplateBuffer,
+    epilogue_nodes: Sequence[BaseSchedulerNode],
+) -> bool:
+    """Whether a Triton template can host epilogue_nodes, including reductions,
+    given an output tile that fits them (see tile_fits_reduction_epilogue)."""
+    if not (
+        config.triton.template_reduction_epilogue
+        and isinstance(template, ir.TritonTemplateBuffer)
+        and len(template.get_size()) in (2, 3)
+        # Only bf16 and fp16 outputs are tested.
+        and template.get_dtype() in (torch.bfloat16, torch.float16)
+        # The JIT cpp wrapper can't import the Blackwell template's source
+        # (its docstring ends the wrapper's string literal).
+        and not V.graph.cpp_wrapper
+    ):
+        return False
+    size = template.get_size()
+    # Dynamic sizes are untested: the Blackwell templates specialize them.
+    if not all(isinstance(s, sympy.Integer) for s in size):
+        return False
+    if template.get_stride() != ir.FlexibleLayout.contiguous_strides(size):
+        return False
+    # Arg reductions can lower to a multi-result tl.reduce, which
+    # automatic warp specialization rejects.
+    return not any(
+        isinstance(node.node, ir.ComputedBuffer)
+        and node.node.get_reduction_type() in ARG_REDUCTION_TYPES
+        for node in epilogue_nodes
+        if node.is_reduction()
+    )
+
+
 class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
@@ -8902,51 +9011,20 @@ class TritonScheduling(SIMDScheduling):
         template choice stores output tiles they fit. See
         TritonTemplateKernel.codegen_tile_reduction_epilogue."""
         template = node1.get_template_node()
-        if not (
-            config.triton.template_reduction_epilogue
-            and isinstance(template, ir.TritonTemplateBuffer)
-            and len(template.get_size()) in (2, 3)
-            # Only bf16 and fp16 outputs are tested.
-            and template.get_dtype() in (torch.bfloat16, torch.float16)
-            # The JIT cpp wrapper can't import the Blackwell template's source
-            # (its docstring ends the wrapper's string literal).
-            and not V.graph.cpp_wrapper
-        ):
+        if not isinstance(template, ir.TritonTemplateBuffer):
             return False
-        size = template.get_size()
-        # Static shapes only: the Blackwell templates specialize dynamic sizes.
-        if not all(isinstance(s, sympy.Integer) for s in size):
-            return False
-        if template.get_stride() != ir.FlexibleLayout.contiguous_strides(size):
-            return False
-        # Arg reductions can lower to a multi-result tl.reduce, which
-        # automatic warp specialization rejects.
-        if any(
-            isinstance(node.node, ir.ComputedBuffer)
-            and node.node.get_reduction_type() in ARG_REDUCTION_TYPES
-            for node in node2.get_nodes()
-            if node.is_reduction()
-        ):
-            return False
+        epilogue = ir.ReductionEpilogue(node1, node2)
         if (
             isinstance(template, ir.MultiTemplateBuffer)
             and template.make_kernel_render is None
         ):
-            tiles = [
-                c.output_tile
+            return any(
+                c.supports_reduction_epilogue(epilogue)
                 for c in template.choices
                 if isinstance(c, ir.TritonTemplateCallerBase)
-            ]
-        else:
-            tiles = [template.output_tile]
-        epilogue = [
-            node
-            for node in (*node1.get_nodes(), *node2.get_nodes())
-            if not node.is_template()
-        ]
-        return any(
-            tile_fits_reduction_epilogue(tile, template, epilogue)
-            for tile in OrderedSet(tiles)
+            )
+        return epilogue.triton_supported and epilogue.triton_tile_fits(
+            template.output_tile
         )
 
     def codegen_comment(self, node_schedule, kernel_name=None):
@@ -9280,6 +9358,8 @@ class TritonScheduling(SIMDScheduling):
                     )
 
         if len(kernels) > 1:
+            for kernel2 in kernels:
+                kernel2._in_multi_kernel = True
             for kernel2 in kernels[1:]:
                 # Keep buffers needed by the non-persistent reduction so both kernels have the same arguments
                 kernel2.must_keep_buffers = kernel.must_keep_buffers

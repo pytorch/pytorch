@@ -1276,7 +1276,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
   });
 
   m.def("_cudnn_set_conv_benchmark_empty_cache", [](bool enable) {
-    return at::native::_cudnn_set_conv_benchmark_empty_cache(enable);
+    at::native::_cudnn_set_conv_benchmark_empty_cache(enable);
   });
 }
 
@@ -1671,9 +1671,15 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  // Internal ATen operations restore this public handle to cuBLAS's default
-  // workspace before releasing their eager workspace allocations.
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  // On CUDA, internal ATen operations restore this public handle to cuBLAS's
+  // default workspace before releasing their eager workspace allocations. On
+  // ROCm they use separate handles. Creating a ROCm public handle allocates
+  // from the caching allocator, whose OOM observers may need the GIL.
+  cublasHandle_t handle = nullptr;
+  {
+    pybind11::gil_scoped_release no_gil;
+    handle = at::cuda::getCurrentCUDABlasHandle();
+  }
   return PyLong_FromVoidPtr(handle);
   END_HANDLE_TH_ERRORS
 }
