@@ -181,8 +181,6 @@ def copy_strided_storage_(dst: torch.Tensor, src: torch.Tensor) -> None:
 def maybe_handle_backward_generation(
     compiled_graph: CompiledFxGraph,
     boxed_forward_device_index: BoxedDeviceIndex | None,
-    *,
-    forward_cudagraphs_enabled: bool = True,
 ) -> None:
     if compiled_graph.current_callable is None:
         raise AssertionError("compiled_graph.current_callable must not be None")
@@ -192,13 +190,11 @@ def maybe_handle_backward_generation(
     # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
     # know we are running the backward even if we will not run it in cudagraphs
     if is_backward and config.triton.cudagraph_trees:
-        if not forward_cudagraphs_enabled:
-            return
         if boxed_forward_device_index is None:
-            raise AssertionError("boxed_forward_device_index must not be None")
-        if boxed_forward_device_index.value is None:
-            raise AssertionError("boxed_forward_device_index.value must not be None")
+            return
         device_index = boxed_forward_device_index.value
+        if device_index is None:
+            return
         compiled_graph_callable = compiled_graph.current_callable
 
         from torch._functorch._aot_autograd.runtime_wrappers import (
@@ -905,10 +901,6 @@ class CompiledFxGraph(OutputCode):
             boxed_forward_device_index = graph_kwargs.get(
                 "boxed_forward_device_index", None
             )
-        forward_cudagraphs_enabled = (
-            boxed_forward_device_index is not None
-            and boxed_forward_device_index.value is not None
-        )
 
         # When a CUDAGraphPolicy is set and it says not to wrap this
         # inner CompiledFxGraph (e.g. because wrapping happens at the
@@ -958,11 +950,7 @@ class CompiledFxGraph(OutputCode):
         # The policy's own wrapper drives the CUDA Graph transition when it takes
         # over, so only signal it here for a backward nobody else will wrap.
         if is_backward and not cudagraphs and not policy_wraps_elsewhere:
-            maybe_handle_backward_generation(
-                self,
-                boxed_forward_device_index,
-                forward_cudagraphs_enabled=forward_cudagraphs_enabled,
-            )
+            maybe_handle_backward_generation(self, boxed_forward_device_index)
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
         # so we still need to realign inputs if that happens
