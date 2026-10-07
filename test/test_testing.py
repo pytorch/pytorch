@@ -1254,11 +1254,18 @@ print("RESULT=" + json.dumps(result))
                         actual = run_test_module.parse_args().save_test_run_reports
                 self.assertEqual(actual, expected)
 
+        args = run_test_module._test_run_report_args
         with unittest.mock.patch.object(run_test_module, "HAS_TEST_RUN_REPORTS", True):
-            self.assertEqual(run_test_module._test_run_report_args(absolute_dir), [f"--save-test-run-reports={absolute_dir}"])
-            self.assertEqual(run_test_module._test_run_report_args(None), [])
+            self.assertEqual(args("test_type_info", False, absolute_dir), [f"--save-test-run-reports={absolute_dir}"])
+            # C++ tests don't go through run_tests, so they get the plugin itself.
+            self.assertEqual(
+                args("cpp/test_api", True, absolute_dir),
+                ["-p", "torch.testing._internal.torchci.plugin", f"--torchci-report-dir={absolute_dir}/cpp.test_api"],
+            )
+            self.assertEqual(args("test_type_info", False, None), [])
+            self.assertEqual(args("cpp/test_api", True, None), [])
         with unittest.mock.patch.object(run_test_module, "HAS_TEST_RUN_REPORTS", False):
-            self.assertEqual(run_test_module._test_run_report_args(absolute_dir), [])
+            self.assertEqual(args("test_type_info", False, absolute_dir), [])
 
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
@@ -1474,14 +1481,47 @@ class TestReportHelpers(TestCase):
                 ("test/test_x.py::TestP::test_p[a::b-1]", ("test/test_x.py", "TestP", "test_p[a::b-1]", "python")),
                 name="pytest_parameter",
             ),
+            subtest(
+                ("build/bin/test_api::ModulesTest.Linear", ("cpp/test_api", "ModulesTest", "Linear", "cpp")),
+                name="cpp_test",
+            ),
+            subtest(
+                ("build/bin/test_api.exe::Prime/0.Returns/1", ("cpp/test_api", "Prime/0", "Returns/1", "cpp")),
+                name="cpp_parameter",
+            ),
         ],
     )
     def test_identity(self, nodeid, expected):
         self.assertEqual(torchci_report.identity(nodeid), expected)
 
-    def test_declared_case_name_fallback(self):
-        record = torchci_report.run_record("test/test_x.py::TestX::test_case[param]", 0, "passed", 1.0, 2.0)
-        self.assertEqual(record["declared_case_name"], "test_case")
+    @parametrize(
+        "nodeid, expected",
+        [
+            subtest(("test/test_x.py::TestX::test_case[param]", "test_case"), name="python"),
+            subtest(("build/bin/test_api::Suite.Name/0", "Name"), name="cpp"),
+        ],
+    )
+    def test_declared_case_name_fallback(self, nodeid, expected):
+        record = torchci_report.run_record(nodeid, 0, "passed", 1.0, 2.0)
+        self.assertEqual(record["declared_case_name"], expected)
+
+    def test_gtest_crash(self) -> None:
+        plugin = importlib.import_module("torch.testing._internal.torchci.plugin")
+        from _pytest.reports import TestReport
+
+        nodeid = "build/bin/test_api::Suite.Crashes"
+        # What pytest-cpp reports when a gtest's process dies.
+        crash = "Internal Error: calling build/bin/test_api for test Suite.Crashes failed (returncode=-11):\nSegfault"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "report.jsonl"
+            writer = plugin.ReportWriter(str(path), "uuid", unittest.mock.Mock(getoption=lambda name, default=None: default))
+            with open(path, "w", encoding="utf-8") as writer.file:
+                writer.pytest_runtest_logstart(nodeid, None)
+                for when, outcome, longrepr in (("setup", "passed", None), ("call", "failed", crash), ("teardown", "passed", None)):
+                    writer.pytest_runtest_logreport(TestReport(nodeid, ("", 0, ""), {}, outcome, longrepr, when, start=1.0, stop=2.0))
+            run = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual((run["file"], run["language"], run["outcome"]), ("cpp/test_api", "cpp", "crashed"))
+        self.assertEqual(run["outcome_summary"], "the test process exited with code -11 (SIGSEGV)")
 
     def test_declared_case_name_raising_item(self):
         plugin = importlib.import_module("torch.testing._internal.torchci.plugin")
