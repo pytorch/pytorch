@@ -379,8 +379,11 @@ def maybe_set_real_tensor(x: object, real: Tensor | None) -> None:
     # Store the shadow real tensor on a Python FakeTensor or a C++ fake.
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         x.real_tensor = real
-    elif real is not None and isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
-        torch._C._set_real_tensor(x, real)
+    elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
+        if real is None:
+            torch._C._clear_fake_real_tensor(x)
+        else:
+            torch._C._set_real_tensor(x, real)
 
 
 def maybe_get_item_memo(x: object) -> _ItemMemo | None:
