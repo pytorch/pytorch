@@ -38,6 +38,12 @@ aoti_torch_delete_xpu_stream_guard(XPUStreamGuardHandle guard);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_xpu_stream(int32_t device_index, void** ret_stream);
 
+// Returns a queue from c10's per-device XPU stream pool, distinct from the
+// "current" stream. Used by AOTI multi-stream codegen to obtain auxiliary
+// streams for concurrent kernel execution.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_xpu_stream_from_pool(int32_t device_index, void** ret_stream);
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_xpu_device(int32_t* device_index);
 
