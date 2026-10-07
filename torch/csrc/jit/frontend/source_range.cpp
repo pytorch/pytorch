@@ -34,25 +34,67 @@ size_t StringCordView::find(const std::string& tok, size_t start) const {
     return 0;
   }
 
-  if ((size() - start) < tok.size()) {
+  const size_t total_size = size();
+  if (start > total_size || (total_size - start) < tok.size()) {
     return std::string::npos;
   }
 
-  Iterator begin = iter_for_pos(start);
-  Iterator end_iter = end();
-  size_t offset = start;
-  for (; begin != end_iter; ++begin, ++offset) {
-    if (*begin == tok[0]) {
-      auto mismatch = std::mismatch(begin, end_iter, tok.begin(), tok.end());
-      if (mismatch.second == tok.end()) {
-        // no mismatch, and second string (tok) is exhausted.
-        return offset;
+  const std::string_view needle(tok);
+  if (pieces_.size() == 1) {
+    return pieces_[0].find(needle, start);
+  }
+
+  size_t piece_start = 0;
+  for (size_t piece_index = 0; piece_index < pieces_.size(); ++piece_index) {
+    const std::string_view piece = pieces_[piece_index];
+    if (start >= piece_start + piece.size()) {
+      piece_start += piece.size();
+      continue;
+    }
+
+    size_t search_from = start - piece_start;
+    while (search_from < piece.size()) {
+      const size_t local_match = piece.find(needle.front(), search_from);
+      if (local_match == std::string_view::npos) {
+        break;
       }
-      if (mismatch.first == end_iter) {
-        // this str is exhausted but tok is not
+
+      const size_t match_start = piece_start + local_match;
+      if ((total_size - match_start) < needle.size()) {
         return std::string::npos;
       }
+
+      size_t match_piece = piece_index;
+      size_t match_pos = local_match;
+      size_t needle_pos = 0;
+      while (needle_pos < needle.size()) {
+        while (match_piece < pieces_.size() &&
+               match_pos == pieces_[match_piece].size()) {
+          ++match_piece;
+          match_pos = 0;
+        }
+        if (match_piece == pieces_.size()) {
+          break;
+        }
+
+        const std::string_view fragment =
+            pieces_[match_piece].substr(match_pos);
+        const size_t count =
+            std::min(fragment.size(), needle.size() - needle_pos);
+        if (fragment.substr(0, count) != needle.substr(needle_pos, count)) {
+          break;
+        }
+        match_pos += count;
+        needle_pos += count;
+      }
+      if (needle_pos == needle.size()) {
+        return match_start;
+      }
+
+      search_from = local_match + 1;
     }
+    piece_start += piece.size();
+    start = piece_start;
   }
   return std::string::npos;
 }
