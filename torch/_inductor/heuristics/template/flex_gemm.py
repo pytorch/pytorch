@@ -60,6 +60,25 @@ _PRIORITY_RANK = _sm100_priority_rank(
 _SKINNY_PRIORITY_RANK = _sm100_priority_rank(
     ((128, 32, 2, 1, True), (128, 32, 2, 2, False)), swap_ab=True
 )
+# 1-CTA M64 tiles: half the padded rows of M128 and twice the CTAs along N.
+# Unswapped they are the only skinny tiles grouped-main (SwiGLU) stores accept.
+# Measured on GB200 bf16 decode (M <= 64, N 4096..14336, K 4096).
+_SKINNY_M64 = tuple(
+    (64, tile_n, 1, cluster_n, dynamic)
+    for tile_n, cluster_n in ((64, 1), (32, 1), (64, 4), (64, 2), (128, 1), (16, 1))
+    for dynamic in (True, False)
+)
+_SKINNY_PRIORITY_RANK = {
+    **_SKINNY_PRIORITY_RANK,
+    **{
+        key: rank + len(_SKINNY_PRIORITY_RANK)
+        for key, rank in _sm100_priority_rank(_SKINNY_M64).items()
+    },
+    **{
+        key: rank + len(_SKINNY_PRIORITY_RANK) + len(_SKINNY_M64)
+        for key, rank in _sm100_priority_rank(_SKINNY_M64, swap_ab=True).items()
+    },
+}
 
 # Measured varlen-M (grouped_mm) order on SM100 over DeepSeek-V3 16B/671B
 # expert shapes (E in 8..256, balanced and skewed offs); the first entry is
