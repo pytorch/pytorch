@@ -422,6 +422,7 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(values, expected.values)
         self.assertEqual(indices, expected.indices)
 
+    @skipIfWindows(msg="TemporaryFileName cannot unlink a memory-mapped file")
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_from_file(self, device):
@@ -443,7 +444,9 @@ class TestLibtorchAgnostic(TestCase):
             on_disk = torch.from_file(path, size=24, dtype=torch.float32)
             self.assertEqual(on_disk, torch.full((24,), 3.0))
 
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(
+                RuntimeError, r"open file <.*> in read-only mode"
+            ):
                 my_from_file(path + ".missing", size=1, dtype=torch.uint8)
 
     # These exercise the use case: a raw PyObject passed straight from Python

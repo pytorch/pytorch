@@ -1400,9 +1400,9 @@ inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> sort(
 /// @param shared Optional flag to write tensor changes back to the file.
 /// @param size Optional number of elements to read from the file.
 /// @param dtype Optional scalar type for the tensor elements.
-/// @param layout Optional memory layout (e.g., strided, sparse).
+/// @param layout Optional memory layout, which must be strided for this op.
 /// @param device Optional device, which must be CPU for this op.
-/// @param pin_memory Optional flag to use pinned memory.
+/// @param pin_memory Optional pinning flag, which must be false for this op.
 /// @return A new tensor holding the file contents.
 inline torch::stable::Tensor from_file(
     const std::string& filename,
