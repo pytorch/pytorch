@@ -517,9 +517,11 @@ def _fake_1d_contig(dt):
 
 @instrumented_cutedsl_cache(
     lambda red, *a, **k: f"aten::{red.name}",
-    key_fn=lambda red, torch_dtype, N: f"{red.name} multirow {torch_dtype} N={N}",
+    key_fn=lambda red, torch_dtype, N, device: (
+        f"{red.name} multirow {torch_dtype} N={N} device={device}"
+    ),
 )
-def _compile_multirow(red: _Reduction, torch_dtype: torch.dtype, N: int):
+def _compile_multirow(red: _Reduction, torch_dtype: torch.dtype, N: int, device: str):
     in_dt = _TORCH_TO_CUTE[torch_dtype]
     acc = _acc_for(in_dt)
     launcher = _make_multirow(
@@ -538,8 +540,9 @@ def _compile_multirow(red: _Reduction, torch_dtype: torch.dtype, N: int):
 
 @instrumented_cutedsl_cache(
     lambda red, *a, **k: f"aten::{red.name}",
-    key_fn=lambda red, torch_dtype, N, num_warps, _bte, num_batches, *_rest: (
-        f"{red.name} looped {torch_dtype} N={N} warps={num_warps} batches={num_batches}"
+    key_fn=lambda red, torch_dtype, N, num_warps, _bte, num_batches, *rest: (
+        f"{red.name} looped {torch_dtype} N={N} warps={num_warps} "
+        f"batches={num_batches} device={rest[-1]}"
     ),
 )
 def _compile_looped(
@@ -552,6 +555,7 @@ def _compile_looped(
     depth: int,
     rows_per_block: int,
     effective_loads: int,
+    device: str,
 ):
     in_dt = _TORCH_TO_CUTE[torch_dtype]
     acc = _acc_for(in_dt)
@@ -579,9 +583,9 @@ def _compile_looped(
 
 @instrumented_cutedsl_cache(
     lambda red, *a, **k: f"aten::{red.name}",
-    key_fn=lambda red, torch_dtype, N, num_warps, _bte, num_batches, *_rest: (
+    key_fn=lambda red, torch_dtype, N, num_warps, _bte, num_batches, *rest: (
         f"{red.name} two_partial {torch_dtype} N={N} "
-        f"warps={num_warps} batches={num_batches}"
+        f"warps={num_warps} batches={num_batches} device={rest[-1]}"
     ),
 )
 def _compile_two_partial(
@@ -593,6 +597,7 @@ def _compile_two_partial(
     num_batches: int,
     depth: int,
     effective_loads: int,
+    device: str,
 ):
     in_dt = _TORCH_TO_CUTE[torch_dtype]
     acc = _acc_for(in_dt)
@@ -619,11 +624,13 @@ def _compile_two_partial(
 
 @instrumented_cutedsl_cache(
     lambda red, *a, **k: f"aten::{red.name}",
-    key_fn=lambda red, torch_dtype, num_batches: (
-        f"{red.name} two_accum {torch_dtype} batches={num_batches}"
+    key_fn=lambda red, torch_dtype, num_batches, device: (
+        f"{red.name} two_accum {torch_dtype} batches={num_batches} device={device}"
     ),
 )
-def _compile_two_accum(red: _Reduction, torch_dtype: torch.dtype, num_batches: int):
+def _compile_two_accum(
+    red: _Reduction, torch_dtype: torch.dtype, num_batches: int, device: str
+):
     out_dt = _TORCH_TO_CUTE[torch_dtype]
     acc = _acc_for(out_dt)
     launcher = _make_two_accum(acc, out_dt, num_batches, red)
@@ -651,10 +658,11 @@ def _inner_tree_reduce_into(
     """
     m, n = src.shape
     dtype = src.dtype
+    device = str(src.device)
     vec_size = _vec_size(dtype.itemsize)
 
     if n <= vec_size * _K_MULTIROW_MAX_LOADS:
-        compiled = _compile_multirow(red, dtype, n)
+        compiled = _compile_multirow(red, dtype, n, device)
         grid = _ceil_div(m, _MULTIROW_THREADS)
         compiled(src, out, m, grid)
         return
@@ -671,6 +679,7 @@ def _inner_tree_reduce_into(
             p.depth,
             p.rows_per_block,
             p.effective_loads,
+            device,
         )
         grid = _ceil_div(m, p.rows_per_block)
         compiled(src, out, m, grid)
@@ -688,9 +697,10 @@ def _inner_tree_reduce_into(
         p.num_batches,
         p.depth,
         p.effective_loads,
+        device,
     )
     c1(src, partials, m * p.num_batches)
-    c2 = _compile_two_accum(red, dtype, p.num_batches)
+    c2 = _compile_two_accum(red, dtype, p.num_batches, device)
     c2(partials, out, m, _ceil_div(m, _ACCUM_THREADS))
 
 
