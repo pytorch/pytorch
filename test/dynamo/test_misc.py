@@ -4329,6 +4329,78 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             )
             torch._dynamo.reset()
 
+    def test_numpy_operator_with_default_device_context(self):
+        def fn(input_image):
+            rounded = np.round(input_image)
+            return rounded * 64.0, 64.0 * rounded, None
+
+        x = np.ones((2, 3, 4), dtype=np.uint8)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        # CPU is sufficient to exercise DeviceContext/TorchFunctionMode handling.
+        with torch.device("cpu"):
+            result = opt_fn(x)
+
+        expected = fn(x)
+        self.assertEqual(type(result[0]), np.ndarray)
+        self.assertEqual(type(result[1]), np.ndarray)
+        self.assertEqual(result, expected)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_operator_ignores_torch_function_mode(self):
+        class RewriteMultiply(torch.overrides.TorchFunctionMode):
+            def __init__(self):
+                self.multiply_count = 0
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if func in (torch.mul, torch.multiply):
+                    self.multiply_count += 1
+                    return args[0]
+                return func(*args, **(kwargs or {}))
+
+        def fn(x):
+            return x * 4.0
+
+        x = np.arange(4, dtype=np.float32)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        mode = RewriteMultiply()
+
+        with mode:
+            result = opt_fn(x)
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(mode.multiply_count, 0)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_operator_with_tensor_subclass(self):
+        class DisabledTorchFunctionTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        def fn(array, tensor):
+            # ndarray on the left defers to the tensor's reflected method.
+            return tensor * array, array / tensor
+
+        array = np.arange(4, dtype=np.float32)
+        for tensor in (
+            torch.arange(1, 5, dtype=torch.float32),
+            torch.arange(1, 5, dtype=torch.float32).as_subclass(
+                DisabledTorchFunctionTensor
+            ),
+        ):
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+            with torch.device("cpu"):
+                expected = fn(array, tensor)
+                result = opt_fn(array, tensor)
+
+            for got, want in zip(result, expected):
+                self.assertIs(type(got), type(want))
+            self.assertEqual(result, expected)
+            self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
             a = x.numpy()
@@ -5353,6 +5425,53 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(d.b, [10, 20])
         self.assertIsNot(d.b, p.b)  # deep copy clones the list
         self.assertIs(type(d), Plain)
+
+    def test_copy_reduce_override(self):
+        # object.__reduce_ex__ must defer to a type's overridden __reduce__
+        # rather than the copyreg __newobj__ path. Exercise both a plain custom
+        # class and the pure-Python functools.partial (which returns func plus a
+        # 4-tuple state consumed by __setstate__).
+        from test.support.import_helper import import_fresh_module
+
+        class Custom:
+            def __init__(self, a, b=None):
+                self.a = a
+                self.b = b
+
+            def __reduce__(self):
+                return (type(self), (self.a,), {"b": self.b})
+
+            def __setstate__(self, state):
+                self.b = state["b"]
+
+        def fn(o):
+            return copy.copy(o), copy.deepcopy(o)
+
+        # graph break on equality comparison for py_functools.args tuples
+        cfn = torch.compile(fn, fullgraph=False, backend="eager")
+
+        obj = Custom(1, [10, 20])
+        c, d = cfn(obj)
+        self.assertEqual(c.a, 1)
+        self.assertIs(c.b, obj.b)  # shallow copy shares the list from state
+        self.assertEqual(d.a, 1)
+        self.assertIsNot(d.b, obj.b)  # deep copy clones the list
+        self.assertEqual(d.b, obj.b)
+
+        py_functools = import_fresh_module("functools", blocked=["_functools"])
+        p = py_functools.partial(sorted, ["asdf"], key=lambda t: t[0])
+        p.attr = [1, 2]
+        c, d = cfn(p)
+
+        self.assertIs(c.func, p.func)
+        self.assertIs(c.args, p.args)
+        self.assertIs(c.keywords, p.keywords)
+        self.assertIs(c.attr, p.attr)  # shallow copy shares __dict__ attr
+
+        self.assertEqual(d.args, p.args)
+        self.assertEqual(list(d.keywords), list(p.keywords))
+        self.assertIsNot(d.attr, p.attr)  # deep copy clones __dict__ attr
+        self.assertEqual(d.attr, p.attr)
 
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
@@ -11398,9 +11517,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             get_instruction_source_311(f.__code__, insts[op_offset]),
             """\
             a = ("🔥🔥🔥" +
-                ~~~~~~~~
+                ~~~~~~~~~~~
                 + "🔥🔥") + b
-                ~~~~~~~~^~~
+                ~~~~~~~~~~^~~
 """,
         )
 
@@ -16365,6 +16484,7 @@ fn
         with self.assertRaises(ImportError):
             fn(x)
 
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_dynamo_cache_move_to_front(self):
         def fn(x, const):
             return x + const

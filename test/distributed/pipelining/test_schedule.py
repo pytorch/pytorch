@@ -44,6 +44,7 @@ from torch.distributed.pipelining.schedules import (
     _add_send_recv,
     _add_unshard_reshard,
     _add_wait_send,
+    _add_wait_send_budget,
     _batch_p2p,
     _build_recv_ops,
     _defer_recv_ops,
@@ -1524,6 +1525,56 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
+    def test_post_metadata_inference_cleanup(self):
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        device = torch.device("cpu")
+        x = torch.randn(2, 4, device=device)
+        target = torch.randn_like(x)
+        try:
+            dynamic_stage = PipelineStage(torch.nn.Linear(4, 4), 0, 1, device)
+            dynamic_schedule = ScheduleGPipe(
+                dynamic_stage,
+                n_microbatches=1,
+                loss_fn=torch.nn.MSELoss(),
+            )
+            cleanup_calls = 0
+
+            def cleanup() -> None:
+                nonlocal cleanup_calls
+                self.assertIsNone(dynamic_stage._metadata_inference_buffer_backup)
+                self.assertIsNone(dynamic_stage._fwd_outputs_for_bwd_meta)
+                cleanup_calls += 1
+
+            handle = dynamic_schedule.register_post_metadata_inference_cleanup(cleanup)
+            dynamic_schedule.step(x, target=target)
+            self.assertEqual(cleanup_calls, 1)
+            dynamic_schedule.step(x, target=target)
+            self.assertEqual(cleanup_calls, 1)
+
+            handle.remove()
+            dynamic_schedule.eval(x, target=target)
+            self.assertEqual(cleanup_calls, 1)
+
+            static_module = torch.nn.Linear(4, 4)
+            static_stage = PipelineStage(
+                static_module,
+                0,
+                1,
+                device,
+                input_args=x,
+                output_args=static_module(x),
+            )
+            static_schedule = ScheduleGPipe(static_stage, n_microbatches=1)
+            static_cleanup = MagicMock()
+            static_schedule.register_post_metadata_inference_cleanup(static_cleanup)
+            static_schedule.step(x)
+            static_cleanup.assert_not_called()
+        finally:
+            torch.distributed.destroy_process_group()
+
     @parametrize(
         "ScheduleClass",
         [
@@ -2115,6 +2166,198 @@ class TestSchedulePlan(TestCase):
 
         work.wait.assert_called_once_with()
         stage.release_fwd_send_outputs.assert_called_once_with(0)
+
+    def _wait_send_schedule(self, num_stages=4, num_microbatches=8):
+        compute = {
+            rank: [_Action(rank, F, mb) for mb in range(num_microbatches)]
+            + [_Action(rank, B, mb) for mb in range(num_microbatches)]
+            for rank in range(num_stages)
+        }
+        with_comms = _add_send_recv(
+            compute, stage_to_rank=lambda stage: stage, num_stages=num_stages
+        )
+        return _add_wait_send(with_comms)
+
+    @staticmethod
+    def _outstanding_sends(actions):
+        pending = set()
+        peak = 0
+        for action in actions:
+            if action.computation_type in (SEND_F, SEND_B):
+                pending.add(
+                    (
+                        action.computation_type,
+                        action.stage_index,
+                        action.microbatch_index,
+                    )
+                )
+                peak = max(peak, len(pending))
+            elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+                send_type = SEND_F if action.computation_type == WAIT_SEND_F else SEND_B
+                pending.remove((send_type, action.stage_index, action.microbatch_index))
+        return peak, len(pending)
+
+    def test_send_budget_caps_forward_and_backward_sends(self):
+        uncapped = self._wait_send_schedule()
+        capped = _add_wait_send_budget(
+            uncapped, stage_to_rank=lambda stage: stage, max_outstanding_sends=4
+        )
+
+        self.assertTrue(
+            any(
+                action.computation_type == WAIT_SEND_B
+                for actions in capped.values()
+                for action in actions
+            )
+        )
+        for rank, actions in capped.items():
+            peak, remaining = self._outstanding_sends(actions)
+            _, uncapped_remaining = self._outstanding_sends(uncapped[rank])
+            self.assertLessEqual(peak, 4)
+            self.assertLessEqual(remaining, uncapped_remaining)
+
+    def test_send_budget_preserves_non_wait_actions(self):
+        uncapped = self._wait_send_schedule()
+        capped = _add_wait_send_budget(
+            uncapped, stage_to_rank=lambda stage: stage, max_outstanding_sends=4
+        )
+        wait_types = (WAIT_SEND_F, WAIT_SEND_B)
+        for rank, actions in capped.items():
+            self.assertEqual(
+                [
+                    action
+                    for action in actions
+                    if action.computation_type not in wait_types
+                ],
+                [
+                    action
+                    for action in uncapped[rank]
+                    if action.computation_type not in wait_types
+                ],
+            )
+
+    def test_send_budget_uses_reachability_for_independent_receive(self):
+        actions = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, F, 1),
+                _Action(0, SEND_F, 0),
+                _Action(0, SEND_F, 1),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 1),
+            ],
+            1: [
+                _Action(1, RECV_F, 0),
+                _Action(1, RECV_F, 1),
+                _Action(1, F, 0),
+                _Action(1, F, 1),
+            ],
+        }
+
+        capped = _add_wait_send_budget(
+            actions, stage_to_rank=lambda stage: stage, max_outstanding_sends=1
+        )
+
+        send_one = capped[0].index(_Action(0, SEND_F, 1))
+        self.assertEqual(capped[0][send_one - 1], _Action(0, WAIT_SEND_F, 0))
+        _simulate_comms_compute(capped, lambda stage: stage, num_stages=2)
+
+    def test_send_budget_rejects_cyclic_wait_move(self):
+        actions = {
+            0: [
+                _Action(0, SEND_F, 0),
+                _Action(0, SEND_F, 1),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 1),
+            ],
+            1: [
+                _Action(1, RECV_F, 1),
+                _Action(1, RECV_F, 0),
+            ],
+        }
+
+        with self.assertRaisesRegex(
+            ValueError, "Cannot satisfy max_outstanding_sends=1"
+        ):
+            _add_wait_send_budget(
+                actions, stage_to_rank=lambda stage: stage, max_outstanding_sends=1
+            )
+
+    def test_send_budget_rejects_unsatisfied_limit(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Cannot satisfy max_outstanding_sends=0 on pipeline rank 0.*0SEND_F0",
+        ):
+            _add_wait_send_budget(
+                self._wait_send_schedule(2, 2),
+                stage_to_rank=lambda stage: stage,
+                max_outstanding_sends=0,
+            )
+
+    def test_zero_send_budget_accepts_schedule_without_sends(self):
+        actions = {0: [_Action(0, F, 0), _Action(0, B, 0)]}
+        self.assertEqual(
+            _add_wait_send_budget(
+                actions,
+                stage_to_rank=lambda stage: stage,
+                max_outstanding_sends=0,
+            ),
+            actions,
+        )
+
+    @parametrize("value", [-1, 1.5, True])
+    def test_max_outstanding_sends_validation(self, value):
+        with self.assertRaisesRegex(ValueError, "non-negative integer"):
+            _PipelineScheduleRuntime([], 1, max_outstanding_sends=value)
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleLoopedBFS,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleZBVZeroBubble,
+            ScheduleDualPipeV,
+        ],
+    )
+    def test_max_outstanding_sends_applies_to_runtime_schedule(self, ScheduleClass):
+        stages = [
+            MockPipelineStage(group_size=2, group_rank=0, num_stages=4)
+            for _ in range(2)
+        ]
+        schedule = ScheduleClass(
+            stages,
+            n_microbatches=8,
+            max_outstanding_sends=4,
+        )
+
+        for actions in schedule.pipeline_order_with_comms.values():
+            outstanding = 0
+            peak = 0
+            for action in actions:
+                if action.computation_type in (SEND_F, SEND_B):
+                    outstanding += 1
+                    peak = max(peak, outstanding)
+                elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+                    outstanding -= 1
+            self.assertLessEqual(peak, 4)
+
+        # The simulator does not support DualPipeV's placeholder stage indices.
+        if ScheduleClass is not ScheduleDualPipeV:
+            communication_schedule = {
+                rank: [
+                    action
+                    for action in actions
+                    if action.computation_type
+                    not in (UNSHARD, RESHARD, REDUCE_GRAD, WAIT_REDUCE_GRAD)
+                ]
+                for rank, actions in schedule.pipeline_order_with_comms.items()
+            }
+            _simulate_comms_compute(
+                communication_schedule,
+                lambda stage: schedule.stage_index_to_group_rank[stage],
+                schedule._num_stages,
+            )
 
     def test_defer_reduce_grad_wait_lowering(self):
         actions = [

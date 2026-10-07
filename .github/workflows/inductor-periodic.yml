@@ -39,8 +39,8 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0;8.6'
       test-matrix: |
@@ -62,7 +62,7 @@ jobs:
       build-additional-packages: "vision audio fbgemm torchao"
       python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   periodic-dynamo-benchmarks-test:
@@ -77,7 +77,7 @@ jobs:
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix }}
       python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   rocm-periodic-dynamo-benchmarks-build:
@@ -89,6 +89,7 @@ jobs:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      rocm-arch-list: gfx950
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -123,8 +124,8 @@ jobs:
       - get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.0-py3.11-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
       test-matrix: |
@@ -134,7 +135,7 @@ jobs:
       build-additional-packages: "vision audio fbgemm torchao"
       python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   inductor-smoke-test:
@@ -149,7 +150,7 @@ jobs:
       test-matrix: ${{ needs.inductor-smoke-build.outputs.test-matrix }}
       python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
 

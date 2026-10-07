@@ -22,17 +22,14 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
-    TEST_XPU,
     TestCase,
 )
 
 
 try:
-    from torchvision import models as torchvision_models
-
-    HAS_TORCHVISION = True
+    from torchvision.models import resnet18
 except ImportError:
-    HAS_TORCHVISION = False
+    resnet18 = None
 
 from contextlib import contextmanager
 from time import perf_counter
@@ -63,7 +60,7 @@ def triu(A):
     return torch.where(i <= j, a, zero).order(i, j)
 
 
-class _TestMinBase(TestCase):
+class TestBase(TestCase):
     def setUp(self):
         super().setUp()
         gc.disable()
@@ -72,6 +69,8 @@ class _TestMinBase(TestCase):
         for o in gc.get_objects():
             if isinstance(o, (torch.Tensor, Dim, Tensor, DimList)):
                 self.interesting.add(id(o))
+        if "test_attn_device" in self._testMethodName:
+            self.mem_allocated = torch.accelerator.memory_allocated()
 
     def tearDown(self):
         interesting = []
@@ -82,13 +81,22 @@ class _TestMinBase(TestCase):
             ):
                 interesting.append(o)
 
+        extra_memory = 0
+        if "test_attn_device" in self._testMethodName:
+            extra_memory += torch.accelerator.memory_allocated() - self.mem_allocated
+
         #  nolevels = _n_levels_in_use() == 0
-        if len(interesting) != 0:
+        if extra_memory != 0 or len(interesting) != 0:
             import refcycle
 
             refcycle.garbage().export_image("garbage.pdf")
         gc.collect()
         # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
+        self.assertEqual(
+            extra_memory,
+            0,
+            lambda msg: f"{msg}\nextra accelerator memory left allocated: {extra_memory}",
+        )
         self.assertEqual(
             len(interesting),
             0,
@@ -244,7 +252,7 @@ class _TestMinBase(TestCase):
 
 
 @skipIfTorchDynamo("Bad interaction")
-class TestMin(_TestMinBase):
+class TestMin(TestBase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_manual_stuff(self):
@@ -476,9 +484,10 @@ class TestMin(_TestMinBase):
         i = dims()
         self.assertEqual(list(A[i].expand(2, 4).order(i).size()), [3, 2, 4])
 
-    @unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
     def test_network(self):
-        rn = torchvision_models.resnet18(
+        if resnet18 is None:
+            self.skipTest("no torchvision")
+        rn = resnet18(
             norm_layer=lambda x: torch.nn.BatchNorm2d(x, track_running_stats=False)
         )
         rn.train()
@@ -665,33 +674,14 @@ class TestMin(_TestMinBase):
         x.split(l, 0)
 
 
-@skipIfTorchDynamo("Bad interaction")
-class TestMinDevice(_TestMinBase):
+class TestMinDevice(TestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def setUp(self):
-        super().setUp()
-        self.mem_allocated = torch.accelerator.memory_allocated()
-
-    def tearDown(self):
-        extra_memory = torch.accelerator.memory_allocated() - self.mem_allocated
-        if extra_memory != 0:
-            import refcycle
-
-            refcycle.garbage().export_image("garbage.pdf")
-        self.assertEqual(
-            extra_memory,
-            0,
-            lambda msg: f"{msg}\nextra accelerator memory left allocated: {extra_memory}",
-        )
-        super().tearDown()
-
     @unittest.skipIf(
-        not (TEST_XPU and IS_LINUX)  # The test passes for XPU on Linux
-        and (IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS),
+        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS,
         "https://github.com/pytorch/pytorch/issues/86710",
     )
-    def test_attn(self, device):
+    def test_attn_device(self, device):
         # size from the BERT paper, 90% pretraining of sequence length 128
         self.attn(
             batch_size=256,
@@ -704,9 +694,7 @@ class TestMinDevice(_TestMinBase):
         )
 
 
-instantiate_device_type_tests(
-    TestMinDevice, globals(), except_for=("cpu",), allow_xpu=True
-)
+instantiate_device_type_tests(TestMinDevice, globals(), except_for=("cpu",))
 
 
 class TestMinFunctorchOnly(TestMin):
