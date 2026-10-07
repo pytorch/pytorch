@@ -4140,19 +4140,17 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES = {
-    bytearray: ByteArrayBuiltinVariable,
-    dict: DictBuiltinVariable,
-    getattr: GetAttrBuiltinVariable,
-    hasattr: HasAttrBuiltinVariable,
-    iter: IterBuiltinVariable,
-    list: ListBuiltinVariable,
-    setattr: SetAttrBuiltinVariable,
+    id(bytearray): ByteArrayBuiltinVariable,
+    id(dict): DictBuiltinVariable,
+    id(getattr): GetAttrBuiltinVariable,
+    id(hasattr): HasAttrBuiltinVariable,
+    id(iter): IterBuiltinVariable,
+    id(list): ListBuiltinVariable,
+    id(setattr): SetAttrBuiltinVariable,
 }
 
 
 def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
-    if not hashable(obj):
-        return None
     # Custom allow/disallow in graph takes precedence over the general lookup.
     if is_callable_disallowed(obj):
         return SkipFunctionVariable
@@ -4160,8 +4158,8 @@ def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
         return TorchInGraphFunctionVariable
     if is_polyfilled_callable(obj):
         return PolyfilledFunctionVariable
-    if obj in BUILTIN_CALLABLES:
-        return BUILTIN_CALLABLES[obj]
+    if (variable := BUILTIN_CALLABLES.get(id(obj))) is not None:
+        return variable
     if is_builtin_callable(obj):
         return BuiltinVariable
     return None
