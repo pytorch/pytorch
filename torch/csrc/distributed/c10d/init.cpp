@@ -384,7 +384,8 @@ class PythonStore : public ::c10d::Store {
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "append");
     if (!fn) {
-      return Store::append(key, value);
+      Store::append(key, value);
+      return;
     }
     // Call function with a py::bytes object for the value.
     fn(key, toPyBytes(value));
@@ -417,7 +418,8 @@ class PythonStore : public ::c10d::Store {
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "multi_set");
     if (!fn) {
-      return Store::multiSet(keys, values);
+      Store::multiSet(keys, values);
+      return;
     }
 
     fn(keys, toPyBytes(values));
@@ -812,17 +814,17 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_check_reducer_finalized",
-          [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
+          [](::c10d::Reducer& reducer) { reducer.check_finalized(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_reset_state",
-          [](::c10d::Reducer& reducer) { return reducer.reset_state(); },
+          [](::c10d::Reducer& reducer) { reducer.reset_state(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_update_process_group",
           [](::c10d::Reducer& reducer,
              c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
-            return reducer.update_process_group(std::move(new_process_group));
+            reducer.update_process_group(std::move(new_process_group));
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -1158,7 +1160,7 @@ Example:
   module.def(
       "_set_allow_inflight_collective_as_graph_input",
       [](bool value) {
-        return ::c10d::set_allow_inflight_collective_as_graph_input(value);
+        ::c10d::set_allow_inflight_collective_as_graph_input(value);
       },
       py::arg("value"));
 
@@ -1170,13 +1172,13 @@ Example:
   module.def(
       "_unregister_process_group",
       [](const std::string& group_name) {
-        return ::c10d::unregister_process_group(group_name);
+        ::c10d::unregister_process_group(group_name);
       },
       py::arg("group_name"));
 
   // Remove all process groups from the native registry
   module.def("_unregister_all_process_groups", []() {
-    return ::c10d::unregister_all_process_groups();
+    ::c10d::unregister_all_process_groups();
   });
 
 #ifdef USE_NVSHMEM
@@ -1190,6 +1192,11 @@ Example:
   // Check if NVSHMEM is available on current system.
   module.def(
       "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
+
+  module.def(
+      "_release_nvshmem_team_pool",
+      ::c10d::nvshmem_extension::release_nvshmem_team_pool,
+      py::arg("group_name"));
 #endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
@@ -1403,6 +1410,16 @@ Example:
       .def_readonly("matrix", &::c10d::DMAConnectivity::matrix);
 
   module.def("_detect_dma_connectivity", ::c10d::detect_dma_connectivity);
+  module.def("_is_nccl_symmem_available", []() {
+  // On ROCm this reports the device API; host-only symmetric memory is
+  // available whenever NCCL_HAS_SYMMEM_SUPPORT is.
+#if defined(USE_C10D_NCCL) && defined(NCCL_HAS_SYMMEM_SUPPORT) && \
+    (!defined(USE_ROCM) || defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT))
+    return true;
+#else
+    return false;
+#endif
+  });
 
   using SymmetricMemory = ::c10d::symmetric_memory::SymmetricMemory;
   py::class_<SymmetricMemory, c10::intrusive_ptr<SymmetricMemory>>(
@@ -2775,7 +2792,8 @@ Arguments:
                 std::optional<std::chrono::milliseconds> timeout) {
                 ::c10d::AllToAllOptions opts;
                 opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->all_to_all_single(output, input, outputSplitSizes, inputSplitSizes, opts);
+                return self->all_to_all_single(
+                    output, input, outputSplitSizes, inputSplitSizes, opts);
               },
               py::arg("output"),
               py::arg("input"),
@@ -2836,9 +2854,9 @@ Arguments:
             "barrier",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                 std::optional<std::chrono::milliseconds> timeout) {
-                    ::c10d::BarrierOptions opts;
-                    opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                    return self->barrier(opts);
+                ::c10d::BarrierOptions opts;
+                opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
+                return self->barrier(opts);
                 },
                 py::arg("timeout") = std::nullopt,
                 py::call_guard<py::gil_scoped_release>(),
@@ -2857,7 +2875,7 @@ Arguments:
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->monitoredBarrier(opts, waitAllRanks);
+                self->monitoredBarrier(opts, waitAllRanks);
               },
               py::arg("timeout") = std::nullopt,
               py::arg("wait_all_ranks") = false,
@@ -2912,10 +2930,9 @@ This API is experimental and subject to change.)")
                 if (!backend_obj.is_none()) {
                   backend =
                       backend_obj.cast<c10::intrusive_ptr<::c10d::Backend>>();
-                  auto* pyobj =
-                      torch::utils::PyObjectPreservation::get_or_init(
-                          **backend,
-                          [&]() { return Py_NewRef(backend_obj.ptr()); });
+                  auto* pyobj = torch::utils::PyObjectPreservation::get_or_init(
+                      **backend,
+                      [&]() { return Py_NewRef(backend_obj.ptr()); });
                   Py_DECREF(pyobj);
                 }
                 py::gil_scoped_release nogil{};
@@ -2946,7 +2963,7 @@ experimental and subject to breakage without warning.)")
               "_set_default_backend",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const ::c10d::ProcessGroup::BackendType& backendType) {
-                return self->setDefaultBackend(backendType);
+                self->setDefaultBackend(backendType);
               },
               py::arg("backend_type"),
               py::call_guard<py::gil_scoped_release>())
@@ -2960,8 +2977,9 @@ experimental and subject to breakage without warning.)")
                 // backend implementations and the latter cannot depend on
                 // python-related libs.
                 self->registerOnCompletionHook(
-                    [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
-                         hook))](const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
+                    [hookWrapper =
+                         ::c10d::PythonOnCompletionHook(std::move(hook))](
+                        const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
                       hookWrapper(workInfo);
                     });
               },
@@ -3102,12 +3120,13 @@ Arguments:
               &::c10d::ProcessGroup::unregisterPostHook,
               py::arg("hook_id"))
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
-            return torch::jit::toPyObject(c10::IValue(std::move(self)));
+                return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
           .def_static("unbox", [](py::object obj) {
-              auto typePtr = torch::getCustomClass("__torch__.torch.classes.c10d.ProcessGroup");
-              auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-              return ivalue.toCustomClass<::c10d::ProcessGroup>();
+                auto typePtr = torch::getCustomClass(
+                    "__torch__.torch.classes.c10d.ProcessGroup");
+                auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+                return ivalue.toCustomClass<::c10d::ProcessGroup>();
           });
 
   // Thread local process group manipulation
@@ -3133,6 +3152,21 @@ Arguments:
       .value("MPI", ::c10d::ProcessGroup::BackendType::MPI)
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
       .export_values();
+
+  // Getter for a Backend property that is backed by a virtual method. C++
+  // subclasses (ProcessGroupNCCL, ...) don't rebind these properties, so for
+  // them the getter must dispatch virtually to reach their override. For a
+  // Python subclass (PyBackend), reaching Backend's own property means the
+  // subclass doesn't override it or is calling super(); both want Backend's
+  // implementation, and dispatching virtually would go through the trampoline
+  // back into Python. This assumes PyBackend is the only trampoline below
+  // Backend.
+#define BACKEND_VIRTUAL_PROPERTY(method)                      \
+  [](::c10d::Backend& self) {                                 \
+    return dynamic_cast<::c10d::PyBackend*>(&self) != nullptr \
+        ? self.::c10d::Backend::method()                      \
+        : self.method();                                      \
+  }
 
   // TODO: The collection definitions handles direct instantiation of
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
@@ -3169,15 +3203,15 @@ Arguments:
               py::arg("value"))
           .def_property_readonly(
               "supports_splitting",
-              &::c10d::Backend::supportsSplitting,
+              BACKEND_VIRTUAL_PROPERTY(supportsSplitting),
               "(test whether the backend supports splitting)")
           .def_property_readonly(
               "supports_coalescing",
-              &::c10d::Backend::supportsCoalescing,
+              BACKEND_VIRTUAL_PROPERTY(supportsCoalescing),
               "(test whether the backend supports coalescing)")
           .def_property_readonly(
               "_supports_time_estimate",
-              &::c10d::Backend::supportsTimeEstimation,
+              BACKEND_VIRTUAL_PROPERTY(supportsTimeEstimation),
               R"(Test whether the backend supports collective time estimation.
 
 This API is experimental and subject to change.)")
@@ -3195,11 +3229,11 @@ This API is experimental and subject to change.)")
 This API is experimental and subject to change.)")
           .def_property_readonly(
               "supports_shrinking",
-              &::c10d::Backend::supportsShrinking,
+              BACKEND_VIRTUAL_PROPERTY(supportsShrinking),
               "(test whether the backend supports communicator shrinking)")
           .def_property_readonly(
               "supports_reconfigure",
-              &::c10d::Backend::supportsReconfigure,
+              BACKEND_VIRTUAL_PROPERTY(supportsReconfigure),
               "(test whether the backend supports reconfigure for fault tolerance)")
           .def(
               "set_timeout",
@@ -3235,7 +3269,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "Reconfigure the backend with a new set of peers for fault tolerance")
           .def_property_readonly(
               "supports_window",
-              &::c10d::Backend::supportsWindow,
+              BACKEND_VIRTUAL_PROPERTY(supportsWindow),
               "(test whether the backend supports one-sided window operations)")
           .def(
               "new_window",
@@ -3604,7 +3638,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return self->monitoredBarrier(opts, waitAllRanks);
+                self->monitoredBarrier(opts, waitAllRanks);
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
@@ -3721,11 +3755,14 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "bound_device_id",
               &::c10d::Backend::getBoundDeviceId,
               &::c10d::Backend::setBoundDeviceId)
-          .def_property_readonly("options", &::c10d::Backend::getBackendOptions)
+          .def_property_readonly(
+              "options", BACKEND_VIRTUAL_PROPERTY(getBackendOptions))
           .def(
               "get_error",
               &::c10d::Backend::getError,
               py::call_guard<py::gil_scoped_release>());
+
+#undef BACKEND_VIRTUAL_PROPERTY
 
   // base Backend::Options binding
   // TODO: Maybe we can consider how to merge this with
