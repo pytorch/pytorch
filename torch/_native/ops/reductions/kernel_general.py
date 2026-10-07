@@ -315,7 +315,7 @@ def _try_fast_row(
 
     M, itemsize = x.shape[0], x.element_size()
     ordered = rt.inner_tree_order_enabled()
-    if ordered and rt.itree_plan(N, M, itemsize) is not None:
+    if ordered and rt.itree_plan(N, M, itemsize, device=x.device) is not None:
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
     if not ordered and rt.one_thread_row_ok(N, itemsize, M, x.device):
         return rt.reduce_row_tile(
@@ -463,10 +463,11 @@ def _indexed_itree_plan(
 ) -> "_ItreePlan | None":
     from . import kernel_rowtile as rt
 
-    plan = rt.itree_plan(count, num_o, itemsize, stage=False)
+    plan = rt.itree_plan(count, num_o, itemsize, stage=False, device=device)
     if plan is None:
         return None
-    return plan
+    # General addressing cannot stage physically adjacent rows.
+    return plan._replace(stage_rows=False)
 
 
 def _try_indexed_itree(
@@ -531,7 +532,13 @@ def _try_indexed_itree(
     _launch(s1, key1, [_flat(x)], parts)
 
     outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
-    combine = rt.itree_combine_plan(plan)
+    combine = rt.itree_combine_plan(
+        plan,
+        parts[0].element_size(),
+        x.device,
+        nfields=trait.nfields,
+        nrows=num_o,
+    )
     s2 = ReduceBlock(
         trait,
         count=nbatch,
