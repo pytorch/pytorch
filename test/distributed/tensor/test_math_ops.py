@@ -30,8 +30,10 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    LocalDTensorContinuousTestBase,
     map_local_for_rank,
+    NUM_DEVICES,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -40,7 +42,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 funcol = torch.ops.c10d_functional
 
 
-class DistMathOpsTest(DTensorTestBase):
+class DistMathOpsTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
@@ -2031,7 +2035,7 @@ class DistMathOpsTest(DTensorTestBase):
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
-    DistMathOpsTest,
+    DistMathOpsTest, base_class=LocalDTensorContinuousTestBase
 )
 
 if __name__ == "__main__":
