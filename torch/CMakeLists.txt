@@ -41,7 +41,7 @@ append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
 if(BUILD_TEST)
-    add_definitions(-DBUILDING_TESTS)
+    add_compile_definitions(BUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
       )
@@ -106,25 +106,25 @@ set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
 set(TORCH_PYTHON_COMPILE_OPTIONS)
 
-set(TORCH_PYTHON_LINK_FLAGS "")
+set(TORCH_PYTHON_LINK_OPTIONS)
 
 if(MSVC)
-    string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
+    list(APPEND TORCH_PYTHON_LINK_OPTIONS "/NODEFAULTLIB:LIBCMT.LIB")
     # Python headers use #pragma comment(lib, "pythonXX") which makes MSVC search
     # for the library by bare name.  Add the directory so the linker can find it.
     foreach(_pylib IN LISTS Python_LIBRARIES)
       if(_pylib MATCHES "python[0-9].*\\.lib$")
         get_filename_component(_pylib_dir "${_pylib}" DIRECTORY)
-        string(APPEND TORCH_PYTHON_LINK_FLAGS " /LIBPATH:\"${_pylib_dir}\"")
+        list(APPEND TORCH_PYTHON_LINK_OPTIONS "/LIBPATH:${_pylib_dir}")
         break()
       endif()
     endforeach()
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${Python_LIBRARIES} onnx_library)
     if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
-      string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
+      list(APPEND TORCH_PYTHON_LINK_OPTIONS "/DEBUG:FULL")
     endif()
 elseif(APPLE)
-    string(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
+    list(APPEND TORCH_PYTHON_LINK_OPTIONS "LINKER:-undefined,dynamic_lookup")
 else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
@@ -270,9 +270,11 @@ if(USE_DISTRIBUTED)
     endif()
     # Disable certain warnings for GCC-9.X
     if(CMAKE_COMPILER_IS_GNUCXX)
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+      set_source_files_properties(
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
+        PROPERTIES COMPILE_OPTIONS -Wno-cast-function-type)
     endif()
     # NCCL is a private dependency of libtorch, but libtorch_python includes
     # some private headers of libtorch, which in turn include NCCL. As a hacky
@@ -304,7 +306,9 @@ endif()
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
-torch_optimize_layout_if_enabled(torch_python)
+torch_optimize_layout_if_enabled(
+  torch_python
+  "libtorch_python-${Python_SOABI}.yaml")
 if(APPLE)
   target_compile_options(torch_python PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=default>)
@@ -369,7 +373,7 @@ if(BUILD_LIBTORCHLESS)
   set(EXPERIMENTAL_SINGLE_THREAD_POOL "0" CACHE STRING
   "Experimental option to use a single thread pool for inter- and intra-op parallelism")
   if("${EXPERIMENTAL_SINGLE_THREAD_POOL}")
-    target_compile_definitions(torch_python PRIVATE "-DAT_EXPERIMENTAL_SINGLE_THREAD_POOL=1")
+    target_compile_definitions(torch_python PRIVATE AT_EXPERIMENTAL_SINGLE_THREAD_POOL=1)
   endif()
 
 endif()
@@ -393,29 +397,31 @@ set_source_files_properties(
 
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX)
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+  set_source_files_properties(
+    ${TORCH_SRC_DIR}/csrc/Module.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
+    PROPERTIES COMPILE_OPTIONS -Wno-cast-function-type)
 endif()
 
 # Preserve CUDA_GENCODE flags
 if(USE_CUDA)
   torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_DEFINITIONS "CUDA_ARCH_FLAGS=${_ARCH_FLAGS_readable}")
 endif()
 
 # Preserve HIP arch flags
 if(USE_ROCM)
   string(REPLACE ";" " " PYTORCH_ROCM_ARCH_readable "${PYTORCH_ROCM_ARCH}")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${PYTORCH_ROCM_ARCH_readable}\"")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_DEFINITIONS "CUDA_ARCH_FLAGS=${PYTORCH_ROCM_ARCH_readable}")
 endif()
 
 # Preserve XPU arch flags
 if(USE_XPU)
   string(REPLACE "," " " _ARCH_FLAGS_readable "${TORCH_XPU_ARCH_LIST}")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_FLAGS "-DXPU_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_DEFINITIONS "XPU_ARCH_FLAGS=${_ARCH_FLAGS_readable}")
 endif()
 
-target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
+target_compile_definitions(torch_python PRIVATE THP_BUILD_MAIN_LIB)
 
 target_link_libraries(torch_python PRIVATE ${TORCH_LIB} ${TORCH_PYTHON_LINK_LIBRARIES})
 
@@ -431,20 +437,20 @@ if(USE_UCC)
 endif()
 
 if(BUILD_ONEDNN_GRAPH)
-  target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  target_compile_definitions(torch_python PRIVATE BUILD_ONEDNN_GRAPH)
   if(NOT BUILD_LIBTORCHLESS)
-    target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+    target_compile_definitions(torch_cpu PRIVATE BUILD_ONEDNN_GRAPH)
   endif()
 endif()
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
    # Workaround numerous decref-without-a-gil warnings from JIT
    # see https://github.com/pytorch/pytorch/issues/130073
-   target_compile_definitions(torch_python PRIVATE "-DPYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF")
+   target_compile_definitions(torch_python PRIVATE PYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF)
 endif()
 
-if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
-    set_target_properties(torch_python PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+if(TORCH_PYTHON_LINK_OPTIONS)
+    target_link_options(torch_python PRIVATE ${TORCH_PYTHON_LINK_OPTIONS})
 endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -577,10 +583,10 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     target_link_libraries(nnapi_backend PRIVATE torch)
   endif()
   target_link_libraries(nnapi_backend PRIVATE torch_python pybind::pybind11 fmt::fmt-header-only)
-  if(MSVC AND TORCH_PYTHON_LINK_FLAGS)
-    set_target_properties(nnapi_backend PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+  if(MSVC AND TORCH_PYTHON_LINK_OPTIONS)
+    target_link_options(nnapi_backend PRIVATE ${TORCH_PYTHON_LINK_OPTIONS})
   endif()
 endif()
 
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
-set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
+set(TORCH_PYTHON_LINK_OPTIONS "${TORCH_PYTHON_LINK_OPTIONS}" PARENT_SCOPE)

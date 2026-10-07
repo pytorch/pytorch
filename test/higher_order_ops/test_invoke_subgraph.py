@@ -1468,7 +1468,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(exp_out, out)
         self.assertEqual(x_clone, x)
 
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_input_mutation_inference_mode(self):
         @nested_compile_region
@@ -3584,6 +3583,125 @@ class TestInvokeSubgraphReuse(TestCase):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
 
         self.assertEqual(count(), 1)
+
+    def test_subgraph_reuse_nan_constant(self):
+        # nan != nan under IEEE eq; the reuse check must compare constants
+        # bitwise so a nan constant input still allows subgraph reuse.
+        @nested_compile_region
+        def gn(x, c: float):
+            return x * c
+
+        def fn(x):
+            a = gn(x, float("nan"))
+            b = gn(x, float("nan"))
+            return torch.stack([a, b])
+
+        x = torch.randn(8)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(count(), 1)
+        self.assertTrue(torch.isnan(res).all())
+
+    def test_subgraph_no_reuse_neg_zero_constant(self):
+        # -0.0 == 0.0 under IEEE eq, but a subgraph traced with 0.0 baked in
+        # must not be reused for -0.0 (reciprocal flips sign of inf).
+        @nested_compile_region
+        def gn(x, c: float):
+            return (x * c).reciprocal()
+
+        def fn(x):
+            a = gn(x, 0.0)
+            b = gn(x, -0.0)
+            return torch.stack([a, b])
+
+        x = torch.ones(8)
+
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+
+    def test_subgraph_reuse_nan_arg(self):
+        # Constants passed as arguments have sources, so reuse goes through
+        # the snapshotted EQUALS_MATCH/CONSTANT_MATCH eval_fn path.
+        @nested_compile_region
+        def gn(x, c: float):
+            return x * c
+
+        def fn(x, c1, c2):
+            return torch.stack([gn(x, c1), gn(x, c2)])
+
+        x = torch.randn(8)
+        n = float("nan")
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, n, n)
+
+        self.assertEqual(count(), 1)
+        self.assertTrue(torch.isnan(res).all())
+
+    def test_subgraph_no_reuse_neg_zero_arg(self):
+        @nested_compile_region
+        def gn(x, c: float):
+            return (x * c).reciprocal()
+
+        def fn(x, c1, c2):
+            return torch.stack([gn(x, c1), gn(x, c2)])
+
+        x = torch.ones(8)
+
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, 0.0, -0.0)
+        self.assertEqual(res, fn(x, 0.0, -0.0))
+
+    def test_subgraph_no_reuse_neg_zero_complex_arg(self):
+        @nested_compile_region
+        def gn(x, c: complex):
+            return (x * c).real.reciprocal()
+
+        def fn(x, c1, c2):
+            return torch.stack([gn(x, c1), gn(x, c2)])
+
+        x = torch.ones(8)
+        c1, c2 = complex(0.0, 1.0), complex(-0.0, 1.0)
+
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, c1, c2)
+        self.assertEqual(res, fn(x, c1, c2))
+
+    def test_subgraph_no_reuse_neg_zero_dict_key(self):
+        @nested_compile_region
+        def gn(x, d):
+            (k,) = d.keys()
+            return (x * k).reciprocal()
+
+        def fn(x, d1, d2):
+            return torch.stack([gn(x, d1), gn(x, d2)])
+
+        x = torch.ones(8)
+        d1, d2 = {0.0: None}, {-0.0: None}
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, d1, d2)
+
+        self.assertEqual(count(), 2)
+        self.assertEqual(res, fn(x, d1, d2))
+
+    def test_subgraph_reuse_nan_dict_key(self):
+        @nested_compile_region
+        def gn(x, d):
+            (k,) = d.keys()
+            return x * k
+
+        def fn(x, d1, d2):
+            return torch.stack([gn(x, d1), gn(x, d2)])
+
+        x = torch.ones(8)
+        d1, d2 = {float("nan"): None}, {float("nan"): None}
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, d1, d2)
+
+        self.assertEqual(count(), 1)
+        self.assertTrue(torch.isnan(res).all())
 
     def test_subgraph_reuse_different_shapes(self):
         @nested_compile_region

@@ -15,9 +15,9 @@ module scope; torchgen is pure Python with no torch dependency.
 
 A module declares either ONE op (the module itself carries the exports
 below) or a FAMILY: it exports ``declarations() -> list`` of objects,
-each carrying the same exports as attributes/methods. Table-driven
-families (e.g. pointwise) build their declaration objects from the same
-table that drives their JIT registration.
+each carrying the same exports as attributes/methods. A table-driven family
+builds its declaration objects from the same table that drives its JIT
+registration.
 
 Required exports (module or declaration object):
 
@@ -92,6 +92,11 @@ Optional exports:
                               matching; like covered_axes it may be
                               narrower than the stub's dispatch chain
                               but never wider than intended coverage.
+
+Every generated op also registers torch.ops._native_aot.archs_<op>(), returning
+the embedded compute capabilities (e.g. [90, 100]). This is independent of
+cpp_covers: the Python fallback must verify that this op was embedded for the
+input device before subtracting any calls from the JIT route.
 
 Emission cardinality: cpp_helpers once per file, cpp_dispatch_prelude
 once per op, cpp_dispatch/cpp_launch once per precompile point. The
