@@ -6,9 +6,9 @@
 #include <c10/macros/Macros.h>
 
 // Determine if the architecture supports rowwise scaled mm
-// Currently failing on windows with:
-// https://github.com/NVIDIA/cutlass/issues/1571
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION)
+// CUTLASS issue #1571 (Windows _udiv128 in __host__ __device__) is fixed
+// in cutlass >= v4.6.1, which is the current submodule pin.
+#if !defined(USE_ROCM) && defined(CUDA_VERSION)
 
 #define BUILD_ROWWISE_FP8_KERNEL
 #endif
