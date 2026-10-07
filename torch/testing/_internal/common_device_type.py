@@ -819,7 +819,7 @@ class CUDATestBase(DeviceTypeTestBase):
 
         return {
             Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
-            Capability.dtype.bf16: lambda: SM80OrLater,
+            Capability.dtype.bf16: lambda: SM80OrLater or torch.version.hip,
             Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
             Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         }

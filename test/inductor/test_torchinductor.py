@@ -1521,7 +1521,7 @@ class CommonTemplate:
             ),
         )
 
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1565,7 +1565,7 @@ class CommonTemplate:
             )
             self.assertEqual(ref, res)
 
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1621,7 +1621,7 @@ class CommonTemplate:
             self.assertEqual(ref_tensor1, res_tensor1)
             self.assertEqual(ref_out_tensor1, res_out_tensor1)
 
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1662,7 +1662,7 @@ class CommonTemplate:
             for ref_value, res_value in zip(ref_value_list, res_value_list):
                 self.assertEqual(ref_value, res_value)
 
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1707,7 +1707,7 @@ class CommonTemplate:
 
                 self.assertEqual(ref_value, res_value)
 
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1755,7 +1755,7 @@ class CommonTemplate:
 
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
 
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -1829,7 +1829,7 @@ class CommonTemplate:
             self.assertEqual(len(ref_values), len(res_values))
             self.assertEqual(ref_values, res_values)
 
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
@@ -2092,7 +2092,7 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80")
     def test_scatter_bf16(self):
         def fn(inp, src, index):
             return inp.scatter_add(0, index, src)
@@ -2741,7 +2741,7 @@ class CommonTemplate:
         b = make_tensor(64, low=0, dtype=torch.float32, device=self.device)
         self.common(fn, (x, b))
 
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     @skip_if_gpu_halide  # accuracy issue
     def test_split_cumsum_low_prec(self):
         if is_cpp_backend(self.device):
@@ -2815,7 +2815,7 @@ class CommonTemplate:
             )
             self.common(fn, (inp,), atol=1e-5, rtol=1e-4, check_lowp=False)
 
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     @skip_if_gpu_halide  # accuracy issue
     def test_split_cumprod_low_prec(self):
         if is_cpp_backend(self.device):
@@ -3679,7 +3679,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4, 1, 4),))
 
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_dist_bf16(self):
         def fn(a, b):
@@ -5299,7 +5299,7 @@ for dtype in (torch.int32, torch.int64):
         self.common(fn, (a2, b2))
 
     @skipIfPy312  # segfaults
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -5314,7 +5314,7 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @skipIfPy312  # segfaults
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
             return torch.mm(a, b.to(a.dtype)) * scale + bias
@@ -5331,7 +5331,7 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @skipIfPy312  # segfaults
-    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80")
     def test_mixed_mm3(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -8795,7 +8795,7 @@ for dtype in (torch.int32, torch.int64):
     def test_infinitely_differentiable_gelu_backward_bfloat16(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
-        if not SM80OrLater:
+        if not (SM80OrLater or torch.version.hip):
             raise unittest.SkipTest("uses bfloat16 which requires SM >= 80")
 
         def fn(grad, self):
@@ -17749,7 +17749,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(fn(x), torch.tensor(15, device=self.device))
         self.common(fn, (x,))
 
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80")
     @parametrize(
         "dtype_x, dtype_y",
         list(itertools.product(test_dtypes, test_dtypes)),
@@ -17871,7 +17871,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual = torch.compile(fn)(x)
         self.assertEqual(ref, actual)
 
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "uses bfloat16 which requires SM >= 80")
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_bfloat16_to_int16(self):
         def fn(a, b):
@@ -21506,7 +21506,7 @@ if RUN_GPU:
                 )
                 torch._inductor.aot_compile(traced, inputs)
 
-        @skipCUDAIf(not SM90OrLater, "Requires sm90")
+        @skipCUDAIf(not (SM90OrLater or torch.version.hip), "Requires sm90")
         @requires_cuda_and_triton
         @config.patch(implicit_fallbacks=True)
         @parametrize("backend", ["cublaslt", "cutlass"])
@@ -22815,7 +22815,8 @@ if RUN_GPU:
                 ).run(code)
 
         @skipCUDAIf(
-            not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+            not (SM90OrLater or torch.version.hip),
+            "uses bfloat16 atomic add instrs which requires SM >= 90",
         )
         def test_bf16_atomic_add(self):
             def fn(output, indices, values):

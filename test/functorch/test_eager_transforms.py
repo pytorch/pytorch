@@ -5544,7 +5544,9 @@ class TestCompileTransformsDevice(TestCase):
     # Triton only supports GPU with SM70 or later.
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @expectedFailureIf((IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not SM70OrLater))
+    @expectedFailureIf(
+        (IS_WINDOWS and TEST_CUDA) or (TEST_CUDA and not (SM70OrLater or torch.version.hip))
+    )
     @unittest.skipIf(
         TEST_CUDA_MEM_LEAK_CHECK,
         "Leaking memory, see https://github.com/pytorch/pytorch/pull/150059 for example",

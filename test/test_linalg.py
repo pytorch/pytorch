@@ -7270,7 +7270,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test__int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
+        if self.device_type == 'cuda' and not (SM80OrLater or torch.version.hip):
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM and self.device_type == 'cuda' and CDNA5OrLater():
@@ -7342,7 +7342,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test_compile_int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
+        if self.device_type == 'cuda' and not (SM80OrLater or torch.version.hip):
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM and self.device_type == 'cuda' and CDNA5OrLater():
@@ -11994,7 +11994,10 @@ class TestGroupedMM(TestCase):
                 self.assertEqual(b.grad[b_idx], b_ref.grad)
             start = end
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(
+        not (SM80OrLater or torch.version.hip),
+        "Grouped gemm supported only on SM80 or greater",
+    )
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
@@ -12030,7 +12033,10 @@ class TestGroupedMM(TestCase):
         with mock.patch.dict(os.environ, {env_var: "1"}):
             self._check_grouped_gemm(device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype)
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(
+        not (SM80OrLater or torch.version.hip),
+        "Grouped gemm supported only on SM80 or greater",
+    )
     @parametrize("a_shape,b_shape,offsets,a_row_major,b_row_major", [
         subtest(((25, 8192), (1, 1024, 8192), [25], True, False), name="rows_bn128"),
         subtest(((2, 49, 8192), (1024, 8192), [257, 1024], False, True), name="cols_bn256"),
@@ -12046,7 +12052,10 @@ class TestGroupedMM(TestCase):
         self.grouped_mm_helper(a, b, offs)
 
     @onlyOn(["cuda", "mps"])
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(
+        not (SM80OrLater or torch.version.hip),
+        "Grouped gemm supported only on SM80 or greater",
+    )
     @dtypes(torch.bfloat16)
     def test_grouped_mm_large_stride_fallback(self, device, dtype):
         # Forces MPS's oversized-stride guard and jagged-column transposed fallback.
@@ -12065,7 +12074,10 @@ class TestGroupedMM(TestCase):
             F.grouped_mm(a, b, offs=offs)
 
     @onlyOn(["cuda", "mps"])
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(
+        not (SM80OrLater or torch.version.hip),
+        "Grouped gemm supported only on SM80 or greater",
+    )
     @serialTest()
     @largeTensorTest("6GB")
     @largeMPSBufferTest((2**31 + 64) * torch.bfloat16.itemsize)

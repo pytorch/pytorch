@@ -694,7 +694,7 @@ class TestCuteDSLSmoketestCUDA(TestCase):
             cutedsl_utils._CUTEDSL_REQUIRED_VERSIONS,
         )
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_elementwise_add(self):
         _host, from_dlpack = _build_elementwise_add()
         import cutlass.cute as cute
@@ -714,7 +714,7 @@ class TestCuteDSLSmoketestCUDA(TestCase):
 
         torch.testing.assert_close(c, a + b)
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_sgemm(self):
         SGemm, from_dlpack = _build_sgemm()
         import cutlass.cute as cute
@@ -755,7 +755,7 @@ class TestCuteDSLSmoketestCUDA(TestCase):
         ref = torch.einsum("mk,nk->mn", a, b)
         torch.testing.assert_close(c.cpu(), ref.cpu(), atol=1e-3, rtol=1e-5)
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_cta_rmsnorm(self):
         CtaNorm, from_dlpack, cutlass_torch = _build_cta_norm()
         import cutlass
@@ -782,7 +782,7 @@ class TestCuteDSLSmoketestCUDA(TestCase):
         ref = torch.rms_norm(x, (N,), weight, eps)
         torch.testing.assert_close(y, ref, atol=1e-3, rtol=1e-3)
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_cta_layernorm(self):
         CtaNorm, from_dlpack, cutlass_torch = _build_cta_norm()
         import cutlass
@@ -839,7 +839,7 @@ class TestCuteDSLReadOnlyWrapperCUDA(TestCase):
 
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_readonly_wrapper_tvm_ffi_kernel(self):
         _host, from_dlpack = _build_elementwise_add()
         import cutlass.cute as cute
@@ -886,7 +886,7 @@ class TestCuteDSLReadOnlyWrapperCUDA(TestCase):
         self.assertEqual(a_cow.const_data_ptr(), a_addr)
         self.assertEqual(b_cow.const_data_ptr(), b_addr)
 
-    @unittest.skipIf(not SM80OrLater, "SM80+ required")
+    @unittest.skipIf(not (SM80OrLater or torch.version.hip), "SM80+ required")
     def test_readonly_wrapper_routes_to_const_exchange_api(self):
         # tvm-ffi / cuteDSL discover __dlpack_c_exchange_api__ on the type. The
         # wrapper must expose the const (read-only) API rather than the default.

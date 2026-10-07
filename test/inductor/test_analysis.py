@@ -455,7 +455,7 @@ class TestAnalysis(TestCase):
         ):
             main()
 
-    @skipIf(not (SM80OrLater or TEST_XPU), "Requires SM80 or XPU")
+    @skipIf(not (SM80OrLater or torch.version.hip or TEST_XPU), "Requires SM80 or XPU")
     def test_augment_trace_helper_unit(self):
         js = json.loads(example_profile)
         out_profile = _augment_trace_helper(js)

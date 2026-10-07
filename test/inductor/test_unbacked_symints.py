@@ -575,7 +575,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
         if device == "cpu":
@@ -601,7 +601,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.compile(fn, fullgraph=True)(x)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
-    @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):
         if device == "cpu":

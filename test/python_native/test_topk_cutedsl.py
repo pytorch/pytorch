@@ -53,7 +53,7 @@ def _test_n(k: int) -> int:
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
-@unittest.skipUnless(SM90OrLater, "SM90+ required")
+@unittest.skipUnless(SM90OrLater or torch.version.hip, "SM90+ required")
 @skipIfNoCuteDSL
 class TestCuTeDSLTopK(TestCase):
     def _assert_topk_matches_aten(self, x: torch.Tensor, k: int) -> None:

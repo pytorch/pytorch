@@ -40,7 +40,7 @@ BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 # >GPU-count and maybe_set_hip_visible_devies() in run_test.py assigns workers
 # to nonexistent device indices -> torch.cuda.device_count()==0.
 IS_ROCM = torch is not None and torch.version.hip is not None
-NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if not TEST_CUDA or SM80OrLater else 2
+NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if not TEST_CUDA or SM80OrLater or IS_ROCM else 2
 NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
 

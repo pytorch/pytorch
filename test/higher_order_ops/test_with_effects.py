@@ -1008,7 +1008,7 @@ class TestWithEffectsDevice(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @skipCUDAIf(not SM80OrLater, "triton")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "triton")
     @skipIfNoDynamoSupport
     def test_register_effectful_custom_op(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -1265,7 +1265,7 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 
     @onlyAccelerator
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @skipCUDAIf(not SM80OrLater, "triton")
+    @skipCUDAIf(not (SM80OrLater or torch.version.hip), "triton")
     def test_effectful_op_with_flex_attention(self, device):
         """Test that effectful custom ops work with flex_attention."""
         from torch._library.effects import EffectType

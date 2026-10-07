@@ -244,7 +244,7 @@ inductor_skips["cuda"] = {
     "multinomial": {f16, f32, f64},  # stochastic op, output comparison not meaningful
 }
 
-if not SM80OrLater:
+if not (SM80OrLater or torch.version.hip):
     inductor_skips["cuda"]["bfloat16"] = {b8, f16, f32, f64, i32, i64}
 
 inductor_skips["xpu"] = {

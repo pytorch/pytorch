@@ -195,7 +195,10 @@ class TestOutDtypeOpDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @unittest.skipIf(IS_WINDOWS, "_int_mm unavailable")
-    @unittest.skipIf(TEST_CUDA and not SM80OrLater, "_int_mm unavailable")
+    @unittest.skipIf(
+        TEST_CUDA and not (SM80OrLater or torch.version.hip),
+        "_int_mm unavailable",
+    )
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "_int_mm unavailable")
     @skipIfNoDynamoSupport

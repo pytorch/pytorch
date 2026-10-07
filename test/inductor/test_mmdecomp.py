@@ -143,7 +143,7 @@ class TestDecomp(NNTestCase):
     @parametrize(
         "dtype",
         [torch.float, torch.float16, torch.bfloat16]
-        if SM80OrLater or TEST_XPU
+        if SM80OrLater or torch.version.hip or TEST_XPU
         else [torch.float],
     )
     @parametrize("m", [256, 4096])
@@ -190,7 +190,7 @@ class TestDecomp(NNTestCase):
     @parametrize(
         "dtype",
         [torch.float, torch.float16, torch.bfloat16]
-        if SM80OrLater or TEST_XPU
+        if SM80OrLater or torch.version.hip or TEST_XPU
         else [torch.float],
     )
     @parametrize("m", [256, 4096])
@@ -268,7 +268,9 @@ class TestDecomp(NNTestCase):
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @parametrize(
         "dtype",
-        [torch.float, torch.bfloat16] if SM80OrLater or TEST_XPU else [torch.float],
+        [torch.float, torch.bfloat16]
+        if SM80OrLater or torch.version.hip or TEST_XPU
+        else [torch.float],
     )
     @parametrize("bs", [1, 2, 4, 10])
     def test_batched_mm(self, device, dtype, bs):

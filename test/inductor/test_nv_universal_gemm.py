@@ -213,7 +213,7 @@ def _force_pdl_nvgemm_choice():
 
 
 @unittest.skipIf(
-    not (ensure_nv_universal_gemm_available() and SM90OrLater),
+    not (ensure_nv_universal_gemm_available() and (SM90OrLater or torch.version.hip)),
     "NVIDIA Universal GEMM (cutlass.operators) library not available or GPU is older than SM90",
 )
 @instantiate_parametrized_tests
