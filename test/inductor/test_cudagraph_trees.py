@@ -4905,6 +4905,23 @@ if HAS_CUDA_AND_TRITON:
             # Partition was too small, so no cudagraph recorded
             self.assertIsNone(self.get_manager())
 
+        def test_max_autotune_skips_single_kernel_cudagraph_by_default(self):
+            def fn(x, bias, y):
+                return torch.sigmoid(x + 0.5 * y + bias)
+
+            x = torch.randn((16, 8), device="cuda")
+            y = torch.randn((16, 8), device="cuda")
+            bias = torch.randn((1, 8), device="cuda")
+
+            fn_compiled = torch.compile(
+                fn, fullgraph=True, dynamic=False, mode="max-autotune"
+            )
+            for _ in range(3):
+                out = fn_compiled(x, bias, y)
+
+            self.assertEqual(out, fn(x, bias, y))
+            self.assertIsNone(self.get_manager())
+
         def test_cudagraph_min_partition_size_allow_large(self):
             """Partitions with enough kernels pass the threshold."""
 
@@ -5435,6 +5452,11 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
+        # Keep the single-kernel matmul partition cudagraphable so the test
+        # isolates the eigh skip from the max-autotune partition size threshold.
+        @torch._inductor.config.patch(
+            "triton.max_autotune_cudagraph_min_partition_size", 0
+        )
         @skipIfRocm
         def test_graph_partition_max_autotune_skips_linalg_eigh(self):
             from torch._inductor.utils import is_cudagraph_unsafe_fx_node
