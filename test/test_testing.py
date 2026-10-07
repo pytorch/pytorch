@@ -1195,22 +1195,17 @@ class TestReportHelpers(TestCase):
         _assert_run_line(run, int(now * 1000), int(now * 1000))
         self.assertEqual(run["outcome_summary"], r"\ud800")
 
-    @parametrize(
-        "raw, expected",
-        [
-            subtest(("NVIDIA L4", "l4"), name="l4"),
-            subtest(("Tesla T4", "t4"), name="t4"),
-            subtest(("NVIDIA H100 80GB HBM3", "h100"), name="h100"),
-            subtest(("AMD Instinct MI350X VF", "mi350x"), name="mi350x"),
-            subtest(("Apple M2 Pro", "m2"), name="m2"),
-            subtest(("Intel(R) Data Center GPU Max 1100", "max1100"), name="max1100"),
-            subtest(("Intel(R) Arc(TM) Pro B60 Graphics", "b60"), name="b60"),
-            subtest(("NVIDIA GeForce RTX 4090", "nvidia-geforce-rtx-4090"), name="unknown"),
-        ],
-    )
-    def test_normalize_device_name(self, raw, expected):
+    def test_capture_skips_torch_accelerator(self) -> None:
         environment = importlib.import_module("torch.testing._internal.torchci.environment")
-        self.assertEqual(environment._normalize_device_name(raw), expected)
+        with unittest.mock.patch.object(torch._C, "_accelerator_getAccelerator") as probe:
+            environment.capture()
+        probe.assert_not_called()
+
+    @parametrize("rocm, expected", [subtest(("10.1.0", "10.1"), name="release"), subtest((None, "7.16"), name="hip")])
+    def test_rocm_version(self, rocm, expected):
+        environment = importlib.import_module("torch.testing._internal.torchci.environment")
+        with unittest.mock.patch.multiple(torch.version, cuda=None, hip="7.16.26385", rocm=rocm):
+            self.assertEqual(environment._accelerator(), ("rocm", expected))
 
 
 instantiate_parametrized_tests(TestReportHelpers)
