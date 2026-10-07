@@ -5,6 +5,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -252,8 +253,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
         is_nested || query.size(2) != 1 || !sdp::is_cudnn_attention_decode_disabled(),
         "cuDNN SDPA decode is disabled for cuDNN versions 9.19-9.25.0 (except 9.24.1) on SM 10.x and 11.x.");
     TORCH_CHECK(
-        !is_nested || max_q > 128,
-        "cuDNN varlen attention does not support query sequence length <= 128.");
+        !is_nested || max_q > 128 ||
+            at::detail::getCUDAHooks().versionRuntimeCuDNN() >= 92400,
+        "cuDNN varlen attention requires cuDNN >= 9.24 for query sequence length <= 128.");
 
     if (!is_nested) {
       const int64_t batch_size = query.size(0);
@@ -565,6 +567,17 @@ _efficient_attention_backward(
 
 #ifdef USE_ROCM
   // ROCM Implementation
+  // Empty grad_out means there is nothing to accumulate; skip the backends,
+  // which cannot launch on empty inputs (see _efficient_attention_forward).
+  if (grad_out.numel() == 0) {
+    grad_q.zero_();
+    grad_k.zero_();
+    grad_v.zero_();
+    if (grad_bias.defined()) {
+      grad_bias.zero_();
+    }
+    return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v), std::move(grad_bias));
+  }
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
 #if defined(USE_ROCM_CK_SDPA)
@@ -654,8 +667,8 @@ _efficient_attention_backward(
     const auto lse_batch_size =
         cu_seqlens_q.has_value() ? cu_seqlens_q->size(0) - 1 : B;
     at::Tensor softmax_lse = logsumexp.view({lse_batch_size * nH, max_seqlen_q});
-    hipError_t err;
-    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_input_aotensor;
+    using sdp::aotriton_adapter::mk_output_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::cast_dtype;
     aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
@@ -664,23 +677,27 @@ _efficient_attention_backward(
     const auto aotriton_philox_offset =
         use_dropout ? philox_offset : at::zeros({}, at::dtype(at::kLong));
     using aotriton::v3::flash::CausalType;
-    using aotriton::v3::flash::VarlenType;
     using aotriton::v3::flash::WindowValue;
+#if AOTRITON_VARLEN_BITS_API
+    using sdp::aotriton_adapter::mk_varlen_bits_packed;
+#else
+    using aotriton::v3::flash::VarlenType;
+#endif
     aotriton::v3::flash::attn_bwd_params params;
-    params.Q = mk_aotensor(q_t, "q");
-    params.K = mk_aotensor(k_t, "k");
-    params.V = mk_aotensor(v_t, "v");
-    params.B = bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4;
+    params.Q = mk_input_aotensor(q_t, "q");
+    params.K = mk_input_aotensor(k_t, "k");
+    params.V = mk_input_aotensor(v_t, "v");
+    params.B = bias.has_value() ? mk_input_aotensor(bias.value(), "bias") : empty_t4;
     params.Sm_scale = softmax_scale;
-    params.Out = mk_aotensor(out_t, "out");
-    params.DO = mk_aotensor(dout_t, "dout");
-    params.DK = mk_aotensor(dk_t, "dk");
-    params.DV = mk_aotensor(dv_t, "dv");
-    params.DQ = mk_aotensor(dq_t, "dq");
-    params.DB = bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4;
-    params.L = mk_aotensor<2>(softmax_lse, "L");
-    params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
-    params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
+    params.Out = mk_input_aotensor(out_t, "out");
+    params.DO = mk_input_aotensor(dout_t, "dout");
+    params.DK = mk_output_aotensor(dk_t, "dk");
+    params.DV = mk_output_aotensor(dv_t, "dv");
+    params.DQ = mk_output_aotensor(dq_t, "dq");
+    params.DB = bias_requires_grad ? mk_output_aotensor(grad_bias, "db") : empty_t4;
+    params.L = mk_input_aotensor<2>(softmax_lse, "L");
+    params.Max_seqlen_q = max_seqlen_q;        // Unused if seqinfo_q0 is empty
+    params.Max_seqlen_k = max_seqlen_k;        // Unused if seqinfo_k0 is empty
     params.dropout_p = float(dropout_p);
     params.philox_seed_ptr = mk_aoscalartensor(aotriton_philox_seed);
     params.philox_offset1 = mk_aoscalartensor(aotriton_philox_offset);
@@ -700,19 +717,28 @@ _efficient_attention_backward(
     LazyTensorContext lazy_dq_acc { .like_tensor = dq_t, .tensor_name = "dq_acc" };
     params.D = mklazy_empty_like<2>(&lazy_delta);
     params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
+#if AOTRITON_VARLEN_BITS_API
+    if (cu_seqlens_q.has_value()) {
+      params.varlen_bits = mk_varlen_bits_packed();
+      params.seqinfo_q0 = mk_input_aotensor<1>(cu_seqlens_q.value(), "seqinfo_q0");
+      params.seqinfo_k0 = mk_input_aotensor<1>(cu_seqlens_k.value(), "seqinfo_k0");
+    }
+#else
     if (cu_seqlens_q.has_value()) {
       params.varlen_type = VarlenType::CompactVarlen;
-      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q");
-      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k");
+      params.cu_seqlens_q = mk_input_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q");
+      params.cu_seqlens_k = mk_input_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k");
     } else {
       params.varlen_type = VarlenType::None;
     }
+#endif
     aotriton::v3::flash::attn_options opts;
     opts.deterministic = deterministic;
-    err = aotriton::v3::flash::attn_bwd(params,
-                                        aotriton::v3::flash::attn_bwd_params::kVersion,
-                                        stream,
-                                        &opts);
+    AT_CUDA_CHECK(aotriton::v3::flash::attn_bwd(
+        params,
+        aotriton::v3::flash::attn_bwd_params::kVersion,
+        stream,
+        &opts));
 #else  // DISABLE_AOTRITON
     TORCH_CHECK(false, "Attempting to use aotriton mem_eff_backward backend in a build that has not built AOTriton");
 #endif
@@ -890,8 +916,8 @@ _efficient_attention_backward(
     }
 
     // Heuristic for finding optimal number of splits
-    auto parallelism_without_split_key =
-        p.getBlocksGrid().x * p.getBlocksGrid().y * p.getBlocksGrid().z;
+    const int64_t parallelism_without_split_key =
+        int64_t(p.num_batches) * p.num_heads;
     p.num_splits_key = cutlass::ceil_div(p.num_keys, Kernel::kBlockSizeJ);
     if (num_splits_key.has_value()) {
       p.num_splits_key =
@@ -909,8 +935,8 @@ _efficient_attention_backward(
       // Increasing `split_keys` leads to using more gmem for temporary storage
       // when we need a staging area for gK/gV. let's avoid that
       if (Kernel::kNeedsAccumGradK || Kernel::kNeedsAccumGradV) {
-        p.num_splits_key = std::min(
-            int32_t(p.num_splits_key), 200 / ((int32_t)(p.num_batches * p.num_heads)));
+        p.num_splits_key = std::min<int64_t>(
+            p.num_splits_key, 200 / parallelism_without_split_key);
       }
     }
     if (!Kernel::kEnableSplitKeys || p.num_splits_key < 1) {
@@ -974,7 +1000,16 @@ _efficient_attention_backward(
         checkBinaryArchMatches(), "Something went wrong in the build process");
 #endif
 
-    kernel_fn<<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes, stream>>>(p);
+    auto blocks = p.getBlocksGrid();
+    // Match forward's logical batch/head indices, including workspace and RNG.
+    for (p.batch_offset = 0; p.batch_offset < p.num_batches; p.batch_offset += blocks.z) {
+      blocks.z = std::min(65535, p.num_batches - p.batch_offset);
+      for (p.head_offset = 0; p.head_offset < p.num_heads; p.head_offset += blocks.y) {
+        blocks.y = std::min(65535, p.num_heads - p.head_offset);
+        kernel_fn<<<blocks, p.getThreadsGrid(), smem_bytes, stream>>>(p);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
+    }
   };
 
   DISPATCH_TYPES(query, ([&]() {
@@ -1069,6 +1104,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
+#ifdef USE_ROCM
   constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
   int64_t batch_size = query.size(0);
 
@@ -1077,6 +1113,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
                 "Efficient attention backward cannot handle dropout when "
                 "the batch size exceeds (", MAX_BATCH_SIZE, ").");
   }
+#endif
   auto grad_out_t = grad_out_.transpose(1, 2);
   auto query_t = query.transpose(1, 2);
   auto key_t = key.transpose(1, 2);
@@ -1130,6 +1167,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), std::move(grad_bias));
   };
 
+#ifdef USE_ROCM
   // process in chunks if batch size exceeds maximum
   if (batch_size > MAX_BATCH_SIZE) {
     Tensor final_grad_q, final_grad_k, final_grad_v, final_grad_bias;
@@ -1200,14 +1238,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
         std::move(final_grad_v),
         std::move(final_grad_bias));
   }
-  // when batch size is within allowed size, no chunking needed
-  else {
-    std::optional<Tensor> attn_bias_opt;
-    if (attn_bias.defined()) {
-      attn_bias_opt = attn_bias;
-    }
-    return process_chunk(grad_out_t, query_t, key_t, value_t, attn_bias_opt, out_t, logsumexp);
-  }
+#endif
+  return process_chunk(grad_out_t, query_t, key_t, value_t, attn_bias, out_t, logsumexp);
 }
 
 std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_cuda(

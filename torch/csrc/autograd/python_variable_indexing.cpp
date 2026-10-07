@@ -240,7 +240,8 @@ static Variable applySlicing(
     bool is_tracing,
     const at::Device& self_device,
     const std::optional<int64_t>& self_ndim,
-    int64_t specified_dims) {
+    int64_t specified_dims,
+    bool allow_device_index_for_setitem = false) {
   int64_t size = PyTuple_GET_SIZE(index);
   int64_t dim = 0;
 
@@ -290,7 +291,10 @@ static Variable applySlicing(
               auto scalar_type = tensor.scalar_type();
               if (tensor.dim() == 0 &&
                   at::isIntegralType(scalar_type, /*includeBool=*/false) &&
-                  scalar_type != at::kByte) {
+                  scalar_type != at::kByte &&
+                  !(allow_device_index_for_setitem &&
+                    at::indexing::impl::canKeepScalarIndexOnDevice(
+                        tensor, self))) {
                 recordSelectTrace(tensor);
               }
             }
@@ -318,7 +322,8 @@ static Variable applySlicing(
         // tensor indexing functions from Python ]
         /*disable_slice_optimization=*/is_tracing,
         /*original_tensor_device=*/self_device,
-        /*prev_dim_result_sizes=*/result_sizes);
+        /*prev_dim_result_sizes=*/result_sizes,
+        /*allow_device_index_for_setitem=*/allow_device_index_for_setitem);
   }
   return result;
 }
@@ -586,7 +591,9 @@ static int THPVariable_setitem_impl(
       /*is_tracing=*/is_tracing,
       self_device,
       self_.ndimension(),
-      specified_dims);
+      specified_dims,
+      /*allow_device_index_for_setitem=*/
+      at::indexing::impl::allowsScalarIndexOnDevice(value, self_));
   if (variableIndices.empty()) {
     pybind11::gil_scoped_release no_gil;
     at::indexing::copy_to(sliced, value);
@@ -595,6 +602,14 @@ static int THPVariable_setitem_impl(
 
   {
     pybind11::gil_scoped_release no_gil;
+    if constexpr (std::is_same_v<T, Scalar>) {
+      if (at::indexing::try_dispatch_masked_fill_(
+              sliced, variableIndices, value) ||
+          at::indexing::try_dispatch_index_fill_(
+              sliced, variableIndices, value)) {
+        return 0;
+      }
+    }
     Tensor valueTensor = asTensor(value, self_);
     SymIntArrayRef valueSizes = valueTensor.sym_sizes();
     SymIntArrayRef slicedValueSizes =
