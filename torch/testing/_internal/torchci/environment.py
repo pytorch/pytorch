@@ -1,5 +1,6 @@
 """Machine identity, TestEnvironment flags and properties for the report line.
-The only PyTorch-aware module of the writer."""
+The only PyTorch-aware module of the writer. capture() runs in the test process
+before its tests, so it must not change state they can observe."""
 
 from __future__ import annotations
 
@@ -15,13 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import torch
-
-
-# The model in a vendor's device string, e.g. "NVIDIA H100 80GB HBM3", "AMD Instinct
-# MI350X VF", "Apple M2 Pro", "Intel(R) Data Center GPU Max 1100".
-_MODELS = re.compile(
-    r"\b(A10G|A100|H100|H200|B200|B300|L4|L40S|L40|T4|V100|MI\d{3}[A-Z]?|M\d+|Max \d{4}|B\d{2})\b"
-)
 
 
 @dataclass
@@ -55,11 +49,8 @@ def capture() -> Environment:
     os_name, os_version, os_release = _os()
     cc_compiler, cc_version = _compiler(torch.__config__.show())
     accelerator, acc_version = _accelerator()
-    try:
-        device_count = torch.accelerator.device_count()
-    except Exception:
-        device_count = 0
-    raw_name, memory, driver = _device(accelerator) if device_count else ("", "", "")
+    device_count = _device_count(accelerator)
+    device_name, memory, driver = _device(accelerator) if device_count else ("", "", "")
     cpu_capability = torch.backends.cpu.get_cpu_capability().lower().replace(" ", "")
     if cpu_capability == "avx512" and torch.cpu._is_amx_tile_supported():
         cpu_capability = "amx"
@@ -84,7 +75,7 @@ def capture() -> Environment:
         accelerator=accelerator,
         accelerator_version=acc_version,
         device_count=device_count,
-        device_name=_normalize_device_name(raw_name) if raw_name else "",
+        device_name=device_name,
         flags=dict(TestEnvironment.env_var_values),
         properties={k: v for k, v in properties.items() if v},
     )
@@ -134,7 +125,9 @@ def _accelerator() -> tuple[str, str]:
     if torch.version.cuda:
         return "cuda", ".".join(torch.version.cuda.split(".")[:2])
     if torch.version.hip:
-        return "rocm", ".".join(torch.version.hip.split(".")[:2])
+        # The ROCm release (10.1), not HIP's own version (7.16).
+        rocm = getattr(torch.version, "rocm", None) or torch.version.hip
+        return "rocm", ".".join(rocm.split(".")[:2])
     xpu = str(getattr(torch.version, "xpu", "") or "")
     if xpu:
         # The SYCL version packed as major * 10000 + minor * 100 + patch.
@@ -145,6 +138,22 @@ def _accelerator() -> tuple[str, str]:
     if torch.backends.mps.is_built():
         return "mps", ""
     return "cpu", ""
+
+
+def _device_count(accelerator: str) -> int:
+    # Not torch.accelerator: it latches MTIA's hooks before a test can register
+    # its own (test_cpp_extensions_mtia_backend) and counts PrivateUse1 backends
+    # that tests register at import.
+    try:
+        if accelerator in ("cuda", "rocm"):
+            return torch.cuda.device_count()
+        if accelerator == "xpu":
+            return torch.xpu.device_count()
+        if accelerator == "mps":
+            return int(torch.backends.mps.is_available())
+    except Exception:
+        pass
+    return 0
 
 
 def _device(accelerator: str) -> tuple[str, str, str]:
@@ -162,15 +171,6 @@ def _device(accelerator: str) -> tuple[str, str, str]:
     except Exception:
         pass
     return "", "", ""
-
-
-def _normalize_device_name(raw: str) -> str:
-    """h100, mi350x, m2, max1100, ...; an unknown name is kept whole, lower-cased
-    with dashes."""
-    match = _MODELS.search(raw)
-    if match:
-        return match.group(1).replace(" ", "").lower()
-    return re.sub(r"\s+", "-", raw.strip().lower())
 
 
 def _first_visible_index() -> int:
