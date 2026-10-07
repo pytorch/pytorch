@@ -345,6 +345,162 @@ class StrictNumericsCompileTest(TestCase):
             for op in op_db
             if op.name
             in (
+                "nn.functional.gelu",
+                "nn.functional.hardswish",
+                "nn.functional.mish",
+                "nn.functional.silu",
+                "nn.functional.softplus",
+                "nn.functional.tanhshrink",
+                "sigmoid",
+                "tanh",
+            )
+            and not op.variant_test_name
+        ],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    @parametrize("shared", (False, True))
+    def test_activation_backward(self, device, dtype, op, numerics, upcast, shared):
+        bounds = torch.tensor(
+            [-3.0, -0.5, -0.0, 0.0, 0.2, 0.5, 3.0, 20.0, 104.0],
+            device=device,
+            dtype=dtype,
+        )
+        x = torch.cat(
+            (
+                bounds,
+                torch.nextafter(bounds, torch.full_like(bounds, -float("inf"))),
+                torch.nextafter(bounds, torch.full_like(bounds, float("inf"))),
+                torch.linspace(-20, 20, 257, device=device, dtype=dtype),
+            )
+        ).requires_grad_()
+        grad = torch.linspace(-1.3, 1.7, x.numel(), device=device, dtype=dtype)
+        grad[:2] = torch.tensor([0.0, -0.0], device=device, dtype=dtype)
+        kwargs = {}
+        if op.name == "nn.functional.gelu":
+            kwargs = {"approximate": "tanh"}
+        elif op.name == "nn.functional.softplus":
+            kwargs = {"beta": 3, "threshold": 0.2}
+
+        def fn(x):
+            result = (op.op(x, **kwargs),)
+            if not shared:
+                return result
+            # Exercise shared float32 intermediates. Eager skips unused branches, but
+            # AOTAutograd materializes their zero tangents; detach avoids turning -0
+            # gradients into +0.
+            result = (*result, (x.float() * x.float()).detach())
+            if op.name == "nn.functional.softplus":
+                # Also cover negative-beta forward signed zeros in the shared graph.
+                return (*result, op.op(x, beta=-1).detach())
+            return result
+
+        expected = fn(x)
+        expected_grad = torch.autograd.grad(expected[0], x, grad)[0]
+        result, codes = run_and_get_code(
+            torch.compile(
+                fn,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+        )
+        self.assertIn("@triton.jit", "\n".join(codes))
+        result_grads, codes = run_and_get_code(torch.autograd.grad, result[0], x, grad)
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in result),
+            tuple(t.view(_BIT_VIEW[t.dtype]) for t in expected),
+        )
+        int_dtype = _BIT_VIEW[dtype]
+        self.assertEqual(result_grads[0].view(int_dtype), expected_grad.view(int_dtype))
+
+    @ops(
+        [op for op in op_db if op.name == "true_divide"],
+        allowed_dtypes=(torch.float32,),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("divisor", (3.0, -1.0, 0.0, -0.0, float("inf"), -float("inf")))
+    def test_activation_division(self, device, dtype, op, numerics, divisor):
+        from torch._inductor.decomposition import _div_rn
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        x = torch.cat(
+            (
+                _sampled_fp32(NUM_BITPATTERN_SAMPLES, device),
+                _min_max_specials(dtype, device),
+            )
+        )
+
+        def fn(x):
+            return _div_rn(x, divisor)
+
+        graph = make_fx(fn)(x)
+        compiled = torch.compile(graph, fullgraph=True, options={"numerics": numerics})
+        result, codes = run_and_get_code(compiled, x)
+        # Eager CUDA tensor division rounds; Python scalar division uses a reciprocal.
+        expected = op.op(x, torch.full((), divisor, dtype=dtype, device=device))
+        self.assertEqual(result.view(torch.int32), expected.view(torch.int32))
+        self.assertIn("triton.language.div_rn", "\n".join(codes))
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("upcast", (False, True))
+    @parametrize("scalar_grad", (False, True))
+    def test_tanh_backward_scalar_cast(self, device, dtype, upcast, scalar_grad):
+        scalar = torch.tensor(
+            1 + torch.finfo(dtype).eps / 2 + 2**-45,
+            device=device,
+            dtype=torch.float64,
+        )
+        vector = torch.full((17,), 0 if scalar_grad else 1, device=device, dtype=dtype)
+        grad, output = (scalar, vector) if scalar_grad else (vector, scalar)
+        fn = torch.ops.aten.tanh_backward.default
+        result = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": "strict_pointwise",
+                "triton.codegen_upcast_to_fp32": upcast,
+            },
+        )(grad, output)
+        self.assertEqual(result.view(torch.int16), fn(grad, output).view(torch.int16))
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("upcast", (False, True))
+    @parametrize("opname", ("gelu", "hardswish", "mish", "silu"))
+    def test_activation_backward_mixed_dtype(self, device, dtype, upcast, opname):
+        x = torch.tensor(
+            [-3.703125, -3.671875, -1.5390625, 0.0, 0.5, 1.5],
+            device=device,
+            dtype=dtype,
+        )
+        grad = torch.tensor(-2.7281209403305, device=device, dtype=torch.float64)
+        if opname == "mish":
+            grad = grad.expand_as(x).clone()
+        fn = getattr(torch.ops.aten, f"{opname}_backward").default
+        kwargs = {"approximate": "tanh"} if opname == "gelu" else {}
+        expected = fn(grad, x, **kwargs)
+        result = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "numerics": "strict_pointwise",
+                "triton.codegen_upcast_to_fp32": upcast,
+            },
+        )(grad, x, **kwargs)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result.view(torch.int16), expected.view(torch.int16))
+
+    @ops(
+        [
+            op
+            for op in op_db
+            if op.name
+            in (
                 "clamp",
                 "nn.functional.relu",
                 "nn.functional.relu6",
@@ -1426,8 +1582,6 @@ POINTWISE_XFAIL = frozenset(
         ("mvlgamma_mvlgamma_p_5", "bfloat16"),
         ("mvlgamma_mvlgamma_p_5", "float16"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
-        ("nn_functional_gelu", "float32"),
-        ("nn_functional_softplus", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),
         ("nn_functional_softshrink", "float32"),
@@ -1525,28 +1679,11 @@ BACKWARD_XFAIL = frozenset(
         ("mvlgamma_mvlgamma_p_1", "float32"),
         ("mvlgamma_mvlgamma_p_3", "float32"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
-        ("nn_functional_gelu", "bfloat16"),
-        ("nn_functional_gelu", "float16"),
-        ("nn_functional_gelu", "float32"),
-        ("nn_functional_hardswish", "bfloat16"),
-        ("nn_functional_hardswish", "float16"),
-        ("nn_functional_hardswish", "float32"),
-        ("nn_functional_mish", "bfloat16"),
-        ("nn_functional_mish", "float16"),
-        ("nn_functional_mish", "float32"),
-        ("nn_functional_silu", "float16"),
-        ("nn_functional_silu", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),
         ("nn_functional_softshrink", "float32"),
-        ("nn_functional_tanhshrink", "bfloat16"),
-        ("nn_functional_tanhshrink", "float16"),
-        ("nn_functional_tanhshrink", "float32"),
         ("rsqrt", "bfloat16"),
         ("rsqrt", "float16"),
-        ("sigmoid", "bfloat16"),
-        ("sigmoid", "float16"),
-        ("sigmoid", "float32"),
         ("special_bessel_j0", "float32"),
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
@@ -1560,9 +1697,6 @@ BACKWARD_XFAIL = frozenset(
         ("special_modified_bessel_i1", "float32"),
         ("special_xlog1py", "bfloat16"),
         ("special_xlog1py", "float16"),
-        ("tanh", "bfloat16"),
-        ("tanh", "float16"),
-        ("tanh", "float32"),
         ("xlogy", "bfloat16"),
         ("xlogy", "float16"),
     }
@@ -1576,17 +1710,33 @@ NONFLOAT_XFAIL = frozenset(
 
 
 # Preserve all floating dtype coverage after removing repaired xfail entries.
-FULL_DTYPE_POINTWISE_OPS = frozenset(
+FULL_DTYPE_ACTIVATION_OPS = frozenset(
     {
-        "abs",
-        "angle",
-        "double",
-        "frexp",
-        "neg",
-        "special_entr",
-        "special_xlog1py",
-        "xlogy",
+        "nn_functional_gelu",
+        "nn_functional_hardswish",
+        "nn_functional_mish",
+        "nn_functional_silu",
+        "nn_functional_softplus",
+        "nn_functional_tanhshrink",
+        "sigmoid",
+        "tanh",
     }
+)
+
+FULL_DTYPE_POINTWISE_OPS = (
+    frozenset(
+        {
+            "abs",
+            "angle",
+            "double",
+            "frexp",
+            "neg",
+            "special_entr",
+            "special_xlog1py",
+            "xlogy",
+        }
+    )
+    | FULL_DTYPE_ACTIVATION_OPS
 )
 
 
@@ -1999,7 +2149,7 @@ class PointwiseStrictNumericsTest(TestCase):
             self._require_kernel(tested, "no differentiable sample")
         return mismatches
 
-    @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL)
+    @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL, full_dtype_ops=FULL_DTYPE_ACTIVATION_OPS)
     def test_pointwise_backward(self, device, dtype, op):
         mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
