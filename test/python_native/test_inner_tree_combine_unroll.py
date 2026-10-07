@@ -54,6 +54,50 @@ class TestInnerTreeCombineUnroll(TestCase):
             with self.assertRaisesRegex(ValueError, "combine_unroll"):
                 rt.itree_combine_plan(None, 4)
 
+    @parametrize(
+        "count,last,itemsize,fields,weights",
+        [
+            (8192, 8192, 4, 3, False),
+            (8192, 8192, 4, 3, True),
+            (8192, 8191, 4, 3, True),
+            (8192, 8192, 4, 1, True),
+        ],
+    )
+    def test_uniform_count_eligibility(self, count, last, itemsize, fields, weights):
+        """Enable uniform counts only when every partial has the same supported shape."""
+        from torch._native.ops.reductions import kernel_rowtile as rt
+
+        split = rt._ItreePlan(
+            "split", 4, 16, 1, 2, (), (), (1024, count, last, 512, 512)
+        )
+        arch = rt._ITREE_ARCH["default"]._replace(
+            combine_group_bytes=16,
+            combine_async=8,
+            combine_max=512,
+            combine_unroll=4,
+        )
+        with mock.patch.object(
+            rt._hw, "caps", return_value=SimpleNamespace(smem_per_block_optin=232448)
+        ):
+            baseline = rt.itree_combine_plan(
+                split, itemsize, nfields=fields, nrows=1, arch=arch
+            )
+            candidate = rt.itree_combine_plan(
+                split,
+                itemsize,
+                nfields=fields,
+                nrows=1,
+                arch=arch,
+                uniform_count=True,
+                combine_weights=weights,
+            )
+        supported = (count, last, itemsize, fields) == (8192, 8192, 4, 3)
+        self.assertEqual(candidate.combine_count, count if supported else 0)
+        self.assertEqual(candidate.combine_weights, weights and supported)
+        self.assertEqual(
+            candidate._replace(combine_count=0, combine_weights=False), baseline
+        )
+
 
 @unittest.skipUnless(
     TEST_CUDA and SM90OrLater and TEST_CUTEDSL, "requires CUDA and CuTeDSL"
@@ -100,6 +144,65 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         self.assertEqual(output, torch.full_like(output, 512))
         with self.assertRaisesRegex(ValueError, "aligned partial buffers"):
             kg._launch(op, key, [unaligned], [output])
+
+    @parametrize("weights", [False, True])
+    def test_uniform_count_bits(self, device, weights):
+        """Preserve exact bits at uniform-count boundaries where staged tail guards change."""
+        import cutlass
+
+        from torch._native.ops.reductions import (
+            kernel_general as kg,
+            kernel_rowtile as rt,
+            traits,
+        )
+
+        rows, partials, count = 33, 1024, 8192
+        trait = traits.VarMeanOps(correction=1, acc=cutlass.Float32)
+        means = torch.randn(rows, partials, device=device).mul_(8).add_(1024)
+        means[0].fill_(-0.0)
+        means[1, 17] = float("nan")
+        means[2, 33] = float("inf")
+        parts = [
+            means.flatten(),
+            torch.rand_like(means).flatten(),
+            torch.full_like(means, count).flatten(),
+        ]
+        plan = rt._ItreePlan(
+            "combine",
+            1,
+            0,
+            1,
+            2,
+            (),
+            (),
+            (partials, count, count, 512, 512),
+            combine_grp=4,
+            combine_tile=512,
+            combine_unroll=4,
+        )
+        baseline = [torch.empty(rows, device=device) for _ in range(2)]
+        actual = [torch.empty_like(t) for t in baseline]
+
+        def launch(selected, outs):
+            block = kg.ReduceBlock(
+                trait,
+                count=partials,
+                num_o=rows,
+                red_pairs=[],
+                kept_pairs=[],
+                project_n=count * partials,
+                nouts=2,
+                order="inner_tree",
+                itree=selected,
+            )
+            key = ("test_uniform_count",) + block.cache_sig
+            kg._launch(block, key, parts, outs)
+
+        candidate = plan._replace(combine_count=count, combine_weights=weights)
+        launch(plan, baseline)
+        launch(candidate, actual)
+        for got, expected in zip(actual, baseline):
+            self.assertEqual(got.view(torch.uint8), expected.view(torch.uint8))
 
 
 instantiate_parametrized_tests(TestInnerTreeCombineUnroll)
