@@ -2049,6 +2049,7 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
     CallFunction(
         torch.ops.aten.cat,
         ListOf(CallFunctionVarArgs(torch.ops.aten.unsqueeze)),
+        dim=Ignored(),
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("unbind_stack_aten_pass"),
