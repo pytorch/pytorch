@@ -934,7 +934,7 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("out_dtype", [e4m3_type, e5m2_type])
     def test_float8_scale_result(self, device, out_dtype) -> None:
@@ -958,7 +958,7 @@ class TestFP8Matmul(TestCase):
 
         self.assertEqual(actual, expected)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_float8_scale_result_ignored_for_non_float8_out(self, device, out_dtype) -> None:
