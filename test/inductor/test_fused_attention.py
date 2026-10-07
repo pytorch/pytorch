@@ -1275,6 +1275,32 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
         self.assertEqual(counters["inductor"]["fuse_attention"], 0)
 
+    def _test_sdpa_rewriter_non_last_dim_softmax(self, dtype):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+        ) -> torch.Tensor:
+            scores = torch.matmul(query, key.transpose(-2, -1)) / 4.0
+            weights = torch.softmax(scores, dim=1)
+            return torch.matmul(weights, value)
+
+        args = [
+            torch.randn((2, 4, 8, 16), device=self.device, dtype=dtype),
+            torch.randn((2, 4, 8, 16), device=self.device, dtype=dtype),
+            torch.randn((2, 4, 8, 16), device=self.device, dtype=dtype),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_fuse_pattern=False,
+            has_dropout=False,
+            check_train=True,
+            override_check_equal=True,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
     def _test_sdpa_rewriter_14(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -2144,6 +2170,77 @@ class TestSDPAPatternRegistration(TestCase):
         )
         self.assertEqual([], missing_inference_names)
 
+    def test_non_last_dim_softmax_not_fused(self):
+        from torch._inductor.fx_passes.joint_graph import joint_graph_passes
+        from torch._inductor.pattern_matcher import fwd_only, joint_fwd_bwd
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        for requires_grad in [False, True]:
+            for dim, should_fuse in [
+                (-1, True),
+                (3, True),
+                (0, False),
+                (1, False),
+                (2, False),
+                (-2, False),
+            ]:
+                counters.clear()
+
+                def fn(q, k, v):
+                    return (
+                        torch.matmul(q, k.transpose(-2, -1))
+                        .div(4.0)
+                        .softmax(dim=dim)
+                        .matmul(v)
+                    )
+
+                with FakeTensorMode():
+                    args = [
+                        torch.randn(
+                            (2, 4, 8, 16),
+                            device="cpu",
+                            dtype=torch.float32,
+                            requires_grad=requires_grad,
+                        ),
+                        torch.randn(
+                            (2, 4, 8, 16),
+                            device="cpu",
+                            dtype=torch.float32,
+                            requires_grad=requires_grad,
+                        ),
+                        torch.randn(
+                            (2, 4, 8, 16),
+                            device="cpu",
+                            dtype=torch.float32,
+                            requires_grad=requires_grad,
+                        ),
+                    ]
+                    gm = (
+                        joint_fwd_bwd(fn, args)
+                        if requires_grad
+                        else fwd_only(fn, args, run_functional_passes=False)
+                    )
+                    joint_graph_passes(gm, torch.device("cpu"))
+
+                if should_fuse:
+                    self.assertGreater(
+                        counters["inductor"]["fuse_attention"],
+                        0,
+                        msg=(
+                            f"Expected fuse_attention > 0 for softmax(dim={dim}), "
+                            f"requires_grad={requires_grad}"
+                        ),
+                    )
+                else:
+                    self.assertEqual(
+                        counters["inductor"]["fuse_attention"],
+                        0,
+                        msg=(
+                            f"Expected fuse_attention == 0 for softmax(dim={dim}), "
+                            f"requires_grad={requires_grad}"
+                        ),
+                    )
+
 
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
@@ -2265,6 +2362,10 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         )
         test_sdpa_rewriter_30_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_30
+        )
+        test_sdpa_rewriter_non_last_dim_softmax_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_non_last_dim_softmax,
+            dtype=torch.half,
         )
         if HAS_XPU_AND_TRITON:
             test_sdpa_rewriter_25_gpu = functools.partialmethod(
@@ -2425,6 +2526,10 @@ if HAS_CPU:
         device = "cpu"
         test_sdpa_rewriter_13_non_transpose_permute_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13_non_transpose_permute,
+            dtype=torch.float32,
+        )
+        test_sdpa_rewriter_non_last_dim_softmax_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_non_last_dim_softmax,
             dtype=torch.float32,
         )
 
