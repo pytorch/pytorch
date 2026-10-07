@@ -4141,6 +4141,40 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(F.margin_ranking_loss(input1, input2, target, margin=0.5, reduction='none'),
                          loss_reference_fns['MarginRankingLoss'](input1, input2, target, margin=0.5, reduction='none'))
 
+    def test_bpr_loss_matches_logistic_preference(self):
+        positive = torch.tensor([2.0, 0.5], dtype=torch.double)
+        negative = torch.tensor([-1.0, 1.5], dtype=torch.double)
+        per_pair = torch.tensor(
+            [0.04858735157374206, 1.3132616875182228], dtype=torch.double
+        )
+        self.assertEqual(F.bpr_loss(positive, negative, reduction="none"), per_pair)
+        self.assertEqual(F.bpr_loss(positive, negative), per_pair.mean())
+        self.assertEqual(F.bpr_loss(positive, negative, reduction="sum"), per_pair.sum())
+        # The hinge ranking criterion is a different function of the same scores.
+        hinge = F.margin_ranking_loss(
+            positive, negative, torch.ones_like(positive), reduction="none"
+        )
+        self.assertEqual(hinge, torch.tensor([0.0, 1.0], dtype=torch.double))
+        self.assertNotEqual(hinge, per_pair)
+
+        wide = F.bpr_loss(
+            positive.view(2, 1), negative.view(1, 2), reduction="none"
+        )
+        self.assertEqual(wide.shape, torch.Size([2, 2]))
+        self.assertEqual(
+            F.bpr_loss(torch.tensor(-100.0, dtype=torch.double), torch.tensor(100.0, dtype=torch.double)),
+            torch.tensor(200.0, dtype=torch.double),
+        )
+
+        pos = positive.clone().requires_grad_()
+        neg = negative.clone().requires_grad_()
+        self.assertTrue(gradcheck(lambda x, y: F.bpr_loss(x, y), (pos, neg)))
+        self.assertTrue(gradgradcheck(lambda x, y: F.bpr_loss(x, y), (pos, neg)))
+        module = nn.BPRLoss(reduction="sum")
+        self.assertEqual(module(positive, negative), per_pair.sum())
+        with self.assertRaisesRegex(ValueError, "abc is not a valid value for reduction"):
+            F.bpr_loss(positive, negative, reduction="abc")
+
     def test_triplet_margin_loss(self):
         input1 = torch.randn(5, 10, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(5, 10, requires_grad=True, dtype=torch.double)

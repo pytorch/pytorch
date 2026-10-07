@@ -1844,6 +1844,38 @@ def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
             *sample.args,
             **sample.kwargs)
 
+def sample_inputs_bpr_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    shapes = (
+        (),
+        (S,),
+        (S, S),
+        (S, S, S),
+    )
+    for shape in shapes:
+        for reduction in ("sum", "mean", "none"):
+            yield SampleInput(
+                _make_tensor(shape),
+                args=(_make_tensor(shape),),
+                kwargs={"reduction": reduction},
+            )
+    # One preferred score against several other scores.
+    yield SampleInput(
+        _make_tensor((S, 1)),
+        args=(_make_tensor((S, S)),),
+        kwargs={"reduction": "mean"},
+    )
+
+
+def error_inputs_bpr_loss(op, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+    yield ErrorInput(
+        SampleInput(make_input(3), args=(make_input(3),), kwargs={"reduction": "abc"}),
+        error_type=ValueError,
+        error_regex="abc is not a valid value for reduction",
+    )
+
+
 def sample_inputs_margin_ranking_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -16721,6 +16753,16 @@ op_db: list[OpInfo] = [
         reference_inputs_func=reference_inputs_margin_ranking_loss,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True),
+    OpInfo(
+        "nn.functional.bpr_loss",
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_bpr_loss,
+        error_inputs_func=error_inputs_bpr_loss,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_gradgrad=True,
+    ),
     OpInfo(
         "nn.functional.multi_margin_loss",
         dtypes=floating_types(),
