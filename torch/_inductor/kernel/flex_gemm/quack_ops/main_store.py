@@ -14,6 +14,55 @@ def _contract_epi_tile_n(epi_tile, group):
     return (epi_tile[0], epi_tile[1] // group)
 
 
+def _flatten(shape, stride):
+    if isinstance(shape, tuple):
+        out = []
+        for sh, st in zip(shape, stride):
+            out += _flatten(sh, st)
+        return out
+    return [(shape, stride)]
+
+
+def _map_strides(shape, stride, fn):
+    if isinstance(shape, tuple):
+        return tuple(_map_strides(sh, st, fn) for sh, st in zip(shape, stride))
+    return fn(stride)
+
+
+def _contract_tv_16dp(layout_tv, tile_m, group):
+    """Contract a 16-datapath (M64 1-CTA) t2r register TV layout by ``group`` N lanes.
+
+    Linear tile index is ``m + tile_m * n``. The fragment's fastest value mode
+    holds ``group`` adjacent N columns (stride ``tile_m``); the callback folds
+    it, so drop that mode and divide every column stride by ``group``.
+    """
+    thr_shape, val_shape = layout_tv.shape
+    thr_stride, val_stride = layout_tv.stride
+    vals = _flatten(val_shape, val_stride)
+    if vals[0] != (group, tile_m):
+        raise NotImplementedError(
+            f"grouped main output cannot contract register layout {layout_tv}"
+        )
+
+    def col(st):
+        if st < tile_m:
+            return st
+        if st % (group * tile_m):
+            raise NotImplementedError(
+                f"grouped main output cannot contract register layout {layout_tv}"
+            )
+        return st // group
+
+    rest = vals[1:] or [(1, 0)]
+    return cute.make_layout(
+        (thr_shape, tuple(sh for sh, _ in rest)),
+        stride=(
+            _map_strides(thr_shape, thr_stride, col),
+            tuple(col(st) for _, st in rest),
+        ),
+    )
+
+
 def _grouped_main_epi_tile_2(gemm, epi_tile):
     """Contract a grouped-main output tile by two adjacent N lanes."""
     return _contract_epi_tile_n(epi_tile, 2)
@@ -62,15 +111,21 @@ class GroupedMainStore(TileStore):
             if self.group == 2
             else config.device_capacity == 10
         )
-        supported_m_cluster = (
-            config.tile_m in (128, 256) and config.cluster_m == 1
-        ) or (config.tile_m == 256 and config.cluster_m == 2)
-        min_tile_n = 64 if self.group == 2 else 128
+        # 1-CTA M64 tiles read TMEM through 16-datapath atoms whose fragments
+        # hold column pairs, so only group-2 contraction is expressible there
+        # (see _make_tiled_copy_r2s).
+        one_cta_m = config.tile_m in (128, 256) or (
+            config.tile_m == 64 and self.group == 2
+        )
+        supported_m_cluster = (one_cta_m and config.cluster_m == 1) or (
+            config.tile_m == 256 and config.cluster_m == 2
+        )
+        min_tile_n = 32 if self.group == 2 else 64
         return (
             supported_arch
             and not config.swap_ab
             and supported_m_cluster
-            and config.cluster_n == 1
+            and config.cluster_n in ((1, 2, 4) if config.tile_m == 64 else (1, 2))
             and config.tile_n >= min_tile_n
             and config.tile_n % self.group == 0
         )
@@ -102,6 +157,27 @@ class GroupedMainStore(TileStore):
             self._epi_tile_key(): epi_tile_out,
             self._dtype_field(): tensor.element_type,
         }
+
+    def _make_tiled_copy_r2s(self, gemm, params, tiled_copy_r2s, tiled_copy_t2r):
+        tiler_m, tiler_n = tiled_copy_r2s.tiler_mn
+        tile_m = cute.size(tiler_m)
+        if gemm.cta_tile_shape_mnk[0] != 64 or gemm.use_2cta_instrs:
+            return super()._make_tiled_copy_r2s(
+                gemm, params, tiled_copy_r2s, tiled_copy_t2r
+            )
+        # 1-CTA M64 reads TMEM through 16-datapath atoms, where each thread's
+        # fragment interleaves two rows. The inherited copy keeps the
+        # uncontracted thread-value map, so build the contracted one directly
+        # and store through a universal SIMT atom.
+        layout_tv = _contract_tv_16dp(
+            tiled_copy_r2s.layout_src_tv_tiled, tile_m, self.group
+        )
+        dtype = getattr(gemm, self._dtype_gemm_attr())
+        atom = cute.make_copy_atom(
+            cute.nvgpu.CopyUniversalOp(), dtype, num_bits_per_copy=dtype.width
+        )
+        tiler = (tiler_m, cute.make_layout(cute.size(tiler_n) // self.group))
+        return cute.make_tiled_copy(atom, layout_tv, tiler)
 
     def store_tile_shape_mn(self, gemm):
         return (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // self.group)
