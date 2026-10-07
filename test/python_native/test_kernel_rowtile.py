@@ -484,6 +484,20 @@ class TestKernelRowTile(TestCase):
         )
         self.assertEqual(got, torch.full((8,), 384.0, device="cuda"))
 
+    def test_ragged_vector_edges_and_interior(self):
+        """Combine scalar row edges with aligned vector loads across the interior."""
+        rows, columns = 33, 4097
+        x = torch.randn(rows, columns, device="cuda")
+        (got,) = rt.reduce_row_tile(
+            T.SumOps(acc=cutlass.Float32),
+            "ragged_vector",
+            x,
+            [torch.float32],
+            order="linear",
+            ragged_vector=True,
+        )
+        self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-4, rtol=1e-5)
+
 
 instantiate_parametrized_tests(TestKernelRowTile)
 
