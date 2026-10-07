@@ -18737,11 +18737,6 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # MTIA does not support integer remainder
-                        DecorateInfo(
-                            unittest.skip("MTIA does not support integer remainder"),
-                            None, None, dtypes=integral_types(), device_type='mtia',
-                        ),
                     ),
                     # Support autograd after torch.remainder(Tensor, Tensor) supports
                     # autograd of the second argument.
