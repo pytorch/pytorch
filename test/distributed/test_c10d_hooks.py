@@ -1,9 +1,15 @@
 # Owner(s): ["oncall: distributed"]
 
+from unittest import mock
+
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import HookOpName
-from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed.distributed_c10d import (
+    _get_default_group,
+    _set_collective_annotation_hooks,
+    _unset_collective_annotation_hooks,
+)
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
@@ -141,6 +147,73 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         graph(torch.ones(2))
         self.assertIn(HookOpName.ALLREDUCE, pre_ops)
         pg.unregister_pre_hook(0)
+
+        dist.barrier()
+
+    def test_collective_annotation_metadata(self):
+        pg = _get_default_group()
+        seq = pg._get_sequence_number_for_group()
+        ws = self.world_size
+        peer = (self.rank + 1) % ws
+        annotator = mock.Mock()
+        _set_collective_annotation_hooks(annotator)
+        try:
+            dist.all_reduce(torch.ones(3))
+            dist.all_gather_into_tensor(torch.zeros(2 * ws), torch.ones(2))
+            if self.rank == 0:
+                dist.send(torch.ones(2), dst=peer)
+            else:
+                dist.recv(torch.zeros(2), src=peer)
+        finally:
+            _unset_collective_annotation_hooks(annotator)
+
+        pushes = annotator._push_collective_kernel_metadata.call_args_list
+        allreduce, allgather, p2p = (c.args[0] for c in pushes)
+        self.assertEqual(
+            allreduce,
+            {
+                "Collective name": "allreduce",
+                "In msg nelems": 3,
+                "Out msg nelems": 3,
+                "Group size": ws,
+                "Process Group Name": pg.group_name,
+                "Process Group Description": pg.group_desc,
+                "Process Group Ranks": str(list(range(ws))),
+                "Is asynchronized op": False,
+                "Rank": self.rank,
+                "dtype": "float32",
+                "Seq": seq + 1,
+            },
+        )
+        self.assertEqual(allgather["Collective name"], "_allgather_base")
+        self.assertEqual(allgather["In msg nelems"], 2)
+        self.assertEqual(allgather["Out msg nelems"], 2 * ws)
+        self.assertEqual(allgather["Seq"], seq + 2)
+        if self.rank == 0:
+            self.assertEqual(p2p["Collective name"], "send")
+            self.assertEqual(p2p["Dst Rank"], peer)
+        else:
+            self.assertEqual(p2p["Collective name"], "recv")
+            self.assertEqual(p2p["Src Rank"], peer)
+        self.assertEqual(p2p["Rank"], peer)
+        self.assertNotIn("Seq", p2p)
+
+        dist.barrier()
+
+    def test_collective_annotation_hooks(self):
+        group = dist.new_group()
+        annotator = mock.Mock()
+        _set_collective_annotation_hooks(annotator)
+        dist.all_reduce(torch.ones(1), group=group)
+        _unset_collective_annotation_hooks(annotator)
+        dist.all_reduce(torch.ones(1), group=group)
+        self.assertEqual(
+            [name for name, _, _ in annotator.mock_calls],
+            ["_push_collective_kernel_metadata", "_pop_collective_kernel_metadata"],
+        )
+        metadata = annotator._push_collective_kernel_metadata.call_args.args[0]
+        self.assertEqual(metadata["Process Group Name"], group.group_name)
+        dist.destroy_process_group(group)
 
         dist.barrier()
 

@@ -151,12 +151,19 @@ class CuspyConfig(_ProfilerExtensionConfig):
             dependency edges.
         enable_event_node_ids (bool, optional): Associate CUDA events with CUDA
             graph event-record nodes.
+        annotate_collectives (bool, optional): Tag the kernels of c10d
+            collectives with ``record_param_comms``-style fields. Coalesced and
+            batched p2p collectives are not tagged. Pass ``False`` when a
+            wrapper already annotates them, e.g. with
+            ``add_collective_metadata``: both write the same per-collective
+            fields, so one overwrites the other.
     """
 
     enable_cuda_sync_events: bool = False
     enable_environment_counters: bool = False
     enable_graph_dependencies: bool = False
     enable_event_node_ids: bool = False
+    annotate_collectives: bool = True
 
     def _to_config_entries(self) -> dict[str, str]:
         return {}
@@ -579,6 +586,18 @@ class _KinetoProfile:
             # Open the trace window here (stamps the start boundary, native clock, no
             # device sync); records before this are excluded from the window.
             self._cuspy_profiler_observer.open_window()
+            # Not at prepare_trace: warmup collectives would pay for annotations
+            # the window drops.
+            if (
+                self._cuspy_config is not None
+                and self._cuspy_config.annotate_collectives
+                and torch.distributed.is_available()
+            ):
+                from torch.distributed.distributed_c10d import (
+                    _set_collective_annotation_hooks,
+                )
+
+                _set_collective_annotation_hooks(self._cuspy_profiler_observer)
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
@@ -631,6 +650,12 @@ class _KinetoProfile:
             # export; the observer is kept alive past stop for the async write.
             prof._set_active_cuspy_profiler_observer(None)
             if self._cuspy_profiler_observer is not None:
+                if torch.distributed.is_available():
+                    from torch.distributed.distributed_c10d import (
+                        _unset_collective_annotation_hooks,
+                    )
+
+                    _unset_collective_annotation_hooks(self._cuspy_profiler_observer)
                 self._cuspy_window_id = self._cuspy_profiler_observer.close_window()
         self.profiler.__exit__(None, None, None)
 
