@@ -1355,6 +1355,47 @@ class TestSortAndSelectDevice(TestCase):
                     c = torch.isin(a, b, invert=invert, assume_unique=assume_unique)
                     self.assertEqual(c, ec)
 
+    @dtypes(torch.int64, torch.float32)
+    @parametrize("test_dtype", [torch.int64, torch.float32])
+    @parametrize("num_test_elements", [4, 32])
+    @parametrize("layout", ["transposed", "strided"])
+    @parametrize("assume_unique", [False, True])
+    @parametrize("invert", [False, True])
+    def test_isin_noncontiguous_test_elements(
+        self,
+        device,
+        dtype,
+        test_dtype,
+        num_test_elements,
+        layout,
+        assume_unique,
+        invert,
+    ):
+        elements = torch.tensor([0, 3, 4], device=device, dtype=dtype)
+        # Exercise both the brute-force and sorting paths with unique inputs.
+        if layout == "transposed":
+            test_elements = (
+                torch.arange(num_test_elements, device=device, dtype=test_dtype)
+                .reshape(2, -1)
+                .t()
+            )
+            expected = [True, True, num_test_elements > 4]
+        else:
+            test_elements = torch.arange(
+                2 * num_test_elements, device=device, dtype=test_dtype
+            )[::2]
+            expected = [True, False, True]
+        self.assertFalse(test_elements.is_contiguous())
+        expected = torch.tensor(expected, device=device)
+        if invert:
+            expected = expected.logical_not()
+        self.assertEqual(
+            torch.isin(
+                elements, test_elements, assume_unique=assume_unique, invert=invert
+            ),
+            expected,
+        )
+
     def test_isin_different_dtypes(self, device):
         supported_types = all_types() if device == "cpu" else all_types_and(torch.half)
         for mult in [1, 10]:
