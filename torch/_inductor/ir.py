@@ -150,6 +150,7 @@ if TYPE_CHECKING:
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .kernel.gemm_epilogue import GemmEpiloguePlan, GemmReductionPlan
+    from .scheduler import BaseSchedulerNode
     from .utils import IndentedBuffer
 
 else:
@@ -6356,6 +6357,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
+        output_tile: tuple[int, int, int] | None = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6376,6 +6378,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
         self.epilogue_fusable_outputs = {self.name: self.name}
+        self._output_tile = output_tile
 
         self.subgraph_inps: list[IRNode | Expr | None] | None = None
         self.subgraph_outs: list[IRNode | None] | None = None
@@ -6406,6 +6409,11 @@ class TritonTemplateBuffer(TemplateBuffer):
 
         return res
 
+    @property
+    def output_tile(self) -> tuple[int, int, int] | None:
+        """See TritonTemplateCallerBase.output_tile."""
+        return self._output_tile
+
     def get_outputs(self) -> list[Buffer]:
         return [self, *self.mutation_outputs]
 
@@ -6415,6 +6423,54 @@ class TritonTemplateBuffer(TemplateBuffer):
 
 
 PrimitiveInfoType = int | float | bool | str | list[int | str | float | bool]
+
+
+class ReductionEpilogue:
+    """The epilogue, with reductions, that the template in node1 or node2 would
+    host if they fused. ChoiceCaller.supports_reduction_epilogue judges each
+    choice by its own backend's rules. The analysis each backend needs is cached
+    here, so it runs once per fusion candidate, not once per choice."""
+
+    def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
+        from .scheduler import BaseSchedulerNode
+
+        self.node1 = node1
+        self.node2 = node2
+        _, template_node, self.nodes = BaseSchedulerNode.get_prologue_template_epilogue(
+            [*node1.get_nodes(), *node2.get_nodes()]
+        )
+        template = template_node.get_template_node()
+        if template is None:
+            raise AssertionError("expected a template node")
+        self.template: TemplateBuffer = template
+        self._triton_tile_fits: dict[tuple[int, int, int] | None, bool] = {}
+
+    @functools.cached_property
+    def triton_supported(self) -> bool:
+        """Whether a Triton template can host the epilogue, given an output tile
+        that fits it (see triton_tile_fits)."""
+        from .codegen.triton import template_reduction_epilogue_supported
+
+        return template_reduction_epilogue_supported(self.template, self.nodes)
+
+    def triton_tile_fits(self, tile: tuple[int, int, int] | None) -> bool:
+        if tile not in self._triton_tile_fits:
+            from .codegen.simd import tile_fits_reduction_epilogue
+
+            self._triton_tile_fits[tile] = tile_fits_reduction_epilogue(
+                tile, self.template, self.nodes
+            )
+        return self._triton_tile_fits[tile]
+
+    @functools.cached_property
+    def nvgemm_min_tile_shape(self) -> tuple[int, int] | None:
+        """The tile an NVGEMM choice needs to host the epilogue, or None if
+        NVGEMM can't fuse it."""
+        from .codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+
+        return NVUniversalGemmScheduling.reduction_epilogue_min_tile_shape(self)
 
 
 class ChoiceCaller:
@@ -6495,10 +6551,22 @@ class ChoiceCaller:
         """
         self.failed = True
 
+    def supports_reduction_epilogue(self, epilogue: ReductionEpilogue) -> bool:
+        """Whether this choice's kernel can be generated with epilogue fused."""
+        return False
+
 
 class TritonTemplateCallerBase(ChoiceCaller):
+    # (rows, cols, subtiles) of the output tile each store_output call writes,
+    # when the template stores through scalar tile offsets. A tile spans
+    # cols * subtiles columns, split into subtiles stored by an unrolled loop.
+    output_tile: tuple[int, int, int] | None = None
+
     def get_make_kernel_render(self) -> Any:
         raise NotImplementedError
+
+    def supports_reduction_epilogue(self, epilogue: ReductionEpilogue) -> bool:
+        return epilogue.triton_supported and epilogue.triton_tile_fits(self.output_tile)
 
 
 _NVUniversalGemmCallerClass: type | None = None
@@ -6566,6 +6634,13 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
     @property
     def choices(self) -> list[ChoiceCaller]:
         return self._choices
+
+    @property
+    def output_tile(self) -> tuple[int, int, int] | None:
+        caller = self._render_caller
+        if isinstance(caller, TritonTemplateCallerBase):
+            return caller.output_tile
+        return None
 
     def choice_timings(
         self, hint_override: int | None = None
