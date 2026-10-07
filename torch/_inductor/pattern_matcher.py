@@ -539,7 +539,11 @@ class PatternExpr(ABC):
         try:
             return MatchContext([self], graph=node.graph).match(self, node)
         except FailedMatch as e:
-            return e
+            # Drop the traceback: the caller keeps the returned FailedMatch in a
+            # local, and its traceback would hold this frame and, via f_back, the
+            # whole calling stack (e.g. the autograd backward that triggered a
+            # lazy backward compile, with its real tensors) in a reference cycle.
+            return e.with_traceback(None)
 
     def has_multiple_users(self) -> bool:
         return False
@@ -1327,7 +1331,8 @@ class MultiOutputPattern(PatternExpr):
         try:
             return MatchContext(self.outputs, graph=node.graph).match(self, node)
         except FailedMatch as e:
-            return e
+            # See PatternExpr.match.
+            return e.with_traceback(None)
 
     def pattern_eq(self, other: object) -> bool:
         if not super().pattern_eq(other):

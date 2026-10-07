@@ -795,6 +795,15 @@ class Tracer(TracerBase):
             return flatten_fn, flat_args
         return root_fn, args
 
+    def _collect_tensor_attrs(
+        self, m: torch.nn.Module, prefix_atoms: list[str]
+    ) -> None:
+        for k, v in m.__dict__.items():
+            if isinstance(v, _constant_attribute_types):
+                self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
+        for k, v in m.named_children():
+            self._collect_tensor_attrs(v, prefix_atoms + [k])
+
     @compatibility(is_backward_compatible=True)
     def trace(
         self,
@@ -872,16 +881,7 @@ class Tracer(TracerBase):
                 str,
             ] = {}
 
-            def collect_tensor_attrs(
-                m: torch.nn.Module, prefix_atoms: list[str]
-            ) -> None:
-                for k, v in m.__dict__.items():
-                    if isinstance(v, _constant_attribute_types):
-                        self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
-                for k, v in m.named_children():
-                    collect_tensor_attrs(v, prefix_atoms + [k])
-
-            collect_tensor_attrs(self.root, [])
+            self._collect_tensor_attrs(self.root, [])
 
             if not isinstance(fn, FunctionType):
                 raise AssertionError(f"Expected FunctionType, got {type(fn)}")
@@ -1259,6 +1259,11 @@ def _new_patcher() -> Iterator[_Patcher]:
         if CURRENT_PATCHER is None:
             raise AssertionError("CURRENT_PATCHER is None in finally block")
         CURRENT_PATCHER.revert_all_patches()
+        # The recorded patches hold the wrappers installed while tracing, which
+        # close over the patcher and the tracer; drop them so the tracer (and
+        # e.g. the real tensors in its tensor_attrs) isn't kept in a cycle.
+        CURRENT_PATCHER.patches_made.clear()
+        CURRENT_PATCHER.visited.clear()
         CURRENT_PATCHER = prior_patcher
 
 
