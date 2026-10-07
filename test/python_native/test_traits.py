@@ -5,7 +5,11 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
@@ -74,6 +78,7 @@ class TestTraitProtocol(TestCase):
     def test_butterfly_width_is_a_power_of_two(self):
         self.assertEqual(T._offsets(1), [])
         self.assertEqual(T._offsets(8), [4, 2, 1])
+        self.assertEqual(T._offsets(8, ascending=True), [1, 2, 4])
         for width in (0, 3, 6):
             with (
                 self.subTest(width=width),
@@ -82,6 +87,7 @@ class TestTraitProtocol(TestCase):
                 T._offsets(width)
 
     @unittest.skipUnless(TEST_CUDA, "CUDA required")
+    @unittest.skipUnless(SM90OrLater, "Hopper+ required")
     def test_welford_divisor_clamps_at_zero(self):
         # correction >= n must divide by zero, yielding ATen's +inf, not negative variance.
         # A one-thread kernel probes the cute.jit helper directly.
@@ -120,6 +126,7 @@ class TestTraitProtocol(TestCase):
                 self.assertEqual(out.item(), want)
 
     @unittest.skipUnless(TEST_CUDA, "CUDA required")
+    @unittest.skipUnless(SM90OrLater, "Hopper+ required")
     def test_welford_empty_accumulator_is_identity(self):
         trait = T.WelfordOps(acc=cutlass.Float32)
 
@@ -157,6 +164,86 @@ class TestTraitProtocol(TestCase):
                 device="cuda",
             ),
         )
+
+
+@unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
+class TestTraitDevice(TestCase):
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_norm2_leaf_narrow_values(self, device, dtype):
+        """Square narrow norm inputs after widening so small values do not underflow early."""
+        import cutlass
+        import cutlass.cute as cute
+
+        from torch import _native as native
+        from torch._native.ops.reductions import kernel_coltile as ct, traits
+
+        class LeafSquare(traits.NormOps):
+            @cute.jit
+            def project(self, acc, n):
+                return acc[0]
+
+        x = torch.arange(-32768, 32768, device=device, dtype=torch.int32)
+        x = x.to(torch.int16).view(dtype).view(1, -1)
+        with (
+            native._unconditional_masked(),
+            torch.backends.python_native.cutedsl.disabled(),
+        ):
+            got = ct.reduce_ordered_col(
+                LeafSquare(2, acc=cutlass.Float32),
+                "norm2_leaf_square",
+                x,
+                [torch.float32],
+                1,
+                allow_split=True,
+                column_pack=1,
+            )[0]
+            expected = x[0].float().abs().square()
+            self.assertEqual(got.isnan(), expected.isnan())
+            valid = ~expected.isnan()
+            self.assertEqual(
+                got[valid].view(torch.uint8), expected[valid].view(torch.uint8)
+            )
+
+    def test_norm2_leaf_rounding(self, device):
+        """Match norm leaf rounding between row and column implementations."""
+        from unittest import mock
+
+        from torch import _native as native
+        from torch._native.ops.reductions import kernel_coltile as ct
+
+        rows, columns = 32769, 33
+        x = torch.empty(rows, columns, device=device)
+        x[0::2] = 0.2678401470184326
+        x[1::2] = 0.5074443817138672
+        parts = []
+        original = ct._launch
+
+        def record(block, key, ins, outs):
+            if key[0] == "ordered_col2":
+                parts.append(ins[0])
+            return original(block, key, ins, outs)
+
+        with (
+            native._unconditional_masked(),
+            torch.backends.python_native.cutedsl.disabled(),
+            mock.patch.object(ct, "_launch", record),
+        ):
+            ct.reduce_ordered_col(
+                T.NormOps(2), "rounded_norm2", x, [torch.float32], 1, allow_split=True
+            )
+            ct.reduce_ordered_col(
+                T.SumOps(),
+                "materialized_squares",
+                x.square(),
+                [torch.float32],
+                1,
+                allow_split=True,
+            )
+            self.assertEqual(len(parts), 2)
+            self.assertEqual(parts[0].view(torch.uint8), parts[1].view(torch.uint8))
+
+
+instantiate_device_type_tests(TestTraitDevice, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
