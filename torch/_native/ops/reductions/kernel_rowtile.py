@@ -849,7 +849,6 @@ def reduce_row_tile(
     unroll: int | None = None,
     use_tma: bool | None = None,
     order: Literal["linear", "inner_tree"] | None = None,
-    row_accumulators: int = 0,
     ragged_vector: bool = False,
 ) -> tuple[torch.Tensor, ...]:
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`."""
@@ -862,8 +861,6 @@ def reduce_row_tile(
     # explicit launch shapes on the default order; explicit requests raise below.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
-    if row_accumulators and order != "linear":
-        raise ValueError("static row accumulators require explicit order='linear'")
     if ragged_vector and order != "linear":
         raise ValueError("ragged vectors require explicit order='linear'")
     itree, arch = None, None
@@ -932,7 +929,6 @@ def reduce_row_tile(
         final=final,
         unroll=unroll,
         use_tma=use_tma,
-        row_accumulators=row_accumulators,
         vec=128 // (isz * 8) if ragged_vector else None,
         ragged_vector=ragged_vector,
     )
