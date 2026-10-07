@@ -217,9 +217,9 @@ struct FromImpl<DeviceType> {
 template <>
 struct FromImpl<std::nullopt_t> {
   static StableIValue call(
-      std::nullopt_t val,
-      [[maybe_unused]] uint64_t extension_build_version,
-      [[maybe_unused]] bool is_internal) {
+      std::nullopt_t /*val*/,
+      uint64_t /*extension_build_version*/,
+      bool /*is_internal*/) {
     return torch::stable::detail::from(nullptr);
   }
 };
@@ -617,9 +617,9 @@ struct ToImpl<DeviceType> {
 template <>
 struct ToImpl<std::nullopt_t> {
   static std::nullopt_t call(
-      StableIValue val,
-      [[maybe_unused]] uint64_t extension_build_version,
-      [[maybe_unused]] bool is_internal) {
+      StableIValue /*val*/,
+      uint64_t /*extension_build_version*/,
+      bool /*is_internal*/) {
     // val should be equivalent to from(nullptr)
     return std::nullopt;
   }
