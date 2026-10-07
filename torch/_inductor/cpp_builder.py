@@ -2601,11 +2601,15 @@ class CppBuilder:
                 )
             # See above; we can currently assume this is not on MSVC.
             self._sources_args = f"-x c++-header {sources[0]}"
-            if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
-                # Store PCH paths relative to -isysroot so the .pch can
-                # be used from a different build directory.  The matching
-                # -isysroot is injected by build_fbcode_re().
-                self._cflags_args += " -relocatable-pch -Xclang -fno-pch-timestamp "
+            if _is_clang(BuildOption.get_compiler()):
+                # clang 20 and above require an explicit -c option when precompiling
+                # clang 19 passes with a warning
+                self._cflags_args += " -c "
+                if self._use_relative_path:
+                    # Store PCH paths relative to -isysroot so the .pch can
+                    # be used from a different build directory.  The matching
+                    # -isysroot is injected by build_fbcode_re().
+                    self._cflags_args += " -relocatable-pch -Xclang -fno-pch-timestamp "
         else:
             self._sources_args = " ".join(sources)
 
