@@ -39,7 +39,6 @@
 L1:
   - riseproject-dev/pytorch-ci
   - NVIDIA-dev/pytorch-oot-internal
-  - google-pytorch/torch_tpu
 
 L2:
   - NVIDIA/pytorch-windows-ci:
@@ -58,6 +57,10 @@ L2:
         - nightly
   - Isalia20/pytorch-mps-ci:
       events:
+        - nightly
+  - google-pytorch/torch_tpu:
+      events:
+        - pull_request
         - nightly
 
 L3:
