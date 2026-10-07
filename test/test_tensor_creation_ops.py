@@ -2117,6 +2117,13 @@ class TestTensorCreation(TestCase):
         torch.range(1, 1, 1, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
+        # https://github.com/pytorch/pytorch/issues/186233
+        self.assertRaisesRegex(
+            RuntimeError,
+            "step must be nonzero and representable in the target dtype",
+            lambda: torch.range(0, 20, 1e-6, device=device, dtype=torch.int8),
+        )
+
     # TODO: this test should be updated
     def test_range_warning(self, device):
         with warnings.catch_warnings(record=True) as w:
