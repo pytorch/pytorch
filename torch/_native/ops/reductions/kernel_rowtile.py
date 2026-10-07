@@ -223,36 +223,6 @@ def inner_tree_order_enabled() -> bool:
     )
 
 
-def reduction_order(
-    order: Literal["unordered", "inner_tree"] | None = None,
-) -> Literal["unordered", "inner_tree"]:
-    if order is None:
-        return "inner_tree" if inner_tree_order_enabled() else "unordered"
-    if order not in ("unordered", "inner_tree"):
-        raise ValueError(f"unknown reduction order: {order!r}")
-    return order
-
-
-def select_row_order(
-    cc: tuple[int, int],
-    dtype: torch.dtype,
-    trait_key: str,
-    N: int,
-    M: int,
-    *,
-    order: Literal["unordered", "inner_tree"],
-    nfields: int,
-    nouts: int,
-    acc_bits: int = 32,
-    alignment: int = 16,
-) -> Literal["linear", "inner_tree"]:
-    if order == "inner_tree":
-        return "inner_tree"
-    if order != "unordered":
-        raise ValueError(f"unknown reduction order: {order!r}")
-    return "linear"
-
-
 class _ItreePlan(NamedTuple):
     """Compile-time DAG state for one of upstream's three N-selected shapes.
 
