@@ -896,50 +896,6 @@ You can now define a new memory pool by passing this allocator to {class}`torch.
 pool = torch.cuda.MemPool(allocator)
 ```
 
-For allocators implemented in Python, construct the pool directly from
-callables instead of passing `ctypes` callback addresses:
-
-```python
-from cuda.bindings import runtime
-
-
-def alloc(size: int, device: int, stream: int) -> int | None:
-    err, ptr = runtime.cudaMalloc(size)
-    return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
-
-
-def free(ptr: int, size: int, device: int, stream: int) -> None:
-    runtime.cudaFree(ptr)
-
-
-pool = torch.cuda.MemPool.from_callbacks(alloc, free)
-```
-
-The pool keeps both callables alive until its cached segments have been
-released. Allocation callback exceptions are reported with their Python error
-message. Free callback exceptions are logged and swallowed because cleanup may
-run during destruction. Return `None` or zero from the allocation callback to
-report out-of-memory and allow the caching allocator's release-and-retry path
-and OOM observers to run. Raising an exception, including `MemoryError`, reports
-a non-OOM callback failure immediately instead. An allocation callback must not
-allocate from a Python-backed MemPool on the same thread; doing so raises a
-re-entrancy error. Python-backed allocators are MemPool-only and cannot be
-installed with {func}`~torch.cuda.change_current_allocator`.
-
-Allocation and free callbacks may run concurrently on multiple native threads,
-including threads that did not previously hold the Python GIL. The wrappers
-acquire the GIL before entering Python, but callback implementations and any
-native libraries they call must still be thread-safe.
-
-During CUDA graph capture, the allocation callback runs in relaxed capture
-mode. It may call allocation APIs such as `cudaMalloc` or CUDA virtual-memory
-APIs, but it must not launch work on or synchronize the capturing stream,
-synchronize the device, or begin/end capture. The raw stream address passed to
-the callback must not be retained. Custom frees selected during OOM recovery
-run without the caching allocator lock after reclamation finishes and before
-the allocation retry, so the retry can reuse the returned memory.
-
-
 The pool can then be used with the {class}`torch.cuda.use_mem_pool` context manager to
 allocate tensors into that pool:
 
@@ -1047,6 +1003,51 @@ with torch.cuda.use_mem_pool(pool):
      requirements (`CU_MULTICAST_GRANULARITY_RECOMMENDED`, `CU_MULTICAST_GRANULARITY_MINIMUM`),
      and can cause your workload to run out of memory.
 ```
+
+
+(cuda-memory-python-allocators)=
+## Python-defined CUDA allocators
+
+Use {meth}`torch.cuda.MemPool.from_py_allocator` to implement a pool's segment
+allocator with Python callables instead of compiled `ctypes` callbacks:
+
+```python
+from cuda.bindings import runtime
+
+
+def alloc(size: int) -> int | None:
+    err, ptr = runtime.cudaMalloc(size)
+    return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
+
+
+def free(ptr: int, size: int) -> None:
+    (err,) = runtime.cudaFree(ptr)
+    if err != runtime.cudaError_t.cudaSuccess:
+        raise RuntimeError(f"cudaFree failed with error {err}")
+
+
+pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
+```
+
+Return `None` or zero when an allocation cannot be satisfied. This lets the
+caching allocator release cached blocks, retry the allocation, notify OOM
+observers, and report a normal {class}`torch.OutOfMemoryError` if recovery
+fails. Other exceptions raised by the allocation callback propagate normally.
+Exceptions raised by the free callback produce a warning and are swallowed.
+
+PyTorch makes the segment's device and allocation stream current before calling
+either function. A callback that needs them can use
+{func}`torch.cuda.current_device` and {func}`torch.cuda.current_stream`.
+
+Callbacks can be invoked concurrently from multiple threads, so their Python
+and native state must be thread-safe, including in a no-GIL Python build. An
+allocation callback may allocate from a different Python-backed pool, but
+recursively allocating through the same allocator raises an error.
+
+During CUDA graph capture, the allocation callback runs in relaxed capture
+mode. It may call allocation APIs such as `cudaMalloc` or CUDA virtual-memory
+APIs, but it must not launch work on or synchronize the capturing stream,
+synchronize the device, or begin or end capture.
 
 
 ## Tuning NVLink Performance with Custom Memory Allocator on H100/H200 GPUs
