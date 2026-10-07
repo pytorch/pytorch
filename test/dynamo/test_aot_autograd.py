@@ -1,7 +1,9 @@
 # Owner(s): ["module: dynamo"]
 import copy
 import operator
+import queue
 import re
+import threading
 import unittest
 from textwrap import dedent
 from unittest.mock import patch
@@ -990,6 +992,83 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertNotIn("grad_fn_seq_nr", fx_traceback.current_meta)
         self.assertNotIn("in_grad_fn", fx_traceback.current_meta)
 
+    def test_stacktrace_hooks_use_backward_callers_state(self):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        x = torch.randn(8, requires_grad=True)
+        out = x.sin().sum()
+        with fx_traceback.preserve_node_meta():
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+
+        observed = []
+        out.grad_fn.register_prehook(
+            lambda _grad_outputs: observed.append(dict(fx_traceback.get_current_meta()))
+        )
+        with fx_traceback.preserve_node_meta(), fx_traceback.annotate({"run": 1}):
+            expected_meta = dict(fx_traceback.get_current_meta())
+            out.backward(retain_graph=True)
+            self.assertEqual(dict(fx_traceback.get_current_meta()), expected_meta)
+        with fx_traceback.preserve_node_meta(), fx_traceback.annotate({"run": 2}):
+            expected_meta = dict(fx_traceback.get_current_meta())
+            out.backward()
+            self.assertEqual(dict(fx_traceback.get_current_meta()), expected_meta)
+
+        self.assertEqual(
+            [meta["custom"] for meta in observed], [{"run": 1}, {"run": 2}]
+        )
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
+    def test_stacktrace_hooks_isolate_concurrent_graph_tasks(self):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        x = torch.randn(8, requires_grad=True)
+        out = x.sin().sum()
+        with fx_traceback.preserve_node_meta():
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+
+        observed = queue.Queue()
+        errors = queue.Queue()
+        barrier = threading.Barrier(2)
+        out.grad_fn.register_prehook(
+            lambda _grad_outputs: observed.put(
+                fx_traceback.get_current_meta()["custom"]["owner"]
+            )
+        )
+
+        def run_backward(owner):
+            try:
+                with (
+                    fx_traceback.preserve_node_meta(),
+                    fx_traceback.annotate({"owner": owner}),
+                ):
+                    barrier.wait(timeout=5)
+                    out.backward(retain_graph=True)
+            except Exception as e:
+                errors.put(e)
+                barrier.abort()
+
+        threads = [
+            threading.Thread(target=run_backward, args=(owner,))
+            for owner in ("thread-a", "thread-b")
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+            self.assertFalse(thread.is_alive())
+
+        if not errors.empty():
+            raise errors.get()
+        self.assertEqual(observed.qsize(), 2)
+        self.assertEqual(
+            sorted([observed.get_nowait(), observed.get_nowait()]),
+            ["thread-a", "thread-b"],
+        )
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
     # https://github.com/pytorch/pytorch/issues/110121
     def test_aot_export_joint_simple_repro(self):
         class Mod(torch.nn.Module):
@@ -1912,6 +1991,143 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
 
 class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
+    @onlyAccelerator
+    def test_stacktrace_hooks_fork_before_earlier_worker_prehooks(self, device):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        caller_thread = threading.get_ident()
+        before_traceback_prehook = []
+        after_traceback_prehook = []
+        x = torch.randn(8, device=device, requires_grad=True)
+        out = x.sin().sum()
+
+        def earlier_tensor_hook(grad):
+            fx_traceback.current_meta["early_worker_write"] = True
+            fx_traceback.current_meta["custom"]["worker_only"] = True
+            before_traceback_prehook.append(
+                (threading.get_ident(), dict(fx_traceback.current_meta))
+            )
+            return grad
+
+        # Tensor hooks run before Node prehooks, so this exercises mutable
+        # access before AOTAutograd's traceback prehook can run.
+        out.register_hook(earlier_tensor_hook)
+        with fx_traceback.preserve_node_meta(), fx_traceback.annotate({"caller": True}):
+            fx_traceback.set_stack_trace(["caller-stack"])
+            caller_meta = dict(fx_traceback.get_current_meta())
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+            out.grad_fn.register_prehook(
+                lambda _grad_outputs: after_traceback_prehook.append(
+                    dict(fx_traceback.get_current_meta())
+                )
+            )
+            out.backward()
+            self.assertEqual(dict(fx_traceback.get_current_meta()), caller_meta)
+
+        self.assertEqual(len(before_traceback_prehook), 1)
+        worker_thread, worker_meta = before_traceback_prehook[0]
+        self.assertNotEqual(worker_thread, caller_thread)
+        self.assertEqual(worker_meta["custom"], {"caller": True, "worker_only": True})
+        self.assertEqual(worker_meta["stack_trace"], "caller-stack")
+        self.assertTrue(worker_meta["early_worker_write"])
+        self.assertEqual(len(after_traceback_prehook), 1)
+        self.assertEqual(
+            after_traceback_prehook[0]["custom"],
+            {"caller": True, "worker_only": True},
+        )
+        self.assertTrue(after_traceback_prehook[0]["early_worker_write"])
+        self.assertEqual(after_traceback_prehook[0]["in_grad_fn"], 1)
+        self.assertEqual(len(after_traceback_prehook[0]["grad_fn_seq_nr"]), 1)
+        self.assertTrue(after_traceback_prehook[0]["autograd_backward"])
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
+    @onlyAccelerator
+    def test_stacktrace_hooks_propagate_through_reentrant_backward(self, device):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        observed = []
+        outer_after_inner = []
+
+        class ReentrantBackward(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                with torch.enable_grad():
+                    inner = torch.randn(
+                        8, device=grad_output.device, requires_grad=True
+                    )
+                    inner_out = inner.sin().sum()
+                    setup_stacktrace_preservation_hooks([inner_out.grad_fn])
+                    inner_out.grad_fn.register_prehook(
+                        lambda _grad_outputs: observed.append(
+                            dict(fx_traceback.get_current_meta())
+                        )
+                    )
+                    torch.autograd.grad(inner_out, inner)
+                    outer_after_inner.append(dict(fx_traceback.get_current_meta()))
+                return grad_output
+
+        x = torch.randn(8, device=device, requires_grad=True)
+        out = ReentrantBackward.apply(x).sum()
+        with fx_traceback.preserve_node_meta(), fx_traceback.annotate({"caller": True}):
+            fx_traceback.set_stack_trace(["caller-stack"])
+            caller_meta = dict(fx_traceback.get_current_meta())
+            setup_stacktrace_preservation_hooks([out.grad_fn])
+            out.backward()
+            self.assertEqual(dict(fx_traceback.get_current_meta()), caller_meta)
+
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0]["custom"], {"caller": True})
+        self.assertEqual(observed[0]["in_grad_fn"], 2)
+        self.assertEqual(len(observed[0]["grad_fn_seq_nr"]), 2)
+        self.assertTrue(observed[0]["autograd_backward"])
+        self.assertEqual(len(outer_after_inner), 1)
+        self.assertEqual(outer_after_inner[0]["custom"], {"caller": True})
+        self.assertEqual(outer_after_inner[0]["in_grad_fn"], 1)
+        self.assertEqual(len(outer_after_inner[0]["grad_fn_seq_nr"]), 1)
+        self.assertTrue(outer_after_inner[0]["autograd_backward"])
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
+    @onlyAccelerator
+    def test_stacktrace_worker_state_restored_on_exception(self, device):
+        from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
+
+        x = torch.randn(8, device=device, requires_grad=True)
+        failing_out = x.sin().sum()
+
+        def failing_prehook(_grad_outputs):
+            fx_traceback.current_meta["worker_only"] = True
+            raise RuntimeError("expected worker failure")
+
+        failing_out.grad_fn.register_prehook(failing_prehook)
+        with fx_traceback.preserve_node_meta(), fx_traceback.annotate({"caller": True}):
+            caller_meta = dict(fx_traceback.get_current_meta())
+            setup_stacktrace_preservation_hooks([failing_out.grad_fn])
+            with self.assertRaisesRegex(RuntimeError, "expected worker failure"):
+                failing_out.backward()
+            self.assertEqual(dict(fx_traceback.get_current_meta()), caller_meta)
+
+            observed = []
+            clean_out = x.cos().sum()
+            setup_stacktrace_preservation_hooks([clean_out.grad_fn])
+            clean_out.grad_fn.register_prehook(
+                lambda _grad_outputs: observed.append(
+                    dict(fx_traceback.get_current_meta())
+                )
+            )
+            clean_out.backward()
+            self.assertEqual(dict(fx_traceback.get_current_meta()), caller_meta)
+
+        self.assertEqual(len(observed), 1)
+        self.assertNotIn("worker_only", observed[0])
+        self.assertFalse(fx_traceback.has_preserved_node_meta())
+        self.assertEqual(dict(fx_traceback.current_meta), {})
+
     @onlyAccelerator
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)

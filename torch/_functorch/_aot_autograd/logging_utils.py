@@ -70,11 +70,9 @@ def track_graph_compiling(
                 tracing_context.aot_graph_name = old_name
 
 
-# Set up hooks so that during backward the fx's stack_trace is properly set
-callback_set = False
-
-
 def setup_stacktrace_preservation_hooks(roots: list[torch.autograd.graph.Node]) -> None:
+    """Set up hooks that preserve the active FX traceback state in backward."""
+
     def iter_graph(
         roots: list[torch.autograd.graph.Node],
     ) -> Iterator[torch.autograd.graph.Node]:
@@ -97,24 +95,9 @@ def setup_stacktrace_preservation_hooks(roots: list[torch.autograd.graph.Node]) 
 
             yield node
 
-    def get_callback(saved_stack_: list[str]) -> Callable[[], None]:
-        def callback() -> None:
-            global callback_set
-            fx_traceback.set_stack_trace(saved_stack_)
-            callback_set = False
-
-        return callback
-
     def get_prehook(stack_: list[str], seq_nr: int) -> Callable[[Any], None]:
         def prehook(grad_output: Any) -> None:
-            global callback_set
-
-            if not callback_set:
-                torch.autograd.variable.Variable._execution_engine.queue_callback(  # type: ignore[attr-defined]
-                    get_callback(fx_traceback.format_stack())
-                )
-                callback_set = True
-
+            fx_traceback._install_thread_local_state_for_autograd()
             fx_traceback.set_stack_trace(stack_)
             fx_traceback.set_grad_fn_seq_nr(seq_nr)
             fx_traceback._mark_autograd_backward()
