@@ -15,6 +15,7 @@ import operator
 import sys
 import types
 import typing
+from collections.abc import Callable
 from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
 
@@ -512,7 +513,7 @@ def generic_str(
         return obj
 
     try:
-        if obj.tp_str and type(obj).tp_str_impl is not VariableTracker.tp_str_impl:
+        if obj.tp_str:
             result = obj.tp_str_impl(tx)
         else:
             result = generic_repr(tx, obj)
@@ -1856,6 +1857,30 @@ def python_constant_richcompare_impl(
     except TypeError as e:
         raise_observed_exception(TypeError, tx, args=list(e.args))
     return ConstantVariable.create(result)
+
+
+def python_constant_repr_impl(
+    self: VariableTracker,
+    tx: "InstructionTranslatorBase",
+    fn: Callable[[object], str] = repr,
+) -> VariableTracker:
+    """Constant-fold tp_repr (or tp_str with fn=str) by calling the real type's slot.
+
+    For VTs wrapping a known Python object whose C repr/str Dynamo does not model.
+    """
+    value = self.get_real_python_backed_value()
+    if value is NO_SUCH_SUBOBJ:
+        unimplemented(
+            gb_type="repr() on object without a known value",
+            context=f"{fn.__name__}() on {self}",
+            explanation=f"Dynamo cannot compute {fn.__name__}() of {self.python_type_name()} "
+            "because the underlying Python object is not known at trace time.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    try:
+        return ConstantVariable.create(fn(value))
+    except Exception as e:
+        raise_observed_exception(type(e), tx, args=list(e.args))
 
 
 # _Py_SwappedOp: https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L987

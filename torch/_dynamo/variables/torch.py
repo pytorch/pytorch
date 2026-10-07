@@ -672,6 +672,11 @@ class BaseTorchVariable(VariableTracker):
 
         return getattr(self.value, "__module__", None) in ("math", "cmath")
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
     """Points to a context manager class in torch.* that dynamo has implementations"""

@@ -3463,6 +3463,11 @@ class SymNodeVariable(VariableTracker):
         # searched for a dict key.
         return hash(self.evaluate_expr())
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
 
 class NumpyNdarrayVariable(TensorVariable):
     """

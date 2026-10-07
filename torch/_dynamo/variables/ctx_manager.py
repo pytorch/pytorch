@@ -722,6 +722,11 @@ class GradModeVariable(ContextWrappingVariable):
     def python_type(self) -> type:
         return torch.set_grad_enabled
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
