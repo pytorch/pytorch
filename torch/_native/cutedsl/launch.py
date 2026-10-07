@@ -27,6 +27,11 @@ def sym(divisibility: int = 1) -> cute.SymInt:
     return cute.sym_int(divisibility=divisibility)
 
 
+def sym_int64(divisibility: int = 1) -> cute.SymInt:
+    """A signed 64-bit dynamic extent or stride."""
+    return cute.sym_int64(divisibility=divisibility)
+
+
 def fake_compact(
     dtype: type[cutlass.Numeric],
     shape: Sequence[int | cute.SymInt],

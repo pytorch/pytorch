@@ -29,18 +29,37 @@ def align_bytes(N: int, itemsize: int) -> int:
     return vec_size(N, itemsize) * itemsize
 
 
-def _decode_offset(linear, divs, strides, npairs):
-    # Mixed-radix flat offset with only pair count compiled. linear < 2**31 keeps
-    # div/mod Int32; stride products use Int64. Callers omit empty decodes.
-    rem = Int32(linear)
+def _decode_offset(
+    linear, divs, strides, npairs, native_div: cutlass.Constexpr = False
+):
+    # Mixed-radix flat offset with only pair count compiled.
+    rem = linear
+    if npairs == 0:
+        # The operand collapsed to a single element, so every lane maps to offset 0. Without this
+        # arm, `strides[npairs - 1]` indexes strides[-1].
+        return cutlass.Int64(0)
     if npairs == 1:
         return cutlass.Int64(rem) * strides[0]
     off = cutlass.Int64(0)
     for j in range(npairs - 1):
-        q, r = divmod(rem, divs[j])
+        if const_expr(native_div):
+            q, r = rem // divs[j], rem % divs[j]
+        else:
+            q, r = divmod(rem, divs[j])
         off = off + cutlass.Int64(r) * strides[j]
         rem = q
     return off + cutlass.Int64(rem) * strides[npairs - 1]
+
+
+@cute.jit
+def _load_decoded(mX, obase, linear, divs, strides, npairs, native_div):
+    return mX[obase + _decode_offset(linear, divs, strides, npairs, native_div)]
+
+
+@cute.jit
+def _decoded_index(obase, linear, divs, strides, npairs, native_div, wide):
+    idx = obase + _decode_offset(linear, divs, strides, npairs, native_div)
+    return idx if const_expr(wide) else Int32(idx)
 
 
 def _ilog2(n: int) -> int:
@@ -65,7 +84,7 @@ class TileMap:
         warp_major: bool = False,
         vec: int | None = None,
         exact: bool | None = None,
-    ):
+    ) -> None:
         # Cross-warp butterflies require a power-of-two warp count or drop partials.
         nw = threads_per_row // WARP
         if threads_per_row != 1 and (threads_per_row % WARP or nw & (nw - 1)):
@@ -96,7 +115,7 @@ class TileMap:
         self.wide_ok = N % self.vec == 0
 
     @property
-    def sig(self):
+    def sig(self) -> tuple[Any, ...]:
         return (
             self.N,
             self.vec,
@@ -111,7 +130,7 @@ class TileMap:
         """Alignment to declare for THIS tile (element width when the wide load is off)."""
         return self.vec * itemsize if self.wide_ok else itemsize
 
-    def strides(self):
+    def strides(self) -> tuple[int, int, int]:
         """(lane, warp, load) strides; warp_major swaps the warp/load assignment."""
         if self.threads_per_row == 1:
             return (0, 0, self.vec)
@@ -133,6 +152,24 @@ class TileMap:
 
 
 @cute.jit
+def _load_reduction_value(trait, mX, off, complex_input: cutlass.Constexpr):
+    if const_expr(complex_input):
+        base = off * 2
+        return (trait.acc(mX[base]), trait.acc(mX[base + 1]))
+    return trait.acc(mX[off])
+
+
+@cute.jit
+def _store_reduction_value(mOut, index, value, width: cutlass.Constexpr):
+    if const_expr(width == 1):
+        mOut[index] = mOut.element_type(value)
+    else:
+        index = index * 2
+        mOut[index] = mOut.element_type(value[0])
+        mOut[index + 1] = mOut.element_type(value[1])
+
+
+@cute.jit
 def fold_decoded(
     trait,
     mX,
@@ -146,13 +183,16 @@ def fold_decoded(
     in_base,
     chunk_base,
     gidx: cutlass.Constexpr = "r",
+    wide_gidx: cutlass.Constexpr = False,
+    native_div: cutlass.Constexpr = False,
+    complex_input: cutlass.Constexpr = False,
 ):
     """Grid-stride one output using mixed-radix addressing.
 
     Runtime decodes cover arbitrary layouts; threads_per_block threads cooperate and gidx selects
     the index reported to traits.
     """
-    reduce_fn, acc_dt = trait.reduce, trait.acc
+    reduce_fn = trait.reduce
     acc = trait.init()
     n_full = rb // threads_per_block
     base_r = tidx
@@ -161,32 +201,57 @@ def fold_decoded(
         if const_expr(gidx == "flat"):
             acc = reduce_fn(
                 acc,
-                acc_dt(mX[obase + _decode_offset(base_r, rdivs, rstrides, npairs)]),
-                Int32(obase + _decode_offset(base_r, rdivs, rstrides, npairs)),
+                _load_reduction_value(
+                    trait,
+                    mX,
+                    obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div),
+                    complex_input,
+                ),
+                _decoded_index(
+                    obase,
+                    base_r,
+                    rdivs,
+                    rstrides,
+                    npairs,
+                    native_div,
+                    wide_gidx,
+                ),
                 True,
             )
         elif const_expr(gidx == "chunk"):
             acc = reduce_fn(
                 acc,
-                acc_dt(mX[obase + _decode_offset(base_r, rdivs, rstrides, npairs)]),
+                _load_reduction_value(
+                    trait,
+                    mX,
+                    obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div),
+                    complex_input,
+                ),
                 chunk_base + base_r,
                 True,
             )
         else:
             acc = reduce_fn(
                 acc,
-                acc_dt(mX[obase + _decode_offset(base_r, rdivs, rstrides, npairs)]),
+                _load_reduction_value(
+                    trait,
+                    mX,
+                    obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div),
+                    complex_input,
+                ),
                 base_r,
                 True,
             )
         base_r = base_r + threads_per_block
     # Invalid lanes read in_base because overhanging chunks may put obase out of range.
     valid = base_r < rb
-    off = obase + _decode_offset(base_r, rdivs, rstrides, npairs)
+    off = obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
     off_s = off if valid else in_base
-    val = acc_dt(mX[off_s])
+    val = _load_reduction_value(trait, mX, off_s, complex_input)
     if const_expr(gidx == "flat"):
-        return reduce_fn(acc, val, Int32(off_s), valid)
+        return reduce_fn(
+            acc, val, off_s if const_expr(wide_gidx) else Int32(off_s), valid
+        )
     if const_expr(gidx == "chunk"):
         return reduce_fn(acc, val, chunk_base + base_r, valid)
     return reduce_fn(acc, val, base_r, valid)
@@ -524,28 +589,33 @@ class TileReduce:
         pc=True,
         npairs_red=0,
         npairs_kept=0,
+        wide_count=False,
+        wide_output=False,
+        wide_gidx=False,
+        wide_red=False,
+        wide_kept=False,
         gidx_from="r",
         flat_tail=False,
         ragged_chunk=False,
         order="linear",
         # Duck-typed because its driver-owned type would invert the dependency.
         itree: Any = None,
-    ):
+    ) -> None:
         if axis not in ("row", "col", "general"):
             raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
         if order not in ("linear", "inner_tree"):
             raise ValueError(f"order must be 'linear' or 'inner_tree', got {order!r}")
         if order == "inner_tree":
-            if axis != "row" or itree is None:
+            if axis not in ("row", "general") or itree is None:
                 raise ValueError(
-                    "the inner-tree order is a row-axis option and needs a plan"
+                    "the inner-tree order needs a row or general axis and a plan"
                 )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
             if itree.stage_e:
                 threads_per_row = WARP
             threads_per_block = threads_per_row * itree.rows_per_block
-        if axis == "general":
+        if axis == "general" and order == "linear":
             # Every block thread folds one output, equivalent to row threads_per_row=threads_per_block.
             threads_per_row = threads_per_block
             nwg = threads_per_block // WARP
@@ -578,6 +648,18 @@ class TileReduce:
             # caller-set use_tma can bypass tma_ok.
             raise ValueError(f"TMA staging needs a power-of-two row length, got {N=}")
         self.trait = trait
+        self.complex_input = getattr(trait, "complex_input", False)
+        self.output_widths = (
+            tuple(getattr(trait, "output_widths", (1,) * nouts))
+            if final
+            else (1,) * nouts
+        )
+        if len(self.output_widths) != nouts or any(
+            width not in (1, 2) for width in self.output_widths
+        ):
+            raise ValueError(
+                f"output widths must contain one 1 or 2 per output, got {self.output_widths}"
+            )
         self.dtype = dtype
         self.axis = axis
         self.N = N
@@ -592,6 +674,11 @@ class TileReduce:
         # Compile-time fold_decoded policy.
         self.npairs_red = npairs_red
         self.npairs_kept = npairs_kept
+        self.wide_count = wide_count
+        self.wide_output = wide_output
+        self.wide_gidx = wide_gidx
+        self.wide_red = wide_red
+        self.wide_kept = wide_kept
         self.gidx_from = gidx_from
         self.flat_tail = flat_tail
         self.ragged_chunk = ragged_chunk
@@ -610,7 +697,9 @@ class TileReduce:
             if axis == "row" and order == "linear"
             else None
         )
-        if axis == "row":
+        if order == "inner_tree":
+            self.vec = itree.vec
+        elif axis == "row":
             self.vec = self.tilemap.vec if order == "linear" else itree.vec
         elif axis == "general":
             # Arbitrary strides offer no vector width.
@@ -629,14 +718,14 @@ class TileReduce:
         self.tiler = (threads_per_block, N)  # TMA box: threads_per_block whole rows
 
     @property
-    def tilemap(self):
+    def tilemap(self) -> TileMap:
         # Only linear row folds own one tile; inner-tree plans own one per batch.
         if self.tm is None:
             raise AssertionError(f"no tile on the {self.axis} axis")
         return self.tm
 
     @property
-    def cache_sig(self):
+    def cache_sig(self) -> tuple[Any, ...]:
         # Only TMA keys N because its box is static; runtime paths share a vector class.
         return (
             self.axis,
@@ -650,9 +739,17 @@ class TileReduce:
             self.combine,
             self.pc,
             self.trait.nfields,
+            self.complex_input,
+            self.output_widths,
+            getattr(self.trait, "canonical_bool", False),
             self.N if self.use_tma else 0,
             self.npairs_red,
             self.npairs_kept,
+            self.wide_count,
+            self.wide_output,
+            self.wide_gidx,
+            self.wide_red,
+            self.wide_kept,
             self.gidx_from,
             self.flat_tail,
             self.ragged_chunk,
@@ -729,7 +826,19 @@ class TileReduce:
         )
 
     @cute.jit
-    def _fold_itree(self, mX, r, lane_w, warp_id, row_in_block, batch_idx=None):
+    def _fold_itree(
+        self,
+        mX,
+        r,
+        lane_w,
+        warp_id,
+        row_in_block,
+        batch_idx=None,
+        obase=None,
+        rdivs=None,
+        rstrides=None,
+        in_base=None,
+    ):
         """Fold static batch fragments by streaming tree, then batches linearly.
 
         Per-warp results meet in smem via ascending butterfly. Split selects one runtime
@@ -1003,17 +1112,21 @@ class TileReduce:
             mIns = [mTma]
         else:
             tma_atom = None
-        if const_expr(self.axis == "general"):
-            # Read one-block-per-output grid live to serve any output count.
-            gx = mOuts[0].shape[0]
+        if const_expr(self.order == "inner_tree"):
+            # Split inner-tree writes one partial per (output, batch).
+            nout = mOuts[0].shape[0]
+            gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
             gy = Int32(1)
+        elif const_expr(self.axis == "general"):
+            if const_expr(self.wide_output):
+                # Host geometry splits output blocks over CUDA's signed 32-bit grid x.
+                gx = q
+                gy = npar
+            else:
+                gx = mOuts[0].shape[0] // const_expr(self.output_widths[0])
+                gy = Int32(1)
         elif const_expr(self.axis == "row"):
-            # Split inner-tree writes (row, batch) partials, so count outputs, not input rows.
-            nout = (
-                mOuts[0].shape[0]
-                if const_expr(self.order == "inner_tree")
-                else mIns[0].shape[0]
-            )
+            nout = mIns[0].shape[0]
             gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
             gy = Int32(1)
         else:
@@ -1022,10 +1135,22 @@ class TileReduce:
             gy = Int32(1) if const_expr(self.combine) else npar
         # Build V2 divisors in the MLIR context so .divisor crosses the kernel boundary.
         rdivs = (
-            [cute.FastDivmodDivisorV2(e) for e in rexts] if rexts is not None else None
+            rexts
+            if const_expr(self.wide_red)
+            else (
+                [cute.FastDivmodDivisorV2(e) for e in rexts]
+                if rexts is not None
+                else None
+            )
         )
         kdivs = (
-            [cute.FastDivmodDivisorV2(e) for e in kexts] if kexts is not None else None
+            kexts
+            if const_expr(self.wide_kept)
+            else (
+                [cute.FastDivmodDivisorV2(e) for e in kexts]
+                if kexts is not None
+                else None
+            )
         )
         self.kernel(
             mIns,
@@ -1070,8 +1195,11 @@ class TileReduce:
         # one extra Int32 slowed column fold 1.27x (8.2 to 10.4us at (65536, 256)).
         tx, _, _ = cute.arch.thread_idx()
         bx, by, _ = cute.arch.block_idx()
+        grid_x = cute.arch.grid_dim()[0] if const_expr(self.wide_output) else Int32(0)
         trait = self.trait
-        chunk_base = Int32(0)  # nonzero only under ragged_chunk, for gidx_from "chunk"
+        chunk_base = (
+            Int64(0) if const_expr(self.wide_gidx) else Int32(0)
+        )  # nonzero only under ragged_chunk, for gidx_from "chunk"
         batch_idx = None  # split shape only: which batch of the row this block folds
         # Inner-tree thread map, set from its plan.
         lane_w = warp_id = row_in_block = None
@@ -1110,9 +1238,17 @@ class TileReduce:
                 alive = raw < Int32(mOuts[0].shape[0])
         elif const_expr(self.axis == "general"):
             # One block per output, folded by every thread.
-            raw = Int32(bx)
+            raw = (
+                Int64(bx) + Int64(by) * Int64(grid_x)
+                if const_expr(self.wide_output)
+                else Int32(bx)
+            )
             lane = Int32(tx)
-            alive = True
+            alive = (
+                raw < Int64(mOuts[0].shape[0] // const_expr(self.output_widths[0]))
+                if const_expr(self.wide_output)
+                else True
+            )
         elif const_expr(self.axis == "row"):
             raw = Int32(bx) * const_expr(self.rows_per_block) + Int32(
                 tx // const_expr(self.threads_per_row)
@@ -1124,9 +1260,22 @@ class TileReduce:
             lane = Int32(0)  # the col mapping gives every output group its own thread
             alive = raw < nchunks
         # Clamp dead threads to unit 0 and discard them at store, avoiding predicated loads.
-        unit = raw if alive else Int32(0)
+        unit = (
+            raw
+            if alive
+            else (
+                Int64(0)
+                if const_expr(self.axis == "general" and self.wide_output)
+                else Int32(0)
+            )
+        )
 
         if const_expr(self.order == "inner_tree"):
+            obase = in_base
+            if const_expr(self.axis == "general" and self.npairs_kept > 0):
+                obase = in_base + _decode_offset(
+                    unit, kdivs, kstrides, const_expr(self.npairs_kept)
+                )
             if const_expr(self.itree.shape == "combine"):
                 accs = (self._fold_itree_combine(mIns, unit),)
             elif const_expr(self.itree.stage_e):
@@ -1142,30 +1291,49 @@ class TileReduce:
             obase = in_base
             if const_expr(self.npairs_kept > 0):
                 obase = in_base + _decode_offset(
-                    unit, kdivs, kstrides, const_expr(self.npairs_kept)
+                    unit,
+                    kdivs,
+                    kstrides,
+                    const_expr(self.npairs_kept),
+                    const_expr(self.wide_kept),
                 )
             rb = nchunks
             if const_expr(self.flat_tail):
                 # Clamp reduce-all stage 1's overhanging final chunk.
+                chunk_base = (
+                    Int64(unit) * Int64(nchunks)
+                    if const_expr(self.wide_gidx)
+                    else unit * nchunks
+                )
                 left = limit - obase
                 c64 = cutlass.Int64(nchunks)
                 left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
                 zero = cutlass.Int64(0)
                 left = left if left > zero else zero  # noqa: FURB136 -- no builtin max
-                rb = cutlass.Int32(left)
+                rb = (
+                    cutlass.Int64(left)
+                    if const_expr(self.wide_count)
+                    else cutlass.Int32(left)
+                )
             elif const_expr(self.ragged_chunk):
                 # Clamp each short final chunk. The fastest kept pair gives its step index
                 # for either row or column splitting.
-                _, cc = divmod(Int32(unit), kdivs[0])
+                _, cc = divmod(unit, kdivs[0])
                 c = cutlass.Int64(cc)
                 cnt = cutlass.Int64(nchunks)
-                chunk_base = Int32(c * cnt)  # this chunk's first step, for gidx
+                chunk_base = (
+                    c * cnt if const_expr(self.wide_gidx) else Int32(c * cnt)
+                )  # this chunk's first step, for gidx
                 left = limit - c * cnt
                 c64 = cutlass.Int64(nchunks)
                 left = left if left < c64 else c64  # noqa: FURB136 -- no builtin min
                 zero = cutlass.Int64(0)
                 left = left if left > zero else zero  # noqa: FURB136 -- no builtin max
-                rb = cutlass.Int32(left)
+                rb = (
+                    cutlass.Int64(left)
+                    if const_expr(self.wide_count)
+                    else cutlass.Int32(left)
+                )
             if const_expr(self.combine):
                 accs = (
                     fold_partials_run(
@@ -1174,7 +1342,7 @@ class TileReduce:
                         obase,
                         rb,
                         const_expr(self.threads_per_block),
-                        lane,
+                        Int64(lane) if const_expr(self.wide_count) else lane,
                         in_base,
                     ),
                 )
@@ -1189,10 +1357,13 @@ class TileReduce:
                         const_expr(self.npairs_red),
                         rb,
                         const_expr(self.threads_per_block),
-                        lane,
+                        Int64(lane) if const_expr(self.wide_count) else lane,
                         in_base,
                         chunk_base,
                         const_expr(self.gidx_from),
+                        const_expr(self.wide_gidx),
+                        const_expr(self.wide_red),
+                        const_expr(self.complex_input),
                     ),
                 )
             accs = (merge_lanes(trait, accs[0], const_expr(self.threads_per_row)),)
@@ -1273,11 +1444,19 @@ class TileReduce:
             if lane == 0 and alive:
                 for s in cutlass.range_constexpr(self.nslots):
                     if const_expr(self.nouts == 1):
-                        mOuts[0][out_base + Int32(s)] = mOuts[0].element_type(res[s])
+                        _store_reduction_value(
+                            mOuts[0],
+                            out_base + Int32(s),
+                            res[s],
+                            const_expr(self.output_widths[0]),
+                        )
                     else:
                         for k in cutlass.range_constexpr(self.nouts):
-                            mOuts[k][out_base + Int32(s)] = mOuts[k].element_type(
-                                res[s][k]
+                            _store_reduction_value(
+                                mOuts[k],
+                                out_base + Int32(s),
+                                res[s][k],
+                                const_expr(self.output_widths[k]),
                             )
         else:
             # Emit raw per-field partials for stage 2.
