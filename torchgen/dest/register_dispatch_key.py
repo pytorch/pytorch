@@ -407,17 +407,6 @@ class RegisterDispatchKey:
             g,
             native_aot_manifests=self.native_aot_manifests,
         )
-        # A functional or inplace variant may override its generated Meta kernel
-        # (e.g. a SymInt-aware one); the other variants stay structured.
-        if self.backend_index.dispatch_key == DispatchKey.Meta:
-            return list(
-                mapMaybe(
-                    lambda f: self.gen_unstructured(f, g)
-                    if self.backend_index.has_kernel(f)
-                    else structured_gen.gen_one(f),
-                    g.functions(),
-                )
-            )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
 
     def gen_unstructured(
