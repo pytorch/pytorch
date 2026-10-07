@@ -10804,7 +10804,7 @@ class TestMPS(TestCaseMPS):
         np_fns = {
             "sub": np.subtract, "mul": np.multiply, "trunc_divide": np.floor_divide, "pow": np.power,
             "bitwise_left_shift": np.left_shift, "bitwise_right_shift": np.right_shift,
-            "heaviside": lambda x, y: np.where(x == 0, y, 1).astype(x.dtype),
+            "heaviside": lambda x, y: np.where(x == 0, y, np.ones_like(x)),
             "true_divide": lambda x, y: f32(x) / f32(y),
             "atan2": lambda x, y: np.arctan2(f32(x), f32(y)),
             "copysign": lambda x, y: np.copysign(f32(x), f32(y)),
