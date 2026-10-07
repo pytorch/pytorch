@@ -20,9 +20,12 @@ ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 
 # cmake-3.18.4 from pip
 # NS: Apr 1 2026 3.18.4 is gone, reported here https://github.com/scikit-build/cmake-python-distributions/issues/693
+# pip 9 mishandles truthy PIP_NO_CACHE_DIR values; fixed in pip 19:
+# https://github.com/pypa/pip/pull/5884
 RUN yum install -y python3-pip && \
-    python3 -mpip install cmake==3.18.4.post1 && \
+    python3 -mpip install --no-cache-dir cmake==3.18.4.post1 && \
     ln -s /usr/local/bin/cmake /usr/bin/cmake3
+ENV PIP_NO_CACHE_DIR=1
 RUN rm -rf /usr/local/cuda-*
 
 FROM base as patchelf
