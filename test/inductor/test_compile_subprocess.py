@@ -264,6 +264,25 @@ class TestSubprocess(TestCase):
             self.assertEqual(_AsyncFxCompile._stat_bg_finished, 2)
 
 
+class TestPinnedConstantsMetadata(TestCase):
+    @requires_gpu()
+    def test_pinned_constant_targets(self):
+        from torch._inductor.compile_fx_ext import _pinned_constant_targets
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm._z_pinned = torch.tensor([1, 2, 3], pin_memory=True)
+        gm._a_pinned = torch.tensor([4, 5, 6], pin_memory=True)
+        gm._pageable = torch.tensor([1, 2, 3])
+        gm._not_tensor = 42
+        for target in ("_z_pinned", "_a_pinned", "_pageable", "_not_tensor"):
+            gm.graph.create_node("get_attr", target)
+        self.assertEqual(_pinned_constant_targets(gm), ("_a_pinned", "_z_pinned"))
+        self.assertEqual(
+            _pinned_constant_targets(torch.fx.GraphModule({}, torch.fx.Graph())),
+            (),
+        )
+
+
 if RUN_CPU:
 
     class CpuTests(TestSubprocess):

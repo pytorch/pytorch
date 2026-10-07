@@ -508,8 +508,19 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
             name: getattr(self.gm, orig_name)
             for name, orig_name in g.frozen_param_names.items()
         }
+        from torch.fx.graph_module import _get_attr as _get_gm_attr
+
+        pinned_constants = {
+            name: _get_gm_attr(self.gm, orig_name)
+            for name, orig_name in g.pinned_constant_names.items()
+        }
         constants = g.constants or {}
-        return {**constants, **frozen_params, **g.opaque_value_type_classes}
+        return {
+            **constants,
+            **frozen_params,
+            **pinned_constants,
+            **g.opaque_value_type_classes,
+        }
 
 
 @dataclasses.dataclass
@@ -535,6 +546,7 @@ class CompiledFxGraph(OutputCode):
     mutated_input_idxs: OrderedSet[int]
     constants: dict[str, torch.Tensor] | None
     frozen_param_names: dict[str, str]
+    pinned_constant_names: dict[str, str]
     torchbind_constants: dict[str, torch._C.ScriptObject | FakeScriptObject]
     opaque_value_type_classes: dict[str, type]
     output_strides: list[tuple[_StrideExprStr, ...] | None] | None
@@ -632,6 +644,16 @@ class CompiledFxGraph(OutputCode):
                     self.frozen_param_names[k] = graph.allocated_constant_name[k]
                 else:
                     self.constants[k] = v
+
+        # Constants that were pinned in the parent are rebound to the parent's
+        # own tensors on deserialization (see CompiledFxGraphConstantsWithGm),
+        # so the compiled graph keeps pinned storage without re-pinning.
+        pinned_targets = gm.meta.get("pinned_constants", ())
+        self.pinned_constant_names = {}
+        for k in graph.constants:
+            orig = graph.allocated_constant_name.get(k)
+            if orig is not None and orig in pinned_targets:
+                self.pinned_constant_names[k] = orig
 
         self.torchbind_constants = graph.torchbind_constants
         self.opaque_value_type_classes = graph.opaque_value_type_classes

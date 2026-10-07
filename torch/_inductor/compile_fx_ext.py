@@ -424,6 +424,34 @@ class _CapturedLogs:
                 logger.setLevel(level)
 
 
+def _pinned_constant_targets(gm: torch.fx.GraphModule) -> tuple[str, ...]:
+    """
+    Names of graph constants pinned in this process.
+
+    A compile worker reproduces pin_memory codegen from this metadata instead
+    of touching real pinned memory. Sorted tuple (not a set) so the FX-graph
+    cache key hashes deterministically; only the root graph is scanned.
+    """
+    from torch.fx.graph_module import _get_attr as _get_gm_attr
+
+    pinned: list[str] = []
+    for node in gm.graph.find_nodes(op="get_attr"):
+        try:
+            const = _get_gm_attr(gm, node.target)
+            is_pinned = (
+                isinstance(const, torch.Tensor)
+                and const.device.type == "cpu"
+                and const.layout == torch.strided
+                and bool(const.is_pinned())
+            )
+        except Exception:
+            log.debug("Skipping pinned-ness probe for %s", node.target)
+            continue
+        if is_pinned:
+            pinned.append(node.target)
+    return tuple(sorted(pinned))
+
+
 class _SerializedFxCompile(FxCompile):
     """
     This is used to represent an FxCompile which occurs across a serialized
@@ -493,6 +521,7 @@ class _SerializedFxCompile(FxCompile):
 
         context = torch._guards.TracingContext.try_get()
         constants = CompiledFxGraphConstantsWithGm(gm)
+        gm.meta["pinned_constants"] = _pinned_constant_targets(gm)
         logger_state = _LoggerState()
         lowering = _LoweringSerializer()
 
