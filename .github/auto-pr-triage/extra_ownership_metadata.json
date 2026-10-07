@@ -9,6 +9,6 @@
     "description": "Owns neural-network modules, module behavior, and user-facing torch.nn APIs."
   },
   "testcase_refactoring": {
-    "description": "Owns PRs whose main purpose is making PyTorch tests reusable across hardware backends, including out-of-tree and PrivateUse1 accelerators: converting CUDA-hardcoded tests to device-generic tests (instantiate_device_type_tests, device parameters, torch.accelerator APIs), adding or correcting hw_classification / HardwareClassification on test classes, replacing device-specific skips with capability-based gating, and the shared device-generic test infrastructure in torch/testing/_internal (DeviceTypeTestBase hooks, get_capabilities). Does not own PRs that fix, skip, or change tolerances or expected results of tests for one specific device, such as a CUDA-only test failure, or tests that accompany a product-code change."
+    "description": "Owns PRs that make tests reusable across hardware backends, including out-of-tree accelerators: device-generic test conversions (instantiate_device_type_tests, torch.accelerator), hw_classification labels, capability-based gating, and device-generic test infrastructure in torch/testing/_internal. Does not own fixes, skips, or tolerance changes for tests on one specific device."
   }
 }
