@@ -16,7 +16,7 @@ from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import _storage, tile
-from .traits import WARP
+from .traits import WARP, welford_nouts
 
 
 if TYPE_CHECKING:
@@ -338,6 +338,33 @@ _K0_ALL_BLOCK = 256
 _K0_ALL_GRID_MULT = 4
 
 
+class _AllConfig(NamedTuple):
+    block: int = _K0_ALL_BLOCK
+    grid_mult: int = _K0_ALL_GRID_MULT
+
+
+def select_all_config(
+    cc: tuple[int, int],
+    dtype: torch.dtype,
+    trait_key: str,
+    count: int,
+    *,
+    nfields: int,
+    nouts: int,
+) -> _AllConfig:
+    size = count * dtype.itemsize
+    if (
+        cc == (10, 0)
+        and dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and size in (256 << 20, 2 << 30)
+        and nfields == 2
+        and nouts in (1, 2)
+        and trait_key.startswith(("argmax", "argmin", "max.dim", "min.dim"))
+    ):
+        return _AllConfig(block=512, grid_mult=8)
+    return _AllConfig()
+
+
 class _GeneralConfig(NamedTuple):
     block: int = _K0_BLOCK
     kernel_order: Literal["linear", "inner_tree"] = "linear"
@@ -364,6 +391,53 @@ def select_general_config(
         return _GeneralConfig(kernel_order="inner_tree", rule="required_inner_tree")
     if order != "unordered":
         raise ValueError(f"unknown reduction order: {order!r}")
+    strided_row = (
+        cc == (10, 0)
+        and dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and tuple(red_pairs) == ((count, 2),)
+        and tuple(kept_pairs) == ((num_o, 2 * count),)
+        and acc_bits == 32
+        and alignment >= 16
+    )
+    if (
+        strided_row
+        and count in (256, 257)
+        and (
+            nfields == 1
+            and nouts == 1
+            and trait_key in ("sum", "mean", "amax", "vnorm2")
+            or nfields == 2
+            and nouts == 1
+            and trait_key.startswith(("argmax", "argmin"))
+            or nfields == 3
+            and welford_nouts(trait_key) == nouts
+        )
+    ):
+        return _GeneralConfig(kernel_order="inner_tree", rule="b200_strided_c256")
+    if (
+        strided_row
+        and count in (1024, 4095, 4096)
+        and nfields == 2
+        and nouts == 1
+        and trait_key.startswith(("argmax", "argmin"))
+    ):
+        block = 32 if count == 1024 and dtype in (torch.float16, torch.bfloat16) else 64
+        return _GeneralConfig(block=block, rule="b200_strided_index")
+    if (
+        strided_row
+        and count in (1024, 4095, 4096)
+        and nfields == 3
+        and welford_nouts(trait_key) == nouts
+    ):
+        return _GeneralConfig(block=64, rule="b200_strided_welford", uniform_tree=True)
+    if (
+        strided_row
+        and count in (1024, 4095, 4096)
+        and nfields == 1
+        and nouts == 1
+        and trait_key in ("sum", "prod", "mean", "amax", "amin", "vnorm2")
+    ):
+        return _GeneralConfig(block=32, rule="b200_strided_one_field")
     return _GeneralConfig()
 
 
@@ -419,6 +493,31 @@ def _try_fast_row(
     if kernel_order == "inner_tree":
         return rt.reduce_row_tile(
             trait, trait_key, x, out_dtypes, nouts=nouts, order="inner_tree"
+        )
+    ragged_vector = (
+        tune
+        and order == "unordered"
+        and _hw.caps(x.device).cc == (10, 0)
+        and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and tile.vec_size(N, itemsize) == 1
+        and _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT)
+        == tile.TRANSFER_ALIGNMENT
+        and (
+            trait.nfields == 1
+            or N >= 1024
+            or x.dtype == torch.float32
+            and trait.nfields == 2
+        )
+    )
+    if ragged_vector:
+        return rt.reduce_row_tile(
+            trait,
+            trait_key,
+            x,
+            out_dtypes,
+            nouts=nouts,
+            order="linear",
+            ragged_vector=True,
         )
     if rt.one_thread_row_ok(N, itemsize, M, x.device):
         return rt.reduce_row_tile(
@@ -754,12 +853,13 @@ def _reduce(
 
     # Route one-element outputs through the reduce-all split instead of one general block.
     if math.prod(out_shape) == 1 and x.is_contiguous():
+        all_block = None if tune else block
         if nouts == 1:
-            out = reduce_all(
-                trait, trait_key, x, out_dtypes[0], block=block, order=order
-            )
+            kwargs = {} if all_block is None else {"block": all_block}
+            out = reduce_all(trait, trait_key, x, out_dtypes[0], order=order, **kwargs)
             return (_as_shape(out, out_shape),)
-        outs = reduce_all2(trait, trait_key, x, out_dtypes, block=block, order=order)
+        kwargs = {} if all_block is None else {"block": all_block}
+        outs = reduce_all2(trait, trait_key, x, out_dtypes, order=order, **kwargs)
         return tuple(_as_shape(o, out_shape) for o in outs)
 
     # Reshape dense TensorIterator row/column views onto fast kernels; general remains
@@ -951,6 +1051,16 @@ def _reduce_all(
     from . import kernel_rowtile as rt
 
     order = rt.reduction_order(order)
+    if block == _K0_ALL_BLOCK and grid_mult == _K0_ALL_GRID_MULT:
+        cfg = select_all_config(
+            _hw.caps(x.device).cc,
+            x.dtype,
+            trait_key,
+            x.numel(),
+            nfields=trait.nfields,
+            nouts=nouts,
+        )
+        block, grid_mult = cfg.block, cfg.grid_mult
     if not x.is_contiguous():
         return _reduce(
             trait, trait_key, x, None, out_dtypes, nouts, block=block, order=order
