@@ -1510,6 +1510,221 @@ static at::Tensor _fp8_convolution_onednn_ref(
   return y_f32.to(out_dtype);
 }
 
+static dnnl::convolution_forward::primitive_desc qconv_pointwise_primitive_desc(
+    const ideep::tensor& grouped_weight,
+    const ideep::tensor::desc& src_desc,
+    const ideep::tensor::desc& dst_desc,
+    const ideep::tensor::desc& bias_desc,
+    bool with_bias,
+    int64_t groups,
+    int64_t weight_scale_count,
+    double act_scale,
+    int64_t act_zero_point,
+    double output_scale,
+    int64_t output_zero_point,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    ideep::attr_t op_attr) {
+  using ideep::tensor;
+  auto weights_desc = tensor::desc(
+      grouped_weight.get_dims(),
+      grouped_weight.get_data_type(),
+      ideep::format_tag::any);
+
+  if (groups > 1) {
+    weights_desc = weights_desc.to_grouped(groups);
+  }
+  if (act_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
+  }
+  if (act_zero_point != 0) {
+    op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
+  }
+
+  const int oc_per_group = grouped_weight.get_dim(0) / groups;
+  const int weight_scale_mask = ideep::utils::conv_weight_scale_mask(
+      weight_scale_count, oc_per_group, groups, false);
+  op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, weight_scale_mask);
+
+  if (output_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_DST, 0);
+  }
+  if (output_zero_point != 0) {
+    op_attr.set_zero_points_mask(DNNL_ARG_DST, 0);
+  }
+
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+
+  const auto engine = ideep::engine::cpu_engine();
+  const auto dilates = ideep::utils::get_compatible_dilates(dilation.vec());
+
+  if (with_bias) {
+    return dnnl::convolution_forward::primitive_desc(
+        engine,
+        dnnl::prop_kind::forward_inference,
+        dnnl::algorithm::convolution_direct,
+        src_desc,
+        weights_desc,
+        bias_desc,
+        dst_desc,
+        stride.vec(),
+        dilates,
+        padding.vec(),
+        padding.vec(),
+        op_attr);
+  }
+
+  return dnnl::convolution_forward::primitive_desc(
+      engine,
+      dnnl::prop_kind::forward_inference,
+      dnnl::algorithm::convolution_direct,
+      src_desc,
+      weights_desc,
+      dst_desc,
+      stride.vec(),
+      dilates,
+      padding.vec(),
+      padding.vec(),
+      op_attr);
+}
+
+static at::Tensor _qconv_pointwise_prepack_onednn(
+    at::Tensor weight,
+    at::Tensor weight_scales,
+    std::optional<at::Tensor> bias,
+    double act_scale,
+    int64_t act_zero_point,
+    torch::List<int64_t> act_shape,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    int64_t groups,
+    double output_scale,
+    int64_t output_zero_point,
+    std::optional<c10::ScalarType> output_dtype,
+    std::string_view attr,
+    torch::List<std::optional<at::Scalar>> scalars,
+    std::optional<std::string_view> algorithm,
+    std::optional<std::string_view> binary_attr,
+    std::optional<at::Scalar> binary_alpha,
+    double accum_scale,
+    int64_t accum_zero_point) {
+  using ideep::tensor;
+  TORCH_CHECK(
+      weight.device().is_cpu() && !weight.is_mkldnn(),
+      "qconv pointwise prepack expects a dense CPU weight");
+  TORCH_CHECK(
+      weight.scalar_type() == c10::kChar,
+      "qconv pointwise weight must be int8");
+  TORCH_CHECK(
+      act_shape.size() == 3 || act_shape.size() == 4,
+      "qconv pointwise prepack supports Conv1d and Conv2d");
+  const auto spatial_dim = act_shape.size() - 2;
+  TORCH_CHECK(
+      weight.dim() == static_cast<int64_t>(act_shape.size()),
+      "qconv pointwise weight and activation must have the same rank");
+  TORCH_CHECK(
+      stride.size() == spatial_dim && padding.size() == spatial_dim &&
+          dilation.size() == spatial_dim,
+      "qconv pointwise prepack received invalid convolution parameters");
+  TORCH_CHECK(
+      weight_scales.numel() > 0,
+      "qconv pointwise weight scales cannot be empty");
+
+  const auto out_dtype = output_dtype.value_or(c10::kByte);
+  TORCH_CHECK(
+      out_dtype == c10::kByte || out_dtype == c10::kChar ||
+          out_dtype == c10::kFloat || out_dtype == c10::kBFloat16,
+      "unsupported qconv pointwise output dtype: ",
+      out_dtype);
+
+  const bool floating_output =
+      out_dtype == c10::kFloat || out_dtype == c10::kBFloat16;
+  if (floating_output) {
+    TORCH_CHECK(
+        output_scale == 1.0 && output_zero_point == 0,
+        "floating-point qconv output requires default output qparams");
+  }
+
+  auto src_dims = act_shape.vec();
+  auto weight_copy = weight.clone(c10::MemoryFormat::Contiguous);
+  if (spatial_dim == 1) {
+    // oneDNN represents Conv1d as Conv2d with a singleton height dimension.
+    src_dims.insert(src_dims.begin() + 2, 1);
+    weight_copy =
+        weight_copy.unsqueeze(quant_utils::kConv1dSqueezeDim + 2).contiguous();
+    stride = quant_utils::MakeArgForConv1d(stride, 1);
+    padding = quant_utils::MakeArgForConv1d(padding, 0);
+    dilation = quant_utils::MakeArgForConv1d(dilation, 1);
+  }
+
+  auto plain_weight = tensor(
+      weight_copy.sizes().vec(),
+      dnnl::memory::data_type::s8,
+      ideep::format_tag::oihw,
+      weight_copy.data_ptr());
+  const auto grouped_weight =
+      plain_weight.make_grouped_weights(groups, /*is_deconv=*/false);
+
+  const auto src_desc = tensor::desc(
+      src_dims, dnnl::memory::data_type::u8, ideep::format_tag::nhwc);
+  const auto output_sizes = at::native::conv_output_size(
+      src_dims,
+      plain_weight.get_dims(),
+      padding.vec(),
+      stride.vec(),
+      dilation.vec());
+  const auto dst_desc = tensor::desc(
+      output_sizes,
+      at::native::get_mkldnn_dtype(out_dtype),
+      ideep::format_tag::nhwc);
+  const auto bias_desc = bias.has_value()
+      ? tensor::desc(
+            {weight.size(0)}, ideep::data_type::f32, ideep::format_tag::any)
+      : tensor::desc();
+
+  static tensor::desc dummy_accum_desc;
+  auto op_attr = onednn_utils::create_attr_by_post_op(
+      binary_attr.value_or("none"),
+      binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
+      accum_scale,
+      accum_zero_point,
+      dummy_accum_desc,
+      attr,
+      scalars,
+      algorithm.value_or(""));
+
+  auto primitive_desc = qconv_pointwise_primitive_desc(
+      grouped_weight,
+      src_desc,
+      dst_desc,
+      bias_desc,
+      bias.has_value(),
+      groups,
+      weight_scales.numel(),
+      act_scale,
+      act_zero_point,
+      output_scale,
+      output_zero_point,
+      stride,
+      padding,
+      dilation,
+      std::move(op_attr));
+
+  auto expected_weight_desc =
+      tensor::desc(primitive_desc.weights_desc(), groups);
+  // Always allocate owned storage. reorder_if_differ_in() can return the
+  // source tensor unchanged, but grouped_weight aliases weight_copy above.
+  tensor expected_weight(expected_weight_desc);
+  expected_weight.feed_from(grouped_weight);
+
+  return at::native::new_with_itensor_mkldnn(
+      std::move(expected_weight),
+      c10::optTypeMetaToScalarType(weight_copy.options().dtype_opt()),
+      weight_copy.options().device_opt());
+}
+
 static at::Tensor _quantized_convolution_onednn(
     at::Tensor act, // contains quantized values but not QTensor
     double act_scale,
@@ -1786,43 +2001,26 @@ static at::Tensor _quantized_convolution_onednn(
   // The functions from ideep are heavy because they have complex data structures for unified API
   // oneDNN version >= 3.1.0 is required.
   auto weight_grouped = packed_weight.make_grouped_weights(groups, /* is_deconv */false);
-  auto weights_desc = tensor::desc(weight_grouped.get_dims(), packed_weight.get_data_type(), ideep::format_tag::any);
-  if (groups > 1) {
-    weights_desc = weights_desc.to_grouped(groups);
-  }
   auto dst_desc = dst.get_desc();
   auto bias_desc = with_bias ?
       tensor::desc(expected_bias.get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
       tensor::desc();
-  if (act_scale != 1.0f) {
-    op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
-  }
-  if (act_zero_point != 0) {
-    op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
-  }
-  int oc_per_group = weight_grouped.get_dim(0) / groups;
-  int wei_scale_mask = ideep::utils::conv_weight_scale_mask(weight_scales.numel(), oc_per_group, groups, false);
-  op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, wei_scale_mask);
-  if (output_scale != 1.0f) {
-    op_attr.set_scales_mask(DNNL_ARG_DST, 0);
-  }
-  if (output_zero_point != 0) {
-    op_attr.set_zero_points_mask(DNNL_ARG_DST, 0);
-  }
-  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-  auto engine = ideep::engine::cpu_engine();
-  auto dilates_dnnl = ideep::utils::get_compatible_dilates(dilation.vec());
-  auto primitive_desc = with_bias ?
-      dnnl::convolution_forward::primitive_desc(
-        engine, dnnl::prop_kind::forward_inference, dnnl::algorithm::convolution_direct,
-        src_desc, weights_desc, bias_desc, dst_desc,
-        stride.vec(), dilates_dnnl, padding.vec(), padding.vec(), op_attr
-      ) :
-      dnnl::convolution_forward::primitive_desc(
-        engine, dnnl::prop_kind::forward_inference, dnnl::algorithm::convolution_direct,
-        src_desc, weights_desc, dst_desc,
-        stride.vec(), dilates_dnnl, padding.vec(), padding.vec(), op_attr
-      );
+  auto primitive_desc = qconv_pointwise_primitive_desc(
+      weight_grouped,
+      src_desc,
+      dst_desc,
+      bias_desc,
+      with_bias,
+      groups,
+      weight_scales.numel(),
+      act_scale,
+      act_zero_point,
+      output_scale,
+      output_zero_point,
+      stride,
+      padding,
+      dilation,
+      std::move(op_attr));
   auto primitive = dnnl::convolution_forward(primitive_desc);
 
   // Reorder weight if needed
@@ -1904,6 +2102,54 @@ static at::Tensor _quantized_convolution_onednn(
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at::native {
+
+static at::Tensor qconv_pointwise_prepack(
+    at::Tensor weight,
+    at::Tensor weight_scales,
+    std::optional<at::Tensor> bias,
+    double act_scale,
+    int64_t act_zero_point,
+    torch::List<int64_t> act_shape,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    int64_t groups,
+    double output_scale,
+    int64_t output_zero_point,
+    std::optional<c10::ScalarType> output_dtype,
+    std::string_view attr,
+    torch::List<std::optional<at::Scalar>> scalars,
+    std::optional<std::string_view> algorithm,
+    std::optional<std::string_view> binary_attr,
+    std::optional<at::Scalar> binary_alpha,
+    double accum_scale,
+    int64_t accum_zero_point) {
+#if AT_MKLDNN_ENABLED()
+  return _qconv_pointwise_prepack_onednn(
+      weight,
+      weight_scales,
+      bias,
+      act_scale,
+      act_zero_point,
+      act_shape,
+      stride,
+      padding,
+      dilation,
+      groups,
+      output_scale,
+      output_zero_point,
+      output_dtype,
+      attr,
+      scalars,
+      algorithm,
+      binary_attr,
+      binary_alpha,
+      accum_scale,
+      accum_zero_point);
+#else
+  TORCH_CHECK(false, "Unimplemented as oneDNN is not available.")
+#endif
+}
 
   at::Tensor QConvoneDNN::run_pointwise(
       at::Tensor act, // contains quantized values but not QTensor
@@ -2258,10 +2504,9 @@ TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(onednn, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_pointwise"), at::native::QConvoneDNN::run_pointwise);
-  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_pointwise.tensor"), at::native::QConvoneDNN::run_pointwise_tensor);
-  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"), at::native::QConvoneDNN::run_pointwise_binary);
-  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary_tensor"), at::native::QConvoneDNN::run_pointwise_binary_tensor);
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv_pointwise_prepack"),
+      qconv_pointwise_prepack);
 }
 
 } // namespace

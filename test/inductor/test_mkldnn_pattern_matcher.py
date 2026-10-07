@@ -822,6 +822,247 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 class TestPatternMatcher(TestPatternMatcherBase):
     # Note: tests containing the pattern *qconv2d* were removed in PR #169151 (PT2E migration to torchao).
     # See issue #168635 and its sub-issues.
+    @torch.inference_mode()
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv_pointwise_prepack_freezing(self):
+        from torch._inductor.constant_folding import constant_fold
+        from torch._inductor.fx_passes.freezing_patterns import pass_patterns
+        from torch._inductor.fx_passes.mkldnn_fusion import _mkldnn_weight_pack_init
+
+        root = torch.nn.Module()
+        root.register_buffer(
+            "weight",
+            torch.randint(-128, 127, (16, 16, 3, 3), dtype=torch.int8),
+        )
+        root.register_buffer("weight_scale", torch.rand(16) * 0.05 + 0.01)
+        root.register_buffer("weight_zero_point", torch.zeros(16, dtype=torch.int64))
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = torch.empty((1, 16, 16, 16), dtype=torch.uint8)
+        weight = graph.get_attr("weight")
+        weight.meta["val"] = root.weight
+        weight_scale = graph.get_attr("weight_scale")
+        weight_scale.meta["val"] = root.weight_scale
+        weight_zero_point = graph.get_attr("weight_zero_point")
+        weight_zero_point.meta["val"] = root.weight_zero_point
+
+        conv_params = ([1, 1], [1, 1], [1, 1], 1)
+        preliminary_weight = graph.call_function(
+            torch.ops.onednn.qconv_prepack.default,
+            args=(
+                weight,
+                weight_scale,
+                0.05,
+                3,
+                *conv_params,
+                [1, 16, 16, 16],
+            ),
+        )
+        qconv = graph.call_function(
+            torch.ops.onednn.qconv_pointwise.default,
+            args=(
+                x,
+                0.05,
+                3,
+                preliminary_weight,
+                weight_scale,
+                weight_zero_point,
+                None,
+                *conv_params,
+                1.0,
+                0,
+                torch.float32,
+                "none",
+                [],
+                "",
+            ),
+        )
+        graph.output(qconv)
+        gm = torch.fx.GraphModule(root, graph)
+
+        input_tensor = torch.randint(0, 255, (1, 16, 16, 16), dtype=torch.uint8)
+        eager_weight = torch.ops.onednn.qconv_prepack.default(
+            root.weight,
+            root.weight_scale,
+            0.05,
+            3,
+            *conv_params,
+            [1, 16, 16, 16],
+        )
+        expected = torch.ops.onednn.qconv_pointwise.default(
+            input_tensor,
+            0.05,
+            3,
+            eager_weight,
+            root.weight_scale,
+            root.weight_zero_point,
+            None,
+            *conv_params,
+            1.0,
+            0,
+            torch.float32,
+            "none",
+            [],
+            "",
+        )
+
+        counters.clear()
+        _mkldnn_weight_pack_init()
+        pass_patterns[6].apply(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        self.assertEqual(
+            counters["inductor"]["qconv_pointwise_prepack_matcher_count"], 1
+        )
+        self.assertEqual(
+            qconv.args[3].target, torch.ops.onednn.qconv_pointwise_prepack.default
+        )
+        self.assertNotIn(preliminary_weight, gm.graph.nodes)
+
+        constant_fold(gm)
+        packed_weight = qconv.args[3]
+        self.assertEqual(packed_weight.op, "get_attr")
+        self.assertTrue(getattr(gm, packed_weight.target).is_mkldnn)
+        self.assertFalse(
+            any(
+                node.op == "call_function"
+                and node.target == torch.ops.onednn.qconv_pointwise_prepack.default
+                for node in gm.graph.nodes
+            )
+        )
+        torch.testing.assert_close(gm(input_tensor), expected)
+
+    @torch.inference_mode()
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qconv_binary_prepack_freezing(self):
+        from torch._inductor.constant_folding import constant_fold
+        from torch._inductor.fx_passes.freezing_patterns import pass_patterns
+        from torch._inductor.fx_passes.mkldnn_fusion import _mkldnn_weight_pack_init
+
+        root = torch.nn.Module()
+        root.register_buffer(
+            "weight",
+            torch.randint(-128, 127, (16, 16, 3, 3), dtype=torch.int8),
+        )
+        root.register_buffer("weight_scale", torch.rand(16) * 0.05 + 0.01)
+        root.register_buffer("weight_zero_point", torch.zeros(16, dtype=torch.int64))
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = torch.empty((1, 16, 16, 16), dtype=torch.uint8)
+        accum = graph.placeholder("accum")
+        accum.meta["val"] = torch.empty(
+            (1, 16, 16, 16),
+            dtype=torch.bfloat16,
+            memory_format=torch.channels_last,
+        )
+        weight = graph.get_attr("weight")
+        weight.meta["val"] = root.weight
+        weight_scale = graph.get_attr("weight_scale")
+        weight_scale.meta["val"] = root.weight_scale
+        weight_zero_point = graph.get_attr("weight_zero_point")
+        weight_zero_point.meta["val"] = root.weight_zero_point
+
+        conv_params = ([1, 1], [1, 1], [1, 1], 1)
+        preliminary_weight = graph.call_function(
+            torch.ops.onednn.qconv_prepack.default,
+            args=(
+                weight,
+                weight_scale,
+                0.05,
+                3,
+                *conv_params,
+                [1, 16, 16, 16],
+            ),
+        )
+        qconv = graph.call_function(
+            torch.ops.onednn.qconv2d_pointwise.binary,
+            args=(
+                x,
+                0.05,
+                3,
+                preliminary_weight,
+                weight_scale,
+                weight_zero_point,
+                accum,
+                None,
+                *conv_params,
+                1.0,
+                0,
+                torch.float32,
+                1.0,
+                0,
+                "sum",
+                1.0,
+                "none",
+                [],
+                "",
+            ),
+        )
+        graph.output(qconv)
+        gm = torch.fx.GraphModule(root, graph)
+
+        input_tensor = torch.randint(0, 255, (1, 16, 16, 16), dtype=torch.uint8)
+        accum_tensor = torch.randn((1, 16, 16, 16), dtype=torch.bfloat16).contiguous(
+            memory_format=torch.channels_last
+        )
+        eager_weight = torch.ops.onednn.qconv_prepack.default(
+            root.weight,
+            root.weight_scale,
+            0.05,
+            3,
+            *conv_params,
+            [1, 16, 16, 16],
+        )
+        expected = torch.ops.onednn.qconv2d_pointwise.binary(
+            input_tensor,
+            0.05,
+            3,
+            eager_weight,
+            root.weight_scale,
+            root.weight_zero_point,
+            accum_tensor.clone(),
+            None,
+            *conv_params,
+            1.0,
+            0,
+            torch.float32,
+            1.0,
+            0,
+            "sum",
+            1.0,
+            "none",
+            [],
+            "",
+        )
+
+        counters.clear()
+        _mkldnn_weight_pack_init()
+        pass_patterns[6].apply(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        self.assertEqual(
+            counters["inductor"]["qconv_pointwise_prepack_matcher_count"], 1
+        )
+        final_prepack = qconv.args[3]
+        self.assertEqual(
+            final_prepack.target,
+            torch.ops.onednn.qconv_pointwise_prepack.default,
+        )
+        self.assertEqual(final_prepack.args[12], torch.bfloat16)
+        self.assertNotIn(preliminary_weight, gm.graph.nodes)
+
+        constant_fold(gm)
+        packed_weight = qconv.args[3]
+        self.assertEqual(packed_weight.op, "get_attr")
+        self.assertTrue(getattr(gm, packed_weight.target).is_mkldnn)
+        torch.testing.assert_close(gm(input_tensor, accum_tensor.clone()), expected)
+
     @reduced_f32_on_and_off()
     def test_linear_unary(self, device="cpu"):
         self.device = device
