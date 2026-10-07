@@ -155,11 +155,7 @@ class TileMap:
 def _load_reduction_value(trait, mX, off, complex_input: cutlass.Constexpr):
     if const_expr(complex_input):
         base = off * 2
-        if const_expr(getattr(trait, "preserve_input_dtype", False)):
-            return (mX[base], mX[base + 1])
         return (trait.acc(mX[base]), trait.acc(mX[base + 1]))
-    if const_expr(getattr(trait, "preserve_input_dtype", False)):
-        return mX[off]
     return trait.acc(mX[off])
 
 
@@ -354,7 +350,6 @@ def fold_groups(
     merge_per_group: cutlass.Constexpr = True,
     exact: cutlass.Constexpr = False,
     vec_linear: cutlass.Constexpr = False,
-    complex_input: cutlass.Constexpr = False,
 ):
     """Fold strided or contiguous groups; out-of-row slots add identity to the DAG."""
     op, ident = leaf_op(trait), identity(trait)
@@ -366,10 +361,7 @@ def fold_groups(
             # Hoist trait.leaf and select per field: trait access in a dynamic branch
             # leaks the Python object into IR. Unwritten slots are discarded.
             col = _off(cols[i], j)
-            x = trait.leaf(
-                _load_reduction_value(trait, frag[None, i], j, complex_input),
-                col,
-            )
+            x = trait.leaf(frag[j, i], col)
             if const_expr(exact):
                 vals.append(x)
             else:
@@ -402,7 +394,6 @@ def fold_itree_warp(
     bound=None,
     warp_stride=None,
     vec_linear: cutlass.Constexpr = False,
-    complex_input: cutlass.Constexpr = False,
 ):
     """The per-chunk arm: a TileMap's strided groups, one lane butterfly per load."""
     return fold_groups(
@@ -416,7 +407,6 @@ def fold_itree_warp(
         merge_per_group=True,
         exact=const_expr(tm.exact),
         vec_linear=vec_linear,
-        complex_input=complex_input,
     )
 
 
@@ -436,24 +426,21 @@ def fold_row_rolled(
     nchunks,
     nwaves,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
-    complex_input: cutlass.Constexpr = False,
 ):
     """Fold row `r` with a runtime loop, clamping and masking tail waves to avoid DSL branches."""
-    reduce_fn = trait.reduce
+    reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
     vec = const_expr(tm.vec)
-    storage_vec = const_expr(tm.vec * (2 if complex_input else 1))
     threads_per_row = const_expr(tm.threads_per_row)
-    gv = cute.flat_divide(mX[Int64(r), None], (storage_vec,))
-    frag = cute.make_rmem_tensor(cute.make_layout(storage_vec), mX.element_type)
+    gv = cute.flat_divide(mX[Int64(r), None], (vec,))
+    frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
     for c in cutlass.range(nwaves, unroll=unroll):
         k = c * Int32(threads_per_row) + lane
         ok = k < nchunks
         ks = k if ok else Int32(0)  # clamp so the load is always in range
         cute.autovec_copy(gv[None, ks], frag)
         for i in cutlass.range_constexpr(vec):
-            val = _load_reduction_value(trait, frag, i, complex_input)
-            acc = reduce_fn(acc, val, ks * Int32(vec) + Int32(i), ok)
+            acc = reduce_fn(acc, acc_dt(frag[i]), ks * Int32(vec) + Int32(i), ok)
     return acc
 
 
@@ -520,58 +507,6 @@ def fold_row_aligned(
 
 
 @cute.jit
-def fold_row_prefetched4(
-    trait,
-    mX,
-    r,
-    tm: cutlass.Constexpr,
-    lane,
-    nchunks,
-    nwaves,
-    complex_input: cutlass.Constexpr = False,
-):
-    """Fold four independent loads at a time to hide global-memory latency."""
-    reduce_fn = trait.reduce
-    acc = trait.init()
-    threads_per_row = const_expr(tm.threads_per_row)
-    row = mX[Int64(r), None]
-    nbatches = nwaves // Int32(4)
-    for batch in cutlass.range(nbatches):
-        k0 = (batch * Int32(4)) * Int32(threads_per_row) + lane
-        k1 = (batch * Int32(4) + Int32(1)) * Int32(threads_per_row) + lane
-        k2 = (batch * Int32(4) + Int32(2)) * Int32(threads_per_row) + lane
-        k3 = (batch * Int32(4) + Int32(3)) * Int32(threads_per_row) + lane
-        v0 = k0 < nchunks
-        v1 = k1 < nchunks
-        v2 = k2 < nchunks
-        v3 = k3 < nchunks
-        s0 = k0 if v0 else Int32(0)
-        s1 = k1 if v1 else Int32(0)
-        s2 = k2 if v2 else Int32(0)
-        s3 = k3 if v3 else Int32(0)
-        x0 = _load_reduction_value(trait, row, s0, complex_input)
-        x1 = _load_reduction_value(trait, row, s1, complex_input)
-        x2 = _load_reduction_value(trait, row, s2, complex_input)
-        x3 = _load_reduction_value(trait, row, s3, complex_input)
-        acc = reduce_fn(acc, x0, s0, v0)
-        acc = reduce_fn(acc, x1, s1, v1)
-        acc = reduce_fn(acc, x2, s2, v2)
-        acc = reduce_fn(acc, x3, s3, v3)
-    first_tail = nbatches * Int32(4)
-    for c in cutlass.range(nwaves - first_tail):
-        k = (first_tail + Int32(c)) * Int32(threads_per_row) + lane
-        valid = k < nchunks
-        ks = k if valid else Int32(0)
-        acc = reduce_fn(
-            acc,
-            _load_reduction_value(trait, row, ks, complex_input),
-            ks,
-            valid,
-        )
-    return acc
-
-
-@cute.jit
 def fold_linear_rolled(
     trait,
     mX: cute.Tensor,
@@ -579,19 +514,16 @@ def fold_linear_rolled(
     vec: cutlass.Constexpr,
     nchunks: Int32,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
-    complex_input: cutlass.Constexpr = False,
 ):
     """Fold row `r` with a runtime chunk loop. Returns an acc tuple. threads_per_row == 1 only."""
-    reduce_fn = trait.reduce
+    reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
-    storage_vec = const_expr(vec * (2 if complex_input else 1))
-    gv = cute.flat_divide(mX[Int64(r), None], (storage_vec,))
-    frag = cute.make_rmem_tensor(cute.make_layout(storage_vec), mX.element_type)
+    gv = cute.flat_divide(mX[Int64(r), None], (vec,))
+    frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
     for c in cutlass.range(nchunks, unroll=unroll):
         cute.autovec_copy(gv[None, c], frag)
         for i in cutlass.range_constexpr(vec):
-            val = _load_reduction_value(trait, frag, i, complex_input)
-            acc = reduce_fn(acc, val, c * Int32(vec) + Int32(i), True)
+            acc = reduce_fn(acc, acc_dt(frag[i]), c * Int32(vec) + Int32(i), True)
     return acc
 
 
@@ -613,7 +545,6 @@ def load(
     base_col=0,
     bound=None,
     warp_stride=None,
-    complex_input: cutlass.Constexpr = False,
 ):
     """Fill this thread's (vec, loads) fragment.
 
@@ -625,34 +556,23 @@ def load(
         tm.exact and bound is None and isinstance(base_col, int) and base_col == 0
     )
     rowv = mX[Int64(r), None]
-    storage_scale = const_expr(2 if complex_input else 1)
-    storage_vec = const_expr(tm.vec * storage_scale)
     for l in cutlass.range_constexpr(tm.loads):
         # Plain addition preserves a static base and promotes a dynamic one.
         base = tm.col_base(lane, w, l, warp_stride) + base_col
-        storage_base = base * storage_scale
         if const_expr(whole_row and tm.wide_ok):
-            _wide(rowv, storage_base, storage_vec, frag[None, l])
+            _wide(rowv, base, tm.vec, frag[None, l])
         elif const_expr(not tm.wide_ok):
             for i in cutlass.range_constexpr(tm.vec):
                 # Inline because the DSL rejects binding a dynamic value in a dynamic branch.
                 if _off(base, i) < hi:
-                    if const_expr(complex_input):
-                        frag[2 * i, l] = rowv[_off(storage_base, 2 * i)]
-                        frag[2 * i + 1, l] = rowv[_off(storage_base, 2 * i + 1)]
-                    else:
-                        frag[i, l] = rowv[_off(base, i)]
+                    frag[i, l] = rowv[_off(base, i)]
         else:
             if _off(base, tm.vec) <= hi:
-                _wide(rowv, storage_base, storage_vec, frag[None, l])
+                _wide(rowv, base, tm.vec, frag[None, l])
             else:
                 for i in cutlass.range_constexpr(tm.vec):
                     if _off(base, i) < hi:
-                        if const_expr(complex_input):
-                            frag[2 * i, l] = rowv[_off(storage_base, 2 * i)]
-                            frag[2 * i + 1, l] = rowv[_off(storage_base, 2 * i + 1)]
-                        else:
-                            frag[i, l] = rowv[_off(base, i)]
+                        frag[i, l] = rowv[_off(base, i)]
 
 
 @cute.jit
@@ -670,7 +590,6 @@ def load_decoded(
     base_col=0,
     bound=None,
     warp_stride=None,
-    complex_input: cutlass.Constexpr = False,
 ):
     """Gather logical row elements through a mixed-radix storage mapping."""
     hi = Int32(const_expr(tm.N)) if bound is None else bound
@@ -681,41 +600,11 @@ def load_decoded(
             valid = col < hi
             logical = col if valid else Int32(0)
             off = obase + _decode_offset(logical, rdivs, rstrides, npairs)
-            src = off if valid else in_base
-            if const_expr(complex_input):
-                frag[2 * i, l] = mX[src * 2]
-                frag[2 * i + 1, l] = mX[src * 2 + 1]
-            else:
-                frag[i, l] = mX[src]
+            frag[i, l] = mX[off if valid else in_base]
 
 
-def make_fragment(mX, tm, complex_input: cutlass.Constexpr = False) -> cute.Tensor:
-    storage_vec = tm.vec * (2 if complex_input else 1)
-    return cute.make_rmem_tensor(
-        cute.make_layout((storage_vec, tm.loads)), mX.element_type
-    )
-
-
-@cute.jit
-def fold_row_static(
-    trait, mX, row, tm: cutlass.Constexpr, lane, accumulators: cutlass.Constexpr
-):
-    reduce_fn, combine_fn = trait.reduce, trait.combine
-    frag = make_fragment(mX, tm)
-    warp_lane, warp = lane % Int32(WARP), lane // Int32(WARP)
-    load(mX, row, tm, warp_lane, warp, frag)
-    accs = [trait.init() for _ in range(accumulators)]
-    for l in cutlass.range_constexpr(tm.loads):
-        base = tm.col_base(warp_lane, warp, l)
-        for i in cutlass.range_constexpr(tm.vec):
-            slot = const_expr((l * tm.vec + i) % accumulators)
-            accs[slot] = reduce_fn(
-                accs[slot], trait.acc(frag[i, l]), base + Int32(i), True
-            )
-    acc = accs[0]
-    for i in cutlass.range_constexpr(1, accumulators):
-        acc = combine_fn(acc, accs[i])
-    return acc
+def make_fragment(mX, tm) -> cute.Tensor:
+    return cute.make_rmem_tensor(cute.make_layout((tm.vec, tm.loads)), mX.element_type)
 
 
 def smem_box_layout(N: int, threads: int) -> cute.Layout:
@@ -727,24 +616,16 @@ def smem_box_layout(N: int, threads: int) -> cute.Layout:
 
 
 @cute.jit
-def fold_smem_rotated(
-    trait,
-    sX,
-    rb,
-    N: cutlass.Constexpr,
-    complex_input: cutlass.Constexpr = False,
-):
+def fold_smem_rotated(trait, sX, rb, N: cutlass.Constexpr):
     """Fold one staged row per thread, rotating reads by row to avoid 32-way bank conflicts.
 
     Pass logical columns to the trait; power-of-two N makes rotation a mask.
     """
     acc = trait.init()
     mask = const_expr(N - 1)
-    row = sX[rb, None]
     for c in cutlass.range_constexpr(N):
         col = (Int32(c) + rb) & Int32(mask)
-        val = _load_reduction_value(trait, row, col, complex_input)
-        acc = trait.reduce(acc, val, col, True)
+        acc = trait.reduce(acc, trait.acc(sX[rb, col]), col, True)
     return acc
 
 
@@ -758,27 +639,21 @@ def fold_cols_rolled(
     nrows,
     vec: cutlass.Constexpr,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
-    complex_input: cutlass.Constexpr = False,
 ):
     """Fold rows into vec kept-axis accumulators without lane merging."""
-    reduce_fn = trait.reduce
+    reduce_fn, acc_dt = trait.reduce, trait.acc
     accs = tuple(trait.init() for _ in range(vec))
-    storage_vec = const_expr(vec * (2 if complex_input else 1))
-    frag = cute.make_rmem_tensor(cute.make_layout(storage_vec), mX.element_type)
+    frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
     for r in cutlass.range(nrows, unroll=unroll):
-        rr = storage_row0 + Int32(r)
+        storage_row = storage_row0 + Int32(r)
+        index_row = index_row0 + Int32(r)
         cute.autovec_copy(
-            cute.flat_divide(mX[Int64(rr), None], (storage_vec,))[None, col], frag
+            cute.flat_divide(mX[Int64(storage_row), None], (vec,))[None, col],
+            frag,
         )
-        # The DSL does not preprocess comprehensions; plain range still unrolls constexpr vec.
+        # Plain range unrolls constexpr vec; the DSL does not preprocess comprehensions.
         accs = tuple(
-            reduce_fn(
-                accs[i],
-                _load_reduction_value(trait, frag, i, complex_input),
-                index_row0 + Int32(r),
-                True,
-            )
-            for i in range(vec)
+            reduce_fn(accs[i], acc_dt(frag[i]), index_row, True) for i in range(vec)
         )
     return accs
 
@@ -802,7 +677,6 @@ class TileReduce:
         nouts=1,
         final=True,
         unroll=_ROLL_UNROLL,
-        load_ahead=1,
         vec: int | None = None,
         use_tma=False,
         combine=False,
@@ -821,32 +695,12 @@ class TileReduce:
         order="linear",
         # Duck-typed because its driver-owned type would invert the dependency.
         itree: Any = None,
-        row_accumulators: int = 0,
         ragged_vector=False,
-        general_tree_count: int = 0,
-        col_group: int = 1,
     ) -> None:
         if axis not in ("row", "col", "general"):
             raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
         if order not in ("linear", "inner_tree"):
             raise ValueError(f"order must be 'linear' or 'inner_tree', got {order!r}")
-        if row_accumulators not in (0, 1, 2, 4, 8):
-            raise ValueError("row_accumulators must be 0, 1, 2, 4, or 8")
-        if row_accumulators and (
-            axis != "row"
-            or order != "linear"
-            or use_tma
-            or combine
-            or load_ahead != 1
-            or threads_per_row < WARP
-            or getattr(trait, "complex_input", False)
-            or N <= 0
-            or N % (threads_per_row * vec_size(N, dtype.width // 8))
-            or N // threads_per_row < row_accumulators
-        ):
-            raise ValueError(
-                "static row accumulators require complete real-valued linear row tiles"
-            )
         if ragged_vector and (
             axis != "row"
             or order != "linear"
@@ -855,8 +709,6 @@ class TileReduce:
             or vec & (vec - 1)
             or use_tma
             or combine
-            or load_ahead != 1
-            or row_accumulators
             or getattr(trait, "complex_input", False)
         ):
             raise ValueError("ragged vectors require a real linear row reduction")
@@ -926,11 +778,7 @@ class TileReduce:
         self.nouts = nouts
         self.final = final
         self.unroll = unroll
-        self.load_ahead = load_ahead
-        self.row_accumulators = row_accumulators
         self.ragged_vector = ragged_vector
-        self.general_tree_count = general_tree_count
-        self.col_group = col_group
         self.use_tma = use_tma
         self.combine = combine
         self.batched_col = batched_col
@@ -948,12 +796,7 @@ class TileReduce:
         self.ragged_chunk = ragged_chunk
         self.order = order
         self.itree = itree
-        self.storage_width = N * (2 if self.complex_input else 1)
-        itemsize = (
-            dtype.width // 8 * (2 if self.complex_input else 1)
-            if dtype is not None
-            else 0
-        )
+        itemsize = dtype.width // 8 if dtype is not None else 0
         # Runtime row folds map one load; TMA declares static staged depth. Column and
         # general axes choose no tile.
         self.tm = (
@@ -961,11 +804,7 @@ class TileReduce:
                 N,
                 itemsize,
                 threads_per_row,
-                N // vec_size(N, itemsize)
-                if use_tma
-                else N // (threads_per_row * vec_size(N, itemsize))
-                if row_accumulators
-                else 1,
+                N // vec_size(N, itemsize) if use_tma else 1,
                 vec=vec if ragged_vector else None,
                 exact=False if ragged_vector else None,
             )
@@ -984,13 +823,6 @@ class TileReduce:
             raise ValueError("the col axis needs an explicit vec")
         else:
             self.vec = vec
-        if self.load_ahead != 1 and (
-            axis != "row" or self.vec != 1 or self.load_ahead != 4
-        ):
-            raise ValueError(
-                f"load_ahead supports four independent scalar row loads, got "
-                f"{axis=} {self.vec=} {self.load_ahead=}"
-            )
         # Columns keep vec slots; merged row and general axes keep one.
         self.nslots = self.vec if axis == "col" else 1
         self.rows_per_block = (
@@ -1001,9 +833,7 @@ class TileReduce:
         self.warps_per_row = (
             threads_per_row // WARP
         )  # 0 at threads_per_row == 1: nothing to merge
-        # TMA sees the underlying real descriptor, including both storage scalars
-        # for each logical complex element.
-        self.tiler = (threads_per_block, self.storage_width)
+        self.tiler = (threads_per_block, N)  # TMA box: threads_per_block whole rows
 
     @property
     def tilemap(self) -> TileMap:
@@ -1014,7 +844,7 @@ class TileReduce:
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
-        # Static row folds and TMA key N; runtime paths share a vector class.
+        # Only TMA keys N because its box is static; runtime paths share a vector class.
         return (
             self.axis,
             self.vec,
@@ -1023,7 +853,6 @@ class TileReduce:
             self.nouts,
             self.final,
             self.unroll,
-            self.load_ahead,
             self.use_tma,
             self.combine,
             self.batched_col,
@@ -1032,9 +861,7 @@ class TileReduce:
             self.complex_input,
             self.output_widths,
             getattr(self.trait, "canonical_bool", False),
-            self.N
-            if self.use_tma or self.row_accumulators or self.ragged_vector
-            else 0,
+            self.N if self.use_tma or self.ragged_vector else 0,
             self.npairs_red,
             self.npairs_kept,
             self.wide_count,
@@ -1046,12 +873,10 @@ class TileReduce:
             self.flat_tail,
             self.ragged_chunk,
             self.ragged_vector,
-            self.general_tree_count,
-            self.col_group,
             self.order,
             # Fixed DAGs key on N, requiring one kernel per shape instead of per vec class.
             self.itree.sig if self.itree is not None else None,
-        ) + ((self.row_accumulators,) if self.row_accumulators else ())
+        )
 
     @cute.jit
     def _fold_tma(self, mX, tma_atom, bx, tx):
@@ -1059,7 +884,7 @@ class TileReduce:
         smem = cutlass.utils.SmemAllocator()
         sX = smem.allocate_tensor(
             self.dtype,
-            smem_box_layout(self.storage_width, self.threads_per_block),
+            smem_box_layout(self.N, self.threads_per_block),
             byte_alignment=TRANSFER_ALIGNMENT,
         )
         mbar = smem.allocate_array(cutlass.Int64, num_elems=2)
@@ -1091,13 +916,7 @@ class TileReduce:
             )
             pipe.producer_commit(pstate)
         pipe.consumer_wait(cstate)
-        acc = fold_smem_rotated(
-            self.trait,
-            sX,
-            tx,
-            const_expr(self.N),
-            const_expr(self.complex_input),
-        )
+        acc = fold_smem_rotated(self.trait, sX, tx, const_expr(self.N))
         pipe.consumer_release(cstate)
         return acc
 
@@ -1195,7 +1014,7 @@ class TileReduce:
                 else:
                     base = const_expr(it.batches[b][0])
                     bound, wstride = None, None
-                frag = make_fragment(mX, tm, self.complex_input)
+                frag = make_fragment(mX, tm)
                 if const_expr(self.axis == "general"):
                     load_decoded(
                         mX,
@@ -1211,21 +1030,9 @@ class TileReduce:
                         base,
                         bound,
                         wstride,
-                        const_expr(self.complex_input),
                     )
                 else:
-                    load(
-                        mX,
-                        r,
-                        tm,
-                        lane_w,
-                        cid,
-                        frag,
-                        base,
-                        bound,
-                        wstride,
-                        const_expr(self.complex_input),
-                    )
+                    load(mX, r, tm, lane_w, cid, frag, base, bound, wstride)
                 frags.append(frag)
                 bases.append(base)
                 bounds.append(bound)
@@ -1244,7 +1051,6 @@ class TileReduce:
                     bounds[c],
                     wstrides[c],
                     const_expr(it.vec_linear),
-                    const_expr(self.complex_input),
                 )
                 for c in range(kc)
             ]
@@ -1369,7 +1175,6 @@ class TileReduce:
                     const_expr(_ilog2(Es // vec)),
                     WARP,
                     merge_per_group=False,
-                    complex_input=False,
                 ),
                 t,
                 const_expr(_ilog2(max(ntiles, 2))),
@@ -1617,7 +1422,7 @@ class TileReduce:
             tma_atom, mTma = cpasync.make_tiled_tma_atom(
                 cpasync.CopyBulkTensorTileG2SOp(),
                 mIns[0],
-                smem_box_layout(self.storage_width, self.threads_per_block),
+                smem_box_layout(self.N, self.threads_per_block),
                 self.tiler,
             )
             mIns = [mTma]
@@ -1625,7 +1430,7 @@ class TileReduce:
             tma_atom = None
         if const_expr(self.order == "inner_tree"):
             # Split inner-tree writes one partial per (output, batch).
-            nout = mOuts[0].shape[0] // const_expr(self.output_widths[0])
+            nout = mOuts[0].shape[0]
             gx = cute.ceil_div(nout, const_expr(self.rows_per_block))
             gy = Int32(1)
         elif const_expr(self.axis == "general"):
@@ -1749,14 +1554,10 @@ class TileReduce:
                 )
             elif const_expr(wpr == 0):
                 raw = Int32(bx) * const_expr(self.threads_per_block) + Int32(tx)
-                alive = raw < Int32(
-                    mOuts[0].shape[0] // const_expr(self.output_widths[0])
-                )
+                alive = raw < Int32(mOuts[0].shape[0])
             else:
                 raw = Int32(bx) * const_expr(self.itree.rows_per_block) + row_in_block
-                alive = raw < Int32(
-                    mOuts[0].shape[0] // const_expr(self.output_widths[0])
-                )
+                alive = raw < Int32(mOuts[0].shape[0])
         elif const_expr(self.axis == "general"):
             # One block per output, folded by every thread.
             raw = (
@@ -1945,7 +1746,6 @@ class TileReduce:
                 cnt,
                 const_expr(self.vec),
                 const_expr(self.unroll),
-                const_expr(self.complex_input),
             )
         elif const_expr(self.use_tma):
             accs = (self._fold_tma(mIns[0], tma_atom, bx, tx),)
@@ -1971,42 +1771,19 @@ class TileReduce:
                     const_expr(self.vec),
                     nchunks,
                     const_expr(self.unroll),
-                    const_expr(self.complex_input),
                 ),
             )
         else:
-            if const_expr(self.row_accumulators):
-                acc = fold_row_static(
-                    trait,
-                    mIns[0],
-                    unit,
-                    self.tm,
-                    lane,
-                    const_expr(self.row_accumulators),
-                )
-            elif const_expr(self.load_ahead == 4):
-                acc = fold_row_prefetched4(
-                    trait,
-                    mIns[0],
-                    unit,
-                    self.tm,
-                    lane,
-                    nchunks,
-                    nwaves,
-                    const_expr(self.complex_input),
-                )
-            else:
-                acc = fold_row_rolled(
-                    trait,
-                    mIns[0],
-                    unit,
-                    self.tm,
-                    lane,
-                    nchunks,
-                    nwaves,
-                    const_expr(self.unroll),
-                    const_expr(self.complex_input),
-                )
+            acc = fold_row_rolled(
+                trait,
+                mIns[0],
+                unit,
+                self.tm,
+                lane,
+                nchunks,
+                nwaves,
+                const_expr(self.unroll),
+            )
             acc = merge_lanes(trait, acc, const_expr(self.threads_per_row))
             accs = (self._block_merge(acc),)
 
