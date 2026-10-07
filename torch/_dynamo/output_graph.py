@@ -115,7 +115,7 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
-from .graph_bytecode_inputs import UserObjectRegistry
+from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
 from .graph_id_filter import (
     get_backend_override_for_compile_id,
@@ -855,7 +855,6 @@ class OutputGraph(OutputGraphCommon):
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: dict[str, Source] | None = {}
         self.side_effects = SideEffects(self)
-        self.user_objects = UserObjectRegistry()
         # Generators created while tracing this frame. Tracked here (not on
         # SideEffects) because SideEffects is cloned/swapped during HOP
         # speculation and graph-break restore; the OutputGraph is the single
@@ -3183,7 +3182,7 @@ class OutputGraph(OutputGraphCommon):
                 raise AssertionError("root_tx must not be None")
             cg = PyCodegen(self.root_tx)
 
-            if self.user_objects.needs_pre_graph_store():
+            if has_user_objects():
                 # NB: This is where we store possible user objects before running the graph
                 # index_to_user_object_weakref is the function used in the graph to translate
                 # the dynamo-generated index into the actual object passed to the compiled function.
@@ -3197,7 +3196,7 @@ class OutputGraph(OutputGraphCommon):
                 )
 
                 tmp_vars = []
-                for constructor in self.user_objects.bytecode_constructors:
+                for constructor in index_to_bytecode_constructor:
                     constructor(cg)
                     var_name = (
                         self.new_var()
@@ -3209,7 +3208,7 @@ class OutputGraph(OutputGraphCommon):
                 for var_name in tmp_vars:
                     cg.append_output(cg.create_load(var_name))
 
-                cg.call_function(len(tmp_vars), False)
+                cg.call_function(len(index_to_bytecode_constructor), False)
                 cg.pop_top()
 
             for idx, arg in enumerate(self.graphargs):
