@@ -50,7 +50,7 @@ from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
-from torch.utils._sympy.functions import FloorDiv, Identity
+from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -5715,6 +5715,46 @@ def _is_atomic_add_mutation_epilogue(
     )
 
 
+def _is_cat_slot_epilogue(node: BaseSchedulerNode) -> bool:
+    """A pointwise node that only writes its slot of a ConcatKernel buffer."""
+    if not isinstance(node, SchedulerNode) or not isinstance(
+        node.node, ir.ComputedBuffer
+    ):
+        return False
+    outputs = node.get_outputs()
+    if len(outputs) != 1 or outputs[0].get_mutations():
+        return False
+    aliases = outputs[0].get_aliases()
+    return (
+        isinstance(node.node.layout, ir.NonOwningLayout)
+        and len(aliases) == 1
+        and isinstance(V.graph.try_get_buffer(aliases[0]), ir.ConcatKernel)
+    )
+
+
+def _is_relayout_epilogue(
+    template_node: BaseSchedulerNode, epilogue_node: BaseSchedulerNode
+) -> bool:
+    """Whether the epilogue writes a cat slot or a layout other than the
+    template output's, e.g. a permuted copy."""
+    layout = template_node.get_template_node_or_throw().get_layout()
+    return any(_is_cat_slot_epilogue(n) for n in epilogue_node.get_nodes()) or any(
+        buf.node.get_size() != layout.size or buf.node.get_stride() != layout.stride
+        for buf in epilogue_node.get_outputs()
+    )
+
+
+def _is_tlx_choice(annotations: dict[str, object]) -> bool:
+    """TLX templates build their TMA store descriptor from the template
+    output's layout, so they mis-store a relayout epilogue."""
+    from .kernel_template_choice import KernelTemplateChoice
+
+    ktc = annotations.get("ktc")
+    return isinstance(ktc, KernelTemplateChoice) and ktc.template.name.startswith(
+        "tlx_"
+    )
+
+
 def _can_fuse_atomic_add_template_epilogue(
     template_node: BaseSchedulerNode, epilogue_node: BaseSchedulerNode
 ) -> bool:
@@ -7532,13 +7572,19 @@ class Scheduler:
 
             from torch._inductor.codegen.simd import CantSplit
 
-            # Reject choices that can't host a reduction epilogue up front. Each
-            # choice is judged by its own backend, e.g. by a Triton choice's
-            # output tile.
+            # Reject choices that can't host the epilogue up front: a reduction
+            # epilogue is judged by each choice's backend, e.g. by a Triton
+            # choice's output tile, and TLX choices can't host a relayout.
             epilogue = ir.ReductionEpilogue(node1, node2)
             reduction_epilogue = any(n.is_reduction() for n in epilogue.nodes)
 
-            def choice_fits_reduction_epilogue(choice: ir.ChoiceCaller) -> bool:
+            relayout = epilogue_fusion and any(
+                _is_relayout_epilogue(node1, n) for n in node2.get_nodes()
+            )
+
+            def choice_fits_epilogue(choice: ir.ChoiceCaller) -> bool:
+                if relayout and _is_tlx_choice(choice.annotations):
+                    return False
                 return not reduction_epilogue or choice.supports_reduction_epilogue(
                     epilogue
                 )
@@ -7554,7 +7600,7 @@ class Scheduler:
                         if not isinstance(
                             choice,
                             torch._inductor.select_algorithm.TritonTemplateCaller,
-                        ) or not choice_fits_reduction_epilogue(choice):
+                        ) or not choice_fits_epilogue(choice):
                             continue
                         try:
                             with multi_node.swap_as_triton_caller(choice):
@@ -7636,7 +7682,7 @@ class Scheduler:
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
                 if not isinstance(
                     choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ) or not choice_fits_reduction_epilogue(choice):
+                ) or not choice_fits_epilogue(choice):
                     return False
                 # For prologue fusion we check if the underlying template of the choice
                 # supports all allowed prologue inputs. If not, we skip this choice in
@@ -7746,7 +7792,7 @@ class Scheduler:
                 if not is_triton and not is_nvgemm:
                     continue
 
-                if not choice_fits_reduction_epilogue(choice):
+                if not choice_fits_epilogue(choice):
                     continue
 
                 # pyrefly: ignore [missing-attribute]
@@ -10093,6 +10139,109 @@ class Scheduler:
             return True
         return False
 
+    @staticmethod
+    def _split_loops_for_affine_read(read: MemoryDep) -> list[sympy.Expr] | None:
+        """Loop sizes that split each var of `read` at its FloorDiv/ModularIndexing
+        boundaries, so the read becomes affine. None if no split is needed or
+        the boundaries don't nest."""
+        cuts: dict[sympy.Symbol, OrderedSet[sympy.Expr]] = {
+            v: OrderedSet() for v in read.var_names
+        }
+        for e in read.index.atoms(FloorDiv, ModularIndexing):
+            if e.args[0] not in cuts:
+                return None
+            cuts[e.args[0]].add(e.args[1])
+            if isinstance(e, ModularIndexing):
+                cuts[e.args[0]].add(e.args[1] * e.args[2])
+        sizevars = V.graph.sizevars
+        new_sizes: list[sympy.Expr] = []
+        for v, size in zip(read.var_names, read.size):
+            inner = sympy.S.One
+            factors = []
+            for cut in sorted(c for c in cuts[v] if c.is_Integer and c > 1):
+                if sizevars.statically_known_equals(cut, size):
+                    continue
+                if cut % inner != 0 or not sizevars.statically_known_equals(
+                    sympy.Mod(size, cut), 0
+                ):
+                    return None
+                factors.append(cut // inner)
+                inner = cut
+            new_sizes.extend([FloorDiv(size, inner), *reversed(factors)])
+        if len(new_sizes) == len(read.size):
+            return None
+        return new_sizes
+
+    def _try_reorder_template_epilogue(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> bool:
+        """Reorder pointwise node2's loops so that it reads template node1's
+        output in the order node1 writes it. A permute or cat-slot copy then
+        becomes an epilogue that loads the tile and stores it permuted.
+
+        Returns whether node2's loops changed and are worth a fusion retry.
+        can_fuse rolls the change back if it fails. If can_fuse succeeds but
+        the fusion is not taken (e.g. the benchmark prefers it unfused), node2
+        keeps the reordered loops.
+        """
+        if (
+            not node1.is_template()
+            or not isinstance(node2, SchedulerNode)
+            or node2.is_reduction()
+            or node2.is_cpu()
+        ):
+            return False
+        writes = {
+            self.mutation_renames.get(dep.name, dep.name): dep.rename(
+                self.mutation_renames
+            )
+            for dep in node1.read_writes.writes
+            if isinstance(dep, MemoryDep)
+        }
+
+        def template_read() -> tuple[MemoryDep, MemoryDep] | None:
+            for read in node2.read_writes.reads:
+                if isinstance(read, MemoryDep) and (
+                    write := writes.get(self.mutation_renames.get(read.name, read.name))
+                ):
+                    return read, write
+            return None
+
+        pair = template_read()
+        if pair is None or tuple(pair[0].size) != tuple(node2._sizes[0]):
+            return False
+        changed = False
+        if new_sizes := self._split_loops_for_affine_read(pair[0]):
+            node2.apply_loop_reindexing(new_sizes)
+            changed = True
+            pair = template_read()
+            if pair is None:
+                return False
+        read, write = pair
+        if (
+            read.num_vars != len(node2._sizes[0])
+            or read.num_vars != len(read.index.free_symbols)
+            or any(s == 0 or s == 1 for s in read.size)
+            or read.normalize_with_stride_order() != write.normalize_with_stride_order()
+        ):
+            return False
+        strides = V.graph.sizevars.stride_hints(read.index, read.var_names)
+        if len(OrderedSet(strides)) != len(strides):
+            return False
+        order = sorted(range(len(strides)), key=lambda i: -strides[i])
+        if order != list(range(len(strides))):
+            node2.apply_new_loop_order(order)
+            changed = True
+        # The template stores tiles contiguous along its innermost dim. A copy
+        # that transposes it stores uncoalesced and loses to the unfused copy.
+        return changed and all(
+            V.graph.sizevars.stride_hints(w.index, w.var_names)[-1] == 1
+            for w in node2.read_writes.writes
+            if isinstance(w, MemoryDep) and w.var_names
+        )
+
     def _try_reindex_pointwise_for_reduction(
         self,
         node1: BaseSchedulerNode,
@@ -10826,7 +10975,11 @@ class Scheduler:
             )
             backend = self.get_backend(node1.get_device())
             if (
-                (node2.has_aliasing_or_mutation() and not atomic_add_mutation_epilogue)
+                (
+                    node2.has_aliasing_or_mutation()
+                    and not atomic_add_mutation_epilogue
+                    and not _is_cat_slot_epilogue(node2)
+                )
                 or (
                     node2.is_reduction()
                     and not backend.can_fuse_reduction_epilogue(node1, node2)
@@ -10839,6 +10992,12 @@ class Scheduler:
             template_buf = node1.get_template_node()
             if template_buf is None:
                 raise AssertionError("expected template_buf to be set")
+            caller = getattr(template_buf, "_render_caller", None)
+            if _is_tlx_choice(
+                (caller or template_buf).annotations
+            ) and _is_relayout_epilogue(node1, node2):
+                why("TLX template stores epilogue outputs in its own layout")
+                return False
             if template_buf.is_multi_outputs_template() and not isinstance(
                 node2.node, ir.ComputedBuffer
             ):
@@ -11006,13 +11165,18 @@ class Scheduler:
 
             # Vertical fusion failed - the iteration domains may not
             # match (e.g. pointwise reads buf[x//32] while reduction
-            # writes buf[x]).  Try reindexing the pointwise to the
-            # reduction's domain and retry. A staged plan keeps its original
-            # frame because reindexing would invalidate its exact matches.
+            # writes buf[x], or a layout copy reads a template output out of
+            # order).  Try reindexing the pointwise to the reduction's domain,
+            # or reordering the copy's loops to the template's write order, and
+            # retry. A staged plan keeps its original frame because reindexing
+            # would invalidate its exact matches.
             if (
                 plan is None
                 and config.loop_reindexing_after_fusion
-                and self._try_reindex_pointwise_for_reduction(node1, node2)
+                and (
+                    self._try_reorder_template_epilogue(node1, node2)
+                    or self._try_reindex_pointwise_for_reduction(node1, node2)
+                )
             ):
                 return (
                     self.can_fuse_vertical(node1, node2)

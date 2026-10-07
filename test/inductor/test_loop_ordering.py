@@ -16,6 +16,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, ir, metrics
 from torch._inductor.codegen.simd import MemoryCoalescing, SIMDScheduling
 from torch._inductor.codegen.triton import TritonScheduling
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import (
@@ -268,6 +269,90 @@ class ImplDetailTest(MockSchedulerTest):
 
             self.assertTrue(backend.can_fuse(snode1, snode2))
             self.assertEqual(select_tiling.call_count, 4)
+
+    @parametrize(
+        "size,view,perm,fuses",
+        [
+            # bmm [2S, 32, 128] -> [S, 2, 32, 128] -> permute(0, 2, 1, 3): the
+            # template's N stays innermost, so the copy becomes a coalesced epilogue.
+            ((8, 32, 128), (4, 2, 32, 128), (0, 2, 1, 3), True),
+            # mm [4 * 256, 72] -> [4, 256, 72] -> permute(0, 2, 1): transposes N.
+            ((1024, 72), (4, 256, 72), (0, 2, 1), False),
+        ],
+    )
+    def test_reorder_template_layout_copy_epilogue(self, size, view, perm, fuses):
+        def contiguous(size):
+            return ir.FixedLayout(
+                torch.device(GPU_TYPE),
+                torch.bfloat16,
+                list(size),
+                ir.FlexibleLayout.contiguous_strides(size),
+            )
+
+        layout = contiguous(size)
+        template = ir.TemplateBuffer(layout, [], None)
+        loader = ir.ReinterpretView(
+            data=template, layout=contiguous(view)
+        ).make_loader()
+        out_size = [view[p] for p in perm]
+
+        # A contiguous copy (clone, cat slot). Triton orders a pointwise node's
+        # loops by its store (BackendFeature.PREFER_STORE_LOOP_ORDER, which the
+        # mock graph lacks), so the copy reads the template output out of order.
+        copy = ir.ComputedBuffer(
+            name=None,
+            layout=contiguous(out_size),
+            data=ir.Pointwise(
+                device=layout.device,
+                dtype=layout.dtype,
+                inner_fn=lambda index: loader(
+                    [index[perm.index(d)] for d in range(len(view))]
+                ),
+                ranges=out_size,
+            ),
+        )
+        copy.name = V.graph.register_buffer(copy)
+        template_node = SchedulerNode(V.graph.scheduler, template)
+        with mock.patch.object(V.graph, "has_feature", return_value=True):
+            copy_node = SchedulerNode(V.graph.scheduler, copy)
+        scheduler = object.__new__(Scheduler)
+        scheduler.mutation_renames = {}
+        (write,) = template_node.read_writes.writes
+        (read,) = copy_node.read_writes.reads
+        self.assertNotEqual(read.normalize(), write.normalize())
+
+        self.assertEqual(
+            scheduler._try_reorder_template_epilogue(template_node, copy_node), fuses
+        )
+        # Either way the copy now reads the template output in its write order.
+        (read,) = copy_node.read_writes.reads
+        self.assertEqual(read.normalize().index, write.normalize().index)
+
+    def test_split_loops_for_affine_read(self):
+        # An IGR-shaped bmm -> permute -> cat slot copy, with its loops merged.
+        d0, d1 = (sympy_index_symbol(f"d{i}") for i in range(2))
+        index = (
+            8192 * d0
+            + 128 * FloorDiv(d1, 256)
+            + 4096 * ModularIndexing(d1, 128, 2)
+            + ModularIndexing(d1, 1, 128)
+        )
+        read = MemoryDep("buf0", index, (d0, d1), (5139, 8192))
+        self.assertEqual(
+            Scheduler._split_loops_for_affine_read(read), [5139, 32, 2, 128]
+        )
+        self.assertIsNone(
+            Scheduler._split_loops_for_affine_read(
+                MemoryDep("buf0", 8192 * d0 + d1, (d0, d1), (5139, 8192))
+            )
+        )
+        # Boundaries that don't nest (96 does not divide 128) can't be split.
+        bad = 96 * FloorDiv(d1, 128) + ModularIndexing(d1, 1, 96)
+        self.assertIsNone(
+            Scheduler._split_loops_for_affine_read(
+                MemoryDep("buf0", bad, (d0, d1), (5139, 8192))
+            )
+        )
 
     def test_template_producer_loop_state_rollback(self):
         layout = ir.FixedLayout(
