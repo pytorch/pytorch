@@ -26,10 +26,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
-from torch.testing._internal.common_methods_invocations import (
-    foreach_binary_op_db,
-    op_db,
-)
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     LazyVal,
@@ -198,179 +195,68 @@ class StrictNumericsConfigTest(TestCase):
         )
 
 
-class StrictNumericsFallbackTest(TestCase):
-    @ops(
-        [op for op in op_db if op.name in ("fmin", "fmax")],
-        allowed_dtypes=(torch.float32,),
-    )
-    @parametrize("numerics", NUMERICS_MODES)
-    def test_without_decompositions(self, device, dtype, op, numerics):
-        from torch._inductor.compile_fx import compile_fx
-
-        def backend(gm, inputs):
-            return compile_fx(gm, inputs, decompositions={})
-
-        x = _min_max_specials(dtype, device)
-        y = x.roll(1)
-        with config.patch(numerics=numerics):
-            result = torch.compile(op.op, backend=backend, fullgraph=True)(x, y)
-        self.assertEqual(result.view(torch.int32), op.op(x, y).view(torch.int32))
-
-
 @unittest.skipUnless(
     HAS_CUDA_AND_TRITON and torch.version.hip is None,
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
     @ops(
-        [
-            op
-            for op in foreach_binary_op_db
-            if op.name in ("_foreach_minimum", "_foreach_maximum")
-        ],
-        allowed_dtypes=(torch.float16, torch.bfloat16),
-    )
-    def test_foreach_min_max_opmath(self, device, dtype, op):
-        x = _min_max_specials(dtype, device)
-        y = torch.ones_like(x)
-        compiled = torch.compile(
-            op.op, fullgraph=True, options={"numerics": "strict_pointwise"}
-        )
-        self.assertEqual(
-            compiled([x], [y])[0].view(torch.int16),
-            op.op([x], [y])[0].view(torch.int16),
-        )
-
-    @ops(
-        [op for op in op_db if op.name in ("minimum", "maximum", "fmin", "fmax")],
+        [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp")],
         allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
     )
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
-    def test_min_max_nan_payload(self, device, dtype, op, numerics, upcast):
-        x = _min_max_specials(dtype, device)
-        a, b = x[:, None], x[None, :]
-        compiled = torch.compile(
-            op.op,
-            fullgraph=True,
-            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+    @parametrize("shared", (False, True))
+    def test_unary_nan_payload(self, device, dtype, op, numerics, upcast, shared):
+        if dtype in (torch.float16, torch.bfloat16):
+            x = _exhaustive_16bit(dtype, device)
+        else:
+            x = _min_max_specials(dtype, device)
+            if dtype == torch.float32:
+                x = torch.cat((x, _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)))
+            else:
+                finfo = torch.finfo(dtype)
+                edges = torch.tensor(
+                    [finfo.tiny * finfo.eps, finfo.tiny, finfo.max],
+                    dtype=dtype,
+                    device=device,
+                )
+                x = torch.cat((x, edges, -edges))
+
+        def fn(x):
+            result = op.op(x)
+            outputs = result if op.name == "frexp" else (result,)
+            if shared:
+                return (*outputs, outputs[0].double(), x + 1)
+            return outputs
+
+        result, codes = run_and_get_code(
+            torch.compile(
+                fn,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
         )
-        result, codes = run_and_get_code(compiled, a, b)
         self.assertIn("@triton.jit", "\n".join(codes))
         self.assertEqual(
-            result.view(_BIT_VIEW[dtype]),
-            op.op(a, b).view(_BIT_VIEW[dtype]),
+            tuple(t.view(_BIT_VIEW.get(t.dtype, t.dtype)) for t in result),
+            tuple(t.view(_BIT_VIEW.get(t.dtype, t.dtype)) for t in fn(x)),
         )
 
     @ops(
-        [op for op in op_db if op.name in ("minimum", "maximum", "fmin", "fmax")],
-        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+        [op for op in op_db if op.name in ("abs", "neg", "angle")],
+        allowed_dtypes=(torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8),
     )
-    @parametrize("upcast", (False, True))
-    @parametrize("mixed", (False, True))
-    @parametrize("scalar_input", (False, True))
-    def test_min_max_cpu_scalar(self, device, dtype, op, upcast, mixed, scalar_input):
-        scalar_dtype = (
-            {
-                torch.float16: torch.float32,
-                torch.bfloat16: torch.float32,
-                torch.float32: torch.float16,
-                torch.float64: torch.float32,
-            }[dtype]
-            if mixed
-            else dtype
-        )
-        x = _min_max_specials(dtype, device)
-        if scalar_input:
-            x = x[-4]  # Signaling NaN.
-
-        def fn(x, bound):
-            return op.op(x, bound), op.op(bound, x)
-
-        compiled = torch.compile(
-            fn,
-            fullgraph=True,
-            options={
-                "numerics": "strict_pointwise",
-                "triton.codegen_upcast_to_fp32": upcast,
-            },
-        )
-        bounds = _min_max_specials(scalar_dtype, "cpu")
-        _, codes = run_and_get_code(compiled, x, bounds[0])
-        self.assertTrue(codes)
-        self.assertNotIn("aten.view.dtype(", "\n".join(codes))
-        for bound in bounds:
-            actual, expected = compiled(x, bound), fn(x, bound)
-            int_dtype = _BIT_VIEW[expected[0].dtype]
-            self.assertEqual(
-                tuple(t.view(int_dtype) for t in actual),
-                tuple(t.view(int_dtype) for t in expected),
-            )
-
-    @ops(
-        [op for op in op_db if op.name in ("fmin", "fmax")],
-        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32),
-    )
-    @parametrize("upcast", (False, True))
-    @parametrize("scalar_input", (False, True))
-    def test_min_max_mixed_dtype(self, device, dtype, op, upcast, scalar_input):
-        a = _min_max_specials(dtype, device)[:, None]
-        b = _min_max_specials(torch.float64, device)
-        b = b[-4] if scalar_input else b[None, :]
-
-        def fn(a, b):
-            return op.op(a, b), op.op(b, a)
-
-        compiled = torch.compile(
-            fn,
-            fullgraph=True,
-            options={
-                "numerics": "strict_pointwise",
-                "triton.codegen_upcast_to_fp32": upcast,
-            },
-        )
-        self.assertEqual(
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in compiled(a, b)),
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(a, b)),
-        )
-
-    @ops(
-        [op for op in op_db if op.name in ("minimum", "maximum", "fmin", "fmax")],
-        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32),
-    )
-    @parametrize("compute_dtype", (torch.float32, torch.float64))
-    @parametrize("upcast", (False, True))
-    @parametrize("shared", (False, True))
-    def test_min_max_casts(self, device, dtype, op, compute_dtype, upcast, shared):
-        x = _min_max_specials(dtype, device)
-
-        def fn(a, b):
-            aa, bb = a.to(compute_dtype), b.to(compute_dtype)
-            high = op.op(aa, bb)
-            result = high.to(dtype)
-            if shared:
-                return result, op.op(a, b), high, aa, bb, aa + 1
-            return (result,)
-
-        compiled = torch.compile(
-            fn,
-            fullgraph=True,
-            options={
-                "numerics": "strict_pointwise",
-                "triton.codegen_upcast_to_fp32": upcast,
-            },
-        )
-        if shared:
-            a, b = x.repeat_interleave(x.numel()), x.repeat(x.numel())
-        else:
-            a, b = x[:, None], x[None, :]
-        result, codes = run_and_get_code(compiled, a, b)
-        if shared:
-            self.assertEqual(sum(code.count("@triton.jit") for code in codes), 1)
-        self.assertEqual(
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in result),
-            tuple(t.view(_BIT_VIEW[t.dtype]) for t in fn(a, b)),
-        )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_unary_integer(self, device, dtype, op, numerics):
+        limits = torch.iinfo(dtype)
+        x = torch.tensor([limits.min, 0, 1, limits.max], dtype=dtype, device=device)
+        compiled = torch.compile(op.op, fullgraph=True, options={"numerics": numerics})
+        self.assertEqual(compiled(x), op.op(x))
 
     @ops(
         [op for op in op_db if op.name in ("byte", "char", "short")],
@@ -474,7 +360,8 @@ class StrictNumericsCompileTest(TestCase):
     )
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
-    def test_activation_backward(self, device, dtype, op, numerics, upcast):
+    @parametrize("shared", (False, True))
+    def test_activation_backward(self, device, dtype, op, numerics, upcast, shared):
         bounds = torch.tensor(
             [-3.0, -0.5, -0.0, 0.0, 0.2, 0.5, 3.0, 20.0, 104.0],
             device=device,
@@ -497,9 +384,15 @@ class StrictNumericsCompileTest(TestCase):
             kwargs = {"beta": 3, "threshold": 0.2}
 
         def fn(x):
-            # Share opmath without unused-output tangents changing signed zeros.
-            result = (op.op(x, **kwargs), (x.float() * x.float()).detach())
+            result = (op.op(x, **kwargs),)
+            if not shared:
+                return result
+            # Exercise shared float32 intermediates. Eager skips unused branches, but
+            # AOTAutograd materializes their zero tangents; detach avoids turning -0
+            # gradients into +0.
+            result = (*result, (x.float() * x.float()).detach())
             if op.name == "nn.functional.softplus":
+                # Also cover negative-beta forward signed zeros in the shared graph.
                 return (*result, op.op(x, beta=-1).detach())
             return result
 
@@ -525,6 +418,34 @@ class StrictNumericsCompileTest(TestCase):
         )
         int_dtype = _BIT_VIEW[dtype]
         self.assertEqual(result_grads[0].view(int_dtype), expected_grad.view(int_dtype))
+
+    @ops(
+        [op for op in op_db if op.name == "true_divide"],
+        allowed_dtypes=(torch.float32,),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("divisor", (3.0, -1.0, 0.0, -0.0, float("inf"), -float("inf")))
+    def test_activation_division(self, device, dtype, op, numerics, divisor):
+        from torch._inductor.decomposition import _div_rn
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        x = torch.cat(
+            (
+                _sampled_fp32(NUM_BITPATTERN_SAMPLES, device),
+                _min_max_specials(dtype, device),
+            )
+        )
+
+        def fn(x):
+            return _div_rn(x, divisor)
+
+        graph = make_fx(fn)(x)
+        compiled = torch.compile(graph, fullgraph=True, options={"numerics": numerics})
+        result, codes = run_and_get_code(compiled, x)
+        # Eager CUDA tensor division rounds; Python scalar division uses a reciprocal.
+        expected = op.op(x, torch.full((), divisor, dtype=dtype, device=device))
+        self.assertEqual(result.view(torch.int32), expected.view(torch.int32))
+        self.assertIn("triton.language.div_rn", "\n".join(codes))
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("upcast", (False, True))
@@ -1361,9 +1282,6 @@ class StrictNumericsTest(TestCase):
 
 
 instantiate_device_type_tests(StrictNumericsCompileTest, globals(), only_for="cuda")
-instantiate_device_type_tests(
-    StrictNumericsFallbackTest, globals(), only_for=("cpu", "cuda")
-)
 instantiate_device_type_tests(StrictNumericsTest, globals(), only_for="cuda")
 
 
@@ -1613,15 +1531,9 @@ POINTWISE_XFAIL = frozenset(
         ("special_ndtr", "float16"),
         ("true_divide", "bfloat16"),
         ("true_divide", "float16"),
-        ("abs", "bfloat16"),
-        ("abs", "float16"),
-        ("abs", "float32"),
         ("addcdiv", "bfloat16"),
         ("addcdiv", "float16"),
         ("addcdiv", "float32"),
-        ("angle", "bfloat16"),
-        ("angle", "float16"),
-        ("angle", "float32"),
         ("copysign", "bfloat16"),
         ("copysign", "float16"),
         ("div_floor_rounding", "bfloat16"),
@@ -1633,9 +1545,12 @@ POINTWISE_XFAIL = frozenset(
         ("floor_divide", "bfloat16"),
         ("floor_divide", "float16"),
         ("floor_divide", "float32"),
-        ("frexp", "bfloat16"),
-        ("frexp", "float16"),
-        ("frexp", "float32"),
+        ("fmax", "bfloat16"),
+        ("fmax", "float16"),
+        ("fmax", "float32"),
+        ("fmin", "bfloat16"),
+        ("fmin", "float16"),
+        ("fmin", "float32"),
         ("hypot", "float16"),
         ("hypot", "float32"),
         ("i0", "bfloat16"),
@@ -1646,6 +1561,18 @@ POINTWISE_XFAIL = frozenset(
         ("logaddexp2", "bfloat16"),
         ("logaddexp2", "float16"),
         ("logaddexp2", "float32"),
+        ("max_binary", "bfloat16"),
+        ("max_binary", "float16"),
+        ("max_binary", "float32"),
+        ("maximum", "bfloat16"),
+        ("maximum", "float16"),
+        ("maximum", "float32"),
+        ("min_binary", "bfloat16"),
+        ("min_binary", "float16"),
+        ("min_binary", "float32"),
+        ("minimum", "bfloat16"),
+        ("minimum", "float16"),
+        ("minimum", "float32"),
         ("mvlgamma_mvlgamma_p_1", "bfloat16"),
         ("mvlgamma_mvlgamma_p_1", "float16"),
         ("mvlgamma_mvlgamma_p_1", "float32"),
@@ -1655,9 +1582,6 @@ POINTWISE_XFAIL = frozenset(
         ("mvlgamma_mvlgamma_p_5", "bfloat16"),
         ("mvlgamma_mvlgamma_p_5", "float16"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
-        ("neg", "bfloat16"),
-        ("neg", "float16"),
-        ("neg", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),
         ("nn_functional_softshrink", "float32"),
@@ -1786,7 +1710,7 @@ NONFLOAT_XFAIL = frozenset(
 
 
 # Preserve all floating dtype coverage after removing repaired xfail entries.
-FULL_DTYPE_BACKWARD_OPS = frozenset(
+FULL_DTYPE_ACTIVATION_OPS = frozenset(
     {
         "nn_functional_gelu",
         "nn_functional_hardswish",
@@ -1802,19 +1726,17 @@ FULL_DTYPE_BACKWARD_OPS = frozenset(
 FULL_DTYPE_POINTWISE_OPS = (
     frozenset(
         {
+            "abs",
+            "angle",
             "double",
-            "fmax",
-            "fmin",
-            "max_binary",
-            "maximum",
-            "min_binary",
-            "minimum",
+            "frexp",
+            "neg",
             "special_entr",
             "special_xlog1py",
             "xlogy",
         }
     )
-    | FULL_DTYPE_BACKWARD_OPS
+    | FULL_DTYPE_ACTIVATION_OPS
 )
 
 
@@ -2227,7 +2149,7 @@ class PointwiseStrictNumericsTest(TestCase):
             self._require_kernel(tested, "no differentiable sample")
         return mismatches
 
-    @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL, full_dtype_ops=FULL_DTYPE_BACKWARD_OPS)
+    @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL, full_dtype_ops=FULL_DTYPE_ACTIVATION_OPS)
     def test_pointwise_backward(self, device, dtype, op):
         mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(

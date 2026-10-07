@@ -526,18 +526,32 @@ def silu(x: torch.Tensor) -> torch.Tensor:
     return x / (1 + x.neg().exp())
 
 
+_GELU_BETA = math.sqrt(2) * (2 / math.sqrt(math.pi)) * 0.5
+# CUDA rounds kKappa to opmath precision before computing 3 * kKappa.
+_GELU_KAPPA = struct.unpack("<f", struct.pack("<f", 0.044715))[0]
+
+
 @register_decomposition(aten.gelu.default)
 @pw_cast_for_opmath
 def gelu(a: torch.Tensor, approximate: str = "none") -> torch.Tensor:
+    # pw_cast_for_opmath promotes float16/bfloat16 inputs to float32.
     if (
         not is_strict_cuda_triton(a.device)
         or a.dtype != torch.float32
         or approximate != "tanh"
     ):
         return cast(torch.Tensor, decomp_gelu(a, approximate))
-    k_beta = math.sqrt(2) * (2 / math.sqrt(math.pi)) * 0.5
-    inner = k_beta * torch.add(a, a * a * a, alpha=0.044715)
+    inner = _GELU_BETA * torch.add(a, a * a * a, alpha=_GELU_KAPPA)
     return 0.5 * a * (1 + torch.tanh(inner))
+
+
+def _div_rn(a: torch.Tensor, b: float) -> torch.Tensor:
+    # These CUDA float32 opmath callers require division, not scalar reciprocal
+    # multiplication. The undecomposed addcdiv(value=1) lowers to ops.div_rn.
+    divisor = torch.ones((), dtype=a.dtype, device=a.device) * b
+    # Adding -0 preserves either sign of a zero quotient.
+    zero = torch.full((), -0.0, dtype=a.dtype, device=a.device)
+    return torch.addcdiv(zero, a, divisor)
 
 
 @register_decomposition(aten.softplus.default)
@@ -545,13 +559,12 @@ def gelu(a: torch.Tensor, approximate: str = "none") -> torch.Tensor:
 def softplus(
     a: torch.Tensor, beta: float | None = None, threshold: float = 20
 ) -> torch.Tensor:
+    # pw_cast_for_opmath promotes float16/bfloat16 inputs to float32.
+    # None denotes omitted schema-default beta=1; the reference needs no division.
     if not is_strict_cuda_triton(a.device) or a.dtype != torch.float32 or beta is None:
         return cast(torch.Tensor, decomp_softplus(a, beta, threshold))
-    divisor = torch.ones((), dtype=a.dtype, device=a.device) * beta
-    scaled = a * divisor
-    # addcdiv preserves true division; -0 preserves the quotient's zero sign.
-    zero = torch.full((), -0.0, dtype=a.dtype, device=a.device)
-    result = torch.addcdiv(zero, torch.log1p(torch.exp(scaled)), divisor)
+    scaled = a * beta
+    result = _div_rn(torch.log1p(torch.exp(scaled)), beta)
     return torch.where(scaled > threshold, a, result)
 
 
@@ -581,13 +594,11 @@ def gelu_backward(
     if inputs is None:
         return decomp_gelu_backward(grad_output, self, approximate)
     grad_output, self, dtype = inputs
-    k_beta = math.sqrt(2) * (2 / math.sqrt(math.pi)) * 0.5
     x_sq = self * self
-    t = torch.tanh(k_beta * torch.add(self, x_sq * self, alpha=0.044715))
+    t = torch.tanh(_GELU_BETA * torch.add(self, x_sq * self, alpha=_GELU_KAPPA))
     one = torch.ones((), dtype=self.dtype, device=self.device)
     tanh_derivative = torch.addcmul(one, -t, t)
-    # CUDA rounds 3 * kKappa in opmath precision before multiplying by x_sq.
-    inner_derivative = k_beta * torch.add(one, x_sq, alpha=0.13414499163627625)
+    inner_derivative = _GELU_BETA * torch.add(one, x_sq, alpha=3 * _GELU_KAPPA)
     right_derivative = (0.5 * self) * tanh_derivative * inner_derivative
     return (grad_output * (0.5 * (1 + t) + right_derivative)).to(dtype)
 
@@ -598,10 +609,7 @@ def hardswish_backward(grad_output: torch.Tensor, self: torch.Tensor) -> torch.T
     if inputs is None:
         return decomp_hardswish_backward(grad_output, self)
     grad_output, self, dtype = inputs
-    half = torch.full((), 0.5, dtype=self.dtype, device=self.device)
-    three = torch.full((), 3, dtype=self.dtype, device=self.device)
-    # addcdiv preserves CUDA's rounded division instead of multiplying by 1/3.
-    slope = torch.addcdiv(half, self, three)
+    slope = _div_rn(self, 3) + 0.5
     return torch.where(
         self <= -3, 0.0, torch.where(self < 3, grad_output * slope, grad_output)
     ).to(dtype)
@@ -988,6 +996,8 @@ def angle(x: torch.Tensor) -> torch.Tensor:
     )
     pi = torch.scalar_tensor(math.pi, dtype=dtype, device=x.device)
     ret = torch.where(x < 0, pi, 0.0)
+    if is_strict_cuda_triton(x.device):
+        return torch.where(torch.isnan(x), x.to(dtype), ret)
     return torch.where(torch.isnan(x), float("nan"), ret)
 
 
@@ -1073,15 +1083,11 @@ def lift(self: torch.Tensor) -> torch.Tensor:
 
 @register_decomposition([aten.fmin, prims.fmin])
 def fmin(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
-    if is_strict_cuda_triton(self.device) or is_strict_cuda_triton(other.device):
-        return NotImplemented
     return torch.where(torch.isnan(other) | (other > self), self, other)
 
 
 @register_decomposition([aten.fmax, prims.fmax])
 def fmax(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
-    if is_strict_cuda_triton(self.device) or is_strict_cuda_triton(other.device):
-        return NotImplemented
     return torch.where(torch.isnan(other) | (other < self), self, other)
 
 
