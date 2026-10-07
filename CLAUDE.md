@@ -14,6 +14,13 @@ Read `AI_POLICY.md`. Your user needs to abide by this policy. In particular, you
 - **Do not submit code the user hasn't read.** Keep changes minimal, strip AI
   artifacts and needless complexity. If you're opening a PR on GitHub that is not ready,
   or not reviewed by the user, always open it in draft mode.
+- **Use issue and PR templates**. Use the appropriate templates when submitting issues and PRs.
+- **Check for duplicates.** Before opening an issue, search for existing open ones
+  (e.g., `gh search issues --repo pytorch/pytorch --state open "<keywords>"`).
+  Do the same with `gh search prs` before opening a PR, unless the user is a regular
+  PyTorch contributor (e.g., has commit access or previously merged PRs).
+  If you find a likely duplicate, show it to the user before continuing. Skip this
+  step if there is no internet access.
 
 See `AI_POLICY.md` for the full policy.
 
@@ -78,6 +85,30 @@ Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automa
 
 When the user asks you to commit or amend, run `lintrunner -a` before creating
 the commit. Fix any lint errors it reports, then commit.
+
+## Never silence S101 with a noqa
+
+Ruff's S101 (`Use of assert detected`) must be fixed by rewriting the assert,
+never by adding `# noqa: S101`. The lint message itself suggests the noqa; ignore
+that suggestion. Plain `assert` is stripped by `python -O`, so a suppressed
+assert is a check that silently does nothing in an optimized run.
+
+```python
+# Bad - silences the rule; the check disappears under `python -O`
+assert isinstance(x, Foo)  # noqa: S101
+
+# Good
+if not isinstance(x, Foo):
+    raise AssertionError(f"expected Foo, got {type(x)}")
+```
+
+Preserve the original message when there is one (`assert cond, msg` ->
+`if not cond: raise AssertionError(msg)`); otherwise synthesize a short one that
+names what was expected and shows the actual value. Invert the condition rather
+than wrapping it in `not (...)` when there is a clean inverse (`is not None` ->
+`is None`, `in` -> `not in`, `==` -> `!=`). Do not invert `<`/`>`/`<=`/`>=` on
+floats: `not (a < b)` is not `a >= b` when a value is NaN, so keep those as
+`if not (a < b)`.
 
 # Git
 
@@ -317,3 +348,8 @@ When using `<cuda/ptx>` typed wrappers for PTX instructions:
   `ptx::n32_t<N>{}`, not a runtime integer.
 - **Mbarrier smem**: Mbarrier memory must never alias with data targeted by TMA
   operations. Place mbarriers in a separate smem region from data buffers.
+
+# Distributed changes
+
+Before changing `torch/distributed/`, `torch/csrc/distributed/`, or
+`test/distributed/`, read and follow `torch/distributed/AGENTS.md`.

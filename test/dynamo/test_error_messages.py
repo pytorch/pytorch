@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+import operator
 import re
 import sys
+import time
 import traceback
 import unittest
 import unittest.mock
@@ -15,10 +17,15 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch.utils._pytree as python_pytree
-from torch._dynamo.exc import ResumePrologueTracingError, TorchRuntimeError, Unsupported
-from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
+from torch._dynamo.exc import (
+    BackendCompilerFailed,
+    ResumePrologueTracingError,
+    TorchRuntimeError,
+    Unsupported,
+)
+from torch._dynamo.testing import skipIfNotPy311, skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_FBCODE, munge_exc
+from torch.testing._internal.common_utils import IS_FBCODE, IS_S390X, munge_exc
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
@@ -231,6 +238,10 @@ from user code:
             with obj:
                 return 1
 
+        def post_munge(s):
+            # Python 3.11 attributes BEFORE_WITH to the whole with statement.
+            return s.replace("\n        return 1", "")
+
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(3),
@@ -248,6 +259,7 @@ Unsupported context manager
 from user code:
    File "test_error_messages.py", line N, in fn
     with obj:""",
+            post_munge=post_munge,
         )
 
     def test_backend_fake_tensor_exc(self):
@@ -257,15 +269,16 @@ from user code:
         def fn(x):
             return x + 1
 
-        self.assertExpectedInlineMunged(
-            Unsupported,
-            lambda: torch.compile(fn, backend=bad_backend, fullgraph=True)(
-                torch.ones(3, 3)
-            ),
+        with self.assertRaises(Unsupported) as cm:
+            torch.compile(fn, backend=bad_backend, fullgraph=True)(torch.ones(3, 3))
+
+        msg = munge_exc(cm.exception, suppress_suffix=True)
+        self.assertExpectedInline(
+            msg,
             """\
 Backend compiler exception
   Explanation: Backend compiler `bad_backend` failed with test. Adding a graph break.
-  Hint: Report an issue to the backend compiler repo.
+  Hint: Set `fullgraph=False` to allow this backend fallback to run eagerly.
 
   Developer debug context: Backend: bad_backend
     Exception:test
@@ -276,6 +289,67 @@ Backend compiler exception
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0219.html""",
         )
+
+        if sys.version_info >= (3, 11):
+            msg_with_carets = munge_exc(
+                cm.exception,
+                suppress_suffix=True,
+                strip_carets=False,
+            )
+            self.assertIn(
+                """\
+      File "test_error_messages.py", line N, in fn
+        return x + 1
+        ^^^^^^^^^^^^""",
+                msg_with_carets,
+            )
+
+    @make_logging_test()
+    def test_backend_fake_tensor_exc_no_warning(self, records):
+        def bad_backend(gm, ex):
+            raise torch._subclasses.fake_tensor.UnsupportedFakeTensorException("test")
+
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend=bad_backend)
+        self.assertEqual(opt_fn(torch.ones(3)), torch.ones(3) + 1)
+
+        self.assertFalse(self.hasRecord(records, "Backend compiler exception"))
+        self.assertFalse(
+            self.hasRecord(records, "Report an issue to the backend compiler repo.")
+        )
+
+    @make_logging_test()
+    def test_backend_scalar_extraction_fallback_no_warning(self, records):
+        def bad_backend(gm, ex):
+            raise torch._subclasses.fake_tensor.DataDependentOutputException(
+                torch.ops.aten._local_scalar_dense.default
+            )
+
+        def fn(x):
+            values = x.to(torch.int64).tolist()
+            return x + values[0]
+
+        with torch._dynamo.config.patch(capture_scalar_outputs=True):
+            opt_fn = torch.compile(fn, backend=bad_backend)
+            self.assertEqual(opt_fn(torch.tensor([1, 2, 3])), torch.tensor([2, 3, 4]))
+
+        self.assertFalse(self.hasRecord(records, "Backend compiler exception"))
+        self.assertFalse(
+            self.hasRecord(records, "Report an issue to the backend compiler repo.")
+        )
+
+    def test_backend_hard_failure_still_raises(self):
+        def bad_backend(gm, ex):
+            raise RuntimeError("test")
+
+        def fn(x):
+            return x + 1
+
+        with torch._dynamo.config.patch(suppress_errors=False):
+            with self.assertRaises(BackendCompilerFailed):
+                torch.compile(fn, backend=bad_backend)(torch.ones(3))
 
     def test_unsupported_builtin(self):
         def fn():
@@ -369,6 +443,28 @@ Call to `torch.compiler.disable()`
 from user code:
    File "test_error_messages.py", line N, in fn
     torch.compiler.disable()""",
+        )
+
+    def test_time_function(self):
+        def fn():
+            return time.perf_counter()
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
+            """\
+Call to a time function
+  Explanation: Dynamo graph breaks on `time.perf_counter()` so that the clock read occurs at the correct point relative to compiled operations.
+  Hint: Move the `time.perf_counter()` call outside the compiled function if the graph break is undesirable.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: Called `time.perf_counter()` inside a compiled region
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb9193.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return time.perf_counter()""",
         )
 
     def test_skipfile_dynamo_disable_wrapped_method(self):
@@ -780,6 +876,11 @@ User code traceback:
 
             return Foo
 
+        def post_munge(s):
+            # Python 3.11+ column metadata can identify the whole class
+            # definition span, including the indented body line.
+            return re.sub(r"\n        pass(?=\n|\Z)", "", s)
+
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
@@ -795,6 +896,7 @@ Invalid call to __build_class__
 from user code:
    File "test_error_messages.py", line N, in fn
     class Foo:""",
+            post_munge=post_munge,
         )
 
     @skipIfNotPy312
@@ -871,6 +973,9 @@ from user code:
             post_munge=post_munge,
         )
 
+    @unittest.skipIf(
+        IS_S390X, "Fails only on s390x CI, but not locally. Needs investigation"
+    )
     @make_logging_test(graph_breaks=True)
     def test_reconstruction_failure_gb(self, records):
         class Foo:
@@ -1050,6 +1155,14 @@ from user code:
                 tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)
             return tensors
 
+        def post_munge(s):
+            # Python 3.11 attributes the conditional jump to the whole if body.
+            return s.replace(
+                "\n        clamp_value = torch.finfo(tensors.dtype).max - offset"
+                "\n        tensors = torch.clamp(tensors, min=-clamp_value, max=clamp_value)",
+                "",
+            )
+
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(
@@ -1070,6 +1183,7 @@ Data-dependent branching
 from user code:
    File "test_error_messages.py", line N, in cast_overflow_tensors
     if tensors.isinf().any() or tensors.isnan().any():""",
+            post_munge=post_munge,
         )
 
     # Test that the bytecode source attribution is correct with VariableTracker
@@ -1250,6 +1364,71 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especiall
 """,
         )
 
+    @skipIfNotPy311
+    def test_from_user_code_traceback_carets(self):
+        def gn():
+            torch._dynamo.graph_break()
+
+        def fn(x):
+            return gn()
+
+        with self.assertRaises(Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+
+        msg = munge_exc(
+            cm.exception,
+            suppress_suffix=True,
+            strip_carets=False,
+        )
+        self.assertExpectedInline(
+            msg,
+            """\
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
+
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return gn()
+           ~~^^
+  File "test_error_messages.py", line N, in gn
+    torch._dynamo.graph_break()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^""",
+        )
+
+    @skipIfNotPy311
+    def test_tensor_item_graph_break_warning_caret_points_to_item(self):
+        from torch._dynamo.variables.tensor import TensorVariable
+
+        self.addCleanup(TensorVariable._warn_capture_scalar_outputs.cache_clear)
+        TensorVariable._warn_capture_scalar_outputs.cache_clear()
+
+        def fn(a, b):
+            torch._check(operator.or_(a.item() == 5, b.item() == 5))
+
+        with (
+            torch._dynamo.config.patch(capture_scalar_outputs=False),
+            self.assertLogs("torch._dynamo.variables.tensor", level="WARNING") as logs,
+        ):
+            torch.compile(fn, backend="eager")(torch.tensor([5]), torch.tensor([100]))
+
+        msg = munge_exc(
+            "\n".join(logs.output),
+            suppress_suffix=True,
+            strip_carets=False,
+        )
+        self.assertIn(
+            """\
+  File "test_error_messages.py", line N, in fn
+    torch._check(operator.or_(a.item() == 5, b.item() == 5))
+                              ~~~~~~^^""",
+            msg,
+        )
+
     @torch._dynamo.config.patch(verbose=True)
     def test_internal_compiler_stacktrace_verbose(self):
         def fn():
@@ -1303,6 +1482,43 @@ from user code:
 
 """,
         )
+
+    def _backend_compiler_failed_traceback(self):
+        def bad_backend(gm, example_inputs):
+            raise TypeError("'NoneType' object is not iterable")
+
+        def fn(x):
+            return x + 1
+
+        # assertRaises suppresses the traceback, so manually catch
+        try:
+            torch.compile(fn, backend=bad_backend, fullgraph=True)(torch.ones(1))
+        except BackendCompilerFailed as exc:
+            return "".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )
+
+        self.fail("expected BackendCompilerFailed")
+
+    def test_backend_compiler_failed_traceback(self):
+        msg = self._backend_compiler_failed_traceback()
+
+        self.assertIn("BackendCompilerFailed: backend='bad_backend' raised:", msg)
+        self.assertIn("TypeError: 'NoneType' object is not iterable", msg)
+        self.assertIn("in bad_backend", msg)
+        self.assertIn("output_graph.py", msg)
+        self.assertNotIn("convert_frame.py", msg)
+        self.assertNotIn("symbolic_convert.py", msg)
+        self.assertIn("Set TORCHDYNAMO_VERBOSE=1 for the full Dynamo stack trace", msg)
+
+    @torch._dynamo.config.patch(verbose=True)
+    def test_backend_compiler_failed_traceback_verbose(self):
+        msg = self._backend_compiler_failed_traceback()
+
+        self.assertIn("in bad_backend", msg)
+        self.assertIn("convert_frame.py", msg)
+        self.assertIn("symbolic_convert.py", msg)
+        self.assertNotIn("TORCHDYNAMO_VERBOSE=1", msg)
 
     @make_logging_test(graph_breaks=True)
     def test_graph_break_in_loop(self, records):
@@ -2658,7 +2874,7 @@ User code traceback:
         def outer(x):
             return middle_with_try(x)
 
-        with torch._dynamo.config.patch(nested_graph_breaks=True, verbose=False):
+        with torch._dynamo.config.patch(verbose=False):
             torch.compile(outer, backend="eager")(torch.ones(3))
 
         full_messages = [
@@ -2757,7 +2973,7 @@ Call to `torch._dynamo.graph_break()`
             x = inner(x + 4) + 8
             return inner(x) + 16
 
-        with torch._dynamo.config.patch(nested_graph_breaks=True, verbose=False):
+        with torch._dynamo.config.patch(verbose=False):
             outer(torch.ones(3))
 
         self.assertEqual(

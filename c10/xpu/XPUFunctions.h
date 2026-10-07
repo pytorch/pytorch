@@ -26,6 +26,8 @@ C10_XPU_API sycl::device& get_raw_device(DeviceIndex device);
 
 C10_XPU_API sycl::context& get_device_context();
 
+C10_XPU_API void device_synchronize(c10::DeviceIndex device = -1);
+
 C10_XPU_API void get_device_properties(
     DeviceProp* device_prop,
     DeviceIndex device);

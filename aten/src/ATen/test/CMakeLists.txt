@@ -7,6 +7,7 @@ endif(MSVC)
 list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/Dict_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/MaybeOwned_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/accelerator_event_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/accelerator_graph_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/apply_utils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/atest.cpp
@@ -18,6 +19,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/functional_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/half_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/index_kernel_utils_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/ivalue_test.cpp
@@ -73,6 +75,7 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_optional_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_packedtensoraccessor_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_reportMemoryUsage_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_scan_utils_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_allocatorTraceTracker_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_stream_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu)
@@ -85,6 +88,8 @@ list(APPEND ATen_HIP_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_apply_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_math_test.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_test.hip
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_cublas_handle_pool_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_distributions_test.hip
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_dlconvertor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_generator_test.hip

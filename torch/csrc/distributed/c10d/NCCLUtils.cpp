@@ -2,8 +2,8 @@
 
 #ifdef USE_C10D_NCCL
 #include <fmt/format.h>
-#include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace c10d {
@@ -33,6 +33,7 @@ NCCLComm::NCCLComm(NCCLComm&& other) {
   LockType lock(other.mutex_);
   std::swap(ncclComm_, other.ncclComm_);
   std::swap(aborted_, other.aborted_);
+  std::swap(preInvalidateHook_, other.preInvalidateHook_);
   std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
   std::swap(initialized_, other.initialized_);
   std::swap(nonBlocking_, other.nonBlocking_);
@@ -247,7 +248,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   if (color_id >= 0) {
     // Waiting for parent comm above still does not seem to guarantee the child
     // comm ptr is valid. Therefore we add a manual wait here for safety.
-    // TODO: remove this wait after NCCL fix the semantics.
+    // TODO: remove this wait after NCCL fixes the semantics.
     auto startTime = std::chrono::steady_clock::now();
     auto timeout = nccl_nonblocking_timeout();
     while (!comm->ncclComm_) {
@@ -329,6 +330,20 @@ std::shared_ptr<NCCLComm> NCCLComm::shrink(
 }
 #endif // NCCL_HAS_COMM_SHRINK
 
+void NCCLComm::runPreInvalidateHook() {
+  auto hook = std::exchange(preInvalidateHook_, nullptr);
+  if (!hook) {
+    return;
+  }
+  try {
+    hook();
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Rank " << rank_
+                 << ": NCCL communicator pre-invalidate hook failed: "
+                 << e.what();
+  }
+}
+
 void NCCLComm::finalize() {
   LockType lock(mutex_);
   if (aborted_) {
@@ -343,6 +358,9 @@ void NCCLComm::finalize() {
 
 void NCCLComm::destroy() {
   LockType lock(mutex_);
+#ifdef USE_ROCM
+  runPreInvalidateHook();
+#endif
   if (aborted_) {
     LOG(INFO) << "Rank " << rank_
               << ": NCCL communicator already Invalidated. Skip destroy.";
@@ -357,6 +375,9 @@ void NCCLComm::destroy() {
 
 void NCCLComm::abort(std::optional<std::string> commFailureReason) {
   LockType lock(mutex_);
+#ifdef USE_ROCM
+  runPreInvalidateHook();
+#endif
   at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
   if (aborted_ && !initialized_) {
     // Should not abort twice.

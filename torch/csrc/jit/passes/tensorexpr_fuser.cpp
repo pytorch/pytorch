@@ -390,7 +390,7 @@ void insertTypeGuard(
   // body should be the fusion group node.
   guarded_node->moveBefore(true_block->return_node());
   for (size_t idx = 0; idx < guarded_node->inputs().size(); ++idx) {
-    if (typechecked_inputs.count(guarded_node->input(idx))) {
+    if (typechecked_inputs.contains(guarded_node->input(idx))) {
       guarded_node->replaceInput(
           idx, typechecked_inputs.at(guarded_node->input(idx)));
     }
@@ -480,7 +480,7 @@ class TensorExprFuser {
       auto shapes = fmap(tensor_inputs, [&](Value* v) {
         GRAPH_DEBUG("Getting aten::size for %", v->debugName());
         all_inputs_have_sizes &= shape_of.count(v);
-        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
+        return shape_of.contains(v) ? shape_of.at(v) : nullptr;
       });
       if (!all_inputs_have_sizes) {
         GRAPH_DEBUG(
@@ -539,7 +539,7 @@ class TensorExprFuser {
     for (int64_t i = static_cast<int64_t>(outputs.size()) - 1; i >= 0; --i) {
       auto output = outputs[i];
       auto soutput = soutputs[i];
-      if (usedOnlyInSize(output) && shape_of.count(soutput) > 0) {
+      if (usedOnlyInSize(output) && shape_of.contains(soutput)) {
         auto uses = output->uses();
         for (Use u : uses) {
           AT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
