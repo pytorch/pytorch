@@ -151,6 +151,11 @@ def global_check_message():
     return "global check message"
 
 
+@torch.fx.wrap
+def set_tensor_test_attr(value, attr_value):
+    setattr(value, "_dynamo_test_attr", attr_value)  # noqa: B010
+
+
 # Specializes a test to run only if translation validation is set.
 def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
     @functools.wraps(fn)
@@ -224,7 +229,47 @@ class UserDefineSetAttr:
             return None
 
 
+@functools.cache
+@scoped_load_inline
+def _load_pybind11_enum_mod(*, load_inline):
+    cpp_source = """
+    #include <torch/extension.h>
+
+    enum class E { A = 0, B = 1 };
+
+    PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+        py::enum_<E>(m, "E")
+            .value("A", E::A)
+            .value("B", E::B);
+    }
+    """
+    return load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+
+
 class MiscTests(torch._inductor.test_case.TestCase):
+    def test_storage_offset_scalar_output(self):
+        def fn(x):
+            return x.storage_offset()
+
+        base = torch.arange(30)
+        inputs = (
+            base[:10],
+            base[5:15],
+            base[7:17],
+            base[:10],
+        )
+
+        compiled_fn = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        for x in inputs:
+            result = compiled_fn(x)
+            self.assertIsInstance(result, int)
+            self.assertEqual(result, fn(x))
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
@@ -255,25 +300,13 @@ class MiscTests(torch._inductor.test_case.TestCase):
         entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
         self.assertEqual(len(entries), 0)
 
-    @torch.testing._internal.common_utils.scoped_load_inline
-    def test_pybind11_enum_conversion(self, load_inline):
+    def test_pybind11_enum_conversion(self):
         if IS_FBCODE:
             # fbcode's Python runtime lacks the shared libs load_inline needs, so
             # we use the Buck-prebuilt fixture instead of the load_inline argument.
             mod = _pybind11_enum_test
         else:
-            cpp_source = """
-            #include <torch/extension.h>
-
-            enum class E { A = 0, B = 1 };
-
-            PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-                py::enum_<E>(m, "E")
-                    .value("A", E::A)
-                    .value("B", E::B);
-            }
-            """
-            mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+            mod = _load_pybind11_enum_mod()
         e = mod.E.A
         self.assertEqual(
             torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
@@ -1216,6 +1249,81 @@ graph():
         res = opt_f(x, True)
         self.assertEqual(res, torch.ones(5) + 1)
         self.assertTrue(res.offloading_activation)
+
+    def test_tensor_setattr_on_split_outputs(self):
+        def fn(x, attr_input):
+            values = torch.split(x, 2)
+            attr_values = torch.split(attr_input, 2)
+            for value, attr_value in zip(values, attr_values):
+                set_tensor_test_attr(value, attr_value)
+            return values, attr_values, tuple(value * 2 for value in values)
+
+        x = torch.randn(4)
+        attr_input = torch.randn(4)
+        values, attr_values, result = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x, attr_input)
+        self.assertEqual(result, tuple(value * 2 for value in values))
+        for value, attr_value in zip(values, attr_values):
+            self.assertIs(value._dynamo_test_attr, attr_value)
+
+    def test_tensor_setattr_on_repeated_tensor_object_graph_breaks(self):
+        def fn(x, attr_value):
+            values = torch.broadcast_tensors(x, x)
+            set_tensor_test_attr(values[0], attr_value)
+            return hasattr(values[1], "_dynamo_test_attr")
+
+        self.assertTrue(fn(torch.randn(4), torch.randn(4)))
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on unsupported type"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, torch.randn(4))
+        self.assertFalse(hasattr(x, "_dynamo_test_attr"))
+
+    def test_tensor_setattr_on_input_tensor_object_output_graph_breaks(self):
+        # Misclassifying the input object as new would hide its existing grad.
+        def read_existing_grad_through_output(x):
+            return torch.broadcast_tensors(x)[0].grad
+
+        def fn(x, attr_value):
+            value = torch.broadcast_tensors(x)[0]
+            set_tensor_test_attr(value, attr_value)
+            return value
+
+        x = torch.randn(4, requires_grad=True)
+        x.grad = torch.randn(4)
+        self.assertIs(
+            torch.compile(
+                read_existing_grad_through_output, backend="eager", fullgraph=True
+            )(x),
+            x.grad,
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on unsupported type"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, torch.randn(4))
+        self.assertFalse(hasattr(x, "_dynamo_test_attr"))
+
+    def test_tensor_setattr_on_nested_repeated_tensor_object_graph_breaks(self):
+        @torch.compiler.allow_in_graph
+        def nested_repeated_output(x):
+            value = x + 1
+            return value, (value,)
+
+        def fn(x, attr_value):
+            values = nested_repeated_output(x)
+            set_tensor_test_attr(values[0], attr_value)
+            return hasattr(values[1][0], "_dynamo_test_attr")
+
+        self.assertTrue(fn(torch.randn(4), torch.randn(4)))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on unsupported type"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(4), torch.randn(4)
+            )
 
     @unittest.skipIf(
         not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
@@ -4221,6 +4329,78 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             )
             torch._dynamo.reset()
 
+    def test_numpy_operator_with_default_device_context(self):
+        def fn(input_image):
+            rounded = np.round(input_image)
+            return rounded * 64.0, 64.0 * rounded, None
+
+        x = np.ones((2, 3, 4), dtype=np.uint8)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        # CPU is sufficient to exercise DeviceContext/TorchFunctionMode handling.
+        with torch.device("cpu"):
+            result = opt_fn(x)
+
+        expected = fn(x)
+        self.assertEqual(type(result[0]), np.ndarray)
+        self.assertEqual(type(result[1]), np.ndarray)
+        self.assertEqual(result, expected)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_operator_ignores_torch_function_mode(self):
+        class RewriteMultiply(torch.overrides.TorchFunctionMode):
+            def __init__(self):
+                self.multiply_count = 0
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if func in (torch.mul, torch.multiply):
+                    self.multiply_count += 1
+                    return args[0]
+                return func(*args, **(kwargs or {}))
+
+        def fn(x):
+            return x * 4.0
+
+        x = np.arange(4, dtype=np.float32)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        mode = RewriteMultiply()
+
+        with mode:
+            result = opt_fn(x)
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(mode.multiply_count, 0)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_operator_with_tensor_subclass(self):
+        class DisabledTorchFunctionTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        def fn(array, tensor):
+            # ndarray on the left defers to the tensor's reflected method.
+            return tensor * array, array / tensor
+
+        array = np.arange(4, dtype=np.float32)
+        for tensor in (
+            torch.arange(1, 5, dtype=torch.float32),
+            torch.arange(1, 5, dtype=torch.float32).as_subclass(
+                DisabledTorchFunctionTensor
+            ),
+        ):
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+            with torch.device("cpu"):
+                expected = fn(array, tensor)
+                result = opt_fn(array, tensor)
+
+            for got, want in zip(result, expected):
+                self.assertIs(type(got), type(want))
+            self.assertEqual(result, expected)
+            self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
             a = x.numpy()
@@ -5246,6 +5426,53 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNot(d.b, p.b)  # deep copy clones the list
         self.assertIs(type(d), Plain)
 
+    def test_copy_reduce_override(self):
+        # object.__reduce_ex__ must defer to a type's overridden __reduce__
+        # rather than the copyreg __newobj__ path. Exercise both a plain custom
+        # class and the pure-Python functools.partial (which returns func plus a
+        # 4-tuple state consumed by __setstate__).
+        from test.support.import_helper import import_fresh_module
+
+        class Custom:
+            def __init__(self, a, b=None):
+                self.a = a
+                self.b = b
+
+            def __reduce__(self):
+                return (type(self), (self.a,), {"b": self.b})
+
+            def __setstate__(self, state):
+                self.b = state["b"]
+
+        def fn(o):
+            return copy.copy(o), copy.deepcopy(o)
+
+        # graph break on equality comparison for py_functools.args tuples
+        cfn = torch.compile(fn, fullgraph=False, backend="eager")
+
+        obj = Custom(1, [10, 20])
+        c, d = cfn(obj)
+        self.assertEqual(c.a, 1)
+        self.assertIs(c.b, obj.b)  # shallow copy shares the list from state
+        self.assertEqual(d.a, 1)
+        self.assertIsNot(d.b, obj.b)  # deep copy clones the list
+        self.assertEqual(d.b, obj.b)
+
+        py_functools = import_fresh_module("functools", blocked=["_functools"])
+        p = py_functools.partial(sorted, ["asdf"], key=lambda t: t[0])
+        p.attr = [1, 2]
+        c, d = cfn(p)
+
+        self.assertIs(c.func, p.func)
+        self.assertIs(c.args, p.args)
+        self.assertIs(c.keywords, p.keywords)
+        self.assertIs(c.attr, p.attr)  # shallow copy shares __dict__ attr
+
+        self.assertEqual(d.args, p.args)
+        self.assertEqual(list(d.keywords), list(p.keywords))
+        self.assertIsNot(d.attr, p.attr)  # deep copy clones __dict__ attr
+        self.assertEqual(d.attr, p.attr)
+
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
@@ -5661,6 +5888,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         with self.assertRaises(TypeError):
             fn(torch.randn(4))
+
+    @parametrize(
+        "case",
+        [
+            subtest("no_args", name="no_args"),
+            subtest("one_arg", name="one_arg"),
+            subtest("too_many_args", name="too_many_args"),
+            subtest("keyword_arg", name="keyword_arg"),
+        ],
+    )
+    def test_getattr_wrong_args_raises(self, case):
+        def fn(x):
+            try:
+                if case == "no_args":
+                    return getattr()
+                if case == "one_arg":
+                    return getattr(x)
+                if case == "too_many_args":
+                    return getattr(x, "shape", None, None)
+                return getattr(x, name="shape")
+            except TypeError as exc:
+                return x.sin(), str(exc)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_user_defined_class_name(self):
         class MyClassFoo:
@@ -7728,8 +7981,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def gn(x):
             return
 
-        torch._dynamo.config.reorderable_logging_functions.add(gn)
-
         @torch.compile(backend="eager")
         def fn(x):
             x = x + 1
@@ -7738,7 +7989,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             return x + 4
 
         # If this doesn't crash, the test passes
-        fn(torch.ones(3))
+        with torch._dynamo.config.patch(reorderable_logging_functions={gn}):
+            fn(torch.ones(3))
 
     @parametrize("sequence_type", [torch.Size, tuple, list])
     @parametrize("shape", [(), (0,), (1, 4), (3, 4)])
@@ -8773,6 +9025,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertTrue(torch.allclose(f(), torch.tensor([2.0])))
 
+    def test_opaque_value_instance_staticmethod(self):
+        from torch._library.opaque_object import register_opaque_type
+
+        class Quantizer:
+            def __eq__(self, other):
+                return type(self) is type(other)
+
+            def __hash__(self):
+                return hash(type(self))
+
+            def __fx_repr__(self):
+                name = type(self).__name__
+                return f"{name}()", {name: type(self)}
+
+            @staticmethod
+            def get_shape(shape):
+                return shape
+
+        register_opaque_type(Quantizer, typ="value")
+        q = Quantizer()
+
+        def fn(x):
+            return x + q.get_shape((3,))[0]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(3)), torch.full((3,), 3.0))
+
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
             @abc.abstractclassmethod
@@ -9190,6 +9469,339 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
+
+    @parametrize(
+        "spelling",
+        [
+            "single",
+            "union",
+            "tuple",
+            "union_rev",
+            "optional",
+            "mixed",
+            "nested",
+            "separate",
+            "abc_union",
+            "const_proto",
+        ],
+    )
+    def test_isinstance_runtime_checkable_protocol_classinfo(self, spelling):
+        # https://github.com/pytorch/pytorch/issues/195969
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class HasFoo(typing.Protocol):
+            def foo(self) -> int: ...
+
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        class Registered(abc.ABC):
+            pass
+
+        class Obj:
+            ports = (1, 2)
+
+            def foo(self) -> int:
+                return 1
+
+        class Other:
+            pass
+
+        Registered.register(Other)
+
+        checks = {
+            "single": lambda o: isinstance(o, HasPorts),
+            "union": lambda o: isinstance(o, HasPorts | HasFoo),
+            "tuple": lambda o: isinstance(o, (HasPorts, HasFoo)),
+            "union_rev": lambda o: isinstance(o, HasFoo | HasPorts),
+            "optional": lambda o: isinstance(o, HasPorts | None),
+            "mixed": lambda o: isinstance(o, (int, HasPorts)),
+            "nested": lambda o: isinstance(o, ((HasPorts,), HasFoo)),
+            "separate": lambda o: isinstance(o, HasPorts) or isinstance(o, HasFoo),
+            "abc_union": lambda o: isinstance(o, Registered | HasPorts),
+            "const_proto": lambda o: isinstance(o, HasReal | HasFoo),
+        }
+        check = checks[spelling]
+
+        def fn(x, o):
+            return x + 1 if check(o) else x - 1
+
+        x = torch.ones(3)
+        for o in (Obj(), Other(), None, 3, [1, 2]):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o), fn(x, o), msg=repr(o))
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_isinstance_protocol_with_unspecialized_int(self):
+        # An unspecialized int is a SymNodeVariable with no wrapped object, but
+        # attribute lookup on an int cannot depend on its value, so the Protocol
+        # answer is fixed by the type and needs no graph break.
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        def matches(x, n):
+            return x + 1 if isinstance(n, HasPorts | HasReal) else x - 1
+
+        def misses(x, n):
+            return x + 1 if isinstance(n, HasPorts) else x - 1
+
+        x = torch.ones(3)
+        for fn in (matches, misses):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            for n in (3, 5):
+                self.assertEqual(opt_fn(x, n), fn(x, n), msg=repr(n))
+            # The int stayed symbolic, so the two values share one graph.
+            self.assertEqual(cnt.frame_count, 1)
+
+    def test_isinstance_protocol_member_order_effects(self):
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        # A plain member matching first answers without the wrapped object, so
+        # the Protocol member is never reached and there is no graph break.
+        def plain_member_matches_first(x):
+            return x + 1 if isinstance([x], (list, HasPorts)) else x - 1
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(
+            plain_member_matches_first, backend="eager", fullgraph=True
+        )
+        self.assertEqual(opt_fn(x), plain_member_matches_first(x))
+
+        # A str cannot carry the attribute the Protocol reads, so the answer
+        # comes from the type in either member order and the lazy constant keeps
+        # its type-only guard. Neither spelling may specialize on the value.
+        def plain_first(x, v):
+            return x + 1 if isinstance(v, (str, HasReal)) else x - 1
+
+        def hooked_first(x, v):
+            return x + 1 if isinstance(v, (HasReal, str)) else x - 1
+
+        for fn in (plain_first, hooked_first):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt)
+            for value in ("hello", "world"):
+                self.assertEqual(opt_fn(x, value), fn(x, value))
+            self.assertEqual(cnt.frame_count, 1, msg=fn.__name__)
+
+    def test_isinstance_protocol_without_issubclass_graph_breaks(self):
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        def fn(x):
+            def inner():
+                return x
+
+            # A function is built during tracing, so Dynamo has no Python object
+            # to run the Protocol's __instancecheck__ on, and unlike a list a
+            # function carries a __dict__, so its type does not answer either.
+            # main answered False here by comparing class identity, which
+            # happens to match eager for this case and contradicts it whenever
+            # the attribute is present. Breaking is the honest answer.
+            return x + 1 if isinstance(inner, HasPorts) else x - 1
+
+        x = torch.ones(3)
+        with self.assertRaisesRegex(Unsupported, "does not support issubclass"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_isinstance_value_reading_instancecheck_on_traced_list(self):
+        # This hook reads the instance, not its attributes, so answering it from
+        # a representative empty list would be wrong (here it raises IndexError).
+        # The traced list is reconstructible, so the real object answers.
+        class IndexMeta(type):
+            def __subclasscheck__(cls, subclass):
+                raise TypeError("nope")
+
+            def __instancecheck__(cls, instance):
+                return instance[0] == 1
+
+        class First1(metaclass=IndexMeta):
+            pass
+
+        def fn(x):
+            lst = [1, 2, 3]
+            return x + 1 if isinstance(lst, First1) else x - 1
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_isinstance_inherited_instancecheck_metaclass(self):
+        # __instancecheck__ resolves through the metaclass MRO, so a hook that is
+        # inherited rather than defined directly still takes the object path.
+        class Meta(abc.ABCMeta):
+            pass
+
+        class Base(metaclass=Meta):
+            pass
+
+        class Obj(Base):
+            pass
+
+        def subscripted_generic(x, o):
+            # typing._GenericAlias inherits __instancecheck__ from
+            # _BaseGenericAlias and rejects subscripted generics
+            try:
+                isinstance(o, typing.List[int])
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        def inherited_abcmeta(x, o):
+            return x + 1 if isinstance(o, Base) else x - 1
+
+        x = torch.ones(3)
+        o = Obj()
+        for fn in (subscripted_generic, inherited_abcmeta):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o), fn(x, o), msg=fn.__name__)
+
+    def test_isinstance_protocol_on_nn_module(self):
+        @typing.runtime_checkable
+        class HasWeight(typing.Protocol):
+            weight: torch.Tensor
+
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        def fn(x, mod):
+            return x + 1 if isinstance(mod, HasPorts | HasWeight) else x - 1
+
+        x = torch.ones(3)
+        mod = torch.nn.Linear(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, mod), fn(x, mod))
+
+    def test_isinstance_does_not_specialize_value_independent_constant(self):
+        # Neither hook can see anything about a str that its type does not
+        # already fix, so the answer must not realize the constant and guard
+        # its value. Both spellings used to recompile once per value.
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        def protocol_member(t, v):
+            return t + 1 if isinstance(v, HasReal) else t - 1
+
+        def abc_member(t, v):
+            return t + 1 if isinstance(v, collections.abc.Sequence) else t - 1
+
+        t = torch.randn(3)
+        for fn in (protocol_member, abc_member):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt)
+            for v in ("a", "b", "c", "d"):
+                self.assertEqual(opt_fn(t, v), fn(t, v), msg=v)
+            self.assertEqual(cnt.frame_count, 1, msg=fn.__name__)
+
+    def test_isinstance_instancecheck_raises_non_str_args(self):
+        # Exception args are not all strings; a raw int used to reach the
+        # variable-tracker machinery and fail with an internal AttributeError.
+        class NonStrMeta(type):
+            def __subclasscheck__(cls, subclass):
+                raise TypeError("msg", 42)
+
+            def __instancecheck__(cls, instance):
+                raise TypeError("msg", 42)
+
+        class C(metaclass=NonStrMeta):
+            pass
+
+        class Obj:
+            pass
+
+        def fn(x, o):
+            try:
+                isinstance(o, C)
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        x, o = torch.ones(3), Obj()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, o), fn(x, o))
+
+    def test_isinstance_non_runtime_checkable_protocol_raises(self):
+        class NotRuntime(typing.Protocol):
+            ports: tuple[int, ...]
+
+        @typing.runtime_checkable
+        class HasFoo(typing.Protocol):
+            def foo(self) -> int: ...
+
+        class Obj:
+            ports = (1, 2)
+
+        def fn(x, o):
+            try:
+                isinstance(o, NotRuntime | HasFoo)
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        x = torch.ones(3)
+        o = Obj()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, o), fn(x, o))
+
+    def test_isinstance_tuple_short_circuits_before_invalid_member(self):
+        # CPython validates tuple members lazily, left to right, so a match
+        # before an invalid member returns True instead of raising.
+        @typing.runtime_checkable
+        class HasPorts(typing.Protocol):
+            ports: tuple[int, ...]
+
+        class Obj:
+            ports = (1, 2)
+
+        class Other:
+            pass
+
+        class MyError(Exception):
+            pass
+
+        def fn(x, o):
+            try:
+                hit = isinstance(o, (HasPorts, 1))
+            except TypeError:
+                return x - 1
+            return x + 1 if hit else x
+
+        def fn_exc_class(x):
+            return x + 1 if isinstance(MyError, (type, 1)) else x - 1
+
+        x = torch.ones(3)
+        for o in (Obj(), Other(), 3):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x, o), fn(x, o), msg=repr(o))
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn_exc_class, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn_exc_class(x))
 
     def test_tensor_isinstance_custom_instancecheck_graph_break(self):
         shape_context = threading.local()
@@ -10905,9 +11517,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             get_instruction_source_311(f.__code__, insts[op_offset]),
             """\
             a = ("🔥🔥🔥" +
-                ~~~~~~~~
+                ~~~~~~~~~~~
                 + "🔥🔥") + b
-                ~~~~~~~~^~~
+                ~~~~~~~~~~^~~
 """,
         )
 
@@ -14118,8 +14730,13 @@ def ___make_guard_fn():
 
         x = torch.randn([0, 1, 2, 3, 4, 5])
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "infinite generator"
+        # symbolic_convert imports the limit by value, so patch it there. A small
+        # limit exercises the same bail-out without tracing 100k YIELD_VALUEs.
+        with (
+            unittest.mock.patch.object(
+                torch._dynamo.symbolic_convert, "MAX_ITERATOR_LIMIT", 100
+            ),
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "infinite generator"),
         ):
             compiled_fn(x)
 
@@ -15867,6 +16484,7 @@ fn
         with self.assertRaises(ImportError):
             fn(x)
 
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_dynamo_cache_move_to_front(self):
         def fn(x, const):
             return x + const
@@ -16951,6 +17569,35 @@ fn
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_property_isabstractmethod_raises(self):
+        class NotBool:
+            def __bool__(self):
+                raise ValueError("truth-test failure")
+
+        def accessor(*args):
+            pass
+
+        accessor.__isabstractmethod__ = NotBool()
+
+        def fn(t, prop):
+            try:
+                prop.__isabstractmethod__
+            except ValueError:
+                return t + 1
+            return t - 1
+
+        for accessor_index in range(3):
+            with self.subTest(accessor_index=accessor_index):
+                accessors = [None, None, None]
+                accessors[accessor_index] = accessor
+                prop = property(*accessors)
+                compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+                for value in (0.0, 2.0):
+                    t = torch.tensor(value)
+                    self.assertEqual(fn(t, prop), t + 1)
+                    self.assertEqual(compiled_fn(t, prop), t + 1)
+
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
         with self.assertRaisesRegex(
@@ -17548,6 +18195,95 @@ fn
         self.assertEqual(res, t.sin())
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_shared_mutation(self):
+        def fn(t, wrap_in_tuple):
+            state = ([],) if wrap_in_tuple else []
+
+            class C:
+                def first(self):
+                    target = state[0] if wrap_in_tuple else state
+                    target.append(1)
+
+                def second(self):
+                    target = state[0] if wrap_in_tuple else state
+                    target.append(2)
+
+            obj = C()
+            obj.first()
+            obj.second()
+            target = state[0] if wrap_in_tuple else state
+            return t + len(target), tuple(target)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.tensor(0.0)
+
+        for wrap_in_tuple in (False, True):
+            with self.subTest(wrap_in_tuple=wrap_in_tuple):
+                expected = (t + 2, (1, 2))
+                self.assertEqual(fn(t, wrap_in_tuple), expected)
+                self.assertEqual(compiled_fn(t, wrap_in_tuple), expected)
+
+    def test_contextlib_closing(self):
+        import contextlib
+
+        class Closeable:
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+
+        def fn(t, obj, raise_error):
+            caught = False
+            try:
+                with contextlib.closing(obj) as resource:
+                    same_object = resource is obj
+                    if raise_error:
+                        raise ValueError("test error")
+            except ValueError:
+                caught = True
+
+            return t + obj.close_count, same_object, caught
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.tensor(0.0)
+
+        for raise_error in (False, True):
+            with self.subTest(raise_error=raise_error):
+                eager_obj = Closeable()
+                compiled_obj = Closeable()
+                expected = (t + 1, True, raise_error)
+
+                self.assertEqual(fn(t, eager_obj, raise_error), expected)
+                self.assertEqual(compiled_fn(t, compiled_obj, raise_error), expected)
+                self.assertEqual(eager_obj.close_count, 1)
+                self.assertEqual(compiled_obj.close_count, 1)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_rebinding(self):
+        def fn(t):
+            state = []
+
+            class C:
+                def replace(self):
+                    nonlocal state
+                    state = [1]
+
+            C().replace()
+            return t + len(state), tuple(state)
+
+        t = torch.tensor(0.0)
+        expected = (t + 1, (1,))
+        self.assertEqual(fn(t), expected)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        # Rebinding the materialized sourceless cell remains unsupported.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Write to immutable cell"
+        ):
+            compiled_fn(t)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_return___build_class__(self):
         @torch.compile(fullgraph=True, backend="eager")
         def fn(t):
@@ -17564,6 +18300,35 @@ fn
         cls, res = fn(t)
         self.assertEqual(res, t.sin())
         self.assertEqual(cls.__name__, "NonTensor")
+
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_body_rebinding(self):
+        def fn(t):
+            state = []
+
+            class C:
+                nonlocal state
+                state = [1]
+
+                def get(self):
+                    return tuple(state)
+
+            return t + 1, C().get(), tuple(state)
+
+        t = torch.tensor(0.0)
+        expected = (t + 1, (1,), (1,))
+        self.assertEqual(fn(t), expected)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Invalid call to __build_class__"
+        ):
+            compiled_fn(t)
+
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        self.assertEqual(compiled_fn(t), expected)
 
     @unittest.expectedFailure
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
@@ -18057,6 +18822,34 @@ fn
         self.assertEqual(res[8], -1)
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
+
+    @unittest.expectedFailure
+    def test_builtin_numeric_unbound_method_constant_fold(self):
+        def fn():
+            out = [
+                complex.__radd__(3j, 4.0),
+                float.__rsub__(3.0, 1),
+                float.__sub__(3.0, 1),
+                float.__rpow__(2.0, 3),
+                float.__radd__(3.0, "x"),
+                int.__radd__(3, 4),
+                int.__rsub__(3, 10),
+                int.__radd__(3, 4.5),
+                int.__pow__(3, 4, 5),
+                int.__repr__(True),
+                float.__round__(2.567, 1),
+            ]
+            try:
+                float.__rtruediv__(0.0, 1)
+            except ZeroDivisionError as e:
+                out.append(str(e))
+            try:
+                int.__add__("a", 1)
+            except TypeError as e:
+                out.append(str(e))
+            return out
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
     def test_builtin_constant_fold_str_conversions(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -18923,6 +19716,64 @@ def forward(self, L_x_ : torch.Tensor):
 
         with self.assertRaises(RuntimeError):
             fn(torch.randn(3))
+
+    def test_builtin_lhs_dispatches_to_subclass_ror(self):
+        # A set subclass that inherits __or__ but overrides __ror__ must still
+        # win reflected dispatch when the lhs is a plain builtin set.
+        class S(set):
+            def __ror__(self, other):
+                return "reverse"
+
+        def fn(x, value):
+            return x + 1, {1} | value
+
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.tensor(1)
+        self.assertEqual(opt_fn(x, S({2})), fn(x, S({2})))
+        self.assertEqual(opt_fn(x, S({2}))[1], "reverse")
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_subclass_lhs_dispatches_to_deeper_subclass_ror(self):
+        # Subtype priority: when the rhs is a strict subclass of the lhs type
+        # and overrides the reflected method, the reflected method runs first.
+        class BaseSet(set):
+            pass
+
+        class SubSet(BaseSet):
+            def __ror__(self, other):
+                return "reverse"
+
+        def fn(x, lhs, rhs):
+            return x + 1, lhs | rhs
+
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.tensor(1)
+        lhs, rhs = BaseSet({1}), SubSet({2})
+        self.assertEqual(opt_fn(x, lhs, rhs), fn(x, lhs, rhs))
+        self.assertEqual(opt_fn(x, lhs, rhs)[1], "reverse")
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_deque_subclass_attr_only_mutation_keeps_iterator_valid(self):
+        # Setting only an instance attribute must not replay the deque
+        # contents (clear + extend), which would invalidate live iterators.
+        class D(collections.deque):
+            pass
+
+        def fn(x, value):
+            value.marker = "set"
+            return x + 1
+
+        value = D([1, 2])
+        iterator = iter(value)
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn(torch.tensor(1), value)
+        self.assertEqual(value.marker, "set")
+        self.assertEqual(list(value), [1, 2])
+        self.assertEqual(next(iterator), 1)
+        self.assertEqual(cnts.frame_count, 1)
 
 
 instantiate_parametrized_tests(MiscTests)
