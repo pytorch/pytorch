@@ -127,14 +127,20 @@ _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
 
 
-def _fakes(ts: Sequence[torch.Tensor], *, int64_extent: bool = False) -> list[Any]:
+def _fakes(
+    ts: Sequence[torch.Tensor],
+    *,
+    int64_extent: bool = False,
+    alignments: Sequence[int] | None = None,
+) -> list[Any]:
     # Dynamic flat descriptors let one structural kernel serve every length.
     return [
         _L.fake_compact(
             torch2cute[t.dtype],
             (_L.sym_int64() if int64_extent else _L.sym(),),
+            align=None if alignments is None else alignments[i],
         )
-        for t in ts
+        for i, t in enumerate(ts)
     ]
 
 
@@ -179,6 +185,23 @@ def _launch(
 ) -> None:
     # _PLAN caches boxed geometry (~6us); _COMPILE_CACHE deduplicates structural kernels.
     op_name = key[1]
+    alignments = None
+    itree = op.tile.itree
+    if (
+        op.tile.order == "inner_tree"
+        and itree.shape == "combine"
+        and itree.combine_tile
+    ):
+        # Async atoms require the partial buffers' proven alignment in the fake descriptors.
+        alignments = tuple(itree.combine_grp * t.element_size() for t in ins)
+        if any(
+            _L.supported_alignment(t, align) < align
+            for t, align in zip(ins, alignments)
+        ):
+            raise ValueError(
+                "inner-tree async combine requires aligned partial buffers"
+            )
+        key += (("input_alignments", alignments),)
     key = (str(ins[0].device),) + key
     plan = _PLAN.get((key, op.geom_sig))
     if plan is None:
@@ -189,7 +212,7 @@ def _launch(
                 op.tile,
                 # A flat input storage span can exceed 2**31 even though each
                 # decoded kept and reduced extent fits Int32.
-                _fakes(ins, int64_extent=True),
+                _fakes(ins, int64_extent=True, alignments=alignments),
                 _fakes(
                     outs,
                     int64_extent=op.wide_output
