@@ -2475,6 +2475,12 @@ class GuardBuilder(GuardBuilderBase):
         if code in self.already_added_code_parts:
             return
 
+        reason = (
+            f"Object {ref} must not define instance attribute {attr!r}; Dynamo "
+            "specialized the compiled code assuming this attribute comes from the "
+            "object's class."
+        )
+
         mod_dict_source = f"{guard.name}.__dict__"
         mod_generic_dict_manager = base_manager.get_generic_dict_manager(
             source=mod_dict_source,
@@ -2485,7 +2491,7 @@ class GuardBuilder(GuardBuilderBase):
         mod_generic_dict_manager.add_dict_contains_guard(
             False,
             attr,
-            get_verbose_code_parts(code, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)

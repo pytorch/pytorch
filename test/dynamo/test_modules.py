@@ -3404,6 +3404,36 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         helper()
 
+    def test_forward_monkeypatch_recompilation_message(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        def replacement(self, x):
+            return x.cos()
+
+        def fn(mod, x):
+            return mod(x)
+
+        failures = []
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        mod = MyModule()
+        x = torch.randn(2)
+        compiled_fn(mod, x)
+        mod.forward = types.MethodType(replacement, mod)
+        compiled_fn(mod, x)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("not ___dict_contains('forward', mod.__dict__)", failures[0])
+        expected = (
+            "(HINT: Object mod must not define instance attribute 'forward'; Dynamo "
+            "specialized the compiled code assuming this attribute comes from the "
+            "object's class."
+        )
+        self.assertIn(expected, failures[0])
+
     def test_monkeypatching_forward_inside_compiled_region(self):
         class Mod(torch.nn.Module):
             def forward(self, x):
