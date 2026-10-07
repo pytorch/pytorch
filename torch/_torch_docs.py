@@ -2115,6 +2115,11 @@ Args:
     input (Tensor): the tensor to split
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 
+.. seealso::
+
+    :func:`torch.unbind` removes a tensor dimension by returning a tuple of
+    slices along it.
+
 Example::
 
     >>> x = torch.arange(8)
@@ -13435,6 +13440,11 @@ Returns a tuple of all slices along a given dimension, already without it.
 Arguments:
     input (Tensor): the tensor to unbind
     dim (int): dimension to remove
+
+.. seealso::
+
+    :func:`torch.tensor_split` splits a tensor into multiple views along a
+    dimension.
 
 Example::
 
