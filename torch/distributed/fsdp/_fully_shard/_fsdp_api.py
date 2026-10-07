@@ -83,31 +83,36 @@ class MixedPrecisionPolicy:
         field(default=None, kw_only=True)
     )
 
-    def _resolve_for_param(self, param: nn.Parameter) -> "MixedPrecisionPolicy":
-        if self.param_dtype_override_fn is None:
-            return self
-        param_dtype = self.param_dtype
-        if self.param_dtype_override_fn is not None:
-            param_dtype_override = self.param_dtype_override_fn(param)
-            if param_dtype_override is not None:
-                if not isinstance(param_dtype_override, torch.dtype):
-                    raise ValueError(
-                        "param_dtype_override_fn must return a torch.dtype or None but got "
-                        f"{type(param_dtype_override)}"
-                    )
-                if param_dtype_override not in (self.param_dtype, param.dtype):
-                    raise ValueError(
-                        "param_dtype_override_fn must return None, param_dtype, or the "
-                        "parameter's original dtype but got "
-                        f"{param_dtype_override} for a parameter with dtype "
-                        f"{param.dtype} and param_dtype {self.param_dtype}"
-                    )
-                param_dtype = param_dtype_override
-        return replace(
-            self,
-            param_dtype=param_dtype,
-            param_dtype_override_fn=None,
-        )
+
+def _resolve_mp_policy_for_param(
+    mp_policy: MixedPrecisionPolicy, param: nn.Parameter
+) -> MixedPrecisionPolicy:
+    # Callers may pass duck-typed policies (e.g. vendored copies of this
+    # dataclass) that predate ``param_dtype_override_fn``.
+    param_dtype_override_fn = getattr(mp_policy, "param_dtype_override_fn", None)
+    if param_dtype_override_fn is None:
+        return mp_policy
+    param_dtype = mp_policy.param_dtype
+    param_dtype_override = param_dtype_override_fn(param)
+    if param_dtype_override is not None:
+        if not isinstance(param_dtype_override, torch.dtype):
+            raise ValueError(
+                "param_dtype_override_fn must return a torch.dtype or None but got "
+                f"{type(param_dtype_override)}"
+            )
+        if param_dtype_override not in (mp_policy.param_dtype, param.dtype):
+            raise ValueError(
+                "param_dtype_override_fn must return None, param_dtype, or the "
+                "parameter's original dtype but got "
+                f"{param_dtype_override} for a parameter with dtype "
+                f"{param.dtype} and param_dtype {mp_policy.param_dtype}"
+            )
+        param_dtype = param_dtype_override
+    return replace(
+        mp_policy,
+        param_dtype=param_dtype,
+        param_dtype_override_fn=None,
+    )
 
 
 class Comm(ABC):

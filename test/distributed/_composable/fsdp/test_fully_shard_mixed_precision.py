@@ -13,6 +13,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._fully_shard._fsdp_api import _resolve_mp_policy_for_param
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
     foreach_reduce_scatter_copy_in,
@@ -79,13 +80,13 @@ class TestMixedPrecisionPolicy(TestCase):
             param_dtype_override_fn=param_dtype_override_fn,
         )
         self.assertEqual(
-            policy._resolve_for_param(default_param),
+            _resolve_mp_policy_for_param(policy, default_param),
             MixedPrecisionPolicy(
                 param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
             ),
         )
         self.assertEqual(
-            policy._resolve_for_param(override_param),
+            _resolve_mp_policy_for_param(policy, override_param),
             MixedPrecisionPolicy(
                 param_dtype=torch.float32, reduce_dtype=torch.bfloat16
             ),
@@ -96,7 +97,7 @@ class TestMixedPrecisionPolicy(TestCase):
 
         invalid_policy = MixedPrecisionPolicy(param_dtype_override_fn=invalid_dtype_fn)
         with self.assertRaisesRegex(ValueError, "must return a torch.dtype or None"):
-            invalid_policy._resolve_for_param(default_param)
+            _resolve_mp_policy_for_param(invalid_policy, default_param)
 
     def test_param_dtype_override_fn_is_keyword_only(self):
         self.assertEqual(
@@ -1321,6 +1322,29 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         self.assertEqual(forward_inputs[model].dtype, torch.float32)
         self.assertEqual(forward_inputs[model.c1].dtype, torch.float16)
         self.assertEqual(forward_inputs[model.c2].dtype, torch.float32)
+
+    @skip_if_lt_x_gpu(1)
+    def test_duck_typed_mp_policy(self):
+        # Mirrors downstream copies of ``MixedPrecisionPolicy`` that predate
+        # ``param_dtype_override_fn`` and are passed to ``fully_shard``
+        @dataclasses.dataclass(frozen=True)
+        class DuckTypedMixedPrecisionPolicy:
+            param_dtype: torch.dtype | None = None
+            reduce_dtype: torch.dtype | None = None
+            output_dtype: torch.dtype | None = None
+            cast_forward_inputs: bool = True
+
+        forward_inputs: dict[nn.Module, torch.Tensor] = {}
+        model = SaveForwardInputsModel(
+            forward_inputs=forward_inputs, cast_forward_inputs=False
+        ).to(device_type)
+        mp_policy = DuckTypedMixedPrecisionPolicy(param_dtype=torch.float16)
+        fully_shard(model.c1, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+        model(torch.zeros(2, 100, device=device_type)).sum().backward()
+        self.assertEqual(forward_inputs[model].dtype, torch.float16)
+        self.assertEqual(forward_inputs[model.c1].dtype, torch.float16)
+        self.assertEqual(forward_inputs[model.c2].dtype, torch.float16)
 
     @skip_if_lt_x_gpu(1)
     def test_submodules_with_external_inputs(self):
