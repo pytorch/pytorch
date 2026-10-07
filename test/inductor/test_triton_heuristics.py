@@ -316,6 +316,31 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(scalar_tiled_products[0], 4096)
         self.assertIn(baseline_rblock, scalar_tiled_products)
 
+    def test_strided_reduction_configs(self):
+        # sum(0) of a row-major tensor: the reduction dim is not contiguous
+        device = self._fake_cuda_device_properties()._replace(major=10, cc=100)
+        triton_meta = {"device": device}
+
+        def r_blocks(size_hints, tiling_scores=None):
+            inductor_meta = {"reduction_hint": ReductionHint.DEFAULT}
+            if tiling_scores is not None:
+                inductor_meta["tiling_scores"] = tiling_scores
+            configs = _reduction_configs(
+                size_hints=size_hints,
+                inductor_meta=inductor_meta,
+                triton_meta=triton_meta,
+            )
+            return [config.kwargs["R0_BLOCK"] for config in configs]
+
+        tiled = {"y": 128, "x": 128, "r0_": 8192}
+        self.assertIn(128, r_blocks(tiled, {"y": 1, "x": 100, "r0_": 0}))
+        self.assertNotIn(128, r_blocks(tiled, {"y": 1, "x": 100, "r0_": 10}))
+        tiled_small = {"y": 2048, "x": 128, "r0_": 256}
+        self.assertIn(128, r_blocks(tiled_small, {"y": 1, "x": 100, "r0_": 0}))
+        self.assertNotIn(128, r_blocks(tiled_small, {"y": 1, "x": 100, "r0_": 10}))
+        self.assertIn(128, r_blocks({"x": 16384, "r0_": 8192}))
+        self.assertNotIn(128, r_blocks({"x": 16384, "r0_": 512}))
+
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
             pass
