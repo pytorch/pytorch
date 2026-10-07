@@ -12,7 +12,11 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager, ExitStack, nullcontext
 from itertools import chain
-from typing import Any, cast, TypeAlias
+from typing import Any, cast, TYPE_CHECKING, TypeAlias
+
+
+if TYPE_CHECKING:
+    import weakref
 
 import torch
 import torch._dynamo
@@ -2579,12 +2583,10 @@ def _export_for_training(
         )
 
         active_fakes = fake_tensor_tls.non_strict_export_fake_tensor_tracker
-        legit_leak = find_legit_leaks_from_referrers(active_fakes)
+        legit_leak: weakref.WeakSet = find_legit_leaks_from_referrers(active_fakes)
         leak_sources: list[str] = []
         if len(legit_leak) > 0:
             for fake_val in legit_leak:
-                if not isinstance(fake_val, torch.Tensor):
-                    continue
                 if id(fake_val) in _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT:
                     node = _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(fake_val)]
                     stack_trace = node.meta.get("stack_trace")

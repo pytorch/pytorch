@@ -827,20 +827,14 @@ class MetaTensorDesc(Generic[_TensorT]):
 # FakeTensor as src, we MUST NOT run the copy/clone operation.  A better way
 # to do this would be to not use no_dispatch and instead just disable fake
 # tensor mode only (allowing for subclass dispatch to occur)
-# A cpp fake is a plain torch.Tensor (not a subclass), so the type check alone
-# misses it; is_fake_tensor catches both Python and cpp fakes.
 def _safe_copy(dst: torch.Tensor, src: torch.Tensor | None) -> None:
-    from torch._subclasses.fake_tensor import is_fake_tensor
-
-    if type(src) is not torch.Tensor or is_fake_tensor(src):
+    if type(src) is not torch.Tensor:
         return
     dst.copy_(src)
 
 
 def _safe_clone(src: torch.Tensor) -> torch.Tensor | None:
-    from torch._subclasses.fake_tensor import is_fake_tensor
-
-    if type(src) is not torch.Tensor or is_fake_tensor(src):
+    if type(src) is not torch.Tensor:
         return None
     return src.clone()
 
