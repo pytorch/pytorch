@@ -2,8 +2,6 @@
 
 import os
 
-import run_test
-
 from tools.testing import modulefinder_determinator as _modulefinder
 
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -43,7 +41,9 @@ class DeterminationTest(TestCase):
         # but most importantly to allow us to comment on the absence
         # of a test. It would be very difficult to add a file right
         # next to a comment that says to keep it out of the list.
-        self.assertListEqual(_modulefinder.TARGET_DET_LIST, sorted(_modulefinder.TARGET_DET_LIST))
+        self.assertListEqual(
+            _modulefinder.TARGET_DET_LIST, sorted(_modulefinder.TARGET_DET_LIST)
+        )
 
     def test_config_change_only(self):
         """CI configs trigger all tests"""
@@ -51,17 +51,27 @@ class DeterminationTest(TestCase):
 
     def test_classifies_git_style_paths(self):
         """Git-style paths use / even on Windows"""
-        self.assertEqual(_modulefinder.test_impact_of_file("torch/nn/modules/linear.py"), "TORCH")
+        self.assertEqual(
+            _modulefinder.test_impact_of_file("torch/nn/modules/linear.py"), "TORCH"
+        )
         self.assertEqual(_modulefinder.test_impact_of_file("test/test_jit.py"), "TEST")
-        self.assertEqual(_modulefinder.test_impact_of_file("caffe2/python/core.py"), "CAFFE2")
+        self.assertEqual(
+            _modulefinder.test_impact_of_file("caffe2/python/core.py"), "CAFFE2"
+        )
         self.assertEqual(_modulefinder.test_impact_of_file(".ci/pytorch/test.sh"), "CI")
 
     def test_classifies_windows_style_paths(self):
         """Windows-style paths are still accepted"""
-        self.assertEqual(_modulefinder.test_impact_of_file(r"torch\nn\modules\linear.py"), "TORCH")
+        self.assertEqual(
+            _modulefinder.test_impact_of_file(r"torch\nn\modules\linear.py"), "TORCH"
+        )
         self.assertEqual(_modulefinder.test_impact_of_file(r"test\test_jit.py"), "TEST")
-        self.assertEqual(_modulefinder.test_impact_of_file(r"caffe2\python\core.py"), "CAFFE2")
-        self.assertEqual(_modulefinder.test_impact_of_file(r".ci\pytorch\test.sh"), "CI")
+        self.assertEqual(
+            _modulefinder.test_impact_of_file(r"caffe2\python\core.py"), "CAFFE2"
+        )
+        self.assertEqual(
+            _modulefinder.test_impact_of_file(r".ci\pytorch\test.sh"), "CI"
+        )
 
     def test_should_run_test_handles_git_style_paths(self):
         """should_run_test handles raw Git-style changed-file paths"""
