@@ -1128,9 +1128,6 @@ class ConvTranspose3d(_ConvTransposeNd):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose3d`.
 
-    .. note:: Currently only the FBGEMM engine is implemented.
-        Please, set the `torch.backends.quantized.engine = 'fbgemm'`
-
     For special notes, please, see :class:`~torch.ao.nn.quantized.Conv3d`
 
     Attributes:
@@ -1143,7 +1140,6 @@ class ConvTranspose3d(_ConvTransposeNd):
     Examples::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
-        >>> torch.backends.quantized.engine = 'fbgemm'
         >>> from torch.ao.nn import quantized as nnq
         >>> # With cubic kernels and equal stride
         >>> m = nnq.ConvTranspose3d(16, 33, 3, stride=2)

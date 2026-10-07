@@ -603,12 +603,9 @@ class QLinearPackWeightInt8 final {
       std::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 
-#ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM
-#if !defined(__aarch64__) && !defined(_M_ARM64)
-        || ctx.qEngine() == at::QEngine::X86
-#endif
-    ) {
+#if defined(USE_FBGEMM) && !defined(__aarch64__) && !defined(_M_ARM64)
+    if (ctx.qEngine() == at::QEngine::FBGEMM ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
     }
 #endif
@@ -642,7 +639,15 @@ class QLinearPackWeightFp16 final {
     // after fbgemm fixes the interface for their prepacking op (take fp16 input0
     weight = weight.to(ScalarType::Float);
     if (ctx.qEngine() == at::QEngine::FBGEMM ||
-        ctx.qEngine() == at::QEngine::X86) {
+        ctx.qEngine() == at::QEngine::X86
+#if defined(__aarch64__) || defined(_M_ARM64)
+        // oneDNN has no fp16 LinearPackedParams. X86/FBGEMM are not
+        // registered on AArch64, so ONEDNN (the default engine there) uses
+        // FBGEMM fp16. Elsewhere ONEDNN may be selected on CPUs where
+        // fbgemmSupportedCPU() is false, so it keeps raising below.
+        || ctx.qEngine() == at::QEngine::ONEDNN
+#endif
+    ) {
       return PackedLinearWeightFp16::prepack(
           std::move(weight), std::move(bias));
     }

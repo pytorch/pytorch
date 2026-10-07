@@ -45,7 +45,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     bytes_to_scalar, parametrize, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
-    IS_MACOS, HardwareClassification, instantiate_parametrized_tests,
+    IS_MACOS, IS_ARM64, HardwareClassification, instantiate_parametrized_tests,
 )
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
@@ -10198,6 +10198,23 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             if torch.backends.quantized.engine != qe:
                 raise AssertionError(f"qengine not set successfully: expected {qe}, got {torch.backends.quantized.engine}")
         torch.backends.quantized.engine = original_qe
+
+    @unittest.skipUnless(IS_ARM64, "AArch64 only")
+    def test_qengine_aarch64(self):
+        qengines = torch.backends.quantized.supported_engines
+        self.assertNotIn("x86", qengines)
+        self.assertNotIn("fbgemm", qengines)
+        for qe in ("x86", "fbgemm"):
+            with self.assertRaisesRegex(RuntimeError, "is not supported"):
+                torch.backends.quantized.engine = qe
+        default_qe = subprocess.check_output(
+            [sys.executable, "-c", "import torch; print(torch.backends.quantized.engine)"],
+            text=True,
+        ).strip()
+        if "onednn" in qengines:
+            self.assertEqual(default_qe, "onednn")
+        else:
+            self.assertIn(default_qe, qengines + ["none"])
 
     def test_terminate_handler_on_crash(self):
         cmd = [sys.executable, '-c', "import os; os.environ[\"TORCH_CUSTOM_TERMINATE\"] ='1'; \
