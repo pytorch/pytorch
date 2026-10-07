@@ -1913,6 +1913,90 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         for e, r in zip(expected, result):
             self.assertIs(r, e)
 
+    # =====================================================================
+    # Default tp_richcompare (object_richcompare on VariableTracker)
+    # =====================================================================
+
+    def _assert_fn_matches_eager(self, fn, *args):
+        expected = fn(*args)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(result, expected)
+
+    def test_object_richcompare_super(self):
+        class Base:
+            pass
+
+        class Child(Base):
+            def cmp(self):
+                s = super(Child, self)  # noqa: UP008
+                return s == s, s != s
+
+        self._assert_fn_matches_eager(lambda x: (x + 1, Child().cmp()), torch.ones(1))
+
+    def test_object_richcompare_super_ordering(self):
+        class Base:
+            pass
+
+        class Child(Base):
+            pass
+
+        def fn(x):
+            s = super(Child, Child())
+            try:
+                return s < s
+            except TypeError as e:
+                return str(e)
+
+        self._assert_fn_matches_eager(fn, torch.ones(1))
+
+    def test_object_richcompare_removable_handle(self):
+        x = torch.zeros(3, requires_grad=True)
+
+        def fn(t):
+            h = x.register_hook(lambda g: g)
+            return t + 1, h == h, h != h
+
+        self._assert_fn_matches_eager(fn, torch.ones(1))
+
+    def test_object_richcompare_random_class(self):
+        import random
+
+        def fn(x):
+            return x + 1, random.Random == random.Random, random.Random != int  # noqa: E721
+
+        self._assert_fn_matches_eager(fn, torch.ones(1))
+
+    def test_object_richcompare_untyped_storage(self):
+        def fn(x):
+            s = x.untyped_storage()
+            return x + 1, s == s, s != s
+
+        self._assert_fn_matches_eager(fn, torch.ones(1))
+
+    def test_object_richcompare_ne_uses_eq_truthiness(self):
+        """object.__ne__ inverts PyObject_IsTrue(type(self).__eq__(...))."""
+
+        class Truthy:
+            def __init__(self, val):
+                self.val = val
+
+            def __bool__(self):
+                return self.val
+
+        class EqOnly:
+            def __init__(self, val):
+                self.val = val
+
+            def __eq__(self, other):
+                return Truthy(self.val == other.val)
+
+        a, b, c = EqOnly(1), EqOnly(1), EqOnly(2)
+
+        def fn(x):
+            return x + 1, a != b, a != c
+
+        self._assert_fn_matches_eager(fn, torch.ones(1))
+
 
 # =====================================================================
 # Event comparison (EventVariable)
