@@ -455,8 +455,9 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             key(128, 32, 2, 1, True, swap_ab=True),
             key(128, 32, 2, 2, False, swap_ab=True),
         )
-        legal = (default, skinny[1], key(128, 64, 1, 1, True), skinny[0])
-        expected = (default, *skinny) if include_skinny else (default,)
+        m64 = key(64, 64, 1, 1, True)
+        legal = (default, skinny[1], key(128, 64, 1, 1, True), m64, skinny[0])
+        expected = (default, *skinny, m64) if include_skinny else (default,)
         self.assertEqual(
             flex_gemm_search_space(legal, varlen=varlen, dense_shape=(m, 2048)),
             expected,
@@ -3241,6 +3242,32 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("interleaved_group2_tuned", 2, False, True, 256, None),
             ("interleaved_group2_partial_n", 2, False, False, 192, {"tile_n": 128}),
             ("chunked_group2_partial_n", 2, True, False, 192, {"tile_n": 128}),
+            # 1-CTA M64 reads TMEM through 16-datapath atoms (two rows per thread).
+            (
+                "interleaved_group2_m64",
+                2,
+                False,
+                False,
+                256,
+                {"tile_m": 64, "tile_n": 64},
+            ),
+            ("chunked_group2_m64", 2, True, False, 256, {"tile_m": 64, "tile_n": 64}),
+            (
+                "interleaved_group2_m64_cluster_n2",
+                2,
+                False,
+                False,
+                256,
+                {"tile_m": 64, "tile_n": 32, "cluster_n": 2},
+            ),
+            (
+                "interleaved_group2_cluster_n2",
+                2,
+                False,
+                False,
+                256,
+                {"tile_m": 128, "tile_n": 64, "cluster_n": 2},
+            ),
         ),
         name_fn=lambda case: case[0],
     )
@@ -3296,6 +3323,26 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("flex_gemm_epilogue(", code)
         self.assertNotIn("extern_kernels.mm", code)
         self.assertEqual(actual.stride(-1), eager.stride(-1))
+        for field, value in (config or {}).items():
+            self.assertIn(f"('{field}', {value})", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_output_contraction_group4_rejects_m64(self):
+        a = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device="cuda", dtype=torch.bfloat16)
+
+        def fn(lhs, rhs):
+            return flex_gemm(
+                torch.mm,
+                (lhs, rhs),
+                lambda acc: sum(acc.view(64, 64, 4).select(-1, i) for i in range(4)),
+                kernel_options={"backend": "QUACK", "config": {"tile_m": 64}},
+            )
+
+        with self.assertRaisesRegex(Exception, "no supported GemmConfig"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -10957,7 +11004,7 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
                 {"swap_ab": True},
                 "swap_ab=True",
             ),
-            ({"tile_n": 64}, "no .*GemmConfig.*config_constraints"),
+            ({"tile_n": 32}, "no .*GemmConfig.*config_constraints"),
             ({"tile_n": 160}, "no .*GemmConfig.*config_constraints"),
         ),
         name_fn=lambda case: str(case[0]),
