@@ -5895,6 +5895,86 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_builtin_dunder_attr_access(self):
+        # Introspection attributes on a builtin (BuiltinVariable) must resolve to
+        # real constants during tracing, and missing ones must raise
+        # AttributeError, mirroring CPython getattr semantics.
+        def fn(x):
+            if max.__name__ != "max":
+                raise AssertionError(max.__name__)
+            if max.__module__ != "builtins":
+                raise AssertionError(max.__module__)
+            if not max.__doc__.startswith("max("):
+                raise AssertionError(max.__doc__)
+            try:
+                max.__annotations__
+                missing = False
+            except AttributeError:
+                missing = True
+            if not missing:
+                raise AssertionError("expected AttributeError for max.__annotations__")
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_type_dunder_attr_access(self):
+        # A builtin type exposes constant introspection attributes (including
+        # __type_params__ as an empty tuple) that must resolve during tracing.
+        def fn(x):
+            if type.__name__ != "type":
+                raise AssertionError(type.__name__)
+            if not type.__doc__.startswith("type("):
+                raise AssertionError(type.__doc__)
+            if sys.version_info >= (3, 12):
+                if type.__type_params__ != ():
+                    raise AssertionError(type.__type_params__)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_update_wrapper_from_builtin(self):
+        # functools.update_wrapper copying WRAPPER_ASSIGNMENTS from a builtin
+        # onto a locally defined wrapper: __name__/__doc__ come from the builtin,
+        # __annotations__ stays {} because the builtin lacks that attribute.
+        def fn(x):
+            def wrapper():
+                pass
+
+            functools.update_wrapper(wrapper, max)
+            if wrapper.__name__ != "max":
+                raise AssertionError(wrapper.__name__)
+            if not wrapper.__doc__.startswith("max("):
+                raise AssertionError(wrapper.__doc__)
+            if wrapper.__annotations__ != {}:
+                raise AssertionError(wrapper.__annotations__)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_wraps_decorator_from_builtin(self):
+        # functools.wraps (which calls update_wrapper) applied with a builtin as
+        # the wrapped object.
+        def fn(x):
+            @functools.wraps(max)
+            def wrapper():
+                pass
+
+            if wrapper.__name__ != "max":
+                raise AssertionError(wrapper.__name__)
+            if not wrapper.__doc__.startswith("max("):
+                raise AssertionError(wrapper.__doc__)
+            return x + 1
+
+        x = torch.tensor(1.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_lru_cache_dunder_name_access(self):
         # Accessing __name__ on an lru_cache-wrapped function during tracing
         # should return the original function's name as a constant.
@@ -6114,6 +6194,24 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_dynamic_class_attribute_raw_descriptor(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            class C:
+                def foo(self):
+                    return 1
+
+                foo.__isabstractmethod__ = True
+                foo = types.DynamicClassAttribute(foo)
+
+            descriptor = C.__dict__["foo"]
+            return descriptor.__isabstractmethod__, x + 1
+
+        is_abstract, out = fn(torch.tensor(1))
+        self.assertTrue(is_abstract)
+        self.assertEqual(out, torch.tensor(2))
+
     def test_tuplegetter_on_instance(self):
         from collections import namedtuple
 
@@ -6222,6 +6320,42 @@ class GraphModule(torch.nn.Module):
         # the function VT carries the source, so the method needs no source_fn
         self.assertFalse(hasattr(method, "source_fn"))
         self.assertIs(method.get_source(), im_func.get_source())
+
+    def test_bound_builtin_method_qualname_renamed_in_frame(self):
+        class D(dict):
+            pass
+
+        inst_bound = D(t=torch.ones(1)).get
+        cls_bound = D.fromkeys
+
+        def fn(x):
+            D.__qualname__ = "Renamed"
+            return x + 1, inst_bound.__qualname__, cls_bound.__qualname__
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected[1:], ("Renamed.get", "Renamed.fromkeys"))
+        D.__qualname__ = "D"
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), expected)
+
+    def test_bound_builtin_method_getset(self):
+        class D(dict):
+            pass
+
+        d = D(a=torch.ones(1))
+        s = {1}
+        bounds = (d.get, s.add, (1,).count, dict.fromkeys, tuple.__new__)
+
+        def fn(x):
+            out = [x + 1, bounds[0].__self__ is d, bounds[1].__self__ is s]
+            for b in bounds:
+                out += [b.__name__, b.__qualname__, b.__doc__, b.__text_signature__]
+            return out
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     # generate_pycode cannot reconstruct a TensorPropertySource, which is what
     # a symbolic size input is sourced by; the dynamic_shapes variant therefore

@@ -100,7 +100,7 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
     CUDA_VERSION=12.8.1
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
@@ -108,7 +108,7 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11)
     CUDA_VERSION=13.2.2
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
@@ -116,7 +116,7 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.2.2
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
@@ -132,7 +132,7 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11)
     CUDA_VERSION=13.4.1
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
@@ -140,7 +140,7 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.4.1
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
@@ -201,17 +201,12 @@ case "$tag" in
     CLANG_VERSION=21
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3.11)
-    if [[ $tag =~ "jammy" ]]; then
-      ANACONDA_PYTHON_VERSION=3.10
-    else
-      ANACONDA_PYTHON_VERSION=3.11
-    fi
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
-    ROCM_VERSION=10.0
+    ROCM_VERSION=10.1
     THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
     fi
@@ -224,17 +219,16 @@ case "$tag" in
     USE_MSLK=1
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx950"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
     XPU_VERSION=2026.0
     XPU_DRIVER_TYPE=LTS
     TRITON=yes
     ;;
   pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
     XPU_VERSION=2026.1
     OMIX_VERSION=0.4.0
@@ -249,14 +243,14 @@ case "$tag" in
     fi
     ;;
   pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
     KATEX=yes
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-py3-clang21-executorch)
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=21
     EXECUTORCH=yes
     ;;
@@ -287,7 +281,7 @@ case "$tag" in
     TRITON_CPU=yes
     ;;
   pytorch-linux-jammy-linter)
-    PYTHON_VERSION=3.10
+    PYTHON_VERSION=3.11
     CLANG_VERSION=18
     ;;
   pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-linter)
@@ -443,7 +437,6 @@ build_image() {
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL:-}" \
        --build-arg "USE_MSLK=${USE_MSLK:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \

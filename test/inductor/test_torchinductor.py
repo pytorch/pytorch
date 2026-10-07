@@ -118,7 +118,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     isRocmArchAnyOf,
-    MACOS_VERSION,
     MI200_ARCH,
     NAVI3_ARCH,
     NAVI_ARCH,
@@ -232,9 +231,6 @@ requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
 )
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
-skip_if_x86_mac = functools.partial(
-    unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
-)
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libtest = torch.library.Library("test", "FRAGMENT")  # noqa: SCOPED_LIBRARY
@@ -263,7 +259,7 @@ test_int_dtypes = [
     torch.int64,
 ]
 
-if SM80OrLater or MACOS_VERSION >= 14.0 or GPU_TYPE == "xpu":
+if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE == "xpu":
     test_dtypes.append(torch.bfloat16)
 
 
@@ -2573,7 +2569,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
 
-    @skip_if_x86_mac()
     def test_reduction2(self):
         def fn(a):
             # FIXME: a.argmax
@@ -2581,7 +2576,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("inf")),))
 
-    @skip_if_x86_mac()
     def test_reduction3(self):
         def fn(a):
             # FIXME: a.argmin
@@ -10439,7 +10433,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
-    @skip_if_x86_mac()
     def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
@@ -11198,6 +11191,35 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 self.assertEqual(a1, a2)
                 self.assertEqual(b1, b2)
 
+    def test_input_mutation_after_dtype_view_consumer(self):
+        # x and a dtype view of it (a fallback aten.view.dtype kernel whose
+        # output aliases x) share memory. A pending pointwise user of either one
+        # must be realized before a mutation of the other; Inductor used to
+        # materialize it *after* the mutation, i.e. from the mutated memory.
+        idx = torch.tensor([0, 2], device=self.device)
+        vals = torch.full((2, 12), 7, dtype=torch.int32, device=self.device)
+
+        def mutate_base(x):
+            y = x.view(torch.int32) * 2
+            y.sub_(-4)
+            x[:, 2:5] = 2
+            return y.view(torch.int64)
+
+        def mutate_alias(x):
+            y = x * 2
+            y.sub_(-4)
+            x.view(torch.int32).index_put_((idx,), vals)
+            return y.view(torch.int32)
+
+        x = torch.arange(-12, 12, dtype=torch.int64, device=self.device).reshape(4, 6)
+        for fn in (mutate_base, mutate_alias):
+            torch._dynamo.reset()
+            ref_x, opt_x = x.clone(), x.clone()
+            ref = fn(ref_x)
+            res = torch.compile(fn)(opt_x)
+            self.assertEqual(ref, res)
+            self.assertEqual(ref_x, opt_x)
+
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -11491,6 +11513,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         tmp = torch.randn(16, 8)
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
+
+    @parametrize("reduction", ["any", "amax"])
+    def test_bool_reduction_bitwise_op(self, reduction):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199745
+        def fn(x, y):
+            r = getattr(x, reduction)(dim=1)
+            return r & y, r | y, r ^ y
+
+        x = torch.zeros(4, 64, dtype=torch.bool)
+        x[1, 7] = x[3, 63] = True
+        y = torch.tensor([True, True, False, False])
+        self.common(fn, (x, y))
 
     @skip_if_gpu_halide
     def test_multilayer_any(self):
@@ -12034,6 +12068,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
+
+        # SM90+ CUDA accumulates with BF16 atomics, which round after every update.
+        if self.device == "cuda" and (
+            torch.version.hip or torch.cuda.get_device_capability() < (9, 0)
+        ):
+
+            def bf16_fn(x):
+                idx = torch.zeros(1000, device=x.device, dtype=torch.int64)
+                vals = torch.ones(1000, device=x.device, dtype=x.dtype)
+                x.index_put_((idx,), vals, accumulate=True)
+                return x
+
+            self.common(bf16_fn, (torch.zeros(1, dtype=torch.bfloat16),))
 
     @skipCPUIf(True, "requires Triton atomic_or on tl.int1")
     @skip_if_pallas
@@ -20544,6 +20591,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    def test_masked_cse_recomputed_load(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199642
+        # When an input load is first emitted inside ops.masked (via F.pad),
+        # then loaded unmasked into the kernel-level CSE cache, and subsequently
+        # loaded again inside ops.masked, the second ops.masked block has an
+        # empty scoped_body and returns the outer CSE variable directly.
+        def fn(x, y, table):
+            padded_x = torch.nn.functional.pad(x, (1, 1, 1, 1))
+            padded_y = torch.nn.functional.pad(y, (1, 1, 1, 1))
+            m = (padded_x**2 + padded_y**2)[..., 1:-1, 1:-1]
+            i = ((x + y) * 3).round()
+            idx1 = (i % 8).long()
+            idx2 = ((i + 4) % 8).long()
+            return (m > table.gather(1, idx1)) & (m > table.gather(1, idx2))
+
+        x, y = torch.randn(2, 1, 1, 64, 80, device=self.device).unbind(0)
+        table = torch.rand(1, 8, 64, 80, device=self.device) * 4
+        self.common(fn, (x, y, table), check_lowp=False)
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -20907,6 +20973,17 @@ if RUN_GPU or HAS_MPS:
                         bad_decomp_bias, bad_decomp_x, bad_decomp_weight
                     )
 
+            def baddbmm_beta_zero(bias, x, weight):
+                return torch.baddbmm(bias, x, weight, beta=0.0)
+
+            cpu_bias = torch.tensor(0.0)
+            with self.assertRaisesRegex(RuntimeError, "same device"):
+                baddbmm_beta_zero(cpu_bias, bad_x[None], bad_weight[None])
+            with self.assertRaisesRegex(Exception, "must be on the same device"):
+                torch.compile(baddbmm_beta_zero, fullgraph=True)(
+                    cpu_bias, bad_x[None], bad_weight[None]
+                )
+
             with config.patch({"shape_padding": False, "triton.native_matmul": True}):
                 with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
                     torch.compile(addmm_dtype_mismatch, fullgraph=True)(
@@ -20937,6 +21014,15 @@ if RUN_GPU or HAS_MPS:
                         zero_weight,
                     ),
                 )
+                # alpha == 0 zero-fills without autotuning; this case needs
+                # Triton GEMM choices, which only big GPUs get.
+                if IS_BIG_GPU:
+                    check(
+                        lambda bias, x, weight: torch.addmm(
+                            bias, x, weight.t(), beta=0.0, alpha=0.1
+                        ),
+                        (torch.full((8,), float("nan"), device=self.device), x, weight),
+                    )
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
@@ -22623,11 +22709,11 @@ if RUN_GPU:
             output = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
 
             result, code = run_and_get_code(torch.compile(fn), output, indices, values)
-            if output.device.type == "xpu":
-                # xpu fallback bf16 atomic add for better performance
+            if output.device.type == "xpu" or torch.version.hip:
+                # xpu and ROCm fall back for bf16 atomic add
                 self.assertFalse(
                     "tl.atomic_add" in code[0],
-                    "bf16 should not generate tl.atomic_add on xpu",
+                    "bf16 should not generate tl.atomic_add on xpu or ROCm",
                 )
             else:
                 self.assertTrue(

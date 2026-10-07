@@ -98,6 +98,7 @@ from .base import (
     GetSet,
     getset_build,
     getset_load_or_build,
+    getset_read,
     getset_set,
     Member,
     Method,
@@ -4918,6 +4919,57 @@ class BoundBuiltinMethodVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    def _qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L239
+        # If __self__ is a module or NULL, return m.__name__
+        #    (e.g. len.__qualname__ == 'len')
+        #
+        #    If __self__ is a type, return m.__self__.__qualname__ + '.' + m.__name__
+        #    (e.g. dict.fromkeys.__qualname__ == 'dict.fromkeys')
+        #
+        #    Otherwise return type(m.__self__).__qualname__ + '.' + m.__name__
+        #    (e.g. [].append.__qualname__ == 'list.append')
+        from .object_protocol import generic_getattr
+
+        name = self.descriptor.__name__
+        obj = self.obj
+        obj_type = obj.python_type()
+        if issubclass(obj_type, types.ModuleType):
+            return ConstantVariable.create(name)
+        if issubclass(obj_type, type):
+            owner = obj
+        else:
+            # Read type(obj).__qualname__ through a source so the result follows
+            # a later reassignment of the class's __qualname__.
+            if isinstance(obj, UserDefinedObjectVariable):
+                owner_source = obj.cls_source
+            else:
+                owner_source = obj.source and TypeSource(obj.source)
+            owner = VariableTracker.build(tx, obj_type, owner_source)
+        # PyObject_GetAttr, so a __qualname__ assigned earlier in the frame is seen.
+        owner_qualname = generic_getattr(tx, owner.realize(), "__qualname__")
+        return ConstantVariable.create(f"{owner_qualname.as_python_constant()}.{name}")
+
+    tp_getset = {
+        "__doc__": GetSet(
+            getset_build(lambda vt: vt.descriptor.__doc__),
+            readonly_setter,
+        ),
+        "__name__": GetSet(
+            getset_build(lambda vt: vt.descriptor.__name__),
+            readonly_setter,
+        ),
+        "__qualname__": GetSet(_qualname, readonly_setter),
+        "__self__": GetSet(
+            getset_read(lambda vt: vt.obj),
+            readonly_setter,
+        ),
+        "__text_signature__": GetSet(
+            getset_build(lambda vt: vt.descriptor.__text_signature__),
+            readonly_setter,
+        ),
+    }
+
     def __init__(
         self,
         descriptor: types.MethodDescriptorType
@@ -5029,7 +5081,23 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
     ) -> BoundBuiltinMethodVariable:
         # classmethod_get binds the C method to the class (ignoring obj),
         # producing a builtin_function_or_method via PyCMethod_New.
+        # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
+        owner_value = owner.as_python_constant()
+        if not isinstance(owner_value, type):
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' for type "
+                f"'{self.descriptor.__objclass__.__name__}' needs a type, not a "
+                f"'{type(owner_value).__name__}' as arg 2",
+            )
+        if not issubclass(owner_value, self.descriptor.__objclass__):
+            raise_type_error(
+                tx,
+                f"descriptor '{self.descriptor.__name__}' requires a subtype of "
+                f"'{self.descriptor.__objclass__.__name__}' but received "
+                f"'{owner_value.__name__}'",
+            )
         return BoundBuiltinMethodVariable(self.descriptor, owner, source=self.source)
 
 
