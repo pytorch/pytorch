@@ -14,7 +14,7 @@ import sympy
 import torch
 from torch._inductor.heuristics.registry import register_template_heuristic
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import Min, Mod
+from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
@@ -2417,17 +2417,17 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     ) -> dict[str, Any]:
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
-        m, n, k = kernel_inputs.mnk_symbolic()
         device_type = kernel_inputs.device_type
         if device_type == "xpu":
             # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
             allow_tf32 = torch.backends.mkldnn.allow_tf32
         elif device_type == "cuda":
             # allow_tf32 alignment heuristics based on reverse engineering
-            # H100 CUDA 12.8 behavior
-            size_threshold = V.graph.sizevars.statically_known_true(
-                sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
-            )
+            # H100 CUDA 12.8 behavior. Use size hints rather than guards: the
+            # user flag already permits TF32, so this only picks a precision
+            # within what they opted into.
+            m, n, k = kernel_inputs.mnk_hinted()
+            size_threshold = m >= 16 and min(n, k) >= 512
             allow_tf32 = (
                 torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
             )

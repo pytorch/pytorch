@@ -81,7 +81,12 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    SM90OrLater,
+    tf32_enabled,
+    tf32_off,
+)
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -2407,6 +2412,34 @@ class TestMaxAutotune(TestCase):
 
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
+
+    @unittest.skipIf(GPU_TYPE != "cuda", "ALLOW_TF32 follows the CUDA matmul flag")
+    @skipIfRocm
+    @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 1,
+        }
+    )
+    @parametrize("allow_tf32", (False, True))
+    def test_mm_allow_tf32_dynamic_shapes(self, allow_tf32):
+        # The ALLOW_TF32 size gate reads size hints, so a large dynamic M gets
+        # TF32 when the user enables it and never gets it when they don't.
+        a = torch.randn(1024, 512, device=GPU_TYPE)
+        b = torch.randn(512, 512, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(a, 0)
+        with tf32_enabled() if allow_tf32 else tf32_off():
+            out, code = run_and_get_code(torch.compile(torch.mm), a, b)
+            expected = torch.mm(a, b)
+
+        FileCheck().check(f"ALLOW_TF32 : tl.constexpr = {allow_tf32}").run(code[0])
+        if allow_tf32:
+            torch.testing.assert_close(out, expected, atol=1e-1, rtol=1e-2)
+        else:
+            # Tight enough that a TF32 kernel (error ~1e-2 here) would fail.
+            torch.testing.assert_close(out, expected, atol=1e-4, rtol=1e-4)
 
     @config.patch(
         max_autotune=True,
