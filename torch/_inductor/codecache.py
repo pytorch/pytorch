@@ -3781,20 +3781,19 @@ end
 _libgomp: CDLL | None = None
 
 
-def _custom_op_wrapper_convert_arg(arg: Any) -> Any:
-    if str(type(arg)) == "<class 'PyCapsule'>":
-        # No easy way to do isinstance check on PyCapsule
-        return torch._C._aoti.alloc_tensor_by_stealing_from_void_ptr(arg)
-    elif isinstance(arg, (list, tuple)):
-        return type(arg)(_custom_op_wrapper_convert_arg(a) for a in arg)
-    else:
-        return arg
-
-
 def custom_op_wrapper(op: str, *args: Any) -> list[c_void_p] | c_void_p | None:
     # This function will be called from generated cpp wrapper code in the JIT mode.
     # Because tensors will be passed in as AtenTensorHandle, we need to explicitly convert them.
-    converted_args = [_custom_op_wrapper_convert_arg(arg) for arg in args]
+    def convert_arg(arg: Any) -> Any:
+        if str(type(arg)) == "<class 'PyCapsule'>":
+            # No easy way to do isinstance check on PyCapsule
+            return torch._C._aoti.alloc_tensor_by_stealing_from_void_ptr(arg)
+        elif isinstance(arg, (list, tuple)):
+            return type(arg)(convert_arg(a) for a in arg)
+        else:
+            return arg
+
+    converted_args = [convert_arg(arg) for arg in args]
 
     if not op.startswith("torch.ops."):
         raise AssertionError(op + " can not be called through custom_op_wrapper")

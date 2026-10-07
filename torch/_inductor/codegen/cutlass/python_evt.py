@@ -168,34 +168,6 @@ _ACTIVATION_PATTERNS: tuple[_ActivationPattern, ...] = (
 )
 
 
-def _inline_assigns(
-    node: ast.expr, assigns: dict[str, ast.expr], seen: OrderedSet[str]
-) -> ast.expr:
-    # Fully inline temporary assignments so the expression tree only refers
-    # to function parameters (accum / read buffers) and literal constants.
-    if isinstance(node, ast.Name) and node.id in assigns:
-        if node.id in seen:
-            return node
-        return _inline_assigns(assigns[node.id], assigns, seen | OrderedSet([node.id]))
-    if isinstance(node, ast.BinOp):
-        return ast.BinOp(
-            left=_inline_assigns(node.left, assigns, seen),
-            op=node.op,
-            right=_inline_assigns(node.right, assigns, seen),
-        )
-    if isinstance(node, ast.UnaryOp):
-        return ast.UnaryOp(
-            op=node.op, operand=_inline_assigns(node.operand, assigns, seen)
-        )
-    if isinstance(node, ast.Call):
-        return ast.Call(
-            func=node.func,
-            args=[_inline_assigns(a, assigns, seen) for a in node.args],
-            keywords=[],
-        )
-    return node
-
-
 def _fuse_activations(code: str, *, elide_folded_float32_cast: bool = False) -> str:
     """Re-compose decomposed activations back into single CUTLASS functor calls.
 
@@ -229,6 +201,31 @@ def _fuse_activations(code: str, *, elide_folded_float32_cast: bool = False) -> 
 
     _EMPTY_SET: OrderedSet[str] = OrderedSet()
 
+    def inline(node: ast.expr, seen: OrderedSet[str] | None = None) -> ast.expr:
+        if seen is None:
+            seen = _EMPTY_SET
+        # Fully inline temporary assignments so the expression tree only refers
+        # to function parameters (accum / read buffers) and literal constants.
+        if isinstance(node, ast.Name) and node.id in assigns:
+            if node.id in seen:
+                return node
+            return inline(assigns[node.id], seen | OrderedSet([node.id]))
+        if isinstance(node, ast.BinOp):
+            return ast.BinOp(
+                left=inline(node.left, seen),
+                op=node.op,
+                right=inline(node.right, seen),
+            )
+        if isinstance(node, ast.UnaryOp):
+            return ast.UnaryOp(op=node.op, operand=inline(node.operand, seen))
+        if isinstance(node, ast.Call):
+            return ast.Call(
+                func=node.func,
+                args=[inline(a, seen) for a in node.args],
+                keywords=[],
+            )
+        return node
+
     changed = False
     folded_names: OrderedSet[str] = OrderedSet()
     for stmt in func.body:
@@ -237,7 +234,7 @@ def _fuse_activations(code: str, *, elide_folded_float32_cast: bool = False) -> 
             and len(stmt.targets) == 1
             and isinstance(stmt.targets[0], ast.Name)
         ):
-            inlined = _inline_assigns(stmt.value, assigns, _EMPTY_SET)
+            inlined = inline(stmt.value)
             for pattern in active:
                 x = pattern.match(inlined)
                 if x is not None:

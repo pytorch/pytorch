@@ -535,12 +535,6 @@ def _is_control_deps_ordering_only_use(
     return view in additional_deps and view not in pass_through
 
 
-def _is_meta_only_user(node):
-    if _is_view_op(node.target):
-        return all(_is_meta_only_user(u) for u in node.users)
-    return node.target in META_ONLY_OPS
-
-
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -616,6 +610,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         node_loc = node_order[node]
         copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
+        def is_meta_only_user(node):
+            if _is_view_op(node.target):
+                return all(is_meta_only_user(u) for u in node.users)
+            return node.target in META_ONLY_OPS
+
         for view in shared_view_nodes:
             for user in view.users:
                 user_loc = node_order[user]
@@ -627,7 +626,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if copy_node_loc is not None and copy_node_loc <= user_loc:
                     continue
                 # Reinplacing does not change shape metadata
-                if _is_meta_only_user(user):
+                if is_meta_only_user(user):
                     continue
                 # If our graph looks like:
                 # foo(mutated_arg)
@@ -647,6 +646,14 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         return False
 
     def can_inplace(node, mutated_arg):
+        # ls should be a list of tensors that all shares the same storage.
+        def _overlap(ls) -> bool:
+            try:
+                return len(compute_overlapping_tensors(ls)) != 0
+            except GuardOnDataDependentSymNode:
+                # If we fail with data dependent error we assume they all overlap.
+                return True
+
         if isinstance(mutated_arg, (list, tuple)):
             # TODO Using _overlap here causes a several issues.
             unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
@@ -655,17 +662,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # We can probably do better (that is, reinplace one of them and clone the other)
                 # but that requires more work and mutable List[Tensor] are not that common.
                 return False
-            return all(can_inplace_tensor(node, arg) for arg in mutated_arg)
-        return can_inplace_tensor(node, mutated_arg)
-
-    def can_inplace_tensor(node, mutated_arg):
-        # ls should be a list of tensors that all shares the same storage.
-        def _overlap(ls) -> bool:
-            try:
-                return len(compute_overlapping_tensors(ls)) != 0
-            except GuardOnDataDependentSymNode:
-                # If we fail with data dependent error we assume they all overlap.
-                return True
+            return all(can_inplace(node, arg) for arg in mutated_arg)
 
         if get_node_storage(mutated_arg) is None:
             return False
