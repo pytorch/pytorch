@@ -718,17 +718,33 @@ def _reduce(
                 order="inner_tree",
             )
         else:
-            ordered = _try_indexed_itree(
-                trait,
-                trait_key,
-                x,
-                red_pairs,
-                kept_pairs,
-                num_o,
-                count,
-                out_dtypes,
-                nouts,
+            ordered = None
+            from . import kernel_coltile as ct
+
+            col_view = _physical_col_view(
+                x, red_axes, red_pairs, kept_pairs, count, num_o
             )
+            if col_view is not None:
+                ordered = ct.reduce_ordered_col(
+                    trait,
+                    trait_key,
+                    col_view,
+                    out_dtypes,
+                    nouts,
+                    order=order,
+                )
+            if ordered is None:
+                ordered = _try_indexed_itree(
+                    trait,
+                    trait_key,
+                    x,
+                    red_pairs,
+                    kept_pairs,
+                    num_o,
+                    count,
+                    out_dtypes,
+                    nouts,
+                )
         if ordered is not None:
             return tuple(_as_shape(o, out_shape) for o in ordered)
         raise ValueError("inner-tree reduction cannot serve this geometry")
