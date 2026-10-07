@@ -1756,7 +1756,10 @@ def _get_cpp_stdlib_args(
             " -Wl,--exclude-libs,ALL",
         ]
     elif config.is_fbcode():
-        lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
+        # Without an explicit libgcc_lib, clang falls back to the host's system
+        # GCC install for -lstdc++, which can be newer than the platform runtime
+        # and yield a .so that fails to load (e.g. GLIBCXX_3.4.30 not found).
+        lib_dir_paths = [build_paths.libgcc_lib, sysconfig.get_config_var("LIBDIR")]
         libs.append("stdc++")
 
     return lib_dir_paths, libs, passthrough_args
