@@ -347,7 +347,11 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
     old_custom = copy.copy(current_meta.get("custom", {}))
 
     try:
-        current_meta["custom"] = {**old_custom, **annotation_dict}
+        if not has_custom:
+            current_meta["custom"] = dict[str, Any]()
+
+        # Update with all key-value pairs from the input dict
+        current_meta["custom"].update(annotation_dict)
         yield
     finally:
         if has_custom:
