@@ -27,6 +27,7 @@ import random
 import re
 import sys
 import types
+import typing
 import weakref
 from collections.abc import Callable, Sequence
 from random import Random
@@ -1725,6 +1726,14 @@ class TypingVariable(VariableTracker):
             return VariableBuilder(tx, attr_source)(value)
         else:
             return SourcelessBuilder.create(tx, value)
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        origin = typing.get_origin(self.value)
+        if origin is typing.Union or origin is types.UnionType:
+            return ConstantVariable.create(hasattr(self.value, name))
+        return super().call_obj_hasattr(tx, name)
 
     def as_python_constant(self) -> Any:
         return self.value
