@@ -1262,12 +1262,18 @@ def wait_for_process(p, timeout=None):
             p.kill()
             raise
     except subprocess.TimeoutExpired:
-        # Send SIGINT so pytest can write its reports, but keep the timeout even if
-        # pytest exits in the grace period.
+        # send SIGINT to give pytest a chance to make xml
         p.send_signal(signal.SIGINT)
+        exit_status = None
         try:
-            p.wait(timeout=5)
+            exit_status = p.wait(timeout=5)
+        # try to handle the case where p.wait(timeout=5) times out as well as
+        # otherwise the wait() call in the finally block can potentially hang
         except subprocess.TimeoutExpired:
+            pass
+        if exit_status is not None:
+            return exit_status
+        else:
             p.kill()
         raise
     except:
@@ -1591,7 +1597,8 @@ def run_tests(argv=None):
                     from torch.testing._internal.torchci import recovery
 
                     report_dir = os.path.join(TEST_SAVE_RUN_JSONL, sanitize_test_filename(argv[0]))
-                    recovery.record_dead_subprocess(report_dir, test_case_full_name, exitcode, started)
+                    recorded = recovery.effective_exit_code(exitcode, time.time() - started, timeout)
+                    recovery.record_dead_subprocess(report_dir, test_case_full_name, recorded, started)
                 except Exception as e:
                     print(f"torchci: could not record the test: {e!r}", file=sys.stderr)
 

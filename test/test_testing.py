@@ -790,6 +790,11 @@ class TestJunitXml(TestCase):
         self._assert_matches_golden("pytest_sanitized", normalized)
 
 
+# Generated test files go below test/ so pytest loads test/conftest.py, as in CI.
+_TEST_DIR = Path(__file__).resolve().parent
+# TestJunitXml's fixture suite, which covers every outcome the pytest path reports.
+_PYTEST_SUITE = _JUNIT_TESTDATA / "pytest_suite.py"
+
 # The fixture's run context, which the report records, without the job's device
 # filter (XPU and CUDA jobs set PYTORCH_TESTING_DEVICE_ONLY_FOR).
 _REPORT_CHILD_ENV = {
@@ -803,42 +808,24 @@ _REPORT_CHILD_ENV = {
 }
 
 
-_RUN_KEYS = [
-    "type", "schema_version", "file", "suite", "case_name", "language",
-    "declared_case_name", "rerun_number", "outcome", "outcome_summary",
-    "started_at", "ended_at", "properties",
-]
+# Each run line's keys, in order, and their types.
+_RUN_TYPES = {
+    "type": str, "schema_version": str, "file": str, "suite": str, "case_name": str, "language": str,
+    "declared_case_name": str, "rerun_number": int, "outcome": str, "outcome_summary": str,
+    "started_at": int, "ended_at": int, "properties": dict,
+}
 _RUN_OUTCOMES = {
     "passed", "failed", "error", "skipped", "xfailed", "xpassed",
     "crashed", "timed_out",
 }
 
 
-def _assert_run_line(run: dict[str, Any], t0_ms: int, t1_ms: int) -> None:
-    if list(run) != _RUN_KEYS:
-        raise AssertionError(f"unexpected run keys: {list(run)}")
-    if run["type"] != "run" or run["schema_version"] != "0.1":
-        raise AssertionError(f"unexpected run version: {run}")
-    for name in (
-        "file", "suite", "case_name", "language", "declared_case_name", "outcome",
-        "outcome_summary",
-    ):
-        if not isinstance(run[name], str):
-            raise AssertionError(f"{name} is not a string: {run[name]!r}")
-    for name in ("rerun_number", "started_at", "ended_at"):
-        if type(run[name]) is not int:
-            raise AssertionError(f"{name} is not an int: {run[name]!r}")
-    if run["language"] not in ("python", "cpp"):
-        raise AssertionError(f"unexpected language: {run['language']}")
-    if run["outcome"] not in _RUN_OUTCOMES:
-        raise AssertionError(f"unexpected outcome: {run['outcome']}")
-    if not (t0_ms <= run["started_at"] <= run["ended_at"] <= t1_ms):
-        raise AssertionError(
-            f"timestamps outside [{t0_ms}, {t1_ms}]: "
-            f"{run['started_at']}, {run['ended_at']}"
-        )
-    if run["properties"] != {}:
-        raise AssertionError(f"unexpected run properties: {run['properties']}")
+def _assert_run_line(test: TestCase, run: dict[str, Any], t0_ms: int, t1_ms: int) -> None:
+    test.assertEqual([(k, type(v)) for k, v in run.items()], list(_RUN_TYPES.items()))
+    test.assertEqual((run["type"], run["schema_version"], run["properties"]), ("run", "0.1", {}))
+    test.assertIn(run["language"], ("python", "cpp"))
+    test.assertIn(run["outcome"], _RUN_OUTCOMES)
+    test.assertTrue(t0_ms <= run["started_at"] <= run["ended_at"] <= t1_ms, run)
 
 
 def _report_files(directory: Path) -> list[Path]:
@@ -888,10 +875,7 @@ class TestReportJsonl(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cls.t0_ms = int(time.time() * 1000)
             # A non-default setting, to show up in flags.
-            _, report = _run_plugin(
-                str(_JUNIT_TESTDATA.parent), ["junit_xml_testdata/pytest_suite.py"], Path(tmp) / "suite",
-                {"PYTORCH_TEST_WITH_SLOW": "1"},
-            )
+            _, report = _run_plugin(str(_TEST_DIR), [str(_PYTEST_SUITE)], Path(tmp) / "suite", {"PYTORCH_TEST_WITH_SLOW": "1"})
             cls.t1_ms = int(time.time() * 1000)
             cls.raw = report.read_text()
             cls.report_name = report.name
@@ -966,7 +950,7 @@ test_no_rerun_needed 0 passed""")
         self.assertEqual(report["properties"]["test_config"], "report-config")
         self.assertEqual(report["properties"]["runner_name"], "report-runner")
         for run in runs:
-            _assert_run_line(run, self.t0_ms, self.t1_ms)
+            _assert_run_line(self, run, self.t0_ms, self.t1_ms)
             self.assertEqual(run["language"], "python")
 
     # One xdist worker, so the names travel from a worker to the controller.
@@ -1006,8 +990,7 @@ setattr(TestSetattr, "test_added", lambda self: None)
 """
 
     def test_declared_case_names(self) -> None:
-        # Below test/ so pytest loads the same conftest chain as CI.
-        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
             (Path(tmp) / "xdist_report.py").write_text(textwrap.dedent(self.XDIST_SOURCE))
             t0_ms = int(time.time() * 1000)
             proc, report = _run_plugin(tmp, ["xdist_report.py", "-n", "1"], Path(tmp) / "xdist")
@@ -1015,7 +998,7 @@ setattr(TestSetattr, "test_added", lambda self: None)
             runs = _runs(report)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         for run in runs:
-            _assert_run_line(run, t0_ms, t1_ms)
+            _assert_run_line(self, run, t0_ms, t1_ms)
         declared = {run["case_name"]: run["declared_case_name"] for run in runs}
         self.assertEqual(declared["test_device_cpu"], "test_device")
         self.assertEqual(declared["test_parametrize_value_1"], "test_parametrize")
@@ -1035,7 +1018,7 @@ class TestSubtests(unittest.TestCase):
 """
 
     def test_subtests(self) -> None:
-        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
             (Path(tmp) / "subtests_report.py").write_text(textwrap.dedent(self.SUBTESTS_SOURCE))
             _, report = _run_plugin(tmp, ["subtests_report.py"], Path(tmp) / "subtests")
             runs = _runs(report)
@@ -1099,8 +1082,7 @@ def pytest_configure(config):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        # Below test/ so pytest loads the same conftest chain as CI.
-        cls.tmp = tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent)
+        cls.tmp = tempfile.TemporaryDirectory(dir=_TEST_DIR)
         cls.dir = Path(cls.tmp.name)
         (cls.dir / "failure_isolation.py").write_text(textwrap.dedent(cls.SOURCE))
         (cls.dir / "conftest.py").write_text(textwrap.dedent(cls.CONFTEST))
@@ -1180,8 +1162,7 @@ if __name__ == "__main__":
         )
 
     def test_basic(self) -> None:
-        # Below test/ so pytest loads the same conftest chain as CI.
-        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
             report_dir = Path(tmp) / "reports"
             t0_ms = int(time.time() * 1000)
             proc = self._run_one(tmp, [f"--save-test-run-reports={report_dir}"])
@@ -1192,11 +1173,11 @@ if __name__ == "__main__":
             self.assertRegex(reports[0].name, r"^one-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.jsonl$")
             records = [json.loads(line) for line in reports[0].read_text().splitlines()]
         self.assertEqual([record["type"] for record in records], ["report", "run"])
-        _assert_run_line(records[1], t0_ms, t1_ms)
+        _assert_run_line(self, records[1], t0_ms, t1_ms)
         self.assertEqual(records[1]["outcome"], "passed")
 
     def test_off_is_noop(self) -> None:
-        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
             proc = self._run_one(tmp, [])
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             self.assertEqual([path.name for path in Path(tmp).iterdir()], ["one.py"])
@@ -1225,7 +1206,7 @@ print("RESULT=" + json.dumps(result))
 """
         proc = subprocess.run(
             [sys.executable, "-c", textwrap.dedent(source)],
-            cwd=_JUNIT_TESTDATA,
+            cwd=_TEST_DIR,
             env=_REPORT_CHILD_ENV,
             capture_output=True,
             text=True,
@@ -1295,8 +1276,7 @@ def test_fail_last():
 """
 
     def test_xdist_worker_crash(self) -> None:
-        # Below test/ so pytest loads the same conftest chain as CI.
-        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
             (Path(tmp) / "crash_report.py").write_text(textwrap.dedent(self.XDIST_SOURCE))
             # -x, as run_test.py passes for C++ tests, stops xdist after the last
             # test's final failure, before its teardown.
@@ -1336,7 +1316,7 @@ if __name__ == "__main__":
 """
 
     def test_subprocess_crash(self) -> None:
-        with tempfile.TemporaryDirectory(dir=_JUNIT_TESTDATA.parent) as tmp:
+        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
             (Path(tmp) / "crash.py").write_text(textwrap.dedent(self.SUBPROCESS_SOURCE))
             report_dir = Path(tmp) / "reports"
             t0_ms = int(time.time() * 1000)
@@ -1355,13 +1335,13 @@ if __name__ == "__main__":
             reports = _report_files(report_dir / "crash")
             runs = [run for report in reports for run in _runs(report)]
             # The node id the child gets, relative to the repo root.
-            expected_file = (Path(tmp) / "crash.py").resolve().relative_to(_JUNIT_TESTDATA.parents[1]).as_posix()
+            expected_file = (Path(tmp) / "crash.py").resolve().relative_to(_TEST_DIR.parent).as_posix()
         self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         # Both child attempts (retry_shell retries once) wrote a report line before
         # dying; the parent wrote the third report, with the run.
         self.assertEqual(len(reports), 3)
         self.assertEqual(len(runs), 1)
-        _assert_run_line(runs[0], t0_ms, t1_ms)
+        _assert_run_line(self, runs[0], t0_ms, t1_ms)
         self.assertEqual(
             (runs[0]["file"], runs[0]["suite"], runs[0]["case_name"], runs[0]["outcome"]),
             (expected_file, "TestCrash", "test_crash", "crashed"),
@@ -1398,7 +1378,7 @@ if __name__ == "__main__":
         self.assertEqual(lines[2], torn)
         runs = [json.loads(line) for line in (lines[1], *lines[3:])]
         for run in runs:
-            _assert_run_line(run, t0_ms, int(time.time() * 1000))
+            _assert_run_line(self, run, t0_ms, int(time.time() * 1000))
         self.assertEqual(
             [(run["case_name"], run["rerun_number"], run["outcome"]) for run in runs],
             [("test_hangs[param]", 0, "failed"), ("test_hangs[param]", 1, outcome)],
@@ -1416,19 +1396,21 @@ if __name__ == "__main__":
             lines = Path(path).read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(lines), 2)
 
-    @parametrize("grace_times_out", [subtest(False, name="grace_exit"), subtest(True, name="grace_timeout")])
-    def test_wait_for_process_keeps_the_timeout(self, grace_times_out) -> None:
-        common_utils = importlib.import_module("torch.testing._internal.common_utils")
-        first = subprocess.TimeoutExpired(["test"], 1)
-        process = unittest.mock.Mock()
-        process.wait.side_effect = [first, subprocess.TimeoutExpired(["test"], 5), -9] if grace_times_out else [first, 2, 2]
-        with self.assertRaises(subprocess.TimeoutExpired) as error:
-            common_utils.wait_for_process(process, timeout=1)
-        self.assertIs(error.exception, first)
-        process.send_signal.assert_called_once()
-        self.assertEqual(process.kill.called, grace_times_out)
+    @parametrize(
+        "returned, elapsed, timeout, expected",
+        [
+            subtest((2, 10.0, 5.0, 124), name="pytest_exits_in_grace"),
+            subtest((-2, 10.0, 5.0, 124), name="sigint_kills"),
+            subtest((1, 10.0, 5.0, 1), name="failure_after_timeout"),
+            subtest((2, 1.0, 5.0, 2), name="before_timeout"),
+            subtest((2, 10.0, None, 2), name="no_timeout"),
+        ],
+    )
+    def test_effective_exit_code(self, returned, elapsed, timeout, expected) -> None:
+        recovery = importlib.import_module("torch.testing._internal.torchci.recovery")
+        self.assertEqual(recovery.effective_exit_code(returned, elapsed, timeout), expected)
 
-    def _run_test_retries(self, tmp: str, ret_code: int, cache: dict[str, str]) -> str:
+    def _run_test_retries(self, tmp: str, ret_code: int, cache: dict[str, str], timeout: float | None = None) -> str:
         run_test_module = importlib.import_module("run_test")
         cache_dir = Path(tmp) / ".pytest_cache/v/cache/stepcurrent/key"
         cache_dir.mkdir(parents=True)
@@ -1437,7 +1419,7 @@ if __name__ == "__main__":
         output = io.StringIO()
         with unittest.mock.patch.object(run_test_module, "REPO_ROOT", Path(tmp)):
             with unittest.mock.patch.object(run_test_module, "retry_shell", return_value=(ret_code, False)):
-                run_test_module.run_test_retries([], tmp, {}, None, "key", output, False, "test_file", object())
+                run_test_module.run_test_retries([], tmp, {}, timeout, "key", output, False, "test_file", object())
         return output.getvalue()
 
     def test_run_test_finishes_the_report(self) -> None:
@@ -1445,7 +1427,8 @@ if __name__ == "__main__":
             report = Path(tmp) / "report.jsonl"
             report.write_text('{"type":"report"}\n', encoding="utf-8")
             cache = {"report_path": json.dumps(str(report)), "report_inflight": json.dumps(self._inflight("test_t", 0))}
-            self._run_test_retries(tmp, 124, cache)
+            # pytest exited on the SIGINT that followed a timeout.
+            self._run_test_retries(tmp, 2, cache, timeout=0)
             run = json.loads(report.read_text(encoding="utf-8").splitlines()[1])
             left = [path.name for path in (Path(tmp) / ".pytest_cache/v/cache/stepcurrent/key").iterdir()]
         self.assertEqual(run["outcome"], "timed_out")
@@ -1542,25 +1525,20 @@ class TestReportHelpers(TestCase):
         )
         line.encode("utf-8")
         run = json.loads(line)
-        _assert_run_line(run, int(now * 1000), int(now * 1000))
+        _assert_run_line(self, run, int(now * 1000), int(now * 1000))
         self.assertEqual(run["outcome_summary"], r"\ud800")
 
-    @parametrize(
-        "raw, expected",
-        [
-            subtest(("NVIDIA L4", "l4"), name="l4"),
-            subtest(("Tesla T4", "t4"), name="t4"),
-            subtest(("NVIDIA H100 80GB HBM3", "h100"), name="h100"),
-            subtest(("AMD Instinct MI350X VF", "mi350x"), name="mi350x"),
-            subtest(("Apple M2 Pro", "m2"), name="m2"),
-            subtest(("Intel(R) Data Center GPU Max 1100", "max1100"), name="max1100"),
-            subtest(("Intel(R) Arc(TM) Pro B60 Graphics", "b60"), name="b60"),
-            subtest(("NVIDIA GeForce RTX 4090", "nvidia-geforce-rtx-4090"), name="unknown"),
-        ],
-    )
-    def test_normalize_device_name(self, raw, expected):
+    def test_capture_skips_torch_accelerator(self) -> None:
         environment = importlib.import_module("torch.testing._internal.torchci.environment")
-        self.assertEqual(environment._normalize_device_name(raw), expected)
+        with unittest.mock.patch.object(torch._C, "_accelerator_getAccelerator") as probe:
+            environment.capture()
+        probe.assert_not_called()
+
+    @parametrize("rocm, expected", [subtest(("10.1.0", "10.1"), name="release"), subtest((None, "7.16"), name="hip")])
+    def test_rocm_version(self, rocm, expected):
+        environment = importlib.import_module("torch.testing._internal.torchci.environment")
+        with unittest.mock.patch.multiple(torch.version, cuda=None, hip="7.16.26385", rocm=rocm):
+            self.assertEqual(environment._accelerator(), ("rocm", expected))
 
 
 instantiate_parametrized_tests(TestReportHelpers)
