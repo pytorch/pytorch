@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 import torch
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
@@ -345,7 +345,7 @@ def _generate_default_output_sharding(
         kwargs_schema=op_schema.kwargs_schema,
     )
 
-    def create_output_spec(tensor: FakeTensor) -> DTensorSpec:
+    def create_output_spec(tensor: torch.Tensor) -> DTensorSpec:
         return DTensorSpec(
             mesh=mesh,
             placements=(Replicate(),),
@@ -358,7 +358,7 @@ def _generate_default_output_sharding(
 
     return OutputSharding(
         output_spec=pytree.tree_map_only(
-            FakeTensor, create_output_spec, node.meta["val"]
+            is_fake_tensor, create_output_spec, node.meta["val"]
         ),
         redistribute_schema=new_op_schema,
         needs_redistribute=True,
