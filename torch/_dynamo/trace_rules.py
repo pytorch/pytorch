@@ -499,6 +499,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.atan",
         "math.atan2",
         "math.atanh",
+        "math.cbrt",
         "math.ceil",
         "math.comb",
         "math.copysign",
@@ -509,6 +510,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "math.erf",
         "math.erfc",
         "math.exp",
+        "math.exp2",
         "math.expm1",
         "math.fabs",
         "math.factorial",
@@ -2435,10 +2437,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
     TorchInGraphFunctionVariable,
 )
 
-
-if sys.version_info >= (3, 11):
-    torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
-    torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
 
 if sys.version_info >= (3, 12):
     torch_c_binding_in_graph_functions["math.sumprod"] = TorchInGraphFunctionVariable

@@ -103,7 +103,6 @@ py::list _get_frame_value_stack_with_depth(
     return result;
   }
 
-#if IS_PYTHON_3_11_PLUS
   PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
   _PyInterpreterFrame* iframe = frame->f_frame;
   if (iframe == nullptr) {
@@ -175,33 +174,6 @@ py::list _get_frame_value_stack_with_depth(
     }
   }
 #endif
-
-#else
-  // Python 3.10 and earlier - use f_valuestack
-  PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
-  if (frame->f_valuestack == nullptr) {
-    return result;
-  }
-
-  PyCodeObject* code = frame->f_code;
-  if (code == nullptr) {
-    return result;
-  }
-
-  int stacksize = code->co_stacksize;
-  if (depth > stacksize) {
-    depth = stacksize;
-  }
-
-  for (int i = 0; i < depth; i++) {
-    PyObject* obj = frame->f_valuestack[i];
-    if (obj == nullptr) {
-      result.append(get_null_stack_value());
-    } else {
-      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
-    }
-  }
-#endif // IS_PYTHON_3_11_PLUS
 
   return result;
 }
@@ -344,22 +316,12 @@ PyObject* dynamo__custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback_py) {
-#if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
       "begin %s %s %i %i",
       get_frame_name(frame),
       PyUnicode_AsUTF8(F_CODE(frame)->co_filename),
       F_CODE(frame)->co_firstlineno,
       _PyInterpreterFrame_LASTI(frame));
-#else
-  DEBUG_TRACE(
-      "begin %s %s %i %i %i",
-      get_frame_name(frame),
-      PyUnicode_AsUTF8(F_CODE(frame)->co_filename),
-      frame->f_lineno,
-      frame->f_lasti,
-      frame->f_iblock);
-#endif
 
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==

@@ -1880,9 +1880,7 @@ class VariableBuilder:
                 source=self.source,
                 mutation_type=AttributeMutationExisting(),
             )
-        elif value is sys.exc_info or (
-            sys.version_info >= (3, 11) and value is sys.exception
-        ):
+        elif value is sys.exc_info or value is sys.exception:
             return SysFunctionVariable(value, source=self.source)
         elif is_function_or_wrapper(value) and inspect.getattr_static(
             value, "_torchdynamo_inline", False
@@ -5561,9 +5559,8 @@ class SourcelessBuilder:
             (
                 types.GenericAlias,
                 types.UnionType,
-                # `typing.Any | X` (and `typing.Union[...]`) evaluates to a
-                # `typing._UnionGenericAlias` on Python <= 3.10, not a
-                # `types.UnionType`
+                # `typing.Union[...]` evaluates to a `typing._UnionGenericAlias`
+                # on Python <= 3.13, not a `types.UnionType`
                 typing._UnionGenericAlias,  # type: ignore[attr-defined]
             ),
         ):
