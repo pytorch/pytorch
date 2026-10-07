@@ -37,8 +37,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     TEST_WITH_TORCHDYNAMO,
-    expectedIfCppFakeTensor,
-    xfailIf,
     xfailIfTorchDynamo,
     skipIfTorchDynamo,
 )
@@ -3540,10 +3538,6 @@ class TestRandomTensorCreation(TestCase):
                 with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
                     torch.normal(input, std)
 
-    # https://github.com/pytorch/pytorch/issues/126834
-    @xfailIf(
-        TEST_WITH_TORCHDYNAMO and not torch._dynamo.config.use_cpp_fake_tensor
-    )
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
@@ -3563,10 +3557,17 @@ class TestRandomTensorCreation(TestCase):
             max_val = torch.finfo(dtype).max
 
         values = [double_min, float_min, -42, 0, 42, float_max, double_max]
-        error_type = expectedIfCppFakeTensor(
-            (RuntimeError, torch._dynamo.exc.TorchDynamoException), RuntimeError
-        )
-        wrapped_error = "Unexpected exception when running generated GraphModule"
+
+        def assert_uniform_raises(t, from_, to_, message):
+            with self.assertRaises(RuntimeError) as ctx:
+                t.uniform_(from_, to_)
+            err = ctx.exception
+            # Under dynamo, eager_noexcept wraps an error raised by the generated
+            # GraphModule; check the original error instead of the wrapper.
+            if isinstance(err, torch._dynamo.exc.TorchDynamoException):
+                err = err.__cause__
+                self.assertIsInstance(err, RuntimeError)
+            self.assertRegex(str(err), message)
 
         for from_ in values:
             for to_ in values:
@@ -3574,25 +3575,9 @@ class TestRandomTensorCreation(TestCase):
                 if not (min_val <= from_ <= max_val) or not (min_val <= to_ <= max_val):
                     pass
                 elif to_ < from_:
-                    message = expectedIfCppFakeTensor(
-                        f"uniform_ expects to return|{wrapped_error}",
-                        "uniform_ expects to return",
-                    )
-                    self.assertRaisesRegex(
-                        error_type,
-                        message,
-                        lambda: t.uniform_(from_, to_)
-                    )
+                    assert_uniform_raises(t, from_, to_, "uniform_ expects to return")
                 elif to_ - from_ > max_val:
-                    message = expectedIfCppFakeTensor(
-                        f"uniform_ expects to-from|{wrapped_error}",
-                        "uniform_ expects to-from",
-                    )
-                    self.assertRaisesRegex(
-                        error_type,
-                        message,
-                        lambda: t.uniform_(from_, to_)
-                    )
+                    assert_uniform_raises(t, from_, to_, "uniform_ expects to-from")
                 else:
                     t.uniform_(from_, to_)
                     range_ = to_ - from_
