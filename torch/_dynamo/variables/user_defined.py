@@ -134,6 +134,7 @@ from .object_protocol import (
     type_disallows_instantiation,
     type_implements_nb_slot,
     type_implements_sq_inplace_concat,
+    type_init,
 )
 from .sets import FrozensetVariable, SetVariable
 
@@ -563,6 +564,21 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if hasattr(metaclass, "__bool__") and metaclass is not type:
             return self.call_method(tx, "__bool__", [], {})
         return ConstantVariable.create(True)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if type(self.value).__init__ is not type.__init__:
+            unimplemented(
+                gb_type="metaclass __init__ on existing class",
+                context=f"tp_init_impl {self}",
+                explanation=f"Dynamo does not trace __init__ of metaclass {type(self.value).__name__}.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return type_init(tx, args, kwargs)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/3.13/Objects/typeobject.c#L2379-L2408
@@ -3188,12 +3204,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker:
         from .. import trace_rules
         from . import UserMethodVariable
-        from .constant import ConstantVariable
 
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
-                return ConstantVariable.create(None)
+                return VariableTracker.tp_init_impl(self, tx, args, kwargs)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
@@ -3311,7 +3326,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return super().tp_init_impl(tx, args, kwargs)
         method = self._maybe_get_baseclass_method("__init__")
         if method is object.__init__:
-            return variables.ConstantVariable.create(None)
+            return VariableTracker.tp_init_impl(self, tx, args, kwargs)
         res = self._vectorcall_method(tx, "__init__", args, kwargs)
         if not res.is_constant_none():
             raise_type_error(

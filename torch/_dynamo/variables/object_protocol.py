@@ -1888,6 +1888,22 @@ def python_constant_richcompare_impl(
     return ConstantVariable.create(result)
 
 
+def type_init(
+    tx: "InstructionTranslatorBase",
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    """type_init (a class's tp_init): only validates the arguments.
+
+    https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L3385-L3405
+    """
+    if len(args) == 1 and kwargs:
+        raise_type_error(tx, "type.__init__() takes no keyword arguments")
+    if len(args) not in (1, 3):
+        raise_type_error(tx, "type.__init__() takes 1 or 3 arguments")
+    return ConstantVariable.create(None)
+
+
 # _Py_SwappedOp: https://github.com/python/cpython/blob/e76aa128fe/Objects/object.c#L987
 _REFLECTED_OP: dict[str, str] = {
     "__lt__": "__gt__",
