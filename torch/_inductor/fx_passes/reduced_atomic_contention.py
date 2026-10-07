@@ -190,7 +190,8 @@ def _evaluate_candidate(
     output_node: fx.Node, force: bool, ctx: ScatterPassContext
 ) -> "ScatterCandidate | None":
     """Every gate that does not need the memory profile: shape, dtype, device,
-    min index size and contention ratio. Each rejection records its own reason."""
+    broadcast operand, min index size and contention ratio. Each rejection
+    records its own reason."""
     node_name = output_node.name
     is_scatter_reduce = output_node.target in _SCATTER_REDUCE_TARGETS
     is_index_add = output_node.target is _INDEX_ADD_TARGET
@@ -268,26 +269,26 @@ def _evaluate_candidate(
         _record_skip(ctx, "dim_out_of_bounds", node_name)
         return None
 
-    # A multi-dimensional index makes the replacement flatten values as though
-    # the index dimensions lead the values tensor. index_put allows those
-    # dimensions to broadcast and, for scatter_dim > 0, places them after the
-    # input prefix. Reject shapes that the replacement cannot safely flatten.
-    index_ndim = len(index_meta["shape"])
-    if index_ndim > 1:
-        values_node = output_node.args[2]
-        values_meta = (
-            _get_tensor_meta(values_node) if isinstance(values_node, fx.Node) else None
-        )
-        expected_values_ndim = index_ndim + len(input_meta["shape"]) - scatter_dim - 1
-        if (
-            values_meta is None
-            or len(values_meta["shape"]) != expected_values_ndim
-            or not statically_known_true(
-                sym_eq(values_meta["shape"][:index_ndim], index_meta["shape"])
+    # A multi-dimensional index makes the index_put-style replacement flatten
+    # values as though the index dimensions lead the values tensor. index_put
+    # allows those dimensions to broadcast and, for scatter_dim > 0, places
+    # them after the input prefix. Reject shapes that flatten cannot handle.
+    # scatter_reduce and index_add do not flatten, so they skip this gate.
+    # values_node is already the values operand: args[2] for index_put and
+    # args[3] for _unsafe_masked_index_put_accumulate.
+    if not is_scatter_reduce and not is_index_add:
+        index_ndim = len(index_meta["shape"])
+        if index_ndim > 1:
+            expected_values_ndim = (
+                index_ndim + len(input_meta["shape"]) - scatter_dim - 1
             )
-        ):
-            _record_skip(ctx, "broadcast_operand", node_name)
-            return None
+            if len(values_meta["shape"]) != expected_values_ndim or not (
+                statically_known_true(
+                    sym_eq(values_meta["shape"][:index_ndim], index_meta["shape"])
+                )
+            ):
+                _record_skip(ctx, "broadcast_operand", node_name)
+                return None
 
     output_size = _resolve_numel(input_meta["numel"])
     values_numel = _resolve_numel(values_meta["numel"])

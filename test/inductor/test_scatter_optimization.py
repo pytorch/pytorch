@@ -918,6 +918,80 @@ class TestPartitionedScatterOpt(TestCase):
             0,
         )
 
+    def test_masked_accumulate_broadcast_values(self):
+        """Same broadcast-operand gate as index_put, reading values from args[3].
+
+        A multi-dim index flattens values against the index shape. Broadcast
+        values, and values that carry an explicit input prefix when scatter_dim
+        is nonzero, have to be skipped rather than reshaped.
+        """
+        torch.manual_seed(42)
+        rows, D, B, T = 512, 4, 16, 512
+
+        def f(out, mask, idx, vals):
+            return torch.ops.aten._unsafe_masked_index_put_accumulate(
+                out, mask, [idx], vals
+            )
+
+        out = torch.zeros(rows, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (B, T), dtype=torch.int64)
+        # Last-dim mask broadcasts against every values shape below, and never
+        # has more dims than values, so a skip is broadcast_operand.
+        mask = torch.ones(D, dtype=torch.bool)
+
+        self._check_accuracy(
+            f,
+            (out, mask, idx, torch.randn(B, T, D, dtype=torch.float32)),
+            atol=1.0,
+        )
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+        for vals in (
+            torch.randn(B, 1, D, dtype=torch.float32),
+            torch.randn(D, dtype=torch.float32),
+        ):
+            counters.clear()
+            torch._dynamo.reset()
+            self._check_accuracy(f, (out, mask, idx, vals), atol=1.0)
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+            self.assertGreater(
+                counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"],
+                0,
+                "broadcast values must be rejected by a gate, not reshaped",
+            )
+
+        counters.clear()
+        torch._dynamo.reset()
+        config.partitioned_scatter_force = True
+
+        def f_dim1(out, mask, idx, vals):
+            return torch.ops.aten._unsafe_masked_index_put_accumulate(
+                out, mask, [None, idx], vals
+            )
+
+        out = torch.zeros(3, 8, 4, dtype=torch.float32)
+        idx = torch.randint(0, 4, (8, 8), dtype=torch.int64)
+        mask = torch.ones(4, dtype=torch.bool)
+        self._check_accuracy(
+            f_dim1,
+            (out, mask, idx, torch.randn(8, 8, 4, dtype=torch.float32)),
+            atol=1.0,
+        )
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+        for vals in (
+            torch.randn(4, dtype=torch.float32),
+            torch.randn(3, 8, 8, 4, dtype=torch.float32),
+        ):
+            counters.clear()
+            torch._dynamo.reset()
+            self._check_accuracy(f_dim1, (out, mask, idx, vals), atol=1.0)
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+            self.assertGreater(
+                counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"],
+                0,
+            )
+
     def test_skip_accumulate_false(self):
         """index_put with accumulate=False doesn't match the registered patterns."""
         n = 256
