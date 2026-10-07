@@ -198,8 +198,7 @@ def maybe_handle_backward_generation(
             raise AssertionError("boxed_forward_device_index must not be None")
         if boxed_forward_device_index.value is None:
             raise AssertionError("boxed_forward_device_index.value must not be None")
-        forward_box = boxed_forward_device_index
-        device_index = forward_box.value
+        device_index = boxed_forward_device_index.value
         compiled_graph_callable = compiled_graph.current_callable
 
         from torch._functorch._aot_autograd.runtime_wrappers import (
@@ -211,17 +210,16 @@ def maybe_handle_backward_generation(
             # Look the manager up per call rather than at compile time: the
             # backward can be lowered before the forward has ever run (eager
             # backward lowering), and cudagraphify only creates the manager on
-            # the forward's first invocation. Only a forward call that was
-            # captured left a generation to transition, and the call this
-            # backward belongs to is the one with the same autograd invocation.
-            # It is owed one transition: a retained graph can run this backward
-            # again after another forward is pending.
+            # the forward's first invocation. Only a forward call that ran in the
+            # tree left a generation to transition, and the call this backward
+            # belongs to is the one with the same autograd invocation. It is owed
+            # one transition: a retained graph can run this backward again after
+            # another forward is pending.
+            manager = get_manager(device_index, create_if_none_exists=False)
             invocation = current_autograd_invocation()
-            if invocation in forward_box.captured_invocations:
-                forward_box.captured_invocations.discard(invocation)
-                manager = get_manager(device_index, create_if_none_exists=False)
-                if manager is not None:
-                    manager.set_to_running_backward()
+            if manager is not None and invocation in manager.captured_invocations:
+                manager.captured_invocations.discard(invocation)
+                manager.set_to_running_backward()
             return compiled_graph_callable(new_inputs)
 
         compiled_graph.current_callable = compiled_artifact
@@ -298,9 +296,6 @@ def cudagraph_post_compile(
         }
 
         device_index = next(iter(compiled_graph.device_idxs))
-        forward_device_index = (
-            None if is_backward or is_inference else boxed_forward_device_index
-        )
         cudagraphify_kwargs = dict(
             device_index=device_index,
             stack_traces=stack_traces,
@@ -311,7 +306,6 @@ def cudagraph_post_compile(
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
             kernel_free_cudagraph=compiled_graph.kernel_free_cudagraph,
             user_visible_output_idxs=tuple(user_visible_output_idxs),
-            forward_device_index=forward_device_index,
         )
 
         policy = config.cudagraph_policy
@@ -417,9 +411,6 @@ def cudagraph_partition_post_compile(
 
     from .compile_fx import cudagraphify
 
-    forward_device_index = (
-        None if is_backward or is_inference else boxed_forward_device_index
-    )
     # cudagraphify each partition function, assuming every graph partition function
     # is cudagraphable. Non-cudagraphable ops (e.g., cpu ops) are inlined into
     # `call` function and not included in partition functions.
@@ -442,7 +433,6 @@ def cudagraph_partition_post_compile(
             mutated_input_idxs=tuple(partition_metadata.mutated_input_idxs),
             kernel_free_cudagraph=compiled_graph.kernel_free_cudagraph,
             user_visible_output_idxs=tuple(partition_metadata.user_visible_output_idxs),
-            forward_device_index=forward_device_index,
         )
         cudagraphify_fns.append(cudagraphify_fn)
 
