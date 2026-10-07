@@ -220,6 +220,107 @@ softmax(
   }
 }
 
+// Online (max, sum) pair for the strided split path; sum is relative to max.
+inline float2 softmax_combine(float2 a, float2 b) {
+  const float m = c10::metal::max(a.x, b.x);
+  if (m == -INFINITY) {
+    return float2(m, 0.f);
+  }
+  return float2(m, a.y * precise::exp(a.x - m) + b.y * precise::exp(b.x - m));
+}
+
+// Reduces a threadgroup's per-thread pairs along y, leaving the result in
+// shared[tid.x].
+inline float2 softmax_threadgroup_combine(
+    threadgroup float2* shared,
+    float2 val,
+    uint2 tid,
+    uint2 tptg) {
+  const uint shared_idx = tid.y * tptg.x + tid.x;
+  shared[shared_idx] = val;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint stride = tptg.y / 2; stride > 0; stride /= 2) {
+    if (tid.y < stride) {
+      shared[shared_idx] = softmax_combine(
+          shared[shared_idx], shared[shared_idx + stride * tptg.x]);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  return shared[tid.x];
+}
+
+// First pass of the strided split path. Used when the reduction dim is not
+// the innermost one and there are too few columns to fill the GPU: grid.z
+// splits the reduction dim into chunks and each threadgroup stores the
+// (max, sum) of its chunk for tptg.x columns.
+template <typename T, typename idx_t>
+[[max_total_threads_per_threadgroup(kSoftmaxMaxThreads)]] [[kernel]] void
+softmax_strided_partial(
+    constant T* input,
+    device float2* partials,
+    constant SoftmaxParams<idx_t>& params,
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 tptg [[threads_per_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+  threadgroup float2 shared[kSoftmaxMaxThreads];
+  const auto inner_size = params.inner_size;
+  const idx_t col = idx_t(tgid.x) * tptg.x + tid.x;
+  const idx_t row = idx_t(tgid.y) * inner_size + col;
+  const bool active = col < inner_size;
+  const idx_t base = active ? input_row_offset(row, params) : 0;
+  const idx_t dim_stride = params.strides[params.dim];
+  const idx_t chunk_begin = idx_t(tgid.z) * params.chunk_size;
+  const idx_t chunk_end = min(chunk_begin + params.chunk_size, params.dim_size);
+  float2 acc(-INFINITY, 0.f);
+  for (idx_t r = chunk_begin + tid.y; active && r < chunk_end; r += tptg.y) {
+    acc =
+        softmax_combine(acc, float2(float(input[base + r * dim_stride]), 1.f));
+  }
+  acc = softmax_threadgroup_combine(shared, acc, tid.xy, tptg.xy);
+  if (tid.y == 0 && active) {
+    partials[row * params.n_chunks + tgid.z] = acc;
+  }
+}
+
+// Second pass of the strided split path: every threadgroup folds all chunk
+// partials of its columns, then writes the outputs of its own chunk.
+template <typename T, typename idx_t, bool log_softmax>
+[[max_total_threads_per_threadgroup(kSoftmaxMaxThreads)]] [[kernel]] void
+softmax_strided_finalize(
+    constant T* input,
+    device T* output,
+    constant float2* partials,
+    constant SoftmaxParams<idx_t>& params,
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 tptg [[threads_per_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]]) {
+  threadgroup float2 shared[kSoftmaxMaxThreads];
+  const auto dim_size = params.dim_size;
+  const auto inner_size = params.inner_size;
+  const auto n_chunks = params.n_chunks;
+  const idx_t col = idx_t(tgid.x) * tptg.x + tid.x;
+  const idx_t row = idx_t(tgid.y) * inner_size + col;
+  const bool active = col < inner_size;
+  float2 acc(-INFINITY, 0.f);
+  for (idx_t i = tid.y; active && i < n_chunks; i += tptg.y) {
+    acc = softmax_combine(acc, partials[row * n_chunks + i]);
+  }
+  acc = softmax_threadgroup_combine(shared, acc, tid.xy, tptg.xy);
+  if (!active) {
+    return;
+  }
+  const SoftmaxEpilogue<log_softmax> epilogue(acc.x, acc.y);
+  const idx_t base = input_row_offset(row, params);
+  const idx_t out_base = out_row_offset(row, dim_size, inner_size);
+  const idx_t dim_stride = params.strides[params.dim];
+  const idx_t chunk_begin = idx_t(tgid.z) * params.chunk_size;
+  const idx_t chunk_end = min(chunk_begin + params.chunk_size, dim_size);
+  for (idx_t r = chunk_begin + tid.y; r < chunk_end; r += tptg.y) {
+    output[out_base + r * inner_size] =
+        static_cast<T>(epilogue(float(input[base + r * dim_stride])));
+  }
+}
+
 #define REGISTER_SOFTMAX_OP(DTYPE, IDX_T, SUFFIX, NAME, LOG_SOFTMAX)       \
   template [[host_name(#NAME "_row_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
   softmax_row<DTYPE, IDX_T, LOG_SOFTMAX>(                                  \
@@ -240,6 +341,16 @@ softmax(
           uint2 tgid [[threadgroup_position_in_grid]],                     \
           uint2 tid [[thread_position_in_threadgroup]],                    \
           uint2 tptg [[threads_per_threadgroup]]);                         \
+  template [[host_name(#NAME "_strided_finalize_" #DTYPE                   \
+                             "_" #SUFFIX)]] [[kernel]] void                \
+  softmax_strided_finalize<DTYPE, IDX_T, LOG_SOFTMAX>(                     \
+      constant DTYPE * input,                                              \
+      device DTYPE * output,                                               \
+      constant float2 * partials,                                          \
+      constant SoftmaxParams<IDX_T> & params,                              \
+      uint3 tid [[thread_position_in_threadgroup]],                        \
+      uint3 tptg [[threads_per_threadgroup]],                              \
+      uint3 tgid [[threadgroup_position_in_grid]]);                        \
   template [[host_name(#NAME "_" #DTYPE "_" #SUFFIX)]] [[kernel]] void     \
   softmax<DTYPE, IDX_T, LOG_SOFTMAX>(                                      \
       constant DTYPE * input,                                              \
@@ -260,7 +371,16 @@ softmax(
           constant SoftmaxParams<IDX_T> & params,                          \
           uint2 tgid [[threadgroup_position_in_grid]],                     \
           uint2 tid [[thread_position_in_threadgroup]],                    \
-          uint2 tptg [[threads_per_threadgroup]]);
+          uint2 tptg [[threads_per_threadgroup]]);                         \
+  template [[host_name("softmax_strided_partial_" #DTYPE                   \
+                       "_" #SUFFIX)]] [[kernel]] void                      \
+  softmax_strided_partial<DTYPE, IDX_T>(                                   \
+      constant DTYPE * input,                                              \
+      device float2 * partials,                                            \
+      constant SoftmaxParams<IDX_T> & params,                              \
+      uint3 tid [[thread_position_in_threadgroup]],                        \
+      uint3 tptg [[threads_per_threadgroup]],                              \
+      uint3 tgid [[threadgroup_position_in_grid]]);
 
 #define REGISTER_SOFTMAX(DTYPE)          \
   REGISTER_SOFTMAX_IDX(DTYPE, uint, u32) \
