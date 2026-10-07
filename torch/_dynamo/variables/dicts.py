@@ -72,6 +72,7 @@ from .object_protocol import (
     generic_getitem,
     generic_richcompare_bool,
     mro_lookup,
+    python_constant_repr_impl,
 )
 
 
@@ -1159,8 +1160,6 @@ class MappingProxyVariable(VariableTracker):
         return super().call_obj_hasattr(tx, name)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
