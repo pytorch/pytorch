@@ -790,8 +790,11 @@ class TestJunitXml(TestCase):
         self._assert_matches_golden("pytest_sanitized", normalized)
 
 
-# The fixture's run context, which the report records.
-_REPORT_CHILD_ENV = _JUNIT_CHILD_ENV | {
+# The fixture's run context, which the report records, without the job's device
+# filter (XPU and CUDA jobs set PYTORCH_TESTING_DEVICE_ONLY_FOR).
+_REPORT_CHILD_ENV = {
+    k: v for k, v in _JUNIT_CHILD_ENV.items() if not k.startswith("PYTORCH_TESTING_DEVICE_")
+} | {
     "GITHUB_REPOSITORY": "pytorch/pytorch",
     "JOB_ID": "123456789",
     "BUILD_ENVIRONMENT": "report-build",
@@ -1501,6 +1504,23 @@ class TestReportHelpers(TestCase):
         run = json.loads(line)
         _assert_run_line(run, int(now * 1000), int(now * 1000))
         self.assertEqual(run["outcome_summary"], r"\ud800")
+
+    @parametrize(
+        "raw, expected",
+        [
+            subtest(("NVIDIA L4", "l4"), name="l4"),
+            subtest(("Tesla T4", "t4"), name="t4"),
+            subtest(("NVIDIA H100 80GB HBM3", "h100"), name="h100"),
+            subtest(("AMD Instinct MI350X VF", "mi350x"), name="mi350x"),
+            subtest(("Apple M2 Pro", "m2"), name="m2"),
+            subtest(("Intel(R) Data Center GPU Max 1100", "max1100"), name="max1100"),
+            subtest(("Intel(R) Arc(TM) Pro B60 Graphics", "b60"), name="b60"),
+            subtest(("NVIDIA GeForce RTX 4090", "nvidia-geforce-rtx-4090"), name="unknown"),
+        ],
+    )
+    def test_normalize_device_name(self, raw, expected):
+        environment = importlib.import_module("torch.testing._internal.torchci.environment")
+        self.assertEqual(environment._normalize_device_name(raw), expected)
 
 
 instantiate_parametrized_tests(TestReportHelpers)
