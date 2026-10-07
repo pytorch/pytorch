@@ -659,53 +659,72 @@ def _restore_expandable_segments(
     previous process, and map back the ranges they had mapped.
 
     ``segments`` are entries from :func:`memory_snapshot` taken in the earlier
-    process, all on ``device``. Each is re-reserved at the address, size and
-    segment size it had, with handles shareable the way the originals were,
-    whatever this process's settings
-    (see Note [Expandable Segment Reserved Address]). The restored ranges become
-    free blocks in ``mempool_id``, so ``UntypedStorage._resize_with_addr_`` can
-    then place a tensor back at its original address.
+    process, all on ``device``. Each reservation is recreated at its saved
+    address with its saved reservation size and segment size (mapping
+    granularity), regardless of this process's ``expandable_segments_reserve``
+    and ``large_segment_size_mb``. A saved shareable (IPC) handle type is kept and
+    must be enabled in this process; an unspecified one uses this process's
+    default. See Note [Expandable Segment Reserved Address].
 
-    Call this before anything else allocates, and keep the pool alive (e.g. hold
-    the :class:`MemPool`) for as long as the restored addresses are in use.
+    The restored ranges become free blocks in the pool ``mempool_id``, so
+    ``UntypedStorage._resize_with_addr_`` can then place a tensor back at its
+    original address. A private pool must already exist, and its owner (e.g. the
+    :class:`MemPool` whose ``.id`` is passed) must outlive the restored
+    addresses; ``(0, 0)`` is the default pool.
+
+    Earlier allocations in this process are allowed, but restoring raises if one
+    of them overlaps a saved reservation (holes included) or leaves too little
+    memory to map the saved ranges back; call this as early as possible. A
+    segment that fails to restore leaves nothing behind, but segments restored
+    before it stay in the pool, so to retry the whole list, first drop the pool
+    and call :func:`empty_cache`, or use a fresh process.
 
     .. warning::
         Internal API, subject to change. Requires
         ``PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True``.
     """
     device_index = _get_device_index(device, optional=True)
-    # Group the snapshot's per-mapped-run entries back into whole segments: a
-    # segment with holes is reported as several runs sharing one base address.
-    runs: dict[tuple[bool, int], list[tuple[int, int]]] = {}
-    reservations: dict[tuple[bool, int], tuple[int, int, int]] = {}
+    # memory_snapshot reports each mapped run of a segment as its own entry;
+    # regroup the runs by segment base.
+    layouts: dict[tuple[str, int], dict[str, int]] = {}
+    runs: dict[tuple[str, int], list[tuple[int, int]]] = {}
     for seg in segments:
+        addr, base = seg["address"], seg["expandable_segment_base"]
         if not seg["is_expandable"]:
             raise ValueError(
-                f"segment at {seg['address']:#x} is not an expandable segment, so its "
-                "address cannot be reproduced; set expandable_segments:True when saving"
+                f"segment at {addr:#x} is not an expandable segment, so its address "
+                "cannot be reproduced; set expandable_segments:True before making "
+                "the allocations to be saved"
+            )
+        if seg["segment_type"] not in ("small", "large"):
+            raise ValueError(
+                f"segment at {addr:#x} has unknown segment_type {seg['segment_type']!r}"
             )
         if seg.get("device", device_index) != device_index:
             raise ValueError(
-                f"segment at {seg['address']:#x} is on device {seg['device']}, "
-                f"not device {device_index}"
+                f"segment at {addr:#x} is on device {seg['device']}, not device {device_index}"
             )
-        key = (seg["segment_type"] == "small", seg["expandable_segment_base"])
-        offset = seg["address"] - seg["expandable_segment_base"]
-        runs.setdefault(key, []).append((offset, seg["total_size"]))
-        reservations[key] = (
-            seg["expandable_reservation_size"],
-            seg["expandable_segment_size"],
-            seg["expandable_segment_handle_type"],
-        )
+        key = (seg["segment_type"], base)
+        layout = {
+            "reserve_size": seg["expandable_reservation_size"],
+            "segment_size": seg["expandable_segment_size"],
+            "handle_type": seg["expandable_segment_handle_type"],
+        }
+        if layouts.setdefault(key, layout) != layout:
+            raise ValueError(
+                f"segments in the reservation at {base:#x} disagree on its layout: "
+                f"{layouts[key]} vs {layout}"
+            )
+        runs.setdefault(key, []).append((addr - base, seg["total_size"]))
 
-    for (is_small, base), ranges in runs.items():
+    for (segment_type, base), ranges in runs.items():
         torch._C._cuda_restoreExpandableSegment(
-            device_index,
-            mempool_id,
-            is_small,
-            base,
-            *reservations[(is_small, base)],
-            sorted(ranges),
+            device=device_index,
+            mempool_id=mempool_id,
+            is_small=segment_type == "small",
+            address=base,
+            mapped_ranges=sorted(ranges),
+            **layouts[(segment_type, base)],
         )
 
 
