@@ -1277,7 +1277,14 @@ def is_valid_splitwithsizes_cat(match):
 
 def _canonicalize_dim_arg(rank, dim):
     # a dim left at its default comes through as None; that default is 0
-    return canonicalize_dim(rank, dim if dim is not None else 0)
+    d = dim if dim is not None else 0
+    try:
+        return canonicalize_dim(rank, d)
+    except IndexError:
+        # eager cat tolerates any dim when every input is a legacy (0,)
+        # empty, so an out-of-range dim can reach this check; compare raw
+        # rather than crash the pattern match
+        return d
 
 
 def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):

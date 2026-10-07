@@ -1315,16 +1315,32 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 1, 2)
 
-        # a true mismatch still rejects: on 3D, cat dim=-1 vs split dim=1
+        # a true mismatch still rejects: on 3D, cat dim=-1 (axis 2) vs split
+        # dim=1, with the cat input count and split sizes in agreement so the
+        # dims are the only thing that can reject
         def fn(a, b, c):
             cat = torch.ops.aten.cat.default([a, b, c], -1)
-            split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [1, 1], 1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [0, 0, 0], 1
+            )
             return [s**2 for s in split_with_sizes]
 
         args = [
-            torch.randn(4, 2, 2, device=GPU_TYPE),
-            torch.randn(4, 2, 3, device=GPU_TYPE),
-            torch.randn(4, 2, 5, device=GPU_TYPE),
+            torch.randn(4, 0, 2, device=GPU_TYPE),
+            torch.randn(4, 0, 3, device=GPU_TYPE),
+            torch.randn(4, 0, 5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+        # eager cat accepts any dim when every input is a legacy (0,) empty;
+        # the out-of-range dim must not crash extra_check
+        def fn(a, b):
+            cat = torch.ops.aten.cat.default([a, b], 1)
+            return torch.ops.aten.split_with_sizes.default(cat, [0, 0], 0)
+
+        args = [
+            torch.empty(0, device=GPU_TYPE),
+            torch.empty(0, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
@@ -1389,6 +1405,20 @@ class TestPatternMatcher(TestCase):
 
         args = [
             torch.randn(2, 32, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 0, 0)
+
+        # all-legacy-empty cat keeps rank 1 while the dim stays out of range;
+        # extra_check must compare raw rather than raise
+        def fn(a):
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [0, 0], 0)
+            getitem = split_with_sizes[0]
+            getitem_1 = split_with_sizes[1]
+            cat = torch.ops.aten.cat.default([getitem, getitem_1], 1)
+            return cat**2
+
+        args = [
+            torch.empty(0, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
