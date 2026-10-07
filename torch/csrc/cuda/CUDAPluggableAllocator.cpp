@@ -372,14 +372,6 @@ void CUDAPluggableAllocator::copy_data(
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
     current_custom_allocator;
 
-namespace {
-
-struct PythonCUDAPluggableAllocator : CUDAPluggableAllocator {
-  using CUDAPluggableAllocator::CUDAPluggableAllocator;
-};
-
-} // namespace
-
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator() {
   return current_custom_allocator;
@@ -396,26 +388,9 @@ createCustomAllocator(
   return allocator;
 }
 
-std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
-createPythonAllocator(
-    std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, int, cudaStream_t)> free_fn) {
-  auto allocator = std::make_shared<PythonCUDAPluggableAllocator>(
-      std::move(alloc_fn), std::move(free_fn));
-  allocator->init(device_count);
-  return allocator;
-}
-
 void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator) {
-  TORCH_CHECK(
-      !std::dynamic_pointer_cast<PythonCUDAPluggableAllocator>(allocator),
-      "Python-callable CUDA allocators are supported only by "
-      "torch.cuda.MemPool.from_callbacks() and cannot be installed as the "
-      "process-wide allocator, where callbacks could run for every CUDA "
-      "allocation, from threads without an existing Python context, and "
-      "during interpreter teardown");
   TORCH_CHECK(
       !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
       "Can't swap an already initialized allocator");
