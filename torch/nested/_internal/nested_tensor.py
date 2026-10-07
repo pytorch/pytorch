@@ -14,13 +14,18 @@ _tensor_symint_registry = WeakTensorKeyDictionary()
 
 
 def get_tensor_symint(tensor, *, coeff=1):
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
     from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
 
     # NB: Only FakeTensor is associated with a memo
     tensor = mb_unwrap_functional_tensor(tensor)
     if isinstance(tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return tensor.get_nested_int(coeff=coeff)
+    if (
+        is_fake_tensor(tensor)
+        and (nested_int_memo := getattr(tensor, "nested_int_memo", None)) is not None
+    ):
+        return nested_int_memo * coeff
 
     global _tensor_id_counter
 
