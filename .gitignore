@@ -64,6 +64,7 @@ test/cpp_extensions/**/install
 test/kernel.errors.txt
 third_party/build/
 third_party/nccl/
+third_party/nccl-extensions/
 tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh

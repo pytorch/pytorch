@@ -487,10 +487,10 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   # ncclEp*. How it links libnccl_ep follows how torch links NCCL:
   #  - USE_SYSTEM_NCCL=OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked
   #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT
-  #    headers baked from the submodule build dir; no nccl4py).
+  #    headers baked from the submodule build dir; no nccl-extensions wheel).
   #  - USE_SYSTEM_NCCL=ON: __caffe2_nccl_ep is libnccl_ep.so, NEEDED-linked here
-  #    and resolved from the nccl4py wheel at runtime (RPATH to nccl/ep/lib; JIT
-  #    headers also from nccl4py, so nothing is baked).
+  #    and preloaded from the nccl-extensions wheel at runtime by
+  #    _token_switch.py (JIT headers also from that wheel, so nothing is baked).
   if(USE_NCCL_EP)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
@@ -502,19 +502,13 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     target_link_libraries(_nccl_ep PRIVATE
       torch_python torch_cuda __caffe2_nccl_ep pybind::pybind11)
     set_target_properties(_nccl_ep PROPERTIES
-      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch")
-    if(USE_SYSTEM_NCCL)
-      # Dynamic: resolve nccl4py's libnccl_ep.so (site-packages/nccl/ep/lib, one
-      # dir up from torch/ via $ORIGIN/..) at import.
-      set_target_properties(_nccl_ep PROPERTIES
-        INSTALL_RPATH "${_rpath_portable_origin}/lib;${_rpath_portable_origin}/../nccl/ep/lib")
-    else()
-      # Static: only torch's own libs needed; bake the in-tree JIT header dir so
-      # the extension self-configures NCCL_EP_HOME / NCCL_HOME at import.
+      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
+      INSTALL_RPATH "${_rpath_portable_origin}/lib")
+    if(NOT USE_SYSTEM_NCCL)
+      # Static: bake the in-tree JIT header dir so the extension self-configures
+      # NCCL_EP_HOME / NCCL_HOME at import.
       target_compile_definitions(_nccl_ep PRIVATE
         "NCCL_EP_JIT_HOME=\"${NCCL_EP_JIT_HOME}\"")
-      set_target_properties(_nccl_ep PROPERTIES
-        INSTALL_RPATH "${_rpath_portable_origin}/lib")
     endif()
     if(NOT WIN32)
       set_target_properties(_nccl_ep PROPERTIES C_VISIBILITY_PRESET "default")

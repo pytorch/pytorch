@@ -24,7 +24,8 @@ log = logging.getLogger(__name__)
 
 def _nccl_ep_available() -> bool:
     # The torch._nccl_ep extension is built only with USE_NCCL_EP, and a
-    # USE_SYSTEM_NCCL=ON build additionally needs the nccl4py wheel at runtime.
+    # USE_SYSTEM_NCCL=ON build additionally needs the nccl-extensions wheel at
+    # runtime.
     # Actually importing it is the real check: find_spec would only locate the
     # extension without dlopening it, so it would miss a missing libnccl_ep.so.
     if not torch.cuda.is_available():
@@ -40,7 +41,7 @@ def _nccl_ep_available() -> bool:
 def requires_nccl_ep():
     return skip_but_pass_in_sandcastle_if(
         not _nccl_ep_available(),
-        "Test requires a USE_NCCL_EP build (plus nccl4py for USE_SYSTEM_NCCL=ON)",
+        "Test requires a USE_NCCL_EP build (plus nccl-extensions for USE_SYSTEM_NCCL=ON)",
     )
 
 

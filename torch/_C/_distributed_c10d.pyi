@@ -1018,7 +1018,7 @@ def _register_external_nccl_comm(
 ) -> None: ...
 def _unregister_external_nccl_comm(group_name: str, device: torch.device) -> None: ...
 
-# NCCL EP (contrib/nccl_ep) bindings; only registered in USE_C10D_NCCL builds.
+# NCCL EP (nccl-extensions) bindings; only registered in USE_C10D_NCCL builds.
 class _NcclEpGroup:
     @staticmethod
     def create(

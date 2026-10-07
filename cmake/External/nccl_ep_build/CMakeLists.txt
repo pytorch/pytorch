@@ -1,5 +1,5 @@
-# Driver project that builds NCCL's contrib/nccl_ep against a prebuilt NCCL
-# (the Makefile-built tree in NCCL_HOME). contrib/nccl_ep is written to be
+# Driver project that builds nccl-extensions' nccl_ep against a prebuilt NCCL
+# (the Makefile-built tree in NCCL_HOME). nccl_ep is written to be
 # add_subdirectory'd, so it has no project()/languages of its own and expects
 # CUDA_MAJOR/CUDA_MINOR (mirroring NCCL's root CMakeLists); this driver supplies
 # them. Invoked by the nccl_ep_external ExternalProject in

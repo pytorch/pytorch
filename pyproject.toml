@@ -117,13 +117,15 @@ provider = { path = "tools/metadata", module = "dependencies" }
 include = [
     "third_party/**",
     "aten/src/ATen/native/quantized/cpu/qnnpack/deps/**",
-    # NCCL is not shipped (see !third_party/nccl/** below); the configure step
-    # clones it from this pin instead, so the pin must survive the .ci/** exclude.
+    # NCCL and nccl-extensions are not shipped (see !third_party/nccl/** and
+    # !third_party/nccl-extensions/** below); the configure step clones them
+    # from these pins instead, so the pins must survive the .ci/** exclude.
     ".ci/docker/ci_commit_pins/nccl*.txt",
     "!**/.git",
     "!**/__pycache__/**",
     "!**/*.pyc",
     "!third_party/nccl/**",
+    "!third_party/nccl-extensions/**",
     # third_party/build/ is an in-tree CMake build dir (gitignored); un-include
     # it so a dirty checkout does not leak build output into the sdist. Anchored
     # like the .gitignore entry, so it does not touch tracked build/ dirs deeper
