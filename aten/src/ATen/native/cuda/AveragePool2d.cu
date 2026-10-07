@@ -460,15 +460,7 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
 
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool gesm10x = properties->major >= 10;
-  // The channels_last (NHWC) backward kernel needs more registers per
-  // thread than the plain NCHW kernel for its extra index/stride math, so
-  // on sm10x+ (Blackwell/Rubin) devices 1024 threads/block can overflow the
-  // register budget and launch fails with "too many resources requested
-  // for launch" -- regardless of dtype. This used to be gated on
-  // `scalar_t == double` only, which happened to mask the issue for double
-  // (the only dtype that got the reduced thread count) while leaving
-  // float32/bfloat16/half still broken on newer sm10x parts. Cap at the
-  // architecture level instead of per-dtype.
+  // (don't exceed register usage limits on newer arches)
   const int max_threads = gesm10x ? 768 : 1024;
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
