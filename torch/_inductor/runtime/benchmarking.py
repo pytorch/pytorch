@@ -125,30 +125,29 @@ def register_benchmarker(
     _BENCHMARK_DISPATCH[device_type] = fn
 
 
-def _distort_benchmarking_result(
-    ms: list[float] | tuple[float, ...] | float,
-) -> list[float] | tuple[float, ...] | float:
-    if isinstance(ms, (list, tuple)):
-        return type(ms)(_distort_benchmarking_result(val) for val in ms)  # type: ignore[misc]
-
-    distort_method = inductor_config.test_configs.distort_benchmarking_result
-    if not isinstance(ms, float):
-        raise AssertionError(f"Expected float, got {type(ms)}")
-    if distort_method == "inverse":
-        return 1.0 / ms if ms else 0.0
-    elif distort_method == "random":
-        import random
-
-        return random.random()
-    else:
-        raise RuntimeError(f"Unrecognized distort method {distort_method}")
-
-
 def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
     from torch._inductor import config
 
     if config.test_configs.distort_benchmarking_result == "":
         return fn
+
+    def distort(
+        ms: list[float] | tuple[float, ...] | float,
+    ) -> list[float] | tuple[float, ...] | float:
+        if isinstance(ms, (list, tuple)):
+            return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
+
+        distort_method = config.test_configs.distort_benchmarking_result
+        if not isinstance(ms, float):
+            raise AssertionError(f"Expected float, got {type(ms)}")
+        if distort_method == "inverse":
+            return 1.0 / ms if ms else 0.0
+        elif distort_method == "random":
+            import random
+
+            return random.random()
+        else:
+            raise RuntimeError(f"Unrecognized distort method {distort_method}")
 
     @functools.wraps(fn)
     def wrapper(
@@ -156,7 +155,7 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
     ) -> list[float] | tuple[float, ...] | float:
         ms = fn(*args, **kwargs)
 
-        return _distort_benchmarking_result(ms)
+        return distort(ms)
 
     return wrapper
 
@@ -437,15 +436,6 @@ register_benchmarker("cuda", _default_cuda_bench, override=True)
 register_benchmarker("xpu", _default_xpu_bench, override=True)
 
 
-def _collect_cpu_event_ids(event: Any, benchmark_event_ids: OrderedSet[int]) -> None:
-    if event.device_type != torch.autograd.DeviceType.CPU:
-        return
-
-    benchmark_event_ids.add(event.id)
-    for child in event.cpu_children:
-        _collect_cpu_event_ids(child, benchmark_event_ids)
-
-
 def _get_callable_device_kernel_time_us(
     kineto_events: Any,
     profiler_events: Any,
@@ -455,6 +445,14 @@ def _get_callable_device_kernel_time_us(
     from torch.autograd import DeviceType
 
     benchmark_event_ids: OrderedSet[int] = OrderedSet()
+
+    def collect_cpu_event_ids(event: Any) -> None:
+        if event.device_type != DeviceType.CPU:
+            return
+
+        benchmark_event_ids.add(event.id)
+        for child in event.cpu_children:
+            collect_cpu_event_ids(child)
 
     benchmark_events = [
         event
@@ -469,7 +467,7 @@ def _get_callable_device_kernel_time_us(
         )
 
     for event in benchmark_events:
-        _collect_cpu_event_ids(event, benchmark_event_ids)
+        collect_cpu_event_ids(event)
 
     # An op may re-dispatch internally (e.g. aten::sum with no dim calls
     # aten::sum with dim), producing a kineto CPU event whose corr ID the

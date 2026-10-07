@@ -1713,28 +1713,26 @@ class MultiOutputLine(WrapperLine):
     arg_name: str
     indices: Sequence[Any]
 
-    def _codegen_list_tuple_access(self, basename, indices):  # type: ignore[no-untyped-def]
-        if len(indices) > 0:
-            itype, i = indices[0]
-            if issubclass(itype, list):
-                return self._codegen_list_tuple_access(f"{basename}[{i}]", indices[1:])
-            elif issubclass(itype, tuple):
-                # cpp wrapper code needs to use std::get<> to access a tuple
-                tuple_access = self.wrapper.codegen_tuple_access(
-                    basename, self.result_name, str(i)
-                )
-                return self._codegen_list_tuple_access(tuple_access, indices[1:])
-            elif issubclass(itype, dict):
-                return self._codegen_list_tuple_access(
-                    f"{basename}['{i}']", indices[1:]
-                )
-            else:
-                raise AssertionError("non supported index type: ", itype)
-        else:
-            return basename
-
     def codegen(self, code: IndentedBuffer) -> None:
-        value = self._codegen_list_tuple_access(self.arg_name, self.indices)
+        def codegen_list_tuple_access(basename, indices):  # type: ignore[no-untyped-def]
+            if len(indices) > 0:
+                itype, i = indices[0]
+                if issubclass(itype, list):
+                    return codegen_list_tuple_access(f"{basename}[{i}]", indices[1:])
+                elif issubclass(itype, tuple):
+                    # cpp wrapper code needs to use std::get<> to access a tuple
+                    tuple_access = self.wrapper.codegen_tuple_access(
+                        basename, self.result_name, str(i)
+                    )
+                    return codegen_list_tuple_access(tuple_access, indices[1:])
+                elif issubclass(itype, dict):
+                    return codegen_list_tuple_access(f"{basename}['{i}']", indices[1:])
+                else:
+                    raise AssertionError("non supported index type: ", itype)
+            else:
+                return basename
+
+        value = codegen_list_tuple_access(self.arg_name, self.indices)
         code.writeline(
             f"{self.wrapper.declare}{self.result_name} = {value}{self.wrapper.ending}"
         )
@@ -1976,56 +1974,6 @@ def _resolve_nested_output(
     if not isinstance(current_output, ir.IRNode):
         raise AssertionError(f"expected IRNode output, got {type(current_output)}")
     return current_output, remaining_keypath
-
-
-def _unwrap_views(target) -> ir.Buffer:
-    if isinstance(target, ir.BaseView):
-        return _unwrap_views(target.unwrap_view())
-    if isinstance(target, ir.MutableBox):
-        return _unwrap_views(target.data)
-    if not isinstance(target, ir.Buffer):
-        raise AssertionError(type(target))
-    return target
-
-
-# `_unbacked_keypath_to_expr` recursively constructs a code expression by processing each element of
-# the keypath and construct the expression incrementally.
-# For example, given output name outs and keypath [SequenceKey(0), CallMethodKey("stride", 1)],
-# it generates "outs[0]" based on SequenceKey(0), then recursively
-# _unbacked_keypath_to_expr("outs[0]", [CallMethodKey("stride"), ...])
-def _unbacked_keypath_to_expr(expr: str, keypath: pytree.KeyPath):
-    if keypath == ():
-        return expr
-
-    if (
-        len(keypath) >= 2
-        and isinstance(keypath[0], CallMethodKey)
-        and isinstance(keypath[1], pytree.SequenceKey)
-    ):
-        return _unbacked_keypath_to_expr(
-            f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
-        )
-    elif isinstance(keypath[0], CallMethodKey):
-        return _unbacked_keypath_to_expr(f"{expr}.{keypath[0].name}()", keypath[1:])
-    elif isinstance(keypath[0], pytree.SequenceKey):
-        return (
-            _unbacked_keypath_to_expr(
-                f"std::get<{keypath[0].idx}>({expr})", keypath[1:]
-            )
-            if V.graph.cpp_wrapper
-            else _unbacked_keypath_to_expr(f"{expr}[{keypath[0].idx}]", keypath[1:])
-        )
-    elif isinstance(keypath[0], DivideByKey):
-        # TODO: need to assert divisibility
-        if V.graph.cpp_wrapper:
-            return _unbacked_keypath_to_expr(
-                f"({expr} / {keypath[0].divisor})", keypath[1:]
-            )
-        return _unbacked_keypath_to_expr(
-            f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:]
-        )
-    else:
-        raise AssertionError(f"unrecognized keypath {keypath}")
 
 
 class PythonWrapperCodegen(CodeGen):
@@ -5471,7 +5419,17 @@ class PythonWrapperCodegen(CodeGen):
             if not isinstance(input_buffer, (ir.Buffer, ir.ReinterpretView)):
                 raise AssertionError(type(input_buffer))
             if isinstance(input_buffer, ir.ReinterpretView):
-                input_buffer = _unwrap_views(input_buffer)
+
+                def unwrap_views(target) -> ir.Buffer:
+                    if isinstance(target, ir.BaseView):
+                        return unwrap_views(target.unwrap_view())
+                    if isinstance(target, ir.MutableBox):
+                        return unwrap_views(target.data)
+                    if not isinstance(target, ir.Buffer):
+                        raise AssertionError(type(target))
+                    return target
+
+                input_buffer = unwrap_views(input_buffer)
             self.codegen_allocation(input_buffer)
             self.writeline(ReinterpretLine(self, input_buffer, buffer, layout))
             return
@@ -5586,6 +5544,38 @@ class PythonWrapperCodegen(CodeGen):
         # For example, we might want to generate "u0 = outs[0].stride(1)"", where s = u0, and the keypath
         # describes the structure of "outs[0].stride(1)", like [SequenceKey(0), CallMethodKey("stride"), SequenceKey[1]].
         for s, keypath in unbacked_bindings.items():
+            # `go` recursively constructs a code expression by processing each element of
+            # the keypath and construct the expression incrementally.
+            # For example, given output name outs and keypath [SequenceKey(0), CallMethodKey("stride", 1)],
+            # it generates "outs[0]" based on SequenceKey(0), then recursively go("outs[0]", [CallMethodKey("stride"), ...])
+            def go(expr: str, keypath: pytree.KeyPath):
+                if keypath == ():
+                    return expr
+
+                if (
+                    len(keypath) >= 2
+                    and isinstance(keypath[0], CallMethodKey)
+                    and isinstance(keypath[1], pytree.SequenceKey)
+                ):
+                    return go(
+                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
+                    )
+                elif isinstance(keypath[0], CallMethodKey):
+                    return go(f"{expr}.{keypath[0].name}()", keypath[1:])
+                elif isinstance(keypath[0], pytree.SequenceKey):
+                    return (
+                        go(f"std::get<{keypath[0].idx}>({expr})", keypath[1:])
+                        if V.graph.cpp_wrapper
+                        else go(f"{expr}[{keypath[0].idx}]", keypath[1:])
+                    )
+                elif isinstance(keypath[0], DivideByKey):
+                    # TODO: need to assert divisibility
+                    if V.graph.cpp_wrapper:
+                        return go(f"({expr} / {keypath[0].divisor})", keypath[1:])
+                    return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
+                else:
+                    raise AssertionError(f"unrecognized keypath {keypath}")
+
             # `go_outer` manages the top-level logic for generating the final expression.
             # It handles special cases for C++ code generation and adjusts
             # the keypath based on the context (e.g., single vs. multiple outputs).
@@ -5596,9 +5586,9 @@ class PythonWrapperCodegen(CodeGen):
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
                     node, remaining_keypath = _resolve_nested_output(outputs, keypath)
-                    return _unbacked_keypath_to_expr(node.get_name(), remaining_keypath)
+                    return go(node.get_name(), remaining_keypath)
                 else:
-                    return _unbacked_keypath_to_expr(output_name, keypath)
+                    return go(output_name, keypath)
 
             self.writeline(
                 f"{self.codegen_unbacked_symbol_decl(s)} = {go_outer()}{self.ending}"

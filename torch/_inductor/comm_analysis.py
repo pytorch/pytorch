@@ -2,7 +2,6 @@ import functools
 import logging
 import math
 import operator
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any
@@ -808,14 +807,6 @@ def estimate_fx_collective_memory_footprint(fx_node: torch.fx.Node) -> int:
     return size if not is_all_reduce(fx_node) else size // 2
 
 
-def _to_real_tensor(e: Any, make_tensor: Callable[..., torch.Tensor]) -> Any:
-    if isinstance(e, torch.fx.Node):
-        return _to_real_tensor(e.meta["val"], make_tensor)
-    if isinstance(e, torch.Tensor):
-        return make_tensor([get_fx_node_size_numel(e.size())], e.dtype, e.device)
-    return e
-
-
 def estimate_nccl_collective_runtime_from_fx_node(
     fx_node: torch.fx.Node,
     override_size: int | None = None,
@@ -886,7 +877,14 @@ def estimate_nccl_collective_runtime_from_fx_node(
                 device=device,
             )
 
-        flat_args = [_to_real_tensor(a, _tensor) for a in flat_args]
+        def to_real_tensor(e: Any) -> Any:
+            if isinstance(e, torch.fx.Node):
+                return to_real_tensor(e.meta["val"])
+            if isinstance(e, torch.Tensor):
+                return _tensor([get_fx_node_size_numel(e.size())], e.dtype, e.device)
+            return e
+
+        flat_args = [to_real_tensor(a) for a in flat_args]
         real_args, real_kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
 
         fn = fx_node.target

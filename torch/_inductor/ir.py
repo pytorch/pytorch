@@ -264,39 +264,38 @@ class GraphPartitionSignature:
     constant_names: list[str]
 
 
-def _check_tensorbox(nodes: _NodeOrNodes | None) -> None:
-    # Could expand this to check deeper properties
-    # (e.g. TensorBox points to View or StorageBox)
-    if nodes is None:
-        pass
-    elif isinstance(nodes, (list, tuple)):
-        for node in nodes:
-            _check_tensorbox(node)
-    elif isinstance(nodes, dict):
-        for node in nodes.values():
-            _check_tensorbox(node)
-    else:
-        if not isinstance(
-            nodes,
-            (
-                ExpandView,
-                DynamicScalar,
-                AssertScalar,
-                TensorBox,
-                sympy.logic.boolalg.Boolean,
-                Expr,
-                int,
-                EffectfulKernel,
-                ShapeAsConstantBuffer,
-                OpaqueMultiOutput,
-            ),
-        ):
-            raise AssertionError(
-                f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
-            )
-
-
 def validate_ir(node_or_nodes: _NodeOrNodes | None) -> None:
+    def _check_tensorbox(nodes: _NodeOrNodes | None) -> None:
+        # Could expand this to check deeper properties
+        # (e.g. TensorBox points to View or StorageBox)
+        if nodes is None:
+            pass
+        elif isinstance(nodes, (list, tuple)):
+            for node in nodes:
+                _check_tensorbox(node)
+        elif isinstance(nodes, dict):
+            for node in nodes.values():
+                _check_tensorbox(node)
+        else:
+            if not isinstance(
+                nodes,
+                (
+                    ExpandView,
+                    DynamicScalar,
+                    AssertScalar,
+                    TensorBox,
+                    sympy.logic.boolalg.Boolean,
+                    Expr,
+                    int,
+                    EffectfulKernel,
+                    ShapeAsConstantBuffer,
+                    OpaqueMultiOutput,
+                ),
+            ):
+                raise AssertionError(
+                    f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
+                )
+
     # Be picky about the accepted data structure (don't use pytree here)
     _check_tensorbox(node_or_nodes)
 
@@ -5246,16 +5245,6 @@ class NoneLayout(OutputSpec):
         return self.device
 
 
-def _unwrap_views(target: object) -> object:
-    if isinstance(target, MutationLayoutSHOULDREMOVE):
-        return _unwrap_views(target.target)
-    if isinstance(target, BaseView):
-        return _unwrap_views(target.unwrap_view())
-    if isinstance(target, MutableBox):
-        return _unwrap_views(target.data)
-    return target
-
-
 class MutationLayoutSHOULDREMOVE(Layout):
     """Layout for an operation that writes into an existing tensor or view.
 
@@ -5288,7 +5277,16 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return self.real_layout().storage_size()
 
     def get_buffer(self) -> Buffer:
-        result = _unwrap_views(self.target)
+        def unwrap_views(target: object) -> object:
+            if isinstance(target, MutationLayoutSHOULDREMOVE):
+                return unwrap_views(target.target)
+            if isinstance(target, BaseView):
+                return unwrap_views(target.unwrap_view())
+            if isinstance(target, MutableBox):
+                return unwrap_views(target.data)
+            return target
+
+        result = unwrap_views(self.target)
         if not isinstance(result, Buffer):
             raise AssertionError(type(result))
         return result
@@ -9692,12 +9690,6 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
-def _is_number(t: torch.JitType) -> bool:
-    if isinstance(t, torch.OptionalType):
-        return _is_number(t.getElementType())
-    return isinstance(t, torch.NumberType)
-
-
 class FallbackKernel(ExternKernelAlloc):
     """
     A class that represents a fallback kernel for handling operators that are not
@@ -10300,6 +10292,11 @@ class FallbackKernel(ExternKernelAlloc):
         if not V.graph.cpp_wrapper or not isinstance(kernel, torch._ops.OpOverload):
             return False
 
+        def is_number(t: torch.JitType) -> bool:
+            if isinstance(t, torch.OptionalType):
+                return is_number(t.getElementType())
+            return isinstance(t, torch.NumberType)
+
         def is_integral_tensor(v: Any) -> bool:
             if not isinstance(v, IRNode):
                 return False
@@ -10324,7 +10321,7 @@ class FallbackKernel(ExternKernelAlloc):
                 value = args[i]
             else:
                 value = arg_info.default_value
-            if not _is_number(arg_info.real_type):
+            if not is_number(arg_info.real_type):
                 continue
             if isinstance(value, complex):
                 return True
