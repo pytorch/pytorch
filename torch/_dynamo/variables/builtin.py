@@ -3064,6 +3064,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         # (__doc__, __module__, __qualname__, __type_params__) to real guarded
         # values so they are usable during tracing, and defer everything else
         # (callables, complex objects) to a GetAttrVariable.
+        if name == "__dict__":
+            return super().tp_getattro_impl(tx, name)
         source = self.source and AttrSource(self.source, name)
         try:
             value = getattr(self.fn, name)
