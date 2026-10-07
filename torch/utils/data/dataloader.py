@@ -1178,11 +1178,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 w.start()
             except (TypeError, AttributeError, PicklingError):
                 warnings.warn(
-                    "Got pickle error when attempting to start a worker Process. "
-                    "This might be because the worker Process arguments are not picklable. "
-                    "Python 3.14+ changed the multiprocessing start method in non-Mac POSIX platforms "
-                    "to 'forkserver', which requires the worker Process arguments to be picklable. "
-                    "You can also try multiprocessing.set_start_method('fork').",
+                    "Failed to pickle worker Process arguments, as required by the "
+                    "'spawn' and 'forkserver' start methods. Ensure dataset, "
+                    "collate_fn and worker_init_fn are not lambdas or closures.",
                     stacklevel=2,
                 )
                 raise
