@@ -92,6 +92,7 @@ from .base import (
 )
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
+from .object_protocol import python_constant_repr_impl
 from .script_object import CustomClassObjectVariable
 from .user_defined import UserDefinedClassVariable
 
@@ -3464,8 +3465,6 @@ class SymNodeVariable(VariableTracker):
         return hash(self.evaluate_expr())
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        from .object_protocol import python_constant_repr_impl
-
         return python_constant_repr_impl(self, tx)
 
 
