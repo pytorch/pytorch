@@ -90,6 +90,7 @@ from .utils import (
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
+    forwarded_cuda_compile_options,
     fp32_matmul_precision_key,
     get_dtype_size,
     is_gpu,
@@ -98,7 +99,6 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
-    tlx_only_cuda_options,
     triton_type,
     triton_type_to_torch,
     unique,
@@ -1014,9 +1014,10 @@ class TritonTemplateKernel(TritonKernel):
         if kpack is not None:
             triton_meta["kpack"] = kpack
 
-        # tlx options carry dynamic string keys outside the TritonMeta schema.
+        # Forwarded CUDA options (ctas_per_cga, tlx) carry dynamic string keys
+        # outside the TritonMeta schema.
         triton_meta_extra = cast(dict[str, Any], triton_meta)
-        for k in tlx_only_cuda_options():
+        for k in forwarded_cuda_compile_options():
             if v := self.meta.get(k, None):
                 triton_meta_extra[k] = v
 
@@ -1060,9 +1061,10 @@ class TritonTemplateKernel(TritonKernel):
             num_buffers_warp_spec={self.num_buffers_warp_spec},
         """
 
-        # tlx options carry dynamic string keys outside the TritonMeta schema.
+        # Forwarded CUDA options (ctas_per_cga, tlx) carry dynamic string keys
+        # outside the TritonMeta schema.
         triton_meta_extra = cast(dict[str, Any], self.triton_meta)
-        for k in tlx_only_cuda_options():
+        for k in forwarded_cuda_compile_options():
             if v := self.meta.get(k, None):
                 template_args += f"""
                     {k}={v},
