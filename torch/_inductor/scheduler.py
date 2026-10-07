@@ -2704,6 +2704,10 @@ class SchedulerDonatedBuffer(SchedulerBuffer):
     defining_op: BaseSchedulerNode | None = None
 
 
+def _try_size_hint(s: sympy.Expr) -> int:
+    return V.graph.sizevars.optimization_hint(s, fallback=0)
+
+
 class BaseSchedulerNode:
     """
     One unit of work the scheduler orders, fuses and then hands to a backend.
@@ -3318,11 +3322,8 @@ class BaseSchedulerNode:
         ):
             return {}
 
-        def try_size_hint(s: sympy.Expr) -> int:
-            return V.graph.sizevars.optimization_hint(s, fallback=0)
-
         if isinstance(self, SchedulerNode):
-            node_numel = try_size_hint(
+            node_numel = _try_size_hint(
                 sympy_product(self.get_ranges()[0])
                 * sympy_product(self.get_ranges()[1]),
             )
@@ -3416,9 +3417,7 @@ class BaseSchedulerNode:
                 for mut_name in buf.get_mutation_names()
             )
         else:
-            buf_elems = V.graph.sizevars.optimization_hint(
-                sympy_product(buf.get_size()), fallback=0
-            )
+            buf_elems = _try_size_hint(sympy_product(buf.get_size()))
             return get_dtype_size(buf.get_dtype()) * min(buf_accessed_elems, buf_elems)
 
     @cache_on_self

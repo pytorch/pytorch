@@ -3898,10 +3898,9 @@ if (!custom_op_wrapper) {
                 )
 
             var_name = f"tmp_var_{next(tmp_var_number)}"
-            element_arg = self._parse_stableivalue_arg(
-                dispatch_lines, tmp_var_number, arg_type.getElementType(), codegen_arg
+            dispatch_lines.writeline(
+                f"std::optional {var_name}{{{self._parse_stableivalue_arg(dispatch_lines, tmp_var_number, arg_type.getElementType(), codegen_arg)}}};"
             )
-            dispatch_lines.writeline(f"std::optional {var_name}{{{element_arg}}};")
             return f"torch::stable::detail::from({var_name})"
 
         raii_var = self.create_tmp_raii_handle_var_if_needed(
