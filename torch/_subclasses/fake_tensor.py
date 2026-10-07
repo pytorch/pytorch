@@ -498,10 +498,13 @@ class FakeTensorConverter:
         self.meta_converter.tensor_memo[tid] = v
 
     def remove_from_tensor_memo(self, fake_tensor: Tensor) -> None:
-        """Remove a FakeTensor from tensor_memo, clearing its weakref."""
-        keys = [k for k, v in list(self.tensor_memo.items()) if v is fake_tensor]
-        for k in keys:
-            del self.tensor_memo[k]
+        """Remove all tensor_memo entries for a FakeTensor, dropping their weakrefs."""
+        # WeakValueDictionary holds its values through KeyedRefs, so the memo
+        # keys can be found from the tensor's weakrefs without scanning the memo.
+        memo = self.tensor_memo
+        for ref in weakref.getweakrefs(fake_tensor):
+            if isinstance(ref, weakref.KeyedRef) and memo.get(ref.key) is fake_tensor:
+                del memo[ref.key]
 
     # You can have a real tensor that you need to convert into a fake tensor.
     # If you have a meta tensor already, call from_meta_and_device.

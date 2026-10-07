@@ -68,7 +68,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -77,8 +76,6 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TemporaryFileName,
     TEST_ACCELERATOR,
-    TEST_WITH_ROCM,
-    TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
@@ -3403,11 +3400,6 @@ class FakeTensorOperatorInvariants(TestCase):
 
         self.assertEqual(mode.count, 0)
 
-    # PropagateRealTensors installs weakrefs
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
-        "https://github.com/pytorch/pytorch/issues/165387",
-    )
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_module_to(self):
         def _check_device(sd, device_type):
@@ -3419,6 +3411,20 @@ class FakeTensorOperatorInvariants(TestCase):
             _check_device(m.state_dict(), "cpu")
             m.to("cuda")
             _check_device(m.state_dict(), "cuda")
+
+    def test_module_apply_memoized_params(self):
+        # from_tensor memoizes the fake param and grad in a WeakValueDictionary;
+        # Module._apply must drop those weakrefs before swap_tensors.
+        mode = FakeTensorMode()
+        m = torch.nn.Linear(2, 2)
+        m(torch.randn(3, 2)).sum().backward()
+        for name, p in m.named_parameters():
+            m._parameters[name] = mode.from_tensor(p)
+        with mode:
+            m.double()
+        for p in m.parameters():
+            self.assertEqual(p.dtype, torch.float64)
+            self.assertEqual(p.grad.dtype, torch.float64)
 
 
 make_propagate_real_tensors_cls(FakeTensorOperatorInvariants)
