@@ -605,12 +605,18 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         scheduling,
         template_node,
         epilogue_nodes,
-        prologue_nodes,
         buf_name_to_prologue_group,
+        store_output_input_producer_groups,
         prologue_preserves_zero_mask_fn,
         render,
     ) -> str:
         """Generate template source code with fused prologues and epilogues.
+
+        ``epilogue_nodes`` contains the nodes ordered after the template in the
+        fused scheduler group. ``buf_name_to_prologue_group`` contains producer
+        groups emitted in load-input prologues.
+        ``store_output_input_producer_groups`` contains producer groups emitted in
+        store-output epilogues.
 
         Subclasses override this to implement custom code generation.
         The default implementation raises NotImplementedError — the actual
@@ -4495,32 +4501,54 @@ class SIMDScheduling(BaseScheduling):
         *,
         only_gen_src_code=False,
     ):
-        """
-        Helper method to codegen a single template kernel variant
+        """Codegen a single template kernel variant.
+
+        ``prologue_nodes`` are upstream of the template node. Their producer groups
+        are routed to either the template's load-input or store-output region.
+
+        Template fusion has three codegen placements:
+
+        1. Load-input prologue fusion: producers of named template inputs such as
+           A/B are generated in LOAD_INPUT_A / LOAD_INPUT_B. Their values
+           participate in the main accumulator loop.
+        2. Store-output input-producer fusion: producers of inputs consumed by
+           STORE_OUTPUT are generated before the manual epilogue. Currently, only
+           prefix inputs are supported.
+        3. Output epilogue fusion: consumers of the template result, such as relu
+           or multiply, are generated after epilogue_fn and before the final store.
         """
         buf_name_to_prologue_group = {}
+        store_output_input_producer_groups = {}
         template_reads = template_node.used_buffer_names()
-        prologue_group = []
-        for prologue in prologue_nodes:
-            names = prologue.get_buffer_names()
-            prologue_group.append(prologue)
-            # this must be the end of a prologue group
+        producer_group = []
+        for producer in prologue_nodes:
+            names = producer.get_buffer_names()
+            producer_group.append(producer)
+            # Scheduler ordering keeps the nodes for each template input
+            # contiguous. Accumulate nodes until one produces a buffer read
+            # directly by the template, which completes the producer group.
             if names & template_reads:
                 if len(names) != 1:
                     raise AssertionError(f"expected len(names) == 1, got {len(names)}")
-                buf_name_to_prologue_group[next(iter(names))] = prologue_group
-                kernel.prologue_fused_inputs.add(next(iter(names)))
-                prologue_group = []
+                input_name = next(iter(names))
+                if input_name in kernel.store_output_fusion_allowed_inputs:
+                    store_output_input_producer_groups[input_name] = producer_group
+                    kernel.store_output_fused_inputs.add(input_name)
+                if input_name in kernel.load_input_fusion_allowed_inputs:
+                    buf_name_to_prologue_group[input_name] = producer_group
+                    kernel.load_input_fused_inputs.add(input_name)
+                producer_group = []
 
-        # all prologue groups should have finalized with use in template
-        if len(prologue_group) != 0:
+        # All producer groups should have finalized with use in the template.
+        if len(producer_group) != 0:
             raise AssertionError(
-                f"expected empty prologue_group, got {len(prologue_group)}"
+                f"expected empty producer_group, got {len(producer_group)}"
             )
 
-        # Remove prologue-fused inputs from input_buffers so that
+        # Remove producer-fused inputs from input_buffers so that
         # remove_kernel_local_buffers can remove them.
-        for buf_name in kernel.prologue_fused_inputs:
+        fused_inputs = kernel.load_input_fused_inputs | kernel.store_output_fused_inputs
+        for buf_name in fused_inputs:
             kernel.args.input_buffers.pop(buf_name, None)
 
         # Dispatch to the kernel for source generation.  TritonTemplateKernel
@@ -4530,8 +4558,8 @@ class SIMDScheduling(BaseScheduling):
             self,
             template_node,
             epilogue_nodes,
-            prologue_nodes,
             buf_name_to_prologue_group,
+            store_output_input_producer_groups,
             prologue_preserves_zero_mask,
             render,
         )
@@ -4623,7 +4651,10 @@ class SIMDScheduling(BaseScheduling):
         hint_override: int | None = None,
     ) -> str | None:
         """
-        Codegen a triton template with multi-kernel dispatch support
+        Codegen a triton template with multi-kernel dispatch support.
+
+        ``prologue_nodes`` are upstream of the template node. Their code may be
+        emitted in either the template's load-input or store-output region.
 
         If `only_gen_src_code=True` the src code will be returned instead of being
         codegenned into the wrapper
@@ -4742,6 +4773,7 @@ class SIMDScheduling(BaseScheduling):
         self,
         node_info: NodeInfo,
         only_gen_src_code: bool,
+        is_first_combo_launch: bool,
     ) -> tuple[str, TritonKernel]:
         kernel_kwargs: dict[str, Any] = {}
         self.kernel_type.apply_feature_required_overrides(
@@ -4753,6 +4785,8 @@ class SIMDScheduling(BaseScheduling):
             tiling_scores=node_info.tiling_scores,
             **kernel_kwargs,
         )
+        kernel._from_combo_codegen = True
+        kernel._is_first_combo_launch = is_first_combo_launch
         self.process_kernel(kernel, node_info.node_schedule, only_gen_src_code)
         with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
@@ -5184,7 +5218,7 @@ class SIMDScheduling(BaseScheduling):
                     kernel_code_list.append((None, None, node_group))
                 else:
                     src_code, kernel = self._codegen_standalone_kernel(
-                        node_info, only_gen_src_code
+                        node_info, only_gen_src_code, not kernel_code_list
                     )
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
@@ -5239,7 +5273,9 @@ class SIMDScheduling(BaseScheduling):
                         carve_out = list(group)
                     for pn in carve_out:
                         co_src, co_kernel = self._codegen_standalone_kernel(
-                            node_schedule_map[pn], only_gen_src_code
+                            node_schedule_map[pn],
+                            only_gen_src_code,
+                            not kernel_code_list,
                         )
                         # pyrefly: ignore [bad-argument-type]
                         kernel_code_list.append((co_src, co_kernel, [pn]))
@@ -5302,7 +5338,9 @@ class SIMDScheduling(BaseScheduling):
 
                 for pn in carve_out_pns:
                     co_src_code, co_kernel = self._codegen_standalone_kernel(
-                        node_schedule_map[pn], only_gen_src_code
+                        node_schedule_map[pn],
+                        only_gen_src_code,
+                        not kernel_code_list,
                     )
                     # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((co_src_code, co_kernel, [pn]))

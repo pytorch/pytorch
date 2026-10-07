@@ -142,6 +142,8 @@ jobs:
           { config: "default", shard: 12, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
           { config: "default", shard: 13, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
           { config: "default", shard: 14, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
           { config: "distributed", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
           { config: "distributed", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
           { config: "distributed", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
@@ -174,6 +176,14 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cuda13_2-py3_11-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_2-py3_11-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      # The default config picks these up by discovery; the inductor config in
+      # this same job already runs them on the same L4 runners. Only affects
+      # default (see EXCLUDE_CLAUSE in .ci/pytorch/test.sh).
+      tests-to-exclude: >-
+        inductor/test_torchinductor
+        inductor/test_torchinductor_opinfo
+        inductor/test_aot_inductor
+        inductor/test_cpu_select_algorithm
       python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.2"
