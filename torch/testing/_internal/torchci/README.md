@@ -98,12 +98,23 @@ change bumps the minor version (`"0.1"` to `"0.2"`); additive changes keep it.
 
 ## Enablement
 
-Off by default. `test/run_test.py` and tests using `common_utils.run_tests`
-accept `--save-test-run-reports [DIR]` and `--no-save-test-run-reports`. Each
+On by default in CI, like `--save-xml`. `test/run_test.py` and tests using
+`common_utils.run_tests` accept `--save-test-run-reports [DIR]` and `--no-save-test-run-reports`. Each
 test file gets its own folder, `<DIR>/<file>/`, with path separators replaced by
 dots (`distributed.test_c10d_nccl`). `run_test.py` defaults to
 `test/torchci-reports` and resolves a relative `DIR` under `test/`; `run_tests`
 defaults to `torchci-reports` in the cwd.
+
+## Upload
+
+At job end, `.github/actions/upload-test-artifacts` zips `test/torchci-reports`
+into `torchci-reports-<file suffix>.report.zip`, with entries under
+`test/torchci-reports/`, and uploads it to
+`s3://gha-artifacts/<org>/<repo>/<run id>/<run attempt>/artifact/`, where the
+ingester picks it up. When S3 is skipped (ROCm) or the upload fails, the action
+uploads the GitHub artifact
+`torchci-reports-runattempt<N>-<file suffix>.report.zip` instead, which
+`tools/stats/upload_artifacts.py` copies to the same S3 key.
 
 ## Local check
 

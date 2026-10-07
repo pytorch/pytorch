@@ -529,10 +529,15 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
 def _test_run_report_args(
     test_file: str, is_cpp_test: bool, reports_dir: str | None
 ) -> list[str]:
-    if not HAS_TEST_RUN_REPORTS or not reports_dir:
+    if not HAS_TEST_RUN_REPORTS:
         return []
     if not is_cpp_test:
-        return [f"--save-test-run-reports={reports_dir}"]
+        # Explicit either way, since run_tests defaults to on in CI.
+        if reports_dir:
+            return [f"--save-test-run-reports={reports_dir}"]
+        return ["--no-save-test-run-reports"]
+    if not reports_dir:
+        return []
     # C++ tests run under pytest-cpp, not run_tests, so register the plugin here.
     report_dir = Path(reports_dir) / sanitize_test_filename(test_file)
     plugin = "torch.testing._internal.torchci.plugin"
@@ -1702,7 +1707,7 @@ def parse_args():
         "--save-test-run-reports",
         nargs="?",
         const=reports_dir,
-        default=None,
+        default=reports_dir if IS_CI else None,
         metavar="DIR",
         help="write test run reports (default: test/torchci-reports)",
     )
