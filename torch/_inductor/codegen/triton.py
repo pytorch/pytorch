@@ -8869,6 +8869,39 @@ class FusedUserDefinedTritonKernel(TritonKernel):
         return "\n".join(new_src_lines)
 
 
+def template_reduction_epilogue_supported(
+    template: ir.TemplateBuffer,
+    epilogue_nodes: Sequence[BaseSchedulerNode],
+) -> bool:
+    """Whether a Triton template can host epilogue_nodes, including reductions,
+    given an output tile that fits them (see tile_fits_reduction_epilogue)."""
+    if not (
+        config.triton.template_reduction_epilogue
+        and isinstance(template, ir.TritonTemplateBuffer)
+        and len(template.get_size()) == 2
+        # Only bf16 and fp16 outputs are tested.
+        and template.get_dtype() in (torch.bfloat16, torch.float16)
+        # The JIT cpp wrapper can't import the Blackwell template's source
+        # (its docstring ends the wrapper's string literal).
+        and not V.graph.cpp_wrapper
+    ):
+        return False
+    m, n = template.get_size()
+    # Dynamic sizes are untested: the Blackwell template specializes them.
+    if not (isinstance(m, sympy.Integer) and isinstance(n, sympy.Integer)):
+        return False
+    if template.get_stride() != [n, 1]:
+        return False
+    # Arg reductions can lower to a multi-result tl.reduce, which
+    # automatic warp specialization rejects.
+    return not any(
+        isinstance(node.node, ir.ComputedBuffer)
+        and node.node.get_reduction_type() in ARG_REDUCTION_TYPES
+        for node in epilogue_nodes
+        if node.is_reduction()
+    )
+
+
 class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
@@ -8905,6 +8938,29 @@ class TritonScheduling(SIMDScheduling):
                 [*cls.backend_features, BackendFeature.REDUCE_TO_SINGLE_ELEMENT]
             )
         return cls.backend_features
+
+    def can_fuse_template_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """Row reductions over a row-major template output, when some template
+        choice stores output tiles they fit. See
+        TritonTemplateKernel.codegen_tile_reduction_epilogue."""
+        template = node1.get_template_node()
+        if not isinstance(template, ir.TritonTemplateBuffer):
+            return False
+        epilogue = ir.ReductionEpilogue(node1, node2)
+        if (
+            isinstance(template, ir.MultiTemplateBuffer)
+            and template.make_kernel_render is None
+        ):
+            return any(
+                c.supports_reduction_epilogue(epilogue)
+                for c in template.choices
+                if isinstance(c, ir.TritonTemplateCallerBase)
+            )
+        return epilogue.triton_supported and epilogue.triton_tile_fits(
+            template.output_tile
+        )
 
     def codegen_comment(self, node_schedule, kernel_name=None):
         wrapper = V.graph.wrapper_code
