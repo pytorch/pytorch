@@ -776,6 +776,33 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         y = fn(t)
         self.assertEqual(y, t.sin() + 1 + 2.0)
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_classdef_exception_custom_init(self):
+        # The class body raises an exception whose __init__ signature does not
+        # accept its own .args back, so it cannot be rebuilt from args.
+        class CodeError(ValueError):
+            def __init__(self, code, detail):
+                super().__init__(f"code {code}")
+                self.code = code
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+
+                class A:
+                    raise CodeError(7, "detail")
+
+            except CodeError as e:
+                return t.sin(), e
+            return t.cos(), None
+
+        t = torch.randn(2)
+        res, exc = fn(t)
+        self.assertEqual(res, t.sin())
+        self.assertIsInstance(exc, CodeError)
+        self.assertEqual(exc.args, ("code 7",))
+        self.assertEqual(exc.code, 7)
+
     def test_nn_module_getattr(self):
         class A:
             def __init__(self) -> None:
