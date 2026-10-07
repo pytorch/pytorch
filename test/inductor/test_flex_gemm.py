@@ -3227,14 +3227,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 256,
                 {"tile_m": 64, "tile_n": 32, "cluster_n": 2},
             ),
-            (
-                "interleaved_group2_cluster_n2",
-                2,
-                False,
-                False,
-                256,
-                {"tile_m": 128, "tile_n": 64, "cluster_n": 2},
-            ),
+            ("swiglu_group2_m64", 2, False, False, 256, {"tile_m": 64, "tile_n": 32}),
         ),
         name_fn=lambda case: case[0],
     )
@@ -3258,6 +3251,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 lanes = tuple(grouped.select(-1, index) for index in range(group))
             if name == "interleaved_group4_single_lane":
                 return lanes[1]
+            if name == "swiglu_group2_m64":
+                return F.silu(lanes[0]) * lanes[1]
             if name == "interleaved_mixed_sources":
                 squared = acc.square().view(m, n // group, group)
                 return squared[..., 0] - lanes[1]
