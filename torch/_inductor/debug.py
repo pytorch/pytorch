@@ -36,7 +36,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_leaves, tree_map
 
 from . import config, ir
-from .ir import ExternKernel
+from .ir import ExternKernel, FixedLayout
 from .scheduler import (
     BaseSchedulerNode,
     FusedSchedulerNode,
@@ -133,6 +133,16 @@ def draw_buffers(
     )
 
 
+def _in_output(snode: BaseSchedulerNode | FusedSchedulerNode) -> bool:
+    if isinstance(snode, FusedSchedulerNode):
+        return any(_in_output(x) for x in snode.snodes)
+    return any(
+        isinstance(user.node, OutputNode)
+        for buf in snode.get_outputs()
+        for user in buf.users
+    )
+
+
 def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
@@ -185,16 +195,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
             kwargs = {"device": snode.get_device()}
         fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)  # type: ignore[arg-type]
 
-        def in_output(snode: BaseSchedulerNode | FusedSchedulerNode) -> bool:
-            if isinstance(snode, FusedSchedulerNode):
-                return any(in_output(x) for x in snode.snodes)
-            return any(
-                isinstance(user.node, OutputNode)
-                for buf in snode.get_outputs()
-                for user in buf.users
-            )
-
-        if in_output(snode):
+        if _in_output(snode):
             outputs.append(fx_node)
         name = snode.get_name()
         fx_node.name = name
@@ -614,6 +615,57 @@ class DebugContext:
             return ignored
 
 
+def _build_node_info(node: ir.IRNode) -> dict[str, str]:
+    if hasattr(node, "name"):
+        node_name = node.name
+    else:
+        node_name = ""
+    node_info = {
+        "name": node_name,
+        "type": type(node).__name__,
+    }
+    try:
+        layout = node.get_output_spec()
+        if isinstance(layout, FixedLayout):
+            static_layout = FixedLayout(
+                layout.device,
+                dtype=layout.dtype,
+                size=V.graph.sizevars.optimization_hints(layout.size),
+                stride=V.graph.sizevars.optimization_hints(layout.stride),
+                offset=V.graph.sizevars.optimization_hint(layout.offset, fallback=0),
+            )
+            node_info["layout"] = str(static_layout)
+        else:
+            node_info["layout"] = str(layout)
+    except Exception:
+        pass
+    try:
+        node_info["dtype"] = str(node.get_dtype())
+    except Exception:
+        pass
+    try:
+        node_info["device"] = str(node.get_device())
+    except Exception:
+        pass
+    try:
+        node_info["stride"] = str(
+            V.graph.sizevars.optimization_hints(node.get_stride())
+        )
+    except Exception:
+        pass
+    try:
+        node_info["size"] = str(V.graph.sizevars.optimization_hints(node.get_size()))  # type: ignore[arg-type]
+    except Exception:
+        pass
+    try:
+        node_info["numel"] = str(V.graph.sizevars.optimization_hint(node.get_numel()))
+    except Exception:
+        pass
+    if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
+        node_info["data"] = _build_node_info(node.data)
+    return node_info
+
+
 class DebugFormatter:
     def __init__(self, handler: DebugContext) -> None:
         self.fopen = handler.fopen
@@ -713,69 +765,11 @@ class DebugFormatter:
         precompile_elapse: float,
         prescreening_elapse: float | None,
     ) -> None:
-        from .ir import FixedLayout
-
-        def build_node_info(node: ir.IRNode) -> dict[str, str]:
-            if hasattr(node, "name"):
-                node_name = node.name
-            else:
-                node_name = ""
-            node_info = {
-                "name": node_name,
-                "type": type(node).__name__,
-            }
-            try:
-                layout = node.get_output_spec()
-                if isinstance(layout, FixedLayout):
-                    static_layout = FixedLayout(
-                        layout.device,
-                        dtype=layout.dtype,
-                        size=V.graph.sizevars.optimization_hints(layout.size),
-                        stride=V.graph.sizevars.optimization_hints(layout.stride),
-                        offset=V.graph.sizevars.optimization_hint(
-                            layout.offset, fallback=0
-                        ),
-                    )
-                    node_info["layout"] = str(static_layout)
-                else:
-                    node_info["layout"] = str(layout)
-            except Exception:
-                pass
-            try:
-                node_info["dtype"] = str(node.get_dtype())
-            except Exception:
-                pass
-            try:
-                node_info["device"] = str(node.get_device())
-            except Exception:
-                pass
-            try:
-                node_info["stride"] = str(
-                    V.graph.sizevars.optimization_hints(node.get_stride())
-                )
-            except Exception:
-                pass
-            try:
-                node_info["size"] = str(
-                    V.graph.sizevars.optimization_hints(node.get_size())
-                )  # type: ignore[arg-type]
-            except Exception:
-                pass
-            try:
-                node_info["numel"] = str(
-                    V.graph.sizevars.optimization_hint(node.get_numel())
-                )
-            except Exception:
-                pass
-            if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
-                node_info["data"] = build_node_info(node.data)
-            return node_info
-
         general_properties = {
             "op_name": name,
             "cuda_device_name": torch.cuda.get_device_name(),
             "cuda_device_count": torch.cuda.device_count(),
-            "input_nodes": [build_node_info(node) for node in input_nodes],
+            "input_nodes": [_build_node_info(node) for node in input_nodes],
             "autotuning_time": elapse,
             "precompile_time": precompile_elapse,
             "prescreening_time": prescreening_elapse,

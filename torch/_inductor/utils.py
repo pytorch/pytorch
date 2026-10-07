@@ -715,6 +715,15 @@ def do_bench_using_profiling(
     )
 
 
+def _collect_cpu_event_ids(event: Any, benchmark_event_ids: OrderedSet[int]) -> None:
+    if event.device_type != DeviceType.CPU:
+        return
+
+    benchmark_event_ids.add(event.id)
+    for child in event.cpu_children:
+        _collect_cpu_event_ids(child, benchmark_event_ids)
+
+
 def _get_do_bench_profile_result(
     kineto_events: Iterable[Any],
     profiler_events: Iterable[Any],
@@ -722,14 +731,6 @@ def _get_do_bench_profile_result(
     expected_device_type: DeviceType,
 ) -> float:
     benchmark_event_ids: OrderedSet[int] = OrderedSet()
-
-    def collect_cpu_event_ids(event: Any) -> None:
-        if event.device_type != DeviceType.CPU:
-            return
-
-        benchmark_event_ids.add(event.id)
-        for child in event.cpu_children:
-            collect_cpu_event_ids(child)
 
     benchmark_events = [
         event
@@ -744,7 +745,7 @@ def _get_do_bench_profile_result(
         )
 
     for event in benchmark_events:
-        collect_cpu_event_ids(event)
+        _collect_cpu_event_ids(event, benchmark_event_ids)
 
     device_time_us = 0.0
     for event in kineto_events:
@@ -1551,33 +1552,73 @@ def dominated_nodes(
     return dominated_set
 
 
+def _is_unrealized_node(n: IRNode) -> bool:
+    from . import ir
+
+    if isinstance(n, ir.TensorBox):
+        return _is_unrealized_node(n.data)
+    if isinstance(n, ir.StorageBox):
+        return _is_unrealized_node(n.data)
+    return isinstance(n, ir.IRNode) and not isinstance(
+        n,
+        (
+            ir.ComputedBuffer,
+            ir.InputsKernel,
+            ir.InputBuffer,
+            ir.TemplateBuffer,
+        ),
+    )
+
+
 def gather_origins(
     args: Sequence[IRNode], kwargs: dict[str, IRNode]
 ) -> OrderedSet[torch.fx.Node]:
-    from . import ir
-
-    def is_unrealized_node(n: IRNode) -> bool:
-        if isinstance(n, ir.TensorBox):
-            return is_unrealized_node(n.data)
-        if isinstance(n, ir.StorageBox):
-            return is_unrealized_node(n.data)
-        return isinstance(n, ir.IRNode) and not isinstance(
-            n,
-            (
-                ir.ComputedBuffer,
-                ir.InputsKernel,
-                ir.InputBuffer,
-                ir.TemplateBuffer,
-            ),
-        )
-
     # kwargs and args may include a container of node, for example torch.cat([t1, t2])
     # flatten them before search the unrealized nodes
     kwargs_flatten, _ = tree_flatten(kwargs)
-    kwargs_origins = [val.origins for val in kwargs_flatten if is_unrealized_node(val)]
+    kwargs_origins = [val.origins for val in kwargs_flatten if _is_unrealized_node(val)]
     args_flatten, _ = tree_flatten(args)
-    args_origins = [val.origins for val in args_flatten if is_unrealized_node(val)]
+    args_origins = [val.origins for val in args_flatten if _is_unrealized_node(val)]
     return OrderedSet(itertools.chain(*args_origins, *kwargs_origins))
+
+
+def _is_neg_lead(expr: sympy.Expr) -> bool:
+    return isinstance(expr, sympy.Mul) and len(expr.args) == 2 and expr.args[0] == -1
+
+
+def _sympy_str_add(expr: sympy.Expr) -> str:
+    if isinstance(expr, sympy.Add):
+        # Special case 'a - b'. Note that 'a - b - c' will still appear as
+        # 'a + -1 * b + -1 * c'.
+        if len(expr.args) == 2 and _is_neg_lead(expr.args[1]):
+            return f"{_sympy_str_mul(expr.args[0])} - {_sympy_str_mul(expr.args[1].args[1])}"
+        else:
+            return " + ".join(map(_sympy_str_mul, expr.args))
+    else:
+        return _sympy_str_mul(expr)
+
+
+def _sympy_str_mul(expr: sympy.Expr) -> str:
+    if isinstance(expr, sympy.Mul):
+        if _is_neg_lead(expr):
+            # Special case '-a'. Note that 'a * -b' will still appear as
+            # '-1 * a * b'.
+            return f"-{_sympy_str_atom(expr.args[1])}"
+        else:
+            return " * ".join(map(_sympy_str_atom, expr.args))
+    else:
+        return _sympy_str_atom(expr)
+
+
+def _sympy_str_atom(expr: sympy.Expr) -> str:
+    if isinstance(expr, sympy.Symbol):
+        return expr.name
+    elif isinstance(expr, (sympy.Add, sympy.Mul)):
+        return f"({_sympy_str_add(expr)})"
+    elif isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
+        return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
+    else:
+        return str(expr)
 
 
 def sympy_str(expr: sympy.Expr) -> str:
@@ -1586,45 +1627,7 @@ def sympy_str(expr: sympy.Expr) -> str:
     somewhat worse, as it doesn't do as much simplification.  So don't
     use this for final codegen.
     """
-
-    def is_neg_lead(expr: sympy.Expr) -> bool:
-        return (
-            isinstance(expr, sympy.Mul) and len(expr.args) == 2 and expr.args[0] == -1
-        )
-
-    def sympy_str_add(expr: sympy.Expr) -> str:
-        if isinstance(expr, sympy.Add):
-            # Special case 'a - b'. Note that 'a - b - c' will still appear as
-            # 'a + -1 * b + -1 * c'.
-            if len(expr.args) == 2 and is_neg_lead(expr.args[1]):
-                return f"{sympy_str_mul(expr.args[0])} - {sympy_str_mul(expr.args[1].args[1])}"
-            else:
-                return " + ".join(map(sympy_str_mul, expr.args))
-        else:
-            return sympy_str_mul(expr)
-
-    def sympy_str_mul(expr: sympy.Expr) -> str:
-        if isinstance(expr, sympy.Mul):
-            if is_neg_lead(expr):
-                # Special case '-a'. Note that 'a * -b' will still appear as
-                # '-1 * a * b'.
-                return f"-{sympy_str_atom(expr.args[1])}"
-            else:
-                return " * ".join(map(sympy_str_atom, expr.args))
-        else:
-            return sympy_str_atom(expr)
-
-    def sympy_str_atom(expr: sympy.Expr) -> str:
-        if isinstance(expr, sympy.Symbol):
-            return expr.name
-        elif isinstance(expr, (sympy.Add, sympy.Mul)):
-            return f"({sympy_str_add(expr)})"
-        elif isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
-            return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
-        else:
-            return str(expr)
-
-    return sympy_str_add(expr)
+    return _sympy_str_add(expr)
 
 
 def get_bounds_index_expr(index: sympy.Expr) -> ValueRanges[Any]:

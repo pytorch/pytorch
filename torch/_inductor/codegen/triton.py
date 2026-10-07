@@ -193,6 +193,31 @@ def is_sympy_integer_like(expr: object):
     )
 
 
+def _is_predicate_expr(node: sympy.Basic) -> bool:
+    return bool(
+        getattr(node, "is_Boolean", False) or getattr(node, "is_Relational", False)
+    )
+
+
+def _rewrite_float_subexpr(node: sympy.Expr) -> sympy.Expr:
+    if not node.has(TruncToInt):
+        return node
+    if node.func is TruncToInt:
+        return TruncToFloat(*node.args)
+    if _is_predicate_expr(node) or node.is_integer:
+        return node
+
+    new_args = tuple(
+        _rewrite_float_subexpr(arg)
+        if isinstance(arg, sympy.Expr) and not _is_predicate_expr(arg)
+        else arg
+        for arg in node.args
+    )
+    if new_args == node.args:
+        return node
+    return node.func(*new_args)
+
+
 def _materialize_trunc_to_float_expr(
     expr: sympy.Expr, dtype: torch.dtype
 ) -> sympy.Expr:
@@ -208,30 +233,7 @@ def _materialize_trunc_to_float_expr(
     if expr.func is TruncToInt:
         return TruncToFloat(*expr.args)
 
-    def is_predicate_expr(node: sympy.Basic) -> bool:
-        return bool(
-            getattr(node, "is_Boolean", False) or getattr(node, "is_Relational", False)
-        )
-
-    def rewrite_float_subexpr(node: sympy.Expr) -> sympy.Expr:
-        if not node.has(TruncToInt):
-            return node
-        if node.func is TruncToInt:
-            return TruncToFloat(*node.args)
-        if is_predicate_expr(node) or node.is_integer:
-            return node
-
-        new_args = tuple(
-            rewrite_float_subexpr(arg)
-            if isinstance(arg, sympy.Expr) and not is_predicate_expr(arg)
-            else arg
-            for arg in node.args
-        )
-        if new_args == node.args:
-            return node
-        return node.func(*new_args)
-
-    return rewrite_float_subexpr(expr)
+    return _rewrite_float_subexpr(expr)
 
 
 class OpDtypeSupport:
