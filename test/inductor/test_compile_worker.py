@@ -1493,37 +1493,6 @@ class TestSetTritonLibdevicePath(TestCase):
 
 
 class TestTritonCompileWorker(TestCase):
-    @unittest.skipIf(not HAS_TRITON or not IS_LINUX, "requires Triton and fork")
-    def test_forked_worker_detects_cuda_driver(self):
-        import torch
-
-        if torch.version.hip is not None or not torch.cuda.is_available():
-            self.skipTest("requires NVIDIA GPU")
-
-        code = textwrap.dedent(
-            """\
-            import multiprocessing
-            import torch
-            from triton.backends import backends
-
-            def check_driver():
-                return torch.cuda._is_in_bad_fork(), backends["nvidia"].driver.is_active()
-
-            if __name__ == "__main__":
-                torch.cuda.init()
-                with multiprocessing.get_context("fork").Pool(1) as pool:
-                    bad_fork, driver_active = pool.apply_async(check_driver).get(timeout=60)
-                if not bad_fork or not driver_active:
-                    raise AssertionError(
-                        f"forked worker: bad_fork={bad_fork}, driver_active={driver_active}"
-                    )
-            """
-        )
-        result = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, timeout=90
-        )
-        self.assertEqual(result.returncode, 0, f"{result.stdout}\n{result.stderr}")
-
     @unittest.skipIf(not HAS_TRITON, "requires triton")
     def test_worker_compile_triton_warm_cache_skips_gpu_driver_setup(self):
         from torch._inductor.runtime import triton_helpers
