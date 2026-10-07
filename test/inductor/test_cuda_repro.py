@@ -42,11 +42,9 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
-    MI350_ARCH,
     parametrize,
     skipIfCachingAllocatorDisabled,
     skipIfRocm,
-    skipIfRocmArch,
     skipIfXpu,
     subtest,
     TEST_CUDA,
@@ -489,12 +487,7 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
-    # Fails on ROCm MI350
-    # Mismatched elements: 23 / 33062912 (0.0%)
-    # Greatest absolute difference: 0.07861328125 at index (14, 13, 1008, 36) (up to 1e-05 allowed)
-    # Greatest relative difference: 2.90625 at index (14, 13, 1008, 36) (up to 0.016 allowed)
     @skipIfXpu(msg="RuntimeError, not target, torch-xpu-ops: 2697")
-    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 

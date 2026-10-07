@@ -127,7 +127,6 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocm,
     skipIfRocmArch,
-    skipIfRocmVersionAtLeast,
     skipIfTorchInductor,
     skipIfWindows,
     skipIfXpu,
@@ -6597,9 +6596,6 @@ for dtype in (torch.int32, torch.int64):
     @parametrize("nhwc_weight", (False, True))
     @parametrize("nhwc_input", (False, True))
     @with_tf32_off
-    @skipIfRocmVersionAtLeast(
-        [7, 14]
-    )  # ROCm 7.14+ Triton conv2d backward accuracy issue in this UT family
     def test_conv2d_backward_input_layout(self, nhwc_weight: bool, nhwc_input: bool):
         in_channels, out_channels, groups = 3, 4, 1
         stride, dilation, padding, kernel = 1, 1, 1, 3
