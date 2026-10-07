@@ -377,6 +377,8 @@ def output_json(filename, headers, row):
     }
     if current_settings:
         extra_info.update(current_settings)
+        if current_settings.get("hf_inference_mode") == "prefill":
+            extra_info["batch_size"] = current_batch_size
 
     mapping_headers = {headers[i]: v for i, v in enumerate(row)}
     with open(f"{os.path.splitext(filename)[0]}.json", "a") as f:
@@ -584,6 +586,10 @@ def synchronize():
     pass
 
 
+def artifact_safe_name(name):
+    return name.replace("/", "_").replace("\\", "_")
+
+
 def summarize_graph_break(filename):
     """
     Sorts and de-dupes the graphs breaks on the reason string. Note that this
@@ -640,6 +646,10 @@ def print_summary_table(data, print_dataframe=False):
                 print(col.ljust(width), f"{data[col].mean():.3f}")
             elif col in ("compilation_latency"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f} seconds")
+            elif col == "eager_prefill_latency":
+                print(col.ljust(width), f"mean={data[col].mean():.3f} ms")
+            elif col == "input_tokens_per_second":
+                print(col.ljust(width), f"mean={data[col].mean():.3f} tokens/s")
             elif col in ("compression_ratio"):
                 print(col.ljust(width), f"mean={data[col].mean():.3f}x")
             elif col in ("accuracy"):
@@ -674,7 +684,9 @@ def timed(
     return_result=False,
     collect_outputs=False,
     batch_size=None,
+    setup_fn=None,
 ):
+    # setup_fn prepares each independent request outside the measured interval.
     use_xla = tensor_is_on_xla(example_inputs)
     synchronize()
 
@@ -722,6 +734,9 @@ def timed(
         # Put this call inside the loop to reset the seed for each iteration.
         # Don't include reset_rng_state() to correctly measure timing
         reset_rng_state(use_xla)
+        if setup_fn is not None:
+            setup_fn(model, example_inputs)
+            synchronize()
         t_iter_begin = time.perf_counter()
         result = model_iter_fn(model, example_inputs, collect_outputs=collect_outputs)
 
@@ -736,15 +751,18 @@ def timed(
             # we need the mark step to send the optimizer graph out for
             # compilation.
             xm.mark_step()
+        if setup_fn is not None:
+            synchronize()
         t_iter_end = time.perf_counter()
         time_total += t_iter_end - t_iter_begin
 
-    t_0 = time.perf_counter()
-    if use_xla:
-        xm.wait_device_ops()
-    synchronize()
-    t_1 = time.perf_counter()
-    time_total += t_1 - t_0
+    if setup_fn is None:
+        t_0 = time.perf_counter()
+        if use_xla:
+            xm.wait_device_ops()
+        synchronize()
+        t_1 = time.perf_counter()
+        time_total += t_1 - t_0
     return (time_total, result) if return_result else time_total
 
 
@@ -1087,8 +1105,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         frozen_model_iter_fn = aot_precompile(model, example_inputs)
     else:
         if kwargs["hf_llm"]:
-            # If it's an llm, we want to optimize model.forward, and use
-            # the generate function
+            # Compile the forward, keeping generation and cache setup outside it.
             model.forward = torch._dynamo.run(model.forward)
             frozen_model_iter_fn = model_iter_fn
         else:
@@ -1115,6 +1132,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                 times=times,
                 collect_outputs=args.collect_outputs,
                 batch_size=kwargs.get("batch_size"),
+                setup_fn=kwargs.get("setup_fn"),
             )
 
         # call mark_step between the 2 calls to make the comparison fair.
@@ -1127,6 +1145,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             return_result=True,
             times=times,
             collect_outputs=args.collect_outputs,
+            setup_fn=kwargs.get("setup_fn"),
         )
 
     # Collect profiler trace in a separate run so that profiler overhead
@@ -1145,6 +1164,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=False,
                     times=times,
                     collect_outputs=False,
+                    setup_fn=kwargs.get("setup_fn"),
                 )
             with maybe_mark_profile(p=p, mark="actual"):
                 timed(
@@ -1154,9 +1174,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=False,
                     times=times,
                     collect_outputs=False,
+                    setup_fn=kwargs.get("setup_fn"),
                 )
 
-        name = args.profiler_trace_name + "_" + model.name
+        name = args.profiler_trace_name + "_" + artifact_safe_name(model.name)
         if hasattr(args, "rank"):
             name += f"_rank_{args.rank}"
         if args.export_perfdoctor and trace_handler:
@@ -1170,7 +1191,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
         np.save(
-            f"{output_filename[:-4]}-raw_timings-{current_name}-{current_device}.npy",
+            f"{output_filename[:-4]}-raw_timings-"
+            f"{artifact_safe_name(current_name)}-{current_device}.npy",
             timings,
         )
 
@@ -1181,6 +1203,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
+    if getattr(args, "hf_inference_mode", "generate") == "prefill":
+        input_tokens = times * current_batch_size * args.prompt_length
+        headers += ["eager_prefill_latency", "input_tokens_per_second"]
+        row += [median[0] * 1000, input_tokens / median[1]]
     msg = f"{speedup:.3f}x"
     if getattr(args, "_print_latency_ms", False):
         msg = f"{median[0] * 1000:.4f} ms, {median[1] * 1000:.4f} ms, {msg}"
@@ -2018,6 +2044,19 @@ class BenchmarkRunner:
     def get_accuracy_check_runs(self, name):
         return 1
 
+    def validate_args(self, args):
+        if args.hf_inference_mode == "prefill":
+            raise ValueError(
+                "--hf-inference-mode=prefill requires the huggingface suite"
+            )
+
+    def get_performance_workload(self):
+        # Return the timed iteration and its optional, untimed per-request setup.
+        return self.model_iter_fn, None
+
+    def use_model_forward_for_compilation(self):
+        return False
+
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
             for device in args.devices:
@@ -2424,7 +2463,11 @@ class BenchmarkRunner:
                                 model_copy, example_inputs
                             )
                     else:
-                        optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                        if self.use_model_forward_for_compilation():
+                            model_copy.forward = optimize_ctx(model_copy.forward)
+                            optimized_model_iter_fn = self.model_iter_fn
+                        else:
+                            optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                         new_result = self.run_n_iterations(
                             model_copy, example_inputs, optimized_model_iter_fn
                         )
@@ -2946,18 +2989,17 @@ class BenchmarkRunner:
         tag=None,
         batch_size=None,
     ):
+        model_iter_fn, setup_fn = self.get_performance_workload()
         measure_iters = 5
         stabilization_iters = 0
         if getattr(self, "hf_llm", False):
-            # If we're benchmarking an llm, we want to use the generate function
-            self.model_iter_fn = self.generate
             measure_iters = 1
             stabilization_iters = 4
 
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
                 return experiment(
-                    self.model_iter_fn, *self.maybe_cast(model, example_inputs)
+                    model_iter_fn, *self.maybe_cast(model, example_inputs)
                 )
 
         def warmup(
@@ -2972,13 +3014,25 @@ class BenchmarkRunner:
                     empty_gpu_cache(current_device)
                 elif current_device == "hpu":
                     torch.hpu.reset_peak_memory_stats()
-                t0 = time.perf_counter()
-                for _ in range(measure_iters):
-                    fn(model, example_inputs)
-                t1 = time.perf_counter()
-                latency = t1 - t0
+                if setup_fn is None:
+                    t0 = time.perf_counter()
+                    for _ in range(measure_iters):
+                        fn(model, example_inputs)
+                    latency = time.perf_counter() - t0
+                else:
+                    latency = timed(
+                        model,
+                        fn,
+                        example_inputs,
+                        times=measure_iters,
+                        setup_fn=setup_fn,
+                    )
                 for _ in range(stabilization_iters):
+                    if setup_fn is not None:
+                        setup_fn(model, example_inputs)
                     fn(model, example_inputs)
+                if setup_fn is not None:
+                    synchronize()
                 if current_device == "cuda":
                     peak_mem = get_peak_memory()
                 elif current_device == "hpu":
@@ -3026,7 +3080,7 @@ class BenchmarkRunner:
                     self.init_optimizer(name, current_device, eager_model.parameters())
                     try:
                         eager_latency, eager_peak_mem, _ = warmup(
-                            self.model_iter_fn,
+                            model_iter_fn,
                             eager_model,
                             example_inputs,
                             "eager",
@@ -3034,7 +3088,7 @@ class BenchmarkRunner:
                         )
                         if self.args.use_warm_peak_memory:
                             _, eager_peak_mem, _ = warmup(
-                                self.model_iter_fn,
+                                model_iter_fn,
                                 eager_model,
                                 example_inputs,
                                 "eager",
@@ -3062,12 +3116,11 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx
             else:
                 if getattr(self, "hf_llm", False):
-                    # If it's an llm, we want to optimize model.forward, and use
-                    # the generate function
+                    # Keep generation and cache setup outside the compiled forward.
                     model.forward = optimize_ctx(model.forward)
-                    optimized_model_iter_fn = self.model_iter_fn
+                    optimized_model_iter_fn = model_iter_fn
                 else:
-                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                    optimized_model_iter_fn = optimize_ctx(model_iter_fn)
 
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
@@ -3151,11 +3204,11 @@ class BenchmarkRunner:
                 )
 
             experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
+            if setup_fn is not None:
+                experiment_kwargs["setup_fn"] = setup_fn
 
             results.append(
-                experiment(
-                    self.model_iter_fn, model, example_inputs, **experiment_kwargs
-                )
+                experiment(model_iter_fn, model, example_inputs, **experiment_kwargs)
             )
             return " ".join(map(str, results))
 
@@ -3406,6 +3459,18 @@ def parse_args(args=None):
     )
     parser.add_argument(
         "--batch-size", "--batch_size", type=int, help="batch size for benchmarking"
+    )
+    parser.add_argument(
+        "--hf-inference-mode",
+        choices=("generate", "prefill"),
+        default="generate",
+        help="Inference workload for registered Hugging Face generation models.",
+    )
+    parser.add_argument(
+        "--prompt-length",
+        type=int,
+        default=1000,
+        help="Uniform prompt length for Hugging Face prefill benchmarks.",
     )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
@@ -4298,6 +4363,7 @@ def run(runner, args, original_dir=None):
                 f"--quantization conflicts with --backend={args.backend}"
             )
         args.backend = "torchao"
+    runner.validate_args(args)
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
@@ -4687,6 +4753,9 @@ def run(runner, args, original_dir=None):
 
     if args.output:
         output_filename = args.output
+    elif args.hf_inference_mode == "prefill" and output_filename:
+        stem, ext = os.path.splitext(output_filename)
+        output_filename = f"{stem}_prefill{ext}"
 
     if output_filename:
         if args.output_directory:
@@ -4723,7 +4792,9 @@ def run(runner, args, original_dir=None):
             }
 
         if args.profiler_trace_name is None:
-            if args.backend:
+            if args.hf_inference_mode == "prefill" and output_filename:
+                args.profiler_trace_name = os.path.splitext(output_filename)[0]
+            elif args.backend:
                 args.profiler_trace_name = args.backend
             elif args.inductor:
                 args.profiler_trace_name = "inductor"
