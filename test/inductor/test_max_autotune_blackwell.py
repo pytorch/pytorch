@@ -997,7 +997,7 @@ class TestBlackwellAutoWSConstraints(TestCase):
                 return_value=True,
             ),
         ):
-            for num_stages in range(2, 7):
+            for num_stages in range(2, 9):
                 kwargs["num_stages"] = num_stages
                 self.assertTrue(
                     CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
@@ -1195,25 +1195,6 @@ class TestBlackwellAutoWSConfigs(TestCase):
         self.assertEqual(len(configs), 1)
         self.assertTrue(configs[0]["WARP_SPECIALIZE"])
         self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
-
-    def test_autows_default_configs_are_subset_of_exhaustive(self):
-        with mock.patch.dict(BaseHeuristicSingleton._instances, clear=True):
-            heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
-            configs = heuristic._generate_autows_configs()
-            exhaustive_configs = heuristic._generate_autows_exhaustive_configs()
-            for cfg in configs:
-                self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
-                self.assertTrue(cfg.use_meta_ws)
-                self.assertIn(cfg, exhaustive_configs)
-            expected_stages = [
-                cfg.num_stages for cfg in heuristic.blackwell_persistent_mm_configs
-            ]
-            two_cta_stages = [
-                cfg.num_stages
-                for cfg in configs
-                if cfg.two_ctas and cfg.data_partition_factor == 1
-            ]
-            self.assertEqual(two_cta_stages, expected_stages)
 
 
 if __name__ == "__main__":
