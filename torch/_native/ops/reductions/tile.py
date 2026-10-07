@@ -513,6 +513,34 @@ def load(
                         frag[i, l] = rowv[_off(base, i)]
 
 
+@cute.jit
+def load_decoded(
+    mX,
+    obase,
+    tm: cutlass.Constexpr,
+    lane,
+    w,
+    frag,
+    rdivs,
+    rstrides,
+    npairs: cutlass.Constexpr,
+    in_base,
+    base_col=0,
+    bound=None,
+    warp_stride=None,
+):
+    """Gather logical row elements through a mixed-radix storage mapping."""
+    hi = Int32(const_expr(tm.N)) if bound is None else bound
+    for l in cutlass.range_constexpr(tm.loads):
+        base = tm.col_base(lane, w, l, warp_stride) + base_col
+        for i in cutlass.range_constexpr(tm.vec):
+            col = _off(base, i)
+            valid = col < hi
+            logical = col if valid else Int32(0)
+            off = obase + _decode_offset(logical, rdivs, rstrides, npairs)
+            frag[i, l] = mX[off if valid else in_base]
+
+
 def make_fragment(mX, tm) -> cute.Tensor:
     return cute.make_rmem_tensor(cute.make_layout((tm.vec, tm.loads)), mX.element_type)
 
@@ -895,7 +923,24 @@ class TileReduce:
                     base = const_expr(it.batches[b][0])
                     bound, wstride = None, None
                 frag = make_fragment(mX, tm)
-                load(mX, r, tm, lane_w, cid, frag, base, bound, wstride)
+                if const_expr(self.axis == "general"):
+                    load_decoded(
+                        mX,
+                        obase,
+                        tm,
+                        lane_w,
+                        cid,
+                        frag,
+                        rdivs,
+                        rstrides,
+                        const_expr(self.npairs_red),
+                        in_base,
+                        base,
+                        bound,
+                        wstride,
+                    )
+                else:
+                    load(mX, r, tm, lane_w, cid, frag, base, bound, wstride)
                 frags.append(frag)
                 bases.append(base)
                 bounds.append(bound)
@@ -1283,7 +1328,16 @@ class TileReduce:
             else:
                 accs = (
                     self._fold_itree(
-                        mIns[0], unit, lane_w, warp_id, row_in_block, batch_idx
+                        mIns[0],
+                        unit,
+                        lane_w,
+                        warp_id,
+                        row_in_block,
+                        batch_idx,
+                        obase,
+                        rdivs,
+                        rstrides,
+                        in_base,
                     ),
                 )
         elif const_expr(self.axis == "general"):
