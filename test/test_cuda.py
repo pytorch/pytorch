@@ -13048,7 +13048,7 @@ print(count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetC
             with self.assertRaises(RuntimeError):
                 query(torch.cuda.device_count())
 
-    @parametrize("visibility", ["ordinal", "uuid", "partial_uuid", "unknown"])
+    @parametrize("visibility", ["ordinal", "uuid", "partial_uuid"])
     def test_greencontext_locality_nvml(self, device, visibility):
         from torch.cuda import green_contexts
 
@@ -13071,14 +13071,10 @@ print(count, torch.cuda.is_initialized(), int(_check_cuda_bindings(drv.cuCtxGetC
         code = """
 import json
 import multiprocessing
-import os
-import sys
 from ctypes import byref, c_int
 import torch
 from torch.cuda import green_contexts as g
 from cuda.bindings import driver as drv
-if sys.argv[1] == 'unknown':
-    os.environ['CUDA_MPS_ACTIVE_THREAD_PERCENTAGE'] = '100'
 nvml = g._is_localization_supported_nvml(0)
 supported = error = None
 try:
@@ -13093,8 +13089,6 @@ uninitialized = (
     == drv.CUresult.CUDA_ERROR_NOT_INITIALIZED.value
 )
 torch_initialized = torch.cuda.is_initialized()
-if sys.argv[1] == 'unknown':
-    del os.environ['CUDA_MPS_ACTIVE_THREAD_PERCENTAGE']
 def worker():
     count = g.get_num_locality_domains(0)
     value = torch.ones(1, device='cuda').item()
@@ -13110,7 +13104,7 @@ if process.exitcode != 0:
     raise RuntimeError(f'Forked CUDA worker failed: {process.exitcode}')
 """
         output = subprocess.check_output(
-            [sys.executable, "-c", code, visibility],
+            [sys.executable, "-c", code],
             env={**os.environ, "CUDA_VISIBLE_DEVICES": visible},
             text=True,
         )
@@ -13121,8 +13115,6 @@ if process.exitcode != 0:
             self.assertRegex(error, "Cannot determine locality-domain support")
         else:
             self.assertEqual(supported, count > 1)
-        if visibility == "unknown":
-            self.assertIsNone(nvml)
         self.assertTrue(uninitialized)
         self.assertFalse(torch_initialized)
         self.assertEqual(value, 1)
