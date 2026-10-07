@@ -1844,7 +1844,6 @@ def use_deterministic_algorithms(
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
-        * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when called on CUDA or MPS tensor
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
@@ -3329,6 +3328,11 @@ def compile(
             backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic, name)
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
+        # Start the one-time source hashing for Inductor's cache keys now, so
+        # it overlaps with whatever runs before the first compile.
+        from torch._inductor.codecache import prefetch_cache_keys
+
+        prefetch_cache_keys()
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 

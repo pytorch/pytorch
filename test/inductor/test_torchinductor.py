@@ -118,7 +118,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     isRocmArchAnyOf,
-    MACOS_VERSION,
     MI200_ARCH,
     NAVI3_ARCH,
     NAVI_ARCH,
@@ -232,9 +231,6 @@ requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
 )
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
-skip_if_x86_mac = functools.partial(
-    unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
-)
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libtest = torch.library.Library("test", "FRAGMENT")  # noqa: SCOPED_LIBRARY
@@ -263,7 +259,7 @@ test_int_dtypes = [
     torch.int64,
 ]
 
-if SM80OrLater or MACOS_VERSION >= 14.0 or GPU_TYPE == "xpu":
+if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE == "xpu":
     test_dtypes.append(torch.bfloat16)
 
 
@@ -2573,7 +2569,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
 
-    @skip_if_x86_mac()
     def test_reduction2(self):
         def fn(a):
             # FIXME: a.argmax
@@ -2581,7 +2576,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("inf")),))
 
-    @skip_if_x86_mac()
     def test_reduction3(self):
         def fn(a):
             # FIXME: a.argmin
@@ -5214,6 +5208,39 @@ for dtype in (torch.int32, torch.int64):
         with self.assertRaisesRegex(NotImplementedError, msg):
             torch.compile(fn, fullgraph=True)(a, b)
 
+    @parametrize(
+        "dtype", (torch.int8, torch.uint8, torch.int32, torch.int64, torch.float32)
+    )
+    def test_bmm_cpu_decompose_preserves_integer_output_dtype(self, dtype):
+        # The CPU mul+sum bmm decomposition must keep aten.bmm's output dtype
+        # for integer inputs instead of leaking L.sum_'s int64 promotion, and
+        # the final narrow must truncate like eager's wraparound accumulation
+        # rather than saturate.
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU-specific decomposition branch")
+
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        # M == 1: the 100 + 100 sum overflows int8, so eager (narrow-dtype
+        # wraparound accumulation) and inductor (int64 then to_dtype) only
+        # agree when the final cast truncates.
+        a = torch.full((1, 1, 2), 100, device=self.device, dtype=dtype)
+        b = torch.ones(1, 2, 2, device=self.device, dtype=dtype)
+        expected = fn(a, b)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), a, b
+        )
+        self.assertEqual(actual.dtype, expected.dtype)
+        self.assertEqual(actual, expected)
+        # The decomposition must actually fire: no extern bmm in the output.
+        self.assertNotIn("extern_kernels.bmm", "\n".join(code))
+
+        # N == 1: the other half of the branch condition.
+        a2 = torch.ones(1, 2, 2, device=self.device, dtype=dtype)
+        b2 = torch.full((1, 2, 1), 100, device=self.device, dtype=dtype)
+        self.common(fn, (a2, b2))
+
     @skipIfPy312  # segfaults
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_mixed_mm(self):
@@ -6114,6 +6141,46 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @requires_gpu()
+    @parametrize(
+        "size,view",
+        ((2, "reshape"), (64, "transpose"), (64, "slice")),
+    )
+    def test_to_device_constant_view(self, size, view):
+        def fn(x):
+            src_device = GPU_TYPE if x.device.type == "cpu" else "cpu"
+            const = torch.tensor(
+                list(range(size)), dtype=torch.float32, device=src_device
+            )
+            if view == "reshape":
+                const = const.view(-1, 2)
+            elif view == "transpose":
+                const = const.view(-1, 2).t()
+            else:
+                const = const[1:]
+            return const.to(x), const
+
+        self.common(
+            fn,
+            (torch.empty(0),),
+            assert_equal=functools.partial(TestCase.assertEqual, exact_device=True),
+        )
+
+    @skip_if_cpu
+    def test_to_device_constant_view_slice_assignment(self):
+        def fn(x):
+            center = torch.tensor([256, 256], dtype=torch.float32).view(1, 2)
+            center = (center / 2.0 - 0.5).expand(x.shape[0], -1)
+            matrix = torch.eye(3, device=x.device).repeat(x.shape[0], 1, 1)
+            matrix[:, :2, 2] = center.to(x)
+            return matrix, center
+
+        self.common(
+            fn,
+            (torch.empty(3),),
+            assert_equal=functools.partial(TestCase.assertEqual, exact_device=True),
+        )
+
+    @requires_gpu()
     def test_to_copy_fp64_to_no_fp64_device(self):
         # See https://github.com/pytorch/pytorch/issues/180664
         # When the target device does not support fp64, _to_copy should
@@ -6896,6 +6963,71 @@ for dtype in (torch.int32, torch.int64):
             fn,
             (torch.randn(2, 4, 4, 4),),
         )
+
+    @skip_if_mps  # MPS does not implement adaptive_max_pool3d.
+    def test_adaptive_max_pool3d_channels_last_backward(self):
+        def fn(x):
+            return F.adaptive_max_pool3d(x, (2, 3, 5), return_indices=True)
+
+        x = torch.randperm(480, device=self.device).float().reshape(1, 4, 4, 6, 5)
+        x = x.clone(memory_format=torch.channels_last_3d)
+        eager = x.detach().clone(memory_format=torch.preserve_format).requires_grad_()
+        compiled = (
+            x.detach().clone(memory_format=torch.preserve_format).requires_grad_()
+        )
+        grad = torch.arange(1.0, 121.0, device=self.device).reshape(1, 4, 2, 3, 5)
+        eager_out, eager_indices = fn(eager)
+        compiled_out, compiled_indices = torch.compile(fn, fullgraph=True)(compiled)
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(compiled_out.stride(), eager_out.stride())
+        (eager_out * grad).sum().backward()
+        (compiled_out * grad).sum().backward()
+        self.assertEqual(compiled.grad, eager.grad)
+        self.assertEqual(compiled_indices, eager_indices)
+        self.assertEqual(
+            aten.adaptive_max_pool3d_backward(grad, eager, compiled_indices),
+            aten.adaptive_max_pool3d_backward(grad, eager, eager_indices),
+        )
+        self.assertEqual(compiled_indices.stride(), eager_indices.stride())
+
+    @skip_if_mps  # MPS does not implement adaptive_max_pool3d.
+    def test_adaptive_max_pool3d_backward_noncontiguous_indices(self):
+        """Native backward ignores index strides, so use contiguous indices as reference."""
+        x = torch.randperm(480, device=self.device).float().reshape(1, 4, 4, 6, 5)
+        grad = torch.arange(1.0, 121.0, device=self.device).reshape(1, 4, 2, 3, 5)
+        _, indices = F.adaptive_max_pool3d(x, (2, 3, 5), return_indices=True)
+        indices = indices.contiguous(memory_format=torch.channels_last_3d)
+        self.assertFalse(indices.is_contiguous())
+
+        def backward(grad_output, input, saved_indices):
+            return aten.adaptive_max_pool3d_backward(grad_output, input, saved_indices)
+
+        expected = backward(grad, x, indices.contiguous())
+        actual = torch.compile(backward, fullgraph=True)(grad, x, indices)
+        self.assertEqual(actual, expected)
+
+    @skip_if_mps  # MPS does not implement adaptive_max_pool3d.
+    def test_adaptive_max_pool3d_out_decomposition(self):
+        from torch._inductor.decomposition import decompositions
+
+        x = torch.randperm(480, device=self.device).float().reshape(1, 4, 4, 6, 5)
+        x = x.clone(memory_format=torch.channels_last_3d)
+        output = torch.empty(1, 4, 2, 3, 5, device=self.device)
+        indices = torch.empty_like(output, dtype=torch.int64)
+        expected_output = torch.empty_like(output)
+        expected_indices = torch.empty_like(indices)
+
+        expected = aten.adaptive_max_pool3d.out(
+            x, (2, 3, 5), out=expected_output, indices=expected_indices
+        )
+        actual = decompositions[aten.adaptive_max_pool3d.out](
+            x, (2, 3, 5), out=output, indices=indices
+        )
+        self.assertIs(actual[0], output)
+        self.assertIs(actual[1], indices)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual[0].stride(), expected[0].stride())
+        self.assertEqual(actual[1].stride(), expected[1].stride())
 
     # halide/mps take the non-logical-index path in _pool_argmax_inner_fn, so the
     # window offsets are still physical there; halide additionally fails to schedule
@@ -10301,7 +10433,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
-    @skip_if_x86_mac()
     def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
@@ -11030,6 +11161,65 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
+    def test_input_mutation_copy_of_input_mutated_later(self):
+        # A copy of an input that is mutated later in the graph must stay a real
+        # copy. remove_noop_ops replaced it by the input itself, so the copy into
+        # b read the *updated* a, directly or through a chain of views. This needs
+        # a's write-back copy_ to come first: a sorts first under
+        # canonicalize_output_graph_node_order and is also the first tensor used,
+        # so it is the first graph input either way.
+        def copy_slice(a, b):
+            b[0:, :] = a[0:, :]
+            a.add_(1)
+            return a
+
+        def copy_view_chain(a, b):
+            y = a.clone()
+            a.add_(1)
+            b.copy_(y.view(-1).view(3, 4))
+
+        for fn in (copy_slice, copy_view_chain):
+            for dynamic in (False, True):
+                torch._dynamo.reset()
+                a1 = torch.arange(12, dtype=torch.float32, device=self.device)
+                a1 = a1.view(3, 4)
+                b1 = torch.zeros(3, 4, device=self.device)
+                a2, b2 = a1.clone(), b1.clone()
+                correct = fn(a1, b1)
+                actual = torch.compile(fn, dynamic=dynamic)(a2, b2)
+                self.assertEqual(actual, correct)
+                self.assertEqual(a1, a2)
+                self.assertEqual(b1, b2)
+
+    def test_input_mutation_after_dtype_view_consumer(self):
+        # x and a dtype view of it (a fallback aten.view.dtype kernel whose
+        # output aliases x) share memory. A pending pointwise user of either one
+        # must be realized before a mutation of the other; Inductor used to
+        # materialize it *after* the mutation, i.e. from the mutated memory.
+        idx = torch.tensor([0, 2], device=self.device)
+        vals = torch.full((2, 12), 7, dtype=torch.int32, device=self.device)
+
+        def mutate_base(x):
+            y = x.view(torch.int32) * 2
+            y.sub_(-4)
+            x[:, 2:5] = 2
+            return y.view(torch.int64)
+
+        def mutate_alias(x):
+            y = x * 2
+            y.sub_(-4)
+            x.view(torch.int32).index_put_((idx,), vals)
+            return y.view(torch.int32)
+
+        x = torch.arange(-12, 12, dtype=torch.int64, device=self.device).reshape(4, 6)
+        for fn in (mutate_base, mutate_alias):
+            torch._dynamo.reset()
+            ref_x, opt_x = x.clone(), x.clone()
+            ref = fn(ref_x)
+            res = torch.compile(fn)(opt_x)
+            self.assertEqual(ref, res)
+            self.assertEqual(ref_x, opt_x)
+
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -11324,6 +11514,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
+    @parametrize("reduction", ["any", "amax"])
+    def test_bool_reduction_bitwise_op(self, reduction):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199745
+        def fn(x, y):
+            r = getattr(x, reduction)(dim=1)
+            return r & y, r | y, r ^ y
+
+        x = torch.zeros(4, 64, dtype=torch.bool)
+        x[1, 7] = x[3, 63] = True
+        y = torch.tensor([True, True, False, False])
+        self.common(fn, (x, y))
+
     @skip_if_gpu_halide
     def test_multilayer_any(self):
         def fn(x):
@@ -11572,6 +11774,223 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    def test_index_put_as_masked_fill_mask_reads_target_view(self):
+        # The mask reads y through a transposed view of y's realized buffer;
+        # it must see y from before the fill, not the fill's own output. This
+        # needs y to be realized, which the sum and the two reads of y make it.
+        def fn(x):
+            y = x + x.sum(-2, keepdim=True)
+            mask = y.roll(-1, -2) == y.transpose(-1, -2)
+            y.index_put_((mask,), torch.tensor(7.0, device=x.device))
+            return y
+
+        for shape in [(4, 5, 5), (3, 7, 7)]:
+            x = (torch.arange(math.prod(shape)) % 3).float().view(shape)
+            self.common(fn, (x,))
+
+    def test_index_put_as_masked_fill_mask_reads_target_by_extern_kernel(self):
+        # mm reads y through a transposed view of y's realized buffer, before
+        # the fill.
+        def fn(x, w):
+            y = x + 1
+            mask = (y.t() @ w) > 0
+            y.index_put_((mask,), torch.tensor(7.0, device=x.device))
+            return y
+
+        # Integer values keep the mm, and so the mask, exact in low precision.
+        x = torch.randint(-2, 3, (8, 8)).float()
+        w = torch.randint(-2, 3, (8, 8)).float()
+        self.common(fn, (x, w))
+
+    @skip_if_halide  # won't fuse a read of the buffer it writes in place
+    def test_masked_fill_of_realized_buffer_kernel_count(self):
+        # The fill writes the realized mm output in place, in one kernel.
+        def fn(x, w, m):
+            s = x @ w
+            s.index_put_((m,), torch.tensor(float("-inf"), device=x.device))
+            return s
+
+        x, w = torch.randn(16, 16), torch.randn(16, 16)
+        self.common(fn, (x, w, x > 0.5))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    @parametrize(
+        "case",
+        (
+            "copy_then_mutate",
+            "fsdp_copy_then_mutate",
+            "foreach_reads_target_elsewhere",
+            "foreach_reads_input_elsewhere",
+            "foreach_reads_sibling_target",
+            "foreach_reads_sibling_input",
+            "foreach_reads_sibling_across_groups",
+            "copy_into_strided_empty",
+        ),
+    )
+    def test_mutate_realized_buffer_in_make_fx_graph(self, case):
+        # make_fx keeps the mutations that torch.compile functionalizes away.
+        from torch._inductor.decomposition import select_decomp_table
+
+        def copy_then_mutate(x):
+            # copy_ must give y its own buffer: mutating y afterwards must not
+            # change z or the input x.
+            y = x + 1
+            z = x * 2
+            y.copy_(z)
+            y.add_(1)
+            w = x + 3
+            w.copy_(x)
+            w.add_(1)
+            return y, z, w
+
+        def fsdp_copy_then_mutate(x):
+            # fsdp.copy_ must copy like copy_.
+            y = x + 1
+            z = x * 2
+            torch.ops.fsdp.copy_(y, z)
+            y.add_(1)
+            return y, z
+
+        def foreach_reads_target_elsewhere(x):
+            # The value reads y at other positions, so it can't be computed
+            # straight into y.
+            y = x @ x.t()
+            torch._foreach_add_([y], [y.flip(0)])
+            return (y,)
+
+        def foreach_reads_input_elsewhere(x):
+            # https://github.com/pytorch/pytorch/issues/198033
+            torch._foreach_add_([x], [x.flip(0)])
+            return (x + 0,)
+
+        def foreach_reads_sibling_target(x, w1, w2):
+            # Applied in list order, as eager does on CPU, so b adds the
+            # updated a.
+            a = x @ w1
+            b = x @ w2
+            torch._foreach_add_([a, b], [b, a])
+            return a, b
+
+        def foreach_reads_sibling_input(x, y):
+            torch._foreach_add_([x, y], [y, x])
+            return x + 0, y + 0
+
+        def foreach_reads_sibling_across_groups(a, b, c, d):
+            # c and d read b after it is written, so they start a second
+            # group, which must not fuse pairwise with the first.
+            torch._foreach_add_([a, b, c, d], [c, d, b, b])
+            return a + 0, b + 0, c + 0, d + 0
+
+        def copy_into_strided_empty(x):
+            # The view of e must read the copy through e's strides.
+            e = torch.empty_strided((4, 8), (1, 4), device=x.device)
+            v = e.t()
+            e.copy_(x)
+            return (v + 0,)
+
+        if case == "fsdp_copy_then_mutate" and not hasattr(torch.ops.fsdp, "copy_"):
+            self.skipTest("needs torch.ops.fsdp.copy_")
+        if case in (
+            "foreach_reads_sibling_input",
+            "foreach_reads_sibling_across_groups",
+        ) and is_halide_backend(self.device):
+            # Halide gets the inputs right but not x + 0, which misses x's
+            # in-place update.
+            self.skipTest("halide: an output misses its input's in-place update")
+        fn = {
+            f.__name__: f
+            for f in (
+                copy_then_mutate,
+                fsdp_copy_then_mutate,
+                foreach_reads_target_elsewhere,
+                foreach_reads_input_elsewhere,
+                foreach_reads_sibling_target,
+                foreach_reads_sibling_input,
+                foreach_reads_sibling_across_groups,
+                copy_into_strided_empty,
+            )
+        }[case]
+        # A GPU kernel only reads a flipped row after another block wrote it
+        # when there are many blocks.
+        shape = (1024, 1024) if case.startswith("foreach") else (4, 8)
+        num_inputs = {
+            "foreach_reads_sibling_target": 3,
+            "foreach_reads_sibling_input": 2,
+            "foreach_reads_sibling_across_groups": 4,
+        }
+        xs = [
+            torch.randn(shape, device=self.device)
+            for _ in range(num_inputs.get(case, 1))
+        ]
+        gm = make_fx(fn, decomposition_table=select_decomp_table())(
+            *[x.clone() for x in xs]
+        )
+        xs_eager = [x.clone() for x in xs]
+        xs_compiled = [x.clone() for x in xs]
+        in_order = contextlib.nullcontext()
+        if case.startswith("foreach_reads_sibling"):
+            # With aliased lists eager's GPU foreach kernel has no defined
+            # result (it reads and writes all the targets in one launch), so
+            # the reference applies the elements one after the other, as eager
+            # does on CPU.
+            def add_in_order(targets, values):
+                for t, v in zip(targets, values):
+                    t.add_(v)
+
+            in_order = patch.object(torch, "_foreach_add_", add_in_order)
+        with in_order:
+            expected = fn(*xs_eager)
+        self.assertEqual(compile_fx_inner(gm, xs_compiled)(list(xs_compiled)), expected)
+        self.assertEqual(xs_compiled, xs_eager)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_mutable_op_layout_copy_written_back_in_place(self):
+        # y is an output, so it is realized with eager's transposed strides.
+        # The op needs it contiguous and gets a contiguous copy, which
+        # propagate_mutation writes back to y. The mm has read y through a
+        # view by then, so the write-back must go into y's buffer.
+        from torch._inductor.decomposition import select_decomp_table
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define(
+                "scale_(Tensor(a!) x) -> ()",
+                tags=(torch.Tag.needs_contiguous_strides,),
+            )
+
+            def scale_(x):
+                x.mul_(3)
+
+            lib.impl("scale_", scale_, "CompositeExplicitAutograd")
+
+            def fn(x, w):
+                y = x.t() + 1
+                m = y.t() @ w
+                torch.ops.mylib.scale_(y)
+                return y, m
+
+            # Integer values keep the mm exact in low precision.
+            x = torch.randint(-2, 3, (8, 4), device=self.device).float()
+            w = torch.randint(-2, 3, (4, 4), device=self.device).float()
+            gm = make_fx(fn, decomposition_table=select_decomp_table())(x, w)
+            self.assertEqual(compile_fx_inner(gm, [x, w])([x, w]), fn(x, w))
+
+    @parametrize("case", ("index", "view_index", "mask"))
+    def test_cat_input_mutated_after_cat(self, case):
+        # The concat may compute an input straight into its own storage, which
+        # is only valid if that input is not mutated in place afterwards.
+        def fn(x, idx, src):
+            a = x + 1
+            c = torch.cat([a, x * 2])
+            if case == "index":
+                a.index_put_((idx,), src)
+            elif case == "view_index":
+                a.t().index_put_((idx,), src)
+            else:
+                a.index_put_((a > 1.5,), src[0, 0])
+            return c, a
+
+        self.common(fn, (torch.randn(8, 8), torch.arange(4), torch.ones(4, 8)))
+
     def test_index_put_deterministic_fallback(self):
         if is_mps_backend(self.device):
             # MPS has no deterministic implementation for
@@ -11649,6 +12068,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
+
+        # SM90+ CUDA accumulates with BF16 atomics, which round after every update.
+        if self.device == "cuda" and (
+            torch.version.hip or torch.cuda.get_device_capability() < (9, 0)
+        ):
+
+            def bf16_fn(x):
+                idx = torch.zeros(1000, device=x.device, dtype=torch.int64)
+                vals = torch.ones(1000, device=x.device, dtype=x.dtype)
+                x.index_put_((idx,), vals, accumulate=True)
+                return x
+
+            self.common(bf16_fn, (torch.zeros(1, dtype=torch.bfloat16),))
 
     @skipCPUIf(True, "requires Triton atomic_or on tl.int1")
     @skip_if_pallas
@@ -17802,6 +18234,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             lambda msg: f"{msg}\nRef:\n{ref_grad_list}\nAct:\n{act_grad_list}",
         )
 
+    def test_weight_norm_1d_and_reduced_dtypes(self):
+        # https://github.com/pytorch/pytorch/issues/198676
+        def fn(v, g):
+            return torch._weight_norm(v, g, 0)
+
+        opt_fn = torch.compile(fn)
+        dtypes = [torch.float32, torch.float16, torch.bfloat16]
+        if is_mps_backend(self.device):
+            # MPS eager keeps the norm and the arithmetic in g.dtype
+            dtypes = [torch.float32]
+        for v_shape, g_shape in (((8,), (8,)), ((8, 5), (8, 1))):
+            for dtype in dtypes:
+                kw = {"device": self.device, "dtype": dtype}
+                v = torch.randn(v_shape, requires_grad=True, **kw)
+                g = torch.randn(g_shape, requires_grad=True, **kw)
+                grad_out = torch.randn(v_shape, **kw)
+                ref = fn(v, g)
+                ref_grad = torch.autograd.grad(ref, (v, g), grad_out)
+                act = opt_fn(v, g)
+                act_grad = torch.autograd.grad(act, (v, g), grad_out)
+                self.assertEqual((ref, ref_grad), (act, act_grad))
+
     def test_chunk_recompiles(self):
         def f(x):
             return x.chunk(4)
@@ -19463,7 +19917,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @parametrize("slice_pointwise", (False, True))
     @skip_if_halide
     @skip_if_pallas
-    @skip_if_mps
     def test_argmin_argmax_fused_reduction_logical_index(self, slice_pointwise):
         # https://github.com/pytorch/pytorch/issues/193661
         def fn(x):
@@ -20138,6 +20591,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    def test_masked_cse_recomputed_load(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199642
+        # When an input load is first emitted inside ops.masked (via F.pad),
+        # then loaded unmasked into the kernel-level CSE cache, and subsequently
+        # loaded again inside ops.masked, the second ops.masked block has an
+        # empty scoped_body and returns the outer CSE variable directly.
+        def fn(x, y, table):
+            padded_x = torch.nn.functional.pad(x, (1, 1, 1, 1))
+            padded_y = torch.nn.functional.pad(y, (1, 1, 1, 1))
+            m = (padded_x**2 + padded_y**2)[..., 1:-1, 1:-1]
+            i = ((x + y) * 3).round()
+            idx1 = (i % 8).long()
+            idx2 = ((i + 4) % 8).long()
+            return (m > table.gather(1, idx1)) & (m > table.gather(1, idx2))
+
+        x, y = torch.randn(2, 1, 1, 64, 80, device=self.device).unbind(0)
+        table = torch.rand(1, 8, 64, 80, device=self.device) * 4
+        self.common(fn, (x, y, table), check_lowp=False)
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -20501,6 +20973,17 @@ if RUN_GPU or HAS_MPS:
                         bad_decomp_bias, bad_decomp_x, bad_decomp_weight
                     )
 
+            def baddbmm_beta_zero(bias, x, weight):
+                return torch.baddbmm(bias, x, weight, beta=0.0)
+
+            cpu_bias = torch.tensor(0.0)
+            with self.assertRaisesRegex(RuntimeError, "same device"):
+                baddbmm_beta_zero(cpu_bias, bad_x[None], bad_weight[None])
+            with self.assertRaisesRegex(Exception, "must be on the same device"):
+                torch.compile(baddbmm_beta_zero, fullgraph=True)(
+                    cpu_bias, bad_x[None], bad_weight[None]
+                )
+
             with config.patch({"shape_padding": False, "triton.native_matmul": True}):
                 with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
                     torch.compile(addmm_dtype_mismatch, fullgraph=True)(
@@ -20531,6 +21014,15 @@ if RUN_GPU or HAS_MPS:
                         zero_weight,
                     ),
                 )
+                # alpha == 0 zero-fills without autotuning; this case needs
+                # Triton GEMM choices, which only big GPUs get.
+                if IS_BIG_GPU:
+                    check(
+                        lambda bias, x, weight: torch.addmm(
+                            bias, x, weight.t(), beta=0.0, alpha=0.1
+                        ),
+                        (torch.full((8,), float("nan"), device=self.device), x, weight),
+                    )
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
@@ -22217,11 +22709,11 @@ if RUN_GPU:
             output = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
 
             result, code = run_and_get_code(torch.compile(fn), output, indices, values)
-            if output.device.type == "xpu":
-                # xpu fallback bf16 atomic add for better performance
+            if output.device.type == "xpu" or torch.version.hip:
+                # xpu and ROCm fall back for bf16 atomic add
                 self.assertFalse(
                     "tl.atomic_add" in code[0],
-                    "bf16 should not generate tl.atomic_add on xpu",
+                    "bf16 should not generate tl.atomic_add on xpu or ROCm",
                 )
             else:
                 self.assertTrue(
@@ -22244,11 +22736,7 @@ if RUN_GPU:
             torch.testing.assert_close(result, fn(inp))
 
         def test_3d_reductions_with_max_tiles_3(self):
-            # Inductor only supports at most two reduction iteration ranges, R0 and R1, which the
-            # reduction component of the kernel can be tiled across.
-            # When max_tiles>=3, SIMDScheduling.create_tiling would previously incorrectly allow the
-            # tiling of the kernel in three dimensions, despite there being no pointwise component
-            # of the kernel.
+            """Test that max_tiles=3 permits an R0/R1/R2 pure reduction."""
 
             @torch._inductor.config.patch(
                 {
@@ -22279,9 +22767,41 @@ if RUN_GPU:
             torch.testing.assert_close(actual=actual, expected=expected)
 
             fc = FileCheck()
-            # There's no pointwise work to do, so xnumel should be 1...
             fc.check("xnumel = 1")
+            fc.check("R2_BLOCK")
             fc.run(code[0])
+
+        @torch._inductor.config.patch(
+            {
+                "triton.prefer_nd_tiling": True,
+                "triton.max_tiles": 3,
+                "triton.tile_reductions": True,
+            }
+        )
+        def test_3d_reduction_respects_tensor_rank_limit(self):
+            """Keep three reduction tiles while limiting total tensor rank to five.
+
+            max_tiles=3 applies independently to the pointwise and reduction
+            tilings. With R0/R1/R2 present, the three pointwise dimensions must
+            therefore collapse to Y/X rather than producing a sixth tensor axis.
+            """
+
+            def reduce_3d(x):
+                return torch.sum(x, dim=(3, 4, 5))
+
+            inp = torch.empty_strided(
+                (12, 3, 4, 4, 4, 4),
+                (1536, 128, 4, 384, 32, 1),
+                device=GPU_TYPE,
+            ).normal_()
+
+            actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
+
+            torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
+            for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
+                self.assertIn(block_arg, code[0])
+            self.assertNotIn("ZBLOCK", code[0])
+            self.assertIn("tl.load", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_median_decompose_sort_ops(self):

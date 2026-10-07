@@ -3019,11 +3019,13 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 template_kwargs.get("WARP_SPECIALIZE", True)
                 and not constraints_violated
             )
-            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True
+            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True.
+            # The Meta WS knob is global in Triton, so it rewrites every WS kernel,
+            # not just the use_meta_ws configs.
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and not use_meta_ws
+                and not (use_meta_ws or USE_META_WS)
             )
             two_ctas = template_kwargs.get("TWO_CTAS", False)
             out = {
@@ -3096,7 +3098,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
             [32, 64, 128, 256], repeat=3
         ):
-            for num_stages in [2, 3, 4, 5, 6]:
+            for num_stages in [2, 3, 4, 5, 6, 7, 8]:
                 # AutoWS doesn't work with num_warps < 4
                 for num_warps in [4, 8]:
                     for epilogue_subtile in [1, 2, 4, 8]:
@@ -3580,6 +3582,53 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
         self.mm_configs = self.blackwell_persistent_mm_configs
         self.exhaustive_configs = self._generate_exhaustive_configs()
 
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        return [
+            BlackwellGPUGemmConfig(
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile=epilogue_subtile,
+                data_partition_factor=data_partition_factor,
+                separate_epilogue_store=separate_epilogue_store,
+                two_ctas=two_ctas,
+                use_meta_ws=True,
+                flatten=False,
+            )
+            for (
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile,
+                data_partition_factor,
+                separate_epilogue_store,
+                two_ctas,
+            ) in [
+                (64, 32, 256, 4, 4, 1, 1, True, False),
+                (128, 64, 64, 8, 4, 1, 1, True, False),
+                (128, 256, 64, 7, 8, 8, 1, False, True),
+                (128, 64, 64, 8, 4, 2, 1, False, False),
+                (128, 256, 64, 6, 8, 8, 2, False, True),
+                (32, 32, 256, 2, 4, 1, 1, True, False),
+                (32, 32, 256, 4, 4, 1, 1, True, False),
+                (128, 128, 128, 4, 4, 4, 2, True, True),
+                (128, 256, 128, 3, 4, 8, 2, False, True),
+                (64, 128, 128, 3, 4, 2, 1, True, False),
+                (128, 256, 128, 3, 4, 8, 1, False, True),
+                (128, 256, 64, 7, 4, 8, 1, False, True),
+                (128, 256, 64, 5, 4, 4, 2, False, True),
+                (128, 256, 128, 2, 4, 4, 1, False, True),
+                (256, 256, 64, 5, 4, 8, 2, False, False),
+                (128, 256, 64, 6, 8, 8, 1, False, True),
+                (64, 64, 256, 4, 4, 1, 1, True, False),
+                (256, 128, 64, 4, 4, 4, 2, True, False),
+            ]
+        ]
+
 
 @register_template_heuristic(
     persistent_tma_mm_template.uid,
@@ -3612,6 +3661,53 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
             + self.blackwell_persistent_addmm_configs
         )
         self.exhaustive_configs = self._generate_exhaustive_configs()
+
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        return [
+            BlackwellGPUGemmConfig(
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile=epilogue_subtile,
+                data_partition_factor=data_partition_factor,
+                separate_epilogue_store=separate_epilogue_store,
+                two_ctas=two_ctas,
+                use_meta_ws=True,
+                flatten=False,
+            )
+            for (
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile,
+                data_partition_factor,
+                separate_epilogue_store,
+                two_ctas,
+            ) in [
+                (64, 32, 256, 4, 4, 1, 1, True, False),
+                (256, 128, 64, 4, 4, 4, 2, True, False),
+                (256, 256, 64, 2, 8, 2, 2, True, True),
+                (128, 64, 64, 8, 4, 1, 1, True, False),
+                (128, 256, 64, 7, 4, 8, 1, True, True),
+                (32, 32, 256, 2, 4, 1, 1, True, False),
+                (32, 32, 64, 2, 4, 1, 1, True, False),
+                (128, 256, 64, 7, 4, 8, 2, False, True),
+                (128, 256, 64, 7, 4, 8, 2, True, True),
+                (256, 256, 64, 6, 4, 8, 2, False, True),
+                (128, 128, 128, 4, 4, 4, 2, True, True),
+                (32, 64, 32, 2, 4, 1, 1, True, False),
+                (256, 128, 64, 4, 4, 2, 2, True, False),
+                (64, 32, 256, 5, 4, 1, 1, True, False),
+                (128, 256, 64, 5, 4, 4, 1, False, True),
+                (128, 256, 64, 7, 4, 8, 1, False, True),
+                (128, 128, 64, 8, 4, 1, 1, True, False),
+                (64, 64, 256, 7, 4, 1, 1, True, False),
+            ]
+        ]
 
 
 @register_template_heuristic(

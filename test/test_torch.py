@@ -118,6 +118,15 @@ def _test_gather_backward_one_dim(test_case, device, deterministic: bool = False
             test_case.assertEqual(grad, expected, atol=0, rtol=0)
 
 
+# Runs dst.copy_(src) and reports whether the tiled CUDA transpose kernel was
+# dispatched. Dispatch is the performance contract the tiled-transpose tests pin.
+def _copy_uses_tiled_transpose(dst, src):
+    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+        dst.copy_(src)
+        torch.cuda.synchronize()
+    return any("transpose_copy_tiled_kernel" in e.name for e in prof.events())
+
+
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
@@ -310,7 +319,6 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(_throws_on_data_ptr_access(s2))
         self.assertFalse(raises_on_data_ptr(s2))
 
-    @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
@@ -420,48 +428,6 @@ class TestTorchDeviceType(TestCase):
         s_check = t_check.storage()
         s = t.storage()
         self._check_storage_meta(s, s_check)
-
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @slowTestIf(IS_WINDOWS)
-    def test_storage_meta_errors(self, device, dtype):
-        s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
-
-        with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
-            s0.cpu()
-
-        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
-            s0._share_fd_cpu_()
-
-        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
-            s0._share_filename_cpu_()
-
-        if torch.cuda.is_available():
-            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
-                s0.cuda()
-
-            with self.assertRaisesRegex(RuntimeError, r'only available on CUDA'):
-                s0._share_cuda_()
-
-            with self.assertRaisesRegex(TypeError, r"cannot pin 'torch.storage.UntypedStorage' only CPU memory can be pinned"):
-                s0.pin_memory()
-
-        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
-            s0.share_memory_()
-
-        self.assertFalse(s0.is_shared())
-
-        with self.assertRaisesRegex(NotImplementedError, r'Not available'):
-            s0.tolist()
-
-        with tempfile.NamedTemporaryFile() as f:
-            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
-                s0._write_file(f, True, True, s0.element_size())
-
-        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
-            s1 = torch.TypedStorage([1, 2, 3, 4], device=device, dtype=dtype)
-
-            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
-                s1.copy_(s0)
 
     @onlyAccelerator
     def test_module_share_memory(self, device):
@@ -1016,19 +982,6 @@ class TestTorchDeviceType(TestCase):
         with self.assertWarnsOnceRegex(UserWarning, msg):
             # t + 1 allocates a new tensor for result using empty
             t + 1
-
-    def test_set_default_tensor_type_warnings(self, device):
-        msg = '.*is deprecated as of PyTorch 2.1, please use torch.set_default_dtype().*'
-        default_type = torch.tensor([]).type()
-        try:
-            with self.assertWarnsOnceRegex(UserWarning, msg):
-                torch.set_default_tensor_type(torch.FloatTensor)
-
-            if torch.cuda.is_available():
-                with self.assertWarnsOnceRegex(UserWarning, msg):
-                    torch.set_default_tensor_type(torch.cuda.FloatTensor)
-        finally:
-            torch.set_default_tensor_type(default_type)
 
     # TODO: this test should be in test_nn.py
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
@@ -1963,41 +1916,6 @@ class TestTorchDeviceType(TestCase):
         y = torch.zeros(3, device=device)
         y[1] = 1.
         run_test(x, y)
-
-    # Ensures that median throws nondeterministic alerts in the correct cases
-    @dtypes(torch.double)
-    def test_nondeterministic_alert_median(self, device, dtype):
-        def test_func(call_type):
-            S = 10
-            a = torch.randn(S, device=device)
-            if call_type == 'function':
-                torch.median(a)
-            elif call_type == 'function with indices':
-                torch.median(a, 0)
-            elif call_type == 'method':
-                a.median()
-            elif call_type == 'method with indices':
-                a.median(0)
-            elif call_type == 'out with indices':
-                result = torch.empty_like(a)
-                indices = torch.empty((), dtype=torch.long, device=device)
-                torch.median(a, 0, out=(result, indices))
-            else:
-                self.fail(f"'{call_type}' is not a valid call type")
-
-        def test_func_expect_error(call_type, should_error):
-            self.check_nondeterministic_alert(
-                lambda: test_func(call_type),
-                'median CUDA with indices output',
-                should_error)
-
-        is_cuda = torch.device(device).type == 'cuda'
-
-        test_func_expect_error('function', False)
-        test_func_expect_error('function with indices', is_cuda)
-        test_func_expect_error('method', False)
-        test_func_expect_error('method with indices', is_cuda)
-        test_func_expect_error('out with indices', is_cuda)
 
     # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes
@@ -3325,14 +3243,14 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(out.cpu(), view.cpu().t().contiguous(), atol=0, rtol=0)
 
     @onlyCUDA
-    @dtypes(torch.bool, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("layout", ("aligned", "word_aligned", "src_offset", "dst_offset", "src_pitch", "dst_pitch", "grid_stride"))
+    @dtypes(torch.uint8, torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("layout", ("aligned", "word_aligned", "src_offset", "dst_offset", "src_pitch", "dst_pitch", "grid_z"))
     def test_copy_transpose_tiled_vectorized(self, device, dtype, layout):
         h, w = (2052, 2060) if layout == "word_aligned" else (2064, 2096)
-        if layout == "grid_stride":
+        if layout == "grid_z":
             vec = 4 // torch.empty((), dtype=dtype).element_size()
             tile_size = 64 if dtype == torch.float32 else 32 * vec
-            h, w = tile_size * 65535 + 4 * vec, 4 * vec
+            h, w = tile_size * 65535 + 16 * vec, 16 * vec
         src_offset = int(layout == "src_offset")
         dst_offset = int(layout == "dst_offset")
         src_pad = 1 if layout == "src_pitch" else 16
@@ -3345,7 +3263,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @dtypes(torch.bool, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
+    @dtypes(torch.uint8, torch.float16, torch.bfloat16, torch.float32)
     @parametrize("case", ("below", "at", "offset", "pitch"))
     def test_copy_transpose_tiled_small(self, device, dtype, case):
         es = torch.empty((), dtype=dtype).element_size()
@@ -3354,13 +3272,112 @@ class TestTorchDeviceType(TestCase):
         pad = 1 if case == "pitch" else 16
         src = make_tensor((h, w + pad), device=device, dtype=dtype)[:, offset:offset + w]
         dst = torch.empty((w, h), device=device, dtype=dtype)
-        with torch.profiler.profile(activities=[
-                torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]) as prof:
-            dst.copy_(src.t())
-            torch.cuda.synchronize()
-        tiled = any("transpose_copy_tiled_kernel" in event.name for event in prof.events())
+        tiled = _copy_uses_tiled_transpose(dst, src.t())
         self.assertEqual(tiled, case == "at" and es < 4)
         self.assertEqual(dst.cpu().view(torch.uint8), src.cpu().t().contiguous().view(torch.uint8))
+
+    # Permuted copies whose contiguous dim moves ([B, C, L] <- [B, L, C] and
+    # higher-rank permutes) must take the tiled path and match the generic copy
+    # bit-for-bit. TensorIterator merges adjacent dims whose strides line up in
+    # both operands, so the layouts are chosen to stay distinct after that:
+    #   batch_first    [B, L, C] -> [B, C, L]; one outer dim after the pair
+    #   permute_4d     [B0, L, B1, C] -> [B0, C, B1, L]; two outer dims, one of
+    #                  them between the two transposed dims in the iterator
+    #   permute_5d     [B0, B1, L, B2, C] -> [B1, C, B0, B2, L]; three outer dims
+    #   odd            odd extents (partial tiles) into a row-padded dst whose
+    #                  padding must stay untouched
+    #   padded_*_batch a src or dst outer stride that is word- but not 16-byte
+    #                  aligned: vectorized tile rejected, scalar tile still used
+    #   broadcast      zero src outer stride
+    #   big_batch      more (slice, tile row) pairs than gridDim.y, so slices
+    #                  are decoded from blockIdx.z as well
+    #   small_slices   slices individually below the size gate whose aggregate
+    #                  is above it
+    @onlyCUDA
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.uint8, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("layout", ("batch_first", "permute_4d", "permute_5d", "odd", "padded_src_batch",
+                            "padded_dst_batch", "broadcast", "big_batch", "small_slices"))
+    def test_copy_transpose_tiled_batched(self, device, dtype, layout):
+        es = torch.empty((), dtype=dtype).element_size()
+        word = max(1, 4 // es)  # elements per 32-bit word
+        if layout == "big_batch":
+            b, c, l = 66000, 32, 64
+        elif layout == "small_slices":
+            # each [c, l] slice is 8 KB, far below the 4 MB gate; 2048 of them are not
+            b, c, l = 2048, 32, 256 // es
+        elif layout == "odd":
+            b, c, l = 9, 1001, 1027
+        elif layout in ("permute_4d", "permute_5d"):
+            b, c, l = 24, 192, 256
+        else:
+            b, c, l = 24, 736, 1536 // es
+
+        def padded_batch(shape, fill=None):
+            # pad each slice by one word: word-aligned but not 16-byte aligned
+            n = shape[1] * shape[2]
+            base = make_tensor((shape[0], n + word), dtype=dtype, device=device) if fill is None \
+                else torch.full((shape[0], n + word), fill, dtype=dtype, device=device)
+            return base, base[:, :n].view(shape)
+
+        dst_shape = (b, c, l)
+        dst_base = None
+        if layout == "permute_4d":
+            b0, b1 = 6, b // 6
+            src = make_tensor((b0, l, b1, c), dtype=dtype, device=device).permute(0, 3, 2, 1)
+            dst_shape = (b0, c, b1, l)
+        elif layout == "permute_5d":
+            b0, b1, b2 = 2, 3, b // 6
+            src = make_tensor((b0, b1, l, b2, c), dtype=dtype, device=device).permute(1, 4, 0, 3, 2)
+            dst_shape = (b1, c, b0, b2, l)
+        elif layout == "padded_src_batch":
+            _, src = padded_batch((b, l, c))
+            src = src.permute(0, 2, 1)
+        elif layout == "broadcast":
+            src = make_tensor((1, l, c), dtype=dtype, device=device).expand(b, l, c).permute(0, 2, 1)
+        else:
+            src = make_tensor((b, l, c), dtype=dtype, device=device).permute(0, 2, 1)
+        if layout == "padded_dst_batch":
+            dst_base, dst = padded_batch(dst_shape, fill=0)
+            padding = dst_base[:, -word:]
+        elif layout == "odd":
+            dst_base = torch.zeros((b, c, l + 3), dtype=dtype, device=device)
+            dst, padding = dst_base[..., :l], dst_base[..., l:]
+        else:
+            dst = torch.empty(dst_shape, dtype=dtype, device=device)
+
+        self.assertTrue(_copy_uses_tiled_transpose(dst, src), layout)
+        self.assertEqual(dst.cpu().contiguous().view(torch.uint8), src.cpu().contiguous().view(torch.uint8))
+        if dst_base is not None:
+            self.assertEqual(padding.count_nonzero().item(), 0)
+
+    # Batched slices much smaller than a tile, or narrower than 16 elements, must
+    # stay on the generic path (the tiled kernel is slower there); 2D transposes
+    # are not subject to the guard.
+    @onlyCUDA
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.uint8, torch.bfloat16, torch.float32, torch.float64)
+    def test_copy_transpose_tiled_small_slices_rejected(self, device, dtype):
+        def tiled(src):
+            dst = torch.empty(src.shape, dtype=dtype, device=device)
+            used = _copy_uses_tiled_transpose(dst, src)
+            self.assertEqual(dst.cpu().view(torch.uint8), src.cpu().contiguous().view(torch.uint8))
+            return used
+
+        total = 16 << 20  # bytes, above the size gate
+        es = torch.empty((), dtype=dtype).element_size()
+        # (16, 32) is 512 elements per block: enough for 4- and 8-byte types, not for narrower
+        # ones. (127, 129) and (255, 257) are scalar tiles at 80% and 89% utilization: narrow
+        # types only win when the tile is nearly full.
+        for (c, l), expect in (((16, 16), False), ((512, 4), False), ((3, 512), False), ((8, 128), False),
+                               ((16, 32), es >= 4), ((127, 129), es >= 4), ((255, 257), True), ((32, 64), True)):
+            b = total // (c * l * es)
+            src = make_tensor((b, l, c), dtype=dtype, device=device).permute(0, 2, 1)
+            self.assertEqual(tiled(src), expect, (c, l))
+        # 2D routing is unchanged by the slice guard: a skinny [N, 33] -> [33, N]
+        # transpose still tiles (it beats the generic kernel despite half-empty tiles)
+        src = make_tensor((total // (33 * es), 33), dtype=dtype, device=device).t()
+        self.assertTrue(tiled(src))
 
     # Shapes that must NOT take the tiled path, to guard the dispatch check.
     @onlyCUDA
@@ -3390,10 +3407,11 @@ class TestTorchDeviceType(TestCase):
         src = make_tensor((1024, 1024), dtype=torch.complex128, device=device)
         self.assertEqual(src.t().contiguous().cpu(),
                          src.cpu().t().contiguous(), atol=0, rtol=0)
-        # bool is 1 byte and rides the uint8 instantiation.
-        src = torch.randint(0, 2, (2048, 4099), dtype=torch.bool, device=device)
-        self.assertEqual(src.t().contiguous().cpu(),
-                         src.cpu().t().contiguous(), atol=0, rtol=0)
+        # bool stays on the generic path, which normalizes any nonzero byte to
+        # True (see NOTE [Loading boolean values]); a raw byte copy would not.
+        src = torch.full((2048, 4099), 7, dtype=torch.uint8, device=device).view(torch.bool)
+        out = src.t().contiguous()
+        self.assertEqual(out.view(torch.uint8).unique().tolist(), [1])
 
     def test_clone_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
@@ -3832,6 +3850,7 @@ class TestTorchDeviceType(TestCase):
     # FIXME: find a test suite for the masked scatter operator
     #   test_scatter_gather_ops or test_masked_ops?
     @onlyAccelerator
+    @largeTensorTest('10GB', device='cpu')
     @largeTensorTest('30GB')
     def test_masked_scatter_large_tensor(self, device):
         t_cpu = torch.empty(2**31 + 1, dtype=torch.bool).random_()
@@ -6746,6 +6765,30 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(generator.get_offset(), reserialized.get_offset())
         torch.testing.assert_close(generator.get_state(), reserialized.get_state())
 
+    # FIXME: port to more appropriate test suite
+    @onlyAccelerator
+    def test_to_with_tensor(self, device):
+        a = torch.tensor(5)
+        for non_blocking in [True, False]:
+            for dev in [self.device_type, device]:
+                b = torch.tensor(5., device=dev)
+                self.assertEqual(b.device, b.to(b, non_blocking=non_blocking).device)
+                self.assertEqual(a.device, b.to(a, non_blocking=non_blocking).device)
+                self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
+
+    @onlyAccelerator
+    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    def test_pin_memory(self, device):
+        x = torch.randn(3, 5)
+
+        pinned = x.pin_memory()
+        self.assertTrue(pinned.is_pinned())
+        self.assertEqual(pinned, x)
+        self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
+        # test that pin_memory on already pinned tensor has no effect
+        self.assertIs(pinned, pinned.pin_memory())
+        self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
+
 
 class TestTorchCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -6808,6 +6851,23 @@ class TestTorchCUDA(TestCase):
         names = tuple(event.key for event in prof.key_averages())
         self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @parametrize("src_dtype,dst_dtype", [(torch.int32, torch.int64),
+                                         (torch.bool, torch.int64),
+                                         (torch.bool, torch.float64)])
+    def test_converting_copy_emits_vectorized_kernel(self, device, src_dtype, dst_dtype):
+        if src_dtype == torch.bool:
+            src = torch.randint(0, 256, (1024, 1024), dtype=torch.uint8, device=device).view(torch.bool)
+        else:
+            src = make_tensor((1024, 1024), dtype=src_dtype, device=device)
+        torch.cuda.synchronize()
+        with torch.profiler.profile() as prof:
+            dst = src.to(dst_dtype)
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
+        self.assertEqual(dst.cpu(), src.cpu().to(dst_dtype))
+
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
@@ -6856,9 +6916,11 @@ class TestTorchCUDA(TestCase):
         size = 4
         x = torch.rand(size, device=device)
         y = torch.rand((), device=device)
+        y_cpu = y.cpu()
         ind = torch.randint(size, (3,), device=device)
         ind_2d = torch.randint(size, (2, 3), device=device)
         ind_cpu = ind.cpu()
+        scalar_ind = torch.randint(size, (), device=device)
         repeats = torch.full((1,), 2, device=device)
         mask = torch.randint(2, (size,), device=device, dtype=bool)
         mask_cpu = mask.cpu()
@@ -6867,6 +6929,8 @@ class TestTorchCUDA(TestCase):
                           lambda: _ind_put_fn(x, ind, y),
                           lambda: _ind_put_fn(x, ind, 1.),
                           lambda: _ind_put_fn(x, ind_2d, 1.),
+                          lambda: _ind_put_fn(x, scalar_ind, y),
+                          lambda: _ind_put_fn(x, scalar_ind, 1.),
                           lambda: _ind_put_fn(x, 0, 5.),
                           lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
@@ -6880,6 +6944,7 @@ class TestTorchCUDA(TestCase):
                           lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
+                       lambda: _ind_put_fn(x, scalar_ind, y_cpu),
                        lambda: _ind_get_fn(x, mask),
                        lambda: _ind_get_fn(x, ind_cpu),
                        lambda: x.nonzero(),
@@ -6993,6 +7058,34 @@ class TestTorchCUDA(TestCase):
                     self.assertTrue(re.search(
                         '^TypedStorage is deprecated',
                         str(warning)))
+
+    def test_set_default_tensor_type_warnings(self, device):
+        msg = '.*is deprecated as of PyTorch 2.1, please use torch.set_default_dtype().*'
+        default_type = torch.tensor([]).type()
+        try:
+            with self.assertWarnsOnceRegex(UserWarning, msg):
+                torch.set_default_tensor_type(torch.cuda.FloatTensor)
+        finally:
+            torch.set_default_tensor_type(default_type)
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @slowTestIf(IS_WINDOWS)
+    def test_storage_meta_errors(self, device, dtype):
+        s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
+
+        with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+            s0.cuda()
+
+        with self.assertRaisesRegex(RuntimeError, r'only available on CUDA'):
+            s0._share_cuda_()
+
+        with self.assertRaisesRegex(TypeError, r"cannot pin 'torch.storage.UntypedStorage' only CPU memory can be pinned"):
+            s0.pin_memory()
+
+        s1 = torch.TypedStorage([1, 2, 3, 4], device='cuda', dtype=dtype)
+
+        with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+            s1.copy_(s0)
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
@@ -8933,14 +9026,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
-        if torch.cuda.is_available():
-            pinned = x.pin_memory()
-            self.assertTrue(pinned.is_pinned())
-            self.assertEqual(pinned, x)
-            self.assertNotEqual(pinned.data_ptr(), x.data_ptr())
-            # test that pin_memory on already pinned tensor has no effect
-            self.assertIs(pinned, pinned.pin_memory())
-            self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
@@ -10052,6 +10137,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             for expect, t in zip(expects, out):
                 self.assertTrue(expect.eq(t).all().item())
 
+        # Empty inputs, including all-empty splits, copy nothing
+        for shape, dim, split_sizes in (((30, 0, 50), 1, [0, 0]), ((0, 40), 1, [10, 30])):
+            x = torch.rand(*shape, device=device)
+            views = x.split_with_sizes(split_sizes, dim=dim)
+            out = [torch.empty_like(v) for v in views]
+            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            self.assertEqual([t.shape for t in out], [v.shape for v in views])
+
     def test_type(self):
         x = torch.randn(3, 3).double()
         self.assertEqual(x.type('torch.FloatTensor').dtype, torch.float32)
@@ -10111,14 +10204,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_to_with_tensor(self):
         a = torch.tensor(5)
         self.assertEqual(a.device, a.to(a).device)
-
-        if torch.cuda.is_available():
-            for non_blocking in [True, False]:
-                for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
-                    b = torch.tensor(5., device=cuda)
-                    self.assertEqual(b.device, b.to(b, non_blocking=non_blocking).device)
-                    self.assertEqual(a.device, b.to(a, non_blocking=non_blocking).device)
-                    self.assertEqual(b.device, a.to(b, non_blocking=non_blocking).device)
 
     def test_device(self):
         cpu = torch.device('cpu')
@@ -11373,6 +11458,46 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # This is OK, it changes the meta storage size without allocating
         s0.resize_(10)
 
+    @parametrize("dtype", all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @slowTestIf(IS_WINDOWS)
+    def test_storage_meta_errors(self, dtype):
+        s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
+
+        with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+            s0.cpu()
+
+        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
+            s0._share_fd_cpu_()
+
+        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
+            s0._share_filename_cpu_()
+
+        with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
+            s0.share_memory_()
+
+        self.assertFalse(s0.is_shared())
+
+        with self.assertRaisesRegex(NotImplementedError, r'Not available'):
+            s0.tolist()
+
+        with tempfile.NamedTemporaryFile() as f:
+            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+                s0._write_file(f, True, True, s0.element_size())
+
+        s1 = torch.TypedStorage([1, 2, 3, 4], device='cpu', dtype=dtype)
+
+        with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+            s1.copy_(s0)
+
+    def test_set_default_tensor_type_warnings(self):
+        msg = '.*is deprecated as of PyTorch 2.1, please use torch.set_default_dtype().*'
+        default_type = torch.tensor([]).type()
+        try:
+            with self.assertWarnsOnceRegex(UserWarning, msg):
+                torch.set_default_tensor_type(torch.FloatTensor)
+        finally:
+            torch.set_default_tensor_type(default_type)
+
 
 class TestTorchCPU(TestCase):
     hw_classification = HardwareClassification.CPU
@@ -11400,7 +11525,6 @@ class TestTorchCPU(TestCase):
         src_bf16 = src.bfloat16()
         self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
         self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
-
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
