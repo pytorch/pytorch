@@ -1411,37 +1411,21 @@ class MemPool(_MemPool):
         super().__init__(allocator, True, use_on_oom, no_split)
 
     @classmethod
-    def from_callbacks(
+    def from_py_allocator(
         cls,
-        alloc_fn: Callable[[int, int, int], int | None],
-        free_fn: Callable[[int, int, int, int], None],
+        alloc_fn: Callable[[int], int | None],
+        free_fn: Callable[[int, int], None],
         *,
         use_on_oom: bool = False,
         no_split: bool = False,
     ) -> "MemPool":
         r"""Create a MemPool backed by Python allocation callbacks.
 
-        ``alloc_fn(size, device, stream)`` must return an integer device pointer.
-        Return ``None`` or zero for out-of-memory so the caching allocator can
-        run its normal release-and-retry path and OOM observers. Exceptions,
-        including ``MemoryError``, are treated as non-OOM callback failures and
-        propagate immediately with their Python message.
-
-        ``free_fn(ptr, size, device, stream)`` releases a pointer returned by
-        ``alloc_fn``. Exceptions raised by ``free_fn`` are logged and swallowed
-        because pool cleanup may run during destruction or exception unwinding.
-
-        The pool owns strong references to both callbacks for as long as cached
-        segments can use them. Python-backed allocators are deliberately scoped
-        to MemPool and cannot be installed with
-        :func:`change_current_allocator`.
-
-        The callbacks may be invoked concurrently from multiple native threads,
-        including threads that did not previously hold the Python GIL. Callback
-        implementations and any native libraries they call must therefore be
-        thread-safe. Allocation callbacks must not allocate from a
-        Python-backed MemPool on the same thread, because that would recursively
-        invoke another Python allocation callback.
+        ``alloc_fn(size)`` allocates a backing segment and returns its device
+        address as an integer. Return ``None`` or zero if the allocation cannot
+        be satisfied. ``free_fn(ptr, size)`` releases a segment. PyTorch makes
+        the segment's device and allocation stream current while each callback
+        runs.
 
         Args:
             alloc_fn: Callable that allocates a segment.
@@ -1451,19 +1435,10 @@ class MemPool(_MemPool):
             no_split: Whether the caching allocator should avoid splitting this
                 pool's segments. Defaults to ``False``.
 
-        .. note::
-            The stream argument is a raw stream address and must not be retained.
-            During CUDA graph capture, allocation runs in relaxed capture mode;
-            callbacks must not launch work on or synchronize the capturing
-            stream, synchronize the device, or begin/end capture.
-
-        .. note::
-            Custom frees triggered by allocation recovery are invoked without
-            the caching allocator lock after the reclamation pass completes and
-            before allocation is retried. The retry can therefore reuse memory
-            returned by the callback.
+        See :ref:`cuda-memory-python-allocators` for callback requirements and
+        examples.
         """
-        allocator = torch._C._cuda_customAllocatorFromCallbacks(alloc_fn, free_fn)
+        allocator = torch._C._cuda_createPythonAllocator(alloc_fn, free_fn)
         return cls(allocator, use_on_oom=use_on_oom, no_split=no_split)
 
     @property
@@ -1587,7 +1562,8 @@ def _make_uvm_pool():
         _uvm_advise_supported_cache[cache_key] = supported
         return supported
 
-    def _uvm_alloc(size, device, stream, _runtime=_rt):
+    def _uvm_alloc(size, _runtime=_rt):
+        device = torch.cuda.current_device()
         err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
         _check(err, f"cudaMallocManaged({size})")
         ptr = int(ptr)
@@ -1612,11 +1588,11 @@ def _make_uvm_pool():
             )
         return ptr
 
-    def _uvm_free(ptr, size, device, stream, _runtime=_rt):
+    def _uvm_free(ptr, size, _runtime=_rt):
         if ptr:
             _check(_runtime.cudaFree(ptr))
 
-    return MemPool.from_callbacks(_uvm_alloc, _uvm_free)
+    return MemPool.from_py_allocator(_uvm_alloc, _uvm_free)
 
 
 @contextlib.contextmanager

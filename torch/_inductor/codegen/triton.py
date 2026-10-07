@@ -1613,6 +1613,10 @@ class TritonOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + 1"
         elif bug is None:
+            if TritonOverrides._strict_cuda_pointwise():
+                # Eager preserves the input's negative zero and NaN payload.
+                zero = ops.constant(0, torch.int32)
+                return ops.where(ops.lt(x, zero), zero, x)
             return ops.maximum(ops.constant(0, torch.int32), x)
         else:
             raise AssertionError(
