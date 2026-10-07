@@ -32,7 +32,6 @@ import operator
 import sys
 import types
 import typing
-from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NoReturn, TYPE_CHECKING
 
@@ -103,9 +102,8 @@ from .dicts import (
     DictItemsVariable,
     DictKeysVariable,
     DictViewVariable,
-    OrderedDictVariable,
+    pydict_checkexact,
 )
-from .hashable import is_hashable
 from .lists import (
     BaseListVariable,
     ByteArrayVariable,
@@ -158,7 +156,12 @@ from .object_protocol import (
     type_implements_sq_length,
     vt_identity_compare,
 )
-from .sets import FrozensetVariable, OrderedSetVariable, SetVariable
+from .sets import (
+    FrozensetVariable,
+    OrderedSetVariable,
+    pyanyset_checkexact,
+    SetVariable,
+)
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -3511,7 +3514,16 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+        no_keywords(tx, "dict.fromkeys", kwargs)
+        check_positional(tx, "fromkeys", len(args), 1, 2)
+        # Mirrors the stored-hash fast path in CPython's _PyDict_FromKeys.
+        if pydict_checkexact(args[0]) or pyanyset_checkexact(args[0]):
+            value = args[1] if len(args) == 2 else ConstantVariable.create(None)
+            return ConstDictVariable(
+                dict.fromkeys(args[0].items.keys(), value),  # type: ignore[arg-type]
+                mutation_type=ValueMutationNew(),
+            )
+        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, self, *args, **kwargs)
 
     tp_methods = {
         "fromkeys": Method(fromkeys),
@@ -3567,116 +3579,15 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     @staticmethod
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslatorBase",
-        user_cls: type,
+        user_cls: VariableTracker,
         /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if user_cls not in {dict, OrderedDict, defaultdict}:
-            unimplemented(
-                gb_type="Unsupported dict type for fromkeys()",
-                context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
-                explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
-                f"{user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
-                hints=[
-                    f"Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict.",
-                ],
-            )
-        if kwargs:
-            # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
-            if (
-                user_cls is not OrderedDict
-                or len(args) != 1
-                or len(kwargs) != 1
-                or "value" not in kwargs
-            ):
-                raise_args_mismatch(
-                    tx,
-                    f"{user_cls.__name__}.fromkeys",
-                    "1 args and 1 kwargs (`value`)",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            args = (*args, kwargs.pop("value"))
-        if len(args) == 0:
-            raise_args_mismatch(
-                tx,
-                f"{user_cls.__name__}.fromkeys",
-                "at least 1 args",
-                f"{len(args)} args",
-            )
-        if len(args) == 1:
-            args = (*args, ConstantVariable.create(None))
-        if len(args) != 2:
-            raise_args_mismatch(
-                tx,
-                f"{user_cls.__name__}.fromkeys",
-                "2 args",
-                f"{len(args)} args",
-            )
-
-        arg, value = args
-
-        def _make_result(
-            items: dict[VariableTracker, VariableTracker],
-        ) -> VariableTracker:
-            if user_cls is OrderedDict:
-                return OrderedDictVariable(items, mutation_type=ValueMutationNew())
-            elif user_cls is defaultdict:
-                from .builder import SourcelessBuilder
-                from .user_defined import DefaultDictVariable
-
-                result = tx.output.side_effects.track_new_user_defined_object(
-                    SourcelessBuilder.create(tx, dict),
-                    SourcelessBuilder.create(tx, defaultdict),
-                    [],
-                    tx=tx,
-                )
-                if not isinstance(result, DefaultDictVariable):
-                    raise AssertionError(
-                        f"Expected DefaultDictVariable, got {type(result)}"
-                    )
-                # Route through ConstDictVariable to wrap raw VT keys into
-                # HashableTrackers before populating the defaultdict's storage.
-                wrapped = ConstDictVariable(items, mutation_type=ValueMutationNew())
-                result.items.update(wrapped.items)
-                return result
-            else:
-                return ConstDictVariable(items, mutation_type=ValueMutationNew())
-
-        # Reuse the operand's existing HashableTracker keys instead of
-        # re-wrapping (and thus re-hashing) the underlying VTs, mirroring
-        # CPython's do-not-rehash-dict-keys behavior when building a dict from
-        # an existing set/frozenset/dict.
-        if isinstance(
-            arg,
-            (
-                variables.SetVariable,
-                variables.FrozensetVariable,
-                variables.DictKeySetVariable,
-                variables.OrderedSetVariable,
-                ConstDictVariable,
-            ),
-        ):
-            # HashableTracker keys are accepted by ConstDictVariable.__init__.
-            return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]
-        if isinstance(arg, dict):
-            arg_list = [VariableTracker.build(tx, k) for k in arg]
-            return _make_result(dict.fromkeys(arg_list, value))
-        elif iterator := generic_getiter(tx, arg):
-            keys = unpack_iterable(tx, iterator)
-            if all(is_hashable(v) for v in keys):
-                return _make_result(dict.fromkeys(keys, value))
-
-        unimplemented(
-            gb_type="failed to call dict.fromkeys()",
-            context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
-            explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
-            "arguments could not be automatically converted to a list, "
-            "or some dict key is not hashable.",
-            hints=[
-                "Manually convert the argument to a list.",
-                "Ensure all keys are hashable.",
-            ],
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.dict_fromkeys),
+            [user_cls, *args],
+            kwargs,
         )
 
 
