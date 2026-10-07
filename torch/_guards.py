@@ -817,6 +817,8 @@ class InvokeSubgraphReuseEntry:
     # The graph may have additional outputs from side-effect intermediates;
     # stamp_out_subgraph uses this to return only the user-visible slice.
     num_user_outputs: int = 0
+    condition: InvokeSubgraphReuseCondition | None = None
+    traced_sources: OrderedSet[Source] = dataclasses.field(default_factory=OrderedSet)
 
 
 @dataclass

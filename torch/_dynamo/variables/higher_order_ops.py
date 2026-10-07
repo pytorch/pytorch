@@ -1986,6 +1986,9 @@ def speculate_subgraph_with_auto_output_flattening(
             # - `graph_output_vts`: Only the tensor/symint VTs that are actual
             #   FX graph outputs (basically the vts associated with graph outputs)
             # - `tracing_info`: Properties observed during subgraph tracing
+            if subtracer.parent is not None:
+                subtracer.parent.traced_sources.update(subtracer.traced_sources)
+
             tracing_info = SubgraphTracingInfo(
                 side_effect_stack=subtracer.side_effect_stack,
                 traced_sources=subtracer.traced_sources,
