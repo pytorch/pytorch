@@ -359,12 +359,16 @@ class TestFlyDSLFlexAttentionBackend(TestCase):
         self.assertEqual(output, reference, atol=0.025, rtol=0.025)
 
     @torch._inductor.config.patch({"fx_graph_cache": False})
-    def test_backward_uses_triton_with_flydsl_forward(self, device):
+    def test_backward_matches_triton_with_flydsl_forward(self, device):
         if not _has_gfx950_flydsl():
             self.skipTest("requires gfx950 and a built FlyDSL runtime")
-        base_inputs = _make_qkv(device=device, seq_q=128, seq_kv=128, seed=23)
+        base_inputs = _make_qkv(device=device, seq_q=256, seq_kv=256, seed=23)
         torch.manual_seed(24)
         grad_output = torch.randn_like(base_inputs[2])
+
+        block_mask = create_block_mask(
+            lambda b, h, q, kv: q >= kv, 1, 1, 256, 256, device=device, BLOCK_SIZE=128
+        )
 
         def run(backend):
             inputs = tuple(t.detach().clone().requires_grad_() for t in base_inputs)
@@ -373,22 +377,28 @@ class TestFlyDSLFlexAttentionBackend(TestCase):
                     q,
                     k,
                     v,
+                    block_mask=block_mask,
                     kernel_options={"BACKEND": backend},
                 ),
                 fullgraph=True,
             )
             output, code = run_and_get_code(compiled, *inputs)
-            output.backward(grad_output)
+            _, backward_code = run_and_get_code(lambda: output.backward(grad_output))
             return (
                 output.detach(),
                 tuple(t.grad.detach().clone() for t in inputs),
                 "\n".join(code),
+                "\n".join(backward_code),
             )
 
-        output, grads, code = run("FLYDSL")
-        reference, reference_grads, reference_code = run("TRITON")
-        self.assertIn("build_flex_attn_fwd_module", code)
-        self.assertNotIn("build_flex_attn_fwd_module", reference_code)
+        output, grads, code, backward_code = run("FLYDSL")
+        reference, reference_grads, reference_code, reference_backward_code = run(
+            "TRITON"
+        )
+        self.assertIn("flydsl_fused_", code)
+        self.assertNotIn("flydsl_fused_", reference_code)
+        self.assertIn("flydsl_fused_flex_attention_backward_", backward_code)
+        self.assertNotIn("flydsl_fused_", reference_backward_code)
         self.assertEqual(output, reference, atol=0.03, rtol=0.02)
         for grad, reference_grad in zip(grads, reference_grads):
             self.assertEqual(grad, reference_grad, atol=0.03, rtol=0.02)
