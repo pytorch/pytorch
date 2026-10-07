@@ -2344,6 +2344,74 @@ def _cat_inputs_recombine_reduction(inputs: list[TensorBox], dim: int) -> str | 
     return reduction_name
 
 
+def _cat_unwrap_tensor(x: TensorBox | ir.StorageBox) -> ir.IRNode:
+    if isinstance(x, TensorBox):
+        if isinstance(x.data, ir.BaseView):
+            return x.data.unwrap_view()
+        else:
+            return x.data
+
+    if isinstance(x, ir.StorageBox):
+        return x.data
+
+    return x
+
+
+def _cat_is_reduction(t: Any) -> bool:
+    return isinstance(t, ir.ComputedBuffer) and isinstance(t.data, ir.Reduction)
+
+
+def _cat_can_fuse_reduction(t: Any, exclude: OrderedSet[str]) -> bool:
+    if isinstance(t, (TensorBox, ir.StorageBox)):
+        return _cat_can_fuse_reduction(_cat_unwrap_tensor(t), exclude)
+    return (
+        _cat_is_reduction(t)
+        or isinstance(t, ir.Pointwise)
+        and any(
+            read not in exclude
+            and _cat_can_fuse_reduction(V.graph.get_buffer(read), exclude)
+            for read in t.get_read_names()
+        )
+    )
+
+
+def _should_lower_cat_input(x: Any) -> bool:
+    # Unrealized inputs will not be storage and layouts, and we don't want to realize
+    # them in case we want to fuse
+    if ir.is_storage_and_layout(x):
+        storage, _ = ir.as_storage_and_layout(x, freeze=False)
+        return not ir.ConcatKernel.can_realize_into_without_copy(storage)
+
+    if isinstance(x, (TensorBox, ir.StorageBox)):
+        return _should_lower_cat_input(_cat_unwrap_tensor(x))
+
+    if isinstance(x, ir.Pointwise):
+        return True
+
+    return False
+
+
+def _cat_op_count(x: Any) -> int:
+    if isinstance(x, (TensorBox, ir.StorageBox)):
+        return _cat_op_count(_cat_unwrap_tensor(x))
+
+    # this will correspond to a direct memory read
+    if not isinstance(x, ir.Pointwise):
+        return 0
+
+    count = x.inner_fn_opcount().num_ops
+    for read in x.get_read_names():
+        count += _cat_op_count(V.graph.get_buffer(read))
+
+    return count
+
+
+def _cat_is_unrealized_pointwise(x: Any) -> bool:
+    if isinstance(x, (TensorBox, ir.StorageBox)):
+        return _cat_is_unrealized_pointwise(_cat_unwrap_tensor(x))
+    return isinstance(x, ir.Pointwise)
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     """Lower aten.cat, choosing between pointwise_cat and ConcatKernel."""
@@ -2383,56 +2451,13 @@ def cat(inputs, dim=0):
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
 
-    def unwrap_tensor(x: TensorBox | ir.StorageBox) -> ir.IRNode:
-        if isinstance(x, TensorBox):
-            if isinstance(x.data, ir.BaseView):
-                return x.data.unwrap_view()
-            else:
-                return x.data
-
-        if isinstance(x, ir.StorageBox):
-            return x.data
-
-        return x
-
-    def is_reduction(t):
-        return isinstance(t, ir.ComputedBuffer) and isinstance(t.data, ir.Reduction)
-
-    def can_fuse_reduction(t, exclude: OrderedSet[str] = OrderedSet()):
-        if isinstance(t, (TensorBox, ir.StorageBox)):
-            return can_fuse_reduction(unwrap_tensor(t), exclude)
-        return (
-            is_reduction(t)
-            or isinstance(t, ir.Pointwise)
-            and any(
-                read not in exclude
-                and can_fuse_reduction(V.graph.get_buffer(read), exclude)
-                for read in t.get_read_names()
-            )
-        )
-
     # Pointwise cat evaluates every input's computation for each
     # output element (masked), so fusing reductions in is wasteful.
     # Exception: when inputs just recombine a reduction's output
     # (e.g. qknorm → RoPE → cat), we do not duplicate computation
     recombined = _cat_inputs_recombine_reduction(inputs, dim)
     exclude: OrderedSet[str] = OrderedSet([recombined]) if recombined else OrderedSet()
-    fusable_reduction = any(can_fuse_reduction(t, exclude) for t in inputs)
-
-    def should_lower_cat_input(x) -> bool:
-        # Unrealized inputs will not be storage and layouts, and we don't want to realize
-        # them in case we want to fuse
-        if ir.is_storage_and_layout(x):
-            storage, _ = ir.as_storage_and_layout(x, freeze=False)
-            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
-
-        if isinstance(x, (TensorBox, ir.StorageBox)):
-            return should_lower_cat_input(unwrap_tensor(x))
-
-        if isinstance(x, ir.Pointwise):
-            return True
-
-        return False
+    fusable_reduction = any(_cat_can_fuse_reduction(t, exclude) for t in inputs)
 
     if config.force_pointwise_cat:
         return pointwise_cat(inputs, dim)
@@ -2441,20 +2466,6 @@ def cat(inputs, dim=0):
     #             We will revisit this later after enabling vectorization on index_expr.
     if cpu_device:
         return TensorBox(ir.ConcatKernel.create(inputs, dim))
-
-    def op_count(x):
-        if isinstance(x, (TensorBox, ir.StorageBox)):
-            return op_count(unwrap_tensor(x))
-
-        # this will correspond to a direct memory read
-        if not isinstance(x, ir.Pointwise):
-            return 0
-
-        count = x.inner_fn_opcount().num_ops
-        for read in x.get_read_names():
-            count += op_count(V.graph.get_buffer(read))
-
-        return count
 
     # as inputs increase, possibility for register spilling also increases.
     # Past a certain threshold we only fuse if the input kernels are simple.
@@ -2465,7 +2476,7 @@ def cat(inputs, dim=0):
 
     if len(inputs) <= config.max_complex_pointwise_cat_inputs or (
         (len(inputs) <= config.max_pointwise_cat_inputs)
-        and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
+        and all(_cat_op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
         pointwise_uses = all(
             is_pointwise_use(use, additional_pointwise_ops)
@@ -2474,7 +2485,7 @@ def cat(inputs, dim=0):
         # fuse in case we will be used in a pointwise node, and there are any inputs we
         # we can prevent materialization of.
         fuse_pointwise_use = (
-            any(should_lower_cat_input(inp) for inp in inputs) and pointwise_uses
+            any(_should_lower_cat_input(inp) for inp in inputs) and pointwise_uses
         )
 
         # horizontal fuse in case all inputs will require a copy kernel anyway.
@@ -2499,11 +2510,6 @@ def cat(inputs, dim=0):
             if any(skip_mask):
                 input_nodes = [n for n, skip in zip(input_nodes, skip_mask) if not skip]
 
-            def is_unrealized_pointwise(x):
-                if isinstance(x, (TensorBox, ir.StorageBox)):
-                    return is_unrealized_pointwise(unwrap_tensor(x))
-                return isinstance(x, ir.Pointwise)
-
             for arg, ir_input in zip(input_nodes, inputs):
                 if not hasattr(arg, "users") or len(arg.users) <= 1:
                     continue
@@ -2514,14 +2520,15 @@ def cat(inputs, dim=0):
                 # If input is an unrealized Pointwise with multiple consumers, pointwise_cat
                 # will inline input without realizing it to memory, causing separate
                 # realization cost for input. So we should realize-in-place via ConcatKernel
-                if is_unrealized_pointwise(ir_input):
+                if _cat_is_unrealized_pointwise(ir_input):
                     return True
             return False
 
         has_multi_consumers = any_input_has_multi_consumers()
 
         horizontal_fuse_cat = (
-            all(should_lower_cat_input(inp) for inp in inputs) and not fusable_reduction
+            all(_should_lower_cat_input(inp) for inp in inputs)
+            and not fusable_reduction
         )
 
         if not has_multi_consumers and (fuse_pointwise_use or horizontal_fuse_cat):
@@ -3558,37 +3565,44 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
     return args, kwargs
 
 
+def _get_fake_val(fx_arg: Any) -> Any:
+    if isinstance(fx_arg, torch.fx.Node):
+        return fx_arg.meta.get("val")
+    return fx_arg
+
+
+def _apply_fx_stride_constraint(arg: Any, fx_arg: Any) -> Any:
+    fake_val = _get_fake_val(fx_arg)
+    if _is_tensor_irnode(arg):
+        if not isinstance(fake_val, torch.Tensor):
+            return arg
+        stride_order = ir.get_stride_order(
+            fake_val.stride(), V.graph.sizevars.shape_env
+        )
+        return ir.ExternKernel.require_stride_order(arg, stride_order)
+    if isinstance(arg, dict):
+        if not isinstance(fake_val, dict):
+            return arg
+        return {
+            key: _apply_fx_stride_constraint(arg[key], fake_val[key]) for key in arg
+        }
+    if isinstance(arg, (tuple, list)):
+        if not isinstance(fake_val, (tuple, list)):
+            return arg
+        return type(arg)(
+            _apply_fx_stride_constraint(a, fx_a) for a, fx_a in zip(arg, fake_val)
+        )
+    return arg
+
+
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
-    def get_fake_val(fx_arg):
-        if isinstance(fx_arg, torch.fx.Node):
-            return fx_arg.meta.get("val")
-        return fx_arg
-
-    def apply_constraint(arg, fx_arg):
-        fake_val = get_fake_val(fx_arg)
-        if _is_tensor_irnode(arg):
-            if not isinstance(fake_val, torch.Tensor):
-                return arg
-            stride_order = ir.get_stride_order(
-                fake_val.stride(), V.graph.sizevars.shape_env
-            )
-            return ir.ExternKernel.require_stride_order(arg, stride_order)
-        if isinstance(arg, dict):
-            if not isinstance(fake_val, dict):
-                return arg
-            return {key: apply_constraint(arg[key], fake_val[key]) for key in arg}
-        if isinstance(arg, (tuple, list)):
-            if not isinstance(fake_val, (tuple, list)):
-                return arg
-            return type(arg)(
-                apply_constraint(a, fx_a) for a, fx_a in zip(arg, fake_val)
-            )
-        return arg
-
     args = tuple(
-        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
+        _apply_fx_stride_constraint(arg, fx_arg)
+        for arg, fx_arg in zip(args, fx_node.args)
     )
-    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
+    kwargs = {
+        k: _apply_fx_stride_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()
+    }
     return args, kwargs
 
 
@@ -4307,6 +4321,28 @@ def _unwrap(x):
     return x
 
 
+def _tensor_binary_search(
+    data: Sequence[Any],
+    dtype: torch.dtype,
+    index: Sequence[sympy.Expr],
+    start: int,
+    end: int,
+) -> Any:
+    if start >= end:
+        raise AssertionError("expected: start < end")
+    if end - start == 1:
+        return ops.constant(data[start], dtype)
+    mid = (end - start) // 2 + start
+    return ops.where(
+        ops.lt(
+            ops.index_expr(index[0], torch.int64),
+            ops.constant(mid, torch.int64),
+        ),
+        _tensor_binary_search(data, dtype, index, start, mid),
+        _tensor_binary_search(data, dtype, index, mid, end),
+    )
+
+
 @register_lowering([torch.tensor, aten.scalar_tensor, prims.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     # Match eager/meta scalar_tensor behavior; NJT handles scalar broadcasting.
@@ -4343,24 +4379,9 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
         ranges.append(sympy.Integer(len(data)))
 
         def inner_fn(index):
-            def binary_search(start, end):
-                if start >= end:
-                    raise AssertionError("expected: start < end")
-                if end - start == 1:
-                    return ops.constant(data[start], dtype)
-                mid = (end - start) // 2 + start
-                return ops.where(
-                    ops.lt(
-                        ops.index_expr(index[0], torch.int64),
-                        ops.constant(mid, torch.int64),
-                    ),
-                    binary_search(start, mid),
-                    binary_search(mid, end),
-                )
-
             if len(data) == 0:
                 return ops.constant(0, dtype)
-            return binary_search(0, len(data))
+            return _tensor_binary_search(data, dtype, index, 0, len(data))
 
     else:
         return V.graph.add_tensor_constant(

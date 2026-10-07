@@ -535,6 +535,12 @@ def _is_control_deps_ordering_only_use(
     return view in additional_deps and view not in pass_through
 
 
+def _is_meta_only_user(node):
+    if _is_view_op(node.target):
+        return all(_is_meta_only_user(u) for u in node.users)
+    return node.target in META_ONLY_OPS
+
+
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -610,11 +616,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         node_loc = node_order[node]
         copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
-        def is_meta_only_user(node):
-            if _is_view_op(node.target):
-                return all(is_meta_only_user(u) for u in node.users)
-            return node.target in META_ONLY_OPS
-
         for view in shared_view_nodes:
             for user in view.users:
                 user_loc = node_order[user]
@@ -626,7 +627,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if copy_node_loc is not None and copy_node_loc <= user_loc:
                     continue
                 # Reinplacing does not change shape metadata
-                if is_meta_only_user(user):
+                if _is_meta_only_user(user):
                     continue
                 # If our graph looks like:
                 # foo(mutated_arg)
