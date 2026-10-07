@@ -193,6 +193,7 @@ from .variables.functions import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
+    unimplemented_library_fallback,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -5994,6 +5995,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         ) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
+            if inspect.getattr_static(
+                func.get_function(), "_torchdynamo_library_fallback", False
+            ):
+                unimplemented_library_fallback(func.get_function())
             msg = inspect.getattr_static(
                 func.get_function(), "_torchdynamo_disable_msg", None
             )
