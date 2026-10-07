@@ -1009,7 +1009,7 @@ with torch.cuda.use_mem_pool(pool):
 ## Python-defined CUDA allocators
 
 Use {meth}`torch.cuda.MemPool.from_py_allocator` to implement a pool's segment
-allocator with Python callables instead of compiled `ctypes` callbacks:
+allocator with Python callables:
 
 ```python
 from cuda.bindings import runtime
