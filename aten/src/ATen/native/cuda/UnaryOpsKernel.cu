@@ -21,6 +21,22 @@
 
 namespace at::native {
 
+template <typename scalar_t>
+struct BitwiseCountFunctor {
+  __device__ __forceinline__ uint8_t operator()(scalar_t a) const {
+    // Population count of |a|, matching np.bitwise_count; the magnitude is
+    // negated in the unsigned domain so the minimum signed value is safe.
+    using unsigned_t = std::make_unsigned_t<scalar_t>;
+    auto u = static_cast<unsigned_t>(a);
+    if constexpr (std::is_signed_v<scalar_t>) {
+      if (a < 0) {
+        u = static_cast<unsigned_t>(~u + static_cast<unsigned_t>(1));
+      }
+    }
+    return static_cast<uint8_t>(__popcll(static_cast<unsigned long long>(u)));
+  }
+};
+
 void bitwise_count_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.input_dtype() == ScalarType::Bool) {
     gpu_kernel(iter, []GPU_LAMBDA(bool a) -> uint8_t {
@@ -28,18 +44,7 @@ void bitwise_count_kernel_cuda(TensorIteratorBase& iter) {
     });
   } else {
     AT_DISPATCH_V2(iter.input_dtype(), "bitwise_count_cuda", AT_WRAP([&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> uint8_t {
-        // Population count of |a|, matching np.bitwise_count; the magnitude is
-        // negated in the unsigned domain so the minimum signed value is safe.
-        using unsigned_t = std::make_unsigned_t<scalar_t>;
-        auto u = static_cast<unsigned_t>(a);
-        if constexpr (std::is_signed_v<scalar_t>) {
-          if (a < 0) {
-            u = static_cast<unsigned_t>(~u + static_cast<unsigned_t>(1));
-          }
-        }
-        return static_cast<uint8_t>(__popcll(static_cast<unsigned long long>(u)));
-      });
+      gpu_kernel(iter, BitwiseCountFunctor<scalar_t>());
     }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   }
 }
