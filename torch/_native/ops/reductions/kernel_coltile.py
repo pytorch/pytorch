@@ -9,10 +9,10 @@ from cutlass import Int32
 import torch
 
 from ...cutedsl import launch as _L
-from ...cutedsl.dtypes import torch2cute
+from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
-from .kernel_general import _launch, _PART_TORCH, ReduceBlock
+from .kernel_general import _launch, ReduceBlock
 
 
 _compile = _L.compile_kernel
@@ -68,7 +68,7 @@ def reduce_col_tile(
     elif npar <= 0:
         raise ValueError(f"npar must be positive, got {npar}")
     out = torch.empty(C, device=x.device, dtype=out_dtype)
-    align = tile.align_bytes(C, x.element_size())
+    align = _L.supported_alignment(x, tile.align_bytes(C, x.element_size()))
     nchunks, q, nrows = Int32(C // vec), Int32(-(-R // npar)), Int32(R)
 
     single = npar == 1
@@ -87,7 +87,7 @@ def reduce_col_tile(
         []
         if single
         else [
-            torch.empty(C * npar, device=x.device, dtype=_PART_TORCH[trait.fdtypes[f]])
+            torch.empty(C * npar, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
             for f in range(trait.nfields)
         ]
     )
@@ -120,7 +120,14 @@ def reduce_col_tile(
         )
 
     # _VEC_MAX decouples vec from compile-time alignment, so key both.
-    key = ("coltile", trait_key, x.dtype, out_dtype, align) + op.cache_sig
+    key = (
+        "coltile",
+        trait_key,
+        x.dtype,
+        out_dtype,
+        align,
+        str(x.device),
+    ) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
         [_L.read_only(x)],
@@ -191,7 +198,14 @@ def reduce_col_tile(
         )
 
     pdt = tuple(pp.dtype for pp in parts)
-    key2 = ("coltile2", trait_key, x.dtype, out_dtype, pdt) + op2.cache_sig
+    key2 = (
+        "coltile2",
+        trait_key,
+        x.dtype,
+        out_dtype,
+        pdt,
+        str(x.device),
+    ) + op2.cache_sig
     build2 = lambda: _compile(op2, *_fake2())  # noqa: E731
     cached_plan(_CACHE, key2, build2, op=f"aten::{trait_key}")(
         [_L.read_only(pp) for pp in parts],
