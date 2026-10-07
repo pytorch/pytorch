@@ -794,6 +794,7 @@ class CodeGen:
                 except ModuleNotFoundError:
                     DTensor = None  # type: ignore[assignment,misc]
                     dtensorspec_format_shard_order_str = None
+                from torch._subclasses.meta_utils import is_sparse_compressed_layout
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -803,7 +804,9 @@ class CodeGen:
                 )
 
                 def _tensor_annotation(t: torch.Tensor) -> str:
-                    stride = stringify_shape(t.stride()) if include_stride else ""
+                    compressed = is_sparse_compressed_layout(t.layout)
+                    want_stride = include_stride and not compressed
+                    stride = stringify_shape(t.stride()) if want_stride else ""
                     device = _device_annotation(t.device) if include_device else ""
                     return (
                         f"{red(dtype_abbrs[t.dtype])}"
@@ -813,10 +816,7 @@ class CodeGen:
                     )
 
                 # use string as annotation, to make it valid python code
-                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
-                    torch.sparse_csc,
-                    torch.sparse_csr,
-                ):
+                if isinstance(meta_val, torch.Tensor):
                     # Fake tensors cause tests to wobble, so do not custom print them.
                     is_plain = type(meta_val) is torch.Tensor or isinstance(
                         meta_val, torch._subclasses.FakeTensor

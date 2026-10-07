@@ -14,7 +14,7 @@ from collections.abc import (
 from dataclasses import dataclass
 from functools import partial
 from itertools import chain
-from typing import Any
+from typing import Any, cast
 
 import sympy
 
@@ -22,6 +22,7 @@ import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._inductor.fx_passes.control_dependencies import control_deps
+from torch._library.utils import zip_schema
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
@@ -72,8 +73,8 @@ def matches_module_function_pattern(
 
 
 def _is_fake_tensor_same(
-    new: Any,
-    old: Any,
+    new: object,
+    old: object,
     existing_storages: Mapping[int, int],
     *,
     check_strides: bool = True,
@@ -111,6 +112,7 @@ def _is_fake_tensor_same(
             return old is None
 
         if isinstance(new, Collection):
+            old_collection = cast(Collection[object], old)
             if recursive_ids is None:
                 recursive_ids = OrderedSet()
 
@@ -122,7 +124,7 @@ def _is_fake_tensor_same(
             # this collection have already been validated (or will be validated in the
             # future) by a call at a different layer of recursion.
             return visited or (
-                len(new) == len(old)
+                len(new) == len(old_collection)
                 and all(
                     _is_fake_tensor_same(
                         new_i,
@@ -133,14 +135,15 @@ def _is_fake_tensor_same(
                         node=node,
                         recursive_ids=recursive_ids,
                     )
-                    for new_i, old_i in zip(new, old)
+                    for new_i, old_i in zip(new, old_collection)
                 )
             )
 
         if isinstance(new, torch.types.py_sym_types):
+            old_sym = cast(torch.types.PySymType, old)
             return (
                 not_none(new.node.shape_env)._maybe_evaluate_static(
-                    sympy.Eq(new.node.expr, old.node.expr)
+                    sympy.Eq(new.node.expr, old_sym.node.expr)
                 )
                 == sympy.true
             )
@@ -150,20 +153,22 @@ def _is_fake_tensor_same(
         # implemented __eq__ method will compare IDs.
         return new == old
 
+    old_tensor = cast(torch.Tensor, old)
+
     if (
-        new.layout != old.layout
-        or new.dtype != old.dtype
-        or not is_intlist_same(new.shape, old.shape)
+        new.layout != old_tensor.layout
+        or new.dtype != old_tensor.dtype
+        or not is_intlist_same(new.shape, old_tensor.shape)
     ):
         return False
 
-    if new.device != old.device:
+    if new.device != old_tensor.device:
         return False
 
     if (
         check_strides
         and new.layout == torch.strided
-        and not is_intlist_same(new.stride(), old.stride())
+        and not is_intlist_same(new.stride(), old_tensor.stride())
     ):
         return False
 
@@ -171,11 +176,14 @@ def _is_fake_tensor_same(
         return True
 
     if not statically_known_true(
-        new.storage_offset() == old.storage_offset()
-    ) or get_storage(new) != get_storage(old):
+        new.storage_offset() == old_tensor.storage_offset()
+    ) or get_storage(new) != get_storage(old_tensor):
         return False
 
     def any_user_may_alias(node):
+        # imported here because reinplace imports this module at load time
+        from .fx_passes.reinplace import _generalized_scatter
+
         if not isinstance(node.meta["val"], torch.Tensor):
             # analysis too complicated on lists, can support in the future
             return True
@@ -183,8 +191,7 @@ def _is_fake_tensor_same(
         for user in node.users:
             if not (
                 isinstance(user.target, torch._ops.OperatorBase)
-                or user.target
-                is torch._inductor.fx_passes.reinplace._generalized_scatter
+                or user.target is _generalized_scatter
             ):
                 return True
 
@@ -225,7 +232,7 @@ def _is_fake_tensor_same(
     # else.  If the FakeTensor's storage is fresh and none of the node's users can alias
     # it, then we don't need to update this node.
     if (
-        existing_storages[get_storage(old)] == 1
+        existing_storages[get_storage(old_tensor)] == 1
         and get_storage(new) not in existing_storages
         and not any_user_may_alias(node)
     ):
@@ -403,7 +410,7 @@ def _extract_subgraphs_and_args(
                 )
             wrapped_node = wrapped_nodes[0]
 
-            def replace_placeholder(item: Any) -> Any:
+            def replace_placeholder(item: object) -> object:
                 if isinstance(item, torch.fx.Node):
                     return placeholder_to_arg.get(item, item)
                 return item
@@ -822,6 +829,43 @@ def get_node_storage(node: torch.fx.Node) -> int | None:
     if not torch._C._has_storage(node.meta["val"]):
         return None
     return get_storage(node.meta["val"])
+
+
+def get_mutated_input_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
+    """Tensor input nodes that node writes in place."""
+    target: object = node.target
+    args = node.args
+    if target is torch.ops.higher_order.with_effects:
+        target, args = args[1], args[2:]
+    if target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+        written = [node.kwargs["kwargs"]]
+    elif isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
+        written = [
+            arg
+            for schema_arg, arg in zip_schema(target._schema, args, node.kwargs)
+            if schema_arg.alias_info is not None and schema_arg.alias_info.is_write
+        ]
+    else:
+        return []
+    return [x for x in pytree.tree_leaves(written) if isinstance(x, torch.fx.Node)]
+
+
+def get_mutated_storages(gm: torch.fx.GraphModule) -> OrderedSet[int]:
+    """
+    Fake storages written in place by any node of gm. control_deps subgraphs
+    are included since their placeholders carry the outer nodes' fake values.
+    """
+    storages: OrderedSet[int] = OrderedSet()
+    for node in gm.graph.nodes:
+        subgraph_attr = node.args[1] if node.target is control_deps else None
+        if isinstance(subgraph_attr, torch.fx.Node) and subgraph_attr.op == "get_attr":
+            subgraph = getattr(gm, cast(str, subgraph_attr.target))
+            storages |= get_mutated_storages(subgraph)
+        for written in get_mutated_input_nodes(node):
+            storage = get_node_storage(written)
+            if storage is not None:
+                storages.add(storage)
+    return storages
 
 
 def get_fake(x: Any, gm: torch.fx.GraphModule | None) -> Any:
