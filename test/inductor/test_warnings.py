@@ -23,10 +23,7 @@ TF32_ADVISORY = "TensorFloat32 tensor cores for float32 matrix multiplication av
 
 def _has_cuda_sm80() -> bool:
     # The TF32 advisory uses capability >= (8, 0) on both CUDA and ROCm.
-    return (
-        torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (8, 0)
-    )
+    return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
 
 
 class InductorWarningTests(TestCase):
