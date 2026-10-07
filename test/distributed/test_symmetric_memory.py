@@ -3493,6 +3493,96 @@ class SymmMemSingleProcTest(TestCase):
         finally:
             dist.destroy_process_group()
 
+    @requires_cuda
+    def test_fake_pg_fused_matmul_collectives(self):
+        """FakePG executes the pipelined symmetric-memory implementations."""
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=store)
+        group_name = dist.group.WORLD.group_name
+        try:
+            A_shard = torch.randn(2, 4, device="cuda")
+            B = torch.randn(4, 3, device="cuda")
+            A = torch.randn(8, 4, device="cuda")
+            expected_A, expected_mm = _fused_all_gather_matmul_fallback(
+                A_shard, [B], 0, group_name
+            )
+            expected_rs = _fused_matmul_reduce_scatter_fallback(
+                A, B, "sum", 0, group_name
+            )
+
+            actual_A, actual_mm = torch.ops.symm_mem.fused_all_gather_matmul(
+                A_shard, [B], 0, group_name
+            )
+            actual_rs = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+                A, B, "sum", 0, group_name
+            )
+            self.assertEqual(actual_A, expected_A)
+            self.assertEqual(actual_mm, expected_mm)
+            self.assertEqual(actual_rs, expected_rs)
+
+            A_last = torch.randn(2, 4, device="cuda")
+            B_last = torch.randn(4, 8, device="cuda")
+            expected_avg = _fused_matmul_reduce_scatter_fallback(
+                A_last, B_last, "avg", 1, group_name
+            )
+            actual_avg = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+                A_last, B_last, "avg", 1, group_name
+            )
+            self.assertEqual(actual_avg, expected_avg)
+
+            workspace = symm_mem._group_name_to_fake_workspace[group_name]
+            self.assertEqual(len(set(workspace.buffer_ptrs)), 1)
+            for peer in range(workspace.world_size):
+                self.assertEqual(
+                    workspace.get_buffer(peer, (1,), torch.uint8).data_ptr(),
+                    workspace.buffer_ptrs[peer],
+                )
+
+            with (
+                mock.patch.object(
+                    symm_mem,
+                    "_fused_all_gather_matmul_fallback",
+                    side_effect=AssertionError("unexpected all-gather fallback"),
+                ),
+                mock.patch.object(
+                    symm_mem,
+                    "_fused_matmul_reduce_scatter_fallback",
+                    side_effect=AssertionError("unexpected reduce-scatter fallback"),
+                ),
+                mock.patch.object(
+                    workspace,
+                    "barrier",
+                    wraps=workspace.barrier,
+                ) as barrier,
+            ):
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph):
+                    graph_A, graph_mm = torch.ops.symm_mem.fused_all_gather_matmul(
+                        A_shard, [B], 0, group_name
+                    )
+                    graph_rs = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+                        A, B, "sum", 0, group_name
+                    )
+                self.assertGreater(barrier.call_count, 0)
+
+                A_shard.add_(1)
+                A.add_(1)
+                graph.replay()
+
+            expected_A, expected_mm = _fused_all_gather_matmul_fallback(
+                A_shard, [B], 0, group_name
+            )
+            expected_rs = _fused_matmul_reduce_scatter_fallback(
+                A, B, "sum", 0, group_name
+            )
+            self.assertEqual(graph_A, expected_A)
+            self.assertEqual(graph_mm, expected_mm)
+            self.assertEqual(graph_rs, expected_rs)
+        finally:
+            symm_mem._group_name_to_fake_workspace_tensor.pop(group_name, None)
+            symm_mem._group_name_to_fake_workspace.pop(group_name, None)
+            dist.destroy_process_group()
+
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
