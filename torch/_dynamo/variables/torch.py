@@ -801,14 +801,30 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 raise AssertionError(
                     f"torch.fx.traceback.annotate expects no kwargs, got {len(kwargs)}"
                 )
+
+            def annotation_constant(value: VariableTracker) -> Any:
+                value = value.realize()
+                if isinstance(value, variables.SymNodeVariable):
+                    if value.python_type() is not float:
+                        unimplemented(
+                            gb_type="dynamic value in torch.fx.traceback.annotate",
+                            context=str(value),
+                            explanation="Annotation values are stored as constants in the graph. "
+                            "Dynamic floats are specialized, but other dynamic values are not, "
+                            "since specializing them (e.g. a tensor size) can cause a recompile "
+                            "for every distinct value.",
+                            hints=[
+                                "Compute the annotation value from configuration rather than from tensors or sizes.",
+                            ],
+                        )
+                    # e.g. per-layer float settings sharing one forward
+                    value = specialize_symnode(value)
+                return value.as_python_constant()
+
             annotation = args[0]
             if isinstance(annotation, variables.ConstDictVariable):
-                # Specialize symbolic values (e.g. an automatically dynamic
-                # float), since node.meta holds Python constants.
                 annotation_dict = {
-                    k.vt.as_python_constant(): specialize_symnode(
-                        v.realize()
-                    ).as_python_constant()
+                    k.vt.as_python_constant(): annotation_constant(v)
                     for k, v in annotation.items.items()
                 }
             else:

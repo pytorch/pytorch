@@ -285,6 +285,20 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_method', 'sin', {'ac.knob': 0.75})""",
         )
 
+    def test_annotate_dynamic_int_is_unsupported(self):
+        def fn(x):
+            with fx_traceback.annotate({"seq_len": x.shape[0]}):
+                return x.sin()
+
+        x = torch.randn(4)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "dynamic value in torch.fx.traceback.annotate",
+        ):
+            opt_fn(x)
+
     def test_annotation_on_runtime_asserts(self):
         class M(torch.nn.Module):
             def forward(self, x, y):

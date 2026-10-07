@@ -199,6 +199,16 @@
       ]
     }
   ],
+  "GB3059": [
+    {
+      "Gb_type": "dynamic value in torch.fx.traceback.annotate",
+      "Context": "str(value)",
+      "Explanation": "Annotation values are stored as constants in the graph. Dynamic floats are specialized, but other dynamic values are not, since specializing them (e.g. a tensor size) can cause a recompile for every distinct value.",
+      "Hints": [
+        "Compute the annotation value from configuration rather than from tensors or sizes."
+      ]
+    }
+  ],
   "GB2019": [
     {
       "Gb_type": "Unsupported autograd.Function context `mark_dirty`",
