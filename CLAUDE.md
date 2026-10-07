@@ -240,11 +240,6 @@ hand an int you already have to a bindings call. For example
 `cudaGraphGetId(cudaGraph_t(init_value=g.raw_cuda_graph()))`. Only build the
 typed object when you genuinely need it as a value in its own right.
 
-# CUDA streams
-
-Before adding `record_stream` / `recordStream`, or using a tensor on a stream
-other than the one it was allocated on, read the `cuda-streams` skill.
-
 # Dynamo Config
 
 Use `torch._dynamo.config.patch` for temporarily changing config. It can be used as a decorator on test methods or as a context manager:
