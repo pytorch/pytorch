@@ -849,7 +849,6 @@ def reduce_row_tile(
     unroll: int | None = None,
     use_tma: bool | None = None,
     order: Literal["linear", "inner_tree"] | None = None,
-    row_accumulators: int = 0,
 ) -> tuple[torch.Tensor, ...]:
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`."""
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
@@ -861,8 +860,6 @@ def reduce_row_tile(
     # explicit launch shapes on the default order; explicit requests raise below.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
-    if row_accumulators and order != "linear":
-        raise ValueError("static row accumulators require explicit order='linear'")
     itree, arch = None, None
     if (order == "inner_tree" or (order is None and inner_tree_order_enabled())) and (
         final and threads_per_row is None
@@ -927,7 +924,6 @@ def reduce_row_tile(
         final=final,
         unroll=unroll,
         use_tma=use_tma,
-        row_accumulators=row_accumulators,
     )
 
     # Final projects nouts; stage 1 stores one raw buffer per field.

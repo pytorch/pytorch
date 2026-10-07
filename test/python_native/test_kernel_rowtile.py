@@ -6,12 +6,10 @@
 import math
 import sys
 import unittest
-from types import SimpleNamespace
 from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -488,111 +486,6 @@ class TestKernelRowTile(TestCase):
 
 
 instantiate_parametrized_tests(TestKernelRowTile)
-
-
-class TestStaticRowHost(TestCase):
-    @parametrize(
-        "override",
-        [
-            {"row_accumulators": 3},
-            {"N": 1000},
-            {"axis": "col"},
-            {"order": "inner_tree"},
-            {"use_tma": True},
-            {"threads_per_row": 96},
-        ],
-    )
-    def test_static_rejects_unsupported_tiles(self, override):
-        """Reject static tile configurations that violate row-kernel assumptions."""
-        from torch._native.ops.reductions import tile
-
-        kwargs = dict(
-            axis="row",
-            N=1024,
-            threads_per_row=32,
-            threads_per_block=128,
-            row_accumulators=4,
-        )
-        kwargs.update(override)
-        with self.assertRaises(ValueError):
-            tile.TileReduce(T.SumOps(), cutlass.Float32, **kwargs)
-
-    def test_static_requires_explicit_unconstrained_order(self):
-        """Require an explicit order when static geometry cannot infer one safely."""
-        x = SimpleNamespace(
-            dim=lambda: 2, is_cuda=True, stride=lambda _: 1, shape=(33, 1024)
-        )
-        with self.assertRaisesRegex(ValueError, "explicit order='linear'"):
-            rt.reduce_row_tile(
-                object(), "sum", x, [torch.float32], order=None, row_accumulators=4
-            )
-
-
-@unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
-class TestStaticRowDevice(TestCase):
-    @parametrize(
-        "dtype,op,width,threads,accumulators",
-        [
-            (torch.float32, "sum", 256, 32, 1),
-            (torch.bfloat16, "argmax", 1024, 32, 4),
-            (torch.float32, "var_mean", 4096, 64, 8),
-        ],
-    )
-    def test_static_mapping_numerics(
-        self, device, dtype, op, width, threads, accumulators
-    ):
-        """Validate one-field, indexed, and multi-output static row mappings."""
-        from torch import _native as native
-
-        trait = {
-            "sum": T.SumOps(),
-            "argmax": T.ArgMaxOps(idx=cutlass.Int32),
-            "var_mean": T.VarMeanOps(correction=0),
-        }[op]
-        out_dtype = torch.int64 if op == "argmax" else torch.float32
-        nouts = 2 if op == "var_mean" else 1
-        with (
-            native._unconditional_masked(),
-            torch.backends.python_native.cutedsl.disabled(),
-        ):
-            # Offset storage and a partial final row block exercise address and store guards.
-            storage = torch.empty(33 * width + 1, device=device, dtype=dtype)
-            x = storage[1:].view(33, width)
-            x.normal_().mul_(8).add_(1024)
-            kwargs = dict(dim=1)
-            if op == "sum":
-                kwargs["dtype"] = torch.float32
-            if op == "var_mean":
-                kwargs["correction"] = 0
-
-            def reference():
-                value = getattr(torch, op)(x, **kwargs)
-                return tuple(value) if isinstance(value, tuple) else (value,)
-
-            def run():
-                return rt.reduce_row_tile(
-                    trait,
-                    "test_static_" + op,
-                    x,
-                    [out_dtype] * nouts,
-                    nouts,
-                    threads_per_row=threads,
-                    threads_per_block=128,
-                    order="linear",
-                    row_accumulators=accumulators,
-                )
-
-            self.assertEqual(
-                run(),
-                reference(),
-                atol=1e-4,
-                rtol=0.02 if dtype == torch.bfloat16 else 1e-4,
-                equal_nan=True,
-            )
-
-
-instantiate_parametrized_tests(TestStaticRowHost)
-instantiate_device_type_tests(TestStaticRowDevice, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
