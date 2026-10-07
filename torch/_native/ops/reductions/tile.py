@@ -831,6 +831,75 @@ def fold_cols_rolled(
     return accs
 
 
+@cute.jit
+def _fold_welford_equal_group(
+    leaf_fn,
+    combine_equal_fn,
+    mX,
+    col,
+    row0,
+    idx0,
+    group: cutlass.Constexpr,
+):
+    tree = []
+    for i in cutlass.range_constexpr(group):
+        row = mX[Int64(row0 + Int32(i)), None]
+        tree.append(leaf_fn(row[col], idx0 + Int32(i)))
+    width = 1
+    for _ in cutlass.range_constexpr(group.bit_length() - 1):
+        tree = [
+            combine_equal_fn(tree[2 * i], tree[2 * i + 1], const_expr(width))
+            for i in range(len(tree) // 2)
+        ]
+        width *= 2
+    return tree[0]
+
+
+@cute.jit
+def fold_col_welford_grouped(
+    trait,
+    mX,
+    col,
+    storage_row0,
+    index_row0,
+    nrows,
+    group: cutlass.Constexpr,
+):
+    """Fold fixed-size row groups as equal-count Welford trees."""
+    reduce_fn = trait.reduce
+    leaf_fn = trait.leaf
+    combine_fn = trait.combine
+    combine_equal_fn = trait.combine_equal
+    acc = trait.init()
+    tail = nrows % Int32(group)
+    frag = cute.make_rmem_tensor(cute.make_layout(1), mX.element_type)
+    for i in cutlass.range_constexpr(group - 1):
+        valid = Int32(i) < tail
+        rr = storage_row0 + Int32(i) if valid else Int32(0)
+        cute.autovec_copy(cute.flat_divide(mX[Int64(rr), None], (1,))[None, col], frag)
+        acc = reduce_fn(
+            acc,
+            trait.acc(frag[0]),
+            index_row0 + Int32(i),
+            valid,
+        )
+    ngroups = (nrows - tail) // Int32(group)
+    for g in cutlass.range(ngroups):
+        row0 = storage_row0 + tail + g * Int32(group)
+        idx0 = index_row0 + tail + g * Int32(group)
+        root = _fold_welford_equal_group(
+            leaf_fn,
+            combine_equal_fn,
+            mX,
+            col,
+            row0,
+            idx0,
+            const_expr(group),
+        )
+        acc = combine_fn(acc, root)
+    return (acc,)
+
+
 class TileReduce:
     """Reduction kernel parameterized by reduced axis.
 
@@ -893,6 +962,18 @@ class TileReduce:
             or general_tree_count < threads_per_block
         ):
             raise ValueError("general tree needs a nonempty Welford thread fold")
+        if (
+            col_group not in (1, 4, 8, 16)
+            or col_group > 1
+            and (
+                axis != "col"
+                or combine
+                or vec != 1
+                or getattr(trait, "complex_input", False)
+                or not hasattr(trait, "combine_equal")
+            )
+        ):
+            raise ValueError("column groups need scalar real Welford columns")
         if row_accumulators and (
             axis != "row"
             or order != "linear"
@@ -2009,17 +2090,28 @@ class TileReduce:
             else:
                 col = unit
                 storage_row0 = index_row0
-            accs = fold_cols_rolled(
-                trait,
-                mIns[0],
-                col,
-                storage_row0,
-                index_row0,
-                cnt,
-                const_expr(self.vec),
-                const_expr(self.unroll),
-                const_expr(self.complex_input),
-            )
+            if const_expr(self.col_group > 1):
+                accs = fold_col_welford_grouped(
+                    trait,
+                    mIns[0],
+                    col,
+                    storage_row0,
+                    index_row0,
+                    cnt,
+                    const_expr(self.col_group),
+                )
+            else:
+                accs = fold_cols_rolled(
+                    trait,
+                    mIns[0],
+                    col,
+                    storage_row0,
+                    index_row0,
+                    cnt,
+                    const_expr(self.vec),
+                    const_expr(self.unroll),
+                    const_expr(self.complex_input),
+                )
         elif const_expr(self.use_tma):
             accs = (self._fold_tma(mIns[0], tma_atom, bx, tx),)
         elif const_expr(self.ragged_vector):

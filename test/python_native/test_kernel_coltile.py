@@ -100,6 +100,19 @@ class TestKernelColTile(TestCase):
         )
         self.assertEqual(out, x.var(dim=0), atol=1e-4, rtol=1e-4)
 
+    def test_grouped_welford_columns(self):
+        """Equal-count column groups must preserve a ragged tail's statistics."""
+        x = torch.randn(1025, 33, device="cuda")
+        cfg = ct.ColConfig("unordered", "test_grouped", 64, 1, 1, "column", group=8)
+        with mock.patch.object(ct, "select_col_config", return_value=cfg):
+            out = ct.reduce_col_tile(
+                T.WelfordOps(correction=1, acc=cutlass.Float32),
+                "grouped_welford",
+                x,
+                torch.float32,
+            )
+        self.assertEqual(out, x.var(dim=0), atol=1e-5, rtol=1e-5)
+
     def test_dispatcher_routes_a_column_reduction(self):
         # Numerics cannot distinguish the column arm from K0; assert routing and reshape.
         trait = T.SumOps(acc=cutlass.Float32)
