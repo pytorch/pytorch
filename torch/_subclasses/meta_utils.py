@@ -1003,11 +1003,22 @@ class MetaConverter(Generic[_TensorT]):
 
     @classmethod
     def _backward_error(cls, t: _TensorT) -> _TensorT:
+        from torch._subclasses.fake_tensor import (
+            maybe_get_real_tensor,
+            maybe_set_real_tensor,
+        )
+
         errfn = torch._C._functions.DelayedError(
             "Internal error: Tried to backward() through example input",
             1,
         )
         err = errfn(t)
+        # DelayedError is an identity view, but for a C++ fake the shadow real
+        # tensor lives on the TensorImpl and is not carried to the new tensor,
+        # so re-attach it (no-op for Python fakes and when there is none).
+        real = maybe_get_real_tensor(t)
+        if real is not None:
+            maybe_set_real_tensor(err, real)
         return typing.cast(_TensorT, err)
 
     def _empty_create_subclass(
