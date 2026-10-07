@@ -3,7 +3,9 @@ requests, reviews, or comments. We expect everyone interacting with
 this repo to follow the below policy whenever they use AI tools.
 
 *AI-generated content in comments, issues, or PRs must be clearly disclosed and
-contained* (e.g. using a code block or a quote block). AI-generated content must
+contained*, either under a section heading that labels it as AI-generated (e.g.
+the PR template's "Agent details" section) or in a code or quote block.
+AI-generated content must
 be accompanied by human commentary explaining its relevance. For example:
 "Codex produced the following analysis: `<insert codex output here>`, so I
 believe that \<insert human analysis here\>". The only exceptions to this rule
