@@ -22,10 +22,11 @@ at::DataPtr make_data_ptr(
     void* data,
     cow::COWDeleterContext& ctx,
     std::optional<c10::Stream> clone_stream,
+    bool made_while_capturing,
     c10::Device device) {
   return at::DataPtr(
       data,
-      new cow::COWReference{&ctx, clone_stream},
+      new cow::COWReference{&ctx, clone_stream, made_while_capturing},
       cow::cow_deleter,
       device);
 }
@@ -107,6 +108,7 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
   void* data = data_ptr.get();
   const c10::Device device = data_ptr.device();
   const std::optional<c10::Stream> stream = current_stream(device);
+  const bool capturing = stream.has_value() && stream->is_capturing();
 
   if (simple) {
     // Case 1) We have a simple data pointer: wrap it.
@@ -115,12 +117,12 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     auto* ctx = new cow::COWDeleterContext(std::move(original_ctx));
 
     // Save this for the result.
-    new_data_ptr = make_data_ptr(data, *ctx, stream, device);
+    new_data_ptr = make_data_ptr(data, *ctx, stream, capturing, device);
 
     // Update this storage to the new copy on write context.
     ctx->increment_refcount();
-    storage.set_data_ptr_noswap(
-        make_data_ptr(data, *ctx, /*clone_stream=*/std::nullopt, device));
+    storage.set_data_ptr_noswap(make_data_ptr(
+        data, *ctx, /*clone_stream=*/std::nullopt, capturing, device));
     storage.set_materializer(&materialize_cow);
   } else {
     // Case 2): there is already a copy on write context. Just return a
@@ -129,7 +131,8 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     auto* ref = data_ptr.cast_context<cow::COWReference>(cow::cow_deleter);
     TORCH_INTERNAL_ASSERT(ref != nullptr);
     ref->context->increment_refcount();
-    new_data_ptr = make_data_ptr(data, *ref->context, stream, device);
+    new_data_ptr =
+        make_data_ptr(data, *ref->context, stream, capturing, device);
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
@@ -173,18 +176,38 @@ void materialize_cow(StorageImpl* storage) {
   const std::optional<c10::Stream> stream = current_stream(device);
   const bool capturing = stream.has_value() && stream->is_capturing();
   if (stream.has_value() && !ctx->is_unique()) {
+    // A copy made during graph capture is replayed with the graph, so it is
+    // only allowed if the lazy clone was also made during the capture. (We
+    // don't distinguish between captures, though.)
+    TORCH_CHECK(
+        ref->made_while_capturing == capturing,
+        "Materializing a lazily cloned tensor during graph capture is only "
+        "supported if the lazy clone was also made during the capture, and "
+        "vice versa. Clone it with clone() instead.");
     // The copy must be enqueued on the stream the clone was made on, which is
     // also the stream the new allocation belongs to. For the storage that was
-    // lazily cloned from, that is the stream its memory was allocated on;
-    // under CUDA graph capture, this means that a storage that was allocated
-    // outside of the graph cannot be moved to a new allocation inside of it.
+    // lazily cloned from, that is the stream its memory was allocated on.
     bool ordered = true;
     if (ref->clone_stream.has_value()) {
       ordered = *ref->clone_stream == *stream;
     } else if (storage->allocator() != nullptr) {
-      ordered = storage->allocator()
-                    ->was_allocated_on_stream(data_ptr.get(), *stream)
-                    .value_or(true);
+      const std::optional<bool> allocated_on_stream =
+          storage->allocator()->was_allocated_on_stream(
+              data_ptr.get(), *stream);
+      if (capturing) {
+        // Memory allocated during capture comes from a private pool, for
+        // which the allocation stream is unknown. Memory with a known
+        // allocation stream was allocated before the capture, and the graph
+        // must not move it to a new allocation: e.g., the user would keep
+        // writing the inputs of the graph to the old one.
+        TORCH_CHECK(
+            !allocated_on_stream.has_value(),
+            "Materializing a tensor that was lazily cloned from during graph "
+            "capture is not supported if its memory was allocated before the "
+            "capture. Clone it with clone() instead.");
+      } else {
+        ordered = allocated_on_stream.value_or(true);
+      }
     }
     TORCH_CHECK(
         ordered,

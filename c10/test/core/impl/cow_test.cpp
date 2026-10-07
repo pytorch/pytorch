@@ -79,7 +79,7 @@ TEST_F(ContextTest, cow_deleter) {
   auto& context = *new cow::COWDeleterContext(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
-  cow::cow_deleter(new cow::COWReference{&context, std::nullopt});
+  cow::cow_deleter(new cow::COWReference{&context, std::nullopt, false});
   ASSERT_THAT(delete_count(), testing::Eq(1));
 }
 
@@ -157,7 +157,7 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
           /*data=*/data_ptr,
           /*ctx=*/
           new cow::COWReference{
-              new cow::COWDeleterContext(std::move(data)), std::nullopt},
+              new cow::COWDeleterContext(std::move(data)), std::nullopt, false},
           cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
@@ -203,7 +203,7 @@ TEST(materialize_test, copy_on_write_single_reference) {
           /*data=*/data_ptr,
           /*ctx=*/
           new cow::COWReference{
-              new cow::COWDeleterContext(std::move(data)), std::nullopt},
+              new cow::COWDeleterContext(std::move(data)), std::nullopt, false},
           cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,

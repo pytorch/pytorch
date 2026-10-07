@@ -3418,37 +3418,60 @@ torch.cuda.synchronize()
         TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
     )
     def test_graph_lazy_clone_materialize_errors(self):
-        x = torch.randn(1024, device="cuda")
+        # Capture on the stream the tensors were made on, so that only the
+        # capture, not the stream, differs.
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            x = torch.randn(1024, device="cuda")
 
-        # A lazy clone made before capture stands for a copy made before
-        # capture, which can't be materialized inside of the graph.
-        y = x._lazy_clone()
-        g = torch.cuda.CUDAGraph()
-        with self.assertRaisesRegex(RuntimeError, "not the stream it was lazily"):
-            with torch.cuda.graph(g):
-                y.add_(1)
-        self.assertTrue(torch._C._is_cow_tensor(y))
-        del y
+            # A lazy clone made before capture stands for a copy made before
+            # capture, which can't be redone by every replay.
+            y = x._lazy_clone()
+            g = torch.cuda.CUDAGraph()
+            with self.assertRaisesRegex(RuntimeError, "graph capture is only"):
+                with torch.cuda.graph(g, stream=s):
+                    y.add_(1)
+            self.assertTrue(torch._C._is_cow_tensor(y))
 
-        # Materializing a graph input inside of the graph would move it to a
-        # new allocation, which the graph would then copy into on replay.
-        g = torch.cuda.CUDAGraph()
-        with self.assertRaisesRegex(RuntimeError, "not the stream it was lazily"):
-            with torch.cuda.graph(g):
+            # Same for the tensor that was lazily cloned from.
+            g = torch.cuda.CUDAGraph()
+            with self.assertRaisesRegex(RuntimeError, "graph capture is only"):
+                with torch.cuda.graph(g, stream=s):
+                    x.add_(1)
+            self.assertTrue(torch._C._is_cow_tensor(x))
+            del y
+
+            # Materializing a graph input inside of the graph would move it to
+            # a new allocation, while the user keeps writing to the old one.
+            z = torch.randn(1024, device="cuda")
+            g = torch.cuda.CUDAGraph()
+            with self.assertRaisesRegex(RuntimeError, "allocated before the"):
+                with torch.cuda.graph(g, stream=s):
+                    w = z._lazy_clone()
+                    z.add_(1)
+            self.assertTrue(torch._C._is_cow_tensor(z))
+            del w
+
+            # A lazy clone made during capture can't be materialized after it.
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g, stream=s):
                 y = x._lazy_clone()
-                x.add_(1)
-        self.assertTrue(torch._C._is_cow_tensor(x))
+            with self.assertRaisesRegex(RuntimeError, "graph capture is only"):
+                y.add_(1)
+            self.assertTrue(torch._C._is_cow_tensor(y))
+        torch.cuda.current_stream().wait_stream(s)
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
     )
     def test_lazy_clone_cross_stream(self):
         s = torch.cuda.Stream()
-        s.wait_stream(torch.cuda.current_stream())
 
         # Lazily cloning on a side stream (e.g., when warming up for CUDA graph
         # capture) is fine, and so is materializing on that stream.
         x = torch.randn(1024, device="cuda")
+        s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
             y = x._lazy_clone()
             y.add_(1)
@@ -3493,6 +3516,7 @@ torch.cuda.synchronize()
         s.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(s):
             z.add_(1)
+        torch.cuda.current_stream().wait_stream(s)
         self.assertFalse(torch._C._is_cow_tensor(z))
 
     @unittest.skipIf(

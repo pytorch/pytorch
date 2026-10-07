@@ -92,6 +92,11 @@ struct COWReference {
   // that was lazily cloned from, which may only be materialized by copying on
   // the stream it was allocated on.
   std::optional<c10::Stream> clone_stream;
+  // Whether the current stream was being captured into a graph when this
+  // reference was made by a lazy clone. Materializing by copying is only
+  // allowed if this matches whether the current stream is being captured
+  // then: a copy made during capture is replayed with the graph.
+  bool made_while_capturing = false;
 };
 
 // `cow_deleter` is used as the `ctx_deleter` for DataPtr to implement a COW
