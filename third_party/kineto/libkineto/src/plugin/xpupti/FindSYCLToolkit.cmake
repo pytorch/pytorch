@@ -2,7 +2,7 @@
 SYCLConfig
 -------
 
-Library to verify SYCL compatability of CMAKE_CXX_COMPILER
+Library to verify SYCL compatibility of CMAKE_CXX_COMPILER
 and passes relevant compiler flags.
 
 Result Variables
@@ -44,7 +44,7 @@ if(NOT SYCL_ROOT)
     OUTPUT_STRIP_TRAILING_WHITESPACE)
 
   if(NOT EXISTS "${SYCL_CMPLR_FULL_PATH}")
-    message(WARNING "Cannot find ENV{CMPLR_ROOT} or icpx, please setup SYCL compiler Tool kit enviroment before building!!")
+    message(WARNING "Cannot find ENV{CMPLR_ROOT} or icpx, please setup SYCL compiler Tool kit environment before building!!")
     return()
   endif()
 
