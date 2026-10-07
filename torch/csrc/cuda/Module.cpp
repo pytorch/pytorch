@@ -1126,6 +1126,20 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 
+// Only _get_device_properties hands these objects to Python, as references into
+// the per-device cache behind at::cuda::getDeviceProperties.
+static int devicePropertiesIndex(const cudaDeviceProp& prop) {
+  auto count = c10::cuda::device_count();
+  c10::DeviceIndex index = 0;
+  while (index < count && at::cuda::getDeviceProperties(index) != &prop) {
+    index++;
+  }
+  TORCH_CHECK(
+      index < count,
+      "_CudaDeviceProperties was not returned by get_device_properties");
+  return index;
+}
+
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDeviceProperties class to torch._C
   auto m = py::handle(module).cast<py::module>();
@@ -1159,20 +1173,20 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
       .def_property_readonly(
           "clock_rate",
-          [](const cudaDeviceProp&) {
+          [](const cudaDeviceProp& prop) {
             int clk = 0;
             AT_CUDA_CHECK(cudaDeviceGetAttribute(
-                &clk, cudaDevAttrClockRate, c10::cuda::current_device()));
+                &clk, cudaDevAttrClockRate, devicePropertiesIndex(prop)));
             return clk;
           })
       .def_property_readonly(
           "memory_clock_rate",
-          [](const cudaDeviceProp&) {
+          [](const cudaDeviceProp& prop) {
             int mem_clk = 0;
             AT_CUDA_CHECK(cudaDeviceGetAttribute(
                 &mem_clk,
                 cudaDevAttrMemoryClockRate,
-                c10::cuda::current_device()));
+                devicePropertiesIndex(prop)));
             return mem_clk;
           })
       .def_readonly("memory_bus_width", &cudaDeviceProp::memoryBusWidth)

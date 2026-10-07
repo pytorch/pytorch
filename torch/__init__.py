@@ -1844,7 +1844,6 @@ def use_deterministic_algorithms(
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
-        * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when called on CUDA or MPS tensor
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
@@ -2993,10 +2992,13 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
 
         from torch._guards import detect_fake_mode
         from torch._inductor.virtualized import V
-        from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 
         fake_mode = detect_fake_mode(inputs_)
-        ctx = allow_non_fake_inputs_temporarily(fake_mode)
+        ctx = (
+            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+            if fake_mode
+            else nullcontext()
+        )
         with (
             V.set_aot_compilation(True),
             ctx,
