@@ -8,6 +8,7 @@ import os
 import sys
 import unittest
 from contextlib import contextmanager
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
@@ -262,7 +263,12 @@ class TestInnerTreeOrder(TestCase):
         """Handle short async-combine blocks without reading padded partials as data."""
         n = 1 << 20
         for m in (1, 33):
-            with self.subTest(rows=m):
+            with (
+                self.subTest(rows=m),
+                mock.patch.object(
+                    rt, "_itree_arch", return_value=rt._ITREE_ARCH[(10, 0)]
+                ),
+            ):
                 torch.manual_seed(0)
                 x = torch.randn(m, n, device="cuda")
                 plan = rt.itree_plan(n, m, 4, device=x.device)
