@@ -1,4 +1,6 @@
 #include <ATen/native/hip/ck_tile_group_gemm.h>
+#include <ATen/hip/HIPContext.h>
+#include <c10/hip/HIPException.h>
 #include <c10/hip/HIPStream.h>
 #include <ck_tile/core.hpp>
 #include <ck_tile/host.hpp>
@@ -7,10 +9,13 @@
 
 #include <array>
 #include <cstdint>
+#include <type_traits>
 
 namespace at::hip::detail {
 	namespace {
 		using ck_tile::index_t;
+		using RowMajor = ck_tile::tensor_layout::gemm::RowMajor;
+		using ColMajor = ck_tile::tensor_layout::gemm::ColumnMajor;
 
 		// Tile config for the ck_tile grouped GEMM kernels.
 		// Vector widths of 0 let ck_tile pick the widest global loads/stores; a nonzero value fixes it
@@ -98,6 +103,10 @@ namespace at::hip::detail {
 		using Cfg16_256x256x64      = CkTileGroupGemmConfig<256, 256, 64, 32, 32, 16, 2, 2, false, false, false>;
 		using Cfg16_256x128x64      = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, false, false>;
 		using Cfg16_256x128x64_PadN = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>;
+		// Not from Primus: fallback for everything the configs above reject (K not a multiple of 64,
+		// jagged K or N, column-major A). C is stored 2 elements at a time (the narrowest ck_tile allows
+		// for 16-bit outputs) because in 3D x 2D a group's output columns can start at any even offset.
+		using Cfg16_256x128x64_Pad  = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, true, true, true, false, 0, 2>;
 
 		// fp8/bf8 configs from Primus-Turbo. Primus runs these through its quantized runner
 		// (row/col, tensor and blockwise scales), not the bf16/fp16 runner above.
@@ -224,10 +233,17 @@ namespace at::hip::detail {
 				const void* group_args,  // device array of group_count ck_tile::GemmTransKernelArg<>
 				int32_t group_count,     // number of groups (entries in group_args)
 				hipStream_t stream) {    // current HIP stream
-			// 1. using Kernel = typename CkTileGroupGemm<DataType, ALayout, BLayout, Config>::Kernel;
-			// 2. block = Kernel::BlockSize(); grid = min(Kernel::MaxOccupancyGridSize(stream_config), number of CUs)
-			// 3. ck_tile::launch_kernel(stream_config, ck_tile::make_kernel<1>(Kernel{}, grid, block, 0,
-			//        ck_tile::cast_pointer_to_constant_address_space(group_args), group_count))
+			using Kernel = typename CkTileGroupGemm<DataType, ALayout, BLayout, Config>::Kernel;
+
+			// Persistent kernel: one workgroup per CU, each loops over the tiles of all groups.
+			const dim3 grid(at::cuda::getCurrentDeviceProperties()->multiProcessorCount);
+			const dim3 block = Kernel::BlockSize();
+
+			ck_tile::launch_kernel(
+					ck_tile::stream_config{stream},
+					ck_tile::make_kernel<1>(Kernel{}, grid, block, 0,
+							ck_tile::cast_pointer_to_constant_address_space(group_args), group_count));
+			C10_CUDA_KERNEL_LAUNCH_CHECK();
 		}
 
 		// Per-dtype part of group_gemm_ck_tile: fills the per-group arguments on the device, then
@@ -245,12 +261,56 @@ namespace at::hip::detail {
 				int32_t N,
 				int32_t K,
 				int32_t group_count) {
-			// 1. stream = c10::hip::getCurrentHIPStream()
-			// 2. prepare_grouped_gemm_data<DataType><<<1, group_count, 0, stream>>>(...) with
-			//    mat_a/mat_b/out data pointers, offs (or nullptr), M, N, K, strides, sizes, layouts
-			// 3. Choose a config from the host-known N and K (and whether K is jagged)
-			// 4. Branch on a_row_major / b_row_major -> RowMajor / ColumnMajor and call
-			//    run_ck_tile_group_gemm<DataType, ALayout, BLayout, Config>(group_args.data_ptr(), group_count, stream)
+			const hipStream_t stream = c10::hip::getCurrentHIPStream().stream();
+
+			auto to_strides = [](at::IntArrayRef values) {
+				Strides result{};
+				std::copy(values.begin(), values.end(), result.begin());
+				return result;
+			};
+
+			prepare_grouped_gemm_data<DataType><<<1, group_count, 0, stream>>>(
+					reinterpret_cast<const DataType*>(mat_a.const_data_ptr()),
+					reinterpret_cast<const DataType*>(mat_b.const_data_ptr()),
+					reinterpret_cast<DataType*>(out.data_ptr()),
+					reinterpret_cast<ck_tile::GemmTransKernelArg<>*>(group_args.data_ptr()),
+					offs.has_value() ? offs->const_data_ptr<int32_t>() : nullptr,
+					M, N, K,
+					to_strides(mat_a.strides()), to_strides(mat_b.strides()), to_strides(out.strides()),
+					to_strides(mat_a.sizes()), to_strides(mat_b.sizes()),
+					a_row_major, b_row_major);
+			C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+			// Instantiates and launches the kernel for one config, picking the layout types at runtime.
+			auto run_with_config = [&](auto config) {
+				using Config = decltype(config);
+				if (a_row_major && !b_row_major) {
+					run_ck_tile_group_gemm<DataType, RowMajor, ColMajor, Config>(group_args.const_data_ptr(), group_count, stream);
+				} else if (a_row_major && b_row_major) {
+					run_ck_tile_group_gemm<DataType, RowMajor, RowMajor, Config>(group_args.const_data_ptr(), group_count, stream);
+				} else if (!a_row_major && b_row_major) {
+					run_ck_tile_group_gemm<DataType, ColMajor, RowMajor, Config>(group_args.const_data_ptr(), group_count, stream);
+				} else {
+					TORCH_CHECK(false, "ck_tile group gemm: column-major A with column-major B is not instantiated; make one of them contiguous");
+				}
+			};
+
+			if constexpr (std::is_same_v<DataType, float>) {
+				TORCH_CHECK(false, "ck_tile group gemm: no fp32 config yet");
+			} else {
+				// Primus's configs need K % K_Tile == 0 (no K padding) and row-major A (no M padding).
+				// K < 0 or N < 0 means that dimension is jagged and unknown here.
+				const bool primus_ok = a_row_major && K > 0 && K % 64 == 0 && N > 0 && N % 8 == 0;
+				if (primus_ok && N % 256 == 0) {
+					run_with_config(Cfg16_256x256x64{});
+				} else if (primus_ok && N % 128 == 0) {
+					run_with_config(Cfg16_256x128x64{});
+				} else if (primus_ok) {
+					run_with_config(Cfg16_256x128x64_PadN{});
+				} else {
+					run_with_config(Cfg16_256x128x64_Pad{});
+				}
+			}
 		}
 	}
 
