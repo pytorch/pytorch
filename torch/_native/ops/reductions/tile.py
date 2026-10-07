@@ -572,7 +572,8 @@ def fold_cols_rolled(
     trait,
     mX,
     col,
-    row0,
+    storage_row0,
+    index_row0,
     nrows,
     vec: cutlass.Constexpr,
     unroll: cutlass.Constexpr = _ROLL_UNROLL,
@@ -582,13 +583,16 @@ def fold_cols_rolled(
     accs = tuple(trait.init() for _ in range(vec))
     frag = cute.make_rmem_tensor(cute.make_layout(vec), mX.element_type)
     for r in cutlass.range(nrows, unroll=unroll):
-        # row0 selects this block's reduced-axis chunk.
-        rr = row0 + Int32(r)
+        storage_row = storage_row0 + Int32(r)
+        index_row = index_row0 + Int32(r)
         cute.autovec_copy(
-            cute.flat_divide(mX[Int64(rr), None], (vec,))[None, col], frag
+            cute.flat_divide(mX[Int64(storage_row), None], (vec,))[None, col],
+            frag,
         )
-        # The DSL does not preprocess comprehensions; plain range still unrolls constexpr vec.
-        accs = tuple(reduce_fn(accs[i], acc_dt(frag[i]), rr, True) for i in range(vec))
+        # Plain range unrolls constexpr vec; the DSL does not preprocess comprehensions.
+        accs = tuple(
+            reduce_fn(accs[i], acc_dt(frag[i]), index_row, True) for i in range(vec)
+        )
     return accs
 
 
@@ -614,6 +618,7 @@ class TileReduce:
         vec: int | None = None,
         use_tma=False,
         combine=False,
+        batched_col=False,
         pc=True,
         npairs_red=0,
         npairs_kept=0,
@@ -701,6 +706,7 @@ class TileReduce:
         self.unroll = unroll
         self.use_tma = use_tma
         self.combine = combine
+        self.batched_col = batched_col
         self.pc = pc  # partial layout: (P, C) when True, else (C, P)
         # Compile-time fold_decoded policy.
         self.npairs_red = npairs_red
@@ -772,6 +778,7 @@ class TileReduce:
             self.unroll,
             self.use_tma,
             self.combine,
+            self.batched_col,
             self.pc,
             self.trait.nfields,
             self.complex_input,
@@ -1638,18 +1645,26 @@ class TileReduce:
             accs = (self._fold_partials(mIns, unit, nchunks, npar),)
         elif const_expr(self.axis == "col"):
             # Clamp this block's possibly ragged reduced-axis chunk.
-            row0 = Int32(by) * q
-            left = project_n - row0
+            index_row0 = Int32(by) * q
+            left = project_n - index_row0
             cnt = left if left < q else q  # noqa: FURB136 -- no DSL builtin min
             # A capped npar may leave blocks empty; clamp explicitly instead of relying on
             # negative trip counts lowering to zero.
             zero = Int32(0)
             cnt = cnt if cnt > zero else zero  # noqa: FURB136 -- no DSL builtin max
+            if const_expr(self.batched_col):
+                batch = unit // nwaves
+                col = unit % nwaves
+                storage_row0 = batch * project_n + index_row0
+            else:
+                col = unit
+                storage_row0 = index_row0
             accs = fold_cols_rolled(
                 trait,
                 mIns[0],
-                unit,
-                row0,
+                col,
+                storage_row0,
+                index_row0,
                 cnt,
                 const_expr(self.vec),
                 const_expr(self.unroll),
