@@ -239,13 +239,10 @@ inline Tensor applySelect(
     const std::optional<SymIntArrayRef>& self_sizes) {
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
-    auto maybe_index = index.maybe_as_int();
-    if (maybe_index.has_value()) {
-      TORCH_CHECK_INDEX(
-          !(maybe_index.value() == 0 && dim == 0 && self_sizes->empty()),
-          "invalid index of a 0-dim tensor. ",
-          "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
-    }
+    TORCH_CHECK_INDEX(
+        !(dim == 0 && self_sizes->empty()),
+        "invalid index of a 0-dim tensor. ",
+        "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 
     auto size = (*self_sizes)[dim];
     // Note: `size >= -index` is not equivalent to `size > -1 - index` if index
@@ -378,6 +375,29 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
     mask = mask.unsqueeze(-1);
   }
   return std::make_tuple(true, std::move(mask));
+}
+
+inline bool allowsScalarIndexOnDevice(const Scalar& value, const Tensor& self) {
+  return true;
+}
+
+inline bool allowsScalarIndexOnDevice(const Tensor& value, const Tensor& self) {
+  return value.dim() == 0 && value.device() == self.device() &&
+      value.scalar_type() == self.scalar_type() && self.has_storage() &&
+      value.has_storage() && !value.is_alias_of(self);
+}
+
+// Setitem can leave an eligible scalar index on CUDA instead of calling item().
+inline bool canKeepScalarIndexOnDevice(
+    const Tensor& index,
+    const Tensor& self) {
+  const auto index_dtype = index.scalar_type();
+  return index.dim() == 0 && self.is_cuda() &&
+      index.device() == self.device() &&
+      (index_dtype == kLong || index_dtype == kInt) && !self.is_quantized() &&
+      self.has_storage() && index.has_storage() && !index.is_alias_of(self) &&
+      // CUDA index_fill_ and index_put_ do not support unsigned dtypes.
+      !c10::isBarebonesUnsignedType(self.scalar_type());
 }
 
 // NOTE: Why do we mirror instead of replace the `count_specified_dimensions`
@@ -517,7 +537,8 @@ inline Tensor handleDimInMultiDimIndexing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& original_tensor_device,
-    const std::optional<SymIntArrayRef>& prev_dim_result_sizes) {
+    const std::optional<SymIntArrayRef>& prev_dim_result_sizes,
+    bool allow_device_index_for_setitem = false) {
   if (index.is_integer()) {
     return impl::applySelect(
         prev_dim_result,
@@ -571,7 +592,9 @@ inline Tensor handleDimInMultiDimIndexing(
         {c10::DispatchKey::FuncTorchBatched,
          c10::DispatchKey::BatchedNestedTensor}));
     if (tensor.dim() == 0 && !is_batched &&
-        at::isIntegralType(scalar_type, /*includeBool=*/true)) {
+        at::isIntegralType(scalar_type, /*includeBool=*/true) &&
+        !(allow_device_index_for_setitem &&
+          impl::canKeepScalarIndexOnDevice(tensor, original_tensor))) {
       if (scalar_type != at::kByte && scalar_type != at::kBool) {
         result = impl::applySelect(
             result,
@@ -614,7 +637,8 @@ inline Tensor applySlicing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& self_device,
-    const std::optional<SymIntArrayRef>& self_sizes) {
+    const std::optional<SymIntArrayRef>& self_sizes,
+    bool allow_device_index_for_setitem = false) {
   int64_t dim = 0;
   int64_t specified_dims = impl::count_specified_dimensions(indices);
 
@@ -643,7 +667,8 @@ inline Tensor applySlicing(
         /*outIndices=*/outIndices,
         /*disable_slice_optimization=*/disable_slice_optimization,
         /*original_tensor_device=*/self_device,
-        /*prev_dim_result_sizes=*/result_sizes);
+        /*prev_dim_result_sizes=*/result_sizes,
+        /*allow_device_index_for_setitem=*/allow_device_index_for_setitem);
   }
   return result;
 }
@@ -875,7 +900,8 @@ inline void set_item(
       tensorIndices,
       disable_slice_optimization,
       self_device,
-      self_sizes);
+      self_sizes,
+      impl::allowsScalarIndexOnDevice(value, self));
   if (tensorIndices.empty()) {
     copy_to(sliced, value);
     return;
