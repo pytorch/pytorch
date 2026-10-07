@@ -47,7 +47,6 @@
 #include <mutex>
 #include <new>
 #include <ranges>
-#include <regex>
 #include <set>
 #include <stack>
 #include <thread>
