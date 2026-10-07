@@ -213,8 +213,7 @@ def _effective_arch(arch: str | None) -> str | None:
         raise RuntimeError(
             f"{listed} {'is' if len(named) == 1 else 'are'} set but --arch is not. "
             f"A toolchain's arch variable is per-kind, so it cannot name the arch "
-            f"for every kind in one export; pass --arch (e.g. --arch "
-            f"{named[min(named)]}) to state it once."
+            f"for every kind in one export; pass --arch to state it once."
         )
     return _detected_arch()
 
