@@ -539,6 +539,72 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   return true;
 }
 
+// Below 4 MiB the generic kernel is as fast or faster for fp32 and small permutes (measured on GB300).
+constexpr int64_t kStridedCopyMinBytes = int64_t(4) << 20;
+
+// The iterator's byte offsets, except dim 0 counts kUnitBytes chunks instead of elements.
+template <int kUnitBytes>
+void launch_strided_unit_copy(TensorIteratorBase& iter) {
+  using Word = uint16_t;
+  constexpr int kWordsPerUnit = kUnitBytes / sizeof(Word);
+  using Vec = memory::aligned_vector<Word, kWordsPerUnit>;
+  auto offsets = make_offset_calculator<2>(iter);
+  offsets.sizes_[0] = at::cuda::detail::IntDivider<uint32_t>(iter.shape()[0] * iter.element_size(0) / kUnitBytes);
+  offsets.strides_[0][0] = offsets.strides_[0][1] = kUnitBytes;
+  char* dst = static_cast<char*>(iter.data_ptr(0));
+  const char* src = static_cast<const char*>(iter.data_ptr(1));
+  launch_legacy_kernel<128, 4>(iter.numel() * iter.element_size(0) / kUnitBytes, [=] GPU_LAMBDA(int idx) {
+    const auto offset = offsets.get(idx);
+    *reinterpret_cast<Vec*>(dst + offset[0]) =
+        memory::load_vector<kWordsPerUnit>(reinterpret_cast<const Word*>(src + offset[1]), 0);
+  });
+}
+
+// Copies whose innermost dim is contiguous in both tensors but that are not contiguous overall
+// (pitched rows, permutes that keep the last dim). Each row is moved as 16/8/4/2-byte chunks,
+// so the offset is computed once per chunk instead of once per element.
+bool maybe_strided_unit_copy(TensorIteratorBase& iter) {
+  const int ndim = iter.ndim();
+  // Raw bytes would skip bool normalization (NOTE [Loading boolean values]).
+  // Keep P2P copies on the generic kernel until measured.
+  if (ndim > MAX_DIMS || iter.dtype(0) == kBool || iter.device(0) != iter.device(1)) return false;
+  // Conservatively exclude shared storage, including disjoint views.
+  if (iter.tensor_base(0).is_alias_of(iter.tensor_base(1))) return false;
+  const int64_t element_size = iter.element_size(0);
+  // Reject empty and 0-dim iterators before reading shape[0].
+  if (iter.numel() * element_size < kStridedCopyMinBytes || !iter.has_contiguous_first_dim()) return false;
+
+  // Widest chunk (<= 16 B) that divides the row bytes, both base addresses and every outer
+  // stride, so no chunk is misaligned or crosses a row.
+  auto shape = iter.shape();
+  uint64_t alignment = (shape[0] * element_size) |
+      reinterpret_cast<uintptr_t>(iter.data_ptr(0)) | reinterpret_cast<uintptr_t>(iter.data_ptr(1));
+  for (int d = 1; d < ndim; ++d) {
+    if (shape[d] > 1) alignment |= iter.strides(0)[d] | iter.strides(1)[d];
+  }
+  int64_t unit_bytes = 16;
+  while (alignment % unit_bytes != 0) unit_bytes /= 2;
+  // A one-element chunk is just the generic kernel.
+  if (unit_bytes <= element_size) return false;
+
+  if (!iter.can_use_32bit_indexing()) {
+    // Splitting can change alignment; recheck each piece.
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      if (!maybe_strided_unit_copy(sub_iter)) direct_copy_kernel_cuda(sub_iter);
+    }
+    return true;
+  }
+
+  switch (unit_bytes) {
+    case 16: launch_strided_unit_copy<16>(iter); break;
+    case 8: launch_strided_unit_copy<8>(iter); break;
+    case 4: launch_strided_unit_copy<4>(iter); break;
+    case 2: launch_strided_unit_copy<2>(iter); break;
+    default: TORCH_INTERNAL_ASSERT(false, "unsupported unit size ", unit_bytes);
+  }
+  return true;
+}
+
 } // namespace
 
 // device-to-device copy, does type conversion
@@ -598,8 +664,9 @@ void copy_device_to_device(TensorIterator& iter,
         size, copy_stream, p2p_enabled));
     }
   } else {
-    if (same_type && same_neg && same_conj && maybe_tiled_transpose_copy(iter)) {
-      // handled by the tiled transpose kernel
+    if (same_type && same_neg && same_conj &&
+        (maybe_tiled_transpose_copy(iter) || maybe_strided_unit_copy(iter))) {
+      // handled by the tiled transpose or strided unit kernel
     } else if (same_neg) {
       if (!same_conj) {
         conj_kernel_cuda(iter);
