@@ -2305,6 +2305,21 @@ class ByteArrayVariable(VariableTracker):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(tx, repr(self.data))
 
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # bytearray_init re-initializes the contents in place:
+        # https://github.com/python/cpython/blob/v3.13.3/Objects/bytearrayobject.c#L749-L924
+        unimplemented(
+            gb_type="bytearray.__init__ on existing bytearray",
+            context=f"bytearray.__init__ {self}",
+            explanation="Dynamo does not model re-initializing a bytearray in place.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def nb_remainder_impl(
         self,
         tx: "InstructionTranslatorBase",

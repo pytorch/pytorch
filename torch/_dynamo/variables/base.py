@@ -2377,13 +2377,26 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        """tp_init slot (__init__). VTs override to initialize instances."""
-        unimplemented(
-            gb_type="missing tp_init",
-            context=f"tp_init_impl not implemented for {self.python_type_name()}",
-            explanation=f"Dynamo does not know how to trace __init__ on `{self.debug_repr()}`.",
-            hints=[*graph_break_hints.DYNAMO_BUG],
-        )
+        """Default tp_init: object_init.
+
+        https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L6109-L6127
+
+        Rejects extra arguments unless the type overrides __new__ but not
+        __init__. VT subclasses override this for types with their own tp_init.
+        """
+        if args or kwargs:
+            py_type = self.python_type()
+            if py_type.__init__ is not object.__init__:
+                raise_type_error(
+                    tx,
+                    "object.__init__() takes exactly one argument (the instance to initialize)",
+                )
+            if py_type.__new__ is object.__new__:
+                raise_type_error(
+                    tx,
+                    f"{py_type.__name__}.__init__() takes exactly one argument (the instance to initialize)",
+                )
+        return variables.ConstantVariable.create(None)
 
     def tp_new_impl(
         self,
