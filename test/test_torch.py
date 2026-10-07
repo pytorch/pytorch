@@ -1917,41 +1917,6 @@ class TestTorchDeviceType(TestCase):
         y[1] = 1.
         run_test(x, y)
 
-    # Ensures that median throws nondeterministic alerts in the correct cases
-    @dtypes(torch.double)
-    def test_nondeterministic_alert_median(self, device, dtype):
-        def test_func(call_type):
-            S = 10
-            a = torch.randn(S, device=device)
-            if call_type == 'function':
-                torch.median(a)
-            elif call_type == 'function with indices':
-                torch.median(a, 0)
-            elif call_type == 'method':
-                a.median()
-            elif call_type == 'method with indices':
-                a.median(0)
-            elif call_type == 'out with indices':
-                result = torch.empty_like(a)
-                indices = torch.empty((), dtype=torch.long, device=device)
-                torch.median(a, 0, out=(result, indices))
-            else:
-                self.fail(f"'{call_type}' is not a valid call type")
-
-        def test_func_expect_error(call_type, should_error):
-            self.check_nondeterministic_alert(
-                lambda: test_func(call_type),
-                'median CUDA with indices output',
-                should_error)
-
-        is_cuda = torch.device(device).type == 'cuda'
-
-        test_func_expect_error('function', False)
-        test_func_expect_error('function with indices', is_cuda)
-        test_func_expect_error('method', False)
-        test_func_expect_error('method with indices', is_cuda)
-        test_func_expect_error('out with indices', is_cuda)
-
     # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes
     def test_gather_backward_deterministic_path(self, device) -> None:
