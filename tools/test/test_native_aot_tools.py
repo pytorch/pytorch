@@ -667,14 +667,10 @@ class TestArch(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "outside the known range"):
             native_aot_decl.cc_of("sm_130")
 
-    def test_family_targets_follow_declared_members(self):
-        self.assertEqual(
-            native_aot_decl.FAMILY_TARGET_DEVICES["sm_100f"],
-            ((10, 0), (10, 3), (10, 7)),
-        )
+    def test_family_targets_follow_known_devices(self):
         self.assertEqual(
             native_aot_decl.target_devices("sm_100f"),
-            native_aot_decl.FAMILY_TARGET_DEVICES["sm_100f"],
+            ((10, 0), (10, 3), (10, 7)),
         )
         self.assertEqual(native_aot_decl.target_devices("sm_103f"), ((10, 3), (10, 7)))
         self.assertEqual(native_aot_decl.target_devices("sm_110f"), ((11, 0),))
@@ -713,11 +709,9 @@ class TestArch(unittest.TestCase):
         self.assertIsNone(choose(("sm_100a",), (10, 3)))
 
     def test_family_logic_is_not_special_cased_to_sm10x(self):
-        future = {"sm_60f": ((6, 0), (6, 2), (6, 7))}
         with tempfile.TemporaryDirectory() as ops:
             _write_fake_decl(ops, "ARCHS = ('sm_60f',)\n")
             with (
-                mock.patch.object(native_aot_decl, "FAMILY_TARGET_DEVICES", future),
                 mock.patch.object(
                     native_aot_decl,
                     "KNOWN_DEVICE_CAPABILITIES",
@@ -743,13 +737,16 @@ class TestArch(unittest.TestCase):
         self.assertNotIn("major == 10", match)
         self.assertNotIn("minor >=", match)
 
-    def test_family_table_rejects_cross_major_coverage(self):
-        invalid = {"sm_60f": ((6, 0), (7, 0))}
-        with (
-            mock.patch.object(native_aot_decl, "FAMILY_TARGET_DEVICES", invalid),
-            self.assertRaisesRegex(AssertionError, "major 6 and minor >= 0"),
+    def test_family_targets_do_not_cross_major_capabilities(self):
+        with mock.patch.object(
+            native_aot_decl,
+            "KNOWN_DEVICE_CAPABILITIES",
+            ((6, 0), (6, 2), (6, 7), (7, 0)),
         ):
-            native_aot_decl._validate_family_targets()
+            self.assertEqual(
+                native_aot_decl.target_devices("sm_60f"),
+                ((6, 0), (6, 2), (6, 7)),
+            )
 
     def test_the_detected_arch_is_the_local_capability(self):
         # Detection supplies a device capability to declaration target selection.
@@ -774,6 +771,8 @@ class TestArch(unittest.TestCase):
         self.assertEqual(f("7.5 8.9"), [])
         # Hopper and Blackwell together select one compile-target tree each.
         self.assertEqual(f("9.0a;10.0a"), ["sm_90", "sm_100f"])
+        # SM80 adds no target because no current native-AOT declaration targets
+        # Ampere; the Hopper and Blackwell entries still select one target each.
         self.assertEqual(f("8.0 9.0 10.0+PTX"), ["sm_90", "sm_100f"])
         # Plain and a-suffixed SM100 build entries both use the family target, which
         # also serves SM103 and SM107 without another copy of every kernel.
@@ -2831,6 +2830,14 @@ class TestShouldRun(unittest.TestCase):
         self.assertIn("Linux-only", err.getvalue())
         self.assertIn("darwin", err.getvalue())
 
+    def test_an_unknown_local_device_skips_without_raising(self):
+        with (
+            mock.patch.object(build_stage2, "_torch_value", return_value="sm_130"),
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertFalse(self._run(self.CUDA))
+        self.assertIn("does not know that device capability", err.getvalue())
+
     def test_interpreter_without_a_dsl_wheel_skips(self):
         # The release matrix builds interpreters the pinned DSL publishes no wheel for,
         # where RUN makes the CI shell run an install that cannot resolve and `set -ex`
@@ -4286,6 +4293,13 @@ class TestExportMain(unittest.TestCase):
         self._main([], {"TORCH_CUDA_ARCH_LIST": ""}, seen)
         self.assertEqual(seen, [[None]])
 
+    def test_explicit_arch_requires_at_least_one_device(self):
+        with (
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            self._main(["--arch"], {"TORCH_CUDA_ARCH_LIST": ""}, [])
+
     def test_a_pending_export_invalidates_the_previous_generation(self):
         # The EXPORT half of "invalidate the previous generation first": artifacts are
         # direct link inputs in build.ninja, so an interrupted export plus a plain
@@ -4784,12 +4798,12 @@ class TestStageTwoArgvContract(unittest.TestCase):
             _, env = self._args_of(calls, "export.py")
             self.assertEqual(env.get("TORCH_CUDA_ARCH_LIST"), "9.0;10.0a")
 
-    def test_generation_is_told_both_the_filter_and_the_recorded_list(self):
+    def test_generation_is_told_both_the_filter_and_the_device_list(self):
         with self._run_main("9.0;10.0a") as calls:
             cmd, _ = self._args_of(calls, "gen_aot_lib.py")
             self.assertIn("--archs", cmd)
             self.assertIn("--arch-list", cmd)
-            # --arch-list is recorded verbatim for CMake to compare against.
+            # Generation uses this per declaration and records it for CMake.
             self.assertEqual(cmd[cmd.index("--arch-list") + 1], "9.0;10.0a")
 
     def test_the_discovered_archive_is_passed_to_generation(self):
@@ -5697,8 +5711,8 @@ class TestArchScopedGeneration(unittest.TestCase):
     """Nothing prunes target trees, so a changed TORCH_CUDA_ARCH_LIST can leave the
     dropped target's tree behind. It must be neither generated from nor linked."""
 
-    def _tree(self, tmpdir, arch, prefix, stale_sources=False):
-        d = os.path.join(tmpdir, arch, "fakeop")
+    def _tree(self, tmpdir, arch, prefix, stale_sources=False, op="fakeop"):
+        d = os.path.join(tmpdir, arch, op)
         os.makedirs(d)
         _touch_artifacts(d, prefix)
         rel = _DECL_REL
@@ -5787,6 +5801,50 @@ class TestArchScopedGeneration(unittest.TestCase):
             listed = " ".join(_manifest(tmpdir)["objects"])
             self.assertIn("sm_100a", listed)
             self.assertNotIn("sm_90a", listed)
+
+    def test_build_arch_list_filters_targets_per_declaration(self):
+        class _ExactDecl(_FakeDecl):
+            ATEN_OP = "exact"
+            ARCHS = ("sm_100a",)
+
+        class _FamilyDecl(_FakeDecl):
+            ATEN_OP = "family"
+            ARCHS = ("sm_100f",)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._tree(tmpdir, "sm_100a", "exact_p__sm100a", op="exact")
+            self._tree(tmpdir, "sm_100f", "family_p__sm100f", op="family")
+            # The global target union includes sm_100a for exact, but family did
+            # not select its old sm_100a tree. It must not be stale-checked or linked.
+            self._tree(
+                tmpdir,
+                "sm_100a",
+                "family_old__sm100a",
+                stale_sources=True,
+                op="family",
+            )
+            with tempfile.TemporaryDirectory() as ops:
+                os.makedirs(os.path.join(ops, "family"))
+                open(os.path.join(ops, "family", "aot.py"), "w").close()
+                with _patched_generation(ops, declarations=(_ExactDecl, _FamilyDecl)):
+                    gen_aot_lib.main(
+                        [
+                            "--artifacts-dir",
+                            tmpdir,
+                            "--archs",
+                            "sm_100a",
+                            "sm_100f",
+                            "--arch-list",
+                            "10.0",
+                        ]
+                    )
+            objects = _manifest(tmpdir)["objects"]
+        self.assertEqual(len(objects), 2, objects)
+        object_dirs = {os.path.relpath(os.path.dirname(obj), tmpdir) for obj in objects}
+        self.assertEqual(
+            object_dirs,
+            {os.path.join("sm_100a", "exact"), os.path.join("sm_100f", "family")},
+        )
 
     def test_object_list_excludes_the_tie_break_loser(self):
         # Every consumer must use the same surviving set, or the object list carries

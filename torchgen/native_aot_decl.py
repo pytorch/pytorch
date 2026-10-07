@@ -74,20 +74,10 @@ _OPTIONAL_FNS = {
     "cpp_covers": 0,
 }
 
-
-# An sm_XYf target covers known devices with major X and minor >= Y. Keep the
-# target-to-device mapping explicit so runtime-only devices remain represented.
-FAMILY_TARGET_DEVICES = {
-    "sm_100f": ((10, 0), (10, 3), (10, 7)),
-    "sm_103f": ((10, 3), (10, 7)),
-    "sm_110f": ((11, 0),),
-    "sm_120f": ((12, 0), (12, 1)),
-    "sm_121f": ((12, 1),),
-}
-
-# Device capabilities understood by selection and generated routing. Some are
-# runtime-only: they need not be compiler targets when an earlier family target
-# covers them.
+# Documented device capabilities understood by selection and generated routing.
+# Some are runtime-only: they need not be compiler targets when an earlier target
+# covers them. Plain and f targets cover known same-major devices at or above their
+# minor capability; a targets are exact-only.
 KNOWN_DEVICE_CAPABILITIES = (
     (9, 0),
     (10, 0),
@@ -190,18 +180,15 @@ def target_devices(target: str) -> tuple[tuple[int, int], ...]:
     """Known device capabilities on which ``target`` can run."""
     target_cc, suffix = _parse_arch(target)
     if suffix == "a":
-        return (target_cc,)
-    if suffix == "f":
-        devices = FAMILY_TARGET_DEVICES.get(target)
-        if devices is None:
-            raise RuntimeError(
-                f"family-specific target {target} has no entry in FAMILY_TARGET_DEVICES"
-            )
-        return devices
-    major, minor = target_cc
-    return tuple(
-        cc for cc in KNOWN_DEVICE_CAPABILITIES if cc[0] == major and cc[1] >= minor
-    )
+        devices = (target_cc,) if target_cc in KNOWN_DEVICE_CAPABILITIES else ()
+    else:
+        major, minor = target_cc
+        devices = tuple(
+            cc for cc in KNOWN_DEVICE_CAPABILITIES if cc[0] == major and cc[1] >= minor
+        )
+    if not devices:
+        raise RuntimeError(f"target {target} covers no known device capability")
+    return devices
 
 
 def target_can_run_on(target: str, device_cc: tuple[int, int]) -> bool:
@@ -258,31 +245,14 @@ def known_device_capabilities() -> frozenset[tuple[int, int]]:
     return frozenset(KNOWN_DEVICE_CAPABILITIES)
 
 
-def _validate_family_targets() -> None:
-    for target, devices in FAMILY_TARGET_DEVICES.items():
-        if suffix_of(target) != "f":
-            raise AssertionError(f"{target}: family target must have an f suffix")
-        if not devices or len(set(devices)) != len(devices):
-            raise AssertionError(f"{target}: devices must be non-empty and unique")
-        if devices[0] != cc_of(target):
-            raise AssertionError(
-                f"{target}: first device must match the target's compute capability"
-            )
-        target_major, target_minor = cc_of(target)
-        if any(
-            major != target_major or minor < target_minor for major, minor in devices
-        ):
-            raise AssertionError(
-                f"{target}: devices must have major {target_major} and minor >= "
-                f"{target_minor}"
-            )
-        if any(device not in KNOWN_DEVICE_CAPABILITIES for device in devices):
-            raise AssertionError(f"{target}: devices must all be known capabilities")
+def _validate_known_arches() -> None:
+    if len(set(KNOWN_DEVICE_CAPABILITIES)) != len(KNOWN_DEVICE_CAPABILITIES):
+        raise AssertionError("known device capabilities must be unique")
     for target in KNOWN_ARCHES:
         target_devices(target)
 
 
-_validate_family_targets()
+_validate_known_arches()
 
 
 def _check_arity(mod, name: str, want: int, path: str) -> None:

@@ -482,7 +482,19 @@ def should_run() -> bool:
         # no declaration would export nothing after a successful main build.
         # Through a subprocess, not export._detected_arch(), which would
         # initialize CUDA here -- what _torch_probe exists to avoid.
+        from torchgen import native_aot_decl as decl
+
         local = _torch_value("'sm_%d%d' % torch.cuda.get_device_capability()")
+        try:
+            local_cc = decl.cc_of(local) if local else None
+        except RuntimeError:
+            local_cc = None
+        if local_cc not in decl.known_device_capabilities():
+            _report(
+                f"skipped (local GPU is {local or 'undetectable'}; native-AOT "
+                f"does not know that device capability)"
+            )
+            return False
         targets = export_mod.targets_for_arches([local]) if local else []
         if not targets:
             _report(
@@ -907,8 +919,9 @@ def main(argv: list[str] | None = None) -> int:
     if arch_list:
         from tools.native_aot import export as export_mod
 
-        # Both: --archs filters the trees, --arch-list is the raw value recorded
-        # in the emitted CMake. Only this caller knows they are one request.
+        # Both: --archs is a coarse tree filter, while --arch-list selects targets
+        # per declaration and is recorded in the emitted CMake. Only this caller
+        # knows they are one request.
         gen += ["--archs", *export_mod.archs_from_cuda_arch_list(arch_list)]
         gen += ["--arch-list", arch_list]
     _run_child(gen, "generating stub sources", cwd=REPO)

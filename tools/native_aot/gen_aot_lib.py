@@ -933,9 +933,9 @@ def main(argv: list[str] | None = None) -> None:
         # -- silently passed everything. Refused here rather than relying on the
         # caller having checked.
         nargs="+",
-        help="restrict generation to these compile-target trees (sm strings). "
-        "Stage 2 passes the targets selected for this build, so a tree left by a "
-        "a different TORCH_CUDA_ARCH_LIST is ignored rather than shipped",
+        help="coarsely restrict generation to compile-target trees selected by any "
+        "declaration. --arch-list narrows each declaration to its own targets, so "
+        "trees left by another build are ignored rather than shipped",
     )
     parser.add_argument(
         "--dsl-runtime",
@@ -946,9 +946,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--arch-list",
         default=None,
-        help="the raw TORCH_CUDA_ARCH_LIST this generation is for, recorded as a "
-        "comment in the emitted CMake. Passed by stage 2; omitted for a hand run, "
-        "which records no claim rather than one it never consulted",
+        help="the raw TORCH_CUDA_ARCH_LIST this generation is for. It selects "
+        "targets per declaration and is recorded in the emitted CMake. Passed by "
+        "stage 2; omitted for a hand run, which records no claim rather than one "
+        "it never consulted",
     )
     parser.add_argument(
         "--allow-stale",
@@ -961,6 +962,12 @@ def main(argv: list[str] | None = None) -> None:
 
     from tools.native_aot import export as export_mod
 
+    build_archs = (
+        export_mod.build_arches_from_cuda_arch_list(args.arch_list)
+        if args.arch_list is not None
+        else None
+    )
+
     # Artifact dirs are named by decl_id (a family module under one ops/<dir>
     # produces several), so map them back by scanning every aot.py.
     by_id = {}
@@ -970,7 +977,16 @@ def main(argv: list[str] | None = None) -> None:
             for d in decl.load_declarations(path):
                 # Keep the real source path: a family module's decl_ids do not name
                 # their own directory, so it cannot be reconstructed from them.
-                by_id[decl.decl_id(d)] = (d, os.path.relpath(path, REPO))
+                selected = (
+                    None
+                    if build_archs is None
+                    else frozenset(export_mod.targets_for_declaration(d, build_archs))
+                )
+                by_id[decl.decl_id(d)] = (
+                    d,
+                    os.path.relpath(path, REPO),
+                    selected,
+                )
 
     if not os.path.isdir(args.artifacts_dir):
         # Zero declarations => export wrote nothing and never created
@@ -1041,7 +1057,7 @@ def main(argv: list[str] | None = None) -> None:
     # declaration has passed its refusals; see the commit step after the loop.
     pending: list[tuple[str, str, str, int]] = []
     for entry, art_dirs in sorted(dirs_by_id.items()):
-        d, decl_path = by_id.get(entry, (None, ""))
+        d, decl_path, selected_targets = by_id.get(entry, (None, "", None))
         if d is None:
             # Orphaned artifact dir (declaration renamed or removed): its
             # generated .cpp references a stub that no longer exists, so delete
@@ -1091,6 +1107,18 @@ def main(argv: list[str] | None = None) -> None:
                         f"delete this directory to reclaim the disk."
                     )
             continue
+        if selected_targets is not None:
+            selected_dirs = []
+            for one_dir in art_dirs:
+                target = os.path.basename(os.path.dirname(one_dir))
+                if target in selected_targets:
+                    selected_dirs.append(one_dir)
+                else:
+                    print(
+                        f"{entry}: {target} is not selected for this declaration, "
+                        f"ignoring its artifacts"
+                    )
+            art_dirs = selected_dirs
         sidecars = []
         # Across every target dir this declaration exported into.
         for one_dir in art_dirs:

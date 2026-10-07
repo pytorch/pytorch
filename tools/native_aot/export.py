@@ -353,6 +353,11 @@ def _targets_for_declaration(d, build_archs: dict[str, tuple[int, int]]) -> list
     return out
 
 
+def targets_for_declaration(d, archs) -> list[str]:
+    """One declaration's AOT targets for supported device architectures."""
+    return _targets_for_declaration(d, _resolved_build_arches(archs))
+
+
 def targets_for_arches(archs, ops_filter=None) -> list[str]:
     """All per-op AOT targets selected for supported device architectures."""
     build_archs = _resolved_build_arches(archs)
@@ -616,7 +621,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--arch",
-        nargs="*",
+        nargs="+",
         default=None,
         metavar="SM",
         help="device architecture(s) supported by the build, e.g. --arch sm_90 "
