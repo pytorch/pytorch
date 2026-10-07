@@ -196,6 +196,14 @@ pool3d_backward_shape_check(
   if (indices.has_value()) {
     check_trailing_dim_sizes(*indices, ndim, {nslices, otime, oheight, owidth});
   }
+
+  if (ndim == 5) {
+    const int64_t batchSize = input.size(0);
+    check_dim_size(gradOutput, ndim, 0, batchSize);
+    if (indices.has_value()) {
+      check_dim_size(*indices, ndim, 0, batchSize);
+    }
+  }
 }
 
 // TODO(#196230): remove this alias once the torch-xpu-ops pin in
