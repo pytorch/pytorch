@@ -694,13 +694,14 @@ def binary_cross_entropy_backward(
 
 @register_decomposition(aten.soft_margin_loss)
 @out_wrapper()
-@pw_cast_for_opmath
 def soft_margin_loss(
     input: Tensor,
     target: Tensor,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    loss = torch.log1p(torch.exp(-input * target))
+    # Eager returns a tensor with input's dtype, so compute in the promoted
+    # dtype but cast the result back to input.dtype before reducing.
+    loss = torch.log1p(torch.exp(-input * target)).to(input.dtype)
     return apply_loss_reduction(loss, reduction)
 
 

@@ -5310,6 +5310,23 @@ for dtype in (torch.int32, torch.int64):
             check_lowp=True,
         )
 
+    def test_soft_margin_loss_mixed_dtype(self):
+        def fn(x, target):
+            return torch.nn.functional.soft_margin_loss(
+                x.sum(dim=1), target, reduction="none"
+            )
+
+        x = torch.tensor(
+            [[0.25, 0.5], [-0.5, 0.25]], dtype=torch.float16, device=self.device
+        )
+        target = torch.tensor([1.0, -1.0], dtype=torch.float32, device=self.device)
+
+        expected = fn(x, target)
+        actual = torch.compile(fn)(x, target)
+        self.assertEqual(expected.dtype, torch.float16)
+        self.assertEqual(actual.dtype, expected.dtype)
+        self.assertEqual(actual, expected)
+
     def test_mm_mixed_dtype(self):
         def fn(a, b):
             return torch.mm(a, b)
