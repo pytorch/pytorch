@@ -4961,6 +4961,36 @@
       ]
     }
   ],
+  "GB1586": [
+    {
+      "Gb_type": "__init__ called through a builtin class",
+      "Context": "{cls.__name__}.__init__ on {obj}",
+      "Explanation": "Dynamo does not support {cls.__name__}.__init__ on an instance of the subclass {obj.python_type_name()}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3832": [
+    {
+      "Gb_type": "bytearray.__init__ on existing bytearray",
+      "Context": "bytearray.__init__ {self}",
+      "Explanation": "Dynamo does not model re-initializing a bytearray in place.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4706": [
+    {
+      "Gb_type": "metaclass __init__ on existing class",
+      "Context": "tp_init_impl {self}",
+      "Explanation": "Dynamo does not trace __init__ of metaclass {type(self.value).__name__}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0285": [
     {
       "Gb_type": "unsupported arguments to torch.accelerator.current_stream",
