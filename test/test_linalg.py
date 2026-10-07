@@ -5119,12 +5119,14 @@ class TestLinalg(TestCase):
 
     @onlyAccelerator
     @dtypes(torch.float)
-    def test_triangular_solve_large(self, device, dtype):
+    @parametrize("bs", [1, 2])
+    def test_triangular_solve_large(self, device, dtype, bs):
         # Repro for https://github.com/pytorch/pytorch/issues/79191
-        # B.size(-1) > 524280 triggers the cuBLAS large-input workaround on CUDA < 12.1.
-        # batch sizes >= 2 guard a regression where the batched path returned silently wrong results.
-        A = torch.randn(2, 2, 2, device=device, dtype=dtype).tril_()
-        B = torch.randn(2, 2, 524281, device=device, dtype=dtype)
+        # B.size(-1) > 524280 triggers the cuBLAS large-input workaround on CUDA < 12.1,
+        # which returned silently wrong results for bs >= 2. See
+        # https://github.com/pytorch/pytorch/pull/187717
+        A = torch.randn(bs, 2, 2, device=device, dtype=dtype).tril_()
+        B = torch.randn(bs, 2, 524281, device=device, dtype=dtype)
         X = torch.linalg.solve_triangular(A, B, upper=False)
         self.assertEqual(A @ X, B)
 

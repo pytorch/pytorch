@@ -222,12 +222,12 @@ void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left
   constexpr auto max_batch_size = 524280;
   if (B.size(-1) > max_batch_size) {
     auto n_chunks = (B.size(-1) + max_batch_size - 1) / max_batch_size; // ceildiv
-    auto splits = B.chunk(n_chunks, /*dim=*/-1);
-    for (const Tensor& b : splits) {
-      // Each chunk is a non-contiguous view of B, but get_device_pointers()
-      // assumes the matrices are tightly packed (batch stride == rows*cols).
-      // Clone into a contiguous column-major tensor so the device pointers are
-      // computed correctly and b_cm has the layout cuBLAS expects.
+    auto chunks = B.chunk(n_chunks, /*dim=*/-1);
+    for (const Tensor& b : chunks) {
+      // Each matrix in a chunk still has the layout cuBLAS expects, but
+      // get_device_pointers() infers the batch stride from the last two sizes, so
+      // it would use the chunk's number of columns instead of B's. Cloning the
+      // chunk makes that inference correct.
       Tensor b_cm = cloneBatchedColumnMajor(b);
       triangular_solve_batched_cublas(A, b_cm, left, upper, transpose, unitriangular);
       // Copy solution back into the output view
