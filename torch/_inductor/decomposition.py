@@ -484,6 +484,8 @@ def bmm(
     batch2: torch.Tensor,
     out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
+    if out_dtype is not None:
+        return NotImplemented
     # Outer-product specialization: [B, M, 1] x [B, 1, N] -> [B, M, N].
     # This avoids introducing a reduction and maps directly to broadcasted mul.
     if statically_known_true(self.shape[2] == 1) and statically_known_true(
@@ -575,6 +577,8 @@ def mm(
     input2: torch.Tensor,
     out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
+    if out_dtype is not None:
+        return NotImplemented
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
 
