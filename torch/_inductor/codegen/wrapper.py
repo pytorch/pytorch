@@ -896,6 +896,84 @@ class CommentLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class SizeAssertLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    name: str
+    size: list[sympy.Expr]
+    stride: list[sympy.Expr]
+    op_name: str | None = None
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        size_str = self.wrapper.codegen_python_shape_tuple(self.size)
+        stride_str = self.wrapper.codegen_python_shape_tuple(self.stride)
+        if self.op_name is not None:
+            code.writeline(
+                f"assert_size_stride({self.name}, {size_str}, {stride_str}, {self.op_name!r})"
+            )
+        else:
+            code.writeline(f"assert_size_stride({self.name}, {size_str}, {stride_str})")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_size_assert
+
+
+@dataclasses.dataclass
+class AlignmentAssertLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    name: str
+    align_bytes: int
+    op_name: str | None = None
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline(
+            f"assert_alignment({self.name}, {self.align_bytes}, {self.op_name!r})"
+        )
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_alignment_assert
+
+
+@dataclasses.dataclass
+class NanAssertLine(WrapperLine):
+    """
+    Checks for both NaN and Inf values.  This matches the existing behavior of
+    PythonWrapperCodegen.codegen_input_nan_asserts() which checks both despite
+    the config flag being named ``nan_asserts``.
+    """
+
+    wrapper: PythonWrapperCodegen
+    name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline(f"assert not {self.name}.isnan().any().item()")
+        code.writeline(f"assert not {self.name}.isinf().any().item()")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_nan_assert
+
+
+@dataclasses.dataclass
+class ScalarAssertLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    scalar: sympy.Basic
+    msg: str
+    output_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        sizevar = self.wrapper.codegen_python_sizevar(self.scalar, simplify=False)
+        code.writeline(f"if not ({sizevar}):")
+        code.writeline(f"    raise RuntimeError({repr(self.msg)})")
+        code.writeline(f"{self.output_name} = None")
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_scalar_assert
+
+
+@dataclasses.dataclass
 class DynamicScalarLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: ir.DynamicScalar

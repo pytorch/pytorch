@@ -273,6 +273,8 @@ class MultiKernel:
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
 
     def codegen_nan_check(self):
+        from .wrapper import NanAssertLine
+
         wrapper = V.graph.wrapper_code
         seen: OrderedSet[str] = OrderedSet()
         for k in self.kernels:
@@ -282,10 +284,7 @@ class MultiKernel:
                     continue
                 seen.add(arg)
                 if isinstance(precompile_arg, TensorArg):
-                    line = f"assert not {arg}.isnan().any().item()"
-                    wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
-                    wrapper.writeline(line)
+                    wrapper.writeline(NanAssertLine(wrapper=wrapper, name=arg))
 
     @property
     def removed_buffers(self):

@@ -9662,8 +9662,17 @@ class AssertScalar(ExternKernel):
         # that it's true).  But we're code generating the actual runtime assert here!!
         symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
         if V.graph.fx_wrapper:
-            # TODO fix
-            pass
+            # Local import: wrapper.py imports ir.py, so module-level would be circular.
+            from .codegen.wrapper import ScalarAssertLine
+
+            wrapper.writeline(
+                ScalarAssertLine(
+                    wrapper=wrapper,
+                    scalar=self.scalar,
+                    msg=self.msg,
+                    output_name=self.get_name(),
+                )
+            )
         elif V.graph.cpp_wrapper:
             symbol_str = f"std::to_string({symbol})"
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
