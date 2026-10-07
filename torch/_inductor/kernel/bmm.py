@@ -35,6 +35,7 @@ from .mm_common import (
     is_batch_stride_largest_or_zero,
     mm_args,
     use_native_matmul,
+    zero_addmm_input,
 )
 
 
@@ -200,7 +201,10 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
             mat1 = L.unsqueeze(mat1, -1)
             mat2 = L.unsqueeze(mat2, 1)
-            return L.sum_(L.mul(mat1, mat2), axis=2)
+            # L.sum_ promotes integers to int64 (mirroring torch.sum), but
+            # aten.bmm promises the input dtype (or out_dtype when one is
+            # given), so cast back to whichever the op promised.
+            return L.to_dtype(L.sum_(L.mul(mat1, mat2), axis=2), out_dtype or dtype)
 
         def is_valid_to_require_contiguous(t):
             if not ir.is_storage_and_layout(t):
@@ -387,6 +391,10 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
     use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+    template_inp = inp
+    if not use_bf16x9 and beta == 0:
+        template_inp = zero_addmm_input(inp, mat1, mat2)
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
             arg1 = 0
@@ -446,6 +454,13 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+        if beta == 0:
+            # bmm_template reads inp, and autotuning benchmarks every baddbmm
+            # choice on the same inputs, so ATen gets the zeros too.
+            *_, inp = mm_args(mat1, mat2, template_inp, layout=layout)
+            kernel_inputs = MMKernelInputs(
+                [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+            )
 
     # Single unified call for all templates
     choices.extend(

@@ -5,6 +5,7 @@ import gc
 import importlib
 import os
 import pickle
+import subprocess
 import sys
 import tempfile
 import types
@@ -172,6 +173,46 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertEqual(_collapse_device_types(frozenset(("mps", "xpu"))), "xpu")
         self.assertEqual(_collapse_device_types(frozenset(("hpu", "mps"))), "hpu")
 
+    def test_code_source_walk_skips_non_code_constants(self):
+        # Python 3.10 has no co_qualname, so the walk visits every constant of the
+        # module's functions. b"" and 2**61 - 1 both hash to 0, and putting both in
+        # one set compares them: a BytesWarning, which CI's python -bb raises. (0
+        # would too, but newer Pythons keep small ints out of co_consts.)
+        source = """
+def f():
+    a = b""
+    b = 2305843009213693951
+
+    class C:
+        def g(self):
+            return a, b
+
+    return C
+"""
+        script = """
+import sys
+from unittest import mock
+
+import torch._dynamo.package as package
+import bbmod
+
+code = bbmod.f().g.__code__
+with mock.patch.object(package.sys, "version_info", (3, 10, 0)):
+    name, path = package._get_code_source(code)
+print(eval(f"bbmod.{name}.{path}") is code)
+"""
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "bbmod.py"), "w") as f:
+                f.write(source)
+            out = subprocess.run(
+                [sys.executable, "-bb", "-c", script],
+                cwd=d,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.strip(), "True")
+
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
         # stand-in for a dynamic-shape cuda capture, whose first meta value is a
@@ -233,7 +274,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
         # frozenset(), one cpu-only recompile after a reload re-snapshotted the
         # entry as "cpu" and the cuda code still in it lost its GPU load check.
         # The graphs are fake and never run; is_available is patched so
-        # check_versions accepts the cuda entry on a host without one.
+        # check_versions accepts the cuda entry on a host without one. Save and
+        # reload share the patch so both SystemInfo snapshots see the same
+        # accelerator state.
         with FakeTensorMode():
             cuda = torch.empty(2, device="cuda")
             cpu = torch.empty(2)
@@ -248,9 +291,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         package = CompilePackage(fn)
         package.update_device_type(cuda_graph)
-        saved = pickle.loads(pickle.dumps(package.cache_entry()))
-        self.assertEqual(saved.device_type, "cuda")
         with patch.object(torch.cuda, "is_available", return_value=True):
+            saved = pickle.loads(pickle.dumps(package.cache_entry()))
+            self.assertEqual(saved.device_type, "cuda")
             package = CompilePackage(fn, dynamo=saved)
         self.assertEqual(package.cache_entry().device_type, "cuda")
         package.update_device_type(cpu_graph)
