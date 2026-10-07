@@ -69,8 +69,9 @@ struct AsyncGemmConfig
     static constexpr bool PermuteB = false;
 };
 
-// The kernel is only instantiated for gfx942/gfx950; other arches in
-// PYTORCH_ROCM_ARCH get an empty body instead of compiling the CK GEMM.
+// ck_tile does not compile for all arches, so caffe2/CMakeLists.txt builds
+// the device code of this file only for gfx942/gfx950. If the file is built
+// for another arch, the kernel body is empty.
 template <typename Kernel>
 struct AsyncInputMMKernel
 {
