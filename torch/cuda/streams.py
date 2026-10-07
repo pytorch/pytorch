@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ctypes
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar as _TypeVar
 
 import torch
 from torch._utils import _dummy_type
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from typing import Any
 
 
-_T = TypeVar("_T")
+_T = _TypeVar("_T")
 
 
 if not hasattr(torch._C, "_CudaStreamBase"):
