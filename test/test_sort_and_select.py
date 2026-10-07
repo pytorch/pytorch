@@ -33,15 +33,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class TestSortAndSelectCPU(TestCase):
-    def test_complex_unsupported_cpu(self, device):
-        x = torch.tensor([3.0 + 2j, 4.0 + 3j], device=device)
-        with self.assertRaisesRegex(
-            TypeError, " Sort does not support complex dtypes on CPU"
-        ):
-            torch.sort(input=x)
-
-
 class TestSortAndSelect(TestCase):
     def test_sort_stable_none(self):
         # Called sort with stable=None used to trigger an assertion
@@ -58,6 +49,23 @@ class TestSortAndSelect(TestCase):
 
 
 class TestSortAndSelectDevice(TestCase):
+    def test_sort_complex_unsupported(self, device):
+        x = torch.tensor([1.0 + 1j, 2.0 + 0j], device=device)
+        with self.assertRaisesRegex(TypeError, "Sort does not support complex dtypes"):
+            torch.sort(x)
+
+    def test_topk_complex_unsupported(self, device):
+        x = torch.tensor([1.0 + 1j, 2.0 + 0j], device=device)
+        with self.assertRaisesRegex(TypeError, "topk does not support complex dtypes"):
+            torch.topk(x, 1)
+
+    def test_topk_bool_unsupported(self, device):
+        x = torch.tensor([True, False], device=device)
+        with self.assertRaisesRegex(
+            NotImplementedError, "topk does not support bool dtypes"
+        ):
+            torch.topk(x, 1)
+
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = x.size(1)
         if order == "descending":
@@ -1409,6 +1417,29 @@ class TestSortAndSelectCUDA(TestCase):
                 self.assertEqual(top1, top2)
                 self.assertEqual(idx1, idx2)
 
+    @dtypes(torch.bfloat16, torch.float16, torch.float32)
+    def test_topk_deterministic_ties(self, device, dtype):
+        # Single-block topk on ROCm once ordered tied values by warp arrival (#196177).
+        for cols in (257, 1024):
+            x = torch.randint(0, 4, (256, cols), device=device).to(dtype)
+            x_cpu = x.cpu()
+            for k, largest, sorted_ in product((8, 300), (True, False), (True, False)):
+                if k > cols:
+                    continue
+                msg = f"{cols=} {k=} {largest=} {sorted_=}"
+                _, idx = torch.topk(x, k, largest=largest, sorted=sorted_)
+                for _ in range(10):
+                    rerun = torch.topk(x, k, largest=largest, sorted=sorted_)[1]
+                    self.assertEqual(rerun, idx, msg=msg)
+                if not sorted_:
+                    # Unsorted output is in gather order: indices strictly past the k-th value in
+                    # ascending order, then the lowest indices equal to it.
+                    kth = x_cpu.topk(k, largest=largest).values[:, -1:]
+                    past = x_cpu > kth if largest else x_cpu < kth
+                    rank = torch.where(past, 0, torch.where(x_cpu == kth, 1, 2))
+                    expected = rank.sort(stable=True).indices[:, :k]
+                    self.assertEqual(idx.cpu(), expected, msg=msg)
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @slowTest
     @largeTensorTest("170GB", "cpu")
@@ -1500,7 +1531,6 @@ class TestSortAndSelectCUDA(TestCase):
             )
 
 
-instantiate_device_type_tests(TestSortAndSelectCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestSortAndSelectDevice, globals())
 instantiate_device_type_tests(TestSortAndSelectCUDA, globals(), only_for="cuda")
 
