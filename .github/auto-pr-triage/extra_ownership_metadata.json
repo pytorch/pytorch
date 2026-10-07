@@ -7,5 +7,8 @@
   },
   "nn": {
     "description": "Owns neural-network modules, module behavior, and user-facing torch.nn APIs."
+  },
+  "testcase_refactoring": {
+    "description": "Owns PRs that make tests reusable across hardware backends, including out-of-tree accelerators: device-generic test conversions (instantiate_device_type_tests, torch.accelerator), hw_classification labels, capability-based gating, and device-generic test infrastructure in torch/testing/_internal. Does not own fixes, skips, or tolerance changes for tests on one specific device."
   }
 }
