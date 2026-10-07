@@ -7,10 +7,10 @@ import unittest
 import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
-                                                  TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
+                                                  parametrize, TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
                                                   numpy_to_torch_dtype_dict, skipIfTorchDynamo, HardwareClassification)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests,
-                                                        dtypes, onlyCPU, expectedFailureMeta, skipMeta)
+                                                        dtypes, onlyCPU, onlyOn, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes,
     float_to_corresponding_complex_type_map,
@@ -270,12 +270,6 @@ class TestTypePromotionDevice(TestCase):
             self.assertEqual((bf + scalar).dtype, torch.bfloat16)
             self.assertEqual(scalar + bf, bf + scalar)
 
-        # Note (bcomplex32): Add scalar complex testing back once bcomplex32
-        # is more widely requested.
-        # for scalar in (complex(1, 1), complex(-2, 0), complex(0, -3)):
-        #     self.assertEqual((bf + scalar).dtype, torch.cfloat)
-        #     self.assertEqual(bf + scalar, scalar + bf)
-
         # with tensor
         for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             t = torch.tensor(1, dtype=dtype, device=device)
@@ -294,6 +288,66 @@ class TestTypePromotionDevice(TestCase):
             self.assertEqual(torch.promote_types(dtype, torch.bfloat16), expected_dtype)
             self.assertEqual(torch.promote_types(torch.bfloat16, dtype), expected_dtype)
             self.assertEqual((bf + t).dtype, expected_dtype)
+
+    @parametrize("op_name", ("add", "sub"))
+    @onlyOn(["cpu", "cuda"])
+    def test_bfloat16_complex_scalar_binary_ops(self, device, op_name):
+        contiguous = torch.ones(64, dtype=torch.bfloat16, device=device)
+        noncontiguous = torch.arange(
+            64, dtype=torch.bfloat16, device=device
+        ).reshape(8, 8).t()
+        self.assertFalse(noncontiguous.is_contiguous())
+
+        scalars = (
+            complex(1, 2),
+            torch.tensor(1 + 2j, dtype=torch.complex64, device=device),
+        )
+        op = getattr(operator, op_name)
+        torch_op = getattr(torch, op_name)
+
+        for tensor in (contiguous, noncontiguous):
+            for scalar in scalars:
+                tensor_complex = tensor.to(torch.complex64)
+                scalar_complex = (
+                    scalar.to(torch.complex64)
+                    if isinstance(scalar, torch.Tensor)
+                    else scalar
+                )
+                tensor_scalar_expected = op(tensor_complex, scalar_complex)
+                scalar_tensor_expected = op(scalar_complex, tensor_complex)
+                alpha_expected = torch_op(tensor_complex, scalar_complex, alpha=2)
+                tensor_scalar_result = op(tensor, scalar)
+                scalar_tensor_result = op(scalar, tensor)
+                alpha_result = torch_op(tensor, scalar, alpha=2)
+
+                self.assertEqual(tensor_scalar_result.dtype, torch.bcomplex32)
+                self.assertEqual(scalar_tensor_result.dtype, torch.bcomplex32)
+                self.assertEqual(alpha_result.dtype, torch.bcomplex32)
+                self.assertEqual(tensor_scalar_result.to(torch.complex64), tensor_scalar_expected)
+                self.assertEqual(scalar_tensor_result.to(torch.complex64), scalar_tensor_expected)
+                self.assertEqual(alpha_result.to(torch.complex64), alpha_expected)
+
+        empty = torch.empty(0, dtype=torch.bfloat16, device=device)
+        for scalar in scalars:
+            for result in (
+                op(empty, scalar),
+                op(scalar, empty),
+                torch_op(empty, scalar, alpha=2),
+            ):
+                self.assertEqual(result.shape, empty.shape)
+                self.assertEqual(result.dtype, torch.bcomplex32)
+
+    @parametrize("op_name", ("add_", "sub_"))
+    @onlyOn(["cpu", "cuda"])
+    def test_bfloat16_complex_scalar_inplace(self, device, op_name):
+        tensor = torch.tensor([1, -2, 3], dtype=torch.bfloat16, device=device)
+        scalars = (
+            complex(1, 2),
+            torch.tensor(1 + 2j, dtype=torch.complex64, device=device),
+        )
+        for scalar in scalars:
+            with self.assertRaisesRegex(RuntimeError, "can't be cast to"):
+                getattr(tensor.clone(), op_name)(scalar)
 
     def test_complex_half(self, device):
         try:
