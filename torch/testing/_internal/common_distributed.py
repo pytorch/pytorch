@@ -1956,8 +1956,11 @@ class MultiProcContinuousTest(TestCase):
         # Ensure all the ranks use the same seed.
         common_utils.set_rng_seed()
 
-        # Run the test function
-        test_fn(**kwargs)
+        # Workers call the test directly, so unittest won't run cleanups.
+        try:
+            test_fn(**kwargs)
+        finally:
+            self.doCleanups()
 
     @classmethod
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):

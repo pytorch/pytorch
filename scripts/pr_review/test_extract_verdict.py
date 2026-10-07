@@ -21,6 +21,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).with_name("extract_verdict.py")
@@ -31,18 +32,21 @@ sys.path.insert(0, str(SCRIPT.parent))
 from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F401
 from extract_verdict import (
     _is_repo_path,  # noqa: E402
+    _XREF,
     analysis_view,
     build,
     check_charset,
     check_no_encoded_blob,
     downgrade,
     failure,
+    is_neutral_prose,
     MAX_DROPPED_TRACKED,
     MAX_PATH,
     MAX_SUMMARY,
     neutralize,
     neutralize_path,
     parse_diff,
+    published_findings,
     Rejected,
     sanitize_findings,
 )
@@ -1340,6 +1344,46 @@ class TestTheAnalysisViewIsLinear(unittest.TestCase):
         half = base64.b64encode(bytes(range(256)) * 4).decode()[:70]
         with self.assertRaises(Rejected):
             check_no_encoded_blob(f"{half}&lt;i&gt;&lt;/i&gt;{half}", "t")
+
+
+class TestChainedCrossReferencesAreAllDefused(unittest.TestCase):
+    def test_every_link_in_a_chain_is_defused(self):
+        out = neutralize("pytorch/pytorch#199409/test-infra#8972 and a/b#1/c#2/d#3")
+        self.assertEqual(
+            out,
+            "pytorch/pytorch\\# 199409/test-infra\\# 8972 and a/b\\# 1/c\\# 2/d\\# 3",
+        )
+        self.assertIsNone(_XREF.search(out))
+
+
+class TestPathTrailingNewline(unittest.TestCase):
+    def test_a_trailing_newline_is_not_a_repo_path(self):
+        self.assertFalse(_is_repo_path("torch/x.py\n"))
+
+
+class TestBuildHoldsItsOutputToThePublishCheck(unittest.TestCase):
+    """The publish job re-checks with these predicates; build fails the same way."""
+
+    TOUCHED = {"src/app.py": {11, 12, 13, 14}, "README.md": {1, 2}}
+
+    def test_a_summary_failing_the_check_rejects_the_review(self):
+        with mock.patch("extract_verdict.is_neutral_prose", return_value=False):
+            with self.assertRaisesRegex(Rejected, "publish-side check"):
+                build(ok_payload(), self.TOUCHED)
+
+    def test_a_finding_failing_the_check_is_a_reported_drop(self):
+        with mock.patch("extract_verdict.is_publishable_finding", return_value=False):
+            kept, dropped, total = sanitize_findings(
+                ok_payload()["findings"], self.TOUCHED
+            )
+        self.assertEqual(kept, [])
+        self.assertEqual(total, 1)
+        self.assertEqual(dropped[0]["reason"], "failed_publish_check")
+
+    def test_ordinary_output_passes_the_check(self):
+        result = build(ok_payload(), self.TOUCHED)
+        self.assertEqual(published_findings(result), result["findings"])
+        self.assertTrue(is_neutral_prose(result["summary"], MAX_SUMMARY))
 
 
 if __name__ == "__main__":
