@@ -18,7 +18,7 @@ from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import _storage, tile
 from .kernel_general import _flat, _launch, ReduceBlock
-from .traits import WARP
+from .traits import WARP, welford_nouts
 
 
 _compile = _L.compile_kernel
@@ -66,7 +66,11 @@ def select_ordered_col_config(
     rows: int | None = None,
     full_tiles: bool = False,
 ) -> OrderedColConfig | None:
-    cfg = _ORDERED_COL_CONFIGS.get(cc, {}).get(trait_key)
+    configs = _ORDERED_COL_CONFIGS.get(cc, {})
+    welford = welford_nouts(trait_key)
+    cfg = configs.get(trait_key)
+    if cfg is None and welford:
+        cfg = configs.get("varmean0" if welford == 2 else "var0")
     if (
         cfg is None
         or dtype not in (torch.float32, torch.bfloat16)
@@ -75,9 +79,7 @@ def select_ordered_col_config(
         or partials < 1
     ):
         return None
-    fields = (
-        3 if trait_key in ("var0", "varmean0") else 2 if trait_key == "argmaxi32" else 1
-    )
+    fields = 3 if welford else 2 if trait_key == "argmaxi32" else 1
     output = (
         dtype
         if trait_key == "amax" or fields == 3
@@ -85,7 +87,7 @@ def select_ordered_col_config(
         if fields == 2
         else torch.float32
     )
-    nouts = 2 if trait_key == "varmean0" else 1
+    nouts = max(welford, 1)
     if field_bits != (32,) * fields or out_dtypes != (output,) * nouts:
         return None
     if partials * columns < WARP * cfg.min_blocks:
@@ -115,6 +117,7 @@ class ColConfig(NamedTuple):
     combine_columns: int = 0
     unroll: int = 4
     kernel_order: str = "linear"
+    group: int = 1
 
 
 @functools.lru_cache(maxsize=4096)
@@ -972,6 +975,7 @@ def _reduce_col_tile(
         batched_col=x.dim() == 3,
         pc=pc,
         unroll=cfg.unroll,
+        col_group=cfg.group,
     )
     parts = (
         []
