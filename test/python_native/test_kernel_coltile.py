@@ -183,6 +183,34 @@ class TestOrderedColDevice(TestCase):
             got[0].flatten().view(torch.uint8), reference[0].view(torch.uint8)
         )
 
+    def test_split_plan_matches_the_indexed_tree(self, device):
+        """Preserve each row's inner-tree DAG across ordered column partials."""
+        rows, columns = 100003, 32
+        x = torch.randn(rows, columns, device=device)
+        trait = T.SumOps(acc=cutlass.Float32)
+        got = ct.reduce_ordered_col(
+            trait,
+            "ordered_split",
+            x,
+            [torch.float32],
+            1,
+            allow_split=True,
+        )
+        reference = kg._try_indexed_itree(
+            trait,
+            "ordered_split_reference",
+            x,
+            [(rows, columns)],
+            [(columns, 1)],
+            columns,
+            rows,
+            [torch.float32],
+            1,
+        )
+        self.assertIsNotNone(got)
+        self.assertIsNotNone(reference)
+        self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
+
 
 instantiate_device_type_tests(TestOrderedColDevice, globals(), only_for="cuda")
 
