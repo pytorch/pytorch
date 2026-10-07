@@ -30,6 +30,9 @@ if TYPE_CHECKING:
 
 # Set where the test runs; xdist ships it to the controller with the report.
 _DECLARED_CASE_NAME = "_torchci_declared_case_name"
+# Where run_test.py reads test/conftest.py's stepcurrent files; the report's path
+# and in-flight run (recovery.finish) are published next to them.
+STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 
 _disabled = False
 _writer: ReportWriter | None = None
@@ -86,9 +89,12 @@ class _Run:
     failed_phase: str = ""
     skipped: bool = False
     wasxfail: bool = False
+    crashed: bool = False
     outcome_summary: str = ""
 
     def outcome(self) -> str:
+        if self.crashed:
+            return "crashed"
         if self.failed_phase:
             return "failed" if self.failed_phase == "call" else "error"
         if self.skipped:
@@ -97,23 +103,39 @@ class _Run:
 
 
 class ReportWriter:
-    def __init__(self, path: str, report_uuid: str) -> None:
-        self.path = path
+    def __init__(self, path: str, report_uuid: str, config: Config) -> None:
+        # run_test.py reads the published path from another working directory.
+        self.path = os.path.abspath(path)
         self.report_uuid = report_uuid
+        self.config = config
         self.file: IO[str] | None = None
         self.runs: dict[str, _Run] = {}
         self.rerun_numbers: Counter[str] = Counter()
         self.declared_case_names: dict[str, str] = {}
+        # Only run_test.py's retries read what's published, and they never use xdist.
+        self.xdist = bool(config.getoption("numprocesses", default=None))
+        self.cache: Any = None
+        self.cache_dir = ""
+
+    def _publish(self, name: str, value: Any) -> None:
+        if self.cache is not None:
+            self.cache.set(f"{self.cache_dir}/{name}", value)
 
     def pytest_sessionstart(self, session: Session) -> None:
         if _disabled:
             return
         with _guard():
+            # Read here: test/conftest.py sets it from --sc/--rs in its pytest_configure.
+            key = self.config.getoption("stepcurrent", default=None)
+            if key and not self.xdist:
+                self.cache = getattr(self.config, "cache", None)
+                self.cache_dir = f"{STEPCURRENT_CACHE_DIR}/{key}"
             record = report.report_record(self.report_uuid, environment.capture())
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             self.file = open(self.path, "w", encoding="utf-8", newline="\n")  # noqa: SIM115
             self.file.write(report.line(record))
             self.file.flush()
+            self._publish("report_path", self.path)
 
     def pytest_collection_finish(self, session: Session) -> None:
         if _disabled:
@@ -130,7 +152,15 @@ class ReportWriter:
         with _guard():
             names = self.declared_case_names
             declared = names.get(nodeid) or report.fallback_declared_case_name(nodeid)
-            self.runs[nodeid] = _Run(time.time(), declared)
+            started = time.time()
+            self.runs[nodeid] = _Run(started, declared)
+            inflight = {
+                "nodeid": nodeid,
+                "declared_case_name": declared,
+                "started_at": started,
+                "rerun_number": self.rerun_numbers[nodeid],
+            }
+            self._publish("report_inflight", inflight)
 
     # Before test/conftest.py's LogXMLReruns rewrites skip longreprs.
     @pytest.hookimpl(tryfirst=True)
@@ -141,8 +171,19 @@ class ReportWriter:
             self._logreport(report)
 
     def _logreport(self, test_report: TestReport) -> None:
-        run = self.runs.get(test_report.nodeid)
-        if run is None or test_report.when not in ("setup", "call", "teardown"):
+        nodeid = test_report.nodeid
+        if test_report.when not in ("setup", "call", "teardown"):
+            # xdist's report for a test whose worker crashed: when "???", no times,
+            # and nothing else follows for this run.
+            fallback = _Run(time.time(), report.fallback_declared_case_name(nodeid))
+            run = self.runs.setdefault(nodeid, fallback)
+            run.ended = time.time()
+            run.crashed = True
+            run.outcome_summary = str(test_report.longrepr)
+            self._finish(nodeid, run)
+            return
+        run = self.runs.get(nodeid)
+        if run is None:
             return
         if test_report.when == "setup":
             run.started = test_report.start
@@ -166,7 +207,7 @@ class ReportWriter:
             run.wasxfail = hasattr(test_report, "wasxfail")
         # A rerun attempt ends at its "rerun" report; others end at teardown.
         if test_report.outcome == "rerun" or test_report.when == "teardown":
-            self._finish(test_report.nodeid, run)
+            self._finish(nodeid, run)
 
     def _finish(self, nodeid: str, run: _Run) -> None:
         del self.runs[nodeid]
@@ -188,9 +229,17 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
+            # xdist stops at -x/--maxfail right after the failing report, so that
+            # run's teardown never arrives; its outcome is already known.
+            for nodeid, run in list(self.runs.items()):
+                if run.failed_phase:
+                    self._finish(nodeid, run)
             if self.file is not None:
                 self.file.close()
                 self.file = None
+            # A run still open was interrupted; run_test.py records it.
+            if not self.runs:
+                self._publish("report_inflight", None)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -223,5 +272,5 @@ def pytest_configure(config: Config) -> None:
         if directory and not worker and not config.getoption("collectonly"):
             report_uuid = str(uuid.uuid4())
             path = report.report_path(directory, report_uuid)
-            _writer = ReportWriter(path, report_uuid)
+            _writer = ReportWriter(path, report_uuid, config)
             config.pluginmanager.register(_writer, "torchci_report_writer")

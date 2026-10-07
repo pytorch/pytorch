@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 from typing import Any, NamedTuple
 
 
@@ -87,6 +88,13 @@ def run_record(
         "ended_at": int(ended * 1000),
         "properties": {},
     }
+
+
+def exit_summary(exit_code: int) -> str:
+    """The outcome summary of a run whose process exited with ``exit_code``."""
+    signals = {s.value: s.name for s in signal.Signals}
+    name = f" ({signals[-exit_code]})" if -exit_code in signals else ""
+    return f"the test process exited with code {exit_code}{name}"
 
 
 def _json_safe(value: Any) -> Any:

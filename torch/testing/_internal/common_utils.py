@@ -1261,18 +1261,12 @@ def wait_for_process(p, timeout=None):
             p.kill()
             raise
     except subprocess.TimeoutExpired:
-        # send SIGINT to give pytest a chance to make xml
+        # Send SIGINT so pytest can write its reports, but keep the timeout even if
+        # pytest exits in the grace period.
         p.send_signal(signal.SIGINT)
-        exit_status = None
         try:
-            exit_status = p.wait(timeout=5)
-        # try to handle the case where p.wait(timeout=5) times out as well as
-        # otherwise the wait() call in the finally block can potentially hang
+            p.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            pass
-        if exit_status is not None:
-            return exit_status
-        else:
             p.kill()
         raise
     except:
@@ -1585,7 +1579,18 @@ def run_tests(argv=None):
 
             timeout = None if RERUN_DISABLED_TESTS else 15 * 60
 
+            started = time.time()
             exitcode, _ = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
+
+            if TEST_SAVE_RUN_JSONL and USE_PYTEST:
+                # A child that crashed or timed out couldn't record its test.
+                try:
+                    from torch.testing._internal.torchci import recovery
+
+                    report_dir = os.path.join(TEST_SAVE_RUN_JSONL, sanitize_test_filename(argv[0]))
+                    recovery.record_dead_subprocess(report_dir, test_case_full_name, exitcode, started)
+                except Exception as e:
+                    print(f"torchci: could not record the test: {e!r}", file=sys.stderr)
 
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.

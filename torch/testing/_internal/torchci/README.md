@@ -65,8 +65,8 @@ physical RAM; it is omitted where neither is available.
 | `language` | string | `python` |
 | `declared_case_name` | string | Source test name before generated device, dtype, op, or parameter suffixes |
 | `rerun_number` | int | Execution number within one process, starting at `0` |
-| `outcome` | string | `passed`, `failed`, `error`, `skipped`, `xfailed`, or `xpassed` |
-| `outcome_summary` | string | Failure, skip, or xfail summary; otherwise `""` |
+| `outcome` | string | `passed`, `failed`, `error`, `skipped`, `xfailed`, `xpassed`, `crashed`, or `timed_out` |
+| `outcome_summary` | string | Failure, skip, xfail, crash, or timeout summary; otherwise `""` |
 | `started_at` | int | Setup start as Unix epoch milliseconds |
 | `ended_at` | int | Last phase stop as Unix epoch milliseconds |
 | `properties` | object | Empty in version 0.1 |
@@ -74,6 +74,20 @@ physical RAM; it is omitted where neither is available.
 Pytest reruns and flakefinder repeats within one process count up
 `rerun_number`. A test's subtests share its run line, and a failing subtest fails
 it.
+
+## Crash recording
+
+A process that dies can't record the test it was running, so whoever sees it die
+records that run as `crashed`, or `timed_out` after a timeout:
+
+| Process | Recorded by |
+|---|---|
+| xdist worker | The xdist controller, from xdist's crash report |
+| `run_test.py` retry process | `run_test.py`, from the in-flight run the writer publishes in the stepcurrent cache (`recovery.finish`) |
+| `run_tests --subprocess` child | The parent, in a report of its own (`recovery.record_dead_subprocess`) |
+
+Each retry process writes its own file, so its `rerun_number` starts at 0. A crash
+followed by a passing retry inside `retry_shell` isn't recorded.
 
 ## Versioning
 
