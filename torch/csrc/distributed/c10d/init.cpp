@@ -384,7 +384,8 @@ class PythonStore : public ::c10d::Store {
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "append");
     if (!fn) {
-      return Store::append(key, value);
+      Store::append(key, value);
+      return;
     }
     // Call function with a py::bytes object for the value.
     fn(key, toPyBytes(value));
@@ -417,7 +418,8 @@ class PythonStore : public ::c10d::Store {
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "multi_set");
     if (!fn) {
-      return Store::multiSet(keys, values);
+      Store::multiSet(keys, values);
+      return;
     }
 
     fn(keys, toPyBytes(values));
@@ -656,7 +658,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                  bool skip_all_reduce_unused_params,
                  bool use_python_reducer,
                  std::vector<int64_t> bucket_bytes_cap_list,
-                 bool batched_grad_copy) {
+                 bool batched_grad_copy,
+                 bool lazy_bucket_allocation) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -674,7 +677,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                     skip_all_reduce_unused_params,
                     use_python_reducer,
                     std::move(bucket_bytes_cap_list),
-                    batched_grad_copy);
+                    batched_grad_copy,
+                    lazy_bucket_allocation);
               }),
           py::arg("params"),
           py::arg("bucket_indices"),
@@ -690,7 +694,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("skip_all_reduce_unused_params") = false,
           py::arg("use_python_reducer") = false,
           py::arg("bucket_bytes_cap_list") = std::vector<int64_t>(),
-          py::arg("batched_grad_copy") = false)
+          py::arg("batched_grad_copy") = false,
+          py::arg("lazy_bucket_allocation") = false)
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
@@ -809,17 +814,17 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_check_reducer_finalized",
-          [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
+          [](::c10d::Reducer& reducer) { reducer.check_finalized(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_reset_state",
-          [](::c10d::Reducer& reducer) { return reducer.reset_state(); },
+          [](::c10d::Reducer& reducer) { reducer.reset_state(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_update_process_group",
           [](::c10d::Reducer& reducer,
              c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
-            return reducer.update_process_group(std::move(new_process_group));
+            reducer.update_process_group(std::move(new_process_group));
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -1155,7 +1160,7 @@ Example:
   module.def(
       "_set_allow_inflight_collective_as_graph_input",
       [](bool value) {
-        return ::c10d::set_allow_inflight_collective_as_graph_input(value);
+        ::c10d::set_allow_inflight_collective_as_graph_input(value);
       },
       py::arg("value"));
 
@@ -1167,13 +1172,13 @@ Example:
   module.def(
       "_unregister_process_group",
       [](const std::string& group_name) {
-        return ::c10d::unregister_process_group(group_name);
+        ::c10d::unregister_process_group(group_name);
       },
       py::arg("group_name"));
 
   // Remove all process groups from the native registry
   module.def("_unregister_all_process_groups", []() {
-    return ::c10d::unregister_all_process_groups();
+    ::c10d::unregister_all_process_groups();
   });
 
 #ifdef USE_NVSHMEM
@@ -1187,6 +1192,11 @@ Example:
   // Check if NVSHMEM is available on current system.
   module.def(
       "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
+
+  module.def(
+      "_release_nvshmem_team_pool",
+      ::c10d::nvshmem_extension::release_nvshmem_team_pool,
+      py::arg("group_name"));
 #endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
@@ -1400,6 +1410,16 @@ Example:
       .def_readonly("matrix", &::c10d::DMAConnectivity::matrix);
 
   module.def("_detect_dma_connectivity", ::c10d::detect_dma_connectivity);
+  module.def("_is_nccl_symmem_available", []() {
+  // On ROCm this reports the device API; host-only symmetric memory is
+  // available whenever NCCL_HAS_SYMMEM_SUPPORT is.
+#if defined(USE_C10D_NCCL) && defined(NCCL_HAS_SYMMEM_SUPPORT) && \
+    (!defined(USE_ROCM) || defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT))
+    return true;
+#else
+    return false;
+#endif
+  });
 
   using SymmetricMemory = ::c10d::symmetric_memory::SymmetricMemory;
   py::class_<SymmetricMemory, c10::intrusive_ptr<SymmetricMemory>>(
@@ -2772,7 +2792,8 @@ Arguments:
                 std::optional<std::chrono::milliseconds> timeout) {
                 ::c10d::AllToAllOptions opts;
                 opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->all_to_all_single(output, input, outputSplitSizes, inputSplitSizes, opts);
+                return self->all_to_all_single(
+                    output, input, outputSplitSizes, inputSplitSizes, opts);
               },
               py::arg("output"),
               py::arg("input"),
@@ -2833,9 +2854,9 @@ Arguments:
             "barrier",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                 std::optional<std::chrono::milliseconds> timeout) {
-                    ::c10d::BarrierOptions opts;
-                    opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                    return self->barrier(opts);
+                ::c10d::BarrierOptions opts;
+                opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
+                return self->barrier(opts);
                 },
                 py::arg("timeout") = std::nullopt,
                 py::call_guard<py::gil_scoped_release>(),
@@ -2854,7 +2875,7 @@ Arguments:
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->monitoredBarrier(opts, waitAllRanks);
+                self->monitoredBarrier(opts, waitAllRanks);
               },
               py::arg("timeout") = std::nullopt,
               py::arg("wait_all_ranks") = false,
@@ -2909,10 +2930,9 @@ This API is experimental and subject to change.)")
                 if (!backend_obj.is_none()) {
                   backend =
                       backend_obj.cast<c10::intrusive_ptr<::c10d::Backend>>();
-                  auto* pyobj =
-                      torch::utils::PyObjectPreservation::get_or_init(
-                          **backend,
-                          [&]() { return Py_NewRef(backend_obj.ptr()); });
+                  auto* pyobj = torch::utils::PyObjectPreservation::get_or_init(
+                      **backend,
+                      [&]() { return Py_NewRef(backend_obj.ptr()); });
                   Py_DECREF(pyobj);
                 }
                 py::gil_scoped_release nogil{};
@@ -2943,7 +2963,7 @@ experimental and subject to breakage without warning.)")
               "_set_default_backend",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const ::c10d::ProcessGroup::BackendType& backendType) {
-                return self->setDefaultBackend(backendType);
+                self->setDefaultBackend(backendType);
               },
               py::arg("backend_type"),
               py::call_guard<py::gil_scoped_release>())
@@ -2957,8 +2977,9 @@ experimental and subject to breakage without warning.)")
                 // backend implementations and the latter cannot depend on
                 // python-related libs.
                 self->registerOnCompletionHook(
-                    [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
-                         hook))](const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
+                    [hookWrapper =
+                         ::c10d::PythonOnCompletionHook(std::move(hook))](
+                        const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
                       hookWrapper(workInfo);
                     });
               },
@@ -3099,12 +3120,13 @@ Arguments:
               &::c10d::ProcessGroup::unregisterPostHook,
               py::arg("hook_id"))
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
-            return torch::jit::toPyObject(c10::IValue(std::move(self)));
+                return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
           .def_static("unbox", [](py::object obj) {
-              auto typePtr = torch::getCustomClass("__torch__.torch.classes.c10d.ProcessGroup");
-              auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-              return ivalue.toCustomClass<::c10d::ProcessGroup>();
+                auto typePtr = torch::getCustomClass(
+                    "__torch__.torch.classes.c10d.ProcessGroup");
+                auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+                return ivalue.toCustomClass<::c10d::ProcessGroup>();
           });
 
   // Thread local process group manipulation
@@ -3601,7 +3623,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return self->monitoredBarrier(opts, waitAllRanks);
+                self->monitoredBarrier(opts, waitAllRanks);
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
