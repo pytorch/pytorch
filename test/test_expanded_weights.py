@@ -31,7 +31,6 @@ from torch.testing._internal.common_nn import (
     TestBase,
 )
 from torch.testing._internal.common_utils import (
-    ACCELERATOR_TYPE,
     freeze_rng_state,
     HardwareClassification,
     make_tensor,
@@ -1028,7 +1027,11 @@ def filter_supported_tests(t):
 supported_tests = [
     t for t in module_tests + get_new_module_tests() if filter_supported_tests(t)
 ]
-accelerator = ACCELERATOR_TYPE._value
+accelerator = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else None
+)
 for test_param in supported_tests:
     if "constructor" not in test_param:
         name = test_param.pop("module_name")
