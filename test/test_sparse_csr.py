@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     OpDTypes,
     ops,
     precisionOverride,
@@ -1614,6 +1615,26 @@ class TestSparseCSR(TestCase):
                 c = make_tensor((batch_size, m, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
+
+    @onlyCUDA
+    @skipCUDAIfNoSparseGeneric
+    @dtypes(torch.float32)
+    def test_baddbmm_batched_csr_cuda_error(self, device, dtype):
+        torch.manual_seed(5)
+        input = torch.randn(2, 3, 4, device=device, dtype=dtype)
+        batch1 = torch.randn(2, 3, 5, device=device, dtype=dtype).to_sparse_csr()
+        batch2 = torch.randn(2, 5, 4, device=device, dtype=dtype)
+
+        for op, args, kwargs in (
+            (torch.baddbmm, (input, batch1, batch2), {"beta": 1.0, "alpha": 1.0}),
+            (torch.bmm, (batch1, batch2), {}),
+        ):
+            with self.subTest(op=op.__name__):
+                with self.assertRaisesRegex(
+                    RuntimeError, "CUDA sparse matrix operations do not support batched CSR indices or values"
+                ) as error:
+                    op(*args, **kwargs)
+                self.assertNotIn("INTERNAL ASSERT", str(error.exception))
 
     @onlyAccelerator
     @skipCUDAIfNoSparseGeneric
