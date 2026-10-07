@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -83,6 +84,8 @@ class TORCH_API MPSStream {
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
   void synchronize(SyncType syncType);
+  // Commits once enough kernels are encoded, so that the GPU runs them while the host keeps encoding
+  void commitIfNeeded();
   void copy(MTLBuffer_t srcBuffer,
             MTLBuffer_t dstBuffer,
             size_t length,
@@ -133,6 +136,8 @@ class TORCH_API MPSStream {
   dispatch_queue_t _serialQueue = nullptr;
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
+  uint32_t _kernelsSinceCommit = 0;
+  std::atomic<uint32_t> _commandBuffersInFlight{0};
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
   // First execution error reported by an asynchronously committed command buffer

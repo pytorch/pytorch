@@ -84,8 +84,18 @@ id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
   if (!_commandEncoder) {
     _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
   }
+  ++_kernelsSinceCommit;
 
   return _commandEncoder;
+}
+
+void MPSStream::commitIfNeeded() {
+  // Encoded kernels only start running once their command buffer is committed, so commit every 16 of them.
+  // Metal blocks the creation of a command buffer while its queue has 64 uncompleted ones, which would stall
+  // the caller, so skip the commit while 32 of the stream's own commits are in flight (MPSGraph's are not counted).
+  if (_enableCommitAndContinue && _kernelsSinceCommit >= 16 && _commandBuffersInFlight < 32) {
+    synchronize(SyncType::COMMIT);
+  }
 }
 
 void MPSStream::synchronize(SyncType syncType) {
@@ -115,6 +125,7 @@ void MPSStream::synchronize(SyncType syncType) {
 }
 
 void MPSStream::commit() {
+  _kernelsSinceCommit = 0;
   if (_enableCommitAndContinue) {
     addErrorHandler();
     [commandBuffer() commitAndContinue];
@@ -124,6 +135,7 @@ void MPSStream::commit() {
 }
 
 void MPSStream::commitAndWait() {
+  _kernelsSinceCommit = 0;
   if (_prevCommandBuffer) {
     // the previous command buffer (if exists) has already been committed,
     // so we just wait until it's completed and then dispose it.
@@ -153,6 +165,7 @@ void MPSStream::commitAndWait() {
 
 void MPSStream::commitAndContinue() {
   assert(_commandBuffer);
+  _kernelsSinceCommit = 0;
   addErrorHandler();
   [_commandBuffer commitAndContinue];
 }
@@ -186,7 +199,9 @@ void MPSStream::addErrorHandler() {
   // the whole command buffer, leaving its outputs unwritten. Record the first such error
   // so that checkLastError() raises it at the next synchronization point, rather than
   // silently returning garbage, similar to how CUDA reports asynchronous errors.
+  ++_commandBuffersInFlight;
   [commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
+    --_commandBuffersInFlight;
     CommandBufferError error;
     if (commandBufferFailed(cb, error.is_oom, error.code, error.message)) {
       recordCommandBufferError(std::move(error));
@@ -416,6 +431,9 @@ void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)()) {
   dispatch_sync(queue, ^() {
     try {
       block();
+      if (auto stream = getCurrentMPSStream(); stream->queue() == queue) {
+        stream->commitIfNeeded();
+      }
     } catch (...) {
       block_exception = std::current_exception();
     }
