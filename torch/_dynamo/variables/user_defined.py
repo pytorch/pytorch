@@ -778,7 +778,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            sm_vt = variables.StaticMethodVariable(cls_attr, source=descriptor_source)
+            sm_vt = variables.StaticMethodVariable.from_descriptor(
+                tx, cls_attr, source=descriptor_source
+            )
             return sm_vt.tp_descr_get_impl(tx, self, self)
 
         if isinstance(cls_attr, classmethod):
@@ -793,7 +795,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            cm_vt = variables.ClassMethodVariable(cls_attr, source=descriptor_source)
+            cm_vt = variables.ClassMethodVariable.from_descriptor(
+                tx, cls_attr, name, source=descriptor_source
+            )
             return cm_vt.tp_descr_get_impl(tx, self, self)
 
         if isinstance(cls_attr, types.ClassMethodDescriptorType):
@@ -1147,12 +1151,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif (
-            self.value in {collections.OrderedDict, collections.defaultdict}
-            and name == "fromkeys"
-        ):
+        elif name == "fromkeys" and issubclass(self.value, dict):
+            if not issubclass(self.value, collections.OrderedDict):
+                no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
+                check_positional(tx, "fromkeys", len(args), 1, 2)
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
+                tx, self, *args, **kwargs
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
@@ -1765,12 +1769,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             "compile_on_one_rank for this region."
                         )
 
-                var_kwargs = ConstDictVariable(
-                    {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
-                )
-                var_args = TupleVariable(list(args))
-                # Use the tracing rank for the example stream, but retain the
-                # CurrentDeviceVariable for rank-relative reconstruction.
                 example_args: list[Any] = [
                     arg.value
                     if isinstance(arg, CurrentDeviceVariable)
@@ -1789,6 +1787,48 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     *example_args,
                     **example_kwargs,
                 )
+                current_device = next(
+                    (
+                        arg
+                        for arg in (*args, *kwargs.values())
+                        if isinstance(arg, CurrentDeviceVariable)
+                    ),
+                    None,
+                )
+                has_public_device_arg = len(args) < 3 and "device_index" not in kwargs
+                if current_device is None and has_public_device_arg:
+                    from torch.fx.experimental.proxy_tensor import (
+                        _coor_device_index_is_current,
+                    )
+
+                    device_arg = args[0] if args else kwargs.get("device")
+                    device_value = (
+                        None if device_arg is None else device_arg.as_python_constant()
+                    )
+                    uses_current_device = device_value is None or (
+                        isinstance(device_value, (str, torch.device))
+                        and torch.device(device_value).index is None
+                    )
+                    if uses_current_device and _coor_device_index_is_current(
+                        stream.device
+                    ):
+                        current_device = CurrentDeviceVariable(
+                            torch.device(stream.device.type)
+                        )
+                reconstruct_args = list(args)
+                reconstruct_kwargs = dict(kwargs)
+                if current_device is not None and has_public_device_arg:
+                    if args:
+                        reconstruct_args[0] = current_device
+                    elif "device" in kwargs:
+                        reconstruct_kwargs["device"] = current_device
+                var_args = TupleVariable(reconstruct_args)
+                var_kwargs = ConstDictVariable(
+                    {
+                        VariableTracker.build(tx, key): value
+                        for key, value in reconstruct_kwargs.items()
+                    }
+                )
                 from ..graph_bytecode_inputs import register_graph_created_object
                 from .streams import StreamVariable
 
@@ -1803,6 +1843,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     proxy=tx.output.create_proxy(
                         "call_function", get_external_object_by_index, (ind,), {}
                     ),
+                    current_device=current_device,
                 )
             elif issubclass(self.value, torch.Event):
                 from .lists import TupleVariable
@@ -1959,11 +2000,21 @@ class RemovableHandleClass:
     pass
 
 
+class RandomCallOnSource:
+    """random_calls entry replayed on the runtime random.Random object at
+    `source`, so the draw reads and advances that object's live state."""
+
+    def __init__(self, source: Source, method_name: str) -> None:
+        self.source = source
+        self.method_name = method_name
+
+
 def call_random_fn(
     tx: "InstructionTranslatorBase",
     fn: Callable[..., Any],
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
+    replay_fn: RandomCallOnSource | None = None,
 ) -> VariableTracker:
     from .builder import VariableBuilder
 
@@ -1980,7 +2031,7 @@ def call_random_fn(
     # we just need the right type
     example_value = fn(*args, **kwargs)
     source = RandomValueSource(random_call_index)
-    tx.output.random_calls.append((fn, args, kwargs))  # type: ignore[arg-type]
+    tx.output.random_calls.append((replay_fn or fn, args, kwargs))  # type: ignore[arg-type]
     # TODO: arguably, this should route to wrap_symint/wrap_symfloat
     # (currently hypothetical), but I'm not going to poke my hand in
     # this nest for now
@@ -3219,7 +3270,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         res = self._vectorcall_method(tx, "__init__", args, kwargs)
         if not res.is_constant_none():
             raise_type_error(
-                tx, f"__init__() should return None, got {res.python_type_name()}"
+                tx, f"__init__() should return None, not {res.python_type_name()!r}"
             )
         return res
 
@@ -3948,7 +3999,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # descriptor protocol and skip past the staticmethod wrapper.
             if can_use_mro_source:
                 source = self.get_source_by_walking_mro(tx, name)
-            sm_vt = variables.StaticMethodVariable(type_attr, source=source)
+            sm_vt = variables.StaticMethodVariable.from_descriptor(
+                tx, type_attr, source=source
+            )
             return sm_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -3958,7 +4011,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # descriptor protocol and skip past the classmethod wrapper.
             if can_use_mro_source:
                 source = self.get_source_by_walking_mro(tx, name)
-            cm_vt = variables.ClassMethodVariable(type_attr, source=source)
+            cm_vt = variables.ClassMethodVariable.from_descriptor(
+                tx, type_attr, name, source=source
+            )
             return cm_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
