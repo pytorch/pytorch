@@ -23,6 +23,7 @@ from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._tensor_iterator import reduce_op, TensorIterator
 
 from ... import cutedsl_utils as cu
+from ...utils import capability as cap
 
 
 # TODO: Move this rollout gate to a shared PyTorch config once eager native-op
@@ -224,7 +225,7 @@ def _make_impl(reduce_into):
         _run(self, d, out_kd, reduce_into)
         return out_kd if keepdim else out_kd.squeeze(d)
 
-    return _impl
+    return cap.cuda_device_guard(cap.resolve_neg_view(_impl))
 
 
 def _make_out_impl(reduce_into):
@@ -238,7 +239,7 @@ def _make_out_impl(reduce_into):
         _run(self, d, out_kd, reduce_into)
         return out
 
-    return _out_impl
+    return cap.cuda_device_guard(cap.resolve_neg_view(_out_impl))
 
 
 def register_to_dispatch() -> None:
