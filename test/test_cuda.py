@@ -6406,7 +6406,7 @@ class TestExpandableSegmentBase(TestCase):
         # reported as several runs -- all of them naming the same base.
         script = """
 import json, torch
-# 40 MiB is two whole 20 MiB mapping granules, so freeing the middle
+# The large pool maps with 20 MiB granularity, so freeing the middle 40 MiB
 # allocation really unmaps and leaves a hole.
 keep = [torch.empty(40 << 20, dtype=torch.uint8, device="cuda") for _ in range(3)]
 del keep[1]
@@ -6436,9 +6436,10 @@ class TestExpandableSegmentRestore(TestCase):
     back in a fresh process. See Note [Expandable Segment Reserved Address].
     """
 
-    # Freeing the middle of three whole 20 MiB granules unmaps it, so the large
-    # segment comes back as two runs around a hole. The default pool is used
-    # because empty_cache does not release blocks of a live MemPool.
+    # The large pool maps with 20 MiB granularity, so freeing the middle of
+    # three 20 MiB tensors unmaps it, and the large segment comes back as two
+    # runs around a hole. The default pool is used because empty_cache does not
+    # release blocks of a live MemPool.
     _SAVE = """
 import json, torch
 a, hole, c = (torch.empty(5 << 20, dtype=torch.float32, device="cuda") for _ in range(3))
@@ -6621,6 +6622,35 @@ print(json.dumps([first, torch.cuda.memory_snapshot(include_traces=False)]))
             )
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("saved with shareable handles", proc.stderr)
+
+    def test_restore_rejects_malformed_input(self):
+        # Runs sharing a base must agree on the reservation's layout, and a
+        # reservation with nothing mapped is refused since nothing would free it.
+        script = """
+import json, torch
+G = 20 << 20
+seg = {
+    "is_expandable": True, "segment_type": "large", "address": 1 << 40, "total_size": G,
+    "expandable_segment_base": 1 << 40, "expandable_reservation_size": 64 * G,
+    "expandable_segment_size": G, "expandable_segment_handle_type": 0,
+}
+other = {**seg, "address": seg["address"] + 2 * G, "expandable_reservation_size": 32 * G}
+pool = torch.cuda.MemPool()
+errors = []
+for call in (
+    lambda: torch.cuda.memory._restore_expandable_segments([seg, other], pool.id),
+    lambda: torch._C._cuda_restoreExpandableSegment(0, pool.id, False, 1 << 40, 64 * G, G, 0, []),
+):
+    try:
+        call()
+        errors.append("no error")
+    except (ValueError, RuntimeError) as e:
+        errors.append(str(e))
+print(json.dumps(errors))
+"""
+        out = self._run(script)
+        self.assertIn("disagree on its layout", out[0])
+        self.assertIn("at least one mapped range", out[1])
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")

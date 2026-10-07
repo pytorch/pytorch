@@ -1563,7 +1563,15 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             static_cast<c10::cuda::CUDACachingAllocator::
                             Expandable_Segments_Handle_Type>(handle_type),
             mapped_ranges);
-      });
+      },
+      py::arg("device"),
+      py::arg("mempool_id"),
+      py::arg("is_small"),
+      py::arg("address"),
+      py::arg("reserve_size"),
+      py::arg("segment_size"),
+      py::arg("handle_type"),
+      py::arg("mapped_ranges"));
 
   m.def(
       "_cuda_beginAllocateCurrentThreadToPool",
