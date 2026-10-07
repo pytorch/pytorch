@@ -44,7 +44,7 @@ def quack_rmsnorm_fwd(
         weight = reshape_contiguous(
             weight, (N,), alignment=row_alignment(N, weight.element_size())
         )
-    rstd = torch.empty(M, device=x.device, dtype=torch.float32)
+    rstd = torch.empty((M, 1), device=x.device, dtype=torch.float32)
     hw = caps(x.device.index)
     arch = hw.cc
     kernel = kernels.compile_rmsnorm("forward", x.dtype, N, weight is not None, arch)
@@ -60,7 +60,10 @@ def quack_rmsnorm_fwd(
     stat_shape = list(input_shape[: -len(normalized_shape)]) + [1] * len(
         normalized_shape
     )
-    return out.view(input_shape), rstd.view(stat_shape)
+    return (
+        out if out.shape == input_shape else out.view(input_shape),
+        rstd if rstd.shape == tuple(stat_shape) else rstd.view(stat_shape),
+    )
 
 
 def quack_rmsnorm_bwd(
@@ -84,7 +87,7 @@ def quack_rmsnorm_bwd(
             weight, (N,), alignment=row_alignment(N, weight.element_size())
         )
     dx = torch.empty_like(x)
-    rstd_flat = reshape_contiguous(rstd, (M,))
+    rstd_2d = reshape_contiguous(rstd, (M, 1))
     compute_dw = weight is not None and dw_mask
     hw = caps(x.device.index)
     arch = hw.cc
@@ -113,7 +116,7 @@ def quack_rmsnorm_bwd(
         launch.read_only(x),
         launch.read_only(weight),
         launch.read_only(dout),
-        launch.read_only(rstd_flat),
+        launch.read_only(rstd_2d),
         dx,
         partial,
         dw,
@@ -121,7 +124,8 @@ def quack_rmsnorm_bwd(
         blocks,
         launch.stream(x.device.index),
     )
-    dx = dx.view(input.shape)
-    if dw is not None:
+    if dx.shape != input.shape:
+        dx = dx.view(input.shape)
+    if dw is not None and len(normalized_shape) != 1:
         dw = dw.view(normalized_shape)
     return dx, dw

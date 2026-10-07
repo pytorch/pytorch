@@ -251,6 +251,40 @@ class TestRmsNormJit(TestCase):
             rtol=2e-4,
         )
 
+    @dtypes(torch.float32)
+    @parametrize("n", [30, 1024])
+    def test_autograd_and_cuda_graph(
+        self, device: str, dtype: torch.dtype, n: int
+    ) -> None:
+        from torch.profiler import profile, ProfilerActivity
+
+        x = torch.randn(37, n, device=device, dtype=dtype, requires_grad=True)
+        w = torch.randn(n, device=device, dtype=dtype, requires_grad=True)
+        dy = torch.randn_like(x)
+
+        def run() -> tuple[torch.Tensor, tuple[torch.Tensor, ...]]:
+            y = torch.nn.functional.rms_norm(x, [n], w, 1e-5)
+            return y, torch.autograd.grad(y, (x, w), dy)
+
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = run()
+        expected = (expected[0].detach(), expected[1])
+        with jit_only():
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                run()
+            torch.cuda.current_stream().wait_stream(stream)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                actual = run()
+            with profile(activities=[ProfilerActivity.CUDA]) as prof:
+                graph.replay()
+        names = [e.name for e in prof.events() if e.device_type.name == "CUDA"]
+        for kernel in ("RMSNorm_", "RMSNormBackward", "reduce_rows"):
+            self.assertTrue(any(kernel in name for name in names), (kernel, names))
+        self.assertEqual(actual, expected, atol=2e-5, rtol=2e-5)
+
 
 instantiate_device_type_tests(TestRmsNormJit, globals(), only_for="cuda")
 

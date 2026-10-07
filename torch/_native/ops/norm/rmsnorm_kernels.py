@@ -149,7 +149,8 @@ def kernel_spec(
     out = tensor(element_type, shape, stride_order)
     rstd = launch.fake_compact(
         Float32,
-        (launch.sym(),) if jit else (1,),
+        (launch.sym(), 1) if jit else (1,),
+        stride_order=(1, 0) if jit else None,
         align=4,
     )
     tensor_args = [{"name": "mX", "read_only": True}]
