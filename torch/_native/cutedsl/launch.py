@@ -20,6 +20,11 @@ def sym(divisibility: int = 1):
     return cute.sym_int(divisibility=divisibility)
 
 
+def sym_int64(divisibility: int = 1):
+    """A signed 64-bit dynamic extent or stride."""
+    return cute.sym_int64(divisibility=divisibility)
+
+
 def fake_compact(dtype, shape, *, stride_order=None, align=None):
     """Describe a compact compile-time operand. `stride_order` gives each mode's
     compactness rank (0 is stride-1); the pointer must satisfy `align`.
