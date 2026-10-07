@@ -1349,9 +1349,9 @@ namespace {
 thread_local std::unordered_set<const c10::SafePyObject*>
     active_python_allocator_callbacks;
 
-class PythonAllocatorCallbackGuard {
+class PythonAllocatorReentrancyGuard {
  public:
-  explicit PythonAllocatorCallbackGuard(const c10::SafePyObject* state)
+  explicit PythonAllocatorReentrancyGuard(const c10::SafePyObject* state)
       : state_(state) {
     const bool inserted =
         active_python_allocator_callbacks.insert(state_).second;
@@ -1361,7 +1361,7 @@ class PythonAllocatorCallbackGuard {
         "through the same allocator.");
   }
 
-  ~PythonAllocatorCallbackGuard() {
+  ~PythonAllocatorReentrancyGuard() {
     active_python_allocator_callbacks.erase(state_);
   }
 
@@ -1385,7 +1385,7 @@ void* callPythonAllocator(
   if (!Py_IsInitialized() || Py_IsFinalizing()) {
     return nullptr;
   }
-  PythonAllocatorCallbackGuard callback_guard(state.get());
+  PythonAllocatorReentrancyGuard callback_guard(state.get());
   c10::cuda::CUDAStreamGuard stream_guard(
       c10::cuda::getStreamFromExternal(stream, device));
   py::gil_scoped_acquire gil;
