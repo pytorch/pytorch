@@ -38,6 +38,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <c10/core/DynamicCast.h>
 #include <c10/core/ScalarType.h>
+#include <c10/cuda/CUDAArchList.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeCast.h>
 
@@ -215,6 +216,14 @@ __forceinline__ __device__ void vectorized_elementwise_kernel_impl(
   }
 }
 
+// Read by the device #if, the build guard and the runtime check below. The
+// three differ in scope: a +PTX build can pass the last two and still JIT from
+// another arch. Macros because the device guards are #if.
+#define AT_VEC8_SM_LO 90
+#define AT_VEC8_SM_HI 109
+#define AT_VEC8_128B_SM_LO 100
+#define AT_VEC8_128B_SM_HI 109
+
 template <
     int vec_size,
     typename func_t,
@@ -223,7 +232,8 @@ template <
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   if constexpr (vec_size == 8 && use_128b_tws) {
-#if __CUDA_ARCH__ / 100 == 10
+#if __CUDA_ARCH__ / 10 >= AT_VEC8_128B_SM_LO && \
+    __CUDA_ARCH__ / 10 <= AT_VEC8_128B_SM_HI
     using output_t = typename function_traits<func_t>::result_type;
     constexpr auto input_size = calc_io_size<func_t>() - sizeof(output_t);
     constexpr auto tws_128b = elems_per_thread_128b<input_size>(sizeof(output_t));
@@ -235,7 +245,7 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
         "work size supports only sm_10x. Please report an issue on GitHub.");
 #endif
   } else if constexpr (vec_size == 8) {
-#if __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
+#if __CUDA_ARCH__ / 10 >= AT_VEC8_SM_LO && __CUDA_ARCH__ / 10 <= AT_VEC8_SM_HI
     constexpr auto io_size = calc_io_size<func_t>();
     constexpr auto tws = elems_per_thread<io_size>();
     vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
@@ -243,7 +253,7 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
     CUDA_KERNEL_ASSERT(
       false && "Fatal! vectorized_elementwise_kernel<8,...> supports only "
       "sm_90 and sm_10x. Please report an issue on GitHub.");
-#endif // __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
+#endif
   } else {
     constexpr auto io_size = calc_io_size<func_t>();
     constexpr auto tws = elems_per_thread<io_size>();
@@ -345,8 +355,12 @@ static inline void launch_vectorized_kernel(
   // (the larger thread work size decreases thread level parallelism,
   // which is important for small footprints).
   constexpr int64_t min_sm107_io_size = 16 * 1024 * 1024;
+  // Not just the device: a build without sm_10x must not take this path either.
+  constexpr bool vec8_128b_supported =
+      c10::cuda::targets_any_arch_in(AT_VEC8_128B_SM_LO, AT_VEC8_128B_SM_HI);
+  const int cc = p->major * 10 + p->minor;
   const bool use_sm107_optimizations =
-      p->major == 10 && p->minor == 7 && N * io_size >= min_sm107_io_size;
+      vec8_128b_supported && cc == 107 && N * io_size >= min_sm107_io_size;
   if (use_sm107_optimizations) {
     using args_t = typename function_traits<func_t>::ArgsTuple;
     constexpr auto max_input_size = at::native::max_of_sizes(
@@ -355,9 +369,12 @@ static inline void launch_vectorized_kernel(
   }
   vec_size = std::min<uint16_t>(vec_size, max_vec_size);
   // due to excessive binary size the `vectorized_elementwise_kernel` of
-  // the size 8 is compiled for sm_90 and sm_10x only.
+  // the size 8 is compiled for sm_90 and sm_10x only, and only when the build
+  // targets one of them.
   // TODO: Lift this limitation when CUDA 12.x support is fully dropped
-  if (p->major != 9 && p->major != 10) {
+  constexpr bool vec_size_8_supported =
+      c10::cuda::targets_any_arch_in(AT_VEC8_SM_LO, AT_VEC8_SM_HI);
+  if (!vec_size_8_supported || cc < AT_VEC8_SM_LO || cc > AT_VEC8_SM_HI) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
 #if !defined(CUDA_VERSION) || CUDA_VERSION < 12080
@@ -388,11 +405,18 @@ static inline void launch_vectorized_kernel(
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
 #else
       if (use_sm107_optimizations) {
-        vectorized_elementwise_kernel<8, func_t, array_t, tws_128b >= 8>
-            <<<grid, num_threads(), 0, stream>>>(N, f, data);
-      } else {
+        if constexpr (vec8_128b_supported) {
+          vectorized_elementwise_kernel<8, func_t, array_t, tws_128b >= 8>
+              <<<grid, num_threads(), 0, stream>>>(N, f, data);
+        } else {
+          TORCH_INTERNAL_ASSERT(false, "vec_size 8 reached without an sm_10x target");
+        }
+      } else if constexpr (vec_size_8_supported) {
         vectorized_elementwise_kernel<8, func_t, array_t>
             <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "vec_size 8 reached without an sm_90 or sm_10x target");
       }
 #endif
       C10_CUDA_KERNEL_LAUNCH_CHECK();
