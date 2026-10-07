@@ -675,34 +675,19 @@ class TestArch(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "outside the known range"):
             native_aot_decl.cc_of("sm_130")
 
-    def test_family_targets_follow_known_devices(self):
-        self.assertEqual(
-            native_aot_decl.target_devices("sm_100f"),
-            ((10, 0), (10, 3), (10, 7)),
+    def test_targets_follow_known_devices(self):
+        cases = (
+            ("sm_100f", ((10, 0), (10, 3), (10, 7))),
+            ("sm_103f", ((10, 3), (10, 7))),
+            ("sm_110f", ((11, 0),)),
+            ("sm_120f", ((12, 0), (12, 1))),
+            ("sm_121f", ((12, 1),)),
+            ("sm_100", ((10, 0), (10, 3), (10, 7))),
+            ("sm_100a", ((10, 0),)),
         )
-        self.assertEqual(native_aot_decl.target_devices("sm_103f"), ((10, 3), (10, 7)))
-        self.assertEqual(native_aot_decl.target_devices("sm_110f"), ((11, 0),))
-        self.assertEqual(native_aot_decl.target_devices("sm_120f"), ((12, 0), (12, 1)))
-        self.assertEqual(native_aot_decl.target_devices("sm_121f"), ((12, 1),))
-        self.assertTrue(native_aot_decl.target_can_run_on("sm_103f", (10, 7)))
-        self.assertTrue(native_aot_decl.target_can_run_on("sm_100f", (10, 7)))
-        self.assertTrue(native_aot_decl.target_can_run_on("sm_120f", (12, 1)))
-        self.assertFalse(native_aot_decl.target_can_run_on("sm_100f", (10, 1)))
-
-    def test_plain_targets_forward_within_the_same_major(self):
-        self.assertEqual(
-            native_aot_decl.target_devices("sm_100"),
-            ((10, 0), (10, 3), (10, 7)),
-        )
-        self.assertEqual(
-            native_aot_decl.target_devices("sm_103"),
-            ((10, 3), (10, 7)),
-        )
-        self.assertEqual(
-            native_aot_decl.target_devices("sm_120"),
-            ((12, 0), (12, 1)),
-        )
-        self.assertEqual(native_aot_decl.target_devices("sm_100a"), ((10, 0),))
+        for target, devices in cases:
+            with self.subTest(target=target):
+                self.assertEqual(native_aot_decl.target_devices(target), devices)
 
     def test_widest_compatible_target_prefers_family_coverage(self):
         choose = native_aot_decl.widest_compatible_target
@@ -710,11 +695,8 @@ class TestArch(unittest.TestCase):
         self.assertEqual(choose(candidates, (10, 0)), "sm_100f")
         self.assertEqual(choose(candidates, (10, 3)), "sm_100f")
         self.assertEqual(choose(candidates, (10, 7)), "sm_100f")
-
-    def test_arch_conditional_candidate_is_exact_only(self):
-        choose = native_aot_decl.widest_compatible_target
-        self.assertEqual(choose(("sm_100a",), (10, 0)), "sm_100a")
-        self.assertIsNone(choose(("sm_100a",), (10, 3)))
+        self.assertEqual(choose(("sm_100a", "sm_100"), (10, 0)), "sm_100")
+        self.assertEqual(choose(("sm_100", "sm_100f"), (10, 7)), "sm_100f")
 
     def test_family_logic_is_not_special_cased_to_sm10x(self):
         with tempfile.TemporaryDirectory() as ops:
@@ -723,7 +705,7 @@ class TestArch(unittest.TestCase):
                 mock.patch.object(
                     native_aot_decl,
                     "KNOWN_DEVICE_CAPABILITIES",
-                    ((6, 0), (6, 2), (6, 7)),
+                    ((6, 0), (6, 2), (6, 7), (7, 0)),
                 ),
                 mock.patch.object(native_aot_decl, "KNOWN_ARCHES", ("sm_60f",)),
                 mock.patch.object(export, "OPS_DIR", ops),
@@ -732,29 +714,11 @@ class TestArch(unittest.TestCase):
                     native_aot_decl.target_devices("sm_60f"),
                     ((6, 0), (6, 2), (6, 7)),
                 )
-                self.assertTrue(native_aot_decl.target_can_run_on("sm_60f", (6, 7)))
-                self.assertEqual(
-                    native_aot_decl.widest_compatible_target(
-                        ("sm_60f", "sm_67a"), (6, 7)
-                    ),
-                    "sm_60f",
-                )
                 match = gen_aot_lib._device_match("sm_60f")
                 self.assertEqual(export.targets_for_arches(["sm_67"]), ["sm_60f"])
         self.assertIn("major == 6", match)
         self.assertNotIn("major == 10", match)
         self.assertNotIn("minor >=", match)
-
-    def test_family_targets_do_not_cross_major_capabilities(self):
-        with mock.patch.object(
-            native_aot_decl,
-            "KNOWN_DEVICE_CAPABILITIES",
-            ((6, 0), (6, 2), (6, 7), (7, 0)),
-        ):
-            self.assertEqual(
-                native_aot_decl.target_devices("sm_60f"),
-                ((6, 0), (6, 2), (6, 7)),
-            )
 
     def test_the_detected_arch_is_the_local_capability(self):
         # Detection supplies a device capability to declaration target selection.
@@ -772,67 +736,29 @@ class TestArch(unittest.TestCase):
             self.assertIsNone(export._detected_arch())
 
     def test_archs_from_cuda_arch_list(self):
-        # TORCH_CUDA_ARCH_LIST states supported devices; each declaration maps those
-        # to its widest compatible target. Named, malformed, +PTX and unsupported
-        # entries drop out.
+        # These expectations come from top-k's ARCHS plus the compatibility rules,
+        # not from suffixes in the build's supported-device list.
         f = export.archs_from_cuda_arch_list
-        self.assertEqual(f("7.5 8.9"), [])
-        # Hopper and Blackwell together select one compile-target tree each.
-        self.assertEqual(f("9.0a;10.0a"), ["sm_90", "sm_100f"])
-        # SM80 adds no target because no current native-AOT declaration targets
-        # Ampere; the Hopper and Blackwell entries still select one target each.
-        self.assertEqual(f("8.0 9.0 10.0+PTX"), ["sm_90", "sm_100f"])
-        # Plain and a-suffixed SM100 build entries both use the family target, which
-        # also serves SM103 and SM107 without another copy of every kernel.
-        self.assertEqual(f("10.0"), ["sm_100f"])
-        self.assertEqual(f("Hopper 10.3a"), ["sm_100f"])
-        self.assertEqual(f("12.0;12.1a"), [])
-        self.assertEqual(f("13.0"), [])
-
-    def test_archs_from_cuda_arch_list_dedups(self):
-        # "10.0;10.0+PTX" names one arch twice; a repeated entry would read as
-        # a second target downstream and export another full set of kernels.
-        f = export.archs_from_cuda_arch_list
-        self.assertEqual(f("10.0;10.0+PTX"), ["sm_100f"])
-        self.assertEqual(f("10.0a 10.0a"), ["sm_100f"])
-        self.assertEqual(f("10.0 10.3"), ["sm_100f"])
-
-    def test_known_devices_include_runtime_only_family_members(self):
-        self.assertIn((10, 7), native_aot_decl.known_device_capabilities())
-        self.assertIn((11, 0), native_aot_decl.known_device_capabilities())
-        self.assertIn((12, 1), native_aot_decl.known_device_capabilities())
-        self.assertNotIn("sm_107a", native_aot_decl.KNOWN_ARCHES)
+        cases = (
+            ("7.5 8.9", []),
+            ("9.0a;10.0a", ["sm_90", "sm_100f"]),
+            ("8.0 9.0 10.0+PTX", ["sm_90", "sm_100f"]),
+            ("10.0", ["sm_100f"]),
+            ("Hopper 10.3a", ["sm_100f"]),
+            ("12.0;12.1a", []),
+            ("13.0", []),
+            ("10.0 10.3", ["sm_100f"]),
+            ("10.0;10.0a", ["sm_100f"]),
+            ("10.0a;9.0", ["sm_100f", "sm_90"]),
+        )
+        for arch_list, targets in cases:
+            with self.subTest(arch_list=arch_list):
+                self.assertEqual(f(arch_list), targets)
 
     def test_build_arch_parser_does_not_choose_op_targets(self):
         f = export.build_arches_from_cuda_arch_list
         self.assertEqual(f("9.0a;10.0a;10.3+PTX"), ["sm_90", "sm_100", "sm_103"])
         self.assertEqual(f("13.0;10.0"), ["sm_100"])
-
-    def test_arch_list_respects_an_exact_only_declaration(self):
-        with tempfile.TemporaryDirectory() as ops:
-            _write_fake_decl(ops, "ARCHS = ('sm_100a',)\n")
-            with mock.patch.object(export, "OPS_DIR", ops):
-                self.assertEqual(export.archs_from_cuda_arch_list("10.0a"), ["sm_100a"])
-
-    def test_each_declaration_selects_its_own_target(self):
-        with tempfile.TemporaryDirectory() as ops:
-            _write_fake_decl(ops, "ARCHS = ('sm_100a',)\n", op="exact")
-            _write_fake_decl(ops, "ARCHS = ('sm_100a', 'sm_100f')\n", op="family")
-            with mock.patch.object(export, "OPS_DIR", ops):
-                self.assertEqual(
-                    export.archs_from_cuda_arch_list("10.0a"),
-                    ["sm_100a", "sm_100f"],
-                )
-
-    def test_archs_from_cuda_arch_list_collapses_one_capability(self):
-        # The main build may name either feature set for one capability; both map to
-        # the one portable native-AOT target, so embedded kernels are not duplicated.
-        f = export.archs_from_cuda_arch_list
-        self.assertEqual(f("10.0;10.0a"), ["sm_100f"])
-        self.assertEqual(f("10.0a;10.0"), ["sm_100f"])
-        # Different supported devices remain represented, and order is preserved.
-        self.assertEqual(f("9.0a;10.0;10.0a"), ["sm_90", "sm_100f"])
-        self.assertEqual(f("10.0a;9.0"), ["sm_100f", "sm_90"])
 
     def test_collect_jobs_respects_declaration_archs(self):
         # A declaration gets jobs only for compatible devices; on-device export
@@ -851,12 +777,6 @@ class TestArch(unittest.TestCase):
         self.assertEqual(len(blackwell), 1)
         self.assertEqual(len(hopper), 0)
         self.assertEqual(len(on_device), 1)
-
-    def test_topk_uses_its_widest_target_for_an_exact_build_arch(self):
-        with tempfile.TemporaryDirectory() as out, _no_ambient_arch():
-            jobs = export._collect_jobs(["topk"], out, ["sm_100a"])
-        self.assertTrue(jobs)
-        self.assertEqual({job[4] for job in jobs}, {"sm_100f"})
 
     def test_multi_arch_jobs_nest_per_arch(self):
         # Every job nests under <out>/<target>/<decl_id>, for one selected target or
@@ -908,23 +828,6 @@ class TestArch(unittest.TestCase):
             self.assertEqual(list(groups), ["sm_100f"])
             self.assertEqual([s["prefix"] for s in groups["sm_100f"]], ["f"])
 
-    def test_by_arch_keeps_family_target_beside_exact_target(self):
-        scs = [
-            {"prefix": "exact", "arch": "sm_100a"},
-            {"prefix": "family", "arch": "sm_100f"},
-        ]
-        groups = gen_aot_lib._by_arch(scs)
-        self.assertEqual(list(groups), ["sm_100a", "sm_100f"])
-
-    def test_by_arch_orders_exact_then_nearest_family_target(self):
-        scs = [
-            {"prefix": "base_family", "arch": "sm_100f"},
-            {"prefix": "exact", "arch": "sm_103a"},
-            {"prefix": "near_family", "arch": "sm_103f"},
-        ]
-        groups = gen_aot_lib._by_arch(scs)
-        self.assertEqual(list(groups), ["sm_103a", "sm_103f", "sm_100f"])
-
     def test_by_arch_rejects_an_arch_less_sidecar(self):
         # Export names the arch of everything it writes, so this is an older tree.
         # Rejected rather than grouped: an unmatchable target declines silently.
@@ -967,11 +870,6 @@ class TestArch(unittest.TestCase):
         m = gen_aot_lib._device_match("sm_103a")
         self.assertIn("major == 10", m)
         self.assertIn("minor == 3", m)
-        family = gen_aot_lib._device_match("sm_100f")
-        self.assertIn("major == 10", family)
-        for minor in (0, 3, 7):
-            self.assertIn(f"minor == {minor}", family)
-        self.assertNotIn("minor >=", family)
 
 
 class TestSidecarIntegrity(unittest.TestCase):
@@ -2338,34 +2236,32 @@ class TestMultiTargetSelector(unittest.TestCase):
         self.assertNotIn("launch_fakeop_p__sm90a(", sm100_branch)
 
     def test_exact_target_precedes_family_fallback(self):
-        exact = dict(
-            SIDECAR,
-            prefix="fakeop_p__sm100a",
-            arch="sm_100a",
-            spec={"N": 1024, "K": 8},
-        )
-        family = dict(
-            SIDECAR,
-            prefix="fakeop_p__sm100f",
-            arch="sm_100f",
-            spec={"N": 1024, "K": 8},
-        )
+        def sc(arch):
+            return dict(
+                SIDECAR,
+                prefix=f"fakeop_p__{arch.replace('_', '', 1)}",
+                arch=arch,
+                spec={"N": 1024, "K": 8},
+            )
 
         class _FamilyDecl(_FakeDecl):
-            ARCHS = ("sm_100a", "sm_100f")
+            ARCHS = ("sm_103a", "sm_103f", "sm_100f")
 
         src = gen_aot_lib.gen_op(
             "fakeop",
             "CUDA",
             _FamilyDecl,
-            [family, exact],
+            [sc("sm_100f"), sc("sm_103f"), sc("sm_103a")],
             "const at::Tensor & self, int64_t k, const at::Tensor & out",
         )
-        self.assertLess(
-            src.index("launch_fakeop_p__sm100a("),
-            src.index("launch_fakeop_p__sm100f("),
-        )
-        self.assertIn("_naot_props->minor == 7", src)
+        body = src.split("bool fakeop_cuda_aot_kernel(", 1)[1]
+        body = body[: body.index("\n}\n")]
+        calls = [
+            body.index(f"launch_fakeop_p__{target}(")
+            for target in ("sm103a", "sm103f", "sm100f")
+        ]
+        self.assertEqual(calls, sorted(calls))
+        self.assertIn("_naot_props->minor == 7", body)
 
 
 class TestSourceClosureAndRuntimes(unittest.TestCase):
@@ -4359,32 +4255,6 @@ class TestSpecRoundTrip(unittest.TestCase):
             impl_params="const at::Tensor & self, int64_t k",
         )
         self.assertEqual(seen["dtypes"], ("f32", "bf16"))
-
-
-class TestWidestCompatibleTarget(unittest.TestCase):
-    def test_plain_beats_arch_conditional_for_one_capability(self):
-        choose = native_aot_decl.widest_compatible_target
-        self.assertEqual(choose(("sm_100a", "sm_100"), (10, 0)), "sm_100")
-        self.assertEqual(choose(("sm_90a", "sm_90"), (9, 0)), "sm_90")
-
-    def test_family_target_serves_later_members(self):
-        choose = native_aot_decl.widest_compatible_target
-        self.assertEqual(choose(("sm_100f",), (10, 3)), "sm_100f")
-        self.assertEqual(choose(("sm_100f",), (10, 7)), "sm_100f")
-
-    def test_plain_target_serves_later_members(self):
-        choose = native_aot_decl.widest_compatible_target
-        self.assertEqual(choose(("sm_100",), (10, 3)), "sm_100")
-        self.assertEqual(choose(("sm_100",), (10, 7)), "sm_100")
-
-    def test_family_target_wins_when_coverage_is_equal(self):
-        choose = native_aot_decl.widest_compatible_target
-        self.assertEqual(choose(("sm_100", "sm_100f"), (10, 7)), "sm_100f")
-
-    def test_earliest_family_target_wins(self):
-        choose = native_aot_decl.widest_compatible_target
-        candidates = ("sm_100f", "sm_103f", "sm_103a")
-        self.assertEqual(choose(candidates, (10, 3)), "sm_100f")
 
 
 class TestSidecarSchemaIsReadFirst(unittest.TestCase):

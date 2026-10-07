@@ -135,10 +135,7 @@ class TestNativeAotTopKDeclaration(TestCase):
         # Native AOT uses one widest portable compiler target per major:
         # sm_90 is the available portable SM9x target, while
         # the same-major compatibility rule makes sm_100f cover known SM10x devices.
-        self.assertEqual(
-            aot.ARCHS,
-            ("sm_90", "sm_100f"),
-        )
+        self.assertEqual(aot.ARCHS, ("sm_90", "sm_100f"))
 
     def test_dispatch_alignment_is_radix_only(self):
         from torch._native.ops.topk import aot
