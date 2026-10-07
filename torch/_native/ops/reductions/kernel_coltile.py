@@ -51,6 +51,7 @@ class ColConfig(NamedTuple):
     partial_layout: str
     combine_columns: int = 0
     unroll: int = 4
+    kernel_order: str = "linear"
 
 
 @functools.lru_cache(maxsize=4096)
@@ -73,7 +74,7 @@ def select_col_config(
     npar: int | None = None,
     vec: int | None = None,
 ) -> ColConfig | None:
-    """Select measured column configs; inner-tree uses its separate DAG planner."""
+    """Select an implementation for unordered semantics, including ordered plans."""
     if order not in ("unordered", "inner_tree"):
         raise ValueError(f"unknown reduction order: {order!r}")
     if order == "inner_tree":
@@ -186,71 +187,160 @@ class _OrderedColReduce:
         C: int,
         B: int,
         nouts: int,
+        *,
+        worker_warps: int = _ORDERED_WORKER_WARPS,
+        tile_columns: int = WARP,
+        full_tiles: bool = False,
+        column_pack: int = 1,
+        partition_begin: int = 0,
+        partition_count: int | None = None,
     ) -> None:
-        if plan.shape not in ("multirow", "looped"):
+        if plan.shape not in ("multirow", "looped", "split"):
             raise ValueError(f"ordered columns do not support {plan.shape=}")
+        if plan.shape == "split" and plan.vec_linear:
+            raise ValueError("ordered split columns require tree vector folds")
+        if worker_warps not in (1, 2, 4, 8, 16):
+            raise ValueError("worker_warps must be one of 1, 2, 4, 8, 16")
+        if tile_columns not in (8, 16, WARP):
+            raise ValueError("tile_columns must be one of 8, 16, 32")
+        if column_pack not in (1, 2, 4):
+            raise ValueError("column_pack must be one of 1, 2, 4")
+        if column_pack > 1 and (
+            trait.nfields != 1
+            or trait.acc.width != 32
+            or nouts != 1
+            or C % column_pack
+            or getattr(trait, "complex_input", False)
+            or any(w != 1 for w in (getattr(trait, "output_widths", None) or (1,)))
+        ):
+            raise ValueError(
+                "column packing requires complete single-field real outputs"
+            )
         self.trait = trait
         self.plan = plan
         self.R = R
         self.C = C
         self.B = B
         self.nouts = nouts
-        self.complex_input = getattr(trait, "complex_input", False)
-        self.output_widths = tuple(getattr(trait, "output_widths", (1,) * nouts))
-        self.workers = (
-            1 if plan.shape == "multirow" else min(_ORDERED_WORKER_WARPS, plan.wpr)
+        self.column_pack = column_pack
+        self.output_groups = C // column_pack
+        self.state_fields = trait.nfields * column_pack
+        self.partition_begin = partition_begin
+        self.partition_count = (
+            plan.split[0] - partition_begin
+            if partition_count is None and plan.shape == "split"
+            else 1
+            if partition_count is None
+            else partition_count
         )
-        self.outputs_per_block = 128 if plan.shape == "multirow" else WARP
+        if (
+            self.partition_begin < 0
+            or self.partition_count < 1
+            or (
+                plan.shape == "split"
+                and self.partition_begin + self.partition_count > plan.split[0]
+            )
+        ):
+            raise ValueError("ordered-column partition range is out of bounds")
+        self.complex_input = getattr(trait, "complex_input", False)
+        self.output_widths = (
+            (1,) * nouts
+            if plan.shape == "split"
+            else tuple(getattr(trait, "output_widths", None) or (1,) * nouts)
+        )
+        # Each worker traverses an original warp tree, even with fewer column lanes.
+        self.workers = 1 if plan.shape == "multirow" else min(worker_warps, plan.wpr)
+        self.outputs_per_block = 128 if plan.shape == "multirow" else tile_columns
+        self.full_tiles = False
 
     @property
     def cache_sig(self) -> tuple[Any, ...]:
-        return (
-            self.plan.shape,
+        key = (
             self.R,
             self.C,
             self.B,
-            self.plan.vec,
-            self.plan.wpr,
-            self.plan.depth,
-            self.plan.batches,
+            self.trait.nfields,
             self.nouts,
             self.output_widths,
+            self.workers,
+            self.outputs_per_block,
+            self.full_tiles,
+            self.column_pack,
+            self.partition_begin,
+            self.partition_count,
         )
+        return key + (self.plan.sig,)
 
     @cute.jit
     def __call__(self, mIn: cute.Tensor, mOuts: list, in_base: Int64, stream):
         self.kernel(mIn, mOuts, in_base).launch(
-            grid=[math.ceil(self.B * self.C / self.outputs_per_block), 1, 1],
+            grid=[
+                math.ceil(self.B * self.output_groups / self.outputs_per_block),
+                self.partition_count,
+                1,
+            ],
             block=(
                 [self.outputs_per_block, 1, 1]
                 if const_expr(self.plan.shape == "multirow")
-                else [WARP, self.workers, 1]
+                else [self.outputs_per_block, self.workers, 1]
             ),
             stream=stream,
         )
 
     @cute.jit
-    def _leaf(self, mIn, in_base, batch, col, red, active):
-        trait = self.trait
-        valid = active & (red < Int32(self.R))
-        safe_red = red if valid else Int32(0)
-        index = (
-            in_base
-            + Int64(batch) * Int64(self.R * self.C)
-            + Int64(safe_red) * Int64(self.C)
-            + Int64(col)
-        )
-        got = trait.leaf(
-            tile._load_reduction_value(
-                trait, mIn, index, const_expr(self.complex_input)
-            ),
-            safe_red,
-        )
-        ident = trait.init()
-        return tuple(got[f] if valid else ident[f] for f in range(trait.nfields))
+    def _identity(self):
+        if const_expr(self.column_pack > 1):
+            return tuple(self.trait.init()[0] for _ in range(self.column_pack))
+        return self.trait.init()
 
     @cute.jit
-    def _lane_root(self, mIn, in_base, batch, col, base, active):
+    def _combine(self, a, b):
+        if const_expr(self.column_pack > 1):
+            # Adjacent columns keep independent copies of the logical tree.
+            return tuple(
+                self.trait.combine((a[i],), (b[i],))[0] for i in range(self.column_pack)
+            )
+        return self.trait.combine(a, b)
+
+    @cute.jit
+    def _leaf(self, mIn, in_base, batch, col, red, active, bound):
+        trait = self.trait
+        valid = active & (red < bound)
+        safe_red = red if const_expr(self.full_tiles) else red if valid else Int32(0)
+        if const_expr(self.column_pack > 1):
+            # Storage and columns are pack-aligned; keep row strides in pack units.
+            index = (
+                in_base // self.column_pack
+                + Int64(batch) * Int64(self.R * (self.C // self.column_pack))
+                + Int64(safe_red) * Int64(self.C // self.column_pack)
+                + Int64(col) // self.column_pack
+            )
+            packed = cute.flat_divide(mIn, (self.column_pack,))
+            frag = cute.make_rmem_tensor(
+                cute.make_layout(self.column_pack), mIn.element_type
+            )
+            cute.autovec_copy(packed[None, index], frag)
+            got = tuple(
+                trait.leaf(frag[i], safe_red)[0] for i in range(self.column_pack)
+            )
+        else:
+            index = (
+                in_base
+                + Int64(batch) * Int64(self.R * self.C)
+                + Int64(safe_red) * Int64(self.C)
+                + Int64(col)
+            )
+            got = trait.leaf(
+                tile._load_reduction_value(
+                    trait, mIn, index, const_expr(self.complex_input)
+                ),
+                safe_red,
+            )
+        ident = self._identity()
+        return tuple(got[f] if valid else ident[f] for f in range(self.state_fields))
+
+    @cute.jit
+    def _lane_root(self, mIn, in_base, batch, col, base, active, bound):
         vals = [
             self._leaf(
                 mIn,
@@ -259,23 +349,29 @@ class _OrderedColReduce:
                 col,
                 base + Int32(i),
                 active,
+                bound,
             )
             for i in range(self.plan.vec)
         ]
-        return tile._reduce_vec(vals, self.plan.vec, self.trait.combine)
+        return tile._reduce_vec(vals, self.plan.vec, self._combine)
 
     @cute.kernel
     def kernel(self, mIn: cute.Tensor, mOuts: list, in_base: Int64):
         tx, ty, _ = cute.arch.thread_idx()
-        bx, _, _ = cute.arch.block_idx()
+        bx, by, _ = cute.arch.block_idx()
         trait, plan = self.trait, self.plan
-        op, ident = trait.combine, trait.init()
+        op, ident = self._combine, self._identity()
+        split_base = Int32(0)
+        partition = Int32(by) + Int32(const_expr(self.partition_begin))
+        if const_expr(plan.shape == "split"):
+            split_base = partition * Int32(plan.split[1])
 
         if const_expr(plan.shape == "multirow"):
             output = Int32(bx) * Int32(self.outputs_per_block) + Int32(tx)
-            active = output < Int32(self.B * self.C)
+            active = output < Int32(self.B * self.output_groups)
             safe = output if active else Int32(0)
-            batch, col = safe // Int32(self.C), safe % Int32(self.C)
+            batch = safe // Int32(self.output_groups)
+            col = (safe % Int32(self.output_groups)) * Int32(self.column_pack)
             tree = []
             for load in cutlass.range_constexpr(plan.batches[0][2]):
                 tile._streaming_push(
@@ -287,6 +383,7 @@ class _OrderedColReduce:
                         col,
                         Int32(load * plan.vec),
                         active,
+                        Int32(self.R),
                     ),
                     load,
                     plan.depth,
@@ -295,16 +392,18 @@ class _OrderedColReduce:
             final = tree[0]
         else:
             lane, worker = Int32(tx), Int32(ty)
-            output = Int32(bx) * Int32(WARP) + lane
-            active = output < Int32(self.B * self.C)
+            columns = const_expr(self.outputs_per_block)
+            output = Int32(bx) * Int32(columns) + lane
+            active = output < Int32(self.B * self.output_groups)
             safe = output if active else Int32(0)
-            batch, col = safe // Int32(self.C), safe % Int32(self.C)
-            nf = const_expr(trait.nfields)
+            batch = safe // Int32(self.output_groups)
+            col = (safe % Int32(self.output_groups)) * Int32(self.column_pack)
+            nf = const_expr(self.state_fields)
             smem = cutlass.utils.SmemAllocator()
             roots = [
                 smem.allocate_tensor(
-                    trait.fdtypes[f],
-                    cute.make_layout(const_expr(plan.wpr * WARP)),
+                    trait.fdtypes[f % trait.nfields],
+                    cute.make_layout(const_expr(plan.wpr * columns)),
                     byte_alignment=8,
                 )
                 for f in range(nf)
@@ -313,6 +412,21 @@ class _OrderedColReduce:
             for b in cutlass.range_constexpr(len(plan.batches)):
                 batch_off, _remaining, loads, warp_chunk = plan.batches[b]
                 for warp in cutlass.range(worker, plan.wpr, self.workers):
+                    warp_base = split_base + Int32(batch_off) + warp * Int32(warp_chunk)
+                    bound = Int32(self.R)
+                    if const_expr(
+                        plan.shape == "split" and plan.split[1] != plan.split[2]
+                    ):
+                        nbatch, bte, last, full_chunk, last_chunk = plan.split
+                        final_batch = partition == Int32(nbatch - 1)
+                        remaining = Int32(last) if final_batch else Int32(bte)
+                        chunk = Int32(last_chunk) if final_batch else Int32(full_chunk)
+                        offset = warp * chunk
+                        offset = remaining if offset > remaining else offset  # noqa: FURB136
+                        warp_base = split_base + offset
+                        end = offset + chunk
+                        end = remaining if end > remaining else end  # noqa: FURB136
+                        bound = split_base + end
                     load_tree = []
                     for load in cutlass.range_constexpr(loads):
                         if const_expr(nf == 1):
@@ -325,10 +439,11 @@ class _OrderedColReduce:
                                     in_base,
                                     batch,
                                     col,
-                                    Int32(batch_off + load * WARP * plan.vec)
-                                    + warp * Int32(warp_chunk)
+                                    warp_base
+                                    + Int32(load * WARP * plan.vec)
                                     + Int32(original_lane * plan.vec),
                                     active,
+                                    bound,
                                 )[0]
                             load_root = tile._inner_tree_reduce(
                                 [(lane_roots[i],) for i in range(WARP)], op
@@ -343,10 +458,11 @@ class _OrderedColReduce:
                                         in_base,
                                         batch,
                                         col,
-                                        Int32(batch_off + load * WARP * plan.vec)
-                                        + warp * Int32(warp_chunk)
+                                        warp_base
+                                        + Int32(load * WARP * plan.vec)
                                         + Int32(original_lane * plan.vec),
                                         active,
+                                        bound,
                                     ),
                                     original_lane,
                                     5,
@@ -354,7 +470,7 @@ class _OrderedColReduce:
                                 )
                             load_root = lane_tree[0]
                         tile._streaming_push(load_tree, load_root, load, plan.depth, op)
-                    slot = warp * Int32(WARP) + lane
+                    slot = warp * Int32(columns) + lane
                     for f in cutlass.range_constexpr(nf):
                         roots[f][slot] = load_tree[0][f]
                 cute.arch.barrier()
@@ -364,7 +480,9 @@ class _OrderedColReduce:
                         tile._inner_tree_reduce(
                             [
                                 tuple(
-                                    roots[f][(g * plan.kchunk + i) * Int32(WARP) + lane]
+                                    roots[f][
+                                        (g * plan.kchunk + i) * Int32(columns) + lane
+                                    ]
                                     for f in range(nf)
                                 )
                                 for i in range(plan.kchunk)
@@ -380,27 +498,59 @@ class _OrderedColReduce:
                             group_vals[0][f] if dynamic_false else ident[f]
                             for f in range(nf)
                         )
-                    group_vals.extend([padding] * (WARP - groups))
-                    final = op(final, tile._inner_tree_reduce(group_vals, op))
+                    if const_expr(plan.shape != "split" or groups > 1):
+                        group_vals.extend([padding] * (WARP - groups))
+                    root = tile._inner_tree_reduce(group_vals, op)
+                    if const_expr(plan.shape == "split"):
+                        final = root
+                    else:
+                        final = op(final, root)
                 cute.arch.barrier()
 
-        projected = trait.project(final, trait.acc(self.R))
-        if (Int32(ty) == Int32(0)) & active:
-            if const_expr(self.nouts == 1):
-                tile._store_reduction_value(
-                    mOuts[0],
-                    output,
-                    projected,
-                    const_expr(self.output_widths[0]),
+        if const_expr(plan.shape == "split"):
+            if (Int32(ty) == Int32(0)) & active:
+                if const_expr(self.column_pack > 1):
+                    for i in cutlass.range_constexpr(self.column_pack):
+                        index = (output * Int32(self.column_pack) + Int32(i)) * Int32(
+                            plan.split[0]
+                        ) + partition
+                        mOuts[0][index] = final[i]
+                else:
+                    index = output * Int32(plan.split[0]) + partition
+                    for f in cutlass.range_constexpr(trait.nfields):
+                        mOuts[f][index] = final[f]
+        else:
+            if const_expr(self.column_pack > 1):
+                projected = tuple(
+                    trait.project((final[i],), trait.acc(self.R))
+                    for i in range(self.column_pack)
                 )
             else:
-                for k in cutlass.range_constexpr(self.nouts):
+                projected = trait.project(final, trait.acc(self.R))
+            if (Int32(ty) == Int32(0)) & active:
+                if const_expr(self.column_pack > 1):
+                    for i in cutlass.range_constexpr(self.column_pack):
+                        tile._store_reduction_value(
+                            mOuts[0],
+                            output * Int32(self.column_pack) + Int32(i),
+                            projected[i],
+                            1,
+                        )
+                elif const_expr(self.nouts == 1):
                     tile._store_reduction_value(
-                        mOuts[k],
+                        mOuts[0],
                         output,
-                        projected[k],
-                        const_expr(self.output_widths[k]),
+                        projected,
+                        const_expr(self.output_widths[0]),
                     )
+                else:
+                    for k in cutlass.range_constexpr(self.nouts):
+                        tile._store_reduction_value(
+                            mOuts[k],
+                            output,
+                            projected[k],
+                            const_expr(self.output_widths[k]),
+                        )
 
 
 def _split_p(R: int) -> int:
@@ -416,6 +566,7 @@ def reduce_ordered_col(
     nouts: int,
     *,
     order: str = "inner_tree",
+    allow_split: bool | None = None,
 ) -> tuple[torch.Tensor, ...] | None:
     """Reduce the middle axis of a contiguous (B, R, C) physical view."""
     if order != "inner_tree":
@@ -435,39 +586,95 @@ def reduce_ordered_col(
     plan = rt.trait_itree_plan(
         trait, R, B * C, x.element_size(), stage=False, device=x.device
     )
-    if plan is None or plan.shape not in ("multirow", "looped"):
+    if plan is None:
         return None
-    op = _OrderedColReduce(trait, plan, R, C, B, nouts)
+    split = plan.shape == "split"
+    if split and (
+        allow_split is not True
+        or not x.is_contiguous()
+        or x.dtype not in (torch.float32, torch.bfloat16, torch.float16)
+        or plan.vec_linear
+        or B * C * plan.split[0] >= 2**31
+        or plan.split[0] > 65535
+    ):
+        return None
+    ops = (
+        _OrderedColReduce(
+            trait,
+            plan,
+            R,
+            C,
+            B,
+            trait.nfields if split else nouts,
+        ),
+    )
     outs = [
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
     ]
     kernel_x = _flat(x)
-    kernel_outs = [_storage.flat_view(out) for out in outs]
-    fake_in = _L.fake_compact(torch2cute[kernel_x.dtype], (_L.sym_int64(),))
+    kernel_outs = (
+        [
+            torch.empty(B * C * plan.split[0], device=x.device, dtype=cute2torch[d])
+            for d in trait.fdtypes
+        ]
+        if split
+        else [_storage.flat_view(out) for out in outs]
+    )
+    fake_in = _L.fake_compact(
+        torch2cute[kernel_x.dtype],
+        (_L.sym_int64(),),
+    )
     fake_outs = [
         _L.fake_compact(torch2cute[out.dtype], (_L.sym(),)) for out in kernel_outs
     ]
-    key = (
-        (
-            "ordered_col",
-            trait_key,
-            x.dtype,
-            tuple(out_dtypes[:nouts]),
-            str(x.device),
+    for op in ops:
+        key = (
+            (
+                "ordered_col1" if split else "ordered_col",
+                trait_key,
+                x.dtype,
+                tuple(out_dtypes[:nouts]),
+                str(x.device),
+            )
+            + op.cache_sig
+            + (("order", order),)
         )
-        + op.cache_sig
-        + (("order", order),)
-    )
-    build = lambda: _compile(  # noqa: E731
-        op, fake_in, fake_outs, Int64(x.storage_offset()), _stream()
-    )
-    cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
-        _L.read_only(kernel_x),
-        kernel_outs,
-        Int64(x.storage_offset()),
-        _stream(),
-    )
+        build = lambda: _compile(  # noqa: E731
+            op, fake_in, fake_outs, Int64(x.storage_offset()), _stream()
+        )
+        cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(
+            _L.read_only(kernel_x),
+            kernel_outs,
+            Int64(x.storage_offset()),
+            _stream(),
+        )
+    if split:
+        combine = rt.itree_combine_plan(
+            plan,
+            kernel_outs[0].element_size(),
+            x.device,
+            nfields=trait.nfields,
+            nrows=B * C,
+        )
+        s2 = ReduceBlock(
+            trait,
+            count=plan.split[0],
+            num_o=B * C,
+            red_pairs=[],
+            kept_pairs=[],
+            project_n=R,
+            nouts=nouts,
+            order="inner_tree",
+            itree=combine,
+        )
+        key2 = (
+            "ordered_col2",
+            trait_key,
+            tuple(out_dtypes),
+            tuple(part.dtype for part in kernel_outs),
+        ) + s2.cache_sig
+        _launch(s2, key2, kernel_outs, [_storage.flat_view(out) for out in outs])
     return tuple(outs)
 
 
@@ -583,6 +790,10 @@ def _reduce_col_tile(
     )
     if cfg is None:
         raise AssertionError("unordered column reduction needs a column configuration")
+    if cfg.kernel_order == "inner_tree":
+        ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts)
+        if ordered is not None:
+            return ordered
     threads_per_block, npar, vec = cfg.threads_per_block, cfg.npar, cfg.vec
     if vec <= 0:
         raise ValueError(f"vec must be positive, got {vec}")
