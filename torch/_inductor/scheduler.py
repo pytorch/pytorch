@@ -275,6 +275,25 @@ def _is_gpu_triton_backend(
     )
 
 
+def _is_loop_carried_compile_error(e: Exception) -> bool:
+    """Whether ``e`` is the Triton loop-carried-variable compile failure.
+
+    Benchmarking a fusion candidate that hits it tells us nothing, so callers allow
+    the fusion instead -- the workaround for
+    https://github.com/triton-lang/triton/issues/2151. A compile that ran in an
+    async-compile pool worker comes back wrapped in a SubprocException, so match on
+    both sides of that boundary or the workaround silently stops applying whenever
+    the pool is in use.
+    """
+    from triton.compiler.errors import CompilationError
+
+    from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+    return isinstance(e, (CompilationError, SubprocException)) and (
+        "Loop-carried variable" in str(e)
+    )
+
+
 class MixOrderReduction:
     """
     This class contains utility functions to decide if we should fuse reductions
@@ -3976,11 +3995,9 @@ class SchedulerNode(BaseSchedulerNode):
         whole reduction; this node is left unchanged."""
         if not MixOrderReduction.is_split_reduction(self):
             return self
-        if not isinstance(self.node, ir.ComputedBuffer):
-            raise AssertionError("expected self.node to be an ir.ComputedBuffer")
         node = copy.copy(self)
-        with self.node.with_original_inner_fn():
-            node._compute_attrs()
+        node.cancel_reduction_split()
+        # cancel_reduction_split caches the unsplit body.
         self.node.get_default_sizes_body.clear_cache(self.node)
         return node
 
@@ -4850,7 +4867,19 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             foreach_match = len(producer.snodes) == len(consumer.snodes)
             if not foreach_match:
                 why("foreach do not have same length")
-            return foreach_match and all(
+                return False
+            # Each pair becomes one sub-kernel and the sub-kernels run in
+            # parallel, so a consumer may depend only on its own partner.
+            owner = {
+                name: i
+                for i, snode in enumerate(producer.snodes)
+                for name in snode.get_buffer_names()
+            }
+            for i, snode in enumerate(consumer.snodes):
+                if any(owner.get(dep.name, i) != i for dep in snode.unmet_dependencies):
+                    why("a consumer depends on another producer sub-node")
+                    return False
+            return all(
                 producer.scheduler.can_fuse(l, r)
                 for l, r in zip(producer.snodes, consumer.snodes)
             )
@@ -5880,6 +5909,10 @@ class Scheduler:
         # Failed correctness check of memory timeline modeling disables fusion memory checks
         # for later fusion rounds.
         self._fusion_memory_guard_disabled = False
+        # Whether fusion rounds hold back template reduction epilogues, and
+        # whether the latest round held any back. See fuse_nodes.
+        self._defer_template_reduction_epilogues = False
+        self._deferred_template_reduction_epilogues = False
         super().__init__()
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
@@ -6379,7 +6412,10 @@ class Scheduler:
                 name
                 for name in names
                 if name in kept_node_names
-                and not isinstance(self.name_to_node[name], NopKernelSchedulerNode)
+                and not isinstance(
+                    self.name_to_node[name],
+                    (NopKernelSchedulerNode, ExternKernelSchedulerNode),
+                )
             ]
             if not names:
                 # All nodes eliminated
@@ -6388,18 +6424,32 @@ class Scheduler:
             removed_node_names.update(names)
             snodes = [self.name_to_node[name] for name in names]
 
+            # The nodes of a foreach kernel run in parallel, so a node that
+            # depends on an earlier one of the list starts a new kernel: in
+            # _foreach_add_([a, b], [b, a]) the value for b reads a after the
+            # first element has written it.
+            groups: list[list[tuple[str, BaseSchedulerNode]]] = [[]]
+            written: OrderedSet[str] = OrderedSet()
+            for name, snode in zip(names, snodes):
+                if any(dep.name in written for dep in snode.unmet_dependencies):
+                    groups.append([])
+                    written = OrderedSet()
+                groups[-1].append((name, snode))
+                written.update(snode.get_buffer_names())
+
             enable_autotune = config.combo_kernels_autotune > 1
-            fe_node = ForeachKernelSchedulerNode(
-                self,
-                snodes,
-                use_custom_partition_algo=False,
-                enable_autotune=enable_autotune,
-            )
+            for group in groups:
+                fe_node = ForeachKernelSchedulerNode(
+                    self,
+                    [snode for _, snode in group],
+                    use_custom_partition_algo=False,
+                    enable_autotune=enable_autotune,
+                )
 
-            fe_nodes.append(fe_node)
+                fe_nodes.append(fe_node)
 
-            for name in names:
-                self.name_to_fused_node[name] = fe_node
+                for name, _ in group:
+                    self.name_to_fused_node[name] = fe_node
 
         self.nodes = [
             node for node in self.nodes if node.get_name() not in removed_node_names
@@ -7030,6 +7080,11 @@ class Scheduler:
             "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
         ):
             self._fusion_memory_state = None
+            # A template reduction epilogue is benchmarked against the template
+            # plus the reduction's own kernel, so hold it back until no other
+            # fusion is left. Otherwise the reduction is timed before it fuses
+            # with its consumers, which are then timed as separate kernels.
+            self._defer_template_reduction_epilogues = True
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(
@@ -7045,11 +7100,15 @@ class Scheduler:
                     old_len,
                     new_len,
                 )
+                if new_len == old_len and self._deferred_template_reduction_epilogues:
+                    self._defer_template_reduction_epilogues = False
+                    continue
                 if new_len == old_len or new_len == 1:
                     fusion_log.debug(
                         "===== fusion complete (%d iterations) =====", i + 1
                     )
                     break
+            self._defer_template_reduction_epilogues = False
 
             if (
                 config.loop_ordering_after_fusion
@@ -7538,7 +7597,10 @@ class Scheduler:
         )
 
     def compile_kernel(
-        self, nodes: Sequence[BaseSchedulerNode], hint_override: int | None = None
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        hint_override: int | None = None,
+        skip_if_perf_cached: bool = False,
     ) -> tuple[LambdaFuture | None, ModuleType]:
         src_code = self.generate_kernel_code_from_nodes(
             nodes, benchmark_kernel=True, hint_override=hint_override
@@ -7547,6 +7609,11 @@ class Scheduler:
 
         if not hasattr(mod, "triton_"):
             return (None, mod)
+
+        if skip_if_perf_cached and mod.__file__ is not None:
+            perf_path = os.path.splitext(mod.__file__)[0] + ".kernel_perf"
+            if os.path.exists(perf_path):
+                return (None, mod)
 
         async_compile = torch._inductor.async_compile.AsyncCompile()
         if not async_compile.use_process_pool():
@@ -7557,6 +7624,21 @@ class Scheduler:
                 raise AssertionError("expected fut to be a LambdaFuture")
 
         return (fut, mod)
+
+    def _is_template_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """Whether fusing node2 into Triton template node1 puts a reduction in
+        the template's epilogue. Reduction epilogues the backend fuses natively
+        (NVGEMM) keep their own path."""
+        return (
+            config.triton.template_reduction_epilogue
+            and isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
+            and any(n.is_reduction() for n in node2.get_nodes())
+            and not self.get_backend(node1.get_device()).can_fuse_reduction_epilogue(
+                node1, node2
+            )
+        )
 
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -7580,11 +7662,10 @@ class Scheduler:
         # A reduction in a Triton template's epilogue is kept only when the
         # epilogue benchmark shows it beats the template plus a separate
         # reduction kernel.
-        template_reduction = isinstance(
-            node1.get_template_node(), ir.TritonTemplateBuffer
-        ) and any(n.is_reduction() for n in node2.get_nodes())
+        template = node1.get_template_node()
+        template_reduction = self._is_template_reduction_epilogue(node1, node2)
         if template_reduction and not (
-            isinstance(node1.get_template_node(), ir.MultiTemplateBuffer)
+            isinstance(template, ir.MultiTemplateBuffer)
             and config.benchmark_template_fusion
         ):
             return FusionResult.fuse(False)
@@ -7611,6 +7692,7 @@ class Scheduler:
                 and self.get_backend(device).has_sub_parent_epilogue(fused_nodes)
             )
         ):
+            # The tile reduction epilogue can't express a two-level reduction.
             return FusionResult.fuse(not template_reduction)
 
         if (
@@ -7641,8 +7723,6 @@ class Scheduler:
         # epilogues, so keep the existing non-template behavior here.
         if has_atomic_add and not is_multi_template:
             return FusionResult.fuse(True)
-
-        from triton.compiler.errors import CompilationError
 
         why = WhyNoFuse(node1, node2)
 
@@ -7690,21 +7770,17 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
-            from torch._inductor.codegen.simd import (
-                CantSplit,
-                tile_fits_reduction_epilogue,
-            )
+            from torch._inductor.codegen.simd import CantSplit
 
-            # A reduction epilogue needs an output tile that can hold it. Each
-            # choice records its tile when rendered, so reject misfits up front.
-            epilogue_nodes = [n for n in node_list_fused if not n.is_template()]
-            reduction_epilogue = epilogue_fusion and any(
-                n.is_reduction() for n in epilogue_nodes
-            )
+            # Reject choices that can't host a reduction epilogue up front. Each
+            # choice is judged by its own backend, e.g. by a Triton choice's
+            # output tile.
+            epilogue = ir.ReductionEpilogue(node1, node2)
+            reduction_epilogue = any(n.is_reduction() for n in epilogue.nodes)
 
             def choice_fits_reduction_epilogue(choice: ir.ChoiceCaller) -> bool:
-                return not reduction_epilogue or tile_fits_reduction_epilogue(
-                    getattr(choice, "output_tile", None), multi_node, epilogue_nodes
+                return not reduction_epilogue or choice.supports_reduction_epilogue(
+                    epilogue
                 )
 
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
@@ -7838,6 +7914,8 @@ class Scheduler:
                 return True
 
             if has_atomic_add:
+                # This path fuses without benchmarking, and reduction epilogues
+                # are only kept when benchmarked faster.
                 if not epilogue_fusion or template_reduction:
                     return FusionResult.fuse(False)
 
@@ -8208,10 +8286,10 @@ class Scheduler:
                 except NoTritonConfigsError:
                     return False
 
-                except CompilationError as e:
-                    if "Loop-carried variable" in str(e):
-                        return True
-                    raise
+                except Exception as e:
+                    if not _is_loop_carried_compile_error(e):
+                        raise
+                    return True
 
             return FusionResult.from_callable(
                 callable_fn=benchmark_when_ready, future=future_and_mod_l1_fused[0]
@@ -8306,6 +8384,21 @@ class Scheduler:
 
         return False
 
+    def _is_stale_pending_fusion(self, pending_fusion: PendingFusion) -> bool:
+        """Whether either node of a pending fusion has fused with a reduction
+        since its speedup was benchmarked, with template reduction epilogues
+        enabled. The benchmark (and the template choice it would finalize) only
+        covers the nodes it saw, so it may pick a tile that can't hold the
+        reduction. Such fusions are skipped, and the next fusion round
+        benchmarks the new nodes. Other pending fusions are evaluated on the
+        nodes' current fused nodes."""
+        nodes = pending_fusion.get_fusion_nodes()
+        fused = [self.get_fused_node(node) for node in nodes]
+        return config.triton.template_reduction_epilogue and any(
+            f is not n and any(s.is_reduction() for s in f.get_nodes())
+            for f, n in zip(fused, nodes)
+        )
+
     def _evaluate_pending_template_fusions(
         self,
         template_fusion_candidates: dict[BaseSchedulerNode, list[PendingFusion]],
@@ -8368,6 +8461,8 @@ class Scheduler:
                     future_to_pending_fusion[f] = (pending_fusion, candidate)
                 else:
                     # Non AsyncCompile path, perform fusion
+                    if self._is_stale_pending_fusion(pending_fusion):
+                        continue
                     if self._fusion_memory_state is not None:
                         node1 = self.get_fused_node(node1)
                         node2 = self.get_fused_node(node2)
@@ -8379,6 +8474,8 @@ class Scheduler:
             # Evaluate fusion candidates as async_compile completes
             for f in as_completed(template_futures):
                 pending_fusion, cand = future_to_pending_fusion[f]
+                if self._is_stale_pending_fusion(pending_fusion):
+                    continue
                 if self.fuse_if_speedup(
                     self.get_fused_node(pending_fusion.node1),
                     self.get_fused_node(pending_fusion.node2),
@@ -9238,9 +9335,28 @@ class Scheduler:
         possible_fusions = self.get_possible_fusions_with_highest_priority(
             possible_fusions
         )
+        possible_fusions = self._defer_benchmarked_template_reductions(possible_fusions)
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
+
+    def _defer_benchmarked_template_reductions(
+        self, possible_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]]
+    ) -> list[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
+        """Drop the template reduction epilogues that would be benchmarked
+        while fuse_nodes defers them, and record whether any were dropped."""
+        deferred = OrderedSet(
+            (node1, node2)
+            for node1, node2 in possible_fusions
+            if self._defer_template_reduction_epilogues
+            and config.benchmark_template_fusion
+            and isinstance(node1.get_template_node(), ir.MultiTemplateBuffer)
+            and self._is_template_reduction_epilogue(node1, node2)
+        )
+        self._deferred_template_reduction_epilogues = bool(deferred)
+        for node1, node2 in deferred:
+            WhyNoFuse(node1, node2)("template reduction epilogue deferred")
+        return [pair for pair in possible_fusions if pair not in deferred]
 
     def will_fusion_create_cycle(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -10710,6 +10826,9 @@ class Scheduler:
             if self._fusion_blocked_by_placement(node1, node2):
                 return False
             return node1.can_fuse_with(node2)
+        # Only a Triton template epilogue can generate both reductions of a
+        # mix-order pair, as a row pass and a transposed column pass over the
+        # output tile; nothing else can fuse with the pair.
         if isinstance(node2, FusedMixOrderReductions) and not (
             config.triton.template_reduction_epilogue
             and isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
@@ -11117,19 +11236,7 @@ class Scheduler:
                 and node2.is_reduction()
                 and backend.can_fuse_template_reduction_epilogue(node1, node2)
             ):
-                # Reductions in a template epilogue read the output tile from
-                # registers, so they may traverse it in any loop order.
-                staged_matches = tuple(
-                    MemoryDepMatch(write, read)
-                    for write in node1.read_writes.writes
-                    for snode in node2.get_nodes()
-                    if snode.is_reduction()
-                    for read in snode.read_writes.reads
-                    if isinstance(write, MemoryDep)
-                    and isinstance(read, MemoryDep)
-                    and write.normalize_with_stride_order()
-                    == read.normalize_with_stride_order()
-                )
+                staged_matches = self._template_reduction_epilogue_matches(node1, node2)
             vertical_fusion_legal = (
                 self.can_fuse_vertical(node1, node2)
                 if staged_matches is None
@@ -11179,6 +11286,51 @@ class Scheduler:
         be scheduled before the fusion of node1 and node2.
         """
         return self._can_fuse_vertical_impl(node1, node2, ())
+
+    def _template_reduction_epilogue_matches(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> tuple[MemoryDepMatch, ...]:
+        """Matches of template node1's writes to the reads of node2's
+        reductions. Reductions in a template epilogue read the output tile from
+        registers, so they may traverse it in any loop order. A split reduction
+        is generated whole, so its stage-1 reads match only if the unsplit
+        reduction reads the whole write."""
+        matches = []
+        for snode in node2.get_nodes():
+            if not snode.is_reduction():
+                continue
+            unsplit = (
+                snode.unsplit_reduction() if isinstance(snode, SchedulerNode) else snode
+            )
+            reads = [
+                read.rename(self.mutation_renames) for read in snode.read_writes.reads
+            ]
+            unsplit_reads = [
+                read.rename(self.mutation_renames) for read in unsplit.read_writes.reads
+            ]
+            for write in node1.read_writes.writes:
+                if not isinstance(write, MemoryDep):
+                    continue
+                write = write.rename(self.mutation_renames)
+                normalized = write.normalize_with_stride_order()
+                if unsplit is not snode and not all(
+                    isinstance(read, MemoryDep)
+                    and read.normalize_with_stride_order() == normalized
+                    for read in unsplit_reads
+                    if read.name == write.name
+                ):
+                    continue
+                matches.extend(
+                    MemoryDepMatch(write, read)
+                    for read in reads
+                    if isinstance(read, MemoryDep)
+                    and (
+                        read.name == write.name
+                        if unsplit is not snode
+                        else read.normalize_with_stride_order() == normalized
+                    )
+                )
+        return tuple(matches)
 
     def _can_fuse_vertical_impl(
         self,
@@ -12875,6 +13027,9 @@ class Scheduler:
         self.current_device = self.default_device_context
         if self.previous_node is not None:
             raise AssertionError("expected previous_node to be None")
+        previous_nodes_by_stream: dict[
+            tuple[torch.device | None, int], BaseSchedulerNode
+        ] = {}
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -12902,6 +13057,8 @@ class Scheduler:
                     V.graph.wrapper_code.mark_multistream_alignment(multi)
 
         for node in nodes:
+            stream_key = (node.get_device(), self.get_node_stream(node))
+            self.previous_node = previous_nodes_by_stream.get(stream_key)
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -12990,7 +13147,7 @@ class Scheduler:
             # on multiple streams get one copy per stream.
             V.graph.wrapper_code.codegen_deferred_alignment_copies(
                 (dep.name for dep in node.read_writes.reads),
-                self.node_to_stream.get(node, 0),
+                stream_key[1],
             )
 
             self.current_node = node
@@ -13062,9 +13219,9 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                self.previous_node = node
+                previous_nodes_by_stream[stream_key] = node
             else:
-                self.previous_node = None
+                previous_nodes_by_stream.pop(stream_key, None)
 
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen
@@ -13111,12 +13268,19 @@ class Scheduler:
 
         if not config.benchmark_combo_kernel:
             return True
-
-        from triton.compiler.errors import CompilationError
+        if device is None:
+            raise AssertionError("expected device to be set")
 
         ms1, path1_list = 0.0, []
         node_benchmark_results = {}
-        for i, snode in enumerate(subkernel_nodes):
+        # Submit cache misses to the compile pool before benchmarking any subkernel.
+        # Triton's frontend holds the GIL, so compiles only overlap across processes.
+        compiled = [
+            self.compile_kernel(snode.get_nodes(), skip_if_perf_cached=True)
+            for snode in subkernel_nodes
+        ]
+
+        for i, (snode, (future, mod)) in enumerate(zip(subkernel_nodes, compiled)):
             node_list = snode.get_nodes()
             # We can not accurately benchmark kernel using atomic_add
             # due to how we generate random integer inputs.
@@ -13125,8 +13289,20 @@ class Scheduler:
                     "ComboKernel: benchmarking may not accurate due to atomic_add"
                 )
 
+            if future is not None:
+                try:
+                    future.result()
+                except Exception:
+                    # The benchmark below recompiles in-process and scores a failure as
+                    # inf; deciding here would make the verdict depend on the pool.
+                    fusion_log.debug(
+                        "ComboKernel benchmark: %d-th subkernel failed in the pool",
+                        i,
+                        exc_info=True,
+                    )
+
             try:
-                ms, path = self.benchmark_fused_nodes(node_list)
+                ms, path = self.benchmark_codegened_module(mod, device)
                 node_benchmark_results[snode] = (ms, path)
                 if math.isinf(ms):
                     fusion_log.debug(
@@ -13134,15 +13310,13 @@ class Scheduler:
                         i,
                     )
                     return False
-            except CompilationError as e:
-                # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
-                if "Loop-carried variable" in str(e):
-                    fusion_log.debug(
-                        "ComboKernel benchmark: return True because of loop-carried variable"
-                    )
-                    return True  # allow fusion
-                else:
+            except Exception as e:
+                if not _is_loop_carried_compile_error(e):
                     raise
+                fusion_log.debug(
+                    "ComboKernel benchmark: return True because of loop-carried variable"
+                )
+                return True  # allow fusion
             ms1 += ms
             path1_list.append(path)
 
@@ -13150,15 +13324,13 @@ class Scheduler:
             ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(
                 subkernel_nodes, node_benchmark_results
             )
-        except CompilationError as e:
-            # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
-            if "Loop-carried variable" in str(e):
-                fusion_log.debug(
-                    "ComboKernel benchmark: return True because of loop-carried variable"
-                )
-                return True  # allow fusion
-            else:
+        except Exception as e:
+            if not _is_loop_carried_compile_error(e):
                 raise
+            fusion_log.debug(
+                "ComboKernel benchmark: return True because of loop-carried variable"
+            )
+            return True  # allow fusion
 
         # small kernels are very likely to have speedup but hard to benchmark. So we skip benchmarking.
         small_kernel = ms2 - ms2_clone < 0.3 or ms1 < 0.3
@@ -13173,7 +13345,7 @@ class Scheduler:
                     "cannot fuse (benchmark): fusing causes %sx slowdown",
                     red_text(f"{ms1 / ms2:.3f}"),
                 )
-        # ms1 returned by benchmark_fused_nodes discounted clone time
+        # ms1 returned by benchmark_codegened_module discounted clone time
         return ms2 - ms2_clone < ms1 or small_kernel
 
     def get_buffer_layout(self, buf_name: str) -> ir.Layout:
@@ -13307,7 +13479,8 @@ class BaseScheduling:  # noqa: docstring_linter
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         """Whether reductions in node2 may join template node1's epilogue,
-        subject to the ordinary vertical fusion checks."""
+        subject to the ordinary vertical fusion checks (unlike
+        can_fuse_reduction_epilogue, which bypasses them)."""
         return False
 
     def can_fuse_reduction_pair(

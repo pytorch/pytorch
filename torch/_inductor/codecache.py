@@ -60,6 +60,7 @@ from torch._dynamo.utils import (
     get_metrics_context,
 )
 from torch._inductor import config, config_comms, exc, metrics
+from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.codegen.common import (
     custom_backend_codegen_configs,
     custom_backend_passes,
@@ -160,6 +161,7 @@ class SystemDeviceInfo(TypedDict):
 
 class SystemVersionInfo(TypedDict, total=False):
     triton: str | None
+    triton_meta_ws: bool
     cuda: str
     hip: str | None
 
@@ -343,6 +345,10 @@ class CacheBase:
             triton_version = triton_key()
 
         version_info: SystemVersionInfo = {"triton": triton_version}
+        # Meta Triton autoWS compiles the same kernels differently. Recorded
+        # only when on, so other builds keep their keys.
+        if triton_version is not None and meta_ws_enabled():
+            version_info["triton_meta_ws"] = True
         hash_input: SystemCacheInfo = {"version": version_info}
         try:
             device_info: SystemDeviceInfo = {"name": None}
