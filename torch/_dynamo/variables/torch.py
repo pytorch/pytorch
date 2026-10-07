@@ -88,7 +88,6 @@ from ..utils import (
     fqn,
     guard_if_dyn,
     has_torch_function,
-    hashable,
     is_wrapper_or_member_descriptor,
     no_keywords,
     no_positional,
@@ -166,8 +165,9 @@ def _is_supported_out_tensor_layout(
     )
 
 
-supported_ctx_manager_classes = dict.fromkeys(
-    [
+supported_ctx_manager_classes = {
+    id(cls): cls
+    for cls in (
         torch.profiler.profiler.profile,
         torch.autograd.forward_ad._set_fwd_grad_enabled,
         torch.autograd.forward_ad.dual_level,
@@ -201,8 +201,8 @@ supported_ctx_manager_classes = dict.fromkeys(
         # This allows us to support calling functions decorated with these
         # context managers, without much extra effort or code dup.
         torch.nn.attention.sdpa_kernel.__wrapped__,  # type: ignore[attr-defined]
-    ]
-)
+    )
+}
 
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
@@ -693,14 +693,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
-        return (
-            # Context manager type or function with @contextmanager is callable
-            callable(value)
-            and (
-                hashable(value)  # accesses value.__hash__()
-                and value in supported_ctx_manager_classes
-            )
-        )
+        return id(value) in supported_ctx_manager_classes
 
     def call_function(
         self,

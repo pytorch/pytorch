@@ -29,6 +29,7 @@ from torch._dynamo.variables import (
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -594,6 +595,78 @@ class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(y_lambda, y_exp))
 
 
+class CallableClassificationTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_lookup_callable_does_not_hash(self):
+        # Make hashing fail to verify classification uses identity, including
+        # when the callable is explicitly allowed in the graph.
+        class Callable:
+            def __call__(self):
+                pass
+
+            def __hash__(self):
+                raise AssertionError("classification must not hash user objects")
+
+        instance = Callable()
+        self.assertIsNone(torch._dynamo.trace_rules.lookup_callable(instance))
+        self.assertFalse(
+            torch._dynamo.variables.TorchCtxManagerClassVariable.is_matching_cls(
+                instance
+            )
+        )
+        self.assertTrue(
+            torch._dynamo.variables.TorchCtxManagerClassVariable.is_matching_cls(
+                torch.no_grad
+            )
+        )
+        torch.compiler.allow_in_graph(instance)
+        try:
+            self.assertIs(
+                torch._dynamo.trace_rules.lookup_callable(instance),
+                TorchInGraphFunctionVariable,
+            )
+        finally:
+            torch._dynamo.trace_rules._allowed_callable_ids.remove(id(instance))
+
+
+class PartiallyInitializedCallable:
+    def __init__(self, value):
+        self._args = (value,)
+
+    def __call__(self):
+        return self._args[0]
+
+    def __hash__(self):
+        return hash(self._args)
+
+
+class CallableInitializationTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=True)
+    def test_partial_callable_constructor(self, device):
+        Container = PartiallyInitializedCallable
+
+        def initialize(instance, value):
+            instance.__init__(value)
+            return instance().sin()
+
+        value = torch.randn(3, device=device, requires_grad=True)
+        instance = Container.__new__(Container)
+        constructor = torch.compile(
+            Container.__init__, backend="aot_eager", fullgraph=True
+        )
+        constructor(instance, value)
+        self.assertIs(instance._args[0], value)
+        compiled = torch.compile(initialize, backend="aot_eager", fullgraph=True)
+        result = compiled(Container.__new__(Container), value)
+        expected = initialize(Container.__new__(Container), value)
+        self.assertEqual(result, expected)
+        self.assertEqual(
+            torch.autograd.grad(result.sum(), value),
+            torch.autograd.grad(expected.sum(), value),
+        )
+
+
+instantiate_device_type_tests(CallableInitializationTests, globals())
 instantiate_parametrized_tests(TraceRuleTests)
 
 
