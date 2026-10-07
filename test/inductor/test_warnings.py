@@ -21,9 +21,10 @@ from torch.testing._internal.logging_utils import logs_to_string
 TF32_ADVISORY = "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
 
 
-def _has_cuda_sm80() -> bool:
-    # The TF32 advisory uses capability >= (8, 0) on both CUDA and ROCm.
-    return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
+def _has_tf32() -> bool:
+    # On ROCm, capability >= (8, 0) is true for MI200 and RDNA, which do not
+    # have XF32. is_tf32_supported() is gfx94x/gfx95x only.
+    return torch.cuda.is_available() and torch.cuda.is_tf32_supported()
 
 
 class InductorWarningTests(TestCase):
@@ -68,13 +69,9 @@ class InductorWarningTests(TestCase):
         self.assertIn("FLOAT32_PRECISION : tl.constexpr = 'ieee'", source)
         self.assertNotIn("FLOAT32_PRECISION : tl.constexpr = 'tf32'", source)
 
-    @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
+    @unittest.skipIf(not _has_tf32(), "requires TF32")
     @recover_orig_fp32_precision
-    @(
-        torch._inductor.config.patch(fx_graph_cache=False, fx_graph_remote_cache=False)
-        if torch.version.hip is not None
-        else lambda fn: fn
-    )
+    @torch._inductor.config.patch(force_disable_caches=True)
     def test_trivial_matmul_compile_no_user_warning(self):
         # recover_orig_fp32_precision restores the per-backend flags; the
         # legacy enum still needs the set_float32_matmul_precision below.
@@ -89,6 +86,9 @@ class InductorWarningTests(TestCase):
             with ctx(), warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("ignore")
                 warnings.simplefilter("always", UserWarning)
+                warnings.filterwarnings(
+                    "ignore", message="dynamo_pgo force disabled by.*"
+                )
                 actual = torch.compile(
                     lambda y: y @ y, backend="inductor", fullgraph=True
                 )(x)
@@ -101,7 +101,7 @@ class InductorWarningTests(TestCase):
             torch.set_float32_matmul_precision(orig_matmul_precision)
             torch._dynamo.reset()
 
-    @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
+    @unittest.skipIf(not _has_tf32(), "requires TF32")
     @recover_orig_fp32_precision
     def test_fuse_attention_tf32_advisory_no_user_warning(self):
         orig_matmul_precision = torch.get_float32_matmul_precision()

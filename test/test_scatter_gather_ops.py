@@ -570,7 +570,7 @@ class TestScatterGatherDevice(TestCase):
     @onlyCUDA
     @unittest.skipUnless(
         TEST_CUDA and (torch.version.hip is not None or SM80OrLater),
-        "requires CUDA sm80+",
+        "requires CUDA sm80+; ROCm runs the generic kernel",
     )
     @dtypes(torch.float16, torch.bfloat16)
     def test_scatter_reduce_minmax_fastpath_edge_cases(self, device, dtype):
