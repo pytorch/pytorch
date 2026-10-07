@@ -225,4 +225,15 @@ The frontend API is `fully_shard` that can be called on a `module`:
 .. autofunction:: torch.distributed.fsdp.experimental.all_gather_output_fn_with_native_copy
 .. autofunction:: torch.distributed.fsdp.experimental.reduce_scatter_input_fn_with_native_copy
 .. autoclass:: torch.distributed.fsdp.experimental.AllGatherInput
+.. autoclass:: torch.distributed.fsdp.experimental.DefaultAllGatherLayout
 ```
+
+A custom all-gather backend whose collective writes its own output layout, e.g.
+parameter-contiguous output, provides an all-gather layout bound to its comm and
+is installed per module with a single `set_all_gather_layout` call, which also
+installs the comm. Create a separate stateful backend instance for each FSDP
+module and install it before the first unshard. FSDP owns the buffers behind the
+unsharded parameters, as with the default layout: it frees them on reshard,
+unless `set_keep_unsharded_storage` keeps them, and re-allocates them for the
+next unshard. The layout authoring interfaces are private and may change without
+backward compatibility.
