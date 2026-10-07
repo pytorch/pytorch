@@ -72,11 +72,6 @@ from pathlib import Path
 
 aten = torch.ops.aten
 
-CPP_FAKETENSOR = torch._dynamo.config.use_cpp_fake_tensor
-
-if CPP_FAKETENSOR:
-    raise NotImplementedError("c++ faketensor not implemented yet")
-
 
 def strip_end(s, suffix):
     if suffix and s.endswith(suffix):
