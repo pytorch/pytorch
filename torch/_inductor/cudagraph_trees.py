@@ -2538,7 +2538,8 @@ class CUDAGraphTreeManager:
         # Whether the current run() holds memory the tree owns that its backward
         # may still read: it ran in the tree (warmup, recording or replay), or it
         # fell back to the eager model with inputs the tree owns, which it may
-        # have saved for its backward.
+        # have saved for its backward. A fallback is only checked while no other
+        # forward keeps the generation pending.
         self.holds_tree_memory = False
         self.has_live_user_visible_output_cloning = False
 
@@ -2898,11 +2899,21 @@ class CUDAGraphTreeManager:
         self, new_inputs: list[InputType], function_id: FunctionID
     ) -> OutputType:
         # The call runs eagerly, but a forward can still save inputs the tree owns
-        # for its backward, which a new generation must not overwrite first.
-        if self.mode == CompilationMode.FORWARD:
+        # for its backward, which a new generation must not overwrite first. Each
+        # lookup scans the tree path, so skip the check when another forward
+        # already keeps the generation pending, and skip static inputs
+        # (parameters and buffers), which are never tree outputs.
+        if (
+            self.mode == CompilationMode.FORWARD
+            and not self.running_forwards_with_pending_backwards
+        ):
             is_tree_owned = self._get_cuda_graph_recorded_tensor_checker()
-            tensors = (t for t in new_inputs if isinstance(t, torch.Tensor))
-            if any(map(is_tree_owned, tensors)):
+            static_idxs = OrderedSet(self.ids_to_funcs[function_id].static_input_idxs)
+            if any(
+                isinstance(t, torch.Tensor) and is_tree_owned(t)
+                for i, t in enumerate(new_inputs)
+                if i not in static_idxs
+            ):
                 self._note_holds_tree_memory()
         return self.ids_to_funcs[function_id].model(new_inputs)
 
