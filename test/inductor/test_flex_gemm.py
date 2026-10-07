@@ -307,7 +307,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             with fresh_cache():
                 root = os.environ["TORCHINDUCTOR_CACHE_DIR"]
                 self.assertEqual(
-                    inductor_quack_cache_dir(), os.path.join(root, "quack")
+                    inductor_quack_cache_dir(),
+                    os.path.join(os.path.abspath(root), "quack"),
                 )
                 seen.add(root)
         self.assertEqual(len(seen), 2)
@@ -772,14 +773,13 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         graph_module = make_fx(lambda a, b, bias: torch.mm(a, b) + bias)(
             torch.randn(4, 8), torch.randn(8, 16), torch.randn(16)
         )
-        nodes = list(graph_module.graph.nodes)
-        placeholders = [node for node in nodes if node.op == "placeholder"]
-        add = next(n for n in nodes if n.target == torch.ops.aten.add.Tensor)
+        placeholders = [
+            node for node in graph_module.graph.nodes if node.op == "placeholder"
+        ]
         match = SimpleNamespace(
             args=tuple(placeholders[:2]),
             kwargs={"inp": placeholders[2]},
-            nodes=nodes,
-            output_node=lambda: add,
+            nodes=list(graph_module.graph.nodes),
         )
         self.assertTrue(is_valid_addmm_fusion(match))
 

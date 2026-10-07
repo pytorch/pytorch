@@ -42,12 +42,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <ranges>
-#include <regex>
 #include <set>
 #include <stack>
 #include <thread>
@@ -1517,8 +1517,55 @@ namespace Native {
 
 class DeviceCachingAllocator {
  private:
+  using DeferredCustomFree = std::pair<std::shared_ptr<CUDAAllocator>, void*>;
+
+  static void drain_deferred_custom_frees(
+      std::vector<DeferredCustomFree> frees) {
+    std::exception_ptr first_exception;
+    for (auto& [allocator, ptr] : frees) {
+      try {
+        allocator->raw_delete(ptr);
+      } catch (...) {
+        if (!first_exception) {
+          first_exception = std::current_exception();
+        }
+      }
+    }
+    if (first_exception) {
+      std::rethrow_exception(first_exception);
+    }
+  }
+
+  static void drain_deferred_custom_frees_noexcept(
+      std::vector<DeferredCustomFree> frees) noexcept {
+    try {
+      drain_deferred_custom_frees(std::move(frees));
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Exception while releasing a custom CUDA MemPool: "
+                 << e.what();
+    } catch (...) {
+      LOG(ERROR) << "Unknown exception while releasing a custom CUDA MemPool";
+    }
+  }
+
+  void drain_deferred_custom_frees_outside_lock(
+      std::unique_lock<std::recursive_mutex>& lock) {
+    auto frees = std::exchange(deferred_custom_frees_, {});
+    if (frees.empty()) {
+      return;
+    }
+    auto relock = c10::make_scope_exit([&]() { lock.lock(); });
+    lock.unlock();
+    drain_deferred_custom_frees_noexcept(std::move(frees));
+  }
+
   // lock around all operations
   mutable std::recursive_mutex mutex;
+
+  // Custom frees selected while holding mutex. A drain must exchange this into
+  // a local batch before unlocking so another thread cannot steal or append to
+  // the batch being freed.
+  std::vector<DeferredCustomFree> deferred_custom_frees_;
 
   // device statistics
   DeviceStats stats;
@@ -1826,8 +1873,17 @@ class DeviceCachingAllocator {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
-
     std::unique_lock<std::recursive_mutex> lock(mutex);
+    // On exceptional exits, detach the pending queue while the mutex is still
+    // held, then invoke the external frees after unlocking.
+    auto deferred_free_cleanup = c10::make_scope_exit([&]() noexcept {
+      if (!lock.owns_lock()) {
+        return;
+      }
+      auto frees = std::exchange(deferred_custom_frees_, {});
+      lock.unlock();
+      drain_deferred_custom_frees_noexcept(std::move(frees));
+    });
 
     prepare_for_malloc(context, stream);
 
@@ -1863,6 +1919,7 @@ class DeviceCachingAllocator {
               AcceleratorAllocatorConfig::garbage_collection_threshold() >
                   0.0)) {
         garbage_collect_cached_blocks(context);
+        drain_deferred_custom_frees_outside_lock(lock);
       }
 
       // Attempt allocate
@@ -1878,21 +1935,25 @@ class DeviceCachingAllocator {
         // Skip retry chain - will be handled below in the !block_found path
       } else if (!block_found) {
         // Normal retry chain: try various strategies to free memory and retry
-        block_found =
-            // Try to use memory pools that have opted in as overflow before
-            // expensive memory freeing operations.
-            try_mempool_fallback(
-                params, size, stream, device_id, alloc_size, stats)
-            // Free enough available cached blocks to satisfy alloc and retry
-            // alloc.
-            || (release_available_cached_blocks(params, context) &&
-                alloc_block(params, false, context, lock))
-            // Free all non-split cached blocks and retry alloc.
-            // Only skip this during actual graph capture; user mempools
-            // should be able to reclaim cached memory.
-            || (C10_LIKELY(!is_capture_context()) &&
-                release_cached_blocks(context, {0, 0}) &&
-                alloc_block(params, true, context, lock));
+        // Try to use memory pools that have opted in as overflow before
+        // expensive memory freeing operations.
+        block_found = try_mempool_fallback(
+            params, size, stream, device_id, alloc_size, stats);
+
+        // Free enough available cached blocks to satisfy alloc and retry.
+        if (!block_found &&
+            release_available_cached_blocks(params, context, lock)) {
+          block_found = alloc_block(params, false, context, lock);
+        }
+
+        // Free all non-split cached blocks and retry alloc. Only skip this
+        // during actual graph capture; user mempools should be able to reclaim
+        // cached memory.
+        if (!block_found && C10_LIKELY(!is_capture_context())) {
+          release_cached_blocks(context, {0, 0});
+          drain_deferred_custom_frees_outside_lock(lock);
+          block_found = alloc_block(params, true, context, lock);
+        }
       }
     }
 
@@ -2728,8 +2789,17 @@ class DeviceCachingAllocator {
   /** returns cached blocks to the system allocator **/
   void emptyCache(MempoolId_t mempool_id) {
     auto context = maybeGatherContext(RecordContext::ALL);
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    release_cached_blocks(context, mempool_id);
+    std::vector<DeferredCustomFree> frees;
+    try {
+      std::lock_guard<std::recursive_mutex> lock(mutex);
+      auto detach_deferred_frees = c10::make_scope_exit(
+          [&]() { frees = std::exchange(deferred_custom_frees_, {}); });
+      release_cached_blocks(context, mempool_id);
+    } catch (...) {
+      drain_deferred_custom_frees_noexcept(std::move(frees));
+      throw;
+    }
+    drain_deferred_custom_frees(std::move(frees));
   }
 
   /** Retrieves size of largest unused block held by the memory cache **/
@@ -3361,6 +3431,20 @@ class DeviceCachingAllocator {
   void markCaptureEnd() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     capture_tracker_.captureEnd();
+  }
+
+  // Public entry to is_capture_context() for callers outside the allocator
+  // that must refuse host-blocking work under capture (e.g. symmetric
+  // memory allocation). Cheap when no capture is active on this device.
+  bool isCaptureContext() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (C10_LIKELY(!capture_tracker_.hasActiveCaptures())) {
+      return false;
+    }
+    // The default stream's handle is nullptr, which the driver resolves
+    // against the current device, so select this device for the query.
+    c10::cuda::CUDAGuard guard(device_id);
+    return is_capture_context();
   }
 
   // Called by CUDAGraph::reset and MemPool::~MemPool()
@@ -4072,18 +4156,27 @@ class DeviceCachingAllocator {
       }
       return bool(p.block);
     } else {
-      if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
+      const bool has_custom_allocator =
+          p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator();
+      const bool release_lock =
+          CUDAAllocatorConfig::release_lock_on_cudamalloc() ||
+          has_custom_allocator;
+      if (release_lock) {
         // At scope exit, acquire the lock again. This provides safety against
         // any potential exceptions in the cudaMallocMaybeCapturing function.
+        // Custom allocators are arbitrary external code and may acquire the
+        // Python GIL or their own locks, so never invoke them while holding the
+        // caching allocator mutex.
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
         lock.unlock();
         p.err = cudaMallocMaybeCapturing(&ptr, size, p);
       } else {
         p.err = cudaMallocMaybeCapturing(&ptr, size, p);
       }
-      if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
+      if (release_lock) {
         TORCH_CHECK(
-            lock.owns_lock(), "Failed to acquire lock after cudaMalloc");
+            lock.owns_lock(),
+            "Failed to acquire lock after external allocation");
       }
 
       if (p.err != cudaSuccess) {
@@ -4167,7 +4260,13 @@ class DeviceCachingAllocator {
   /** to satisfy the target size **/
   bool release_available_cached_blocks(
       const AllocParams& p,
-      const std::shared_ptr<GatheredContext>& context) {
+      const std::shared_ptr<GatheredContext>& context,
+      std::unique_lock<std::recursive_mutex>& lock) {
+    // Drain only after this function's traversal and all its iterators have
+    // finished. This also drains partial reclamation when the return value is
+    // false and drains safely on exceptional exits.
+    auto drain_deferred_frees = c10::make_scope_exit(
+        [&]() { drain_deferred_custom_frees_outside_lock(lock); });
     if (AcceleratorAllocatorConfig::max_split_size() ==
         std::numeric_limits<size_t>::max())
       return false;
@@ -4298,9 +4397,13 @@ class DeviceCachingAllocator {
 
     auto* pool = block->pool;
     if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
-      // If there is an active mempool with a given allocator,
-      // we use the given allocator's delete function.
-      pool->owner_PrivatePool->allocator()->raw_delete(block->ptr);
+      // Calling an arbitrary custom allocator while holding the caching
+      // allocator mutex can deadlock against the callback's own locks (in
+      // particular, the Python GIL). Retain the allocator in the pending queue;
+      // the reclamation owner detaches that queue before unlocking and
+      // invoking the frees.
+      deferred_custom_frees_.emplace_back(
+          pool->owner_PrivatePool->allocator_, block->ptr);
     } else {
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     }
@@ -5258,6 +5361,14 @@ class NativeCachingAllocator : public CUDAAllocator {
   void markCaptureEnd(c10::DeviceIndex device) override {
     assertValidDevice(device);
     device_allocator[device]->markCaptureEnd();
+  }
+
+  bool isCaptureContext(c10::DeviceIndex device) override {
+    // Before init() no CUDAGraph can have begun a capture.
+    if (device < 0 || static_cast<size_t>(device) >= device_allocator.size()) {
+      return false;
+    }
+    return device_allocator[device]->isCaptureContext();
   }
 
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) override {

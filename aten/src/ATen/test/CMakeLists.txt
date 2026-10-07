@@ -84,23 +84,23 @@ if(CAFFE2_USE_CUDNN)
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
 endif()
 
-list(APPEND ATen_HIP_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_apply_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_math_test.hip
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_complex_test.hip
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_cublas_handle_pool_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_device_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_distributions_test.hip
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_dlconvertor_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_generator_test.hip
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_half_test.hip
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_integer_divider_test.hip
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_optional_test.hip
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_packedtensoraccessor_test.hip
-  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_vectorized_test.hip)
-# TODO: fix and enable these
-#  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_tensor_interop_test.cpp
-#  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_stream_test.cpp
+# ROCm builds the hipified copy of every CUDA test (hip/hip_foo_test.{cpp,hip})
+# except the ones listed here.
+set(ATen_HIP_TEST_EXCLUDE
+  cuda_cudnn_test # cuDNN only
+  cuda_exchange_device_test # lazy-context ExchangeDevice is CUDA_VERSION >= 12000 only
+  )
+foreach(test_src ${ATen_CUDA_TEST_SRCS})
+  get_filename_component(test_name ${test_src} NAME_WE)
+  if(test_name IN_LIST ATen_HIP_TEST_EXCLUDE)
+    continue()
+  endif()
+  get_filename_component(test_ext ${test_src} LAST_EXT)
+  # hipify renames every "cuda" in the stem; these names only have the prefix.
+  string(REGEX REPLACE "^cuda_" "hip_" test_name ${test_name})
+  string(REGEX REPLACE "^\\.cu$" ".hip" test_ext ${test_ext})
+  list(APPEND ATen_HIP_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/hip/${test_name}${test_ext})
+endforeach()
 
 list(APPEND ATen_VULKAN_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp)
