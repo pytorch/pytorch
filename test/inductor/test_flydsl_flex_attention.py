@@ -130,8 +130,10 @@ def _evaluate_mask_program(program, b, h, q, kv):
                 "add": operator.add,
                 "sub": operator.sub,
                 "mul": operator.mul,
+                "remainder": operator.mod,
                 "ge": operator.ge,
                 "lt": operator.lt,
+                "eq": operator.eq,
                 "and": operator.and_,
             }[op](lhs, rhs)
         )
@@ -455,7 +457,7 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
         append.assert_not_called()
 
 
-class TestFlyDSLFlexAttention(TestCase):
+class _FlyDSLFlexAttentionRuntimeMixin:
     def _require_runtime(self):
         if not _has_gfx950_flydsl():
             self.skipTest("requires gfx950 and a built FlyDSL runtime")
@@ -583,6 +585,9 @@ class TestFlyDSLFlexAttention(TestCase):
             return_aux=return_aux,
         )
 
+
+@instantiate_parametrized_tests
+class TestFlyDSLFlexAttentionLowering(TestCase):
     def test_mask_lowering_rejects_float_constant(self):
         graph_module = torch.fx.symbolic_trace(lambda b, h, q, kv: q + -0.5 >= kv)
         program, reason = lower_flydsl_mask_graph(graph_module, ())
@@ -630,6 +635,15 @@ class TestFlyDSLFlexAttention(TestCase):
                     False,
                 ),
                 name="window_boundary_outside",
+            ),
+            subtest(
+                (
+                    lambda b, h, q, kv: (q - kv) % 8 == 1,
+                    1,
+                    8,
+                    True,
+                ),
+                name="negative_lhs_remainder",
             ),
         ],
     )
@@ -789,6 +803,8 @@ class TestFlyDSLFlexAttention(TestCase):
         kwargs, reason = _fake_choice_result(inputs)
         self.assertIsNotNone(kwargs, reason)
 
+
+class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
     @parametrize(
         "q_heads,kv_heads,seq,captured",
         [

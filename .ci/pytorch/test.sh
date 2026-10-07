@@ -1331,7 +1331,11 @@ version = importlib.metadata.version("flydsl")
 print(f"FlyDSL {version} runtime available on {arch}")
 PY
   )
-  python test/run_test.py --include inductor/test_flydsl_template.py inductor/test_flydsl_grouped_scheduler.py --verbose
+  python test/run_test.py --include \
+    inductor/test_flydsl_template.py \
+    inductor/test_flydsl_grouped_scheduler.py \
+    inductor/test_flydsl_flex_attention.py \
+    --verbose
   assert_git_not_dirty
 }
 
