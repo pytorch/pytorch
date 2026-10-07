@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
+from torch.utils._triton import has_triton_package
 
 
 # NOTE: Each of the tests in this module need to be run in a brand new process to ensure CUDA is uninitialized
@@ -53,6 +54,27 @@ class TestExtendedCUDAIsAvail(TestCase):
     def in_bad_fork_test() -> bool:
         _ = torch.cuda.is_available()
         return torch.cuda._is_in_bad_fork()
+
+    @staticmethod
+    def init_cuda_in_child() -> bool:
+        torch.cuda.init()
+        return torch.cuda.is_initialized()
+
+    @unittest.skipIf(IS_WINDOWS or torch.version.hip is not None, "NVIDIA fork test")
+    def test_triton_driver_probe_does_not_poison_fork(self):
+        if not has_triton_package():
+            self.skipTest("Triton not installed")
+        if torch.cuda._device_count_nvml() < 0:
+            self.skipTest("NVML unavailable")
+
+        from triton.backends import backends
+
+        with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
+            self.assertFalse(torch.cuda.is_initialized())
+            self.assertTrue(backends["nvidia"].driver.is_active())
+            with multiprocessing.get_context("fork").Pool(1) as pool:
+                result = pool.apply_async(TestExtendedCUDAIsAvail.init_cuda_in_child)
+                self.assertTrue(result.get(timeout=60))
 
     # These tests validate the behavior and activation of the weaker, NVML-based, user-requested
     # `torch.cuda.is_available()` assessment. The NVML-based assessment should be attempted when
