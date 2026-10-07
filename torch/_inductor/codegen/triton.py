@@ -1682,28 +1682,6 @@ class TritonOverrides(OpOverrides):
         return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
 
     @staticmethod
-    def _fminmax(a, b, name):
-        result = f"tl.{name}({a}, {b})"
-        both_nan = f"tl.{name}({a}, {b}, tl.PropagateNan.ALL)"
-        if a.dtype == torch.float64:
-            # Lowering orders the operands so the second NaN supplies the payload.
-            both_nan = (
-                f"({b}.to(tl.int64, bitcast=True) | 0x0008000000000000)"
-                ".to(tl.float64, bitcast=True)"
-            )
-        return f"tl.where(({a} != {a}) & ({b} != {b}), {both_nan}, {result})"
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def fmin(a, b):
-        return TritonOverrides._fminmax(a, b, "minimum")
-
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def fmax(a, b):
-        return TritonOverrides._fminmax(a, b, "maximum")
-
-    @staticmethod
     # pyrefly: ignore [bad-override]
     def fmaximum(a, b):
         return f"tl.maximum({a}, {b})"
