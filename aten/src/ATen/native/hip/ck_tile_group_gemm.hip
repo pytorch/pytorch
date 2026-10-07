@@ -119,15 +119,14 @@ namespace at::hip::detail {
 		using Strides = std::array<int64_t, 3>;
 
 
-		// Fills one ck_tile::GemmTransKernelArg per group on the device, so offs is never read on the host.
-		// Launch with one thread per group. Exactly one of M, N, K is -1 when that dimension is jagged
-		// (2D x 3D: M, 3D x 2D: N, 2D x 2D: K); all are set for 3D x 3D. Ported from
-		// prepare_grouped_gemm_data in ATen/native/cuda/GroupMMCommon.cuh.
+		// Fills one ck_tile::GemmTransKernelArg per group on the device. 
+		// Basically extracts A, B, and output ptrs and strides for one GEMM and puts in in the corresponding entry in the group_args array.
+		// This is a kernel intended to be launched with one thread per group on the device so offs is never read on the host.
 		template <typename DataType>
 		__global__ void prepare_grouped_gemm_data(
 				const DataType* A,                          // base pointer of mat_a (2D (sumM, K) / (M, sumK), or 3D (G, M, K))
 				const DataType* B,                          // base pointer of mat_b (2D (K, sumN) / (sumK, N), or 3D (G, K, N))
-				DataType* output,                           // base pointer of out (2D (sumM, N), or 3D (G, M, N) / (G, M, sumN))
+				DataType* output,                           // base pointer of out (2D (sumM, N) / (M, sumN), or 3D (G, M, N))
 				ck_tile::GemmTransKernelArg<>* group_args,  // output: one entry per group, read by GroupedGemmKernel
 				const int32_t* offs,                        // cumulative end offset of each group along the jagged dim; nullptr for 3D x 3D
 				int32_t M,                                  // rows of each group's A and C, or -1 if jagged (2D x 3D)
@@ -140,8 +139,82 @@ namespace at::hip::detail {
 				Strides tensor_ShapeB,                      // mat_b.sizes(); used to check offs stays inside B
 				bool a_row_major,                           // true if A is layed out in row-major order
 				bool b_row_major) {                         // true if B is layed out in row-major order
+			const int32_t thread_id = threadIdx.x;
 
-				
+			const DataType* a_ptr = nullptr; //pointer to the start of A[thread_id]
+			const DataType* b_ptr = nullptr; //pointer to the start of B[thread_id]
+			DataType* output_ptr = nullptr; //pointer to the start of output[thread_id]
+			int64_t lda = 0, ldb = 0, ldc = 0; //leading dimensions of A, B, and output
+
+			// Start of this group along the jagged dim and its size; offs holds cumulative end offsets.
+			int32_t start = 0;
+			int32_t delta = 0;
+			if (offs != nullptr) {
+				start = thread_id == 0 ? 0 : offs[thread_id - 1];
+				delta = offs[thread_id] - start;
+				CUDA_KERNEL_ASSERT(delta >= 0 && "expected offs to be non-decreasing\n");
+			}
+
+			if (M < 0) { //M is the dynamic dimension being split, 2D x 3D
+				// A (sumM, K), B (G, K, N), out (sumM, N): rows start..end of A and out, all of B[thread_id]
+				CUDA_KERNEL_ASSERT(offs[thread_id] <= tensor_ShapeA[0] && "expected offs to stay inside mat_a\n");
+				M = delta;
+				a_ptr = A + start * tensor_StrideA[0]; // skip `start` rows, for either layout of A
+				b_ptr = B + thread_id * tensor_StrideB[0];
+				output_ptr = output + start * tensor_StrideOutput[0];
+
+				lda = a_row_major ? tensor_StrideA[0] : tensor_StrideA[1];
+				ldb = b_row_major ? tensor_StrideB[1] : tensor_StrideB[2];
+				ldc = tensor_StrideOutput[0]; // output is always row-major
+			} else if (N < 0) { //N is the dynamic dimension being split, 3D x 2D
+				// A (G, M, K), B (K, sumN), out (M, sumN): all of A[thread_id], columns start..end of B and out
+				CUDA_KERNEL_ASSERT(offs[thread_id] <= tensor_ShapeB[1] && "expected offs to stay inside mat_b\n");
+				N = delta;
+				a_ptr = A + thread_id * tensor_StrideA[0];
+				b_ptr = B + start * tensor_StrideB[1]; // skip `start` columns, for either layout of B
+				output_ptr = output + start * tensor_StrideOutput[1];
+
+				lda = a_row_major ? tensor_StrideA[1] : tensor_StrideA[2];
+				ldb = b_row_major ? tensor_StrideB[0] : tensor_StrideB[1];
+				ldc = tensor_StrideOutput[0]; // output is ALWAYS row-major
+			} else if (K < 0) { //K is the dynamic dimension being split, 2D x 2D
+				// A (M, sumK), B (sumK, N), out (G, M, N): columns start..end of A, rows start..end of B, all of out[thread_id]
+				CUDA_KERNEL_ASSERT(offs[thread_id] <= tensor_ShapeA[1] && offs[thread_id] <= tensor_ShapeB[0] && "expected offs to stay inside mat_a and mat_b\n");
+				K = delta;
+				a_ptr = A + start * tensor_StrideA[1]; // skip `start` columns of A
+				b_ptr = B + start * tensor_StrideB[0]; // skip `start` rows of B
+				output_ptr = output + thread_id * tensor_StrideOutput[0];
+
+				lda = a_row_major ? tensor_StrideA[0] : tensor_StrideA[1];
+				ldb = b_row_major ? tensor_StrideB[0] : tensor_StrideB[1];
+				ldc = tensor_StrideOutput[1]; // output is ALWAYS row-major
+			} else { //3D x 3D
+				a_ptr = A + thread_id * tensor_StrideA[0]; //tensor_StrideA[0] should be M * K, ignoring padding, etc..
+				b_ptr = B + thread_id * tensor_StrideB[0]; //tensor_StrideB[0] should be K * N, ignoring padding, etc..
+				output_ptr = output + thread_id * tensor_StrideOutput[0]; //tensor_StrideOutput[0] should be M * N, ignoring padding, etc..
+
+				lda = a_row_major ? tensor_StrideA[1] : tensor_StrideA[2];
+				ldb = b_row_major ? tensor_StrideB[1] : tensor_StrideB[2];
+				ldc = tensor_StrideOutput[1]; // output is ALWAYS row-major
+			}
+
+			auto& arg = group_args[thread_id];
+			auto& karg = arg.group_karg;
+
+			// looks sketch but it is a hack to set as_ptr and bs_ptr without going through the constructor
+			const_cast<std::array<const void*, 1>&>(karg.as_ptr)[0] = a_ptr;
+			const_cast<std::array<const void*, 1>&>(karg.bs_ptr)[0] = b_ptr;
+			karg.e_ptr = output_ptr;
+
+			karg.M = M;
+			karg.N = N;
+			karg.K = K;
+			karg.stride_As[0] = lda;
+			karg.stride_Bs[0] = ldb;
+			karg.stride_E = ldc;
+			karg.k_batch = 1;
+			arg.block_start = 0;
+			arg.block_end = 0;
 		}
 
 		// Launches the ck_tile grouped GEMM for one dtype / layout / config combination.
