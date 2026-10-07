@@ -58,6 +58,125 @@ class TestColumnConfig(TestCase):
         self.assertEqual(cfg.vec, 4)
         self.assertEqual(cfg.partial_layout, "column")
 
+    @parametrize(
+        "dtype,size,columns,key,fields,rule",
+        [
+            (torch.float32, 256, 256, "sum", 1, "rubin_c256"),
+            (torch.bfloat16, 2048, 1024, "argmaxi32", 2, "rubin_c1024"),
+            (torch.float32, 256, 4096, "mean", 1, "rubin_mean_c4096_tiled"),
+            (torch.bfloat16, 2048, 4096, "var0", 3, "rubin_var_c4096"),
+            (
+                torch.bfloat16,
+                2048,
+                4096,
+                "argmaxi32",
+                2,
+                "rubin_argmax_c4096_tree",
+            ),
+        ],
+    )
+    def test_sm107_unordered_profiles(self, dtype, size, columns, key, fields, rule):
+        """Pin each distinct SM107 unordered-column launch family."""
+        expected = {
+            "rubin_c256": (4096, 4, "column", 0, "linear"),
+            "rubin_c1024": (4096, 8, "column", 0, "inner_tree"),
+            "rubin_mean_c4096_tiled": (256, 8, "partition", 16, "linear"),
+            "rubin_var_c4096": (2048, 8, "column", 0, "inner_tree"),
+            "rubin_argmax_c4096_tree": (2048, 4, "partition", 8, "inner_tree"),
+        }
+        cfg = self.select(
+            dtype,
+            size,
+            columns,
+            cc=(10, 7),
+            trait_key=key,
+            nfields=fields,
+        )
+        self.assertEqual(
+            (
+                cfg.npar,
+                cfg.vec,
+                cfg.partial_layout,
+                cfg.combine_columns,
+                cfg.kernel_order,
+            ),
+            expected[rule],
+        )
+        self.assertEqual(cfg.rule, rule)
+        self.assertEqual(cfg.threads_per_block, 64)
+
+    @parametrize(
+        "dtype,key,rows,columns,partials,fields,outputs,expected",
+        [
+            (
+                torch.float32,
+                "sum",
+                65536,
+                129,
+                8,
+                1,
+                (torch.float32,),
+                (16, 16, 1),
+            ),
+            (
+                torch.float32,
+                "varmean0",
+                16384,
+                1024,
+                2,
+                3,
+                (torch.float32, torch.float32),
+                (0, 16, 1),
+            ),
+            (
+                torch.bfloat16,
+                "mean",
+                262144,
+                4096,
+                32,
+                1,
+                (torch.float32,),
+                (32, 8, 4),
+            ),
+        ],
+    )
+    def test_sm107_ordered_profiles(
+        self, dtype, key, rows, columns, partials, fields, outputs, expected
+    ):
+        """Pin SM107 ordered mappings, including packed full-column loads."""
+        cfg = ct.select_ordered_col_config(
+            (10, 7),
+            dtype,
+            key,
+            columns,
+            1,
+            partials,
+            field_bits=(32,) * fields,
+            out_dtypes=outputs,
+            rows=rows,
+            full_tiles=True,
+        )
+        self.assertEqual((cfg.min_blocks, cfg.tile_columns, cfg.column_pack), expected)
+        self.assertEqual((cfg.worker_warps, cfg.full_tiles), (16, True))
+
+    def test_sm107_column_guards(self):
+        """Keep incompatible SM107 calls on generic policies."""
+        self.assertEqual(self.select(cc=(10, 7), size=255).rule, "default")
+        self.assertIsNone(
+            ct.select_ordered_col_config(
+                (10, 7),
+                torch.bfloat16,
+                "mean",
+                4096,
+                1,
+                32,
+                field_bits=(64,),
+                out_dtypes=(torch.float32,),
+                rows=262144,
+                full_tiles=True,
+            )
+        )
+
     @parametrize("kwargs", [{"threads_per_block": 128}, {"npar": 7}, {"vec": 2}])
     def test_explicit_geometry_disables_policy(self, kwargs):
         """Honor explicit column geometry without rewriting it through policy."""
@@ -81,7 +200,7 @@ class TestColumnConfig(TestCase):
             )
 
     def test_b200_ordered_column_packing(self):
-        """Pin B200 packing separately so Rubin guards cannot reject its valid rule."""
+        """Keep B200 packing independent from SM107 policy guards."""
         cfg = ct.select_ordered_col_config(
             (10, 0),
             torch.bfloat16,

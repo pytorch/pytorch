@@ -50,7 +50,25 @@ class OrderedColConfig(NamedTuple):
     column_pack: int = 1
 
 
-_ORDERED_COL_CONFIGS: dict[tuple[int, int], dict[str, OrderedColConfig]] = {}
+_ORDERED_COL_CONFIGS = {
+    (10, 7): {
+        "sum": OrderedColConfig(32),
+        "argmaxi32": OrderedColConfig(64),
+        "var0": OrderedColConfig(64),
+        "varmean0": OrderedColConfig(64),
+    },
+}
+
+
+def _full_welford_columns(dtype: torch.dtype, rows: int | None, columns: int) -> bool:
+    return (
+        dtype == torch.float32
+        and rows == 16384
+        and columns in (256, 1024)
+        or dtype == torch.bfloat16
+        and rows == 8192
+        and columns in (1024, 4096)
+    )
 
 
 def select_ordered_col_config(
@@ -78,6 +96,44 @@ def select_ordered_col_config(
         and (partials > 1 or full_tiles)
     ):
         cfg = OrderedColConfig(0, tile_columns=WARP, full_tiles=True)
+    size = rows * columns * (2 if dtype == torch.bfloat16 else 4) if rows else 0
+    column_anchor = (
+        cc == (10, 7)
+        and dtype in (torch.float32, torch.bfloat16)
+        and columns in (1024, 4096)
+        and rows is not None
+        and size in (256 << 20, 2048 << 20)
+    )
+    full_column_anchor = (
+        cc == (10, 7)
+        and dtype in (torch.float32, torch.bfloat16)
+        and trait_key in ("mean", "amax", "vnorm2")
+        and full_tiles
+        and (
+            columns == 256
+            and size in (256 << 20, 2048 << 20)
+            or dtype == torch.bfloat16
+            and size == 64 << 20
+            and columns in (256, 1024)
+        )
+    )
+    if (
+        cfg is None
+        and (column_anchor or full_column_anchor)
+        and trait_key in ("mean", "amax", "vnorm2")
+    ):
+        cfg = OrderedColConfig(32)
+    if cc == (10, 7) and full_tiles:
+        if welford and _full_welford_columns(dtype, rows, columns):
+            cfg = OrderedColConfig(
+                0, tile_columns=WARP if columns == 4096 else 16, full_tiles=True
+            )
+        elif (
+            dtype == torch.float32
+            and rows == 16384
+            and (trait_key, columns) in (("argmaxi32", 256), ("vnorm2", 1024))
+        ):
+            cfg = OrderedColConfig(0, tile_columns=16, full_tiles=True)
     if (
         cfg is None
         or dtype not in (torch.float32, torch.bfloat16, torch.float16)
@@ -97,9 +153,15 @@ def select_ordered_col_config(
     nouts = max(welford, 1)
     if field_bits != (32,) * fields or out_dtypes != (output,) * nouts:
         return None
-    if full_tiles and rows is not None:
+    if full_column_anchor:
+        cfg = cfg._replace(
+            tile_columns=16 if size == 256 << 20 else WARP, full_tiles=True
+        )
+    elif full_tiles and rows is not None:
         if rows == 65536 and columns == 1024 and fields != 2:
             cfg = cfg._replace(tile_columns=16, full_tiles=True)
+        elif column_anchor:
+            cfg = cfg._replace(full_tiles=True)
         elif 32768 <= rows <= 131072 and 33 <= columns <= 257:
             minimum = 0 if fields == 3 else 16
             if dtype == torch.bfloat16 and partials >= 8:
@@ -284,6 +346,103 @@ def select_col_config(
                 npar=npar,
                 vec=1,
             )
+    fields = {
+        "sum": 1,
+        "mean": 1,
+        "amax": 1,
+        "argmaxi32": 2,
+        "vnorm2": 1,
+    }
+    expected_fields = 3 if welford_nouts(trait_key) else fields.get(trait_key)
+    if (
+        explicit
+        or cc != (10, 7)
+        or dtype not in (torch.float32, torch.bfloat16)
+        or acc_bits != 32
+        or nouts != max(welford_nouts(trait_key), 1)
+        or expected_fields != nfields
+        or batches != 1
+        or not contiguous
+        or alignment < 16
+    ):
+        return cfg
+    bf16 = dtype == torch.bfloat16
+    welford = nfields == 3
+    inner = False
+    if columns == 256:
+        inner = (size == 16 << 20 and bf16 and welford) or (
+            size == 64 << 20
+            and (trait_key in ("sum", "argmaxi32") or welford_nouts(trait_key))
+        )
+    elif columns == 1024:
+        if size in (256 << 20, 2048 << 20):
+            inner = nfields > 1 or (not bf16 and size == 2048 << 20)
+    elif columns == 4096:
+        if size == 16 << 20:
+            inner = not bf16 or not welford
+        elif size == 64 << 20:
+            inner = trait_key in ("sum", "mean", "vnorm2") if bf16 else not welford
+        elif size == 256 << 20:
+            inner = not bf16 and (
+                trait_key in ("mean", "amax") or welford_nouts(trait_key)
+            )
+    if trait_key in ("mean", "amax", "vnorm2"):
+        inner = inner or (
+            columns == 256
+            and not bf16
+            and size in (256 << 20, 2048 << 20)
+            or bf16
+            and size == 64 << 20
+            and columns in (256, 1024)
+        )
+    if welford and _full_welford_columns(dtype, rows, columns):
+        inner = True
+    if inner:
+        cfg = cfg._replace(kernel_order="inner_tree")
+    if size not in (256 << 20, 2048 << 20) or (nouts == 2 and columns == 256):
+        return cfg
+    # Measured anchors only: interpolate after crossover sweeps, not from byte size alone.
+    large = size == 2048 << 20
+    if columns == 256:
+        return cfg._replace(rule="rubin_c256", threads_per_block=64, npar=4096, vec=4)
+    if columns == 1024:
+        return cfg._replace(
+            rule="rubin_c1024",
+            threads_per_block=64,
+            npar=4096 if large else 1024,
+            vec=8,
+        )
+    if columns != 4096:
+        return cfg
+    if trait_key in ("sum", "mean", "amax", "vnorm2"):
+        return cfg._replace(
+            rule=f"rubin_{trait_key}_c4096_tiled",
+            threads_per_block=64,
+            npar=(2048 if bf16 else 1024) if large else 256,
+            vec=4 if large and not bf16 else 8,
+            partial_layout="partition",
+            combine_columns=8 if large else 16,
+            kernel_order="linear",
+        )
+    if welford_nouts(trait_key):
+        return cfg._replace(
+            rule="rubin_var_c4096",
+            threads_per_block=64,
+            npar=(2048 if bf16 else 1024) if large else 256,
+            vec=8,
+            kernel_order="inner_tree",
+        )
+    if trait_key == "argmaxi32":
+        inner = bf16 and large
+        return cfg._replace(
+            rule=f"rubin_argmax_c4096_{'tree' if inner else 'tiled'}",
+            threads_per_block=64,
+            npar=(2048 if bf16 else 1024) if large else 512,
+            vec=4,
+            partial_layout="partition",
+            combine_columns=8,
+            kernel_order="inner_tree" if inner else "linear",
+        )
     return cfg
 
 

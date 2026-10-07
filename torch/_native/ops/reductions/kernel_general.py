@@ -438,6 +438,37 @@ def select_general_config(
         and trait_key in ("sum", "prod", "mean", "amax", "amin", "vnorm2")
     ):
         return _GeneralConfig(block=32, rule="b200_strided_one_field")
+    if (
+        cc != (10, 7)
+        or dtype not in (torch.float32, torch.bfloat16)
+        or count != 1024
+        or tuple(red_pairs) != ((count, 2),)
+        or tuple(kept_pairs) != ((num_o, 2 * count),)
+        or acc_bits != 32
+        or alignment < 16
+    ):
+        return _GeneralConfig()
+    itemsize = 4 if dtype == torch.float32 else 2
+    size = num_o * count * itemsize
+    if size not in (16 << 20, 64 << 20, 256 << 20, 2 << 30):
+        return _GeneralConfig()
+    if size >= 256 << 20 and (trait_key, nfields, nouts) == ("sum", 1, 1):
+        return _GeneralConfig(block=64, rule="rubin_strided_sum")
+    if nfields == 3 and welford_nouts(trait_key) == nouts:
+        return _GeneralConfig(kernel_order="inner_tree", rule="rubin_strided_welford")
+    if size >= 64 << 20:
+        if (
+            nouts == 1
+            and nfields == 1
+            and trait_key in ("sum", "mean", "amax", "vnorm2")
+        ):
+            return _GeneralConfig(kernel_order="inner_tree", rule="rubin_strided_inner")
+        if (trait_key, nfields, nouts) == ("argmaxi32", 2, 1) and (
+            dtype == torch.bfloat16 or size == 2 << 30
+        ):
+            return _GeneralConfig(
+                kernel_order="inner_tree", rule="rubin_strided_argmax"
+            )
     return _GeneralConfig()
 
 
