@@ -149,6 +149,14 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 5e-5, torch.cfloat: 5e-5}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncInfo(
         "fft.fft2",
@@ -237,6 +245,14 @@ op_db: list[OpInfo] = [
                 dtypes=(torch.complex64, torch.complex128),
             ),
         ),
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncInfo(
         "fft.hfft2",
@@ -337,6 +353,14 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         check_batched_grad=False,
         check_batched_gradgrad=False,
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncInfo(
         "fft.rfft2",
@@ -399,6 +423,14 @@ op_db: list[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.half, torch.bfloat16, torch.complex32
         ),
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 5e-5, torch.cfloat: 5e-5}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncInfo(
         "fft.ifft2",
@@ -473,6 +505,14 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
         check_batched_grad=False,
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 5e-5, torch.cfloat: 5e-5}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncInfo(
         "fft.ihfft2",
@@ -553,6 +593,14 @@ op_db: list[OpInfo] = [
             torch.bool, torch.half, torch.bfloat16, torch.complex32
         ),
         check_batched_gradgrad=False,
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncInfo(
         "fft.irfft2",
@@ -607,7 +655,7 @@ op_db: list[OpInfo] = [
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
         ],
     ),
     OpInfo(
@@ -636,26 +684,74 @@ python_ref_db: list[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft",
         torch_opinfo_name="fft.fft",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 5e-5, torch.cfloat: 5e-5}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifft",
         torch_opinfo_name="fft.ifft",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 5e-5, torch.cfloat: 5e-5}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfft",
         torch_opinfo_name="fft.rfft",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfft",
         torch_opinfo_name="fft.irfft",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfft",
         torch_opinfo_name="fft.hfft",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft",
         torch_opinfo_name="fft.ihfft",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 5e-5, torch.cfloat: 5e-5}),
+                "TestFFT",
+                "test_reference_1d",
+                device_type="xpu",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.fftn",

@@ -159,9 +159,6 @@ class TestFFT(TestCase):
             )
         ]
 
-        if self.device_type == "xpu": 
-            self.precision = 3e-5 
-            self.rel_tol= 1e-4
 
         for iargs in test_args:
             args = list(iargs)
