@@ -21,11 +21,14 @@ registration.
 
 Required exports (module or declaration object):
 
-  ATEN_OP: str                name of a STRUCTURED op: its base name when
-                              that resolves to exactly one structured
-                              group, or its overload-qualified name when
-                              overloads have separate structured groups.
-                              decl_id()
+  ATEN_OP: str                name of a structured op: a base name
+                              ("topk") when the base resolves to exactly
+                              one structured group, or overload-qualified
+                              ("gt.Tensor", "all.dim") when overloads
+                              have separate structured groups. With
+                              STRUCTURED=False, the exact name of an
+                              unstructured functional overload returning
+                              fresh tensors. decl_id()
                               (dots -> underscores) names the stub, the
                               generated kernel, and the covers op.
   DISPATCH_KEY: str           e.g. "CUDA"
@@ -57,8 +60,11 @@ Required exports (module or declaration object):
                               it served by THIS point? First match wins.
   cpp_launch(spec, launch_fn) -> str
                               C++ invoking this point's kernel via
-                              launch_fn(...); no allocation, no fallback
-                              (the chain's return false IS the fallback)
+                              launch_fn(...). Structured outputs are
+                              already allocated. With STRUCTURED=False,
+                              allocate outputs and assign aot_result
+                              (the schema's return type). No fallback:
+                              the chain's return false IS the fallback.
 
 Emitted C++ (any of the cpp_* exports) sees ATen/core/Tensor.h, not
 ATen/ATen.h -- Tensor methods all work, but calling an at:: FACTORY
@@ -67,6 +73,14 @@ its per-op header added to FILE_TMPL in gen_aot_lib.py. The failure is a
 loud "'empty' is not a member of 'at'" at build time, not a silent one.
 
 Optional exports:
+
+  STRUCTURED: bool           True by default. False opts a functional
+                              unstructured operator into a hook before
+                              its backend implementation. The declaration
+                              must validate inputs, allocate outputs, and
+                              assign aot_result only when it handles the
+                              call. The device guard and device checks
+                              have already run; meta() has not.
   cpp_dispatch_prelude() -> str | None
                               shared front half of the dispatch chain:
                               cheap universal rejects and setup (locals,
@@ -95,6 +109,12 @@ Optional exports:
                               stub's dispatch chain but never wider than
                               intended coverage.
 
+Every generated op also registers torch.ops._native_aot.archs_<op>(), returning
+the device compute capabilities covered by its embedded targets (e.g. sm_100f
+reports [100, 103, 107]). This is independent of cpp_covers: the Python fallback
+must verify that this op was embedded for the input device before subtracting any
+calls from the JIT route.
+
 Emission cardinality: cpp_helpers once per file, cpp_dispatch_prelude
 once per op, cpp_dispatch/cpp_launch once per precompile point. The
 generated stub is::
@@ -104,7 +124,8 @@ generated stub is::
 in the op's structured impl scope (outputs allocated by meta(), device
 guard held). Dispatch conditions are evaluated ASSUMING the prelude
 passed; locals the prelude declares are in scope for dispatch and
-launch.
+launch. For unstructured functions the signature is the dispatcher
+signature followed by a reference to aot_result.
 """
 
 from torchgen.native_aot_decl import (

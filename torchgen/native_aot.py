@@ -6,6 +6,8 @@ validating loader torchgen/native_aot_decl.py. torchgen consumes the declaration
 generate NativeAotStubs.h -- one at::native DispatchStub per declared op,
 signature-matched to the structured impl, with no kernel registered by default -- and
 to emit a stub consultation between op.meta() and op.impl() in the generated wrapper.
+Unstructured functional declarations instead return allocated tensors through an
+output parameter, before the wrapper calls the ordinary backend implementation.
 
 Only the identity torchgen needs is modeled here: the precompile grid belongs to the
 export tool and to torch._native.aot_manifest, the C++-generating hooks to
@@ -25,6 +27,7 @@ from torchgen.native_aot_decl import decl_id_for_op as _decl_id, discover_declar
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from torchgen.api.types import Binding
     from torchgen.model import NativeFunction, NativeFunctionsGroup
 
 
@@ -38,6 +41,7 @@ class NativeAotManifest:
     # consultation gates on the private mask instead of the user-facing
     # switch (see gen_stub_consultation).
     unconditional: bool = False
+    structured: bool = True
 
     @property
     def decl_id(self) -> str:
@@ -50,15 +54,17 @@ class NativeAotManifest:
         return f"{self.decl_id}_aot_fn"
 
     def matches_group(self, g: NativeFunctionsGroup) -> bool:
-        """Does this manifest target group g? A qualified op matches the exact
+        """Does this structured manifest target group g? A qualified op matches the exact
         functional overload name; a base name matches the group's base, whose
         uniqueness validate_native_aot_manifests checks."""
+        if not self.structured or not g.structured:
+            return False
         if "." in self.op:
             return self.op == str(g.functional.func.name)
         return self.op == g.functional.func.name.name.base
 
 
-def is_unconditional(d) -> bool:
+def is_unconditional(d: object) -> bool:
     """Whether a declaration's kernels ARE the op's implementation rather than a
     faster route to the same answer (``UNCONDITIONAL``, default False). Such an op's
     gate reads the private mask instead of the user-facing switch, so nothing a caller
@@ -85,18 +91,23 @@ def parse_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest] = {}
     if not os.path.isdir(ops_dir):
         return manifests
-    # Beyond the (dispatch_key, op) keys, only UNCONDITIONAL is read here --
-    # it picks the gate in the generated wrapper. The rest of each
-    # declaration is for the export tool and gen_aot_lib.
+    # STRUCTURED picks the wrapper ABI; UNCONDITIONAL picks its enablement gate.
+    # The rest of each declaration is for the export tool and gen_aot_lib.
     for (key_str, op), d in discover_declarations(ops_dir).items():
         key = DispatchKey.parse(key_str)
+        structured = getattr(d, "STRUCTURED", True)
+        if not isinstance(structured, bool):
+            raise RuntimeError(f"{op}: STRUCTURED must be a bool")
         manifests[(key, op)] = NativeAotManifest(
-            op=op, dispatch_key=key, unconditional=is_unconditional(d)
+            op=op,
+            dispatch_key=key,
+            unconditional=is_unconditional(d),
+            structured=structured,
         )
     return manifests
 
 
-def _impl_bindings(g: NativeFunctionsGroup) -> list:
+def _impl_bindings(g: NativeFunctionsGroup) -> list[Binding]:
     import torchgen.api.structured as structured
     from torchgen.context import native_function_manager
 
@@ -104,9 +115,26 @@ def _impl_bindings(g: NativeFunctionsGroup) -> list:
         return structured.impl_arguments(g)
 
 
-def gen_stub_declaration(m: NativeAotManifest, g: NativeFunctionsGroup) -> str:
-    bindings = _impl_bindings(g)
-    params = ", ".join(b.decl() for b in bindings)
+def functional_stub_params(f: NativeFunction) -> str:
+    from torchgen.api.types import DispatcherSignature
+    from torchgen.context import native_function_manager
+
+    with native_function_manager(f):
+        sig = DispatcherSignature.from_schema(f.func)
+        params = [b.decl() for b in sig.arguments()]
+        params.append(f"{sig.returns_type().cpp_type()}& aot_result")
+    return ", ".join(params)
+
+
+def gen_stub_declaration(
+    m: NativeAotManifest, g: NativeFunction | NativeFunctionsGroup
+) -> str:
+    from torchgen.model import NativeFunctionsGroup
+
+    if isinstance(g, NativeFunctionsGroup):
+        params = ", ".join(b.decl() for b in _impl_bindings(g))
+    else:
+        params = functional_stub_params(g)
     return f"""\
 using {m.fn_type_name()} = bool (*)({params});
 DECLARE_DISPATCH({m.fn_type_name()}, {m.stub_name()})
@@ -120,10 +148,11 @@ REGISTER_NO_CPU_DISPATCH({m.stub_name()})
 """
 
 
-def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
-    """The structured-wrapper call site. The stub has no kernel unless the AOT
-    library registered one, and a Context switch gates the whole path; a true return
-    means the AOT kernel filled the meta()-allocated outputs and op.impl is skipped.
+def gen_stub_consultation(
+    m: NativeAotManifest, impl_exprs: str, *, returns_type: str | None = None
+) -> str:
+    """The wrapper call site. A Context switch gates the stub, which either fills
+    structured outputs or assigns the functional result and skips the backend.
 
     Which switch depends on the declaration: an ordinary op reads allowNativeAot(),
     the user-facing off switch, while an UNCONDITIONAL op reads
@@ -135,8 +164,24 @@ def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
     call site alone does not show."""
     device_type = f"c10::DeviceType::{m.dispatch_key}"
     stub = f"at::native::{m.stub_name()}"
+    gate = (
+        "!at::globalContext().maskUnconditionalNativeAot()"
+        if m.unconditional
+        else "at::globalContext().allowNativeAot()"
+    )
+    if not m.structured:
+        if returns_type is None:
+            raise AssertionError("functional native-AOT hooks require a return type")
+        args = ", ".join(filter(None, (impl_exprs, "aot_result")))
+        return f"""
+  if ({gate} && {stub}.is_device_supported({device_type})) {{
+    {returns_type} aot_result;
+    if ({stub}({device_type}, {args})) {{
+      return aot_result;
+    }}
+  }}
+"""
     if m.unconditional:
-        gate = "!at::globalContext().maskUnconditionalNativeAot()"
         # The user-facing switch does NOT reach this op, so the shared comment's
         # "switched off" case would describe a route that does not exist here.
         gate_comment = (
@@ -151,7 +196,6 @@ def gen_stub_consultation(m: NativeAotManifest, impl_exprs: str) -> str:
             "// below is the ordinary aten kernel.\n"
         )
     else:
-        gate = "at::globalContext().allowNativeAot()"
         gate_comment = ""
         cases = (
             "// the stub is never called when AOT is switched off or the device is\n"
@@ -174,21 +218,42 @@ def validate_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest],
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
 ) -> None:
-    """Every manifest op must resolve to exactly one structured op group:
-    the stub call site is emitted in the structured wrapper (between meta
-    and impl), so an unstructured op has nowhere to put it, and an
-    ambiguous base name would hook the wrong overload silently."""
+    """Resolve structured groups or explicitly declared unstructured functions.
+
+    Functional hooks require fresh Tensor returns so the result parameter cannot
+    introduce mutation or aliasing. Structured base names must be unambiguous.
+    """
     from collections import defaultdict
 
-    from torchgen.model import NativeFunctionsGroup
+    from torchgen.model import BaseTy, BaseType, NativeFunctionsGroup, SchemaKind
 
     structured_by_base: dict[str, list[str]] = defaultdict(list)
+    functional_by_name: dict[str, NativeFunction] = {}
     for g in grouped_native_functions:
         if isinstance(g, NativeFunctionsGroup) and g.structured:
             structured_by_base[g.functional.func.name.name.base].append(
                 str(g.functional.func.name)
             )
-    for key, op in manifests:
+        else:
+            f = g.functional if isinstance(g, NativeFunctionsGroup) else g
+            functional_by_name[str(f.func.name)] = f
+    for (key, op), manifest in manifests.items():
+        if not manifest.structured:
+            f = functional_by_name.get(op)
+            if (
+                f is None
+                or f.func.kind() != SchemaKind.functional
+                or not f.func.returns
+                or any(
+                    r.type != BaseType(BaseTy.Tensor) or r.annotation is not None
+                    for r in f.func.returns
+                )
+            ):
+                raise RuntimeError(
+                    f"native-aot declaration for {op}@{key}: STRUCTURED=False "
+                    "requires an exact functional overload returning fresh tensors"
+                )
+            continue
         base = op.split(".")[0]
         names = structured_by_base.get(base, [])
         if "." in op:
@@ -201,11 +266,8 @@ def validate_native_aot_manifests(
         elif not names:
             raise RuntimeError(
                 f"native-aot declaration for {op}@{key}: {op} is not a "
-                f"structured op in native_functions.yaml. The stub is "
-                f"consulted between meta() and impl(), so unstructured ops "
-                f"are served by the JIT layer only; to embed, structure the "
-                f"op upstream first (preferred; e.g. var.correction is a "
-                f"candidate)"
+                f"structured op in native_functions.yaml. Use STRUCTURED=False "
+                f"for an exact functional overload returning fresh tensors."
             )
         elif len(names) > 1:
             raise RuntimeError(
