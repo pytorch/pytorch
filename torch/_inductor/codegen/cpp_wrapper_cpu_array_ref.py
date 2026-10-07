@@ -729,10 +729,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     )
                 else:
                     if is_constant_buffer:
-                        # See NOTE(return_constant) above.
+                        # See NOTE(return_constant) above. A constant-folding output
+                        # can be a non-dense view that kernels were compiled
+                        # against, so the clone must keep its strides.
                         self.wrapper_call.writeline(
                             "AOTI_TORCH_ERROR_CODE_CHECK("
-                            f"aoti_torch_clone({output}, &output_handles[{idx}]));"
+                            f"aoti_torch_clone_preserve_strides({output}, &output_handles[{idx}]));"
                         )
                     else:
                         if output in output2idx:
