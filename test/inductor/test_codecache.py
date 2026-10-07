@@ -31,6 +31,7 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
+from torch._higher_order_ops.effects import _EffectType
 from torch._inductor import config, config_comms, metrics
 from torch._inductor.async_compile import CompiledTritonKernels
 from torch._inductor.cache_key import (
@@ -2229,6 +2230,90 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @functorch_config.patch({"enable_autograd_cache": False})
+    @parametrize("requires_grad", (False, True))
+    def test_with_effects_custom_op_cache_hit(self, requires_grad):
+        """
+        with_effects wrapping a custom OpOverload is as cacheable as the op
+        itself, and the effectful op still runs in program order on a hit.
+        """
+        logged = []
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::log", "(Tensor x, str tag) -> ()", lib=lib)
+            lib.impl(
+                "log",
+                lambda x, tag: logged.append((tag, x.sum().item())),
+                "CompositeExplicitAutograd",
+            )
+            lib.impl("log", lambda x, tag: None, "Meta")
+            torch.library._register_effectful_op(
+                "mylib::log", _EffectType.ORDERED, lib=lib
+            )
+
+            class LogGrad(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, grad):
+                    torch.ops.mylib.log(grad, "grad")
+                    return grad
+
+            def fn(x):
+                if requires_grad:
+                    x = LogGrad.apply(x)
+                y = x.sin()
+                torch.ops.mylib.log(y, "a")
+                z = y.cos()
+                torch.ops.mylib.log(z, "b")
+                return z.sum()
+
+            def run():
+                logged.clear()
+                x = torch.arange(8.0, requires_grad=requires_grad)
+                out = torch.compile(fn)(x)
+                if requires_grad:
+                    out.backward()
+                return out.detach(), list(logged)
+
+            num_graphs = 2 if requires_grad else 1
+            out1, log1 = run()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], num_graphs)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            counters.clear()
+            self.reset()
+            out2, log2 = run()
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], num_graphs)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            self.assertEqual(out1, out2)
+            self.assertEqual(log1, log2)
+            expected = ["a", "b", "grad"] if requires_grad else ["a", "b"]
+            self.assertEqual([tag for tag, _ in log2], expected)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    def test_with_effects_noncacheable_hop_bypass(self):
+        """
+        with_effects wrapping a non-cacheable HOP still bypasses the cache.
+        """
+
+        def fn(x):
+            torch._higher_order_ops.print("x: {}", x)
+            return x.sin()
+
+        torch.compile(fn)(torch.randn(4))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
     @requires_gpu()
     @requires_triton()
