@@ -155,10 +155,9 @@ def fn():
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(opt_f(None, torch.ones(2)), 6)
 
-        if sys.version_info >= (3, 11):
-            insts = bytecode_transformation.cleaned_instructions(f.__code__)
-            for inst in insts:
-                self.assertNotIn("_NONE", inst.opname)
+        insts = bytecode_transformation.cleaned_instructions(f.__code__)
+        for inst in insts:
+            self.assertNotIn("_NONE", inst.opname)
 
     @skipIfNotPy311
     def test_py311_jump_offset(self):

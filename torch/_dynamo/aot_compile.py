@@ -388,11 +388,9 @@ class AOTCompilePickler(FunctionPicklerBase):
             reason = (
                 f"it does not pickle ({failure})" if failure else "it does not pickle"
             )
-        # co_qualname is 3.11+; the bare co_name on 3.10 cannot tell a wraps
-        # wrapper from its wrappee, but __qualname__ could not either.
         log.warning(
             "dropping %s.%s (%s) from the artifact: %s; pass it in external_data to keep it (function defined at %s:%d)",
-            getattr(code, "co_qualname", code.co_name),
+            code.co_qualname,
             slot,
             type(value).__name__,
             reason,
@@ -472,7 +470,7 @@ class AOTCompilePickler(FunctionPicklerBase):
             code = obj.__code__
             log.debug(
                 "dropping the annotations of %s (%s:%d): %s",
-                getattr(code, "co_qualname", code.co_name),
+                code.co_qualname,
                 code.co_filename,
                 code.co_firstlineno,
                 e,
@@ -1572,9 +1570,9 @@ def _resolve_guard_scope(
         if wrapped is not None and code is not None:
             # functools.wraps copied the wrappee's __qualname__ onto the wrapper
             # (a class-body @torch.compiler.wrap_numpy forward binds external_utils'
-            # wrap), which would read "X resolves to X". co_qualname is 3.11+.
+            # wrap), which would read "X resolves to X".
             what = (
-                f"{getattr(code, 'co_qualname', code.co_name)}, a functools.wraps'd "
+                f"{code.co_qualname}, a functools.wraps'd "
                 f"wrapper over {getattr(wrapped, '__qualname__', what)}"
             )
         return None, (

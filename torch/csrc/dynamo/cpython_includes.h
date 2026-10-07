@@ -24,7 +24,6 @@
 #include <internal/pycore_ceval.h>
 #endif
 
-#if IS_PYTHON_3_11_PLUS
 #include <internal/pycore_frame.h>
 
 #include <torch/csrc/dynamo/stackref_bridge.h>
@@ -35,8 +34,6 @@
 #include <internal/pycore_stackref.h>
 #elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
 #include <internal/pycore_interpframe_structs.h> // _PyInterpreterFrame
-#endif
-
 #endif
 
 #undef Py_BUILD_CORE
