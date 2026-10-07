@@ -13063,6 +13063,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertTrue((d >= 0).all())
             self.assertTrue((d < 1).all())
 
+    @parametrize(
+        "dtype",
+        (torch.int64, torch.int32, torch.int16, torch.int8, torch.uint8),
+    )
+    def test_geometric_integer_dtypes(self, dtype):
+        @torch.compile(backend="inductor")
+        def fn(p):
+            x = torch.empty(2048, dtype=dtype, device=self.device)
+            return x.geometric_(p)
+
+        torch.manual_seed(0)
+        out = fn(0.2)
+        self.assertEqual(out.dtype, dtype)
+        self.assertTrue((out >= 1).all())
+        # With p=0.2, P(all 2048 samples == 1) = 0.2^2048 == 0; ensure non-trivial samples > 1.
+        self.assertTrue((out > 1).any())
+
     @config.patch(implicit_fallbacks=True)
     def test_needs_contiguous_strides(self):
         # Construct a custom op whose output strides are not contiguous

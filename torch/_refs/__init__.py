@@ -6695,7 +6695,6 @@ def exponential(self, rate=1, generator=None):
 def geometric(self, p, generator=None):
     if generator is not None:
         raise AssertionError("generator is not supported in refs")
-    # TODO: fix inductor rand_like for integer, bool dtypes
     torch._check(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_boolean_dtype(self.dtype),
@@ -6705,7 +6704,13 @@ def geometric(self, p, generator=None):
         0 < p and p < 1,
         lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
     )
-    return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
+    rand_dtype = (
+        torch.get_default_dtype()
+        if utils.is_integer_dtype(self.dtype)
+        else self.dtype
+    )
+    u = torch.rand_like(self, dtype=rand_dtype)
+    return torch.floor(torch.log1p(-u) / math.log1p(-p)) + 1
 
 
 @register_decomposition(aten.log_normal)
