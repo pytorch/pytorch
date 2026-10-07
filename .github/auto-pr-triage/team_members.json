@@ -8,5 +8,8 @@
   "nn": [
     "@albanD",
     "@jbschlosser"
+  ],
+  "testcase_refactoring": [
+    "@fffrog"
   ]
 }
