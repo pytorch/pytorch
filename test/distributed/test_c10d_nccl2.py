@@ -333,6 +333,83 @@ class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
         del work
         gc.collect()
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_reconfigure_fails_pending_work(self) -> None:
+        device = torch.device("cuda", self.rank)
+        torch.cuda.set_device(device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        timeout = timedelta(seconds=30)
+        store.set_timeout(timeout)
+        dist.init_process_group(
+            "nccl2",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            timeout=timeout,
+            enable_reconfigure=True,
+            device_id=device,
+        )
+        group = dist.group.WORLD
+
+        def make_reconfigure_options(uuid: int) -> ReconfigureOptions:
+            key = f"nccl2_reconfigure/{uuid}"
+            store.set(f"{key}/{self.rank}", group.get_reconfigure_handle())
+            handles = [
+                store.get(f"{key}/{rank}").decode() for rank in range(self.world_size)
+            ]
+            opts = ReconfigureOptions()
+            opts.uuid = uuid
+            opts.handles = handles
+            opts.timeout = timeout
+            return opts
+
+        def reconfigure(uuid: int) -> None:
+            group.reconfigure(make_reconfigure_options(uuid)).wait()
+
+        try:
+            reconfigure(1)
+            next_options = make_reconfigure_options(2)
+
+            stream = torch.cuda.Stream(device=device)
+            lhs = torch.ones((4096, 4096), device=device)
+            rhs = torch.ones_like(lhs)
+            result = torch.empty_like(lhs)
+            with torch.cuda.stream(stream):
+                for _ in range(64):
+                    torch.mm(lhs, rhs, out=result)
+                tensor = torch.full((4 * 1024 * 1024,), self.rank + 1, device=device)
+                old_work = dist.all_reduce(tensor, async_op=True)
+
+            pending = "1" if not old_work.is_completed() else "0"
+            store.set(f"reconfigure_pending/{self.rank}", pending)
+            pending_by_rank = [
+                store.get(f"reconfigure_pending/{rank}").decode()
+                for rank in range(self.world_size)
+            ]
+            # Work completion is rank-local, so check each old Work's outcome
+            # against its own pre-reconfigure state.
+            self.assertIn(
+                "1", pending_by_rank, "the test must exercise pending old work"
+            )
+            group.reconfigure(next_options).wait()
+            if pending_by_rank[self.rank] == "1":
+                with self.assertRaises(dist.DistBackendError):
+                    old_work.wait()
+                self.assertFalse(old_work.is_success())
+            else:
+                old_work.wait()
+                self.assertTrue(old_work.is_success())
+                expected = sum(range(1, self.world_size + 1))
+                self.assertTrue(torch.equal(tensor, torch.full_like(tensor, expected)))
+            self.assertTrue(old_work.is_completed())
+
+            health = torch.tensor([self.rank + 1], device=device)
+            dist.all_reduce(health)
+            self.assertEqual(int(health.item()), sum(range(1, self.world_size + 1)))
+        finally:
+            dist.destroy_process_group()
+
 
 class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
     """Base for groups initialized with backend specific options."""
