@@ -2398,6 +2398,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Output tile size used to estimate how many tiles a decompose-K split launches,
+    # for pruning split choices that rarely win. 0 disables the pruning, which is
+    # also skipped for symbolic shapes and the EXHAUSTIVE search space.
+    decompose_k_min_output_tile_size: int = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_MIN_OUTPUT_TILE_SIZE", "64")
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
