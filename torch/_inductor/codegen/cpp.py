@@ -412,6 +412,58 @@ class ParallelDepth:
     start_depth: int
 
 
+def _check_outer_fusion_loop_level_attr_inner(
+    left_loop_nest: "LoopNest",
+    right_loop_nest: "LoopNest",
+    loop_fusion_depth: int,
+    current_checking_depth: int,
+) -> bool:
+    if not left_loop_nest.loops:
+        raise AssertionError("expected left_loop_nest.loops")
+    if not right_loop_nest.loops:
+        raise AssertionError("expected right_loop_nest.loops")
+    left_loop_level = left_loop_nest.loops[current_checking_depth]
+    right_loop_level = right_loop_nest.loops[current_checking_depth]
+    # Check if same loop level attr
+    outer_loops_attr_compare_list = [
+        "var",
+        "size",
+        "offset",
+        "steps",
+    ]
+    if not (
+        all(
+            getattr(left_loop_level, attr_compare)
+            == getattr(right_loop_level, attr_compare)
+            for attr_compare in outer_loops_attr_compare_list
+        )
+    ):
+        return False
+
+    if loop_fusion_depth < 1:
+        raise AssertionError("expected loop_fusion_depth >= 1")
+    if (loop_fusion_depth := loop_fusion_depth - 1) > 0:
+        # Check next loop level attr
+        current_checking_depth = current_checking_depth + 1
+        if current_checking_depth >= len(left_loop_nest.loops):
+            raise AssertionError(
+                "expected current_checking_depth < len(left_loop_nest.loops)"
+            )
+        if current_checking_depth >= len(right_loop_nest.loops):
+            raise AssertionError(
+                "expected current_checking_depth < len(right_loop_nest.loops)"
+            )
+        if not _check_outer_fusion_loop_level_attr_inner(
+            left_loop_nest,
+            right_loop_nest,
+            loop_fusion_depth,
+            current_checking_depth,
+        ):
+            return False
+
+    return True
+
+
 class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
     @classmethod
     def fuse(  # type: ignore[override]
@@ -488,61 +540,10 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         # For example (test_expr_vec_non_contiguous in test_cpu_repro.py):
         #   * buf0 tiling along the 2nd loop level, buf1 tiling along the 3rd loop level.
         # If the check failed, we should fall back to standard loop codegen.
-        def _inner(
-            left_loop_nest: LoopNest,
-            right_loop_nest: LoopNest,
-            loop_fusion_depth: int,
-            current_checking_depth: int,
-        ) -> bool:
-            if not left_loop_nest.loops:
-                raise AssertionError("expected left_loop_nest.loops")
-            if not right_loop_nest.loops:
-                raise AssertionError("expected right_loop_nest.loops")
-            left_loop_level = left_loop_nest.loops[current_checking_depth]
-            right_loop_level = right_loop_nest.loops[current_checking_depth]
-            # Check if same loop level attr
-            outer_loops_attr_compare_list = [
-                "var",
-                "size",
-                "offset",
-                "steps",
-            ]
-            if not (
-                all(
-                    getattr(left_loop_level, attr_compare)
-                    == getattr(right_loop_level, attr_compare)
-                    for attr_compare in outer_loops_attr_compare_list
-                )
-            ):
-                return False
-
-            if loop_fusion_depth < 1:
-                raise AssertionError("expected loop_fusion_depth >= 1")
-            if (loop_fusion_depth := loop_fusion_depth - 1) > 0:
-                # Check next loop level attr
-                current_checking_depth = current_checking_depth + 1
-                if current_checking_depth >= len(left_loop_nest.loops):
-                    raise AssertionError(
-                        "expected current_checking_depth < len(left_loop_nest.loops)"
-                    )
-                if current_checking_depth >= len(right_loop_nest.loops):
-                    raise AssertionError(
-                        "expected current_checking_depth < len(right_loop_nest.loops)"
-                    )
-                if not _inner(
-                    left_loop_nest,
-                    right_loop_nest,
-                    loop_fusion_depth,
-                    current_checking_depth,
-                ):
-                    return False
-
-            return True
-
         for idx in range(len(cpp_kernel_proxy_list) - 1):
             left_loop_nest = cpp_kernel_proxy_list[idx].loop_nest
             right_loop_nest = cpp_kernel_proxy_list[idx + 1].loop_nest
-            if not _inner(
+            if not _check_outer_fusion_loop_level_attr_inner(
                 left_loop_nest,
                 right_loop_nest,
                 outer_loop_fusion_depth,
