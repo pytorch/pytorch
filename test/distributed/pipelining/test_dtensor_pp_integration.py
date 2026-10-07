@@ -146,6 +146,9 @@ def _requires_multi_gpu(func):
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
 
+    # Decorators above may rebind wrapper. Stamp the object pytest collects
+    # (item.obj), not the inner function. The skip condition is unchanged.
+    wrapper._min_gpus_required = 4
     return wrapper
 
 
@@ -165,8 +168,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     def init_pg(self) -> None:
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+        torch.accelerator.set_device_index(self.device.index)
 
     def _make_mesh(self) -> DeviceMesh:
         return init_device_mesh(device_type, (2, 2), mesh_dim_names=("pp", "tp"))
