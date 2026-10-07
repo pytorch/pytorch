@@ -271,7 +271,7 @@ jobs:
         if: always()
         run: |
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
-          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test && { test ! -d test/torchci-reports || sudo cp -R test/torchci-reports ../workspace/test; }"
 
       - name: Change permissions
         if: ${{ always() && steps.test.conclusion }}
