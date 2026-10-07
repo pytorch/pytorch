@@ -5517,6 +5517,31 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = torch.compile(overridden, fullgraph=True, backend="eager")(x)
         self.assertEqual(result, correct)
 
+    def test_unbound_methods_other_builtin_types(self):
+        # The unbound dispatch is not per type: any builtin type runs its own
+        # method on an explicit receiver, not only list/dict/set.
+        def fn(x):
+            r = range(3)
+            return x + range.count(r, 1) + range.index(r, 2) + len(bytes.decode(b"ab"))
+
+        x = torch.randn(4)
+        correct = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+        # A receiver of the wrong type raises the TypeError the descriptor
+        # raises, instead of running that type's same-named method.
+        def wrong_receiver(x):
+            try:
+                set.copy({1: 2})
+            except TypeError:
+                return x + 1
+            return x + 100
+
+        correct = wrong_receiver(x)
+        result = torch.compile(wrong_receiver, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
     def test_unbound_method_descriptor_value(self):
         # A method descriptor of a builtin type works as a plain value, not
         # just the ones copy._copy_dispatch happens to hold.  The locals keep
@@ -18916,7 +18941,6 @@ fn
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
 
-    @unittest.expectedFailure
     def test_builtin_numeric_unbound_method_constant_fold(self):
         def fn():
             out = [
