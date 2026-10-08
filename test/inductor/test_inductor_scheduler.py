@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import functools
+from types import SimpleNamespace
 from unittest import skipIf
 from unittest.mock import Mock, patch, PropertyMock
 
@@ -18,7 +20,11 @@ from torch._inductor.codegen.simd import (
     _GroupedReductionLayout,
     _PointwiseRemapHandler,
     _SubParentValueResolver,
+    BATCH_COLUMN_AXIS,
+    BATCH_MATRIX_AXIS,
+    finished_after_kernel,
     SIMDScheduling,
+    template_reduction_axis,
     tile_fits_reduction_epilogue,
 )
 from torch._inductor.codegen.simd_kernel_features import (
@@ -48,6 +54,11 @@ from torch._inductor.scheduler import (
     SubParentEpilogueGrouping,
     SubParentOutputGroup,
 )
+from torch._inductor.select_algorithm import (
+    row_tile_element,
+    same_template_element,
+    TritonTemplateKernel,
+)
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import (
     fresh_inductor_cache,
@@ -75,7 +86,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -417,6 +428,25 @@ class TestScheduler(TestCase):
             ),
         ):
             self.assertEqual(NestedReduction.is_candidate(node1, node2), expected)
+
+    @parametrize("outer_is_template", (False, True))
+    def test_nested_reduction_not_enabled_for_template(self, outer_is_template):
+        """A template's epilogue reductions are generated over its output tiles,
+        so a template can't be a nested reduction's outer node."""
+        outer = Mock(spec=BaseSchedulerNode)
+        grouped = Mock(spec=BaseSchedulerNode)
+        outer.is_template.return_value = outer_is_template
+        for node in (outer, grouped):
+            node.has_strict_reduction.return_value = False
+        with (
+            inductor_config.patch({"triton.nested_reduction": True}),
+            patch(
+                "torch._inductor.scheduler._is_gpu_triton_backend", return_value=True
+            ),
+        ):
+            self.assertEqual(
+                NestedReduction._is_enabled_for(outer, grouped), not outer_is_template
+            )
 
     @parametrize(
         "outer_group,grouped_group,group_size,expected",
@@ -3380,6 +3410,302 @@ class TestExtractPointwiseFromReduction(TestCase):
         self.assertIn("partial_accumulate", targets(converted))
         self.assertNotIn("reduction", targets(converted))
         self.assertEqual((converted.iter_vars, converted.reduce_vars), ([x, r], []))
+
+
+class TestBMMMatrixReductionEpilogue(TestCase):
+    """Gates of reductions over each batch's (M, N) matrix of a (B, M, N)
+    template output, fused as per-tile partials."""
+
+    B, M, N = 6, 176, 64
+
+    def setUp(self):
+        super().setUp()
+        self.template = Mock()
+        self.set_shape(self.M, self.N)
+        self.template.get_name.return_value = "buf0"
+        graph = Mock(sizevars=SizeVarAllocator(), cpp_wrapper=False)
+        self.enterContext(V.set_graph_handler(graph))
+
+    def set_shape(self, M, N):
+        self.M, self.N = M, N
+        self.template.get_size.return_value = [
+            sympy.Integer(s) for s in (self.B, self.M, self.N)
+        ]
+
+    def snode(self, name, group, reads, sizes=None, reduction_type=None):
+        node = Mock(spec=SchedulerNode)
+        node.get_name.return_value = name
+        node.get_buffer_names.return_value = OrderedSet([name])
+        node.used_buffer_names.return_value = OrderedSet(dep.name for dep in reads)
+        node.group = ("cuda", group)
+        node.read_writes = Mock(reads=OrderedSet(reads))
+        node.is_reduction.return_value = reduction_type is not None
+        node.unsplit_reduction.return_value = node
+        node.get_nodes.return_value = [node]
+        node.get_ranges.return_value = sizes
+        node.node = Mock(spec=ir.ComputedBuffer)
+        node.node.get_reduction_type.return_value = reduction_type
+        node.node.get_dtype.return_value = torch.float32
+        node.node._split_size = None
+        return node
+
+    def matrix(self, name="buf1", reduction_type="sum", flat=True, reads="buf0"):
+        """A reduction over each batch's (M, N) matrix of reads, read row-major."""
+        B, M, N = self.B, self.M, self.N
+        x, r0, r1 = sympy.symbols("x r0 r1", integer=True, nonnegative=True)
+        if flat:
+            dep = MemoryDep(reads, M * N * x + r0, (x, r0), (B, M * N))
+            sizes = ([B], [M * N])
+        else:
+            dep = MemoryDep(reads, M * N * x + N * r0 + r1, (x, r0, r1), (B, M, N))
+            sizes = ([B], [M, N])
+        return self.snode(name, (B, M * N), [dep], sizes, reduction_type)
+
+    def axis(self, node, produced=("buf0",)):
+        return template_reduction_axis(node, self.template, OrderedSet(produced))
+
+    def test_axis(self):
+        self.assertEqual(self.axis(self.matrix()), BATCH_MATRIX_AXIS)
+        self.assertEqual(self.axis(self.matrix(flat=False)), BATCH_MATRIX_AXIS)
+        self.assertEqual(
+            self.axis(self.matrix(reduction_type="max")), BATCH_MATRIX_AXIS
+        )
+        # The wrapper can't finish other reductions from partials.
+        self.assertIsNone(self.axis(self.matrix(reduction_type="prod")))
+        self.assertIsNone(self.axis(self.matrix(reduction_type="argmax")))
+
+    def test_axis_rejects_non_row_major_reads(self):
+        B, M, N = self.B, self.M, self.N
+        x, r0, r1 = sympy.symbols("x r0 r1", integer=True, nonnegative=True)
+        # Each batch's matrix read transposed: same ranges, wrong elements.
+        transposed = self.snode(
+            "buf1",
+            (B, M * N),
+            [MemoryDep("buf0", M * N * x + r0 + M * r1, (x, r0, r1), (B, M, N))],
+            ([B], [M, N]),
+            "sum",
+        )
+        self.assertIsNone(self.axis(transposed))
+        # Batches innermost: a sum over the batch dim, not over each matrix.
+        self.assertIsNone(
+            self.axis(
+                self.snode(
+                    "buf1",
+                    (B, M * N),
+                    [MemoryDep("buf0", x + B * r0, (x, r0), (B, M * N))],
+                    ([B], [M * N]),
+                    "sum",
+                )
+            )
+        )
+        # A per-batch column sum keeps its own axis.
+        y = sympy.Symbol("y", integer=True, nonnegative=True)
+        column = self.snode(
+            "buf1",
+            (B * N, M),
+            [MemoryDep("buf0", M * N * x + y + N * r0, (x, y, r0), (B, N, M))],
+            ([B, N], [M]),
+            "sum",
+        )
+        self.assertEqual(self.axis(column), BATCH_COLUMN_AXIS)
+
+    def test_tile_fits(self):
+        node = self.matrix()
+        for tile in ((128, 64, 1), (128, 128, 1), (64, 32, 1)):
+            self.assertTrue(
+                tile_fits_reduction_epilogue(tile, self.template, [node]), tile
+            )
+        # Partials are per subtile, but meta WS rejects reductions over them.
+        for meta_ws in (False, True):
+            with patch(
+                "torch._inductor.codegen.simd.meta_ws_enabled", return_value=meta_ws
+            ):
+                self.assertEqual(
+                    tile_fits_reduction_epilogue((128, 32, 2), self.template, [node]),
+                    not meta_ws,
+                )
+
+    def normalize(self, name="buf2", stat="buf1"):
+        """A node over the whole output reading it and a per-batch result."""
+        B, M, N = self.B, self.M, self.N
+        x, y = sympy.symbols("x y", integer=True, nonnegative=True)
+        return self.snode(
+            name,
+            (B * M * N, sympy.S.One),
+            [
+                MemoryDep("buf0", M * N * x + y, (x, y), (B, M * N)),
+                MemoryDep(stat, x, (x, y), (B, M * N)),
+            ],
+            ([B, M * N], []),
+        )
+
+    def test_one_tile_per_batch_finishes_in_kernel(self):
+        """When a tile holds a batch's whole matrix, RMSNorm's normalize reads
+        the finished statistic in the same kernel."""
+        B, M, N = self.B, 128, 64
+        self.set_shape(M, N)
+        x, r = sympy.symbols("x r", integer=True, nonnegative=True)
+        stat, normalize = self.matrix(), self.normalize()
+        tile = (128, 64, 1)
+        self.assertEqual(
+            finished_after_kernel(tile, self.template, [stat, normalize]), ([], [])
+        )
+        fits = functools.partial(tile_fits_reduction_epilogue, tile, self.template)
+        self.assertTrue(fits([stat]))
+        self.assertTrue(fits([stat, normalize]))
+        # A row reduction of the normalized output runs after it.
+        row = self.snode(
+            "buf3",
+            (B * M, N),
+            [MemoryDep("buf2", N * x + r, (x, r), (B * M, N))],
+            ([B * M], [N]),
+            "sum",
+        )
+        self.assertTrue(fits([stat, normalize, row]))
+        # Matrix and per-batch column reductions run before it.
+        self.assertFalse(fits([stat, normalize, self.matrix("buf3", reads="buf2")]))
+        y = sympy.Symbol("y", integer=True, nonnegative=True)
+        column = self.snode(
+            "buf3",
+            (B * N, M),
+            [MemoryDep("buf2", M * N * x + y + N * r, (x, y, r), (B, N, M))],
+            ([B, N], [M]),
+            "sum",
+        )
+        self.assertFalse(fits([stat, normalize, column]))
+        # Readers over the batches only aren't generated over the tile, so the
+        # matrix reduces from partials and they run after the kernel.
+        per_batch = self.snode(
+            "buf3", (B, sympy.S.One), [MemoryDep("buf1", x, (x,), (B,))], ([B], [])
+        )
+        self.assertTrue(fits([stat, per_batch]))
+        self.assertEqual(
+            finished_after_kernel(tile, self.template, [stat, per_batch]),
+            ([stat], [per_batch]),
+        )
+        # Across subtiles, only the first holds the matrix.
+        self.assertFalse(
+            tile_fits_reduction_epilogue((128, 64, 2), self.template, [stat, normalize])
+        )
+
+    def test_two_pass_runs_after_kernel(self):
+        """RMSNorm's normalize reads the finished per-batch statistic, so it
+        runs after the kernel; a second reduction over it can't."""
+        B, M, N = self.B, self.M, self.N
+        x, y = sympy.symbols("x y", integer=True, nonnegative=True)
+        stat = self.matrix()
+        normalize = self.snode(
+            "buf2",
+            (B * M * N, sympy.S.One),
+            [
+                MemoryDep("buf0", y, (y,), (B * M * N,)),
+                MemoryDep("buf1", x, (x, y), (B, M * N)),
+            ],
+        )
+        tile = (128, 64, 1)
+        partials, after = finished_after_kernel(tile, self.template, [stat, normalize])
+        self.assertEqual(partials, [stat])
+        self.assertEqual(after, [normalize])
+        self.assertTrue(
+            tile_fits_reduction_epilogue(tile, self.template, [stat, normalize])
+        )
+        # The second reduction reads the normalized output, so it can't store
+        # partials during the kernel either.
+        second = self.matrix(name="buf3", reads="buf2")
+        self.assertEqual(
+            finished_after_kernel(tile, self.template, [stat, normalize, second]),
+            ([stat], [normalize, second]),
+        )
+        self.assertFalse(
+            tile_fits_reduction_epilogue(tile, self.template, [stat, normalize, second])
+        )
+
+
+class TestBMMRowPassLoadReuse(TestCase):
+    """The row pass of a batched template output reuses loads that epilogue
+    nodes before it made over the template's own indices, rather than reload
+    them. Index forms are those of an RMSNorm backward epilogue on a
+    (5247, 64, 128) output with 64x64 tiles."""
+
+    B, M, N = 5247, 64, 128
+
+    def setUp(self):
+        super().setUp()
+        graph = Mock(sizevars=SizeVarAllocator(), cpp_wrapper=False)
+        self.enterContext(V.set_graph_handler(graph))
+        self.X, self.R = sympy.symbols("tile_xindex tile_r0_index", integer=True)
+        self.sizes = [sympy.Integer(s) for s in (self.B, self.M, self.N)]
+
+    def kernel(self, out_syms, range_tree_nodes, root):
+        output_node = Mock()
+        output_node.get_size.return_value = self.sizes
+        return SimpleNamespace(
+            output_index_symbols={0: out_syms},
+            range_tree_nodes=range_tree_nodes,
+            range_trees=[Mock(index_sym=Mock(return_value=root))],
+            output_node=output_node,
+        )
+
+    def matches(self, kernel, template_index, row_index):
+        recorded = TritonTemplateKernel._template_element_index(
+            kernel, template_index, 0
+        )
+        element = row_tile_element(row_index, (self.X, self.R), self.M)
+        self.assertIsNotNone(recorded)
+        self.assertIsNotNone(element)
+        return same_template_element(element, recorded, self.sizes)
+
+    def test_tma_store_indices(self):
+        M, N = self.M, self.N
+        x, y, z = sympy.symbols("xindex yindex zindex", integer=True)
+        kernel = self.kernel([x, y, z], {}, x)
+        X, R = self.X, self.R
+        out = z + N * y + M * N * x
+        weight = z + N * y  # broadcast over batches
+        stat = y + M * x  # one per row
+        self.assertTrue(self.matches(kernel, out, R + N * X))
+        self.assertTrue(self.matches(kernel, weight, R + N * ModularIndexing(X, 1, M)))
+        self.assertTrue(self.matches(kernel, stat, X))
+        self.assertFalse(self.matches(kernel, out, R + N * ModularIndexing(X, 1, M)))
+        self.assertFalse(self.matches(kernel, weight, R + N * X))
+        self.assertFalse(self.matches(kernel, stat, R))
+
+    def test_contiguous_indices(self):
+        """The masked tl.store path: one range tree over the contiguous output,
+        with the template's batch, row and col indices derived from it."""
+        M, N = self.M, self.N
+        root = sympy.Symbol("xindex", integer=True)
+        batch, rm, rn = sympy.symbols("batch rm rn", integer=True)
+        nodes = {
+            batch: Mock(expr=FloorDiv(root, M * N)),
+            rm: Mock(expr=ModularIndexing(root, N, M)),
+            rn: Mock(expr=ModularIndexing(root, 1, N)),
+        }
+        kernel = self.kernel([batch, rm, rn], nodes, root)
+        X, R = self.X, self.R
+        self.assertTrue(self.matches(kernel, rn + N * rm + M * N * batch, R + N * X))
+        self.assertTrue(
+            self.matches(kernel, rn + N * rm, R + N * ModularIndexing(X, 1, M))
+        )
+        self.assertFalse(self.matches(kernel, rn + N * rm, R + N * X))
+
+    def test_masked_store_indices(self):
+        """The masked tl.store path as generated: the template's batch, row and
+        col indices are its own variables, and loads index xindex."""
+        M, N = self.M, self.N
+        root = sympy.Symbol("xindex", integer=True)
+        batch, rm, rn = sympy.symbols("batch rm rn", integer=True)
+        kernel = self.kernel([batch, rm, rn], {}, root)
+        X, R = self.X, self.R
+        self.assertTrue(self.matches(kernel, root, R + N * X))
+        self.assertTrue(
+            self.matches(
+                kernel,
+                ModularIndexing(root, 1, M * N),
+                R + N * ModularIndexing(X, 1, M),
+            )
+        )
+        self.assertFalse(self.matches(kernel, root, R + N * ModularIndexing(X, 1, M)))
 
 
 instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)
