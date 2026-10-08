@@ -32,6 +32,7 @@ set(C10_CUDA_SRCS
     CUDAException.cpp
     CUDAFunctions.cpp
     CUDAGraphMemory.cpp
+    CUDALocalityAllocator.cpp
     CUDAMallocAsyncAllocator.cpp
     CUDAMiscFunctions.cpp
     CUDAStream.cpp
@@ -48,6 +49,7 @@ set(C10_CUDA_HEADERS
     CUDAEvent.h
     CUDAFunctions.h
     CUDAGuard.h
+    CUDALocalityAllocator.h
     CUDAMacros.h
     CUDAMathCompat.h
     CUDAMiscFunctions.h

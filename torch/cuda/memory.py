@@ -61,6 +61,7 @@ __all__ = [
     "mem_get_info",
     "get_allocator_backend",
     "CUDAPluggableAllocator",
+    "LocalityInterleavedAllocator",
     "change_current_allocator",
     "MemPool",
     "use_mem_pool",
@@ -1325,6 +1326,30 @@ class _CUDAAllocator:
 
     def allocator(self):
         return self._allocator
+
+
+class LocalityInterleavedAllocator(_CUDAAllocator):
+    r"""Built-in allocator for GPUs with two memory sides (locality domains).
+
+    Allocations come from one arena per device whose 2 MiB page ``P`` is backed by
+    locality domain ``P & 1``, so ``side(addr) = (addr >> 21) & 1``, and start
+    4 MiB aligned. Large contiguous elementwise kernels whose operands all come
+    from the arena use a side-aware schedule (toggle with
+    ``torch._C._cuda_set_side_aware``), with bitwise-identical results.
+
+    Example::
+
+        >>> pool = torch.cuda.MemPool(LocalityInterleavedAllocator().allocator())
+        >>> with torch.cuda.use_mem_pool(pool):
+        ...     x = torch.randn(1 << 28, device="cuda")
+
+    .. warning::
+        Prototype: blocks are rounded up to 4 MiB, pages are never unmapped,
+        and IPC and peer access are not supported.
+    """
+
+    def __init__(self):
+        super().__init__(torch._C._cuda_localityInterleavedAllocator())
 
 
 class CUDAPluggableAllocator(_CUDAAllocator):

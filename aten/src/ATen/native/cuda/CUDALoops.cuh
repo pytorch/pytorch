@@ -36,6 +36,9 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
+#ifndef USE_ROCM
+#include <ATen/native/cuda/SideAware.cuh>
+#endif
 #include <c10/core/DynamicCast.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
@@ -336,6 +339,12 @@ static inline void launch_vectorized_kernel(
   // Similar check in vectorized_elementwise_kernel() as well. Both should be in sync.
   int tws = at::detail::getCUDAHooks().isGPUArch({"gfx942"}, curDevice) ? 16 : elems_per_thread<io_size>();
 #else
+  // Operands from the locality-interleaved arena: send each chunk to an SM on
+  // its memory side.
+  side_aware::DefaultLaunchTimer side_aware_timer; // records a calibration sample after the default launch below
+  if (side_aware::try_launch_side_aware(N, f, data, side_aware_timer)) {
+    return;
+  }
   using cpp_type = typename function_traits<func_t>::result_type;
   const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
   uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));

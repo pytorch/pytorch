@@ -2,6 +2,7 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/cuda/SideAwareState.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/RNN.h>
 #include <c10/core/Device.h>
@@ -25,6 +26,7 @@
 #include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDALocalityAllocator.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #ifdef USE_NCCL
@@ -1451,6 +1453,24 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         reinterpret_cast<FreeFuncType*>(free_ptr);
     return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
         malloc_fn, free_fn);
+  });
+
+  m.def("_cuda_localityInterleavedAllocator", []() {
+    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+        c10::cuda::LocalityAllocator::raw_alloc,
+        c10::cuda::LocalityAllocator::raw_free);
+  });
+  m.def("_cuda_set_side_aware", [](bool enabled) {
+    at::native::side_aware::set_enabled(enabled);
+  });
+  m.def("_cuda_get_side_aware", []() {
+    return at::native::side_aware::enabled();
+  });
+  m.def("_cuda_side_aware_launch_count", []() {
+    return at::native::side_aware::launch_count();
+  });
+  m.def("_cuda_side_aware_sm_sides", [](c10::DeviceIndex device) {
+    return at::native::side_aware::sm_sides(device);
   });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
