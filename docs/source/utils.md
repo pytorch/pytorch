@@ -141,7 +141,6 @@
     preprocessor
     processKernelLaunches
     replace_extern_shared
-    replace_math_functions
     str2bool
 ```
 
