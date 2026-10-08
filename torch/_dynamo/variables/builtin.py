@@ -3594,6 +3594,77 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         )
 
 
+class FrozenDictBuiltinVariable(BaseBuiltinVariable):
+    if torch._has_frozendict:
+        _fn = torch._frozendict
+
+    def __init__(self, value: Any = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "frozendict", len(args), 0, 1)
+        if (
+            len(args) == 1
+            and isinstance(args[0], variables.FrozenDictVariable)
+            and not kwargs
+        ):
+            return args[0]
+        storage = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        storage.dict_update(tx, args, kwargs)
+        return variables.FrozenDictVariable(storage.items)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if (
+            name == "__new__"
+            and args
+            and isinstance(args[0], FrozenDictBuiltinVariable)
+        ):
+            result = self.call_function(tx, args[1:], kwargs)
+            if not isinstance(result, variables.FrozenDictVariable):
+                raise AssertionError(f"Expected FrozenDictVariable, got {type(result)}")
+            return variables.FrozenDictVariable(result.items)
+        if (
+            name == "__new__"
+            and args
+            and isinstance(args[0], variables.UserDefinedClassVariable)
+            and issubclass(args[0].value, self._fn)
+        ):
+            unimplemented(
+                gb_type="frozendict subclass allocation",
+                context="frozendict.__new__",
+                explanation="Dynamo does not yet support allocating frozendict subclasses.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if name == "fromkeys":
+            unimplemented(
+                gb_type="frozendict fromkeys",
+                context=name,
+                explanation="Dynamo does not yet support frozendict.fromkeys.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if name in self._fn.__dict__ and callable(self._fn.__dict__[name]):
+            check_positional(tx, name, len(args), 1, sys.maxsize)
+            if not isinstance(args[0], variables.FrozenDictVariable):
+                raise_type_error(
+                    tx,
+                    f"descriptor '{name}' for 'frozendict' objects doesn't apply "
+                    f"to a '{args[0].python_type_name()}' object",
+                )
+            return args[0].call_method(tx, name, args[1:], kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+
 class IterBuiltinVariable(BaseBuiltinVariable):
     """Variable tracker for the `iter` builtin."""
 

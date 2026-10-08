@@ -1273,6 +1273,20 @@ class ConstantSource(Source):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class FrozenDictItemsSource(ChainedSource):
+    @property
+    def _name_template(self) -> str:
+        return "___frozendict_items({0})"
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "frozendict_items")
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+
+@dataclass_with_cached_hash(frozen=True)
 class NumpyTensorSource(ChainedSource):
     @property
     def _name_template(self) -> str:
