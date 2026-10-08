@@ -362,6 +362,21 @@ def cudagraph_partition_post_compile(
         # cudagraphify is not called if there are no partitions
         BoxedBool.disable(cudagraphs)
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
+        if cudagraph_fail_reasons:
+            # Preserve original non-raising behavior: log and bump counter only,
+            # do not escalate to RuntimeError even if cudagraph_or_error is set.
+            log.warning("skipping cudagraphs due to %s", cudagraph_fail_reasons)
+            counters["inductor"]["cudagraph_skips"] += 1
+        elif compiled_graph.partition_maps is None:
+            # Preserve original non-raising behavior.
+            log.warning("skipping cudagraphs as compiled_graph.partition_maps is None")
+            counters["inductor"]["cudagraph_skips"] += 1
+        else:
+            # This is the actual case this PR targets: empty partitions.
+            # Use the shared helper so cudagraph_or_error=True correctly raises.
+            log_cudagraph_skip_and_bump_counter(
+                "skipping cudagraphs as len(compiled_graph.partition_maps) == 0"
+            )
         return
 
     if compiled_graph.current_callable is None:
