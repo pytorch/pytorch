@@ -191,9 +191,15 @@ class TestMarkKernels(TestCase):
         big = torch.randn(8192, 8192, device="cuda")
         graph = torch.cuda.CUDAGraph(keep_graph=True)
 
-        with torch.cuda.graph(graph, enable_annotations=True):
-            with mark_kernels("reduction"):
-                _ = torch.sum(big)
+        # The default capture-end pass rewrites small memset nodes into fill kernels
+        # (torch.cuda.graphs._rewrite_small_memset_nodes); this test is about the
+        # annotation of memset nodes, so keep them.
+        with unittest.mock.patch.object(
+            torch.cuda.graphs, "_memset_to_kernel_max_bytes", 0
+        ):
+            with torch.cuda.graph(graph, enable_annotations=True):
+                with mark_kernels("reduction"):
+                    _ = torch.sum(big)
 
         raw_graph = graph.raw_cuda_graph()
         _, num_nodes = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw_graph))
