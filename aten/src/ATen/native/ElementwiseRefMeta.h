@@ -24,8 +24,11 @@ Tensor binary_ref_meta(
     const Tensor& other,
     ELEMENTWISE_TYPE_PROMOTION_KIND kind,
     bool fake_devices,
-    const std::optional<Scalar>& alpha = std::nullopt,
-    bool is_sub = false);
+    const std::optional<Scalar>& alpha = std::nullopt);
+
+// utils.is_weakly_lesser_type(type(alpha), utils.dtype_to_type(dtype)), with the
+// refs' error message.
+void check_alpha_type(const Scalar& alpha, ScalarType dtype);
 
 // _make_elementwise_binary_reference, with its Python scalar checks. name is
 // the prim's name, used in the error messages.
