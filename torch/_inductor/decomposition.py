@@ -653,8 +653,18 @@ def cat(
             else filtered_t.to(dtype=promoted_dtype)
         )
     elif 1 < len(filtered_tensors) < len(tensors):
-        # on the first call, when we remove empty tensors, we redispatch recursively
-        return aten.cat.default(filtered_tensors, dim)
+        # on the first call, when we remove empty tensors, we redispatch recursively.
+        # The removed empty tensors still participate in dtype promotion.
+        promoted_dtype = elementwise_dtypes(
+            *tensors,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        )[1]
+        result = aten.cat.default(filtered_tensors, dim)
+        return (
+            result
+            if promoted_dtype == result.dtype
+            else result.to(dtype=promoted_dtype)
+        )
 
     # optimization, avoid concat for single, repeated input
     if len(filtered_tensors) > 1 and all(

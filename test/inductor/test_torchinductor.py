@@ -9089,6 +9089,22 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.randn(1, 0, 64), torch.randn(128, 64)))
 
+    def test_cat_empty_dtype_promotion(self):
+        # https://github.com/pytorch/pytorch/issues/198852
+        # An empty tensor dropped by the cat decomposition must still take part
+        # in dtype promotion when more than one non-empty tensor remains.
+        def fn(x, y):
+            empty = torch.empty((0, 2), dtype=torch.float32, device=x.device)
+            return torch.cat((empty, x, y), dim=0)
+
+        self.common(
+            fn,
+            (
+                torch.randn(1, 2, dtype=torch.float16),
+                torch.randn(1, 2, dtype=torch.float16),
+            ),
+        )
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_legacy_empty(self):
         def fn(x, y):
