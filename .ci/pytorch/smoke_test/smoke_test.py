@@ -361,7 +361,13 @@ def smoke_test_cuda(
             "darwin",
         ]
     ):
-        smoke_test_compile("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            compile_device = "cuda"
+        elif torch.xpu.is_available():
+            compile_device = "xpu"
+        else:
+            compile_device = "cpu"
+        smoke_test_compile(compile_device)
         smoke_test_compile_dynamic_indirect_indexing()
 
     if torch.cuda.is_available():
@@ -499,6 +505,9 @@ def test_sdpa(device="cpu", dtype=torch.float16) -> None:
 
 def smoke_test_compile(device: str = "cpu") -> None:
     supported_dtypes = [torch.float16, torch.float32, torch.float64]
+    # Intel client GPUs (e.g. Arc) have no native fp64.
+    if device == "xpu" and not torch.xpu.get_device_properties().has_fp64:
+        supported_dtypes.remove(torch.float64)
 
     def foo(x: torch.Tensor) -> torch.Tensor:
         return torch.sin(x) + torch.cos(x)
