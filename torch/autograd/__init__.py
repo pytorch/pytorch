@@ -476,7 +476,8 @@ def grad(
         inputs (sequence of Tensor or GradientEdge or Mapping[str, Tensor]): Inputs w.r.t. which
             the gradient will be returned (and not accumulated into ``.grad``).
             When a mapping is provided (e.g. ``dict(model.named_parameters())``),
-            the result is returned as a dict with matching keys.
+            the result is returned as a dict with matching keys, or an OrderedDict
+            if ``inputs`` is an OrderedDict.
         grad_outputs (sequence of [Tensor or None] or Tensor, optional): The "vector" in the
             vector-Jacobian product. Usually gradients w.r.t. each output. None values can be
             specified for scalar Tensors or ones that don't require grad. If a None value would be
