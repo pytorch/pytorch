@@ -1625,16 +1625,6 @@
       "Hints": []
     }
   ],
-  "GB9539": [
-    {
-      "Gb_type": "frozendict subclass allocation",
-      "Context": "frozendict.__new__",
-      "Explanation": "Dynamo does not yet support allocating frozendict subclasses.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0105": [
     {
       "Gb_type": "Tensor.numpy() with trace_numpy=False",

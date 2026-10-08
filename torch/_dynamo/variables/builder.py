@@ -357,6 +357,7 @@ from .user_defined import (
     UserDefinedDequeVariable,
     UserDefinedDictVariable,
     UserDefinedExceptionClassVariable,
+    UserDefinedFrozenDictVariable,
     UserDefinedFrozensetVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
@@ -1087,7 +1088,13 @@ class VariableBuilder:
                 value_item, GetItemSource(pair_source, 1), tx=self.tx
             )
             items[key_var] = value_var
-        result = FrozenDictVariable(items, source=self.source)
+        result: VariableTracker
+        if type(value) is FrozenDictVariable._cpython_type:
+            result = FrozenDictVariable(items, source=self.source)
+        else:
+            result = UserDefinedFrozenDictVariable(
+                value, items=items, source=self.source
+            )
         return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_mapping_proxy(self, value: Any) -> VariableTracker:
@@ -2455,6 +2462,8 @@ class VariableBuilder:
             return self.wrap_user_defined(value)
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
+        if torch._has_frozendict and isinstance(value, torch._frozendict):
+            return self.wrap_frozendict(value)
         from .ctx_manager import GenericContextWrappingVariable
         from .user_defined import _CONSTANT_BASE_TYPES, is_generic_ctx_manager_cls
 

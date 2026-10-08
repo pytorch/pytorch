@@ -118,7 +118,12 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
+from .dicts import (
+    ConstDictVariable,
+    FrozenDictVariable,
+    OrderedDictVariable,
+    pydict_check,
+)
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -512,6 +517,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             collections.deque.__new__,
             types.SimpleNamespace.__new__,
         }
+        if torch._has_frozendict:
+            c_new_fns.add(torch._frozendict.__new__)
         return c_new_fns.union(exceptions)
 
     @staticmethod
@@ -1215,6 +1222,23 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and name == "__enter__"
         ):
             return args[0].enter(tx)
+        elif (
+            torch._has_frozendict
+            and issubclass(self.value, torch._frozendict)
+            and name == "fromkeys"
+            and self.lookup_cls_mro_attr(name) is torch._frozendict.__dict__[name]
+        ):
+            return variables.FrozenDictBuiltinVariable().fromkeys(
+                tx, args, kwargs, cls=self
+            )
+        elif (
+            torch._has_frozendict
+            and name == "__new__"
+            and self.value.__new__ is torch._frozendict.__new__
+        ):
+            return variables.FrozenDictBuiltinVariable().call_method(
+                tx, name, args, kwargs
+            )
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
@@ -5467,6 +5491,33 @@ class UserDefinedSetVariable(UserDefinedObjectVariable, SetVariable):
         # type(self)(items), which would misfire on this class's (value, items)
         # constructor.
         return SetVariable(list(items), mutation_type=ValueMutationNew())
+
+
+class UserDefinedFrozenDictVariable(UserDefinedObjectVariable, FrozenDictVariable):
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *FrozenDictVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self, value: object, items=None, init_args=None, **kwargs: Any
+    ) -> None:
+        if items is None and init_args:
+            initial = init_args[0]
+            if not isinstance(initial, FrozenDictVariable):
+                raise AssertionError(
+                    f"Expected FrozenDictVariable, got {type(initial)}"
+                )
+            items = initial.items
+        super().__init__(value, items=items, init_args=init_args, **kwargs)
+        base_type = cast(type, FrozenDictVariable._cpython_type)
+        self._base_methods = {
+            method for method in base_type.__dict__.values() if callable(method)
+        }
+        self._base_methods.add(object.__init__)
+
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return self.mp_length_impl(tx)
 
 
 class UserDefinedFrozensetVariable(UserDefinedObjectVariable, FrozensetVariable):
