@@ -65,11 +65,11 @@ static void adaptive_avg_pool2d_metal(const Tensor& input, Tensor& output, bool 
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         auto encoder = stream->commandEncoder();
-        getMPSProfiler().beginProfileKernel(pso, kernel, {input});
+        getMPSProfiler().beginProfileKernel(pso, kernel, {input}, stream);
         [encoder setComputePipelineState:pso];
         mtl_setArgs(encoder, input, output, params);
         mtl_dispatch1DJob(encoder, pso, output.numel());
-        getMPSProfiler().endProfileKernel(pso);
+        getMPSProfiler().endProfileKernel(pso, stream);
       }
     });
   }

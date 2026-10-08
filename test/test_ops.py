@@ -2919,8 +2919,6 @@ fake_backward_mps_xfails = {
         ("linalg.matrix_sqrth", ""),
         ("mode", ""),
         ("native_batch_norm", ""),
-        ("nn.functional.adaptive_avg_pool1d", ""),
-        ("nn.functional.adaptive_avg_pool2d", ""),
         ("nn.functional.adaptive_avg_pool3d", ""),
         ("nn.functional.adaptive_max_pool3d", ""),
         ("nn.functional.batch_norm", ""),
