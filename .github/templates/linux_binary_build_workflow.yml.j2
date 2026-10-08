@@ -11,7 +11,11 @@ name: !{{ build_environment }}
     the entries it needs. Tests for ROCm/XPU run inline (they use setup-* host
     actions and custom GPU device passthrough); everything else delegates to
     _binary-test-linux.yml. -#}
-{%- set rocm_configs = build_configs | selectattr('gpu_arch_type', 'equalto', 'rocm') | list %}
+{%- set all_rocm_configs = build_configs | selectattr('gpu_arch_type', 'equalto', 'rocm') | list %}
+{#- The preview lane tracks a moving SDK, so it gets its own build/test/upload
+    chain; a red preview leg must not block the supported ROCm uploads. -#}
+{%- set rocm_preview_configs = all_rocm_configs | selectattr('gpu_arch_version', 'equalto', 'preview') | list %}
+{%- set rocm_configs = all_rocm_configs | rejectattr('gpu_arch_version', 'equalto', 'preview') | list %}
 {%- set xpu_configs = build_configs | selectattr('gpu_arch_type', 'equalto', 'xpu') | list %}
 {%- set test_standard_configs = build_configs | rejectattr('gpu_arch_type', 'in', ['rocm', 'xpu']) | list %}
 
@@ -22,7 +26,7 @@ name: !{{ build_environment }}
     build job is wired up. -#}
 {%- set unified_arch_types = ['cpu', 'cpu-aarch64', 'cuda', 'cuda-aarch64', 'xpu'] %}
 {%- set unified_build_configs = build_configs | selectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
-{%- set matrix_build_configs = build_configs | rejectattr('gpu_arch_type', 'in', unified_arch_types) | list %}
+{%- set matrix_build_configs = build_configs | rejectattr('gpu_arch_type', 'in', unified_arch_types) | rejectattr('gpu_arch_version', 'equalto', 'preview') | list %}
 
 {#- Standard (non-ROCm/XPU) configs that are built by the manywheel-build matrix
     rather than an inline unified job (e.g. cpu-s390x). manywheel-test consumes
@@ -95,6 +99,8 @@ name: !{{ build_environment }}
   {%- set docker_registry_host = "" %}
   {%- set owner_if = "${{ github.repository_owner == 'pytorch' }}" %}
 {%- endif %}
+{%- set preview_docker_image_suffix = "${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}" %}
+{%- set preview_if = "${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.image_available == 'true' }}" %}
 
 on:
   push:
@@ -260,6 +266,85 @@ jobs:
 {%- endif %}
 {%- endif %}
 
+{%- if rocm_preview_configs and pin_docker_image %}
+  # Preview is optional during bootstrap: its missing public image must not
+  # redirect or block the stable CPU/CUDA/ROCm/XPU lanes.
+  get-preview-docker-tag:
+    needs: get-label-type
+    if: ${{ github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') }}
+    name: get-preview-docker-tag
+    runs-on: ubuntu-24.04
+    outputs:
+      docker_image_suffix: ${{ steps.calc.outputs.docker_image_suffix }}
+      image_available: ${{ steps.calc.outputs.image_available }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          submodules: false
+          show-progress: false
+      - name: Check preview builder availability
+        id: calc
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PREVIEW_IMAGE_WAIT_SECONDS: 3600
+          PREVIEW_IMAGE_POLL_SECONDS: 300
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix=""
+          if [[ "${REF_TYPE}" == "tag" || "${GITHUB_REF}" == "refs/heads/nightly" || "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            suffix="-$(git rev-parse HEAD:.ci/docker)"
+          fi
+          tag="!{{ rocm_preview_configs[0]['container_image_tag_prefix'] }}${suffix}"
+          repo="pytorch/!{{ rocm_preview_configs[0]['container_image'] }}"
+          url="https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"
+          deadline=$((SECONDS + PREVIEW_IMAGE_WAIT_SECONDS))
+          while true; do
+            request_timeout=60
+            if [[ "${GITHUB_REF}" == "refs/heads/nightly" ]]; then
+              remaining=$((deadline - SECONDS))
+              if ((remaining < request_timeout)); then
+                request_timeout=$((remaining > 0 ? remaining : 1))
+              fi
+            fi
+            if ! status=$(curl -sS --retry 3 --retry-all-errors \
+                --max-time "${request_timeout}" --retry-max-time "${request_timeout}" \
+                -o /dev/null -w '%{http_code}' "${url}"); then
+              echo "::error::Failed to query preview builder ${repo}:${tag}."
+              exit 1
+            fi
+            if [[ "${status}" == "200" ]]; then
+              echo "docker.io/${repo}:${tag} exists"
+              available=true
+              break
+            fi
+            if [[ "${status}" == "404" && "${GITHUB_REF}" == refs/tags/ciflow/* ]]; then
+              echo "::warning::Preview builder ${repo}:${tag} is not published; skipping preview jobs."
+              available=false
+              break
+            fi
+            remaining=$((deadline - SECONDS))
+            if [[ "${status}" == "404" && "${GITHUB_REF}" == "refs/heads/nightly" && "${remaining}" -gt 0 ]]; then
+              delay="${PREVIEW_IMAGE_POLL_SECONDS}"
+              if ((delay > remaining)); then
+                delay="${remaining}"
+              fi
+              echo "Preview builder ${repo}:${tag} is not published yet; retrying in ${delay}s..."
+              sleep "${delay}"
+              continue
+            fi
+            echo "::error::Preview builder probe returned HTTP ${status} for ${repo}:${tag}."
+            exit 1
+          done
+          echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
+          echo "image_available=${available}" >> "${GITHUB_OUTPUT}"
+{%- endif %}
+
 {#- One inline build job per (gpu_arch_type, desired_cuda) group. Each loops
     over all CPython versions in the group on a single runner, reusing build/
     across iterations. libtorch_cpu/libtorch_cuda are Python-ABI-free; only
@@ -350,18 +435,38 @@ jobs:
   {%- endfor %}
 {%- endfor %}
 
+{%- set build_lanes = [] %}
+{%- set build_needs = "[get-label-type, get-docker-tag]" if pin_docker_image else "get-label-type" %}
 {%- if matrix_build_configs %}
+  {%- set _ = build_lanes.append({
+        'job_name': 'manywheel-build',
+        'configs': matrix_build_configs,
+        'if': owner_if,
+        'needs': build_needs,
+        'image_suffix': docker_image_suffix,
+        'image_registry_host': docker_registry_host}) %}
+{%- endif %}
+{%- if rocm_preview_configs %}
+  {%- set _ = build_lanes.append({
+        'job_name': 'manywheel-build-rocm-preview',
+        'configs': rocm_preview_configs,
+        'if': preview_if,
+        'needs': '[get-label-type, get-preview-docker-tag]',
+        'image_suffix': preview_docker_image_suffix,
+        'image_registry_host': ''}) %}
+{%- endif %}
+{%- for lane in build_lanes %}
 
-  manywheel-build:
+  !{{ lane['job_name'] }}:
     name: ${{ matrix.build_name }}-build
-    if: !{{ owner_if }}
+    if: !{{ lane['if'] }}
     uses: ./.github/workflows/_binary-build-linux.yml
-    needs: {% if pin_docker_image %}[get-label-type, get-docker-tag]{% else %}get-label-type{% endif %}
+    needs: !{{ lane['needs'] }}
     strategy:
       fail-fast: false
       matrix:
         include:
-        {%- for config in matrix_build_configs %}
+        {%- for config in lane['configs'] %}
           - desired_python: "!{{ config['python_version'] }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
             gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
@@ -382,13 +487,13 @@ jobs:
         {%- endfor %}
     with:
       PYTORCH_ROOT: /pytorch
-      PACKAGE_TYPE: !{{ matrix_build_configs[0]['package_type'] }}
+      PACKAGE_TYPE: !{{ lane['configs'][0]['package_type'] }}
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ docker_image_suffix }}
-      DOCKER_IMAGE_REGISTRY_HOST: "!{{ docker_registry_host }}"
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ lane['image_suffix'] }}
+      DOCKER_IMAGE_REGISTRY_HOST: "!{{ lane['image_registry_host'] }}"
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: "!{{ runner_prefix }}"
       runs_on: !{{ build_runs_on }}
@@ -400,7 +505,7 @@ jobs:
       build_environment: !{{ build_environment }}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-{%- endif %}
+{%- endfor %}
 
 {%- if test_standard_configs %}
 {#- One test job per arch group, matching the build jobs, so each group runs
@@ -475,18 +580,37 @@ jobs:
 {%- endfor %}
 {%- endif %}
 
+{%- set rocm_test_lanes = [] %}
 {%- if rocm_configs %}
+  {%- set _ = rocm_test_lanes.append({
+        'job_name': 'manywheel-test-rocm',
+        'build_job': 'manywheel-build',
+        'configs': rocm_configs,
+        'if': owner_if,
+        'needs': '[get-label-type' ~ (', get-docker-tag' if pin_docker_image else '') ~ ', manywheel-build]',
+        'image_suffix': ''}) %}
+{%- endif %}
+{%- if rocm_preview_configs %}
+  {%- set _ = rocm_test_lanes.append({
+        'job_name': 'manywheel-test-rocm-preview',
+        'build_job': 'manywheel-build-rocm-preview',
+        'configs': rocm_preview_configs,
+        'if': preview_if,
+        'needs': '[get-label-type, get-preview-docker-tag, manywheel-build-rocm-preview]',
+        'image_suffix': preview_docker_image_suffix}) %}
+{%- endif %}
+{%- for lane in rocm_test_lanes %}
 
-  manywheel-test-rocm:
+  !{{ lane['job_name'] }}:
     name: ${{ matrix.build_name }}-test
-    if: !{{ owner_if }}
-    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, manywheel-build]
+    if: !{{ lane['if'] }}
+    needs: !{{ lane['needs'] }}
     uses: ./.github/workflows/_binary-test-rocm-linux.yml
     strategy:
       fail-fast: false
       matrix:
         include:
-        {%- for config in rocm_configs %}
+        {%- for config in lane['configs'] %}
           - desired_python: "!{{ config['python_version'] }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
             gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
@@ -499,15 +623,18 @@ jobs:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: !{{ build_configs[0]['package_type'] }}
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
+{%- if lane['configs'][0].get('upload_subfolder') %}
+      INDEX_SUBFOLDER: "!{{ lane['configs'][0]['upload_subfolder'] }}"
+{%- endif %}
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       # ROCm test runners have no ECR pull credentials, so ROCm stays on the
       # Docker Hub image (excluded from the content-addressed ECR path).
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ lane['image_suffix'] }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
-{%- endif %}
+{%- endfor %}
 
 {%- if xpu_configs %}
 
@@ -551,41 +678,61 @@ jobs:
 
     The groups below partition build_configs exactly: unified groups (cpu /
     cuda per version), the standard configs built by the manywheel-build matrix
-    (e.g. cpu-s390x), then rocm and xpu. -#}
+    (e.g. cpu-s390x), then rocm, rocm preview and xpu. -#}
 {%- set upload_jobs = [] %}
 {%- for u in unified_upload_groups %}
   {%- set _ = upload_jobs.append({
         'name': u['job_name'] | replace('-build', '-upload'),
-        'needs': [u['job_name']] + ([u['test_name']] if test_standard_configs else []),
+        'if': owner_if,
+        'needs': '[' ~ ('get-docker-tag, ' if pin_docker_image else '') ~
+          (([u['job_name']] + ([u['test_name']] if test_standard_configs else [])) | join(', ')) ~ ']',
+        'image_suffix': docker_image_suffix,
         'configs': u['configs']}) %}
 {%- endfor %}
 {%- if matrix_standard_configs %}
   {%- set _ = upload_jobs.append({
         'name': 'manywheel-upload',
-        'needs': ['manywheel-build'] + (['manywheel-test'] if test_standard_configs else []),
+        'if': owner_if,
+        'needs': '[' ~ ('get-docker-tag, ' if pin_docker_image else '') ~
+          ((['manywheel-build'] + (['manywheel-test'] if test_standard_configs else [])) | join(', ')) ~ ']',
+        'image_suffix': docker_image_suffix,
         'configs': matrix_standard_configs}) %}
 {%- endif %}
 {%- if rocm_configs %}
   {%- set _ = upload_jobs.append({
         'name': 'manywheel-rocm-upload',
-        'needs': ['manywheel-build', 'manywheel-test-rocm'],
+        'if': owner_if,
+        'needs': '[' ~ ('get-docker-tag, ' if pin_docker_image else '') ~
+          ('manywheel-build, manywheel-test-rocm') ~ ']',
+        'image_suffix': docker_image_suffix,
         'configs': rocm_configs}) %}
+{%- endif %}
+{%- if rocm_preview_configs %}
+  {%- set _ = upload_jobs.append({
+        'name': 'manywheel-rocm-preview-upload',
+        'if': preview_if,
+        'needs': '[get-preview-docker-tag, manywheel-build-rocm-preview, manywheel-test-rocm-preview]',
+        'image_suffix': preview_docker_image_suffix,
+        'configs': rocm_preview_configs}) %}
 {%- endif %}
 {%- if xpu_configs %}
   {%- set _ = upload_jobs.append({
         'name': 'manywheel-xpu-upload',
-        'needs': ['manywheel-xpu-build', 'manywheel-test-xpu'],
+        'if': owner_if,
+        'needs': '[' ~ ('get-docker-tag, ' if pin_docker_image else '') ~
+          ('manywheel-xpu-build, manywheel-test-xpu') ~ ']',
+        'image_suffix': docker_image_suffix,
         'configs': xpu_configs}) %}
 {%- endif %}
 {%- for job in upload_jobs %}
 
   !{{ job['name'] }}:
     name: ${{ matrix.build_name }}-upload
-    if: !{{ owner_if }}
+    if: !{{ job['if'] }}
     permissions:
       id-token: write
       contents: read
-    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}!{{ job['needs'] | join(', ') }}]
+    needs: !{{ job['needs'] }}
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
@@ -604,10 +751,13 @@ jobs:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: !{{ build_configs[0]['package_type'] }}
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
+{%- if job['configs'][0].get('upload_subfolder') %}
+      UPLOAD_SUBFOLDER: "!{{ job['configs'][0]['upload_subfolder'] }}"
+{%- endif %}
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ docker_image_suffix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ job['image_suffix'] }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
     secrets:
@@ -618,21 +768,42 @@ jobs:
 {%- endfor %}
 {%- endif %}
 
-{%- if libtorch_extraction_configs %}
+{%- set libtorch_lanes = [] %}
+{%- set lt_main_configs = libtorch_extraction_configs | rejectattr('gpu_arch_version', 'equalto', 'preview') | list %}
+{%- set lt_preview_configs = libtorch_extraction_configs | selectattr('gpu_arch_version', 'equalto', 'preview') | list %}
+{%- if lt_main_configs %}
+  {%- set _ = libtorch_lanes.append({
+        'suffix': '',
+        'build_job': 'manywheel-build',
+        'configs': lt_main_configs,
+        'if': owner_if,
+        'needs': '[manywheel-build]',
+        'image_suffix': ''}) %}
+{%- endif %}
+{%- if lt_preview_configs %}
+  {%- set _ = libtorch_lanes.append({
+        'suffix': '-rocm-preview',
+        'build_job': 'manywheel-build-rocm-preview',
+        'configs': lt_preview_configs,
+        'if': preview_if,
+        'needs': '[get-preview-docker-tag, manywheel-build-rocm-preview]',
+        'image_suffix': preview_docker_image_suffix}) %}
+{%- endif %}
+{%- for lane in libtorch_lanes %}
 
-  libtorch-extract:
+  libtorch-extract!{{ lane['suffix'] }}:
     name: ${{ matrix.build_name }}-extract
-    if: !{{ owner_if }}
-    needs: [manywheel-build]
+    if: !{{ lane['if'] }}
+    needs: !{{ lane['needs'] }}
     runs-on: "mt-l-x86iavx512-16-128"
     container:
-      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
+      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}!{{ lane['image_suffix'] }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-        {%- for lt_config in libtorch_extraction_configs %}
+        {%- for lt_config in lane['configs'] %}
           - desired_cuda: "!{{ lt_config['desired_cuda'] }}"
             gpu_arch_type: "!{{ lt_config['gpu_arch_type'] }}"
             gpu_arch_version: "!{{ lt_config['gpu_arch_version'] }}"
@@ -689,19 +860,23 @@ jobs:
 
 {%- if branches == "nightly" %}
 
-  libtorch-upload:
+  libtorch-upload!{{ lane['suffix'] }}:
     name: ${{ matrix.build_name }}-upload
-    if: !{{ owner_if }}
+    if: !{{ lane['if'] }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-extract
+{%- if lane['suffix'] == '-rocm-preview' %}
+    needs: [get-preview-docker-tag, libtorch-extract!{{ lane['suffix'] }}]
+{%- else %}
+    needs: libtorch-extract!{{ lane['suffix'] }}
+{%- endif %}
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
       matrix:
         include:
-        {%- for lt_config in libtorch_extraction_configs %}
+        {%- for lt_config in lane['configs'] %}
           - desired_cuda: "!{{ lt_config['desired_cuda'] }}"
             gpu_arch_type: "!{{ lt_config['gpu_arch_type'] }}"
             gpu_arch_version: "!{{ lt_config['gpu_arch_version'] }}"
@@ -713,6 +888,9 @@ jobs:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
+{%- if lane['configs'][0].get('upload_subfolder') %}
+      UPLOAD_SUBFOLDER: "!{{ lane['configs'][0]['upload_subfolder'] }}"
+{%- endif %}
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
@@ -724,4 +902,4 @@ jobs:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 {%- endif %}
-{%- endif %}
+{%- endfor %}
