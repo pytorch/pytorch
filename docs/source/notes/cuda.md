@@ -1415,10 +1415,13 @@ stream and establish the required dependencies and tensor lifetimes as
 described in {ref}`cuda-stream-semantics`.
 
 For a dense CUDA tensor, `tensor.to("cpu", non_blocking=True)` allocates its
-CPU output in pinned memory. PyTorch's caching host allocator can reuse freed
-pinned allocations, which amortizes allocation costs. The same synchronization
-requirements apply before accessing the result on the CPU. See the `pinned_*`
-options in {ref}`cuda-memory-envvars` for allocator configuration.
+CPU output in pinned memory. Apply the same synchronization described above
+for {meth}`~torch.Tensor.copy_`: wait for the transfer to complete before
+accessing the result on the CPU.
+
+PyTorch's caching host allocator can reuse freed pinned allocations, which
+amortizes allocation costs. See the `pinned_*` options in
+{ref}`cuda-memory-envvars` for allocator configuration.
 
 When measuring bandwidth, distinguish allocation and the first transfer from
 transfers into a reused buffer, and synchronize to measure completion rather
