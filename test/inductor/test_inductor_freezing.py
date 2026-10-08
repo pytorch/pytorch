@@ -2,6 +2,7 @@
 import contextlib
 import copy
 import functools
+import gc
 import importlib
 import itertools
 import os
@@ -759,6 +760,28 @@ class OptimizeForInferenceTemplate(TestCase):
 
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
+
+    def test_frozen_constants_released_with_compiled_code(self):
+        # The module holding a compiled graph's frozen constants used to stay in
+        # sys.modules for the rest of the process, so the model's weights
+        # outlived the model and its compiled code.
+        mod = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.ReLU())
+        mod = mod.eval().to(self.device)
+        modules_before = set(sys.modules)
+        with torch.no_grad():
+            torch.compile(mod)(torch.randn(2, 8, device=self.device))
+        constant_refs = [
+            weakref.ref(value)
+            for name in set(sys.modules) - modules_before
+            for value in vars(sys.modules[name]).values()
+            if isinstance(value, torch.Tensor)
+        ]
+        self.assertTrue(constant_refs)
+
+        del mod
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertEqual([ref for ref in constant_refs if ref() is not None], [])
 
     @torch._inductor.config.patch(layout_optimization=True)
     def test_conv_with_as_strided(self):
