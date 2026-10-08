@@ -699,15 +699,14 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 struct RegisterNCCLSymmetricMemoryAllocator {
     RegisterNCCLSymmetricMemoryAllocator() {
     auto allocator = c10::make_intrusive<NCCLSymmetricMemoryAllocator>();
+    // Available to `set_backend` whether or not it is the default
+    register_availability("NCCL", allocator);
     // Query backend used for CUDA tensor
     if (getSymmMemBackendCUDA() == "NCCL") {
       // Direct set (static registration)
       register_allocator(
           c10::DeviceType::CUDA,
           allocator);
-    } else {
-      // Register availability in case `set_backend` is called dynamically
-      register_availability("NCCL", allocator);
     }
   }
 };

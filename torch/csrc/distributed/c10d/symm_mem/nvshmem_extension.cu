@@ -8,6 +8,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <torch/custom_class.h>
 
@@ -40,6 +41,8 @@
 #endif
 
 namespace c10d::nvshmem_extension {
+
+using c10d::symmetric_memory::GroupStreamGuard;
 
 #define THREADS_PER_BLOCK 512
 #define WARP_SIZE 32
@@ -94,6 +97,7 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::s
   TORCH_CHECK(root < team_size, "root must be smaller than group size");
 
   auto stream = at::cuda::getCurrentCUDAStream();
+  GroupStreamGuard stream_guard(group_name);
   nvshmemx_broadcastmem_on_stream(team, buffer_ptr, buffer_ptr, buffer_size, root, stream);
   return input;
 }
@@ -229,6 +233,7 @@ at::Tensor nvshmem_all_to_all(
   size_t bytes_per_rank = buffer_size / world_size;
 
   auto stream = at::cuda::getCurrentCUDAStream(input.device().index());
+  GroupStreamGuard stream_guard(group_name);
   nvshmemx_alltoallmem_on_stream(team, output_ptr, input_ptr, bytes_per_rank, stream);
   return out;
 }
@@ -393,6 +398,9 @@ void all_to_all_vdev(
   auto& team_manager = TeamManager::get(device);
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   auto stream = at::cuda::getCurrentCUDAStream(device.index());
+  // Held to the end of the function: the launches below are one collective and
+  // must not interleave with another operation on the same team.
+  GroupStreamGuard stream_guard(group_name);
 
   // Exchange output splits and source offsets
   // Use collective launch because kernel involves nvshmem barrier
@@ -807,6 +815,9 @@ void all_to_all_vdev_2d(
   auto stream = at::cuda::getCurrentCUDAStream();
   auto& team_manager = TeamManager::get(device);
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
+  // Held to the end of the function: the launches below are one collective and
+  // must not interleave with another operation on the same team.
+  GroupStreamGuard stream_guard(group_name);
 
   // Exchange output splits and source offsets
   auto input_dim0 = input.size(0);
@@ -947,6 +958,9 @@ void all_to_all_vdev_2d_offset(
   auto stream = at::cuda::getCurrentCUDAStream();
   auto& team_manager = TeamManager::get(device);
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
+  // Held to the end of the function: the launches below are one collective and
+  // must not interleave with another operation on the same team.
+  GroupStreamGuard stream_guard(group_name);
 
   // Exchange output splits and source offsets
   auto input_dim0 = input.size(0);
@@ -1088,6 +1102,7 @@ void tile_reduce(
       root < nvshmem_team_n_pes(teams[0]),
       "root must be smaller than group size");
   auto stream = at::cuda::getCurrentCUDAStream();
+  GroupStreamGuard stream_guard(group_name);
 
   // Prepare launch parameters
   auto shape = nvshmemx::make_shape(in_tile.sizes()[0], in_tile.sizes()[1]);
@@ -1170,6 +1185,7 @@ void multi_root_tile_reduce(
   auto& team_manager = TeamManager::get(device);
   auto [teams, teams_dev] = team_manager.get_n_teams(
       group_name, hdl->get_rank_to_global_rank(), nblocks);
+  GroupStreamGuard stream_guard(group_name);
 
   // Prepare launch parameters
   auto shape = nvshmemx::make_shape(out_tile.sizes()[0], out_tile.sizes()[1]);

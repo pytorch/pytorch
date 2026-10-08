@@ -15,19 +15,29 @@ class ProcessGroup;
 
 namespace c10d::symmetric_memory {
 
-// RAII guard that orders the built-in CUDA-backend symmetric-memory
-// operations touching the signal pad within a (process group, device) pair:
-// barrier, put_signal and wait_signal, the collectives in
-// CUDASymmetricMemoryOps.cu, the NCCL backend's barrier, and the signal ops in
-// nccl_extension.cu. Not covered: ncclPutSignal/ncclWaitSignal, the NVSHMEM
-// backend, and user kernels on a raw get_signal_pad() tensor.
+// RAII guard that orders the built-in symmetric-memory operations that pair up
+// across ranks within a (process group, device): barrier, put_signal and
+// wait_signal on the CUDA, NCCL and NVSHMEM backends, the collectives in
+// CUDASymmetricMemoryOps.cu and nvshmem_extension.cu, and the signal ops in
+// nccl_extension.cu. Two of these issued concurrently on different streams can
+// pair with the wrong counterpart on a peer, because the rendezvous they use --
+// the signal pad for the pad ops, an NVSHMEM team for the NVSHMEM collectives
+// -- carries no tag saying which operation an arrival belongs to.
 //
-// One guarded scope is one pad operation: construct, launch the kernel, let
-// the guard go out of scope. Construction takes the group's mutex and, when
-// the current stream differs from the previous operation's, waits on the
-// event marking the end of that operation. Destruction records that event on
-// the current stream, just after the launch. The mutex spans the launch, so
-// two host threads cannot interleave reading the stream with launching.
+// Not covered: point-to-point data movement (nvshmem_put/nvshmem_get), the
+// signal ops taking a caller-supplied signal word and value (ncclPutSignal,
+// ncclWaitSignal, nvshmem_put_with_signal, nvshmem_wait_for_signal), where that
+// address and value identify the handshake so there is nothing to mismatch, and
+// user kernels on a raw get_signal_pad() tensor.
+//
+// One guarded scope is one operation: construct, launch the kernel, let the
+// guard go out of scope. An operation that spans several launches, as the
+// all_to_all_vdev family does, holds one guard across all of them.
+// Construction takes the group's mutex and, when the current stream differs
+// from the previous operation's, waits on the event marking the end of that
+// operation. Destruction records that event on the current stream, just after
+// the launch. The mutex spans the launch, so two host threads cannot
+// interleave reading the stream with launching.
 //
 // State is keyed by (ProcessGroup identity, device), with a weak reference to
 // the group as the liveness check. The group_name arguments only resolve the

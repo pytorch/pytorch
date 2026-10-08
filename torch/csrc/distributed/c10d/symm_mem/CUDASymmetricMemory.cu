@@ -1245,14 +1245,13 @@ bool CUDASymmetricMemoryAllocator::has_allocation(void* ptr) {
 struct RegisterCUDASymmetricMemoryAllocator {
   RegisterCUDASymmetricMemoryAllocator() {
     auto allocator = c10::make_intrusive<CUDASymmetricMemoryAllocator>();
+    // Available to `set_backend` whether or not it is the default
+    register_availability("CUDA", allocator);
     // Query backend used for CUDA tensor
     // "CUDA" backend stands for this implementation
     if (getSymmMemBackendCUDA() == "CUDA") {
       // Direct set (static registration)
       register_allocator(c10::DeviceType::CUDA, allocator);
-    } else {
-      // Register availability in case `set_backend` is called dynamically
-      register_availability("CUDA", allocator);
     }
   }
 };
