@@ -603,7 +603,7 @@ void ChromeTraceLogger::handleOverheadInfo(
   sanitizeStrForJSON(name);
   escapeQuotesForJSON(name);
 
-  // TOOD: reserve pid = -1 for overhead but we need to rethink how to scale
+  // TODO: reserve pid = -1 for overhead but we need to rethink how to scale
   // this for other metadata
   time = transToRelativeTime(time);
   writeMetadataEvent(

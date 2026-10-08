@@ -26,7 +26,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
 from torch._dynamo.utils import counters, identity, same
-from torch._inductor import config, ir
+from torch._inductor import config
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
     _TestCodeCacheBenchmarkRequest,
@@ -941,15 +941,16 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
-    def test_addmm_0d_bias_max_autotune(self):
+    @parametrize("beta", (0, 1))
+    def test_addmm_0d_bias_max_autotune(self, beta):
         torch._dynamo.reset()
         bias = torch.tensor(0.5)
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
 
-        eager_out = torch.addmm(bias, x, y)
+        eager_out = torch.addmm(bias, x, y, beta=beta)
         with config.patch({"max_autotune": True, "max_autotune_gemm": True}):
-            compiled_out = torch.compile(torch.addmm)(bias, x, y)
+            compiled_out = torch.compile(torch.addmm)(bias, x, y, beta=beta)
 
         self.assertEqual(compiled_out, eager_out)
 
@@ -1301,6 +1302,26 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(16, 8).to(GPU_TYPE)
         with config.patch({"max_autotune": True}):
             torch.compile(fn, dynamic=dynamic)(x, a, b)
+
+    @parametrize("op", [torch.addmm, torch.baddbmm])
+    def test_max_autotune_zero_beta_drops_nan_bias(self, op):
+        def fn(x, a, b):
+            return op(x, a, b, beta=0, alpha=0.5)
+
+        shape = (64, 64) if op is torch.addmm else (2, 64, 64)
+        x = torch.full((64,), float("nan"), device=GPU_TYPE)
+        a = torch.randn(shape, device=GPU_TYPE)
+        b = torch.randn(shape, device=GPU_TYPE)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.native_matmul": False,
+            }
+        ):
+            out = torch.compile(fn)(x, a, b)
+        self.assertFalse(out.isnan().any())
+        self.assertEqual(out, fn(x, a, b), atol=1e-2, rtol=1e-2, equal_nan=False)
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_autotune_conv1x1(self, search_space):
@@ -2260,6 +2281,26 @@ class TestMaxAutotune(TestCase):
             FileCheck().check("contiguous_addmm").run(code[0])
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @parametrize("beta", (0.0, 0.5))
+    @config.patch(max_autotune=True)
+    def test_max_autotune_contiguous_transform_addmm_scalars(self, beta):
+        def addmm_transpose(inp, a, b):
+            return torch.addmm(inp, a, b.transpose(0, 1), beta=beta, alpha=2.0)
+
+        inp = torch.randn(64, 128, device=GPU_TYPE)
+        a = torch.randn(64, 256, device=GPU_TYPE)
+        b = torch.randn(128, 256, device=GPU_TYPE)
+        with mock.patch(
+            "torch._inductor.heuristics.template.contiguous_mm.use_contiguous",
+            return_value=True,
+        ):
+            out, code = run_and_get_code(torch.compile(addmm_transpose), inp, a, b)
+
+        # contiguous_addmm calls addmm without alpha and beta.
+        FileCheck().check_not("contiguous_addmm").run(code[0])
+        self.assertEqual(out, addmm_transpose(inp, a, b), atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_contiguous_transform_non_contiguous_second_matrix(
         self, dynamic
@@ -2477,31 +2518,21 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
 
     def test_triton_template_generated_code_cache_key(self):
-        generate_and_load_args = set(
+        generate_and_load_args = len(
             inspect.signature(
                 torch._inductor.select_algorithm.TritonTemplate.generate_and_load
             ).parameters
         )
-        make_key_args = set(
+        make_key_args = len(
             inspect.signature(
                 torch._inductor.select_algorithm.GeneratedCodeCache.make_key
             ).parameters
         )
 
-        # Parameters intentionally excluded from the cache key:
-        # - generate_with_caching: controls whether the cache is used at all; it
-        #   doesn't affect the generated code.
-        # - prefix_inputs_fusion_indices: no producers are fused at autotune time,
-        #   so the generated code doesn't depend on it. On a cache hit, def_kernel
-        #   is replayed on the new kernel, which rebuilds the store-output allowed
-        #   inputs from its own indices, and the scheduling-time render receives
-        #   the indices through kernel_options.
-        self.assertEqual(
-            generate_and_load_args
-            - {"generate_with_caching", "prefix_inputs_fusion_indices"},
-            make_key_args,
-        )
-        self.assertEqual(len(generate_and_load_args), 22)
+        # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
+        # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
+        self.assertEqual(generate_and_load_args - 1, make_key_args)
+        self.assertEqual(generate_and_load_args, 21)
 
     @fresh_cache()
     @config.patch(
@@ -5167,6 +5198,9 @@ class TestPrologueFusion(TestCase):
         ):
             yield
 
+    @fresh_cache()
+    @mock.patch("torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True)
+    @config.patch(enable_caching_generated_triton_templates=True)
     @config.patch(
         {
             "benchmark_template_fusion": True,
@@ -5187,7 +5221,19 @@ class TestPrologueFusion(TestCase):
             out, code = run_and_get_code(torch.compile(foo), x, b)
 
         self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
+        # The bias use needs the materialized producer, so the pointwise kernel
+        # computes x * 2.0 and the template kernel must not recompute it before
+        # tl.dot (i.e. the producer is not fused into the template's A input).
+        (
+            FileCheck()
+            .check("def triton_poi")
+            .check("2.0")
+            .check("def triton_tem")
+            .check_not("2.0")
+            .check("tl.dot")
+            .run(code[0])
+        )
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
@@ -5312,308 +5358,6 @@ class TestPrologueFusion(TestCase):
         FileCheck().check("def triton").check_count(
             "tl.full([1], 1.1, tl.float32)", 3, exactly=True
         ).check("tl.store").run(code[0])
-
-    @unittest.skipIf(
-        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
-    )
-    @unittest.skipIf(
-        has_datacenter_blackwell_tma_device(),
-        "mm_persistent_tma is shadowed by the Blackwell warp-specialized TMA template",
-    )
-    @config.patch(
-        {
-            "epilogue_fusion": True,
-            "benchmark_template_fusion": True,
-            "max_template_fusion_benchmarked_choices": 16,
-            "triton.enable_persistent_tma_matmul": True,
-        }
-    )
-    def test_addmm_prefix_producer_benchmarks_persistent_tma_choices(self):
-        # mm_persistent_tma supports producer fusion into the addmm bias but not
-        # into A or B, so it should be benchmarked only when the bias is fused.
-        M = K = N = 128
-
-        def computed_bias(a, b, bias):
-            return torch.addmm(bias * 2.0 - 1.0, a, b)
-
-        def computed_a(a, b, bias):
-            return torch.addmm(bias, a * 2.0, b)
-
-        a = torch.randn(M, K, device=GPU_TYPE)
-        b = torch.randn(K, N, device=GPU_TYPE)
-        bias = torch.randn(M, N, device=GPU_TYPE)
-
-        orig_swap = ir.MultiTemplateBuffer.swap_as_triton_caller
-
-        def benchmarked_template_names(fn):
-            tried: list[str] = []
-
-            def recording_swap(buf, caller):
-                tried.append(caller.name)
-                return orig_swap(buf, caller)
-
-            torch._dynamo.reset()
-            with (
-                self.force_template_fusion_benchmark(),
-                mock.patch.object(
-                    ir.MultiTemplateBuffer, "swap_as_triton_caller", recording_swap
-                ),
-            ):
-                out, code = run_and_get_code(torch.compile(fn), a, b, bias)
-            self.assertEqual(out, fn(a, b, bias), atol=0.05, rtol=0.05)
-            self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=None)
-            return tried
-
-        self.assertTrue(
-            any(
-                "persistent_tma" in name
-                for name in benchmarked_template_names(computed_bias)
-            )
-        )
-        self.assertFalse(
-            any(
-                "persistent_tma" in name
-                for name in benchmarked_template_names(computed_a)
-            )
-        )
-
-    @config.patch(
-        {
-            "benchmark_template_fusion": True,
-            "max_template_fusion_benchmarked_choices": 3,
-        }
-    )
-    @parametrize("prologue_fusion", (True, False))
-    @parametrize("epilogue_fusion", (True, False))
-    def test_addmm_store_output_producer_and_consumer_fusion(
-        self, prologue_fusion: bool, epilogue_fusion: bool
-    ):
-        M, K, N = 63, 120, 190
-
-        def foo(a, b, bias):
-            computed_bias = bias * 2.0 - 1.0
-            return torch.relu(torch.addmm(computed_bias, a, b)) * 0.5
-
-        a = torch.randn(M, K, device=GPU_TYPE)
-        b = torch.randn(K, N, device=GPU_TYPE)
-        bias = torch.randn(M, N, device=GPU_TYPE)
-
-        with (
-            config.patch(
-                prologue_fusion=prologue_fusion, epilogue_fusion=epilogue_fusion
-            ),
-            self.force_template_fusion_benchmark(),
-        ):
-            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
-
-        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
-        # Store-output producer fusion of the bias is controlled by epilogue_fusion
-        # only; prologue_fusion doesn't affect it.
-        if epilogue_fusion:
-            self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
-        else:
-            self.check_code(code[0], num_kernels=3, num_allocs=None, num_deallocs=None)
-
-    @config.patch({"prologue_fusion": False, "epilogue_fusion": True})
-    def test_epilogue_fusion_does_not_enable_input_prologue_fusion(self):
-        M, K, N = 64, 128, 256
-        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
-        y = torch.rand([K, N], dtype=torch.float, device=GPU_TYPE)
-
-        def foo(x, y):
-            return x.to(y.dtype) @ y
-
-        out, code = run_and_get_code(torch.compile(foo), x, y)
-        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
-
-    @config.patch(
-        {
-            "prologue_fusion": False,
-            "epilogue_fusion": True,
-            "benchmark_template_fusion": True,
-            "max_template_fusion_benchmarked_choices": 3,
-        }
-    )
-    def test_baddbmm_store_output_producer_fusion(self):
-        batch, M, K, N = 4, 31, 48, 70
-
-        def foo(a, b, bias):
-            computed_bias = bias * 2.0 - 1.0
-            return torch.baddbmm(computed_bias, a, b)
-
-        a = torch.randn(batch, M, K, device=GPU_TYPE)
-        b = torch.randn(batch, K, N, device=GPU_TYPE)
-        bias = torch.randn(batch, M, N, device=GPU_TYPE)
-
-        with self.force_template_fusion_benchmark():
-            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
-
-        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
-
-    @fresh_cache()
-    @mock.patch("torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True)
-    @config.patch(enable_caching_generated_triton_templates=True)
-    @config.patch(
-        {
-            "benchmark_template_fusion": True,
-            "max_template_fusion_benchmarked_choices": 3,
-        }
-    )
-    def test_addmm_shared_nonfusible_prefix_and_input_prologue(self):
-        from torch._inductor.select_algorithm import TritonTemplateKernel
-
-        M = K = N = 64
-        saw_shared_input = False
-        original_def_kernel = TritonTemplateKernel.def_kernel
-
-        @functools.wraps(original_def_kernel)
-        def disable_prefix_fusion(kernel, *argnames):
-            nonlocal saw_shared_input
-            if (
-                kernel.prefix_inputs_fusion_indices
-                and argnames
-                and kernel.input_nodes[0].get_name()
-                == kernel.input_nodes[kernel.prefix_args].get_name()
-            ):
-                saw_shared_input = True
-                kernel.prefix_inputs_fusion_indices = ()
-            return original_def_kernel(kernel, *argnames)
-
-        def foo(x, b):
-            computed = x * 2.0
-            return torch.addmm(computed, computed, b)
-
-        x = torch.randn(M, K, device=GPU_TYPE)
-        b = torch.randn(K, N, device=GPU_TYPE)
-
-        with (
-            mock.patch.object(
-                TritonTemplateKernel,
-                "def_kernel",
-                disable_prefix_fusion,
-            ),
-            self.force_template_fusion_benchmark(),
-        ):
-            out, code = run_and_get_code(torch.compile(foo), x, b)
-
-        self.assertTrue(saw_shared_input)
-        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
-
-    @parametrize(
-        "prologue_fusion,epilogue_fusion",
-        ((True, False), (False, True)),
-    )
-    @config.patch(
-        {
-            "benchmark_template_fusion": True,
-            "max_template_fusion_benchmarked_choices": 3,
-        }
-    )
-    def test_addmm_shared_prefix_requires_both_placements(
-        self, prologue_fusion: bool, epilogue_fusion: bool
-    ):
-        M = K = N = 64
-
-        def foo(x, b):
-            computed = x * 2.0
-            return torch.addmm(computed, computed, b)
-
-        x = torch.randn(M, K, device=GPU_TYPE)
-        b = torch.randn(K, N, device=GPU_TYPE)
-
-        with (
-            config.patch(
-                prologue_fusion=prologue_fusion,
-                epilogue_fusion=epilogue_fusion,
-            ),
-            self.force_template_fusion_benchmark(),
-        ):
-            out, code = run_and_get_code(torch.compile(foo), x, b)
-
-        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
-
-    @config.patch(
-        {
-            "benchmark_template_fusion": True,
-            "max_template_fusion_benchmarked_choices": 3,
-        }
-    )
-    def test_addmm_shared_intermediate_prefix_and_input_prologue_fusion(self):
-        # The shared producer and its two branches form a multi-output pointwise
-        # group. It must remain separate from the template rather than being
-        # incorrectly routed to one template input's producer group.
-        M = K = N = 64
-
-        def foo(x, b):
-            shared = x * 100.0
-            computed_bias = shared * 2.0
-            computed_a = shared * 3.0
-            return torch.addmm(computed_bias, computed_a, b)
-
-        x = torch.randn(M, K, device=GPU_TYPE) * 0.01
-        b = torch.randn(K, N, device=GPU_TYPE)
-
-        with self.force_template_fusion_benchmark():
-            out, code = run_and_get_code(torch.compile(foo), x, b)
-
-        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
-
-    @config.patch(
-        {
-            "benchmark_template_fusion": True,
-            "max_template_fusion_benchmarked_choices": 3,
-        }
-    )
-    def test_addmm_indirect_indexing_bias_fusion(self):
-        M, K, N = 63, 120, 190
-        rows, offset = 257, 7
-
-        def foo(source, indices, a, b):
-            computed_bias = source[indices, offset : offset + N]
-            return torch.relu(torch.addmm(computed_bias, a, b)) * 0.5
-
-        source = torch.randn(rows, N + offset + 3, device=GPU_TYPE)
-        indices = torch.randint(0, rows, (M,), device=GPU_TYPE)
-        a = torch.randn(M, K, device=GPU_TYPE)
-        b = torch.randn(K, N, device=GPU_TYPE)
-
-        with self.force_template_fusion_benchmark():
-            out, code = run_and_get_code(torch.compile(foo), source, indices, a, b)
-
-        self.assertEqual(out, foo(source, indices, a, b), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=4)
-        # The index bounds check must survive in the store-output region.
-        FileCheck().check("tl.dot").check("tl.device_assert").run(code[0])
-
-    @config.patch(
-        {
-            "benchmark_template_fusion": True,
-            "max_template_fusion_benchmarked_choices": 3,
-        }
-    )
-    def test_addmm_prefix_prologue_fusion_multi_use(self):
-        # computed_bias is also returned, so it must be materialized and its
-        # producer is not fused into the template's store_output.
-        M, K, N = 63, 120, 190
-
-        def foo(a, b, bias):
-            computed_bias = bias * 2.0 - 1.0
-            return torch.addmm(computed_bias, a, b), computed_bias
-
-        a = torch.randn(M, K, device=GPU_TYPE)
-        b = torch.randn(K, N, device=GPU_TYPE)
-        bias = torch.randn(M, N, device=GPU_TYPE)
-
-        with self.force_template_fusion_benchmark():
-            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
-
-        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
 
     @config.patch(
         {

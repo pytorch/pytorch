@@ -36,10 +36,13 @@ following cases applies:
   `wait()`, so it falls back to `recordStream` (see `ProcessGroupNCCL.cpp`).
   Weigh the design cost against the determinism benefit, and point out the
   option rather than insisting on it.
-- **Inherently unavoidable:** sometimes no reasonable API avoids it. For
+- **Hard to avoid:** sometimes avoiding it would take a redesign. For
   example, the autograd engine moves gradients between nodes whose streams
-  come from the forward pass, and the user's graph decides when they are
-  freed (`torch/csrc/autograd/input_buffer.cpp`).
+  come from the forward pass (`torch/csrc/autograd/input_buffer.cpp`). The
+  engine has the graph and could delay frees to a point where it syncs, but
+  arbitrary user hooks can see and hold on to gradients, so it doesn't know
+  when the last use happens. Don't treat such cases as settled: say what
+  information is missing for a sync point and what it would take to get it.
 
 When `record_stream` is the right call, leave a comment explaining why the
 free point can't be controlled. See also the `record_stream` docstring in
