@@ -5,15 +5,11 @@ self-hosted-runner:
     # GitHub hosted x86 Linux runners
     - linux.24_04.4x
     - linux.24_04.16x
-    # Organization-wide AWS Linux Runners
-    - linux.12xlarge.memory.ephemeral
     # Repo-specific IBM hosted S390x runner
     - linux.s390x
     # Organization wide AWS Windows runners
     - windows.g4dn.xlarge
-    - windows.g4dn.xlarge.nonephemeral
     - windows.12xlarge
-    - windows.12xlarge.nonephemeral
     - windows.4xlarge
     - windows.4xlarge.nonephemeral
     # Windows ARM64 runners

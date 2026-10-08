@@ -27,7 +27,7 @@ on:
         type: string
       runs_on:
         required: false
-        default: linux.12xlarge.memory.ephemeral
+        default: l-x86iavx512-48-384
         type: string
       timeout-minutes:
         required: false
