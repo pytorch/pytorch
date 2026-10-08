@@ -102,6 +102,7 @@ from .utils import (
     contain_metadata_mutation_ops,
     get_default_generator,
     make_boxed_func,
+    maybe_wrap_compiled_graph,
     simple_wraps,
     strict_zip,
     unlift_tokens,
@@ -2485,6 +2486,12 @@ def _aot_stage2b_bw_compile(
                         "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
                         exc_info=True,
                     )
+            # Outside the try: a wrapper raising is a consumer bug, not a
+            # backward-lowering failure, and must not be reported as one.
+            if compiled_bw_func is not None:
+                compiled_bw_func = maybe_wrap_compiled_graph(
+                    compiled_bw_func, "backward"
+                )
             # Compiled autograd will run the bw_module in the backward pass,
             # so recompilation need happen anyway if the backward pass is ever
             # called.
@@ -2898,6 +2905,9 @@ def _aot_stage2b_compile_forward_or_inference(
         with TracingContext.report_output_strides() as fwd_output_strides:
             # pyrefly: ignore[not-callable]
             compiled_fw_func = compiler(fw_module, adjusted_flat_args)
+            compiled_fw_func = maybe_wrap_compiled_graph(
+                compiled_fw_func, "inference" if is_inference else "forward"
+            )
 
         # Make boxed if needed
         if not getattr(compiled_fw_func, "_boxed_call", False):

@@ -104,6 +104,7 @@ from .utils import (
     call_and_expect_output_descs,
     call_func_at_runtime_with_args,
     make_boxed_func,
+    maybe_wrap_compiled_graph,
     partial_flatten_asdict,
     simple_wraps,
     strict_zip,
@@ -2921,8 +2922,9 @@ class _AutogradBackwardCompiler:
             # See Note: [Backward graph lazy lowering]
             if self.bw_compiler is None:
                 raise AssertionError("bw_compiler must not be None")
-            self.compiled_bw = self.bw_compiler(
-                copy.deepcopy(bw_module), placeholder_list
+            self.compiled_bw = maybe_wrap_compiled_graph(
+                self.bw_compiler(copy.deepcopy(bw_module), placeholder_list),
+                "backward",
             )
             # Maybe save cache entry
             if self.try_save_cache_entry is not None:
