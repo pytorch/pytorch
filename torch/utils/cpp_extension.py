@@ -188,13 +188,36 @@ def _find_rocm_home() -> str | None:
     # Guess #1
     rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
     if rocm_home is None:
-        # Guess #2: Support for ROCm distribution from TheRock
-        # rocm-sdk-core installs everything under <site-packages>/_rocm_sdk_core
-        # (include/, lib/, bin/, ...), so the module's own location is the
-        # ROCM_HOME we want. Use find_spec to locate it without importing.
-        spec = importlib.util.find_spec('_rocm_sdk_core')
-        if spec is not None and spec.origin is not None:
-            rocm_home = str(Path(spec.origin).parent.resolve())
+        # Guess #2: Support for ROCm distribution from TheRock.
+        # TheRock splits the SDK across wheels under site-packages:
+        #   _rocm_sdk_core  - HIP runtime, hipcc
+        #   _rocm_sdk_devel - the above plus math-library headers
+        #                     (hipblas, hipsparse, hipsolver, ...)
+        # Prefer devel when present so JIT extensions can include ATen CUDA
+        # headers that hipify to those libraries. Use find_spec to locate
+        # the package without importing it.
+        #
+        # pip install rocm[devel] only installs the unexpanded rocm_sdk_devel
+        # wheel (payload tar). The _rocm_sdk_devel package is created by
+        # `rocm-sdk init`. Do not expand here: it writes gigabytes into
+        # site-packages and this function runs at module import.
+        devel_spec = importlib.util.find_spec('_rocm_sdk_devel')
+        if (devel_spec is None or devel_spec.origin is None) and (
+            importlib.util.find_spec('rocm_sdk_devel') is not None
+        ):
+            logger.warning(
+                "The TheRock devel wheel is installed (rocm_sdk_devel) but has "
+                "not been expanded, so ROCM_HOME will fall back to "
+                "_rocm_sdk_core. Math-library headers will be missing and JIT "
+                "extensions on ROCm may fail with "
+                "'hipblas/hipblas.h: No such file or directory'. "
+                "Run `rocm-sdk init` to expand the devel payload."
+            )
+        for modname in ('_rocm_sdk_devel', '_rocm_sdk_core'):
+            spec = importlib.util.find_spec(modname)
+            if spec is not None and spec.origin is not None:
+                rocm_home = str(Path(spec.origin).parent.resolve())
+                break
     if rocm_home is None:
         # Guess #3
         hipcc_path = shutil.which('hipcc')
@@ -1479,6 +1502,27 @@ def CppExtension(name, sources, *args, **kwargs):
     return setuptools.Extension(name, sources, *args, **kwargs)
 
 
+def _canonicalize_hip_source(source, build_dir):
+    """Return a canonical absolute path for a hipify source.
+
+    Only canonicalize sources that don't already live under ``build_dir``.
+    Realpath-ing every source would relocate a source that is legitimately
+    symlinked *into* the build dir to its real location outside it, which then
+    pushes the generated ``.hip`` file out of ``build_dir`` and breaks the
+    "paths relative to the setup.py directory" invariant. Restricting realpath
+    to sources outside ``build_dir`` still fixes the Windows ``subst`` drive /
+    symlinked-path case where a source resolves to a different spelling than
+    ``build_dir``. ``build_dir`` must already be resolved (``os.path.realpath``).
+    Only Windows needs this; on POSIX the abspath is returned unchanged, so a
+    file-level symlinked source keeps its generated ``.hip`` (and its quote
+    includes) next to the symlink rather than its target.
+    """
+    s_abs = os.path.abspath(source)
+    if not IS_WINDOWS or s_abs.startswith(build_dir + os.sep):
+        return s_abs
+    return os.path.realpath(source)
+
+
 def CUDAExtension(name, sources, *args, **kwargs):
     """
     Create a :class:`setuptools.Extension` for CUDA/C++.
@@ -1623,13 +1667,21 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     if IS_HIP_EXTENSION:
         from .hipify import hipify_python
-        build_dir = os.getcwd()
+        # Resolve symlinks/junctions and Windows `subst` drive aliases on the
+        # build directory so it and the source paths can be compared in a single
+        # canonical form. On Windows CI the build runs under a `subst` drive
+        # (e.g. B:) while source paths may resolve to the real drive (e.g. C:);
+        # without this the `includes` scope below matches nothing and hipify
+        # silently skips the sources, leaving CUDA headers unhipified. On POSIX
+        # `os.getcwd()` is already fully resolved, so this is a no-op there.
+        build_dir = os.path.realpath(os.getcwd())
+
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
             output_directory=build_dir,
             header_include_dirs=include_dirs,
             includes=[os.path.join(build_dir, '*')],  # limit scope to build_dir only
-            extra_files=[os.path.abspath(s) for s in sources],
+            extra_files=[_canonicalize_hip_source(s, build_dir) for s in sources],
             show_detailed=True,
             is_pytorch_extension=True,
             hipify_extra_files_only=True,  # don't hipify everything in includes path
@@ -1637,9 +1689,19 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
         hipified_sources = set()
         for source in sources:
-            s_abs = os.path.abspath(source)
-            hipified_s_abs = (hipify_result[s_abs].hipified_path if (s_abs in hipify_result and
-                              hipify_result[s_abs].hipified_path is not None) else s_abs)
+            s_abs = _canonicalize_hip_source(source, build_dir)
+            if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
+                hipified_s_abs = hipify_result[s_abs].hipified_path
+            else:
+                # A CUDA source that hipify didn't process is left as raw CUDA and
+                # fails to compile with hipcc (e.g. missing 'cuda_runtime_api.h').
+                # Warn loudly instead of silently skipping (the historical failure mode).
+                if source.endswith(('.cu', '.cuh')):
+                    logger.warning(
+                        "hipify did not process CUDA source '%s'; it will be built as-is, "
+                        "which typically fails under ROCm. This can happen when the source "
+                        "resolves outside the build directory '%s'.", source, build_dir)
+                hipified_s_abs = s_abs
             # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
             # *never* absolute paths
             try:
@@ -2154,7 +2216,8 @@ def load_inline(name,
                 with_pytorch_error_handling=True,
                 keep_intermediates=True,
                 use_pch=False,
-                no_implicit_headers=False):
+                no_implicit_headers=False,
+                gil_not_used=False):
     r'''
     Load a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -2228,6 +2291,9 @@ def load_inline(name,
             ``#include <torch/extension.h>`` and ``#include <torch/types.h>`` lines.
             Use this option to improve cold start times when you
             already include the necessary headers in your source code. Default: ``False``.
+        gil_not_used: If ``True``, generated bindings declare that they support
+            running with the GIL disabled. The bound functions and any state they
+            access must be thread-safe. Default: ``False``.
 
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
@@ -2278,8 +2344,14 @@ def load_inline(name,
     # Here, `functions` is (or becomes, after some processing) a map from
     # function names to function docstrings.
     if functions is not None:
-        module_def = []
-        module_def.append('PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {')
+        module_def = [
+            (
+                'PYBIND11_MODULE(TORCH_EXTENSION_NAME, m, '
+                'pybind11::mod_gil_not_used()) {'
+                if gil_not_used
+                else 'PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {'
+            )
+        ]
         if isinstance(functions, str):
             functions = [functions]
         if isinstance(functions, list):
@@ -2402,11 +2474,18 @@ def _jit_compile(name,
                 if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                     if hipify_python is None:
                         raise AssertionError("expected hipify_python to be not None")
+                    # Canonicalize sources that don't already live under the build
+                    # directory (same reasoning as `CUDAExtension`): this fixes the
+                    # Windows `subst` drive / symlinked-path case where a caller-supplied
+                    # source resolves to a different spelling than `build_directory`,
+                    # without relocating sources symlinked into the build directory.
+                    build_dir_real = os.path.realpath(build_directory) if IS_WINDOWS else build_directory
+
                     hipify_result = hipify_python.hipify(
-                        project_directory=build_directory,
-                        output_directory=build_directory,
+                        project_directory=build_dir_real,
+                        output_directory=build_dir_real,
                         header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
-                        extra_files=[os.path.abspath(s) for s in sources],
+                        extra_files=[_canonicalize_hip_source(s, build_dir_real) for s in sources],
                         ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
                         show_detailed=verbose,
                         show_progress=verbose,
@@ -2416,10 +2495,17 @@ def _jit_compile(name,
 
                     hipified_sources = set()
                     for source in sources:
-                        s_abs = os.path.abspath(source)
+                        s_abs = _canonicalize_hip_source(source, build_dir_real)
                         if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
                             hipified_s_abs = hipify_result[s_abs].hipified_path
                         else:
+                            # A CUDA source that hipify didn't process is left as raw CUDA
+                            # and fails to compile with hipcc. Warn loudly instead of
+                            # silently skipping (the historical failure mode).
+                            if source.endswith(('.cu', '.cuh')):
+                                logger.warning(
+                                    "hipify did not process CUDA source '%s'; it will be built "
+                                    "as-is, which typically fails under ROCm.", source)
                             hipified_s_abs = s_abs
                         hipified_sources.add(hipified_s_abs)
                     sources = list(hipified_sources)
@@ -2850,7 +2936,16 @@ def _get_build_directory(name: str, verbose: bool) -> str:
         # Note: torch.backends.cuda.is_built() returns True for both CUDA and ROCm,
         # so we need to check torch.version.hip to distinguish them
         if torch.version.hip is not None:
-            accelerator_str = f'rocm{torch.version.hip.replace(".", "")}'
+            # Strip git sha and dots so the key matches cu{version}.
+            def _ver_key(version: str) -> str:
+                return version.split("-", maxsplit=1)[0].replace(".", "")
+
+            hip_key = _ver_key(torch.version.hip)
+            rocm_ver = getattr(torch.version, "rocm", None)
+            if rocm_ver:
+                accelerator_str = f'rocm{_ver_key(rocm_ver)}_hip{hip_key}'
+            else:
+                accelerator_str = f'rocm{hip_key}'
         elif torch.version.cuda is not None:
             accelerator_str = f'cu{torch.version.cuda.replace(".", "")}'
         else:

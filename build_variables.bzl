@@ -519,6 +519,8 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/FlightRecorder.cpp",
     "torch/csrc/distributed/c10d/hooks/FlightRecorderHook.cpp",
+    "torch/csrc/distributed/c10d/hooks/HealthCheck.cpp",
+    "torch/csrc/distributed/c10d/hooks/HealthCheckHook.cpp",
     "torch/csrc/distributed/c10d/hooks/NanCheckHook.cpp",
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/gloo/GlooDeviceFactory.cpp",
@@ -555,6 +557,8 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/socket.cpp",
     "torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.cpp",
+    "torch/csrc/distributed/fsdp/ChunkCat.cpp",
+    "torch/csrc/distributed/fsdp/CollectiveCopy.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
@@ -807,6 +811,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.cpp",
     "torch/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
     "torch/csrc/distributed/c10d/symm_mem/nccl_extension.cu",
@@ -817,6 +822,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp",
+    "torch/csrc/distributed/fsdp/ChunkCat.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
 ]
 
@@ -924,7 +930,6 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
-    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
     "torch/csrc/xpu/memory_snapshot.cpp",
     "torch/csrc/xpu/MemPool.cpp",
     "torch/csrc/xpu/Graph.cpp",
@@ -932,7 +937,9 @@ libtorch_python_xpu_sources = [
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
 
-libtorch_xpu_sources = libtorch_python_xpu_sources
+libtorch_xpu_sources = libtorch_python_xpu_sources + [
+    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
+]
 
 libtorch_python_core_sources = [
     "torch/csrc/DataLoader.cpp",
@@ -1173,6 +1180,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/EmptyTensor.cpp",
     "aten/src/ATen/ExpandUtils.cpp",
     "aten/src/ATen/CachedTensorUtils.cpp",
+    "aten/src/ATen/FakeTensor.cpp",
     "aten/src/ATen/FunctionalInverses.cpp",
     "aten/src/ATen/FunctionalStorageImpl.cpp",
     "aten/src/ATen/FunctionalTensorWrapper.cpp",
@@ -1584,6 +1592,18 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/transformers/attention.cpp",
     "aten/src/ATen/native/transformers/sdp_utils_cpp.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
+    "aten/src/ATen/native/FusedAdam.cpp",
+    "aten/src/ATen/native/FusedSGD.cpp",
+    "aten/src/ATen/native/FusedAdagrad.cpp",
+    # Files not in native, but depends on native symbols
+    # "aten/src/ATen/TensorIndexing.cpp",
+    "aten/src/ATen/TensorIterator.cpp",
+]
+
+# These sources are the only ones that require linking against XNNPACK itself, so
+# they live in a dedicated list/target. That lets full PyTorch and PyTorch mobile
+# each pick their own XNNPACK dep without the choice leaking into aten_native_cpu.
+aten_native_xnnpack_source_list = [
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",
@@ -1594,12 +1614,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/xnnpack/OpContext.cpp",
     "aten/src/ATen/native/xnnpack/RegisterOpContextClass.cpp",
     "aten/src/ATen/native/xnnpack/Shim.cpp",
-    "aten/src/ATen/native/FusedAdam.cpp",
-    "aten/src/ATen/native/FusedSGD.cpp",
-    "aten/src/ATen/native/FusedAdagrad.cpp",
-    # Files not in native, but depends on native symbols
-    # "aten/src/ATen/TensorIndexing.cpp",
-    "aten/src/ATen/TensorIterator.cpp",
 ]
 
 # 1. Files in ATen/native with a few exceptions

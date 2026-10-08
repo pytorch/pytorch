@@ -272,6 +272,15 @@ def get_error_inputs_for_all_optims(device, dtype):
             ),
             ErrorOptimizerInput(
                 OptimizerInput(
+                    params={sample_param, sample_param2},
+                    kwargs={},
+                    desc="warn on a bare unordered set of params",
+                ),
+                error_type=FutureWarning,
+                error_regex="optimizer parameters need to be organized in ordered collections",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
                     params=[{"params": sample_param}, {"params": sample_param}],
                     kwargs={},
                     desc="duplicate parameters should not occur across param groups either",

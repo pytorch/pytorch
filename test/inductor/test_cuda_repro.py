@@ -131,6 +131,63 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
+    @parametrize("self_dtype", [torch.float32, torch.bfloat16])
+    @parametrize("inp_shape", [(64, 32), (32,)])
+    @parametrize("beta", [0.0, 1.0, 2.0])
+    @parametrize("cpp_wrapper", [False, True])
+    def test_addmm_out_dtype_compile(self, self_dtype, inp_shape, beta, cpp_wrapper):
+        inp = torch.randn(inp_shape, device=device_type, dtype=self_dtype)
+        if beta == 0:
+            # beta == 0 ignores inp, NaN included.
+            inp.view(-1)[0] = float("nan")
+        a = torch.randn(64, 16, device=device_type, dtype=torch.bfloat16)
+        b = torch.randn(16, 32, device=device_type, dtype=torch.bfloat16)
+
+        def fn(inp, x, y):
+            return torch.addmm(inp, x, y, out_dtype=torch.float32, beta=beta, alpha=0.5)
+
+        expected = fn(inp, a, b)
+        with config.patch(cpp_wrapper=cpp_wrapper):
+            result, (code, *_) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), inp, a, b
+            )
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+        if not cpp_wrapper:
+            FileCheck().check("extern_kernels.addmm_dtype").run(code)
+
+    @parametrize("self_dtype", [torch.float32, torch.bfloat16])
+    @parametrize("coordinate_descent_tuning", [False, True])
+    def test_addmm_out_dtype_k1_compile(self, self_dtype, coordinate_descent_tuning):
+        # The Inductor addmm decomposition rewrites K == 1 as a pointwise
+        # multiply in the promoted input dtype, so it must skip out_dtype.
+        inp = torch.randn(64, 32, device=device_type, dtype=self_dtype)
+        a = torch.randn(64, 1, device=device_type, dtype=torch.bfloat16)
+        b = torch.randn(1, 32, device=device_type, dtype=torch.bfloat16)
+
+        def fn(inp, x, y):
+            return torch.addmm(inp, x, y, out_dtype=torch.float32)
+
+        expected = fn(inp, a, b)
+        with config.patch(coordinate_descent_tuning=coordinate_descent_tuning):
+            result = torch.compile(fn, backend="inductor", fullgraph=True)(inp, a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+
+    def test_addmm_out_dtype_inplace_compile(self):
+        acc = torch.randn(64, 32, device=device_type, dtype=torch.float32)
+        a = torch.randn(64, 16, device=device_type, dtype=torch.bfloat16)
+        b = torch.randn(16, 32, device=device_type, dtype=torch.bfloat16)
+
+        def fn(acc, x, y):
+            torch.addmm(acc, x, y, out_dtype=torch.float32, out=acc)
+            return acc
+
+        expected = fn(acc.clone(), a, b)
+        compiled_acc = acc.clone()
+        torch.compile(fn, backend="inductor", fullgraph=True)(compiled_acc, a, b)
+        self.assertEqual(compiled_acc, expected)
+
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_frexp_non_finite(self):
         def fn(x):
@@ -245,6 +302,202 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(compiled_out["ten0"], eager_out["ten0"])
         self.assertEqual(compiled_out["ten1"], eager_out["ten1"])
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_effn_attn_uniform_zero_bias(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+
+        def fn(query, key, value):
+            additive_mask = torch.full(
+                (batch_size, num_heads, seq_len, seq_len),
+                0.0,
+                device=query.device,
+                dtype=query.dtype,
+            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, False
+            )[0]
+
+        query, key, value = (
+            torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device=device_type,
+            )
+            for _ in range(3)
+        )
+
+        def compile_and_capture_bias(fn, *args, strict=False):
+            biases = []
+
+            def capture_bias(graph):
+                nodes = graph.find_nodes(
+                    op="call_function",
+                    target=aten._scaled_dot_product_efficient_attention.default,
+                )
+                biases.extend(node.args[3] for node in nodes)
+
+            torch._dynamo.reset()
+            with (
+                config.patch(
+                    numerics="strict" if strict else "default",
+                    joint_custom_post_pass=capture_bias,
+                ),
+                sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+            ):
+                compiled = torch.compile(fn, fullgraph=True)
+                actual = compiled(*args)
+            self.assertEqual(len(biases), 1)
+            return actual, biases[0], compiled
+
+        expected = fn(query, key, value)
+        actual, bias, _ = compile_and_capture_bias(fn, query, key, value)
+        self.assertEqual(actual, expected)
+        self.assertIsNone(bias)
+
+        strict_actual, strict_bias, _ = compile_and_capture_bias(
+            fn, query, key, value, strict=True
+        )
+        self.assertEqual(strict_actual, expected)
+        self.assertIsInstance(strict_bias, torch.fx.Node)
+
+        # Only compiler-proven zero masks may be removed; a runtime mask must
+        # remain an FX input because its contents can change between calls.
+        def runtime_mask_fn(query, key, value, attention_mask):
+            return F.scaled_dot_product_attention(
+                query, key, value, attn_mask=attention_mask
+            )
+
+        padding_mask = torch.zeros(
+            batch_size,
+            1,
+            seq_len,
+            seq_len,
+            device=device_type,
+        )
+        padding_mask[..., -1] = torch.finfo(padding_mask.dtype).min
+        expected = runtime_mask_fn(query, key, value, padding_mask)
+        actual, runtime_bias, compiled_runtime_mask_fn = compile_and_capture_bias(
+            runtime_mask_fn, query, key, value, padding_mask
+        )
+        self.assertEqual(actual, expected)
+        self.assertIsInstance(runtime_bias, torch.fx.Node)
+
+        # Reuse the same compiled graph with different mask contents.
+        padding_mask.zero_()
+        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+            self.assertEqual(
+                compiled_runtime_mask_fn(query, key, value, padding_mask),
+                runtime_mask_fn(query, key, value, padding_mask),
+            )
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_effn_attn_uniform_zero_bias_backward(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+
+        def fn(query, key, value):
+            additive_mask = torch.full(
+                (batch_size, num_heads, seq_len, seq_len),
+                0.0,
+                device=query.device,
+                dtype=query.dtype,
+            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, True
+            )[0]
+
+        inputs = tuple(
+            torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device=device_type,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        )
+        eager_inputs = tuple(
+            tensor.detach().clone().requires_grad_() for tensor in inputs
+        )
+        compiled_inputs = tuple(
+            tensor.detach().clone().requires_grad_() for tensor in inputs
+        )
+        expected = fn(*eager_inputs)
+        expected.sum().backward()
+
+        biases = {}
+
+        def capture_biases(graph):
+            for target, bias_index in (
+                (aten._scaled_dot_product_efficient_attention.default, 3),
+                (aten._scaled_dot_product_efficient_attention_backward.default, 4),
+            ):
+                nodes = graph.find_nodes(op="call_function", target=target)
+                self.assertEqual(len(nodes), 1)
+                biases[target] = nodes[0].args[bias_index]
+
+        torch._dynamo.reset()
+        with (
+            config.patch(joint_custom_post_pass=capture_biases),
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+        ):
+            compiled = torch.compile(fn, fullgraph=True)
+            actual = compiled(*compiled_inputs)
+            actual.sum().backward()
+
+        self.assertEqual(actual, expected)
+        for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
+            self.assertEqual(actual_input.grad, expected_input.grad)
+        # check zero bias is removed.
+        self.assertIsNone(biases[aten._scaled_dot_product_efficient_attention.default])
+        self.assertIsNone(
+            biases[aten._scaled_dot_product_efficient_attention_backward.default]
+        )
+
+        def bias_grad_fn(query, key, value, bias_seed):
+            additive_mask = bias_seed * 0.0
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, True
+            )[0]
+
+        bias_seed = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=device_type,
+            requires_grad=True,
+        )
+        bias_grad_bias = []
+
+        def capture_bias_grad_bias(graph):
+            nodes = graph.find_nodes(
+                op="call_function",
+                target=aten._scaled_dot_product_efficient_attention_backward.default,
+            )
+            self.assertEqual(len(nodes), 1)
+            bias_grad_bias.append(nodes[0].args[4])
+
+        torch._dynamo.reset()
+        with (
+            config.patch(joint_custom_post_pass=capture_bias_grad_bias),
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+        ):
+            compiled = torch.compile(bias_grad_fn, fullgraph=True)
+            compiled(*compiled_inputs, bias_seed).sum().backward()
+        # check zero bias is NOT removed due to rqurie bias grad.
+        self.assertEqual(len(bias_grad_bias), 1)
+        self.assertIsInstance(bias_grad_bias[0], torch.fx.Node)
+        self.assertIsNotNone(bias_seed.grad)
 
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
@@ -2824,10 +3077,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
         self.assertEqual(foo(x0), result)
 
-    @skipCUDAIf(
-        not SM90OrLater and not TEST_WITH_ROCM,
-        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
-    )
+    @skipCUDAIf(not SM90OrLater, "requires NVIDIA SM90+ bfloat16 atomic add support")
+    @skipIfRocm(msg="ROCm falls back for bfloat16 atomic add")
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_dim0(self):
         def f(x, y):
             return torch.index_select(x, 0, y)
@@ -2880,10 +3132,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             out = f(x, y)
             self.assertEqual(torch.compile(f)(x, y), out)
 
-    @skipCUDAIf(
-        not SM90OrLater and not TEST_WITH_ROCM,
-        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
-    )
+    @skipCUDAIf(not SM90OrLater, "requires NVIDIA SM90+ bfloat16 atomic add support")
+    @skipIfRocm(msg="ROCm falls back for bfloat16 atomic add")
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_direct(self):
         def f(x, idx, src):
             return torch.index_add(x, -1, idx, src, alpha=0.5)
@@ -2904,10 +3155,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         ).run(code)
         self.assertEqual(out, compiled_out)
 
-    @skipCUDAIf(
-        not SM90OrLater and not TEST_WITH_ROCM,
-        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
-    )
+    @skipCUDAIf(not SM90OrLater, "requires NVIDIA SM90+ bfloat16 atomic add support")
+    @skipIfRocm(msg="ROCm falls back for bfloat16 atomic add")
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
     def test_index_add_bfloat16_scalar_index(self):
         def f(x, idx, src):
             return torch.index_add(x, 1, idx, src)

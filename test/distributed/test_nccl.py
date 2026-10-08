@@ -276,7 +276,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         )
         cls.pg = c10d.distributed_c10d._get_default_group()
 
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
     @skip_if_lt_x_gpu(2)
@@ -696,6 +695,50 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             # handle.wait_signal(src_rank=0)
             # TODO: remove after we have wait_signal
             c10d.barrier()
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
+    @skip_if_lt_x_gpu(3)
+    def test_nccl_symmem_ops_on_subgroup(self):
+        """With group_name the ops rendezvous and order on that group and take
+        group ranks as peers. Rank 0 is outside the group, so ops that ignored
+        group_name and used WORLD would hang."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        subgroup = c10d.new_group([1, 2])
+        if self.rank in (1, 2):
+            name = subgroup.group_name
+            c10d.all_reduce(torch.ones(1, device=self.device), group=subgroup)
+            rank, numel = subgroup.rank(), 1024
+            tensor = symm_mem.empty(numel, device=self.device).fill_(self.rank)
+            hdl = symm_mem.rendezvous(tensor, group=name)
+            self.assertEqual(hdl.group_name, name)
+            c10d.barrier(group=subgroup)
+            if rank == 1:
+                torch.ops.symm_mem.nccl_put_with_signal(tensor, 5, 0, group_name=name)
+            else:
+                torch.ops.symm_mem.nccl_wait_for_signal(tensor, 5, group_name=name)
+                self.assertEqual(tensor, torch.full_like(tensor, 2))
+            c10d.barrier(group=subgroup)
+            if rank == 1:
+                tensor.fill_(3)
+                torch.ops.symm_mem.nccl_put(tensor, 0, group_name=name)
+            torch.cuda.synchronize()
+            c10d.barrier(group=subgroup)
+            if rank == 0:
+                self.assertEqual(tensor, torch.full_like(tensor, 3))
+                tensor.fill_(4)
+            torch.cuda.synchronize()
+            c10d.barrier(group=subgroup)
+            if rank == 1:
+                torch.ops.symm_mem.nccl_get(tensor, 0, group_name=name)
+                torch.cuda.synchronize()
+                self.assertEqual(tensor, torch.full_like(tensor, 4))
+            c10d.barrier(group=subgroup)
+        c10d.barrier()
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")

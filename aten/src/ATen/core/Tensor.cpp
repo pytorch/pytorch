@@ -175,7 +175,7 @@ std::optional<ScalarType> TensorBase::grad_dtype() const {
 }
 
 void TensorBase::set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const {
-  return impl::GetVariableHooks()->set_grad_dtype(*this, grad_dtype);
+  impl::GetVariableHooks()->set_grad_dtype(*this, grad_dtype);
 }
 
 } // namespace at

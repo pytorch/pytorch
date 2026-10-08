@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
+import importlib.util
 import multiprocessing
 import os
 import random
@@ -13,7 +14,9 @@ import traceback
 import types
 import unittest
 import warnings
+from pathlib import Path
 from typing import Any, cast
+from unittest import mock
 
 import torch
 import torch.nn as nn
@@ -672,11 +675,94 @@ class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count("\n") >= 17)
+        self.assertIn("ROCm SDK used to build PyTorch:", info_output)
+        self.assertIn("HIP used to build PyTorch:", info_output)
+        self.assertNotIn("ROCM used to build PyTorch:", info_output)
 
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
+
+    @unittest.skipIf(IS_WINDOWS, "Creating symlinks may require privileges on Windows")
+    def test_canonicalize_hip_source(self):
+        # `_canonicalize_hip_source` must leave a source that already lives under
+        # the build dir untouched (return its abspath), so a source symlinked
+        # *into* the build dir keeps its generated .hip under the build dir. A
+        # source outside the build dir must be realpath-resolved so the Windows
+        # `subst` drive / symlinked-path spelling matches the form hipify records.
+        from torch.utils.cpp_extension import _canonicalize_hip_source
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_real = os.path.realpath(tmp)
+            build_dir = os.path.join(tmp_real, "build")
+            real_dir = os.path.join(tmp_real, "real")
+            os.makedirs(build_dir)
+            os.makedirs(real_dir)
+
+            # Source that resolves under the build dir (via a symlink into it) is
+            # returned as its in-build-dir abspath, not the symlink target.
+            real_source = os.path.join(real_dir, "kernel.cu")
+            with open(real_source, "w"):
+                pass
+            linked_source = os.path.join(build_dir, "kernel.cu")
+            os.symlink(real_source, linked_source)
+            self.assertEqual(
+                _canonicalize_hip_source(linked_source, build_dir),
+                os.path.abspath(linked_source),
+            )
+
+            # Source outside the build dir reached via a symlinked directory is
+            # realpath-resolved to its true location on Windows only; POSIX keeps
+            # the abspath so includes still resolve next to the symlink.
+            link_dir = os.path.join(tmp_real, "link")
+            os.symlink(real_dir, link_dir)
+            outside_source = os.path.join(link_dir, "kernel.cu")
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", True):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    real_source,
+                )
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", False):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    os.path.abspath(outside_source),
+                )
+
+    def test_hipify_processes_relative_extra_files(self):
+        # A relative `extra_files` entry must still be hipified. Previously the
+        # normalization loop rebound a local variable but the preprocessing loop
+        # iterated the raw (relative) `extra_files`, so the relative spelling
+        # never matched the normalized `all_files` set and the source was
+        # silently skipped (never hipified).
+        from torch.utils.hipify import hipify_python
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = os.path.realpath(tmp)
+            source_name = "kernel.cu"
+            with open(os.path.join(build_dir, source_name), "w") as f:
+                f.write(
+                    "#include <cuda_runtime.h>\n"
+                    "__global__ void my_kernel() {}\n"
+                    "void launch() { cudaDeviceSynchronize(); }\n"
+                )
+
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                includes=[os.path.join(build_dir, "*")],
+                extra_files=[source_name],  # relative entry
+                hipify_extra_files_only=True,
+                is_pytorch_extension=True,
+            )
+
+            key = os.path.abspath(os.path.join(build_dir, source_name))
+            self.assertIn(key, result)
+            self.assertIsNotNone(
+                result[key].hipified_path,
+                "relative extra_files source was silently skipped by hipify",
+            )
+            self.assertTrue(result[key].hipified_path.endswith(".hip"))
 
 
 class TestHipifyTrie(TestCase):
@@ -997,6 +1083,122 @@ class TestCppExtensionUtils(TestCase):
         self.assertIsNone(torch.utils.cpp_extension._derive_rocm_version(version))
 
 
+def _load_verify_dynamo():
+    path = Path(__file__).resolve().parents[1] / "tools" / "dynamo" / "verify_dynamo.py"
+    spec = importlib.util.spec_from_file_location("verify_dynamo_under_test", path)
+    loader = spec.loader if spec is not None else None
+    if spec is None or loader is None:
+        raise AssertionError(f"Could not load verify_dynamo from {path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+class TestVerifyDynamoRocm(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.verify_dynamo = _load_verify_dynamo()
+
+    def _write_rocm_version_h(self, tmpdir, major, minor, patch):
+        header = Path(tmpdir) / "include" / "rocm-core" / "rocm_version.h"
+        header.parent.mkdir(parents=True)
+        header.write_text(
+            f"#define ROCM_VERSION_MAJOR {major}\n"
+            f"#define ROCM_VERSION_MINOR {minor}\n"
+            f"#define ROCM_VERSION_PATCH {patch}\n"
+        )
+
+    def test_parse_version_truncates_to_major_minor(self):
+        parsed = self.verify_dynamo._parse_version("7.14.1-githash", components=2)
+        self.assertEqual(str(parsed), "7.14")
+
+    def test_reads_full_rocm_sdk_version(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_rocm_version_h(tmpdir, 10, 1, 2)
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertEqual(
+                    str(self.verify_dynamo.get_rocm_sdk_version()), "10.1.2"
+                )
+
+    def test_missing_rocm_sdk_header_falls_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertIsNone(self.verify_dynamo.get_rocm_sdk_version())
+
+    def test_malformed_rocm_sdk_header_falls_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            header = Path(tmpdir) / "include" / "rocm-core" / "rocm_version.h"
+            header.parent.mkdir(parents=True)
+            header.write_text("#define ROCM_VERSION_MAJOR 7\n")
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertIsNone(self.verify_dynamo.get_rocm_sdk_version())
+
+    def test_check_rocm_sdk_ignores_patch_mismatch(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.14.26306"),
+            mock.patch.object(torch.version, "rocm", "7.14.0"),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_rocm_sdk_version",
+                return_value=TorchVersion("7.14.1"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            result = self.verify_dynamo.check_rocm()
+        self.assertEqual(str(result), "7.14")
+        self.assertFalse(any("mismatch" in str(w.message) for w in caught))
+
+    def test_check_rocm_sdk_warns_on_minor_mismatch(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.15.26306"),
+            mock.patch.object(torch.version, "rocm", "7.14.0"),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_rocm_sdk_version",
+                return_value=TorchVersion("7.15.0"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            self.verify_dynamo.check_rocm()
+        self.assertTrue(any("mismatch" in str(w.message) for w in caught))
+
+    def test_check_rocm_falls_back_to_hip_for_old_wheel(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.15.26306"),
+            mock.patch.object(torch.version, "rocm", None),
+            mock.patch.object(
+                self.verify_dynamo, "get_rocm_sdk_version", return_value=None
+            ),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_hip_version",
+                return_value=TorchVersion("7.15"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            result = self.verify_dynamo.check_rocm()
+        self.assertEqual(str(result), "7.15")
+        self.assertFalse(any("mismatch" in str(w.message) for w in caught))
+
+
 class TestTraceback(TestCase):
     def test_symbolize_mode(self):
         script = "import torch; print(torch._C._get_symbolize_mode())"
@@ -1130,6 +1332,42 @@ class TestTryImport(TestCase):
 
 
 class TestUtilsInternal(TestCase):
+    def test_max_clock_rate_uses_requested_device(self):
+        properties = types.SimpleNamespace(clock_rate=1_980_000)
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", return_value=properties
+                ) as get_device_properties,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(1), 1980)
+
+            get_device_properties.assert_called_once_with(1)
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+    def test_max_clock_rate_uses_current_rocm_device(self):
+        properties = types.SimpleNamespace(clock_rate=1_700_000)
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.object(torch.version, "hip", "6.0"),
+                unittest.mock.patch.object(
+                    torch.cuda, "current_device", return_value=1
+                ) as current_device,
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", return_value=properties
+                ) as get_device_properties,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(), 1700)
+
+            current_device.assert_called_once_with()
+            get_device_properties.assert_called_once_with(1)
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
     def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
         def nvsmi(_query):
             raise FileNotFoundError("nvidia-smi")
