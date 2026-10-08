@@ -68,21 +68,6 @@ _MXFP8_NO_SWIZZLE_KWARGS = {
 }
 
 
-def _make_mxfp8_sr_gold_input(device):
-    M, K = 96, 160
-    values = (torch.arange(M * K, device=device, dtype=torch.int32) % 63).float()
-    input = ((values - 31) / 32).to(torch.bfloat16).reshape(M, K)
-    input[0, :8] = torch.tensor(
-        [448, -448, 0, -0.0, 2**-9, -(2**-9), 2**-10, -(2**-10)],
-        device=device,
-        dtype=torch.bfloat16,
-    )
-    input[1, 1] = float("nan")
-    input[2, 2] = float("inf")
-    input[3, 3] = -float("inf")
-    return input
-
-
 class TestMXFP8ReferenceNumerics(TestCase):
     def test_f32_to_e8m0_rceil(self, device):
         # copied from
