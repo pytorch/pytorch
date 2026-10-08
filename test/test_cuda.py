@@ -3377,6 +3377,9 @@ torch.cuda.synchronize()
             y = static_in._lazy_clone()
             y.const_data_ptr()
             out = y * 2
+        # The graph's temporaries are dropped after capture, so that refilling
+        # its input doesn't need to copy it.
+        del y
         for _ in range(2):
             static_in.copy_(torch.randn(1024, device="cuda"))
             g.replay()

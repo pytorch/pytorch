@@ -91,12 +91,14 @@ void check_copy_allowed(
   // The copy must be enqueued on the stream the lazy copies were made on,
   // which is also the stream their memory was allocated on (when the
   // allocator can tell), and the stream the new allocation belongs to.
+  const std::optional<c10::Stream> shared_stream = ctx.stream();
   TORCH_CHECK(
-      ctx.stream() == stream,
+      shared_stream == stream,
       "Cannot write to this tensor (or take its data_ptr()) on ",
       stream,
       ": it shares memory with a lazy copy (from _lazy_clone()) made on ",
-      *ctx.stream(),
+      shared_stream.has_value() ? c10::str(*shared_stream)
+                                : std::string("another stream"),
       ", and writing to it requires copying it, which can't be done safely on "
       "another stream without synchronizing the streams. If you only read the "
       "tensor, use const_data_ptr() instead of data_ptr(). Otherwise, write "
