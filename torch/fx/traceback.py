@@ -366,14 +366,22 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
 # writer and the reader below so the partitioner / AOTAutograd cache read it the
 # same way.
 MEMORY_BUDGET_ANNOTATION_KEY = "_region_activation_memory_budget"
+# Opaque ``extra`` passed to ``region_activation_memory_budget``, stored as a
+# sorted tuple of (key, value) pairs so Dynamo can LOAD_CONST it when
+# reconstructing the context across a graph break. Always written (even when
+# empty) so a nested region does not inherit its enclosing region's extra.
+MEMORY_BUDGET_EXTRA_ANNOTATION_KEY = "_region_activation_memory_budget_extra"
 
 
 @contextmanager
-def _dynamo_region_activation_memory_budget(budget: float) -> Iterator[None]:
-    with (
-        annotate({MEMORY_BUDGET_ANNOTATION_KEY: budget}),
-        preserve_node_meta(),
-    ):
+def _dynamo_region_activation_memory_budget(
+    budget: float, extra: tuple[tuple[str, Any], ...] = ()
+) -> Iterator[None]:
+    annotation = {
+        MEMORY_BUDGET_ANNOTATION_KEY: budget,
+        MEMORY_BUDGET_EXTRA_ANNOTATION_KEY: extra,
+    }
+    with annotate(annotation), preserve_node_meta():
         yield
 
 
@@ -388,6 +396,18 @@ def _get_memory_budget_annotation(node: Node) -> float | None:
     if not isinstance(custom, dict):
         return None
     return custom.get(MEMORY_BUDGET_ANNOTATION_KEY)
+
+
+def _get_memory_budget_extra_annotation(node: Node) -> dict[str, Any]:
+    """
+    Read the ``extra`` passed to ``region_activation_memory_budget`` off an FX
+    node, returning an empty dict if absent. PyTorch does not interpret it; it
+    is for custom joint-graph passes.
+    """
+    custom = node.meta.get("custom")
+    if not isinstance(custom, dict):
+        return {}
+    return dict(custom.get(MEMORY_BUDGET_EXTRA_ANNOTATION_KEY, ()))
 
 
 @compatibility(is_backward_compatible=False)

@@ -573,6 +573,7 @@ class node_creation_hook:
 
 def region_activation_memory_budget(
     budget: float,
+    extra: dict[str, bool | int | float | str] | None = None,
 ) -> contextlib.AbstractContextManager[None]:
     r"""Set the activation memory budget for the region of a compiled forward
     traced under this context manager.
@@ -614,6 +615,12 @@ def region_activation_memory_budget(
 
     Args:
         budget (float): Activation memory budget ratio in ``[0, 1]``.
+        extra (dict, optional): Opaque per-region settings for custom joint-graph
+            passes (e.g. ``torch._inductor.config.joint_custom_post_pass``), which
+            can read them with ``torch.fx.traceback._get_memory_budget_extra_annotation``.
+            PyTorch itself does not interpret them. Keys must be ``str`` and
+            values ``bool``, ``int``, ``float`` or ``str``. A nested region does
+            not inherit its enclosing region's ``extra``.
 
     Example::
 
@@ -633,6 +640,19 @@ def region_activation_memory_budget(
             f"torch.autograd.graph.region_activation_memory_budget: must be in "
             f"[0, 1], got {budget}"
         )
+    if extra is None:
+        extra = {}
+    if not isinstance(extra, dict):
+        raise TypeError(
+            "torch.autograd.graph.region_activation_memory_budget: extra must be "
+            f"a dict, got {type(extra).__name__}"
+        )
+    for key, value in extra.items():
+        if not isinstance(key, str) or not isinstance(value, (bool, int, float, str)):
+            raise TypeError(
+                "torch.autograd.graph.region_activation_memory_budget: extra must "
+                f"map str to bool/int/float/str, got {key!r}: {value!r}"
+            )
     # The budget only takes effect when read back by the partitioner during
     # compilation. Dynamo folds torch.compiler.is_compiling() to True while
     # tracing this (inlined) call, so this guard only fires in eager mode.
@@ -641,7 +661,9 @@ def region_activation_memory_budget(
             "torch.autograd.graph.region_activation_memory_budget can only be "
             "used inside a torch.compile region; it has no effect in eager mode."
         )
-    return fx_traceback._dynamo_region_activation_memory_budget(float(budget))
+    return fx_traceback._dynamo_region_activation_memory_budget(
+        float(budget), tuple(sorted(extra.items()))
+    )
 
 
 def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:

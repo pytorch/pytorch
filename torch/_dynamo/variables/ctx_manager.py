@@ -1665,9 +1665,14 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
     ) -> None:
         self.annotation = annotation
-        budget = annotation.get(torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY)
+        budget_key = torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY
+        extra_key = torch.fx.traceback.MEMORY_BUDGET_EXTRA_ANNOTATION_KEY
+        budget = annotation.get(budget_key)
+        is_region_budget = annotation.keys() == {budget_key, extra_key}
         target_values = (
-            (budget,) if len(annotation) == 1 and type(budget) is float else ()
+            (budget, annotation[extra_key])
+            if is_region_budget and type(budget) is float
+            else ()
         )
         super().__init__(
             target_values=target_values,

@@ -2713,6 +2713,49 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             region_activation_memory_budget(2.0)
         with self.assertRaisesRegex(ValueError, r"\[0, 1\]"):
             region_activation_memory_budget(-0.1)
+        with self.assertRaisesRegex(TypeError, "extra must be a dict"):
+            region_activation_memory_budget(0.5, [("a", 1)])
+        with self.assertRaisesRegex(TypeError, "extra must map"):
+            region_activation_memory_budget(0.5, {1: 1.0})
+        with self.assertRaisesRegex(TypeError, "extra must map"):
+            region_activation_memory_budget(0.5, {"a": [1.0]})
+
+    def test_region_activation_memory_budget_extra_survives_graph_break(self):
+        graphs = []
+
+        def backend(gm, _):
+            graphs.append(gm)
+            return gm.forward
+
+        def fn(x):
+            with torch.autograd.graph.region_activation_memory_budget(
+                0.2, {"stage": 1.0, "mode": "a"}
+            ):
+                x = x.sin()
+                torch._dynamo.graph_break()
+                with torch.autograd.graph.region_activation_memory_budget(0.2):
+                    x = x.cos()
+                    torch._dynamo.graph_break()
+                    x = x.tan()
+                torch._dynamo.graph_break()
+                x = x + 1
+            return x
+
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x), x.sin().cos().tan() + 1)
+        outer = {"mode": "a", "stage": 1.0}
+        self.assertEqual(
+            [
+                [
+                    torch.fx.traceback._get_memory_budget_extra_annotation(node)
+                    for node in gm.graph.nodes
+                    if node.op in ("call_function", "call_method")
+                ]
+                for gm in graphs
+            ],
+            [[outer], [{}], [{}], [outer]],
+        )
 
     def test_region_activation_memory_budget_eager_raises(self):
         """Using the context manager outside a torch.compile region is an error."""
