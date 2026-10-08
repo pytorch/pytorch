@@ -7879,6 +7879,19 @@ class CPUReproTests(TestCase):
                 # inf or finite numbers, it shouldn't degrade into unexpected NaNs).
                 self.assertEqual(eager_out, compiled_out)
 
+    def test_var_large_magnitude_welford_tail_cpu(self):
+        # https://github.com/pytorch/pytorch/issues/200229
+        # A masked tail reduction leaves zero-weight lanes in the vectorized
+        # Welford accumulator. Combining them with a populated lane computed
+        # delta * delta * 0, which is inf * 0 = NaN once delta * delta overflows.
+        for n in (2, 3, 5):
+            for fn in (torch.var, torch.std):
+                torch._dynamo.reset()
+                x = torch.full((n,), 1e200, dtype=torch.float64)
+                expected = fn(x)
+                actual = torch.compile(fn, backend="inductor")(x)
+                self.assertEqual(actual, expected)
+
     def test_cpu_realization_thresholds(self):
         from torch._inductor.ir import Pointwise, StorageBox
         from torch._inductor.virtualized import ops
