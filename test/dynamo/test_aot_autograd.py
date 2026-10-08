@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import copy
+import gc
 import operator
 import re
 import unittest
@@ -1909,6 +1910,43 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         torch._dynamo.reset()
         result = torch.compile(f)(x, w)  # noqa: UNSPECIFIED_BACKEND
         self.assertIsInstance(result, torch.Tensor)
+
+    def test_eager_bw_compile_failure_no_reference_cycle(self):
+        # A failed eager backward compile is suppressed; the exception must not
+        # stay bound in the compiling frame, where its traceback would hold that
+        # frame and its callers in a reference cycle.
+        from functorch.compile import nop
+        from torch._dynamo.backends.common import aot_autograd
+
+        class BwCompileError(Exception):
+            pass
+
+        def bw_compiler(gm, example_inputs):
+            raise BwCompileError
+
+        @torch.compile(
+            backend=aot_autograd(fw_compiler=nop, bw_compiler=bw_compiler),
+            dynamic=True,
+        )
+        def f(x):
+            return x.sin() * x.shape[0]
+
+        # The suppression warning logs the exception; keep a capturing log
+        # handler from holding on to it.
+        graph_compile_log = torch._functorch._aot_autograd.graph_compile.log
+        gc.collect()
+        gc.disable()
+        gc.set_debug(gc.DEBUG_SAVEALL)
+        try:
+            with patch.object(graph_compile_log, "disabled", True):
+                f(torch.randn(4, requires_grad=True))
+            gc.collect()
+            leaked = sum(type(o) is BwCompileError for o in gc.garbage)
+        finally:
+            gc.set_debug(0)
+            gc.garbage.clear()
+            gc.enable()
+        self.assertEqual(leaked, 0)
 
 
 class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):

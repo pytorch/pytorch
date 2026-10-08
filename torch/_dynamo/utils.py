@@ -4477,6 +4477,11 @@ def _get_fake_value_impl(
             raise_observed_exception(RuntimeError, tx, args=[msg])
         except ObservedException as e:
             raise FakeTensorObservedException(msg, real_stack=e.real_stack) from None
+    finally:
+        # Every path through the handler above raises with `cause` still bound.
+        # Its traceback holds this frame, so the binding would keep the frame
+        # and its callers alive in a reference cycle after the graph break.
+        cause = None  # pyrefly: ignore [bad-assignment]
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
@@ -4644,9 +4649,11 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
         real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
-        exn = e  # to make typing happy for the lambda
+        # Bind e as a default, not a local: a local would keep it, and through
+        # its traceback this frame (real args, the copied nn_module), alive in
+        # a reference cycle after the graph break is handled.
         _wrap_graph_break_with_torch_runtime_err(
-            lambda: unimplemented(
+            lambda exn=e: unimplemented(
                 gb_type="RuntimeError when trying to get real value from fx.Node",
                 context="",
                 explanation="",
