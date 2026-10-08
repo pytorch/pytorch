@@ -280,6 +280,20 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    @skip_if_lt_x_gpu(2)
+    def test_handle_group_name(self) -> None:
+        """A handle reports the group it was rendezvoused on."""
+        self._init_process()
+        group = dist.new_group(list(range(self.world_size)))
+        t = symm_mem.empty(64, device=self.device)
+        world = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        other = symm_mem.rendezvous(t, group=group)
+        self.assertEqual(world.group_name, dist.group.WORLD.group_name)
+        self.assertEqual(other.group_name, group.group_name)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
     def test_large_alloc(self) -> None:
         t = symm_mem.empty(2 * 1024**3, dtype=torch.uint8, device="cuda")
         self.assertEqual(t.numel() * t.element_size(), 2 * 1024**3)

@@ -324,6 +324,10 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return pai_->rank_;
   }
 
+  std::string get_group_name() override {
+    return group_name_;
+  }
+
   int get_world_size() override {
     return pai_->world_size_;
   }

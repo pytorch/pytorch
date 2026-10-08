@@ -9884,6 +9884,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 2, 6, 6]),))
 
+    @parametrize("dtype", test_int_dtypes)
+    def test_sign_int_dtypes(self, dtype):
+        vals = [-3, -1, 0, 2, 7] if dtype.is_signed else [0, 1, 2, 7]
+        x = torch.tensor(vals, dtype=dtype, device=self.device)
+        self.common(torch.sign, [x], check_lowp=False)
+
     def test_frac_signed_zero(self):
         def fn(x):
             y = torch.frac(x)
@@ -11797,9 +11803,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             y.index_put_((mask,), torch.tensor(7.0, device=x.device))
             return y
 
-        # Integer values keep the mm, and so the mask, exact in low precision.
-        x = torch.randint(-2, 3, (8, 8)).float()
-        w = torch.randint(-2, 3, (8, 8)).float()
+        # Keep the mm exact and bounded away from zero in low precision, so the
+        # mask does not change when check_model_gpu downcasts the inputs.
+        x = torch.tensor([-2, 0, 1, 2]).repeat(16).view(8, 8).float()
+        w = 2 * torch.eye(8)
         self.common(fn, (x, w))
 
     @skip_if_halide  # won't fuse a read of the buffer it writes in place
