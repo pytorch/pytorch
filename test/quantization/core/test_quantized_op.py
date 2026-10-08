@@ -54,6 +54,7 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_ARM64,
     IS_FBCODE,
     IS_MACOS,
@@ -471,6 +472,8 @@ class TestQuantizedOpsBase(TestCase):
 
 class TestQuantizedOps(TestQuantizedOpsBase):
     """Tests the correctness of the quantized::relu6 op."""
+    hw_classification = HardwareClassification.GENERIC
+
     def test_qrelu6(self):
         relu6_test_configs = [
             {
@@ -3237,6 +3240,8 @@ class TestQuantizedOps(TestQuantizedOpsBase):
 
 class TestDynamicQuantizedOps(TestCase):
     """Tests the correctness of the dynamic quantized linear and linear_relu op."""
+    hw_classification = HardwareClassification.GENERIC
+
     @override_qengines
     @given(
         batch_size=st.integers(1, 4),
@@ -3922,6 +3927,8 @@ class TestDynamicQuantizedOps(TestCase):
 
 
 class TestQuantizedLinear(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_qlinear_impl(self, batch_size, input_channels, output_channels, use_bias,
                            post_op, use_multi_dim_input, use_channelwise, **post_op_kwargs):
         decimal_val = 4
@@ -4214,102 +4221,6 @@ class TestQuantizedLinear(TestCase):
             decimal_val = 1
             np.testing.assert_array_almost_equal(Y_fp32_ref.numpy(), Y_q_dq.numpy(), decimal=decimal_val)
 
-    @given(batch_size=st.integers(1, 4),
-           # in cudnn v. 8.4.0, there is a limitation that input channels
-           # should be a multiple of 4 for int8 tensors. in cudnn v.8.3.3
-           # this should be a multiple of 16
-           input_channels=st.sampled_from([4, 8, 12, 16, 32]),
-           # constraints on output channels appear to be relax, as it seems we can use any positive integer here
-           # except 1. It is not clear why 1 will not work. TODO: check with Yang
-           output_channels=st.integers(2, 36),
-           use_bias=st.booleans(),
-           use_relu=st.booleans(),
-           use_multi_dim_input=st.booleans(),
-           use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(TEST_CUDNN and torch.backends.cudnn.version() == 90100, "expected failure on cuDNN 9.1.0")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
-    # TODO: check with yang regarding CUDNN flags
-    @unittest.skip("not currently working and feature isn't used")
-    def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
-                           use_relu, use_multi_dim_input, use_channelwise):
-        qlinear_prepack = torch.ops.quantized.linear_prepack
-        if use_relu:
-            qlinear_op = torch.ops.quantized.linear_relu
-        else:
-            qlinear_op = torch.ops.quantized.linear
-        X_scale = 1.5
-        X_zp = 0
-        X_value_min = -128
-        X_value_max = 127
-        X_q0 = np.round(
-            np.random.rand(batch_size, input_channels) *
-            (X_value_max - X_value_min)
-            + X_value_min).astype(np.int8)
-        W_scale = 2.5
-        W_zp = 0
-        W_value_min = -128
-        W_value_max = 127
-        W_q0 = np.round(
-            np.random.rand(output_channels, input_channels)
-            * (W_value_max - W_value_min)
-            + W_value_min
-        ).astype(np.int8)
-        b_value_min = -10
-        b_value_max = 10
-        b_q0 = np.round(
-            np.random.rand(output_channels) *
-            (b_value_max - b_value_min) + b_value_min
-        ).astype(np.int32) if use_bias else None
-        if use_bias:
-            b_value_min = -10
-            b_value_max = 10
-            b_q0 = np.round(
-                np.random.rand(output_channels) *
-                (b_value_max - b_value_min) + b_value_min
-            ).astype(np.int32)
-        else:
-            bias = None
-        avoid_vpmaddubsw_overflow_linear(
-            batch_size,
-            input_channels,
-            output_channels,
-            X_q0,
-            X_value_min,
-            X_value_max,
-            W_q0,
-            W_value_min,
-            W_value_max,
-        )
-        quant_dtype = torch.qint8
-        X = torch.from_numpy(_dequantize(
-            X_q0, X_scale, X_zp)).to(dtype=torch.float).to(device="cuda")
-        X_q = torch.quantize_per_tensor(
-            X, scale=X_scale, zero_point=X_zp, dtype=quant_dtype)
-        W = torch.from_numpy(_dequantize(
-            W_q0, W_scale, W_zp)).to(dtype=torch.float).to(device="cuda")
-        W_q = torch.quantize_per_tensor(W, scale=W_scale, zero_point=W_zp, dtype=quant_dtype)
-        b = torch.from_numpy(_dequantize(
-            b_q0, X_scale * (W_zp), 0)).to(dtype=torch.float).to(device="cuda") if use_bias else None
-        b_q = torch.quantize_per_tensor(
-            b, scale=X_scale * W_scale, zero_point=0, dtype=quant_dtype) if use_bias else None
-        Y_scale = 0.5
-        Y_zp = 0
-        # Weight prepacking operator for quantized Linear
-        float_bias = b if use_bias else None
-        W_prepack = qlinear_prepack(W_q, float_bias if use_bias else None)
-        # Quantized Linear operator with prepacked weight
-        Y_q = qlinear_op(X_q, W_prepack, Y_scale, Y_zp).to(device="cpu")
-        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0,
-                              W_scale, W_zp, b_q0, Y_scale, Y_zp, dtype=np.int8)
-        if use_relu:
-            Y_q_ref[Y_q_ref < Y_zp] = Y_zp
-        decimal_val = 0
-        np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=decimal_val)
-
-    """Tests the correctness of the quantized::linear_unpack op."""
     @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
                        qparams=hu.qparams(dtypes=torch.qint8)),
            use_channelwise=st.booleans())
@@ -5030,6 +4941,8 @@ class TestQuantizedEmbeddingOpsBase(TestCase):
 
 class TestQuantizedEmbeddingOps(TestQuantizedEmbeddingOpsBase):
 
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_embedding_bag_unpack_impl(self, pack_fn, unpack_fn, bit_rate, optimized_qparams, weights):
         data_type = weights.dtype
 
@@ -5265,6 +5178,8 @@ class TestQuantizedEmbeddingOpsAccelerator(TestQuantizedEmbeddingOpsBase):
         CPU counterparts on every accelerator. This covers the bit-field
         extraction the dequantization path is built on, which is shared by
         both bit widths. """
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_embedding_bag_rowwise_offsets_device(self, device):
         # 24 satisfies both ops: the byte op requires D % 4 == 0, the 4-bit op
         # requires D % 8 == 0.
@@ -5603,6 +5518,8 @@ class TestQuantizedEmbeddingOpsAccelerator(TestQuantizedEmbeddingOpsBase):
 
 
 class TestQuantizedConv(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
                                 strides, i_pads, o_pads, channelwise):
         (X_data, W_data, bias_data, groups, transposed) = inputs
@@ -8273,6 +8190,8 @@ class TestQuantizedConv(TestCase):
 
 
 class TestPadding(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @given(batch_size=st.integers(1, 64),
            channels=st.integers(1, 64),
            width=st.integers(16, 128),
@@ -8360,6 +8279,8 @@ class TestPadding(TestCase):
                      "This Pytorch Build has not been built with or does not support QNNPACK")
 class TestQNNPackOps(TestCase):
     """Tests the correctness of the quantized::qnnpack_relu op."""
+    hw_classification = HardwareClassification.GENERIC
+
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8,
                                           zero_point_min=0,
@@ -8838,6 +8759,8 @@ class TestQNNPackOps(TestCase):
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
     """Tests the element-wise equality ops."""
+    hw_classification = HardwareClassification.GENERIC
+
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
            B=hu.tensor(shapes=((5,), (1, 5), (1, 1, 5), (4, 5), (3, 4, 5)),
@@ -8910,6 +8833,8 @@ class TestComparatorOps(TestCase):
 """Tests the correctness of the quantized::embedding_bag_(byte|4bit|2bit)_prepack_with_rowwise_min_max ops."""
 class TestQuantizedWithMinMax(TestCase):
     """Validates that the *rowwsie_min_max* quantization functions are equivalent to the ones without it."""
+    hw_classification = HardwareClassification.GENERIC
+
     def test_quantize_tensor_with_min_max(self):
         num_rows_list = [1, 2, 10, 100]
         num_cols_list = [4, 8, 16, 32, 64, 128]
@@ -8987,6 +8912,8 @@ class TestQuantizedWithMinMax(TestCase):
 class TestQuantizedOpsAccelerator(TestQuantizedOpsBase):
 
     """Tests the correctness of the quantized::relu op."""
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @override_qengines
     def test_qrelu(self, device):
         relu_test_configs = [
@@ -9247,6 +9174,8 @@ class TestQuantizedConvCUDA(TestCase):
 
     # TODO: merge this test with test_qconv2d when CUDNN runtime flags becomes available
     """Tests the correctness of quantized 2D convolution cudnn op."""
+    hw_classification = HardwareClassification.CUDA
+
     @given(batch_size=st.integers(1, 3),
            # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
            input_channels_per_group=st.integers(1, 32),
@@ -9650,6 +9579,110 @@ class TestQuantizedConvCUDA(TestCase):
 
 
 instantiate_device_type_tests(TestQuantizedConvCUDA, globals(), only_for='cuda')
+
+
+class TestQuantizedLinearAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @given(batch_size=st.integers(1, 4),
+           # in cudnn v. 8.4.0, there is a limitation that input channels
+           # should be a multiple of 4 for int8 tensors. in cudnn v.8.3.3
+           # this should be a multiple of 16
+           input_channels=st.sampled_from([4, 8, 12, 16, 32]),
+           # constraints on output channels appear to be relax, as it seems we can use any positive integer here
+           # except 1. It is not clear why 1 will not work. TODO: check with Yang
+           output_channels=st.integers(2, 36),
+           use_bias=st.booleans(),
+           use_relu=st.booleans(),
+           use_multi_dim_input=st.booleans(),
+           use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(TEST_CUDNN and torch.backends.cudnn.version() == 90100, "expected failure on cuDNN 9.1.0")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    # TODO: check with yang regarding CUDNN flags
+    @unittest.skip("not currently working and feature isn't used")
+    def test_qlinear_cudnn(self, device, batch_size, input_channels, output_channels, use_bias,
+                           use_relu, use_multi_dim_input, use_channelwise):
+        qlinear_prepack = torch.ops.quantized.linear_prepack
+        if use_relu:
+            qlinear_op = torch.ops.quantized.linear_relu
+        else:
+            qlinear_op = torch.ops.quantized.linear
+        X_scale = 1.5
+        X_zp = 0
+        X_value_min = -128
+        X_value_max = 127
+        X_q0 = np.round(
+            np.random.rand(batch_size, input_channels) *
+            (X_value_max - X_value_min)
+            + X_value_min).astype(np.int8)
+        W_scale = 2.5
+        W_zp = 0
+        W_value_min = -128
+        W_value_max = 127
+        W_q0 = np.round(
+            np.random.rand(output_channels, input_channels)
+            * (W_value_max - W_value_min)
+            + W_value_min
+        ).astype(np.int8)
+        b_value_min = -10
+        b_value_max = 10
+        b_q0 = np.round(
+            np.random.rand(output_channels) *
+            (b_value_max - b_value_min) + b_value_min
+        ).astype(np.int32) if use_bias else None
+        if use_bias:
+            b_value_min = -10
+            b_value_max = 10
+            b_q0 = np.round(
+                np.random.rand(output_channels) *
+                (b_value_max - b_value_min) + b_value_min
+            ).astype(np.int32)
+        else:
+            bias = None
+        avoid_vpmaddubsw_overflow_linear(
+            batch_size,
+            input_channels,
+            output_channels,
+            X_q0,
+            X_value_min,
+            X_value_max,
+            W_q0,
+            W_value_min,
+            W_value_max,
+        )
+        quant_dtype = torch.qint8
+        X = torch.from_numpy(_dequantize(
+            X_q0, X_scale, X_zp)).to(dtype=torch.float).to(device=device)
+        X_q = torch.quantize_per_tensor(
+            X, scale=X_scale, zero_point=X_zp, dtype=quant_dtype)
+        W = torch.from_numpy(_dequantize(
+            W_q0, W_scale, W_zp)).to(dtype=torch.float).to(device=device)
+        W_q = torch.quantize_per_tensor(W, scale=W_scale, zero_point=W_zp, dtype=quant_dtype)
+        b = torch.from_numpy(_dequantize(
+            b_q0, X_scale * (W_zp), 0)).to(dtype=torch.float).to(device=device) if use_bias else None
+        b_q = torch.quantize_per_tensor(
+            b, scale=X_scale * W_scale, zero_point=0, dtype=quant_dtype) if use_bias else None
+        Y_scale = 0.5
+        Y_zp = 0
+        # Weight prepacking operator for quantized Linear
+        float_bias = b if use_bias else None
+        W_prepack = qlinear_prepack(W_q, float_bias if use_bias else None)
+        # Quantized Linear operator with prepacked weight
+        Y_q = qlinear_op(X_q, W_prepack, Y_scale, Y_zp).to(device="cpu")
+        Y_q_ref = qlinear_ref(X_q0, X_scale, X_zp, W_q0,
+                              W_scale, W_zp, b_q0, Y_scale, Y_zp, dtype=np.int8)
+        if use_relu:
+            Y_q_ref[Y_q_ref < Y_zp] = Y_zp
+        decimal_val = 0
+        np.testing.assert_array_almost_equal(Y_q_ref, Y_q.int_repr().numpy(), decimal=decimal_val)
+
+    """Tests the correctness of the quantized::linear_unpack op."""
+
+
+instantiate_device_type_tests(TestQuantizedLinearAccelerator, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
