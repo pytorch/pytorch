@@ -21,7 +21,6 @@ from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch
-
 import torch.fx
 from torch.utils._pytree import SequenceKey
 
