@@ -180,13 +180,14 @@ jobs:
         env:
           REF_TYPE: ${{ github.ref_type }}
           GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
           PREVIEW_IMAGE_WAIT_SECONDS: 3600
           PREVIEW_IMAGE_POLL_SECONDS: 300
         shell: bash
         run: |
           set -euo pipefail
           suffix=""
-          if [[ "${REF_TYPE}" == "tag" || "${GITHUB_REF}" == "refs/heads/nightly" ]]; then
+          if [[ "${REF_TYPE}" == "tag" || "${GITHUB_REF}" == "refs/heads/nightly" || "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             suffix="-$(git rev-parse HEAD:.ci/docker)"
           fi
           tag="rocm-preview${suffix}"
