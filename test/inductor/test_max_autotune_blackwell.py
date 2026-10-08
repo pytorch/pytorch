@@ -6,10 +6,12 @@ import unittest
 from unittest import mock
 
 import torch
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.autows_utils import has_two_ctas, meta_ws_enabled
 from torch._inductor.codegen import simd
+from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import _HEURISTIC_CACHE, get_template_heuristic
 from torch._inductor.heuristics.template.triton import (
     _use_template_autows,
@@ -921,17 +923,11 @@ class TestBlackwellTMALoadFusion(TestCase):
         ).run(code[0])
 
     @staticmethod
-    def _run_with_mm_config(
-        fn,
-        args,
-        test_config,
-        *extra_configs,
-        autows=(1, False),
-        dynamic=None,
-        fused_ms=0.0,
-        **patches,
+    @contextlib.contextmanager
+    def _mm_config(
+        test_config, *extra_configs, autows=(1, False), fused_ms=0.0, **patches
     ):
-        """Compile fn with only the given configs as Triton choices. Under
+        """Compile with only the given configs as Triton choices. Under
         template autoWS, only the (DATA_PARTITION_FACTOR, TWO_CTAS) = autows
         variants of them. Fused epilogue benchmarks report fused_ms, so by
         default every fusion the gates allow is kept."""
@@ -982,11 +978,19 @@ class TestBlackwellTMALoadFusion(TestCase):
                     Scheduler, "benchmark_codegened_module", return_value=(fused_ms, "")
                 ),
             ):
-                return run_and_get_code(torch.compile(fn, dynamic=dynamic), *args)
+                yield
         finally:
             for key, configs in zip(keys, orig):
                 if (cached := _HEURISTIC_CACHE.get(key)) is not None:
                     cached.mm_configs, cached.blackwell_persistent_mm_configs = configs
+
+    @classmethod
+    def _run_with_mm_config(
+        cls, fn, args, test_config, *extra_configs, dynamic=None, **kwargs
+    ):
+        """Compile fn under _mm_config and run it once on args."""
+        with cls._mm_config(test_config, *extra_configs, **kwargs):
+            return run_and_get_code(torch.compile(fn, dynamic=dynamic), *args)
 
     @staticmethod
     def _poison_outputs():
@@ -1199,7 +1203,7 @@ class TestBlackwellTMALoadFusion(TestCase):
         kernel benchmarks slower or isn't benchmarked, for arg reductions,
         subtiled outputs that read their reduction back or need a multi-output
         reduction, configs that can't host it (data partitioning, 2CTA),
-        dynamic shapes, cpp_wrapper, fp32 outputs, and welford reductions of
+        a dynamic N (dynamic=True), cpp_wrapper, fp32 outputs, and welford reductions of
         tiles narrower than N, which can't finish from partials."""
         fn = {
             "max_values": lambda a, b: (a @ b).float().max(-1).values,
@@ -1258,6 +1262,108 @@ class TestBlackwellTMALoadFusion(TestCase):
             else 0
         )
         self.assertEqual(actual, fn(a, b), atol=tol, rtol=tol)
+        kernels = re.findall(r"def (triton_\w+)\(", code[0])
+        self.assertTrue(any(k.startswith("triton_tem") for k in kernels), kernels)
+        self.assertTrue(
+            any(k.startswith(("triton_per", "triton_red")) for k in kernels), kernels
+        )
+
+    DYNAMIC_M_OPS = {
+        "sum": ROW_OPS["sum"],
+        "mean": ROW_OPS["mean"],
+        "sum_and_out": ROW_OPS["sum_and_out"],
+        "rms_norm": lambda a, b: (
+            (c := (a @ b).float()) * torch.rsqrt(c.pow(2).mean(-1, keepdim=True) + 1e-6)
+        ),
+    }
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", tuple(DYNAMIC_M_OPS))
+    @parametrize("marking", ("mark_dynamic", "automatic"))
+    def test_blackwell_mm_row_reduction_epilogue_dynamic_m(self, op: str, marking: str):
+        """With a dynamic M (rows) and a static N, one compiled template kernel
+        hosts the row reduction for every M, including M smaller than or not a
+        multiple of BLOCK_M. automatic: M varies from call to call (ragged rows),
+        so the second size recompiles once with M dynamic."""
+        op_fn = self.DYNAMIC_M_OPS[op]
+
+        def fn(a, b):
+            return op_fn(a, b)
+
+        # A dynamic graph left from an earlier test would skip the static compile.
+        torch._dynamo.reset()
+        K, N = 256, 128
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE).to(torch.bfloat16)
+        counter = CompileCounterWithBackend("inductor")
+        codes = []
+        with (
+            self._mm_config(
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                **{"triton.template_reduction_epilogue": True},
+            ),
+            self._poison_outputs(),
+            # run_and_get_code resets dynamo, which would drop the dynamic graph.
+            mock.patch.object(GraphLowering, "save_output_code", codes.append),
+        ):
+            compiled = torch.compile(fn, backend=counter)
+            for M in (1024, 1000, 7, 129, 4099):
+                a = torch.randint(-1, 2, (M, K), device=GPU_TYPE).to(torch.bfloat16)
+                if marking == "mark_dynamic":
+                    torch._dynamo.mark_dynamic(a, 0)
+                actual = compiled(a, b)
+                tol = 1e-5 if op == "rms_norm" else 0
+                self.assertEqual(actual, fn(a, b), atol=tol, rtol=tol)
+        self.assertEqual(counter.frame_count, 1 if marking == "mark_dynamic" else 2)
+        kernels = re.findall(r"def (triton_\w+)\(", codes[-1])
+        self._assert_row_fused(kernels, codes[-1])
+        # The fused kernel takes M as an argument.
+        self.assertIsNotNone(
+            re.search(r"def triton_tem_fused\w*\([^)]*\bks0\b", codes[-1]), codes[-1]
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("case", ("unbacked_m", "dynamic_n", "multi_kernel_hints"))
+    def test_blackwell_mm_row_reduction_epilogue_dynamic_not_fused(self, case: str):
+        """The row reduction stays unfused, and correct, for a dynamic M with
+        multi_kernel_hints (untested), a dynamic N (a tile can't be shown to
+        span the rows, and partials need a static N), and an unbacked M (the
+        sliced input doesn't reach the template epilogue at all)."""
+        M, K, N = 1024, 256, 128
+        a = torch.randint(-1, 2, (M, K), device=GPU_TYPE).to(torch.bfloat16)
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE).to(torch.bfloat16)
+        if case == "unbacked_m":
+
+            def fn(a, b, rows):
+                m = rows.item()
+                torch._check(m >= 2)
+                torch._check(m <= a.shape[0])
+                return (a[:m] @ b).float().sum(-1)
+
+            args = (a, b, torch.tensor(M - 24))
+        else:
+
+            def fn(a, b):
+                return (a @ b).float().sum(-1)
+
+            args = (a, b)
+            torch._dynamo.mark_dynamic(*((b, 1) if case == "dynamic_n" else (a, 0)))
+        patches = {"triton.template_reduction_epilogue": True}
+        if case == "multi_kernel_hints":
+            patches["multi_kernel_hints"] = [512, 2048]
+        with (
+            torch._dynamo.config.patch(capture_scalar_outputs=True),
+            self._poison_outputs(),
+        ):
+            actual, code = self._run_with_mm_config(
+                fn, args, BlackwellGPUGemmConfig(128, 128, 64, 3, 8), **patches
+            )
+        self.assertEqual(actual, fn(*args))
         kernels = re.findall(r"def (triton_\w+)\(", code[0])
         self.assertTrue(any(k.startswith("triton_tem") for k in kernels), kernels)
         self.assertTrue(

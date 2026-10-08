@@ -27,6 +27,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype, type_to_dtype
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
@@ -8902,8 +8903,13 @@ def template_reduction_epilogue_supported(
     ):
         return False
     m, n = template.get_size()
-    # Dynamic sizes are untested: the Blackwell template specializes them.
-    if not (isinstance(m, sympy.Integer) and isinstance(n, sympy.Integer)):
+    # N sets whether a tile spans the rows, so it must be static. A dynamic M
+    # must be backed, so autotuning and the fusion benchmark have a hint.
+    # SizeHintMultiKernel's per-hint kernels are untested with these epilogues.
+    if not isinstance(n, sympy.Integer) or (
+        not isinstance(m, sympy.Integer)
+        and (free_unbacked_symbols(m) or config.multi_kernel_hints)
+    ):
         return False
     if template.get_stride() != [n, 1]:
         return False
