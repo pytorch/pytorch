@@ -1,9 +1,11 @@
 """Machine identity, TestEnvironment flags and properties for the report line.
 The only PyTorch-aware module of the writer. capture() runs in the test process
-before its tests, so it must not change state they can observe."""
+before its tests, so it creates no device context (no torch.cuda lazy init) and
+doesn't call torch.accelerator, either of which tests can observe."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import platform
@@ -93,8 +95,10 @@ def _os() -> tuple[str, str, str]:
         version = platform.mac_ver()[0]
         return "macos", ".".join(version.split(".")[:2]), version
     if system == "Windows":
+        # Every Windows since 10 and Server 2016 is NT 10.0, so keep the build: it
+        # changes only with the release (17763 is Server 2019, 20348 Server 2022).
         version = platform.version()
-        return "windows", ".".join(version.split(".")[:2]), version
+        return "windows", version, version
     return system.lower(), "", ""
 
 
@@ -126,7 +130,7 @@ def _accelerator() -> tuple[str, str]:
         return "cuda", torch.version.cuda
     if torch.version.hip:
         # The ROCm release (10.1), not HIP's own version (7.16).
-        return "rocm", ".".join(torch.version.rocm.split(".")[:2])
+        return "rocm", ".".join((torch.version.rocm or "").split(".")[:2])
     xpu = str(getattr(torch.version, "xpu", "") or "")
     if xpu:
         # The SYCL version packed as major * 10000 + minor * 100 + patch.
@@ -213,12 +217,11 @@ def _amdsmi_device() -> tuple[str, str, str]:
     amdsmi = torch.cuda.amdsmi
     name = amdsmi.amdsmi_get_gpu_asic_info(handle)["market_name"]
     memory = driver = ""
-    try:
+    with contextlib.suppress(Exception):
         vram = amdsmi.amdsmi_get_gpu_memory_total(handle, amdsmi.AmdSmiMemoryType.VRAM)
         memory = str(int(vram) >> 20)
+    with contextlib.suppress(Exception):
         driver = amdsmi.amdsmi_get_gpu_driver_info(handle)["driver_version"]
-    except Exception:
-        pass
     return name, memory, driver
 
 
