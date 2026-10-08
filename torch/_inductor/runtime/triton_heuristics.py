@@ -1395,6 +1395,9 @@ class CachingAutotuner(KernelInterface):
             "debug": compile_meta["debug"],
             "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
         }
+        # Backends without a maxnreg option drop it in parse_options.
+        if (maxnreg := getattr(cfg, "maxnreg", None)) is not None:
+            options["maxnreg"] = maxnreg
         if "enable_fp_fusion" in compile_meta:
             options["enable_fp_fusion"] = compile_meta["enable_fp_fusion"]
         if HAS_WARP_SPEC:
@@ -5395,6 +5398,10 @@ def config_to_dict(config: Config) -> dict[str, Any]:
         "num_warps": config.num_warps,
         "num_stages": config.num_stages,
     }
+    # config_from_dict pops maxnreg back out (_pop_config_kwargs), so it must
+    # survive the round trip or a user config's register cap silently vanishes.
+    if getattr(config, "maxnreg", None) is not None:
+        config_dict["maxnreg"] = config.maxnreg
     if HAS_WARP_SPEC:
         config_dict.update(
             {
