@@ -777,8 +777,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         model.register_forward_hook(lambda *_: fwd_dtypes.append(weight.grad_dtype))
         weight.register_hook(lambda _: bwd_dtypes.append(weight.grad_dtype))
         inp = torch.ones(2, 8, device=device_type)
-        # Compile traces a forward's backward with the grad_dtype the forward
-        # sees, so the backward keeps it even if gradient sync changes between
+        # The backward keeps its forward's choice even if gradient sync changes
+        # in between, so a compiled backward can use the forward's grad_dtype
         for forward_sync, backward_sync in ((True, True), (False, True), (True, False)):
             model.set_requires_gradient_sync(forward_sync)
             out = model(inp)

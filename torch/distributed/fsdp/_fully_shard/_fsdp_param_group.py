@@ -261,7 +261,7 @@ class FSDPParamGroup:
         self._all_gather_output_fn: Callable = _default_all_gather_output_fn
         self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._reduce_scatter_param_indices: list[int] = []
-        self._fsdp_params_with_wider_grad_dtype: list[FSDPParam] = []
+        self._fsdp_params_deferring_grad_upcast: list[FSDPParam] = []
         self._param_group_index: int = 0
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
@@ -355,7 +355,7 @@ class FSDPParamGroup:
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
-        self._fsdp_params_with_wider_grad_dtype = [
+        self._fsdp_params_deferring_grad_upcast = [
             p for p in self.fsdp_params if p.defers_grad_upcast
         ]
 
@@ -922,9 +922,9 @@ class FSDPParamGroup:
         # parameter: AccumulateGrad adds them in place to existing wider
         # gradients, and the reduce-scatter copy-in upcasts the rest. Only a
         # gradient that starts accumulating across backwards needs the cast.
-        # Chosen in pre-forward and kept until post-backward since compile
-        # traces a forward's backward with the grad_dtype the forward sees.
-        for fsdp_param in self._fsdp_params_with_wider_grad_dtype:
+        # Chosen in pre-forward and kept until post-backward so that a
+        # compiled backward can use the grad_dtype its forward was traced with.
+        for fsdp_param in self._fsdp_params_deferring_grad_upcast:
             param = getattr(fsdp_param, "_unsharded_param", None)
             if param is None or not param.requires_grad:
                 continue
@@ -936,7 +936,7 @@ class FSDPParamGroup:
         # pipeline schedule's weight passes, get autograd's upcast. Widen a
         # gradient created while deferred but not reduced, so later ones
         # accumulate in the unsharded gradient dtype.
-        for fsdp_param in self._fsdp_params_with_wider_grad_dtype:
+        for fsdp_param in self._fsdp_params_deferring_grad_upcast:
             param = getattr(fsdp_param, "_unsharded_param", None)
             if param is None or not param.requires_grad:
                 continue
