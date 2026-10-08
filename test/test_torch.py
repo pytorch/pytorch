@@ -12,6 +12,7 @@ import io
 import inspect
 import itertools
 import math
+import os
 import random
 import re
 import copy
@@ -6771,6 +6772,37 @@ class TestTorch(TestCase):
         self.assertIsInstance(supported, bool)
         self.assertEqual(tensor, torch.arange(8))
         self.assertEqual(torch.cpu.release_unused_memory(), supported)
+
+    @unittest.skipUnless(
+        sys.platform == "linux", "RSS measurement requires /proc/self/statm"
+    )
+    def test_cpu_release_unused_memory_reduces_rss(self):
+        if not torch.cpu.release_unused_memory():
+            self.skipTest("the active CPU allocator does not support explicit release")
+
+        mib = 1024**2
+        page_size = os.sysconf("SC_PAGE_SIZE")
+
+        def rss_bytes():
+            with open("/proc/self/statm", encoding="utf-8") as statm:
+                resident_pages = int(statm.read().split()[1])
+            return resident_pages * page_size
+
+        buffers = [torch.empty(16 * mib, dtype=torch.uint8) for _ in range(8)]
+        for buffer in buffers:
+            # Touch every OS page without spending the allocator's purge-delay
+            # window writing all 128 MiB.
+            buffer[::page_size].fill_(1)
+        del buffer, buffers
+
+        before_release = rss_bytes()
+        self.assertTrue(torch.cpu.release_unused_memory())
+        after_release = rss_bytes()
+        self.assertGreater(
+            before_release - after_release,
+            64 * mib,
+            "explicit allocator collection did not release the unused pages",
+        )
 
     def test_dir(self):
         dir(torch)
