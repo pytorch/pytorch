@@ -57,6 +57,7 @@ from .autotune_process import (
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
     CSEVariable,
+    DeferredLine,
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
@@ -94,7 +95,7 @@ from .runtime.hints import TritonMeta
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
-    _TMA_SUPPORTED_DTYPES,
+    can_use_tma,
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
@@ -738,6 +739,12 @@ class TritonTemplateKernel(TritonKernel):
         # Reductions fused into the epilogue as per-tile partials, which the
         # wrapper reduces after the kernel.
         self.partial_reductions: list[_PartialReduction] = []
+        # In a row reduction pass over a whole tile, with tma_store set: the
+        # tile's index symbols, origin and shape, so full-tile outputs keep
+        # their TMA store. See _tile_tma_store.
+        self._tile_tma_store_ctx: (
+            tuple[list[sympy.Symbol], list[sympy.Expr], tuple[int, int]] | None
+        ) = None
         # Epilogue nodes codegen'd after the kernel call instead of fused into it.
         self._unfused_epilogues: list[Any] = []
 
@@ -2104,7 +2111,11 @@ class TritonTemplateKernel(TritonKernel):
             and sig.outer_name == self.workspace_arg.outer_name
         )
         for reduction in self.partial_reductions:
-            result.writeline(_partials_finish(f"args[{idx}]", reduction))
+            finish = _partials_finish(f"args[{idx}]", reduction)
+            # Like the wrapper, cast the fp32 partials to the output dtype.
+            if (dtype := V.graph.get_dtype(reduction.buffer)) != torch.float:
+                finish += f".to({dtype})"
+            result.writeline(finish)
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         # Grid args are only used for benchmarking, not correctness
@@ -2172,7 +2183,48 @@ class TritonTemplateKernel(TritonKernel):
         ):
             with patch.object(self, "tma_store", False):
                 return super().store(name, index, value, mode)
+        if mode is None and self._tile_tma_store(name, index, value):
+            return None
         return super().store(name, index, value, mode)
+
+    def _tile_tma_store(self, name: str, index: sympy.Expr, value: CSEVariable) -> bool:
+        """TMA-store a full-tile output of a row reduction pass, e.g. a
+        normalized output, whose index is row-major in the tile's symbols. The
+        descriptor uses the tile's origin as offsets, so it needs no standard
+        block symbols. Returns False to fall back to tl.store."""
+        ctx = self._tile_tma_store_ctx
+        if ctx is None or name not in (self.tma_store_epilogue_outputs or ()):
+            return False
+        (x, r), origin, (rows, cols) = ctx
+        layout = V.graph.get_buffer(name).get_layout()
+        tile_index = index.xreplace(
+            {s: e.expr for s, e in self.range_tree_nodes.items()}
+        )
+        if tile_index != layout.stride[0] * x + r:
+            return False
+        var = self.args.output(name)
+        desc = self.prologue_cache.get(var)
+        if desc is None:
+            desc = f"tma_descriptor{next(self.block_ptr_id)}"
+            self.prologue.writeline(
+                DeferredLine(
+                    name,
+                    f"{desc} = tl.make_tensor_descriptor({var}, "
+                    f"shape={list(layout.size)}, strides={list(layout.stride)}, "
+                    f"block_shape=[{rows}, {cols}])",
+                )
+            )
+            self.prologue_cache[var] = desc
+        self._device_tma_buffers.add(name)
+        self.stores.writeline(
+            DeferredLine(
+                name,
+                f"{desc}.store([{texpr(origin[0])}, {texpr(origin[1])}], "
+                f"tl.broadcast_to({value}, [{rows}, {cols}])"
+                f".to({triton_type(layout.dtype)}))",
+            )
+        )
+        return True
 
     def _staged_tile_elems(self) -> int | None:
         """Elements in one TMA store's shared-memory staging buffer: an
@@ -2235,21 +2287,18 @@ class TritonTemplateKernel(TritonKernel):
                 if scheduler.can_buffer_be_removed_through_fusion(name, fused):
                     continue
                 layout = V.graph.get_buffer(name).get_layout()
-                dtype = layout.dtype
                 if (
-                    dtype not in _TMA_SUPPORTED_DTYPES  # unsupported dtype
-                    or not all(
+                    not all(
                         isinstance(x, (int, sympy.Integer))
                         for x in (*layout.size, *layout.stride, layout.offset)
                     )  # dynamic layout
                     or list(layout.size) != list(size)  # not full-tile
                     or layout.offset != 0  # irregular output
                     or layout.stride[-1] != 1  # irregular output
-                    or (layout.stride[0] * dtype.itemsize) % 16 != 0  # irregular output
-                    or (layout.size[-1] * dtype.itemsize) < 16  # small output
+                    or not can_use_tma(output_layout=layout)
                 ):
                     continue
-                outputs.append((name, staged * dtype.itemsize))
+                outputs.append((name, staged * layout.dtype.itemsize))
         return outputs
 
     def _compute_fusion_metadata(
@@ -2522,6 +2571,11 @@ class TritonTemplateKernel(TritonKernel):
             node.unsplit_reduction() if columns else node for node in nodes
         ]
         header, init, tail = self.body, IndentedBuffer(), IndentedBuffer()
+        tile_tma_store_ctx = (
+            (tile_syms, origin, (rows, cols))
+            if self.tma_store and not partial and subtiles == 1
+            else None
+        )
         with (
             self.use_range_trees(range_trees),
             patch.object(self.cse, "store_cache", store_cache),
@@ -2537,6 +2591,7 @@ class TritonTemplateKernel(TritonKernel):
                 # Tensor descriptors expect standard block symbols, not the tile's.
                 tma_store=False,
                 tma_load_for_template_epilogue=False,
+                _tile_tma_store_ctx=tile_tma_store_ctx,
             ),
         ):
             for tree in range_trees:
