@@ -26,7 +26,6 @@ from optree import (
 
 import torch.utils._cxx_pytree as cxx_pytree  # noqa: F401  # load the C++ extension module
 import torch.utils._pytree as python_pytree
-from torch.utils._pytree import BUILTIN_TYPES, STANDARD_DICT_TYPES
 
 from ..decorators import substitute_in_graph
 
@@ -64,6 +63,15 @@ __all__ = [
 _T = TypeVar("_T")
 _KT = TypeVar("_KT")
 _VT = TypeVar("_VT")
+
+
+BUILTIN_TYPES = frozenset(
+    node_type
+    for node_type in python_pytree.BUILTIN_TYPES
+    if (handler := optree.register_pytree_node.get(node_type)) is not None
+    and handler.kind != optree.PyTreeKind.CUSTOM
+)
+STANDARD_DICT_TYPES = python_pytree.STANDARD_DICT_TYPES & BUILTIN_TYPES
 
 
 @substitute_in_graph(
@@ -250,7 +258,7 @@ class PyTreeSpec:
                 )
             return (
                 f"CustomTreeNode({treespec.type.__name__}[{treespec._metadata!r}], "
-                f"[{', '.join(children_representations)}])"
+                f"[{', '.join(map(str, children_representations))}])"
             )
 
         inner = [

@@ -679,6 +679,16 @@
       ]
     }
   ],
+  "GB5108": [
+    {
+      "Gb_type": "autograd inputs from an external mapping proxy",
+      "Context": "",
+      "Explanation": "Dynamo cannot identify the underlying mapping or its items/values overrides.",
+      "Hints": [
+        "Construct the mapping proxy inside the compiled region."
+      ]
+    }
+  ],
   "GB0046": [
     {
       "Gb_type": "Encountered torch.is_inference_mode_enabled during tracing",
@@ -1613,6 +1623,16 @@
       "Context": "var_getattr {self} grad_fn",
       "Explanation": "Dynamo does not support tracing tensors with a grad_fn directly.",
       "Hints": []
+    }
+  ],
+  "GB9539": [
+    {
+      "Gb_type": "frozendict subclass allocation",
+      "Context": "frozendict.__new__",
+      "Explanation": "Dynamo does not yet support allocating frozendict subclasses.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0105": [
@@ -6793,6 +6813,36 @@
       "Hints": [
         "Clone one of the aliased inputs before the call, or stop mutating it.",
         "Please open an issue."
+      ]
+    }
+  ],
+  "GB9291": [
+    {
+      "Gb_type": "Preexisting frozendict with user-defined hashes",
+      "Context": "self.python_type_name()",
+      "Explanation": "The builtin may have cached a hash before user-defined keys or values changed. Dynamo cannot inspect that cache.",
+      "Hints": [
+        "Construct the frozendict inside the compiled function."
+      ]
+    }
+  ],
+  "GB7038": [
+    {
+      "Gb_type": "Preexisting frozendict key with user-defined hash",
+      "Context": "type(key).__name__",
+      "Explanation": "Dynamo cannot recover the stored key hash without calling a potentially changed or side-effecting hash function.",
+      "Hints": [
+        "Construct the frozendict inside the compiled function."
+      ]
+    }
+  ],
+  "GB4292": [
+    {
+      "Gb_type": "Reconstructing frozendict with user-defined hashes",
+      "Context": "self.python_type_name()",
+      "Explanation": "Reconstruction cannot preserve stored key hashes or a cached container hash involving user-defined hash functions.",
+      "Hints": [
+        "Keep this frozendict inside the compiled region."
       ]
     }
   ]
