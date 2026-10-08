@@ -326,7 +326,21 @@ class IterationRangesRoot(IterationRanges):
 
         nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
         nodes = [n for n in nodes if n and n.root is self]
-        nodes.sort(key=lambda x: get_sort_key(x))
+        sizevars = V.graph.sizevars
+
+        def get_structural_sort_key(x: IterationRangesEntry) -> tuple[int, bool]:
+            # Divisors form a divisibility chain, so a node's position is the
+            # number of node divisors that divide its own.
+            multiple_of = sizevars.statically_known_multiple_of
+            rank = sum(multiple_of(x.divisor, n.divisor) for n in nodes)
+            return (rank, not sizevars.statically_known_equals(x.length, 1))
+
+        # Divisors past a size-0 dim all hint to 0, so hints can't order them.
+        if sizevars.optimization_hint(self.numel) == 0:
+            # sorted(), not sort(): the key reads nodes, which is empty mid-sort.
+            nodes = sorted(nodes, key=get_structural_sort_key)
+        else:
+            nodes.sort(key=get_sort_key)
         divisor = sympy.S.One
         index_vars = []
         sizes = []

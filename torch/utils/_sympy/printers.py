@@ -174,6 +174,12 @@ class PythonPrinter(ExprPrinter):
             x = f"({x} // {div})"
         return f"({x} % {mod})"
 
+    def _print_Where(self, expr: sympy.Expr) -> str:
+        c, p, q = (
+            self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args
+        )
+        return f"({p} if {c} else {q})"
+
     def _print_Infinity(self, expr: sympy.Expr) -> str:
         return "math.inf"
 

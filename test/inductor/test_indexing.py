@@ -1796,6 +1796,116 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         check.check("tl.sum").check_regex(r"tl\.load\(").run(kernel)
 
 
+class TestDynamicShapeIndexing(InductorTestCase):
+    """End-to-end dynamic-shape programs found by fuzzing. Under dynamic=True,
+    closure-captured ints (slice starts, split factors, ...) become symbols too."""
+
+    device = GPU_TYPE if HAS_GPU else "cpu"
+
+    def _check(self, fn, shapes, *args, device=None):
+        cfn = torch.compile(fn, dynamic=True, fullgraph=True)
+        for shape in shapes:
+            x = torch.randn(shape, device=device or self.device)
+            self.assertEqual(cfn(x, *args), fn(x, *args))
+
+    def test_nested_floordiv_negative_divisor(self):
+        def fn(x, a, b):
+            return x + (x.shape[0] // a) // b
+
+        cfn = torch.compile(fn, dynamic=True, fullgraph=True)
+        x = torch.zeros(8, device=self.device)
+        for a, b in [(3, 2), (3, -2), (5, -3)]:
+            self.assertEqual(cfn(x, a, b), fn(x, a, b))
+
+    def test_empty_slice(self):
+        start = 2
+
+        def fn(x):
+            return x[:, start::3] + 0
+
+        self._check(fn, [(4, 2), (4, 8)])
+
+    def test_empty_slice_reduction(self):
+        start = 2
+
+        def fn(x):
+            x = x.unflatten(2, (-1, 2)) * 1.5
+            return (x[:, :, :, start:] + 1).amax(0)
+
+        self._check(fn, [(4, 8, 2, 3), (5, 9, 4, 4)])
+
+    def test_empty_slice_permute(self):
+        start, step, start2 = 2, 2, 1
+
+        def fn(x):
+            x = x.permute(3, 2, 1, 0).unfold(1, 2, 1)[:, start::step]
+            x = x.permute(1, 2, 4, 0, 3).transpose(4, 2).contiguous()[start2:]
+            return torch.cat([x, 2 * x.flip(0)], 0).sum(-1)
+
+        self._check(fn, [(4, 3, 2, 8), (7, 6, 5, 11)])
+
+    def test_empty_slice_reshape(self):
+        start = 2
+
+        def fn(x):
+            x = x[:, start::3].reshape(-1)
+            return x.repeat_interleave(2, 0)
+
+        self._check(fn, [(7, 2, 6), (8, 5, 7)])
+
+    def test_empty_slice_try_solve(self):
+        start = 2
+
+        def fn(x):
+            x = x.unfold(0, 3, 2).unsqueeze(0).expand(2, -1, -1)
+            x = torch.cat([x, 2 * x.flip(1)], 1)[start::2]
+            return x.contiguous() + 0
+
+        self._check(fn, [(6,), (7,), (13,)])
+
+    def test_where_in_roll(self):
+        start, step, shift = 1, 3, 3
+
+        def fn(x):
+            x = x[start::step].roll(shift, 0)
+            return torch.cat([x, 2 * x.flip(0)], 0).flip(0).sum()
+
+        self._check(fn, [(3,), (4,)])
+
+    def test_empty_slice_zero_divisor(self):
+        # The empty slice's size (s1 - 1) // s1 simplifies to 0 inside the
+        # divisor of another FloorDiv in _simplify_with_ranges.
+        a, start, step = 2, 2, 1
+
+        def fn(x):
+            x = x.unflatten(1, (a, -1)).permute(1, 2, 0)
+            return x[:, start::step].sum(-1)
+
+        self._check(fn, [(2, 2)])
+
+    def test_empty_loop_value_ranges(self):
+        # The empty slice's size is symbolic with an upper bound of 0, so the
+        # loop variable's range [0, upper - 1] was invalid.
+        def fn(x):
+            return x.unflatten(0, (-1, 2))[2::3].sum()
+
+        cfn = torch.compile(fn, fullgraph=True)
+        x = torch.randn(4, device=self.device)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+        self.assertEqual(cfn(x), fn(x))
+
+    @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
+    def test_nested_where_cpp_stride(self):
+        # The C++ backend's stride_at ran sympy.simplify on a Where nested in a
+        # Where condition, which differentiates the relational and crashes.
+        lo, hi, s1, s2 = 0, 1, 3, 1
+
+        def fn(x):
+            return torch.nn.functional.pad(x, (lo, hi)).roll(s1, 0).roll(s2, 0) + 0
+
+        self._check(fn, [(7,), (8,), (10,)], device="cpu")
+
+
 class TestOptimizationHintIdentityExpansion(InductorTestCase):
     """Test that optimization_hint expands Identity wrappers after _sub_unbacked_exprs."""
 

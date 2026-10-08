@@ -117,12 +117,17 @@ def _try_isolate_lhs(
         lhs, rhs = e.args
         other = sympy.Mul(*[a for a in lhs.args if not a.has(thing)])
 
-        # If we can't tell whether 'other' is negative or positive, we do nothing.
-        # That is because we don't know whether we have mirror the operation or not.
-        # We also divide only when we know 'rhs' is not zero.
-        if not (isinstance(e, INEQUALITY_TYPES) and other.is_negative is None) and not (
-            not isinstance(e, INEQUALITY_TYPES) and rhs.is_zero
-        ):
+        # Dividing is only sound when 'other' is nonzero. For inequalities we
+        # also need its sign, to know whether to mirror the operation. For
+        # equalities a nonzero 'rhs' implies a nonzero 'other'; we never divide
+        # when 'rhs' is zero.
+        if isinstance(e, INEQUALITY_TYPES):
+            can_divide = other.is_zero is False and other.is_negative is not None
+        else:
+            can_divide = not rhs.is_zero and (
+                other.is_zero is False or rhs.is_zero is False
+            )
+        if can_divide:
             # Divide both sides by 'other'.
             lhs = lhs / other
             rhs = rhs / other

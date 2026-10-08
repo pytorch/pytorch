@@ -41,8 +41,9 @@ class BoundVars:
             return bound_sympy(v).upper if isinstance(v, Expr) else v
 
         self.loop_body = loop_body
+        # An empty loop may have a symbolic size whose upper bound is 0.
         self.replacement_vals = {
-            k: ValueRanges[Expr](0, upper_bound(v) - 1)
+            k: ValueRanges[Expr](0, max(0, upper_bound(v) - 1))
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
