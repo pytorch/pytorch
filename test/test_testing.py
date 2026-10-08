@@ -986,6 +986,20 @@ class TestSetattr:
 
 
 setattr(TestSetattr, "test_added", lambda self: None)
+
+
+def create_test_func():
+    def test(self, device):
+        pass
+
+    return test
+
+
+class TestFactory(TestCase):
+    test_made = create_test_func()
+
+
+instantiate_device_type_tests(TestFactory, globals(), only_for="cpu")
 """
 
     def test_declared_case_names(self) -> None:
@@ -1004,6 +1018,8 @@ setattr(TestSetattr, "test_added", lambda self: None)
         self.assertEqual(declared["test_pytest[one]"], "test_pytest")
         # Added with setattr, so the function is named <lambda>.
         self.assertEqual(declared["test_added"], "test_added")
+        # Made by a factory, so the function is named test.
+        self.assertEqual(declared["test_made_cpu"], "test_made_cpu")
 
     SUBTESTS_SOURCE = """
 import unittest
@@ -1024,6 +1040,28 @@ class TestSubtests(unittest.TestCase):
         # One run per test, however many subtests it has.
         self.assertEqual([(run["case_name"], run["outcome"]) for run in runs], [("test_failing_subtest", "failed")])
         self.assertIn("1 != 0", runs[0]["outcome_summary"])
+
+    SKIP_AFTER_FAILURE_SOURCE = """
+import pytest
+
+
+@pytest.fixture
+def skips_in_teardown():
+    yield
+    pytest.skip("skip in teardown")
+
+
+def test_fails_then_skips(skips_in_teardown):
+    raise AssertionError("the real failure")
+"""
+
+    def test_skip_after_failure(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
+            (Path(tmp) / "skip_report.py").write_text(textwrap.dedent(self.SKIP_AFTER_FAILURE_SOURCE))
+            _, report = _run_plugin(tmp, ["skip_report.py"], Path(tmp) / "skip")
+            runs = _runs(report)
+        # The skip in teardown doesn't replace the failure's message.
+        self.assertEqual([(run["outcome"], run["outcome_summary"]) for run in runs], [("failed", "AssertionError: the real failure")])
 
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
@@ -1074,6 +1112,10 @@ def pytest_configure(config):
         plugin.open = lambda *args, **kwargs: FailingFile()
     elif mode == "name":
         plugin._item_declared_case_name = boom
+    elif mode == "finish":
+        plugin.ReportWriter._finish = boom
+    elif mode == "worker" and hasattr(config, "workerinput"):
+        plugin._item_declared_case_name = boom
 """
 
     @classmethod
@@ -1109,13 +1151,16 @@ def pytest_configure(config):
 
     @parametrize(
         "mode",
-        [subtest(mode, name=mode) for mode in ("capture", "write", "name")],
+        [subtest(mode, name=mode) for mode in ("capture", "write", "name", "finish", "worker")],
     )
     def test_writer_error_does_not_change_tests(self, mode) -> None:
         args = [
             "-p", "torch.testing._internal.torchci.plugin", f"--torchci-report-dir={self.dir / mode}",
             "-p", "no:cacheprovider",
         ]
+        if mode == "worker":
+            # The writer runs on the controller; break the worker's makereport.
+            args += ["-n", "1"]
         proc, outcomes = self._run(mode, args, {"FAIL_MODE": mode})
         baseline_proc, baseline_outcomes = self.baseline
         self.assertEqual(proc.returncode, baseline_proc.returncode, proc.stdout + proc.stderr)
@@ -1371,12 +1416,20 @@ class TestEnvironmentDefFlag(TestCase):
         for name in self._defined:
             if hasattr(self._cu, name):
                 delattr(self._cu, name)
+            # Each test names its flags after their env vars.
+            self._cu.TestEnvironment.env_var_values.pop(name, None)
+            self._cu.TestEnvironment.repro_env_vars.pop(name, None)
 
     def _def_flag(self, name, **kwargs):
         from torch.testing._internal.common_utils import TestEnvironment
         self._defined.append(name)
         kwargs.setdefault("include_in_repro", False)
         return TestEnvironment.def_flag(name, **kwargs)
+
+    def _def_setting(self, name, **kwargs):
+        from torch.testing._internal.common_utils import TestEnvironment
+        self._defined.append(name)
+        return TestEnvironment.def_setting(name, **kwargs)
 
     def test_explicit_zero_overrides_implication(self):
         # Regression: PYTORCH_TEST_WITH_ROCM=0 must override
@@ -1411,6 +1464,23 @@ class TestEnvironmentDefFlag(TestCase):
             self.assertFalse(self._def_flag(
                 "FOO_DF_5", env_var="FOO_DF_5",
                 default=True, implied_by_fn=lambda: True))
+
+    def test_env_var_values(self):
+        # What test run reports record: implied flags and unset settings
+        # included, include_in_repro=False ones left out.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("FOO_EV_")}
+        with unittest.mock.patch.dict(os.environ, env | {"FOO_EV_SET": "1", "FOO_EV_STR": "triton"}, clear=True):
+            self._def_flag("FOO_EV_SET", env_var="FOO_EV_SET", include_in_repro=True)
+            self._def_flag("FOO_EV_IMPLIED", env_var="FOO_EV_IMPLIED", include_in_repro=True, implied_by_fn=lambda: True)
+            self._def_flag("FOO_EV_OFF", env_var="FOO_EV_OFF", include_in_repro=True)
+            self._def_flag("FOO_EV_EXCLUDED", env_var="FOO_EV_EXCLUDED", implied_by_fn=lambda: True)
+            self._def_setting("FOO_EV_STR", env_var="FOO_EV_STR")
+            self._def_setting("FOO_EV_UNSET", env_var="FOO_EV_UNSET")
+        values = {k: v for k, v in self._cu.TestEnvironment.env_var_values.items() if k.startswith("FOO_EV_")}
+        self.assertEqual(values, {"FOO_EV_SET": "1", "FOO_EV_IMPLIED": "1", "FOO_EV_OFF": "0", "FOO_EV_STR": "triton", "FOO_EV_UNSET": ""})
+        # The repro command only needs what was set explicitly.
+        repro = {k: v for k, v in self._cu.TestEnvironment.repro_env_vars.items() if k.startswith("FOO_EV_")}
+        self.assertEqual(repro, {"FOO_EV_SET": "1", "FOO_EV_STR": "triton"})
 
 
 def make_assert_close_inputs(actual: Any, expected: Any) -> list[tuple[Any, Any]]:
