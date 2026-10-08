@@ -2971,8 +2971,8 @@ def requires_multigpu(fn):
     run under an internal test runner that has no pytest, where the skip alone
     is the whole behaviour.
     """
-    reason = "requires >= 2 GPUs"
-    skip = torch.cuda.device_count() < 2
+    reason = "requires >= 2 accelerators"
+    skip = torch.accelerator.device_count() < 2
 
     if isinstance(fn, type):
         if has_pytest:
