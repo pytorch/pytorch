@@ -1343,32 +1343,6 @@ void addStorageDeleterFns(
 
 namespace {
 
-// An allocation callback may allocate through PyTorch and select this allocator
-// again. Reject recursion through the same allocator, while allowing a callback
-// to allocate from a different Python-backed pool.
-thread_local std::unordered_set<const c10::SafePyObject*>
-    active_python_allocator_callbacks;
-
-class PythonAllocatorReentrancyGuard {
- public:
-  explicit PythonAllocatorReentrancyGuard(const c10::SafePyObject* state)
-      : state_(state) {
-    const bool inserted =
-        active_python_allocator_callbacks.insert(state_).second;
-    TORCH_CHECK(
-        inserted,
-        "A Python MemPool allocation callback cannot recursively allocate "
-        "through the same allocator.");
-  }
-
-  ~PythonAllocatorReentrancyGuard() {
-    active_python_allocator_callbacks.erase(state_);
-  }
-
- private:
-  const c10::SafePyObject* state_;
-};
-
 PyObject* getPythonAllocatorCallback(
     const std::shared_ptr<c10::SafePyObject>& state,
     Py_ssize_t index) {
@@ -1385,7 +1359,6 @@ void* callPythonAllocator(
   if (!Py_IsInitialized() || Py_IsFinalizing()) {
     return nullptr;
   }
-  PythonAllocatorReentrancyGuard callback_guard(state.get());
   c10::cuda::CUDAStreamGuard stream_guard(
       c10::cuda::getStreamFromExternal(stream, device));
   py::gil_scoped_acquire gil;

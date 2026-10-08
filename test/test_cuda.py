@@ -10026,7 +10026,7 @@ for args in ((a, b), (a, b, False)):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
     @requires_cuda_python_bindings
     @serialTest()
-    def test_python_mempool_alloc_exception_and_reentrancy(self):
+    def test_python_mempool_alloc_exception_and_cross_pool_allocation(self):
         from cuda.bindings import runtime
 
         def alloc_raises(size):
@@ -10076,18 +10076,6 @@ for args in ((a, b), (a, b, False)):
         inner_pools.clear()
         gc.collect()
         self.assertEqual(callback_errors, [])
-
-        def alloc_reentrant(size):
-            return torch.empty(1, dtype=torch.uint8, device="cuda").data_ptr()
-
-        pool = torch.cuda.MemPool.from_py_allocator(alloc_reentrant, free_noop)
-        with torch.cuda.use_mem_pool(pool):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "cannot recursively allocate through the same allocator",
-            ):
-                torch.empty(1, dtype=torch.uint8, device="cuda")
-        del pool
 
     @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
