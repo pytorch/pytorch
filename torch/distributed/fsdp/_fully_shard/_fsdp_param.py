@@ -946,11 +946,7 @@ class FSDPParam:
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
-        # Fixed for the parameter's lifetime: compile traces a forward's
-        # backward with the grad_dtype it sees during the forward
-        self._unsharded_param.grad_dtype = (
-            None if self.defers_grad_upcast else self.unsharded_grad_dtype
-        )
+        self._unsharded_param.grad_dtype = self.unsharded_grad_dtype
         self._release_all_gather_outputs_if_needed()
 
     def _release_all_gather_outputs_if_needed(self) -> None:
@@ -1220,11 +1216,13 @@ class FSDPParam:
 
     @property
     def defers_grad_upcast(self) -> bool:
-        """Whether autograd leaves gradients in the compute dtype (unsharded
-        ``grad_dtype=None``) instead of casting them to the unsharded gradient
-        dtype. The reduce-scatter copy-in widens fresh gradients, AccumulateGrad
-        adds later ones in place to accumulated wider ones, and post-backward
-        widens a fresh gradient that isn't reduced."""
+        """Whether a forward and its backward may set the unsharded
+        ``grad_dtype=None`` so that autograd leaves gradients in the compute
+        dtype instead of casting each one to the unsharded gradient dtype. The
+        reduce-scatter copy-in widens fresh gradients, AccumulateGrad adds later
+        ones in place to accumulated wider ones, and post-backward widens a fresh
+        gradient that isn't reduced. Gradients from several uses in one such
+        backward are summed in the compute dtype."""
         grad_dtype = self.unsharded_grad_dtype
         compute_dtype = self.param_dtype or self.orig_dtype
         # A larger floating-point dtype holds a smaller one exactly (e.g. fp32

@@ -613,6 +613,7 @@ class FSDPParamGroup:
             leaf = getattr(fsdp_param, "_unsharded_param", None)
             if leaf is not None:
                 leaf.grad = None
+        self._restore_unsharded_grad_dtypes()
         self._partial_reduce_output = None
         self._post_backward_pending = False
         self._partial_reduce_output_layout.clear()
@@ -634,6 +635,10 @@ class FSDPParamGroup:
                 self._training_state = TrainingState.FORWARD
                 self.unshard(self.unshard_async_op)
                 self.wait_for_unshard()
+                # No-grad forwards have no backward, and recomputation keeps the
+                # choice of the forward it recomputes
+                if torch.is_grad_enabled() and not is_bw():
+                    self._set_unsharded_grad_dtypes()
             for fsdp_param in self.fsdp_params:
                 fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
             if entering_forward_pass:
@@ -696,7 +701,7 @@ class FSDPParamGroup:
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
                     self._post_backward_pending = True
-                    self._upcast_unreduced_grads()
+                    self._restore_unsharded_grad_dtypes()
                     if self.reshard_after_backward:
                         self.reshard()
                     return
@@ -707,6 +712,7 @@ class FSDPParamGroup:
                 fsdp_params_with_grad, unsharded_grads = (
                     self._take_unsharded_grads_to_reduce()
                 )
+                self._restore_unsharded_grad_dtypes()
                 if self.reshard_after_backward:
                     self.reshard()
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
@@ -911,16 +917,33 @@ class FSDPParamGroup:
                     "Set reduce_dtype to the dtype its gradients already have."
                 )
 
-    def _upcast_unreduced_grads(self) -> None:
-        # Deferred gradients stay in the dtype autograd produces. Widen a fresh
-        # one that this backward doesn't reduce, so the next backward adds to
-        # it in the unsharded gradient dtype.
+    def _set_unsharded_grad_dtypes(self) -> None:
+        # Leave gradients in the dtype autograd produces, saving a cast per
+        # parameter: AccumulateGrad adds them in place to existing wider
+        # gradients, and the reduce-scatter copy-in upcasts the rest. Only a
+        # gradient that starts accumulating across backwards needs the cast.
+        # Chosen in pre-forward and kept until post-backward since compile
+        # traces a forward's backward with the grad_dtype the forward sees.
         for fsdp_param in self._fsdp_params_with_wider_grad_dtype:
             param = getattr(fsdp_param, "_unsharded_param", None)
-            if param is None or (grad := param.grad) is None:
+            if param is None or not param.requires_grad:
                 continue
-            if grad.dtype != (dtype := fsdp_param.unsharded_grad_dtype):
+            defer = self.reduce_grads or param.grad is not None
+            param.grad_dtype = None if defer else fsdp_param.unsharded_grad_dtype
+
+    def _restore_unsharded_grad_dtypes(self) -> None:
+        # Gradients produced outside a forward and its backward, e.g. by a
+        # pipeline schedule's weight passes, get autograd's upcast. Widen a
+        # gradient created while deferred but not reduced, so later ones
+        # accumulate in the unsharded gradient dtype.
+        for fsdp_param in self._fsdp_params_with_wider_grad_dtype:
+            param = getattr(fsdp_param, "_unsharded_param", None)
+            if param is None or not param.requires_grad:
+                continue
+            grad, dtype = param.grad, fsdp_param.unsharded_grad_dtype
+            if grad is not None and grad.dtype != dtype:
                 param.grad = grad.to(dtype)
+            param.grad_dtype = dtype
 
     def _get_reduce_dtype(
         self, fsdp_params: list[FSDPParam], grads: list[torch.Tensor]
