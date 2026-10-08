@@ -25,7 +25,7 @@ open-ended string-to-string maps.
 | `github_workflow_job_id` | int | Numeric `JOB_ID`, or `0` when unset or invalid |
 | `report_uuid` | string | The uuid4 in the file name |
 | `environment` | object | Machine identity fields listed below |
-| `flags` | object | Every registered `TestEnvironment` setting, sorted by name, with string values |
+| `flags` | object | `TestEnvironment` flags and settings, described below, sorted by env var |
 | `properties` | object | Nonempty report properties listed below |
 
 `environment` contains these fields in order:
@@ -35,7 +35,7 @@ open-ended string-to-string maps.
 | `os` | string | `linux`, `macos`, `windows`, or the platform name |
 | `os_version` | string | OS version |
 | `cpu_architecture` | string | Normalized machine architecture |
-| `cpu_capability` | string | PyTorch CPU capability, including AMX detection |
+| `cpu_capability` | string | `torch.backends.cpu.get_cpu_capability()` lower-cased (`default`, `avx2`, `avx512`, `sve256`, ...), with `ATEN_CPU_CAPABILITY` applied; `amx` for `avx512` on CPUs with AMX tiles |
 | `python_version` | string | Python major.minor, with `t` for free-threaded builds |
 | `cc_compiler` | string | `gcc`, `clang`, `msvc`, or `""` |
 | `cc_compiler_version` | string | Compiler major version |
@@ -44,8 +44,9 @@ open-ended string-to-string maps.
 | `device_count` | int | Visible devices of `accelerator`, honoring `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`; `0` for CPU |
 | `device_name` | string | The first visible device's name as its vendor reports it (`NVIDIA L4`, `AMD Instinct MI350X VF`, `Apple M2 Pro`, `Intel(R) Data Center GPU Max 1100`); empty with no device |
 
-`flags` includes every setting registered with `include_in_repro`. Flags use
-`"1"` or `"0"`, other settings use their value, and unset settings use `""`.
+`flags` maps the env var of every flag and setting registered with
+`include_in_repro` to its value in effect: `"1"` or `"0"` for flags (implied
+ones included), the value for other settings, and `""` for unset settings.
 
 The report `properties` writer emits these keys when their values are nonempty:
 `torch_version`, `os_release`, `device_memory_mib`, `driver_version`,
@@ -109,7 +110,9 @@ defaults to `torchci-reports` in the cwd.
 
 ## Local check
 
+With PyTorch built from this branch, from the repo root:
+
 ```bash
 python test/run_test.py -i test_type_info --save-test-run-reports
-head -1 test/torchci-reports/test_type_info/*.jsonl | python -m json.tool
+cat test/torchci-reports/test_type_info/*.jsonl | python -m json.tool --json-lines
 ```
