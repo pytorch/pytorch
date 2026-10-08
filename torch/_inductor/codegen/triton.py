@@ -3128,6 +3128,10 @@ class TMACompatibilityChecker:
         """
         if self.kernel.index_dtype == "tl.int32":
             return True
+        # Forced template TMA accesses index per dim, bounded by the template's
+        # sizes, which use_triton_tma_template already range-checks.
+        if self.force:
+            return True
         if (
             not self.for_store
             or self.buffer_name is None
