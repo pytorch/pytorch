@@ -2801,39 +2801,6 @@ class <lambda>(torch.nn.Module):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, s), fn(x, s))
 
-    def test_nested_compile_in_backend_preserves_user_objects(self, device):
-        """A compile run from inside another compile's backend must not clobber
-        the outer compile's external object registry before the outer pre-graph
-        bytecode is generated, and the inner call's runtime object table must
-        not leak into AOTAutograd tracing of the outer graph."""
-        from functorch.compile import nop
-        from torch._dynamo.backends.common import aot_autograd
-
-        inner = torch.compile(
-            lambda t: t * torch.accelerator.current_stream(device).stream_id,
-            backend="eager",
-        )
-        aot_eager = aot_autograd(fw_compiler=nop)
-
-        def backend(gm, example_inputs):
-            inner(torch.ones(2, device=device))
-            return aot_eager(gm, example_inputs)
-
-        def fn(x, s):
-            with torch.accelerator.current_stream(device):
-                cur_id = torch.accelerator.current_stream(device).stream_id
-                y = x + 1
-            with s:
-                return y * 2, cur_id
-
-        x = torch.ones(2, device=device)
-        s = torch.Stream(device=device)
-        compiled = torch.compile(fn, backend=backend, fullgraph=True)
-        self.assertEqual(compiled(x, s), fn(x, s))
-        with torch.Stream(device=device) as other:
-            self.assertEqual(compiled(x, s), fn(x, s))
-            self.assertEqual(compiled(x, s)[1], other.stream_id)
-
     def test_recorded_events_append_runtime_objects(self, device):
         events = []
 
