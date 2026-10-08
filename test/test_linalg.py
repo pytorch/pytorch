@@ -2605,7 +2605,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             run_test(shape)
             run_test(shape, symmetric=True)
 
-    @onlyCUDA
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -2667,8 +2666,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             run_test(shape)
             run_test(shape, symmetric=True)
 
-
-    @onlyCUDA
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -2712,8 +2709,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             run_test(shape)
             run_test(shape, symmetric=True)
 
-
-    @onlyCUDA
     @skipCUDAIf(
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
@@ -5198,7 +5193,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
-    @onlyCUDA
     @dtypes(torch.float32)
     def test_linalg_inv_large_batch(self, device, dtype):
         # The batched hipBLAS and rocSOLVER kernels launch nothing above 65536
@@ -5573,7 +5567,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             self.assertEqual(len(w), 1)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @onlyCUDA
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_mm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
@@ -5584,7 +5577,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         (A @ B).backward(G)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @onlyCUDA
     @largeTensorTest('16GB', device='cuda')
     def test_large_bmm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
@@ -6594,7 +6586,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(SM90OrLater and not TEST_WITH_ROCM, "Expected failure on sm90")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyCUDA
     @parametrize("k", [16, 32])
     @parametrize("n", [16, 32])
     @parametrize("use_transpose_a", [True, False])
@@ -6677,7 +6668,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @onlyCUDA
     def test__int_mm_errors(self, device):
 
         def genf_int(x, y):
@@ -11858,7 +11848,6 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
     @slowTest
     @skipIfRocm
     @skipIfNoLapack
-    @onlyCUDA
     @skipCUDAIfNoCusolver
     @dtypes(*complex_types())
     def test_linalg_ldl_factor_stability_large_inputs(self, device, dtype):
@@ -11908,7 +11897,6 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
 
     @skipIfRocm
     @skipIfNoLapack
-    @onlyCUDA
     @setLinalgBackendsToDefaultFinally
     @dtypes(*complex_types())
     def test_linalg_ldl_factor_edge_cases(self, device, dtype):
@@ -11989,7 +11977,6 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
 
     @skipIfRocm
     @skipIfNoLapack
-    @onlyCUDA
     # One dtype keeps it fast, test_linalg_ldl_factor_stability_large_inputs covers both
     @dtypes(torch.complex64)
     def test_linalg_ldl_factor_batched_large_panels(self, device, dtype):
@@ -12009,7 +11996,6 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
             self.assertTrue((scaled_residual < K).all())
 
     @skipIfRocm
-    @onlyCUDA
     # Real inputs go to cuSOLVER (see ldl_factor_kernel)
     @dtypes(*complex_types())
     def test_linalg_ldl_factor_zero_row_col_info(self, device, dtype):
@@ -12028,7 +12014,6 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
     @slowTest
     @skipIfRocm
     @skipIfNoLapack
-    @onlyCUDA
     # nb grows with n (see ldl::panel_width). On H100, 4097, 8193 and 16385 are the first
     # n with nb = 64, 96 and 128 (complex64 skips 64).
     # On GB200, 16385 reaches the widest nb of complex64, and complex128 needs 20481.
