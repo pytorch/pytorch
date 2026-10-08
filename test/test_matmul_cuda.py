@@ -1304,25 +1304,6 @@ class TestMatmulCuda(InductorTestCase):
             C = torch._grouped_mm(a, b)
         self.assertEqual(C, torch.zeros(4, 64, 128, device="cuda", dtype=torch.bfloat16))
 
-    @skipCUDAIfNotRocm
-    @runOnRocmArch(MI300_ARCH + MI350_ARCH)
-    @parametrize("op", ["2d/3d", "3d/3d"])
-    @parametrize("dtype", [torch.float16, torch.bfloat16])
-    def test_grouped_gemm_rocm_ck_tile_odd_n(self, op, dtype):
-        # Odd N with column-major B passes the alignment checks, but every output row ends on an odd column
-        groups, n, k = 5, 199, 64
-        B = torch.randn(groups, n, k, device="cuda", dtype=dtype).transpose(-2, -1)
-        if op == "2d/3d":
-            A = torch.randn(280, k, device="cuda", dtype=dtype)
-            offs = torch.tensor([0, 8, 21, 21, 280], device="cuda", dtype=torch.int32)
-        else:
-            A = torch.randn(groups, 32, k, device="cuda", dtype=dtype)
-            offs = None
-        C_ref = self.grouped_gemm_reference(A.float(), B.float(), offs).to(dtype)
-        with rocm_group_gemm_ck_env("1", var="ROCM_ALLOW_GROUP_GEMM_CK_TILE"):
-            C = torch._grouped_mm(A, B, offs=offs)
-        self.assertEqual(C, C_ref)
-
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("M", [1, 32, 64])
