@@ -58,13 +58,16 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 from ..utils import (
+    _use_autotune_backend,
     decode_device,
     ensure_cute_available,
+    FOLDED_SCALED_MM_OUTPUT_SCALE,
     get_all_devices,
     get_gpu_type,
     is_bf16x9_matmul,
     is_gpu,
     is_pointwise_use,
+    is_view,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V
@@ -72,7 +75,7 @@ from .b2b_gemm import B2B_GEMM_PASS
 from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
-from .micro_pipeline_tp import micro_pipeline_tp_pass
+from .micro_pipeline_tp import is_micro_pipeline_tp_candidate, micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
@@ -815,6 +818,10 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         num_init_leaves = len(fx_init)
         _, ys_outputs = _extract_carry_and_out(cur_node.meta["val"], num_init_leaves)
 
+        # The nesting is what makes replace_by_example treat the list as the scan node's
+        # unpacked outputs. Otherwise, a single flat output (one carry,
+        # no ys) looks like a 1:1 replacement and leaves getitem on a tensor.
+        # TODO: error-prone for any tuple-valued node; disambiguate on its meta["val"].
         def lower_to_while_loop(*args, **kwargs):
             """
             The traced graph of this function will be used to replace the original scan fx_node.
@@ -838,7 +845,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                     )
                     for ys_out in ys_outputs
                 ]
-                return list(init) + empty_ys
+                return (list(init) + empty_ys,)
 
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
@@ -909,7 +916,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 ),
                 operands_spec,
             )
-            return list(last_carry) + list(ys_outs)
+            return (list(last_carry) + list(ys_outs),)
 
         lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
             (
@@ -1113,14 +1120,8 @@ def pointless_cumsum_check(match: Match) -> bool:
     if len(match.kwargs["shape"]) == 0:
         return False
     # A symbolic fill_value arrives as an fx Node, which the replacement's int() and
-    # * both reject. A boolean full stays folded: bool(Node) is True, the right
-    # saturation for every nonzero fill and the wrong one for a zero fill, but
-    # declining is worse today - inductor's own full(..., dtype=bool) lowering drops
-    # the bool cast for a symbolic int fill (#194062). Drop the exemption when that
-    # lands.
-    return is_boolean_dtype(match.kwargs["dtype"]) or not isinstance(
-        match.kwargs["fill_value"], torch.fx.Node
-    )
+    # * both reject.
+    return not isinstance(match.kwargs["fill_value"], torch.fx.Node)
 
 
 @register_graph_pattern(
@@ -1137,13 +1138,16 @@ def pointless_cumsum_check(match: Match) -> bool:
             _users=MULTIPLE,
         ),
         KeywordArg("dim"),
+        dtype=KeywordArg("out_dtype"),
         _users=MULTIPLE,
     ),
     extra_check=pointless_cumsum_check,
     # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )
-def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype, dim):
+def pointless_cumsum_replacement(
+    match: Match, shape, fill_value, device, dtype, dim, out_dtype
+):
     """Based on a pattern in OPTForCausalLM"""
 
     if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
@@ -1152,7 +1156,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
         # cumsum promotes all integral types to int64
         dtype = torch.int64
 
-    out_dtype = match.output_node().kwargs.get("dtype") or dtype
+    out_dtype = out_dtype or dtype
     bool_out = is_boolean_dtype(out_dtype)  # pyrefly: ignore[bad-argument-type]
     # pyrefly: ignore[bad-argument-type]
     integral_out = bool_out or is_integer_dtype(out_dtype)
@@ -1491,6 +1495,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
     inputs = OrderedSet[torch.fx.Node]()
     input_storages = OrderedSet[int | None]()
     output_storages = OrderedSet[int | None]()
+    partitioner_tags = [node.meta.get("partitioner_tag") for node in graph.nodes]
+    is_joint_graph = "is_forward" in partitioner_tags and (
+        "is_backward" in partitioner_tags or "must_be_in_backward" in partitioner_tags
+    )
 
     for node in graph.find_nodes(op="placeholder"):
         inputs.add(node)
@@ -1507,6 +1515,25 @@ def remove_noop_ops(graph: torch.fx.Graph):
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 
+    # Storages mutated in this graph. At this point the graph is functional except for
+    # the input mutations AOT emits (copy_, plus set_ / resize_storage_bytes_ for FSDP).
+    # A non-view noop (aten.copy / aten.clone) of a mutated storage must stay a real copy,
+    # otherwise its users can observe the mutated value instead of the snapshot, e.g.
+    #   dst[0:, :] = src[0:, :]; src.add_(1)
+    # became `copy_(src, add); copy_(dst, src)` and copied the *updated* src into dst.
+    # Views and chained noops resolve to the same storage, and this does not depend on
+    # node order, so it also holds for the joint graph.
+    mutation_targets = (
+        aten.copy_.default,
+        aten.set_.source_Tensor,
+        torch.ops.inductor.resize_storage_bytes_.default,
+    )
+    mutated_storages = OrderedSet(
+        get_node_storage(n.args[0])
+        for target in mutation_targets
+        for n in graph.find_nodes(op="call_function", target=target)
+    )
+
     for node in graph.nodes:
         if node.target in noop_registry:
             cond, src_index = noop_registry[node.target]
@@ -1515,6 +1542,15 @@ def remove_noop_ops(graph: torch.fx.Graph):
             else:
                 src = src_index(node)
             if not isinstance(src, torch.fx.Node):
+                continue
+
+            # AOTAutograd inserts this clone so backward can save the value before
+            # the runtime epilogue mutates the input.
+            if (
+                is_joint_graph
+                and node.target is aten.clone.default
+                and src.meta.get("aot_runtime_epilogue_input_mutation", False)
+            ):
                 continue
 
             if node.target is torch.ops.aten.copy.default:
@@ -1546,6 +1582,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 and node in output_node.args
                 and (src in inputs or src in output_node.args)
             ):
+                continue
+
+            # Keep a real copy of a storage that is mutated in this graph.
+            if not node_is_view and src_storage in mutated_storages:
                 continue
 
             is_valid, args, kwargs = get_fake_args_kwargs(node)
@@ -2349,6 +2389,214 @@ def register_var_std_reduction_dedup_pattern():
 
 
 register_var_std_reduction_dedup_pattern()
+
+
+def _pointwise_chain_can_fuse_to_output(node: torch.fx.Node) -> bool:
+    """Whether downstream pointwise work can fuse through to graph output."""
+
+    @functools.cache
+    def visit(current: torch.fx.Node) -> tuple[bool, bool]:
+        if not current.users:
+            return False, False
+
+        has_pointwise = False
+        for user in current.users:
+            if user.op == "output":
+                continue
+            if user.op != "call_function":
+                return False, False
+            target = user.target
+            is_pointwise = False
+            if target is operator.getitem:
+                pass
+            elif not isinstance(target, torch._ops.OpOverload):
+                return False, False
+            elif target not in L or not (
+                torch.Tag.pointwise in target.tags or is_view(target)
+            ):
+                return False, False
+            else:
+                is_pointwise = torch.Tag.pointwise in target.tags
+
+            reaches_output, child_has_pointwise = visit(user)
+            if not reaches_output:
+                return False, False
+            has_pointwise |= is_pointwise or child_has_pointwise
+
+        return True, has_pointwise
+
+    reaches_output, has_pointwise = visit(node)
+    return reaches_output and has_pointwise
+
+
+def _normalized_scaled_mm(
+    match: Match,
+) -> tuple[torch.fx.Node, dict[str, Any]] | None:
+    scaled_mm = next(
+        node
+        for node in match.nodes
+        if node.op == "call_function" and node.target is aten._scaled_mm.default
+    )
+    from torch.fx.operator_schemas import normalize_function
+
+    normalized = normalize_function(
+        aten._scaled_mm.default,
+        scaled_mm.args,
+        scaled_mm.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    return None if normalized is None else (scaled_mm, normalized.kwargs)
+
+
+def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
+    """Whether ``_scaled_mm(...) * scale`` can use its native output scale.
+
+    Restrict this rewrite to the NVGEMM path: other scaled-mm backends do not
+    uniformly expose ``scale_result`` through Inductor yet.  The vendored
+    Blackwell block-scaled kernel consumes one 0-D FP32 value through its alpha
+    argument. Restricting the match to a true scalar preserves the original
+    multiply's output shape and wrapped-scalar type promotion.
+    """
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+    # This rewrite needs to retry ordinary scaled-mm lowering when every
+    # native-output-scale choice fails. Pipelined autotuning defers failures
+    # until scheduler finalization, after this graph rewrite is irreversible.
+    if config.pipeline_max_autotune_gemm:
+        return False
+    if not _use_autotune_backend("NVGEMM"):
+        return False
+
+    normalized = _normalized_scaled_mm(match)
+    if normalized is None:
+        return False
+    scaled_mm, normalized_kwargs = normalized
+
+    # The native alpha argument is currently implemented only by the vendored
+    # NVFP4 provider.  The packed FP4 dtype is shared with MXFP4, so include the
+    # scale dtype in the recipe check instead of keying on the operands alone.
+    expected_dtypes = {
+        "input": torch.float4_e2m1fn_x2,
+        "mat2": torch.float4_e2m1fn_x2,
+        "scale_a": torch.float8_e4m3fn,
+        "scale_b": torch.float8_e4m3fn,
+    }
+    for name, expected_dtype in expected_dtypes.items():
+        arg = normalized_kwargs[name]
+        value = arg.meta.get("val") if isinstance(arg, torch.fx.Node) else None
+        if not isinstance(value, torch.Tensor) or value.dtype != expected_dtype:
+            return False
+
+    output_scale = match.kwargs["output_scale"]
+    if not isinstance(output_scale, torch.fx.Node):
+        return False
+    scale_val = output_scale.meta.get("val")
+    if not (
+        isinstance(scale_val, torch.Tensor)
+        and scale_val.device.type == "cuda"
+        and scale_val.dtype == torch.float32
+        and scale_val.dim() == 0
+    ):
+        return False
+
+    if config._micro_pipeline_tp and is_micro_pipeline_tp_candidate(scaled_mm):
+        return False
+    # Leave a fully lowerable pointwise chain to scheduler epilogue fusion.
+    # Fold early when that chain reaches an opaque/non-pointwise consumer,
+    # since the scheduler cannot carry the scale across that boundary.
+    output = match.output_node()
+    if _pointwise_chain_can_fuse_to_output(output):
+        return False
+
+    return (
+        normalized_kwargs["bias"] is None
+        and normalized_kwargs["scale_result"] is None
+        and not normalized_kwargs["use_fast_accum"]
+    )
+
+
+_scaled_mm_call = CallFunctionVarArgs(aten._scaled_mm.default)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.mul.Tensor,
+        _scaled_mm_call,
+        KeywordArg("output_scale"),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+    extra_check=_can_fold_scaled_mm_output_scale,
+)
+@register_graph_pattern(
+    CallFunction(
+        aten.mul.Tensor,
+        KeywordArg("output_scale"),
+        _scaled_mm_call,
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+    extra_check=_can_fold_scaled_mm_output_scale,
+)
+def _fold_scaled_mm_output_scale(
+    match: Match,
+    *_args,
+    output_scale,
+    **_kwargs,
+) -> None:
+    """Move a scalar multiply into ``aten._scaled_mm.scale_result``.
+
+    Doing this before lowering is important for QKV projections: their scaled
+    output is split into multiple consumers, which prevents the scheduler's
+    ordinary single-consumer template-epilogue fusion from seeing the multiply.
+    """
+
+    def repl(
+        mat_a,
+        mat_b,
+        scale_a,
+        scale_b,
+        out_dtype,
+        output_scale,
+        use_fast_accum,
+    ):
+        return aten._scaled_mm.default(
+            mat_a,
+            mat_b,
+            scale_a=scale_a,
+            scale_b=scale_b,
+            scale_result=output_scale,
+            out_dtype=out_dtype,
+            use_fast_accum=use_fast_accum,
+        )
+
+    counters["inductor"]["scaled_mm_output_scale_fused"] += 1
+    normalized = _normalized_scaled_mm(match)
+    if normalized is None:
+        raise AssertionError("matched _scaled_mm arguments could not be normalized")
+    _, normalized_kwargs = normalized
+    replacement_nodes = match.replace_by_example(
+        repl,
+        [
+            normalized_kwargs["input"],
+            normalized_kwargs["mat2"],
+            normalized_kwargs["scale_a"],
+            normalized_kwargs["scale_b"],
+            normalized_kwargs["out_dtype"],
+            output_scale,
+            normalized_kwargs["use_fast_accum"],
+        ],
+    )
+    scaled_mm = next(
+        node
+        for node in replacement_nodes
+        if node.op == "call_function" and node.target is aten._scaled_mm.default
+    )
+    # ``scale_result`` has native ATen semantics (and is ignored for BF16
+    # outputs). Mark only the node synthesized from an explicit multiply so the
+    # lowering can distinguish our internal alpha contract from a user-provided
+    # ``scale_result`` argument.
+    scaled_mm.meta[FOLDED_SCALED_MM_OUTPUT_SCALE] = True
 
 
 def register_partial_reduction_pattern():

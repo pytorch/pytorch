@@ -678,6 +678,76 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], nodes)
 
+    def test_addmm_add_alpha(self):
+        # https://github.com/pytorch/pytorch/issues/199698
+        def fn(a, b, c):
+            return (
+                torch.add(a, torch.mm(b, c), alpha=0.5),
+                torch.add(torch.mm(b, c), a, alpha=0.5),
+            )
+
+        args = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(3)]
+        e1, e2 = fn(*args)
+        a1, a2 = torch.compile(fn)(*args)
+        torch.testing.assert_close(a1, e1)
+        torch.testing.assert_close(a2, e2)
+        # the addmm patterns don't declare alpha, so they must not match
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+
+    def test_undeclared_non_default_kwarg_blocks_match(self):
+        add, div = torch.ops.aten.add, torch.ops.aten.div
+        undeclared = CallFunction(add, KeywordArg("x"), KeywordArg("y"))
+        declared = CallFunction(add, KeywordArg("x"), KeywordArg("y"), alpha=Arg())
+        div_pattern = CallFunction(div, KeywordArg("x"), KeywordArg("y"))
+
+        def matches(pattern, op, **kwargs):
+            gm = make_fx(lambda x, y: op(x, y, **kwargs))(
+                torch.randn(2), torch.randn(2)
+            )
+            node = next(n for n in gm.graph.nodes if n.op == "call_function")
+            return bool(pattern.match(node))
+
+        self.assertTrue(matches(undeclared, add))
+        # make_fx drops kwargs equal to their default, so build alpha=1 by hand
+        graph = torch.fx.Graph()
+        x, y = graph.placeholder("x"), graph.placeholder("y")
+        explicit = graph.call_function(add.Tensor, (x, y), {"alpha": 1})
+        self.assertTrue(undeclared.match(explicit))
+        self.assertFalse(matches(undeclared, add, alpha=2))
+        self.assertTrue(matches(declared, add, alpha=2))
+        # rounding_mode is Optional with no schema default, so None is the default
+        self.assertTrue(matches(div_pattern, div, rounding_mode=None))
+        self.assertFalse(matches(div_pattern, div, rounding_mode="floor"))
+        # strided layout and unpinned memory are equivalent to their None default
+        empty_op = torch.ops.aten.empty.memory_format
+        empty = CallFunction(empty_op, Arg())
+        for k, v, ok in (
+            ("layout", torch.strided, True),
+            ("layout", torch.sparse_coo, False),
+            ("pin_memory", False, True),
+            ("pin_memory", True, False),
+        ):
+            node = graph.call_function(empty_op, ([2],), {k: v})
+            self.assertEqual(bool(empty.match(node)), ok)
+        # without a schema, any undeclared kwarg blocks the match
+        torch_add = CallFunction(torch.add, KeywordArg("x"), KeywordArg("y"))
+        self.assertTrue(torch_add.match(graph.call_function(torch.add, (x, y))))
+        node = graph.call_function(torch.add, (x, y), {"alpha": 1})
+        self.assertFalse(torch_add.match(node))
+
+    def test_addcdiv_fma_keeps_add_alpha(self):
+        # https://github.com/pytorch/pytorch/issues/199839
+        args = [torch.randn(8, device=GPU_TYPE) for _ in range(3)]
+        for alpha, fuses in ((1, True), (0.1, False)):
+
+            def fn(m, t1, t2):
+                return torch.add(m, t1 / t2 * 0.01, alpha=alpha)
+
+            torch._dynamo.reset()
+            counters.clear()
+            torch.testing.assert_close(torch.compile(fn)(*args), fn(*args))
+            self.assertEqual(counters["inductor"]["addcdiv_fma_fused"], int(fuses))
+
     def test_addmm_symbolic_scalar(self):
         def fn(m1, m2):
             bias = m1.size(0)
@@ -1048,13 +1118,10 @@ class TestPatternMatcher(TestCase):
         def unbacked(x):
             return torch.full((2,), x.item(), dtype=dtype).cumsum(0).sum()
 
-        x = torch.tensor(3)
+        x = torch.tensor(0)
         result, (code,) = run_and_get_code(torch.compile(unbacked, fullgraph=True), x)
         self.assertEqual(result, unbacked(x))
-        if dtype == torch.bool:
-            self.assertNotIn("aten.cumsum", code)  # exempt, so this one still folds
-        else:
-            self.assertIn("aten.cumsum", code)
+        self.assertIn("aten.cumsum", code)
 
         def make(fill):
             def fn():

@@ -26,7 +26,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
 from torch._dynamo.utils import counters, identity, same
-from torch._inductor import config
+from torch._inductor import config, ir
 from torch._inductor.autotune_process import (
     _TestBenchmarkRequest,
     _TestCodeCacheBenchmarkRequest,
@@ -41,15 +41,11 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
     use_pipelined_autotuning,
 )
-from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import (
     get_registered_heuristic_class,
     override_template_heuristics,
-)
-from torch._inductor.heuristics.template.bmm import (
-    CUDABlackwellBMMTemplateConfigHeuristic,
 )
 from torch._inductor.heuristics.template.triton import (
     BlackwellGPUGemmConfig,
@@ -62,10 +58,6 @@ from torch._inductor.heuristics.template.triton import (
     XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
-from torch._inductor.kernel.bmm import (
-    blackwell_ws_persistent_tma_bmm_template,
-    BlackwellBMMConfig,
-)
 from torch._inductor.kernel.mm import (
     blackwell_ws_persistent_tma_mm_template,
     mm_template,
@@ -73,8 +65,6 @@ from torch._inductor.kernel.mm import (
     persistent_tma_mm_template,
 )
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
-from torch._inductor.kernel_inputs import MMKernelInputs
-from torch._inductor.lowering import lowerings
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
 from torch._inductor.scheduler import Scheduler
@@ -91,11 +81,7 @@ from torch._inductor.select_algorithm import (
     TritonTemplate,
     TritonTemplateCaller,
 )
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FP8,
-    SM100OrLater,
-    SM90OrLater,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -171,34 +157,6 @@ _DECOMPOSE_K_PATCH_ROCM = (
 )
 
 
-@torch.library.custom_op("inductor_test::blackwell_bmm", mutates_args={})
-def blackwell_bmm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    return torch.bmm(a, b)
-
-
-@blackwell_bmm.register_fake
-def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    return a.new_empty((a.shape[0], a.shape[1], b.shape[2]))
-
-
-@torch.library.custom_op("inductor_test::blackwell_bmm_flat", mutates_args={})
-def blackwell_bmm_flat(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    return torch.bmm(a, b).flatten(0, 1)
-
-
-@blackwell_bmm_flat.register_fake
-def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    return a.new_empty((a.shape[0] * a.shape[1], b.shape[2]))
-
-
-class _Test2CTABlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
-    bmm_configs = (BlackwellBMMConfig(128, 128, 64, 4, 8, two_ctas=True),)
-
-
-class _Test1CTABlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
-    bmm_configs = (BlackwellBMMConfig(128, 128, 64, 4, 8),)
-
-
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
     if expected_out is not None:
@@ -228,417 +186,6 @@ class TestMaxAutotune(TestCase):
         a = make_matrix(M, K, *batch_dims, reduction_dim=-1)
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
-
-    def _run_blackwell_bmm_template(
-        self,
-        broadcast_a: bool,
-        broadcast_b: bool,
-        data_partition_factor: int,
-        epilogue_subtile: int,
-        shape: tuple[int, int, int, int] = (3, 256, 8193, 128),
-        check_global_persistence: bool = False,
-        transpose_a: bool = True,
-        transpose_b: bool = False,
-    ) -> None:
-        bsz, m, k, n = shape
-        if broadcast_a:
-            a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-            if transpose_a:
-                a = a.T.contiguous().T
-            a = a.unsqueeze(0).expand(bsz, -1, -1)
-        else:
-            a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-            if transpose_a:
-                a = a.transpose(1, 2).contiguous().transpose(1, 2)
-        if broadcast_b:
-            b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-            if transpose_b:
-                b = b.T.contiguous().T
-            b = b.unsqueeze(0).expand(bsz, -1, -1)
-        else:
-            b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-            if transpose_b:
-                b = b.transpose(1, 2).contiguous().transpose(1, 2)
-
-        class TestBlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
-            def _get_template_configs_impl(self, kernel_inputs, op_name):
-                for template_config in super()._get_template_configs_impl(
-                    kernel_inputs, op_name
-                ):
-                    if (
-                        template_config["BLOCK_M"] == 128
-                        and template_config["BLOCK_N"] == 128
-                    ):
-                        yield {
-                            **template_config,
-                            "DATA_PARTITION_FACTOR": data_partition_factor,
-                            "EPILOGUE_SUBTILE": epilogue_subtile,
-                        }
-                        return
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                MMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            return choices[0].output_node()
-
-        with (
-            override_template_heuristics(
-                device_type=GPU_TYPE,
-                template_op_pairs=[
-                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
-                ],
-                override_heuristic_class=TestBlackwellBMMHeuristic,
-            ),
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
-            ),
-            config.patch(compile_threads=1),
-        ):
-            actual, codes = run_and_get_code(
-                torch.compile(lambda x, y: blackwell_bmm(x, y), fullgraph=True),
-                a,
-                b,
-            )
-
-        torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
-        self.assertIn("make_tensor_descriptor", codes[0])
-        self.assertNotIn("two_ctas=True", codes[0])
-        self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0])
-        if check_global_persistence:
-            self.assertNotIn("tl.program_id(1)", codes[0])
-            self.assertIn(
-                "shape=[BATCH, M, K] if A_ROW_MAJOR else [BATCH, K, M]",
-                codes[0],
-            )
-            self.assertIn(
-                "block_shape=[1, BLOCK_M, BLOCK_K] if A_ROW_MAJOR else "
-                "[1, BLOCK_K, BLOCK_M]",
-                codes[0],
-            )
-            self.assertIn("for tile_id in tl.range", codes[0])
-            self.assertIn("num_tiles = BATCH * num_tiles_per_batch", codes[0])
-        if meta_ws_enabled():
-            self.assertIn(
-                f"DATA_PARTITION_FACTOR : tl.constexpr = {data_partition_factor}",
-                codes[0],
-            )
-            self.assertIn("SEPARATE_EPILOGUE_STORE : tl.constexpr = True", codes[0])
-        else:
-            self.assertNotIn("data_partition_factor", codes[0])
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    @parametrize("data_partition_factor", (1, 2))
-    @parametrize("epilogue_subtile", (1, 2, 4))
-    def test_blackwell_bmm_template(
-        self,
-        data_partition_factor: int,
-        epilogue_subtile: int,
-    ) -> None:
-        self._run_blackwell_bmm_template(
-            broadcast_a=False,
-            broadcast_b=False,
-            data_partition_factor=data_partition_factor,
-            epilogue_subtile=epilogue_subtile,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    def test_blackwell_bmm_template_broadcast_b(self) -> None:
-        self._run_blackwell_bmm_template(
-            broadcast_a=False,
-            broadcast_b=True,
-            data_partition_factor=1,
-            epilogue_subtile=1,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    @parametrize("broadcast_b", (False, True))
-    def test_blackwell_bmm_template_broadcast_a(self, broadcast_b: bool) -> None:
-        self._run_blackwell_bmm_template(
-            broadcast_a=True,
-            broadcast_b=broadcast_b,
-            data_partition_factor=1,
-            epilogue_subtile=1,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    @parametrize("transpose_a", (False, True))
-    @parametrize("transpose_b", (False, True))
-    def test_blackwell_bmm_template_global_persistence(
-        self, transpose_a: bool, transpose_b: bool
-    ) -> None:
-        # More logical tiles than SMs makes each of the first workers process
-        # a second tile from a different batch through the same rank-3 TMA
-        # descriptors.
-        self._run_blackwell_bmm_template(
-            broadcast_a=False,
-            broadcast_b=False,
-            data_partition_factor=1,
-            epilogue_subtile=1,
-            shape=(160, 128, 264, 128),
-            check_global_persistence=True,
-            transpose_a=transpose_a,
-            transpose_b=transpose_b,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    def test_blackwell_bmm_template_rejects_misaligned_leading_stride(self) -> None:
-        bsz, m, k, n = 2, 256, 256, 257
-        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                MMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            self.assertEqual(choices, [])
-            raise NoValidChoicesError("Blackwell BMM template was correctly rejected")
-
-        with (
-            self.assertRaisesRegex(BackendCompilerFailed, "correctly rejected"),
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
-            ),
-            config.patch(compile_threads=1),
-        ):
-            torch.compile(blackwell_bmm, fullgraph=True)(a, b)
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    def test_blackwell_bmm_template_rejects_zero_k(self) -> None:
-        bsz, m, k, n = 2, 256, 0, 128
-        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                MMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            self.assertEqual(choices, [])
-            raise NoValidChoicesError("Blackwell BMM template rejected zero K")
-
-        with (
-            self.assertRaisesRegex(BackendCompilerFailed, "rejected zero K"),
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
-            ),
-            config.patch(compile_threads=1),
-        ):
-            torch.compile(blackwell_bmm, fullgraph=True)(a, b)
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    def test_blackwell_bmm_template_rejects_dynamic_shapes(self) -> None:
-        bsz, m, k, n = 2, 256, 256, 128
-        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                MMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            self.assertEqual(choices, [])
-            raise NoValidChoicesError("Blackwell BMM template rejected dynamic shapes")
-
-        with (
-            self.assertRaisesRegex(BackendCompilerFailed, "rejected dynamic shapes"),
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
-            ),
-            config.patch(compile_threads=1),
-        ):
-            torch.compile(blackwell_bmm, fullgraph=True, dynamic=True)(a, b)
-
-    def _assert_blackwell_bmm_2cta_rejected(
-        self,
-        a: torch.Tensor,
-        b: torch.Tensor,
-        *,
-        flatten_output: bool,
-        heuristic_class: type = _Test2CTABlackwellBMMHeuristic,
-    ) -> None:
-        class FlatBMMKernelInputs(MMKernelInputs):
-            def output_layout(self, flexible=True):
-                return FixedLayout(
-                    self.device(),
-                    self.out_dtype(),
-                    [a.shape[0] * a.shape[1], b.shape[2]],
-                    [b.shape[2], 1],
-                )
-
-        def lowering(a_node, b_node):
-            kernel_inputs_cls = (
-                FlatBMMKernelInputs if flatten_output else MMKernelInputs
-            )
-            choices = V.choices.get_template_configs(
-                kernel_inputs_cls([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            self.assertEqual(choices, [])
-            raise NoValidChoicesError("Blackwell BMM template was correctly rejected")
-
-        custom_op = (
-            torch.ops.inductor_test.blackwell_bmm_flat.default
-            if flatten_output
-            else torch.ops.inductor_test.blackwell_bmm.default
-        )
-        fn = blackwell_bmm_flat if flatten_output else blackwell_bmm
-        with (
-            self.assertRaisesRegex(BackendCompilerFailed, "correctly rejected"),
-            override_template_heuristics(
-                device_type=GPU_TYPE,
-                template_op_pairs=[
-                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
-                ],
-                override_heuristic_class=heuristic_class,
-            ),
-            mock.patch.dict(lowerings, {custom_op: lowering}),
-            config.patch(
-                compile_threads=1,
-                **{"triton.enable_template_tma_store": True},
-            ),
-        ):
-            torch.compile(fn, fullgraph=True)(a, b)
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
-    @parametrize("m", (256, 512))
-    def test_blackwell_bmm_template_2cta_flat_output(self, m: int) -> None:
-        bsz, k, n = 2, 8193, 128
-        a_storage = torch.randn(bsz, k, m, device=GPU_TYPE, dtype=torch.bfloat16)
-        a = a_storage.transpose(1, 2)
-        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-
-        class FlatBMMKernelInputs(MMKernelInputs):
-            def output_layout(self, flexible=True):
-                return FixedLayout(
-                    self.device(), self.out_dtype(), [bsz * m, n], [n, 1]
-                )
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                FlatBMMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            return choices[0].output_node()
-
-        with (
-            override_template_heuristics(
-                device_type=GPU_TYPE,
-                template_op_pairs=[
-                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
-                ],
-                override_heuristic_class=_Test2CTABlackwellBMMHeuristic,
-            ),
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm_flat.default: lowering},
-            ),
-            config.patch(
-                compile_threads=1,
-                **{"triton.enable_template_tma_store": True},
-            ),
-        ):
-            actual, codes = run_and_get_code(
-                torch.compile(blackwell_bmm_flat, fullgraph=True), a, b
-            )
-
-        torch.testing.assert_close(
-            actual.view(bsz, m, n), torch.bmm(a, b), atol=1e-2, rtol=1e-2
-        )
-        self.assertIn("TWO_CTAS : tl.constexpr = True", codes[0])
-        self.assertIn("ctas_per_cga=(2, 1, 1)", codes[0])
-        self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
-    def test_blackwell_bmm_template_2cta_rejects_m_tail(self) -> None:
-        bsz, m, k, n = 2, 384, 8193, 128
-        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-        self._assert_blackwell_bmm_2cta_rejected(
-            a,
-            b,
-            flatten_output=True,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
-    def test_blackwell_bmm_template_2cta_requires_tma_output(self) -> None:
-        bsz, m, k, n = 2, 256, 8193, 128
-        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-        self._assert_blackwell_bmm_2cta_rejected(
-            a,
-            b,
-            flatten_output=False,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    def test_blackwell_bmm_template_flat_output_rejects_m_tail(self) -> None:
-        bsz, m, k, n = 3, 200, 256, 136
-        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-        self._assert_blackwell_bmm_2cta_rejected(
-            a,
-            b,
-            flatten_output=True,
-            heuristic_class=_Test1CTABlackwellBMMHeuristic,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    def test_blackwell_bmm_template_rank3_output_m_tail(self) -> None:
-        bsz, m, k, n = 3, 200, 256, 136
-        # Small integers keep the fp32 accumulation exact.
-        a = torch.randint(-1, 2, (bsz, m, k), device=GPU_TYPE).bfloat16()
-        b = torch.randint(-1, 2, (bsz, k, n), device=GPU_TYPE).bfloat16()
-        expected = torch.bmm(a.float(), b.float()).bfloat16()
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                MMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            return choices[0].output_node()
-
-        with (
-            override_template_heuristics(
-                device_type=GPU_TYPE,
-                template_op_pairs=[
-                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
-                ],
-                override_heuristic_class=_Test1CTABlackwellBMMHeuristic,
-            ),
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
-            ),
-            config.patch(compile_threads=1),
-        ):
-            fn = torch.compile(blackwell_bmm, fullgraph=True)
-            actual, codes = run_and_get_code(fn, a, b)
-            # Poison the freed block so that rows the kernel skips stay NaN.
-            poisoned_ptr = actual.data_ptr()
-            actual.fill_(float("nan"))
-            del actual
-            actual = fn(a, b)
-
-        self.assertEqual(actual.data_ptr(), poisoned_ptr)
-        self.assertIn("blackwell_bmm", codes[0])
-        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
@@ -2930,21 +2477,31 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(out, expected, atol=1e-3, rtol=1e-3)
 
     def test_triton_template_generated_code_cache_key(self):
-        generate_and_load_args = len(
+        generate_and_load_args = set(
             inspect.signature(
                 torch._inductor.select_algorithm.TritonTemplate.generate_and_load
             ).parameters
         )
-        make_key_args = len(
+        make_key_args = set(
             inspect.signature(
                 torch._inductor.select_algorithm.GeneratedCodeCache.make_key
             ).parameters
         )
 
-        # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
-        # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
-        self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 21)
+        # Parameters intentionally excluded from the cache key:
+        # - generate_with_caching: controls whether the cache is used at all; it
+        #   doesn't affect the generated code.
+        # - prefix_inputs_fusion_indices: no producers are fused at autotune time,
+        #   so the generated code doesn't depend on it. On a cache hit, def_kernel
+        #   is replayed on the new kernel, which rebuilds the store-output allowed
+        #   inputs from its own indices, and the scheduling-time render receives
+        #   the indices through kernel_options.
+        self.assertEqual(
+            generate_and_load_args
+            - {"generate_with_caching", "prefix_inputs_fusion_indices"},
+            make_key_args,
+        )
+        self.assertEqual(len(generate_and_load_args), 22)
 
     @fresh_cache()
     @config.patch(
@@ -3037,7 +2594,8 @@ class TestMaxAutotune(TestCase):
                         'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
                         'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
-                        'hint_override':None,'triton_meta':None}"""
+                        'hint_override':None,'emulate_precision_casts':False,
+                        'triton_meta':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
@@ -3079,7 +2637,9 @@ class TestMaxAutotune(TestCase):
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
                     'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                     'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
-                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},'hint_override':None,'triton_meta':None}"""
+                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
+                    'hint_override':None,'emulate_precision_casts':False,
+                    'triton_meta':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
@@ -5591,6 +5151,44 @@ class TestPrologueFusion(TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
+    @contextlib.contextmanager
+    def force_template_fusion_benchmark(self):
+        with (
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                return_value=(1.0, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                return_value=(0.5, ""),
+            ),
+        ):
+            yield
+
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_shared_prefix_and_input_prologue_fusion(self):
+        M = K = N = 64
+
+        def foo(x, b):
+            computed = x * 2.0
+            return torch.addmm(computed, computed, b)
+
+        x = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), x, b)
+
+        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
         M, K, N = sizes
@@ -5714,6 +5312,308 @@ class TestPrologueFusion(TestCase):
         FileCheck().check("def triton").check_count(
             "tl.full([1], 1.1, tl.float32)", 3, exactly=True
         ).check("tl.store").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "mm_persistent_tma is shadowed by the Blackwell warp-specialized TMA template",
+    )
+    @config.patch(
+        {
+            "epilogue_fusion": True,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 16,
+            "triton.enable_persistent_tma_matmul": True,
+        }
+    )
+    def test_addmm_prefix_producer_benchmarks_persistent_tma_choices(self):
+        # mm_persistent_tma supports producer fusion into the addmm bias but not
+        # into A or B, so it should be benchmarked only when the bias is fused.
+        M = K = N = 128
+
+        def computed_bias(a, b, bias):
+            return torch.addmm(bias * 2.0 - 1.0, a, b)
+
+        def computed_a(a, b, bias):
+            return torch.addmm(bias, a * 2.0, b)
+
+        a = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+        bias = torch.randn(M, N, device=GPU_TYPE)
+
+        orig_swap = ir.MultiTemplateBuffer.swap_as_triton_caller
+
+        def benchmarked_template_names(fn):
+            tried: list[str] = []
+
+            def recording_swap(buf, caller):
+                tried.append(caller.name)
+                return orig_swap(buf, caller)
+
+            torch._dynamo.reset()
+            with (
+                self.force_template_fusion_benchmark(),
+                mock.patch.object(
+                    ir.MultiTemplateBuffer, "swap_as_triton_caller", recording_swap
+                ),
+            ):
+                out, code = run_and_get_code(torch.compile(fn), a, b, bias)
+            self.assertEqual(out, fn(a, b, bias), atol=0.05, rtol=0.05)
+            self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=None)
+            return tried
+
+        self.assertTrue(
+            any(
+                "persistent_tma" in name
+                for name in benchmarked_template_names(computed_bias)
+            )
+        )
+        self.assertFalse(
+            any(
+                "persistent_tma" in name
+                for name in benchmarked_template_names(computed_a)
+            )
+        )
+
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    @parametrize("prologue_fusion", (True, False))
+    @parametrize("epilogue_fusion", (True, False))
+    def test_addmm_store_output_producer_and_consumer_fusion(
+        self, prologue_fusion: bool, epilogue_fusion: bool
+    ):
+        M, K, N = 63, 120, 190
+
+        def foo(a, b, bias):
+            computed_bias = bias * 2.0 - 1.0
+            return torch.relu(torch.addmm(computed_bias, a, b)) * 0.5
+
+        a = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+        bias = torch.randn(M, N, device=GPU_TYPE)
+
+        with (
+            config.patch(
+                prologue_fusion=prologue_fusion, epilogue_fusion=epilogue_fusion
+            ),
+            self.force_template_fusion_benchmark(),
+        ):
+            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
+
+        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
+        # Store-output producer fusion of the bias is controlled by epilogue_fusion
+        # only; prologue_fusion doesn't affect it.
+        if epilogue_fusion:
+            self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+        else:
+            self.check_code(code[0], num_kernels=3, num_allocs=None, num_deallocs=None)
+
+    @config.patch({"prologue_fusion": False, "epilogue_fusion": True})
+    def test_epilogue_fusion_does_not_enable_input_prologue_fusion(self):
+        M, K, N = 64, 128, 256
+        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float, device=GPU_TYPE)
+
+        def foo(x, y):
+            return x.to(y.dtype) @ y
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
+
+    @config.patch(
+        {
+            "prologue_fusion": False,
+            "epilogue_fusion": True,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_baddbmm_store_output_producer_fusion(self):
+        batch, M, K, N = 4, 31, 48, 70
+
+        def foo(a, b, bias):
+            computed_bias = bias * 2.0 - 1.0
+            return torch.baddbmm(computed_bias, a, b)
+
+        a = torch.randn(batch, M, K, device=GPU_TYPE)
+        b = torch.randn(batch, K, N, device=GPU_TYPE)
+        bias = torch.randn(batch, M, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
+
+        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+    @fresh_cache()
+    @mock.patch("torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True)
+    @config.patch(enable_caching_generated_triton_templates=True)
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_shared_nonfusible_prefix_and_input_prologue(self):
+        from torch._inductor.select_algorithm import TritonTemplateKernel
+
+        M = K = N = 64
+        saw_shared_input = False
+        original_def_kernel = TritonTemplateKernel.def_kernel
+
+        @functools.wraps(original_def_kernel)
+        def disable_prefix_fusion(kernel, *argnames):
+            nonlocal saw_shared_input
+            if (
+                kernel.prefix_inputs_fusion_indices
+                and argnames
+                and kernel.input_nodes[0].get_name()
+                == kernel.input_nodes[kernel.prefix_args].get_name()
+            ):
+                saw_shared_input = True
+                kernel.prefix_inputs_fusion_indices = ()
+            return original_def_kernel(kernel, *argnames)
+
+        def foo(x, b):
+            computed = x * 2.0
+            return torch.addmm(computed, computed, b)
+
+        x = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with (
+            mock.patch.object(
+                TritonTemplateKernel,
+                "def_kernel",
+                disable_prefix_fusion,
+            ),
+            self.force_template_fusion_benchmark(),
+        ):
+            out, code = run_and_get_code(torch.compile(foo), x, b)
+
+        self.assertTrue(saw_shared_input)
+        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
+
+    @parametrize(
+        "prologue_fusion,epilogue_fusion",
+        ((True, False), (False, True)),
+    )
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_shared_prefix_requires_both_placements(
+        self, prologue_fusion: bool, epilogue_fusion: bool
+    ):
+        M = K = N = 64
+
+        def foo(x, b):
+            computed = x * 2.0
+            return torch.addmm(computed, computed, b)
+
+        x = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with (
+            config.patch(
+                prologue_fusion=prologue_fusion,
+                epilogue_fusion=epilogue_fusion,
+            ),
+            self.force_template_fusion_benchmark(),
+        ):
+            out, code = run_and_get_code(torch.compile(foo), x, b)
+
+        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
+
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_shared_intermediate_prefix_and_input_prologue_fusion(self):
+        # The shared producer and its two branches form a multi-output pointwise
+        # group. It must remain separate from the template rather than being
+        # incorrectly routed to one template input's producer group.
+        M = K = N = 64
+
+        def foo(x, b):
+            shared = x * 100.0
+            computed_bias = shared * 2.0
+            computed_a = shared * 3.0
+            return torch.addmm(computed_bias, computed_a, b)
+
+        x = torch.randn(M, K, device=GPU_TYPE) * 0.01
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), x, b)
+
+        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
+
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_indirect_indexing_bias_fusion(self):
+        M, K, N = 63, 120, 190
+        rows, offset = 257, 7
+
+        def foo(source, indices, a, b):
+            computed_bias = source[indices, offset : offset + N]
+            return torch.relu(torch.addmm(computed_bias, a, b)) * 0.5
+
+        source = torch.randn(rows, N + offset + 3, device=GPU_TYPE)
+        indices = torch.randint(0, rows, (M,), device=GPU_TYPE)
+        a = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), source, indices, a, b)
+
+        self.assertEqual(out, foo(source, indices, a, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=4)
+        # The index bounds check must survive in the store-output region.
+        FileCheck().check("tl.dot").check("tl.device_assert").run(code[0])
+
+    @config.patch(
+        {
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_prefix_prologue_fusion_multi_use(self):
+        # computed_bias is also returned, so it must be materialized and its
+        # producer is not fused into the template's store_output.
+        M, K, N = 63, 120, 190
+
+        def foo(a, b, bias):
+            computed_bias = bias * 2.0 - 1.0
+            return torch.addmm(computed_bias, a, b), computed_bias
+
+        a = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+        bias = torch.randn(M, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
+
+        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
 
     @config.patch(
         {

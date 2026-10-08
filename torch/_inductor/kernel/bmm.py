@@ -142,18 +142,18 @@ def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
     if meta["TWO_CTAS"]:
         grid_m = cdiv(grid_m, 2) * 2
     tiles = b * grid_m * cdiv(n, meta["BLOCK_N"])
+    # Under 2CTA both tiles and NUM_SMS are even, so every CTA has a partner.
+    # The kernel strides by NUM_SMS, so the grid must not round it further.
     grid_x = min(meta["NUM_SMS"], tiles)
-    if meta["TWO_CTAS"]:
-        grid_x = grid_x // 2 * 2
     return (grid_x, 1, 1)
 
 
 blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
     name="blackwell_bmm",
     grid=blackwell_bmm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_bmm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_bmm")
+    + load_kernel_template("triton_gemm_helpers"),
     cache_codegen_enabled_for_template=True,
-    prologue_loads_all_inputs=True,
 )
 
 
@@ -260,7 +260,10 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
             mat1 = L.unsqueeze(mat1, -1)
             mat2 = L.unsqueeze(mat2, 1)
-            return L.sum_(L.mul(mat1, mat2), axis=2)
+            # L.sum_ promotes integers to int64 (mirroring torch.sum), but
+            # aten.bmm promises the input dtype (or out_dtype when one is
+            # given), so cast back to whichever the op promised.
+            return L.to_dtype(L.sum_(L.mul(mat1, mat2), axis=2), out_dtype or dtype)
 
         def is_valid_to_require_contiguous(t):
             if not ir.is_storage_and_layout(t):
