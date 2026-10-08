@@ -52,21 +52,6 @@ class TORCH_API ProcessGroupNCCLLazy
   void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override {
     getPrimary()->addEphemeralTimeout(timeout);
   }
-
-  // Defers the primary communicator (see ProcessGroupNCCL::setLazyDevice).
-  // Pair comms created afterwards are deferred on the same device.
-  void setLazyDevice(at::Device device);
-
- private:
-  ProcessGroupNCCLLazy(
-      const c10::intrusive_ptr<::c10d::Store>& store,
-      int rank,
-      int size,
-      const c10::intrusive_ptr<ProcessGroupNCCL::Options>& options,
-      std::shared_ptr<std::optional<at::Device>> lazy_device);
-
-  // Shared with the pair factory, which runs inside LazyBackend.
-  std::shared_ptr<std::optional<at::Device>> lazy_device_;
 };
 
 } // namespace c10d::nccl2

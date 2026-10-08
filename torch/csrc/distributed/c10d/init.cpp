@@ -4142,6 +4142,10 @@ Attributes:
             available parameters in the config. See
             https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
             for details.
+    lazy_init (bool): nccl2 only. Create the communicator on the first
+            operation instead of when the group is bound to a device, so a
+            group that never communicates allocates no NCCL resources. Such a
+            group is not split from by ``new_group``. Default is False.
 
 Example::
     >>> import torch.distributed as dist
@@ -4164,6 +4168,7 @@ Example::
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
+      .def_readwrite("lazy_init", &::c10d::ProcessGroupNCCL::Options::lazy_init)
       .def_readwrite(
           "use_pg_for_symm_mem_rendezvous",
           &::c10d::ProcessGroupNCCL::Options::use_pg_for_symm_mem_rendezvous)
@@ -4323,19 +4328,14 @@ Returns:
                           int size,
                           c10::intrusive_ptr<
                               ::c10d::nccl2::ProcessGroupNCCL::Options> options,
-                          std::optional<at::Device> device_id,
-                          bool lazy_init) {
+                          std::optional<at::Device> device_id) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
                 auto backend =
                     c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCL>(
                         store, rank, size, std::move(options));
-                if (lazy_init && device_id.has_value()) {
-                  backend->setLazyDevice(*device_id);
-                } else {
-                  backend->setBoundDeviceId(device_id);
-                }
+                backend->setBoundDeviceId(device_id);
                 return backend;
               }),
               py::arg("store"),
@@ -4343,7 +4343,6 @@ Returns:
               py::arg("size"),
               py::arg("options"),
               py::arg("device_id") = std::nullopt,
-              py::arg("lazy_init") = false,
               R"(Create a new ProcessGroupNCCL2 instance.)")
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
@@ -4384,10 +4383,8 @@ Returns:
               R"(
             This process group's ``ncclComm_t``, as an opaque handle.
 
-            The process group holds a single communicator, so the value does
-            not depend on the current device. The communicator is created in
-            the constructor when the group is bound to a device and otherwise
-            by the first operation; the value is 0 until then.
+            The process group holds a single communicator, created in its
+            constructor, so the value does not depend on the current device.
 
             .. warning ::
                 The communicator is owned by the process group. Do not modify
@@ -4410,17 +4407,12 @@ Returns:
                       int size,
                       const c10::intrusive_ptr<
                           ::c10d::nccl2::ProcessGroupNCCL::Options>& options,
-                      std::optional<at::Device> device_id,
-                      bool lazy_init) {
+                      std::optional<at::Device> device_id) {
             py::gil_scoped_release nogil{};
             auto backend =
                 c10::make_intrusive<::c10d::nccl2::ProcessGroupNCCLLazy>(
                     store, rank, size, options);
-            if (lazy_init && device_id.has_value()) {
-              backend->setLazyDevice(*device_id);
-            } else {
-              backend->setBoundDeviceId(device_id);
-            }
+            backend->setBoundDeviceId(device_id);
             return backend;
           }),
           py::arg("store"),
@@ -4428,7 +4420,6 @@ Returns:
           py::arg("size"),
           py::arg("options"),
           py::arg("device_id") = std::nullopt,
-          py::arg("lazy_init") = false,
           R"(Create a new ProcessGroupNCCLLazy instance.)")
       .def(
           py::init([](const c10::intrusive_ptr<::c10d::Store>& store,

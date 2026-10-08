@@ -386,13 +386,20 @@ class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
 
 
 class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
-    """Without device_id, communicators are created on first use."""
+    """With lazy_init, communicators are created on first use."""
+
+    @staticmethod
+    def _lazy_opts() -> dist.ProcessGroupNCCL.Options:
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.lazy_init = True
+        return opts
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_new_group_defers_comm(self) -> None:
-        group = dist.new_group(list(range(self.world_size)))
+        group = dist.new_group(pg_options=self._lazy_opts(), device_id=self.device)
         backend = group._get_backend(self.device)
+        self.assertFalse(backend.supports_splitting)
         self.assertEqual(backend.comm_ptr, 0)
 
         t = torch.ones(1, device=self.device)
@@ -404,9 +411,10 @@ class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_new_group_with_nonmembers(self) -> None:
-        # Only members bootstrap the lazy communicator, so non-members need not
-        # take part.
-        group = dist.new_group(ranks=[0])
+        # Only members bootstrap the communicator; non-members don't split.
+        group = dist.new_group(
+            ranks=[0], pg_options=self._lazy_opts(), device_id=self.device
+        )
         if self.rank == 0:
             t = torch.ones(1, device=self.device)
             dist.all_reduce(t, group=group)
@@ -1450,7 +1458,7 @@ assert not torch._C._cuda_hasPrimaryContext(0), "watchdog created a CUDA context
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
-    def test_init_without_device_id(self) -> None:
+    def test_eager_init_without_device_id(self) -> None:
         self._run_child(device_id="None")
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")

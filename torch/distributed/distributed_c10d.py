@@ -832,22 +832,6 @@ def _nccl2_options(
     return backend_options
 
 
-def _nccl2_lazy_init(opts: _DistributedBackendOptions) -> bool:
-    """Whether to defer the communicator to its first operation.
-
-    Matches the stock backend: a group is only initialized eagerly when the
-    caller bound it to a device (``device_id``). Otherwise each communicator is
-    bootstrapped among the group's members on first use, so groups that never
-    communicate allocate no NCCL resources.
-    """
-    process_group = opts.process_group
-    return (
-        not opts.enable_reconfigure
-        and process_group is not None
-        and process_group.bound_device_id is None
-    )
-
-
 def _nccl2_device(
     opts: _DistributedBackendOptions,
 ) -> torch.device | None:
@@ -873,9 +857,11 @@ def _nccl2_device(
         )
         device_index = global_rank % device_count
 
-    # Not bound on the process group: an unbound group is lazily initialized
-    # (see _nccl2_lazy_init) and must not be split from.
-    return torch.device("cuda", device_index)
+    device = torch.device("cuda", device_index)
+    if process_group is not None:
+        process_group.bound_device_id = device
+
+    return device
 
 
 def _create_nccl2_process_group(
@@ -902,7 +888,6 @@ def _create_nccl2_process_group(
         opts.group_size,
         pg_options,
         _nccl2_device(opts),
-        lazy_init=_nccl2_lazy_init(opts),
     )
     return backend
 
@@ -931,7 +916,6 @@ def _create_nccl_lazy_process_group(
         opts.group_size,
         pg_options,
         _nccl2_device(opts),
-        lazy_init=_nccl2_lazy_init(opts),
     )
     return backend
 
@@ -3021,7 +3005,13 @@ def _new_process_group_helper(
     # communicators in some backends, we have to be careful and only
     # split when we *know* the default PG has already started communicator initialization.
     # We know this if we have bound a device id to the default pg (eager initialized).
-    if is_initialized() and _get_default_group().bound_device_id:
+    # A lazy_init group must not be split: splitting is eager and collective
+    # over the parent.
+    if (
+        is_initialized()
+        and _get_default_group().bound_device_id
+        and not getattr(backend_options, "lazy_init", False)
+    ):
         split_from = _get_split_source(_get_default_group(), backend)
     else:
         split_from = None

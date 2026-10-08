@@ -354,9 +354,10 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
 }
 
 void ProcessGroupNCCL::checkInitialized() {
-  if (lazy_init_ && init_state_ == InitializationState::UNINITIALIZED) {
-    lazy_init_ = false;
-    ensureInitialized(device_);
+  if (options_c10d_->lazy_init &&
+      init_state_ == InitializationState::UNINITIALIZED &&
+      getBoundDeviceId().has_value()) {
+    ensureInitialized(*getBoundDeviceId());
   }
   TORCH_CHECK(
       init_state_ == InitializationState::INITIALIZED,

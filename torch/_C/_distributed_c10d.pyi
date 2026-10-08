@@ -923,6 +923,7 @@ class ProcessGroupNCCL(Backend):
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
         split_color: int
+        lazy_init: bool
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
@@ -1194,7 +1195,6 @@ class ProcessGroupNCCL2(Backend):
         size: int,
         options: ProcessGroupNCCL.Options,
         device_id: torch.device | None = None,
-        lazy_init: bool = False,
     ) -> None: ...
     def get_error(self) -> ErrorType: ...
     @property
@@ -1208,7 +1208,6 @@ class ProcessGroupNCCLLazy(Backend):
         size: int,
         options: ProcessGroupNCCL.Options,
         device_id: torch.device | None = None,
-        lazy_init: bool = False,
     ) -> None: ...
     def get_error(self) -> ErrorType: ...
     def _num_active_channels(self) -> int: ...
