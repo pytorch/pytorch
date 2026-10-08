@@ -2378,7 +2378,7 @@ def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
     """Whether a Triton GEMM template should use TF32, matching eager matmul."""
     if device_type == "xpu":
         # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
-        return torch.backends.mkldnn.allow_tf32
+        return bool(torch.backends.mkldnn.allow_tf32)
     if device_type == "cuda":
         # allow_tf32 alignment heuristics based on reverse engineering
         # H100 CUDA 12.8 behavior
