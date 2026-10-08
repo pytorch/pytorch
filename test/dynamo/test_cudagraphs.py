@@ -222,7 +222,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
             out = compiled_foo(x)
             self.assertTrue(same(out, foo(x)))
 
-        manager = cudagraph_trees.get_manager(x.device.index)
+        manager = cudagraph_trees.get_manager(x.device)
         self.assertTrue(
             len(manager.warned_functions) == 0,
             "Replaying inference workload should not warn about repeated graph captures",

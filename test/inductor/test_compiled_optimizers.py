@@ -723,7 +723,9 @@ class CompiledOptimizerTests(TestCase):
 
     def check_cudagraphs_ran(self):
         # We run the zeroth device currently
-        manager = torch._inductor.cudagraph_trees.get_container(0).tree_manager
+        manager = torch._inductor.cudagraph_trees.get_container(
+            torch.device("cuda", 0)
+        ).tree_manager
         self.assertIsNotNone(manager)
         self.assertEqual(manager.new_graph_id().id, 1)
 

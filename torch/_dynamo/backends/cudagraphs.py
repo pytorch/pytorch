@@ -129,16 +129,16 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
         return skip
 
     if node := get_first_incompatible_cudagraph_node(aot_model):
-        return format_default_skip_message(f"incompatible op ({node.name})")
+        return f"incompatible op ({node.name})"
 
     return None
 
 
-def get_device_index(gm: torch.fx.GraphModule) -> int:
+def get_cudagraph_device(gm: torch.fx.GraphModule) -> torch.device:
     device = next(iter(get_device_node_mapping(gm)))
     if device.type != "cuda":
         raise AssertionError(f"Expected CUDA device, got {device.type}")
-    return device.index
+    return device
 
 
 def get_stack_traces(gm: torch.fx.GraphModule) -> list[str | None]:
@@ -171,17 +171,16 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
         fixed = num_fw_fixed_arguments(len(dynamo_inputs), len(aot_inputs))
         if skip_msg := check_for_skip(aot_model, fixed):
             BoxedBool.disable(do_cudagraphs)
-            log_cudagraph_skip_and_bump_counter(
-                f"skipping cudagraphs due to {skip_msg}"
-            )
+            log_cudagraph_skip_and_bump_counter(format_default_skip_message(skip_msg))
             return interp
 
-        boxed_device_index.set(get_device_index(aot_model))
+        device = get_cudagraph_device(aot_model)
+        boxed_device_index.set(device)
         out = cudagraphify_impl(
             interp,
             aot_inputs,
             range(fixed),
-            device_index=boxed_device_index.value,
+            device=device,
             is_backward=False,
             is_inference=is_inference,
             stack_traces=get_stack_traces(aot_model),
@@ -200,16 +199,14 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
 
         fixed = count_tangents(aot_model)
         if skip_msg := check_for_skip(aot_model, fixed):
-            log_cudagraph_skip_and_bump_counter(
-                f"skipping cudagraphs due to {skip_msg}"
-            )
+            log_cudagraph_skip_and_bump_counter(format_default_skip_message(skip_msg))
 
             # See [Backward Generation Handling]
-            device_idx = boxed_device_index.value
-            if device_idx is None:
-                device_idx = 0  # Default to device 0 if not set
+            device = boxed_device_index.value
+            if device is None:
+                device = get_cudagraph_device(aot_model)
             manager = torch._inductor.cudagraph_trees.get_manager(
-                device_idx, create_if_none_exists=False
+                device, create_if_none_exists=False
             )
             if manager is None:
                 raise AssertionError("cudagraph manager must exist for backward")
@@ -226,7 +223,7 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
             interp,
             aot_inputs,
             range(fixed),
-            device_index=get_device_index(aot_model),
+            device=get_cudagraph_device(aot_model),
             is_backward=True,
             is_inference=False,
             stack_traces=get_stack_traces(aot_model),

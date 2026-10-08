@@ -15,10 +15,12 @@ The abstraction layer enables device-agnostic code in TorchDynamo while allowing
 specialized implementations for each hardware backend's unique features.
 """
 
+import contextlib
 import inspect
 import time
 from collections import namedtuple
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Generator, Iterable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -101,6 +103,128 @@ class DeviceInterface:
         @staticmethod
         def get_device_properties(device: torch.types.Device = None) -> Any:
             raise NotImplementedError
+
+    class Graphs:
+        """
+        Backend surface used by Inductor's CUDA Graph Trees
+        (``torch/_inductor/cudagraph_trees.py``) to capture a device graph and
+        to drive the caching allocator's private pool around it.
+
+        ``supported`` is the opt-in: it is what puts a device type in
+        ``torch._inductor.cudagraph_utils._CUDAGRAPH_SUPPORTED_DEVICE_TYPES``,
+        so a backend that sets it must provide every member without a default.
+        The members that do have a default describe a capability the backend
+        may simply not have; the default is the correct answer for a backend
+        that lacks it.
+        """
+
+        supported = False
+
+        class Graph:
+            def __new__(cls, *args: Any, **kwargs: Any) -> Any:
+                raise NotImplementedError
+
+        @staticmethod
+        def pool_handle() -> tuple[int, int]:
+            raise NotImplementedError
+
+        @staticmethod
+        def capture(
+            graph: Any, *, pool: tuple[int, int], stream: torch.Stream
+        ) -> AbstractContextManager[None]:
+            """Capture work into ``graph`` on ``stream``, allocating from ``pool``.
+
+            Backends that can scope capture errors to the calling thread should
+            do so, but cudagraph trees serializes capture itself, so a backend
+            with no such control is still correct here.
+            """
+            raise NotImplementedError
+
+        @staticmethod
+        def begin_allocate_current_thread_to_pool(
+            device_index: int, pool: tuple[int, int]
+        ) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def end_allocate_to_pool(device_index: int, pool: tuple[int, int]) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def release_pool(device_index: int, pool: tuple[int, int]) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def get_checkpoint_state(device_index: int, pool: tuple[int, int]) -> Any:
+            raise NotImplementedError
+
+        @staticmethod
+        def set_checkpoint_pool_state(
+            device_index: int,
+            state: Any,
+            stale_storages: list[int],
+            live_storages: list[int],
+        ) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def check_pool_live_allocations(
+            device_index: int, pool: tuple[int, int], live_data_ptrs: set[int]
+        ) -> bool:
+            raise NotImplementedError
+
+        @staticmethod
+        def raw_delete(data_ptr: int) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def memory_snapshot() -> list[dict[str, Any]]:
+            raise NotImplementedError
+
+        @staticmethod
+        def history_recording() -> AbstractContextManager[None]:
+            """Record allocation histories, for attributing untracked pool blocks."""
+            raise NotImplementedError
+
+        @staticmethod
+        def construct_tensor(metadata: dict[str, Any], storage: Any) -> torch.Tensor:
+            """Rebuild a tensor of this device type over an existing storage."""
+            raise NotImplementedError
+
+        @staticmethod
+        def has_standard_deleter(storage_impl_ptr: int) -> bool:
+            raise NotImplementedError
+
+        @staticmethod
+        def free_and_remove_deleter(storage_impl_ptr: int) -> None:
+            raise NotImplementedError
+
+        @staticmethod
+        def clear_matmul_workspaces() -> AbstractContextManager[None]:
+            """Drop cached matmul workspaces around a capture or a warmup.
+
+            A workspace allocated in one generation must not stay in use while
+            that generation's tensors are freed back to the private pool.
+            """
+            return contextlib.nullcontext()
+
+        @staticmethod
+        def freeze_conv_benchmark_cache() -> AbstractContextManager[None]:
+            """Stop conv autotuning from emptying the allocator mid-capture."""
+            return contextlib.nullcontext()
+
+        @staticmethod
+        def control_flow_warmup_mode() -> AbstractContextManager[None]:
+            """Warm up branches of torch.cond / torch.while_loop before capture.
+
+            Only backends whose graphs have conditional nodes need this.
+            """
+            return contextlib.nullcontext()
+
+        @staticmethod
+        def control_flow_capture_mode() -> AbstractContextManager[None]:
+            """Capture torch.cond / torch.while_loop as graph conditional nodes."""
+            return contextlib.nullcontext()
 
     @staticmethod
     def current_device() -> int:
@@ -329,6 +453,127 @@ class CudaInterface(DeviceInterface):
                 caching_worker_device_properties["cuda"] = device_prop
 
             return caching_worker_device_properties["cuda"][device]
+
+    class Graphs(DeviceInterface.Graphs):
+        supported = True
+
+        Graph = torch.cuda.CUDAGraph  # type: ignore[assignment]
+
+        pool_handle = staticmethod(torch.cuda.graph_pool_handle)  # type: ignore[assignment]
+        memory_snapshot = staticmethod(torch.cuda.memory_snapshot)  # type: ignore[assignment]
+
+        @staticmethod
+        def capture(
+            graph: Any, *, pool: Any, stream: Any
+        ) -> AbstractContextManager[None]:
+            return torch.cuda.graph(  # type: ignore[return-value]
+                graph, pool=pool, stream=stream, capture_error_mode="thread_local"
+            )
+
+        @staticmethod
+        def begin_allocate_current_thread_to_pool(
+            device_index: int, pool: tuple[int, int]
+        ) -> None:
+            torch._C._cuda_beginAllocateCurrentThreadToPool(device_index, pool)
+
+        @staticmethod
+        def end_allocate_to_pool(device_index: int, pool: tuple[int, int]) -> None:
+            torch._C._cuda_endAllocateToPool(device_index, pool)
+
+        @staticmethod
+        def release_pool(device_index: int, pool: tuple[int, int]) -> None:
+            torch._C._cuda_releasePool(device_index, pool)
+
+        @staticmethod
+        def get_checkpoint_state(device_index: int, pool: tuple[int, int]) -> Any:
+            return torch._C._cuda_getCheckpointState(device_index, pool)
+
+        @staticmethod
+        def set_checkpoint_pool_state(
+            device_index: int,
+            state: Any,
+            stale_storages: list[int],
+            live_storages: list[int],
+        ) -> None:
+            torch._C._cuda_setCheckpointPoolState(
+                device_index, state, stale_storages, live_storages
+            )
+
+        @staticmethod
+        def check_pool_live_allocations(
+            device_index: int, pool: tuple[int, int], live_data_ptrs: set[int]
+        ) -> bool:
+            return torch._C._cuda_checkPoolLiveAllocations(
+                device_index, pool, live_data_ptrs
+            )
+
+        @staticmethod
+        def raw_delete(data_ptr: int) -> None:
+            torch._C._cuda_cudaCachingAllocator_raw_delete(data_ptr)
+
+        @staticmethod
+        @contextlib.contextmanager
+        def history_recording() -> Generator[None, None, None]:
+            enabled = torch._C._cuda_isHistoryEnabled()
+            try:
+                if not enabled:
+                    torch.cuda.memory._record_memory_history()
+                yield
+            finally:
+                if not enabled:
+                    torch.cuda.memory._record_memory_history(None)
+
+        @staticmethod
+        def construct_tensor(metadata: dict[str, Any], storage: Any) -> torch.Tensor:
+            return torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata(
+                metadata, storage
+            )
+
+        @staticmethod
+        def has_standard_deleter(storage_impl_ptr: int) -> bool:
+            return torch._C._has_Standard_Deleter(storage_impl_ptr)
+
+        @staticmethod
+        def free_and_remove_deleter(storage_impl_ptr: int) -> None:
+            torch._C._free_And_Remove_DeleterFn(storage_impl_ptr)
+
+        @staticmethod
+        @contextlib.contextmanager
+        def clear_matmul_workspaces() -> Generator[None, None, None]:
+            # TORCH_CUBLAS_WORKSPACE_CACHE=1 keeps persistent workspaces for matmuls.
+            # The default eager workspace mode does not populate this cache, so these
+            # calls are no-ops there.
+            torch._C._cuda_clearCublasWorkspaces()
+            try:
+                yield
+            finally:
+                torch._C._cuda_clearCublasWorkspaces()
+
+        @staticmethod
+        @contextlib.contextmanager
+        def freeze_conv_benchmark_cache() -> Generator[None, None, None]:
+            prev = torch._C._cuda_get_conv_benchmark_empty_cache()
+            torch._C._cudnn_set_conv_benchmark_empty_cache(False)
+            try:
+                yield
+            finally:
+                torch._C._cudnn_set_conv_benchmark_empty_cache(prev)
+
+        @staticmethod
+        def control_flow_warmup_mode() -> AbstractContextManager[None]:
+            from torch._higher_order_ops.cudagraph_conditional_nodes import (
+                ControlFlowOpWarmupDispatchMode,
+            )
+
+            return ControlFlowOpWarmupDispatchMode()
+
+        @staticmethod
+        def control_flow_capture_mode() -> AbstractContextManager[None]:
+            from torch._higher_order_ops.cudagraph_conditional_nodes import (
+                CUDAGraphCaptureControlFlowOpDispatchMode,
+            )
+
+            return CUDAGraphCaptureControlFlowOpDispatchMode()
 
     current_device = staticmethod(torch.cuda.current_device)
     set_device = staticmethod(torch.cuda.set_device)

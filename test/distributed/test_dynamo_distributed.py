@@ -1052,7 +1052,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
             # 2 fwd and 2 bwd graph such that 4 graphs in total
             graph_id = (
-                torch._inductor.cudagraph_trees.get_container(self.rank)
+                torch._inductor.cudagraph_trees.get_container(
+                    torch.device("cuda", self.rank)
+                )
                 .tree_manager.new_graph_id()
                 .id
             )
