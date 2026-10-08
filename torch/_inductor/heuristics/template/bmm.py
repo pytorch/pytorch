@@ -15,6 +15,7 @@ from ...kernel.bmm import (
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...utils import can_use_tma, get_num_sms, has_free_symbols
 from .base import TemplateConfigHeuristics
+from .triton import mm_allow_tf32
 
 
 if TYPE_CHECKING:
@@ -121,4 +122,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> dict[str, Any]:
-        return {"ALLOW_TF32": False}
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
+        m, n, k = kernel_inputs.mnk_symbolic()
+        return {"ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type)}
