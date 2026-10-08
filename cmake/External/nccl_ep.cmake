@@ -1,16 +1,17 @@
 if(NOT __NCCL_EP_INCLUDED)
   set(__NCCL_EP_INCLUDED TRUE)
 
-  if(NCCL_EP_SOURCE_DIR)
-    get_filename_component(NCCL_EP_SOURCE_DIR "${NCCL_EP_SOURCE_DIR}" ABSOLUTE
-      BASE_DIR "${PROJECT_SOURCE_DIR}")
+  if(NOT NCCL_EP_SOURCE_DIR)
+    set(NCCL_EP_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/nccl-extensions/nccl_ep")
   endif()
-  if(NOT NCCL_EP_SOURCE_DIR OR
-     NOT EXISTS "${NCCL_EP_SOURCE_DIR}/CMakeLists.txt" OR
+  get_filename_component(NCCL_EP_SOURCE_DIR "${NCCL_EP_SOURCE_DIR}" ABSOLUTE
+    BASE_DIR "${PROJECT_SOURCE_DIR}")
+  if(NOT EXISTS "${NCCL_EP_SOURCE_DIR}/CMakeLists.txt" OR
      NOT EXISTS "${NCCL_EP_SOURCE_DIR}/include/nccl_ep.h")
     message(FATAL_ERROR
-      "USE_NCCL_EP requires NCCL_EP_SOURCE_DIR to point to the nccl_ep "
-      "directory of a native nccl-extensions checkout.")
+      "NCCL EP sources are missing at ${NCCL_EP_SOURCE_DIR}. "
+      "Run git submodule update --init --recursive third_party/nccl-extensions "
+      "or set NCCL_EP_SOURCE_DIR to the nccl_ep directory of another checkout.")
   endif()
 
   # Reuse PyTorch's architecture expansion, including named GPUs and +PTX.

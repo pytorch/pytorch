@@ -97,7 +97,7 @@
 #                            vars are no longer used.
 #   NCCL_ROOT / NCCL_LIB_DIR / NCCL_INCLUDE_DIR   nccl location (read from env in
 #                            cmake/Modules/FindNCCL.cmake)
-#   NCCL_EP_SOURCE_DIR       native nccl-extensions/nccl_ep source (passthrough)
+#   NCCL_EP_SOURCE_DIR       optional native nccl-extensions/nccl_ep override (passthrough)
 #   ACL_ROOT_DIR             Arm Compute Library location (read from env in
 #                            cmake/Modules/FindACL.cmake)
 #   LIBRARY_PATH / LD_LIBRARY_PATH   searched for libraries (compiler/linker native)

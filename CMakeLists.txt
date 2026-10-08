@@ -425,7 +425,7 @@ cmake_dependent_option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF "USE_NCCL"
 # Builds NCCL-EP if true.
 cmake_dependent_option(USE_NCCL_EP "Build native NCCL EP from nccl-extensions" OFF
                        "USE_NCCL;USE_CUDA" OFF)
-set(NCCL_EP_SOURCE_DIR "" CACHE PATH "Path to nccl-extensions/nccl_ep")
+set(NCCL_EP_SOURCE_DIR "" CACHE PATH "Override the bundled nccl-extensions/nccl_ep source")
 cmake_dependent_option(USE_NVSHMEM "Use NVSHMEM" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
