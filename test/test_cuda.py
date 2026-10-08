@@ -18,7 +18,7 @@ import unittest
 import warnings
 import weakref
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from copy import deepcopy
 from itertools import product
 from random import randint
@@ -13848,7 +13848,7 @@ class TestGreenContextStreamPool(TestCase):
                     self.assertTrue(creating.wait(10))
                     rest = executor.submit(wrap_pool)
                     self.assertTrue(requesting.wait(10))
-                    with self.assertRaises(TimeoutError):
+                    with self.assertRaises(FutureTimeoutError):
                         rest.result(timeout=0.1)
                 finally:
                     release.set()
