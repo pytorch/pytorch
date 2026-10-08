@@ -114,23 +114,6 @@ namespace at::hip::detail {
 		// for 16-bit outputs) because in 3D x 2D a group's output columns can start at any even offset.
 		using Cfg16_256x128x64_Pad  = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>;
 
-		// fp8/bf8 configs from Primus-Turbo. Primus runs these through its quantized runner
-		// (row/col, tensor and blockwise scales), not the bf16/fp16 runner above.
-		// gfx942: selected by N like the 16-bit configs; mixed fp8 x bf8 uses the 32x32x16 padded one,
-		// blockwise (ABQuantGrouped) scaling uses 128x128x128.
-		using Cfg8_Gfx942_256x256x128_32x32x32           = CkTileGroupGemmConfig<256, 256, 128, 32, 32, 32, 2, 2, false, false, false>;
-		using Cfg8_Gfx942_256x128x128_32x32x32           = CkTileGroupGemmConfig<256, 128, 128, 32, 32, 32, 2, 2, false, false, false>;
-		using Cfg8_Gfx942_256x128x128_32x32x32_PadN      = CkTileGroupGemmConfig<256, 128, 128, 32, 32, 32, 2, 2, false, true, false>;
-		using Cfg8_Gfx942_256x256x128_32x32x16_PadN      = CkTileGroupGemmConfig<256, 256, 128, 32, 32, 16, 2, 2, false, true, false>;
-		using Cfg8_Gfx942_128x128x128_32x32x32           = CkTileGroupGemmConfig<128, 128, 128, 32, 32, 32, 2, 2, false, false, false>;
-
-		// gfx950: N % 256 == 0 -> 256x256x128, N % 128 == 0 -> 256x256x128_PadN, otherwise 128x128x128_32x32x64;
-		// blockwise (ABQuantGrouped) scaling uses the 1x4-wave config.
-		using Cfg8_Gfx950_256x256x128_16x16x128          = CkTileGroupGemmConfig<256, 256, 128, 16, 16, 128, 2, 2, false, false, false>;
-		using Cfg8_Gfx950_256x256x128_16x16x128_PadN     = CkTileGroupGemmConfig<256, 256, 128, 16, 16, 128, 2, 2, false, true, false>;
-		using Cfg8_Gfx950_128x128x128_32x32x64           = CkTileGroupGemmConfig<128, 128, 128, 32, 32, 64, 2, 2, false, false, false>;
-		using Cfg8_Gfx950_128x128x128_16x16x128_1x4Waves = CkTileGroupGemmConfig<128, 128, 128, 16, 16, 128, 1, 4, false, false, false>;
-
 		using Strides = std::array<int64_t, 3>;
 
 
@@ -267,6 +250,9 @@ namespace at::hip::detail {
 				int32_t N,
 				int32_t K,
 				int32_t group_count) {
+			//TODO: not a permanent restriction, will add support for mixed dtypes later
+			TORCH_CHECK(mat_a.scalar_type() == mat_b.scalar_type(), "ck_tile group gemm: mixed dtypes are not supported, got mat_a ", mat_a.scalar_type(), " and mat_b ", mat_b.scalar_type());
+			
 			const hipStream_t stream = c10::hip::getCurrentHIPStream().stream();
 
 			auto to_strides = [](at::IntArrayRef values) {
@@ -385,6 +371,10 @@ namespace at::hip::detail {
 		if (group_count == 0) {
 			return;
 		}
+		if (K == 0) { 
+			out.zero_(); return; 
+		}
+
 		TORCH_CHECK(group_count <= 1024, "ck_tile group gemm: at most 1024 groups are supported, got ", group_count);
 		if (a_is_2d != b_is_2d) {
 			TORCH_CHECK(offs->size(0) == group_count, "ck_tile group gemm: expected offs to have ", group_count,

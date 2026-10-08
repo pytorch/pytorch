@@ -767,12 +767,12 @@ std::optional<c10::ScalarType> out_dtype) {
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 #if defined(USE_ROCM_CK_GEMM)
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
+  // To enable CK-tile path, use env variable ROCM_ALLOW_GROUP_GEMM_CK_TILE=1.
   // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
-  const bool ck_arch = at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"});
-  if (at::globalContext().rocmAllowGroupGemmCk() && ck_arch) {
-    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
-  } else if (at::globalContext().rocmAllowGroupGemmCkTile() && ck_arch) {
+  if (at::globalContext().rocmAllowGroupGemmCkTile() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})) {
     at::hip::detail::group_gemm_ck_tile(mat_a, mat_b, offs, bias, out);
+  } else if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
+    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
