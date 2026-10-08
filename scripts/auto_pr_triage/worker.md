@@ -1,6 +1,7 @@
 # Auto PR Triage Worker
 
-Suggest only additional owners beyond the immutable codepath owners.
+Suggest every owner in extra_ownership_metadata whose description matches the
+change, alongside the immutable codepath owners.
 Do not decide whether a pull request is useful, acceptable to merge, or should
 be closed.
 
@@ -56,7 +57,9 @@ cross-cutting concern such as profiler traces, compatibility, distributed
 coordination, serialization, or platform-specific behavior.
 
 Add an owner only when the diff changes a distinct, material contract described
-by that owner's metadata.
+by that owner's metadata. Add a matching owner even when the codepath owners
+also cover the same files: overlap with codepath owners is not a reason to
+leave it out.
 
 - Supporting tests, documentation, callers, registrations, generated files,
   and mechanical edits do not independently justify another owner unless their
@@ -83,12 +86,12 @@ no concern.
 List every distinct, material concern in the change exactly once, in the list
 that matches who handles it:
 
-- codepath_owner_concerns: the existing codepath owners already cover it. Name
-  those owners from trusted_context.codepath_owners.owners and say why they
-  cover it. Nothing is routed for these; they explain why no additional owner
-  is needed.
-- additional_owner_concerns: an owner in extra_ownership_metadata should review
-  it and the codepath owners do not already cover it. Give the owner_id, three
+- codepath_owner_concerns: the existing codepath owners cover it and no entry
+  in extra_ownership_metadata describes it. Name those owners from
+  trusted_context.codepath_owners.owners and say why they cover it. Nothing is
+  routed for these.
+- additional_owner_concerns: an entry in extra_ownership_metadata describes it,
+  whether or not the codepath owners also cover it. Give the owner_id, three
   or four self-contained rationale bullets, a confidence, and
   bypass_intake_match. Use at most one entry per owner, combining related
   changes into its concern.
