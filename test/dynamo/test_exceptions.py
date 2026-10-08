@@ -5,6 +5,7 @@ import dataclasses
 import gc
 import operator
 import sys
+import types
 import unittest
 
 import torch
@@ -2071,6 +2072,74 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 opt_fn(x)
             alive = sum(type(o) is observed_cls for o in gc.get_objects())
         self.assertEqual(alive, 0)
+
+    def test_fake_value_graph_break_no_reference_cycle(self):
+        # A graph break raised while computing a fake value (here: an op with a
+        # data-dependent output shape) must not leave the exception bound in
+        # the frame that handled it, where its traceback would pin that frame
+        # and the rest of the Dynamo stack until the next gc pass.
+        def fn(x):
+            return torch.nonzero(x).sum() + x.sum()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(8)
+
+        torch._dynamo.reset()
+        gc.collect()
+        gc.disable()
+        gc.set_debug(gc.DEBUG_SAVEALL)
+        try:
+            opt_fn(x)
+            gc.collect()
+            leaked = sum(
+                type(o) is types.FrameType
+                and o.f_code.co_name == "_get_fake_value_impl"
+                for o in gc.garbage
+            )
+        finally:
+            gc.set_debug(0)
+            gc.garbage.clear()
+            gc.enable()
+        self.assertEqual(leaked, 0)
+
+    def test_real_value_graph_break_no_reference_cycle(self):
+        # Same for a RuntimeError raised while computing a real value: neither
+        # get_real_value nor the helper that turns the graph break into a
+        # TorchRuntimeError may keep an exception bound in its frame.
+        from torch._dynamo.exc import TorchRuntimeError
+        from torch._dynamo.utils import get_real_value
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        mm = graph.call_function(torch.mm, (a, b))
+        graph.output(mm)
+        tracer = types.SimpleNamespace(
+            real_value_cache={a: torch.randn(2, 3), b: torch.randn(4, 5)}
+        )
+
+        gc.collect()
+        gc.disable()
+        gc.set_debug(gc.DEBUG_SAVEALL)
+        raised = False
+        try:
+            # Not assertRaises: it clears the traceback's frames, which would
+            # break the cycle this test is looking for.
+            try:
+                get_real_value(mm, tracer)
+            except TorchRuntimeError:
+                raised = True
+            gc.collect()
+            leaked = sum(
+                type(o) is types.FrameType and o.f_code.co_name == "get_real_value"
+                for o in gc.garbage
+            )
+        finally:
+            gc.set_debug(0)
+            gc.garbage.clear()
+            gc.enable()
+        self.assertTrue(raised)
+        self.assertEqual(leaked, 0)
 
     def test_exception_subclass_super_init_with_kwargs(self):
         class MyError(RuntimeError):
