@@ -222,10 +222,10 @@ struct C10_API Allocator {
   // Derived class implementation can simply call `default_copy_data`
   // to use `std::memcpy`.
   //
-  // For devices with streams, the copy must be enqueued on the current stream
-  // (it may be asynchronous with respect to the host), so that it is ordered
-  // like any other operation on that stream, including under CUDA graph
-  // capture.
+  // On CUDA, the copy must be enqueued on the current stream (it may be
+  // asynchronous with respect to the host), so that it is ordered like any
+  // other operation on that stream, including under CUDA graph capture. Copy-
+  // on-write materialization relies on this (see c10/core/impl/README-cow.md).
   //
   // Requires: src and dest were allocated by this allocator
   // Requires: src and dest both have length >= count
@@ -240,7 +240,7 @@ struct C10_API Allocator {
   // the memory may be reused independently of the stream it was allocated on.
   virtual std::optional<bool> was_allocated_on_stream(
       const void* /*ptr*/,
-      const Stream& /*stream*/) {
+      const Stream& /*stream*/) const {
     return std::nullopt;
   }
 

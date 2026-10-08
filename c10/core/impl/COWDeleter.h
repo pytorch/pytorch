@@ -11,15 +11,12 @@
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
-#include <utility>
 #include <variant>
-#include <vector>
 
 namespace c10::impl::cow {
 
-// A COWDeleterContext object holds the data shared by all the COW
-// DataPtrs that are lazy copies of one another. Each such DataPtr has a
-// COWReference (below) as its `ctx`, which points to the shared context.
+// A COWDeleterContext object is used as the `ctx` argument for DataPtr
+// to implement a Copy-on-write (COW) DataPtr.
 class C10_API COWDeleterContext {
  public:
   // Creates an instance, holding the pair of data and original
@@ -45,15 +42,8 @@ class C10_API COWDeleterContext {
   // Represents the last reference to the context.
   //
   // This will be returned by decrement_refcount when it is the last
-  // reference remaining and after any pending copies have completed. For
-  // devices with streams, that only means that the copies have been enqueued,
-  // so it also returns events that are recorded after them.
-  struct LastReference {
-    std::unique_ptr<void, DeleterFnPtr> data;
-    // For each stream that copies of the data were enqueued on, an event
-    // recorded after the last of them.
-    std::vector<std::pair<c10::Stream, c10::Event>> copy_events;
-  };
+  // reference remaining and after any pending copies have completed.
+  using LastReference = std::unique_ptr<void, DeleterFnPtr>;
 
   // Decrements the refcount, returning a handle indicating what to
   // do with it.
@@ -64,10 +54,27 @@ class C10_API COWDeleterContext {
   // can be created concurrently in that case.
   bool is_unique() const;
 
-  // Records an event on `stream` after a copy of the data was enqueued on it.
-  // Must be called while holding the NotLastReference that the copy was made
-  // under, so that the event is returned with the LastReference.
-  void record_copy_event(c10::Stream stream);
+  // On devices whose streams are tracked (see COW.cpp), all references to
+  // the data share the stream they were made on, and whether that stream was
+  // being captured into a graph then. They are set when the first lazy clone
+  // is made, and may only be changed through the only remaining reference
+  // (after waiting for copies, see wait_for_copies()).
+  void set_stream(c10::Stream stream, bool captured);
+  std::optional<c10::Stream> stream() const {
+    return stream_;
+  }
+  bool captured() const {
+    return captured_;
+  }
+
+  // Records an event after a copy of the data was enqueued on stream().
+  // Must be called before the reference that made the copy is decremented.
+  void record_copy_event();
+
+  // Makes `stream` wait (on the device) for the copies recorded with
+  // record_copy_event(), if it isn't stream(). Must be called through the
+  // only remaining reference.
+  void wait_for_copies(c10::Stream stream);
 
  private:
   // The destructor is hidden, this should only ever be used within
@@ -78,34 +85,18 @@ class C10_API COWDeleterContext {
   std::unique_ptr<void, DeleterFnPtr> data_;
   std::atomic<std::int64_t> refcount_ = 1;
 
-  std::mutex copy_events_mutex_;
-  std::vector<std::pair<c10::Stream, c10::Event>> copy_events_;
-};
-
-// The `ctx` of a COW DataPtr. There is one of these per DataPtr, while the
-// COWDeleterContext is shared by all lazy copies of the same data.
-struct COWReference {
-  COWDeleterContext* context = nullptr;
-  // For a lazy clone, the stream that was current when the clone was made.
-  // The clone has the semantics of a clone() enqueued on this stream, so it
-  // may only be materialized by copying on this stream. Unset for the storage
-  // that was lazily cloned from, which may only be materialized by copying on
-  // the stream it was allocated on.
-  std::optional<c10::Stream> clone_stream;
-  // Whether the current stream was being captured into a graph when this
-  // reference was made by a lazy clone. Materializing by copying is only
-  // allowed if this matches whether the current stream is being captured
-  // then: a copy made during capture is replayed with the graph.
-  bool made_while_capturing = false;
+  std::optional<c10::Stream> stream_;
+  bool captured_ = false;
+  std::mutex copy_event_mutex_;
+  std::optional<c10::Event> copy_event_;
 };
 
 // `cow_deleter` is used as the `ctx_deleter` for DataPtr to implement a COW
 // DataPtr.
 //
-// Warning: This should only be called on a pointer to a COWReference that was
-// allocated on the heap with `new`, pointing to a COWDeleterContext that was
-// allocated on the heap with `new`, because both are deleted with `delete`
-// (the latter when its refcount reaches 0).
+// Warning: This should only be called on a pointer to a COWDeleterContext that
+// was allocated on the heap with `new`, because when the refcount reaches 0,
+// the context is deleted with `delete`.
 C10_API void cow_deleter(void* ctx);
 
 } // namespace c10::impl::cow

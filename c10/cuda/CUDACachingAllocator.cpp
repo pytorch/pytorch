@@ -5502,8 +5502,12 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
   std::optional<bool> was_allocated_on_stream(
       const void* ptr,
-      const c10::Stream& stream) override {
-    Block* block = ptr ? get_allocated_block(ptr) : nullptr;
+      const c10::Stream& stream) const override {
+    // get_allocated_block only reads the map of allocated blocks (under its
+    // lock), but isn't const because the lock isn't mutable.
+    Block* block = ptr
+        ? const_cast<NativeCachingAllocator*>(this)->get_allocated_block(ptr)
+        : nullptr;
     // Blocks in private pools (e.g., CUDA graph pools) are not reused by
     // ordinary allocations on their stream, so their stream says nothing about
     // when they may be reused.

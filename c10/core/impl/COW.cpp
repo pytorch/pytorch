@@ -16,29 +16,92 @@ namespace c10::impl::cow {
 
 namespace {
 
-// Makes a copy-on-write DataPtr referencing `ctx`. The caller is responsible
-// for the refcount of `ctx`.
+// Wraps a DataPtr with a copy-on-write DataPtr.
 at::DataPtr make_data_ptr(
-    void* data,
-    cow::COWDeleterContext& ctx,
-    std::optional<c10::Stream> clone_stream,
-    bool made_while_capturing,
-    c10::Device device) {
-  return at::DataPtr(
-      data,
-      new cow::COWReference{&ctx, clone_stream, made_while_capturing},
-      cow::cow_deleter,
-      device);
+    at::DataPtr const& data_ptr,
+    cow::COWDeleterContext& ctx) {
+  return at::DataPtr(data_ptr.get(), &ctx, cow::cow_deleter, data_ptr.device());
 }
 
-// Returns the current stream of `device`, or nullopt if the device does not
-// have streams.
+/// Copies a copy-on-write DataPtr.
+at::DataPtr copy_data_ptr(at::DataPtr const& data_ptr) {
+  auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
+  TORCH_INTERNAL_ASSERT(ctx != nullptr);
+  ctx->increment_refcount();
+  return make_data_ptr(data_ptr, *ctx);
+}
+
+// Returns the current stream of `device` if COW tracks streams for it, or
+// nullopt otherwise. This is only done on CUDA, whose allocators enqueue
+// `copy_data` on the current stream and whose streams support events; other
+// backends keep the stream-agnostic behavior.
 std::optional<c10::Stream> current_stream(c10::Device device) {
-  if (device.is_cpu() || device.is_meta() ||
-      !c10::impl::hasDeviceGuardImpl(device.type())) {
+  if (!device.is_cuda()) {
     return std::nullopt;
   }
   return c10::impl::getDeviceGuardImpl(device.type())->getStream(device);
+}
+
+// Clones `storage` eagerly, on the current stream.
+c10::intrusive_ptr<StorageImpl> eager_clone(StorageImpl& storage) {
+  c10::DeviceGuard device_guard(storage.data_ptr().device());
+  return make_storage_impl(
+      StorageImpl::use_byte_size_t(),
+      storage.sym_nbytes(),
+      storage.allocator()->clone(storage.data_ptr().get(), storage.nbytes()),
+      storage.allocator(),
+      storage.resizable(),
+      storage.device_type());
+}
+
+// Raises an error if data shared through `ctx` may not be materialized by
+// copying it on `stream`: the copy must be ordered like the clone() that the
+// lazy clone stands for, and we raise an error rather than synchronizing when
+// it would not be.
+void check_copy_allowed(
+    const cow::COWDeleterContext& ctx,
+    c10::Stream stream,
+    bool capturing) {
+  // During graph capture, a copy would become part of the graph and be redone
+  // by every replay, which is wrong for a lazy clone made before the capture,
+  // and copying the storage that was lazily cloned from would move it to new
+  // memory inside of the graph (e.g., a graph input, which the user keeps
+  // writing to). Rather than distinguish these cases, we don't copy during
+  // capture at all: if the captured code needs a copy, the graph needs one on
+  // every replay anyway, so making the lazy clone a clone() costs nothing.
+  TORCH_CHECK(
+      !capturing,
+      "Cannot write to this tensor (or take its data_ptr()) during graph "
+      "capture: it shares memory with a lazy copy (from _lazy_clone()), and "
+      "writing to it requires copying it, which isn't supported during "
+      "capture. If you only read the tensor, use const_data_ptr() instead of "
+      "data_ptr(). Otherwise, use clone() instead of _lazy_clone() where the "
+      "lazy copy is made.");
+  // A lazy clone made during capture stands for a copy that every replay of
+  // the graph makes, which a copy after the capture can't provide.
+  TORCH_CHECK(
+      !ctx.captured(),
+      "Cannot write to this tensor (or take its data_ptr()) outside of graph "
+      "capture: it shares memory with a lazy copy (from _lazy_clone()) made "
+      "during a graph capture, and writing to it requires copying it, which "
+      "the replays of the graph would not redo. If you only read the tensor, "
+      "use const_data_ptr() instead of data_ptr(). Otherwise, use clone() "
+      "instead of _lazy_clone() where the lazy copy is made, or free the lazy "
+      "copy first.");
+  // The copy must be enqueued on the stream the lazy copies were made on,
+  // which is also the stream their memory was allocated on (when the
+  // allocator can tell), and the stream the new allocation belongs to.
+  TORCH_CHECK(
+      ctx.stream() == stream,
+      "Cannot write to this tensor (or take its data_ptr()) on ",
+      stream,
+      ": it shares memory with a lazy copy (from _lazy_clone()) made on ",
+      *ctx.stream(),
+      ", and writing to it requires copying it, which can't be done safely on "
+      "another stream without synchronizing the streams. If you only read the "
+      "tensor, use const_data_ptr() instead of data_ptr(). Otherwise, write "
+      "to it on the stream the lazy copy was made on, or use clone() instead "
+      "of _lazy_clone() where the lazy copy is made.");
 }
 
 } // namespace
@@ -97,34 +160,43 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     return nullptr;
   }
 
-  // The lazy clone has the semantics of a clone() enqueued now, i.e., on the
-  // stream that is current when the lazy clone is made (not when it is later
-  // materialized). We record that stream so that materialization can be
-  // checked against it.
-  void* data = data_ptr.get();
-  const c10::Device device = data_ptr.device();
-  const std::optional<c10::Stream> stream = current_stream(device);
+  // The lazy clone has the semantics of a clone() enqueued now, on the
+  // current stream. Until it is materialized, though, it keeps using the
+  // original allocation, which the allocator only orders with respect to the
+  // stream it was allocated on, so its uses on another stream would race with
+  // reuse of that memory once the original is freed. So all references to
+  // some data share one stream (and capture state, see materialize_cow), and
+  // we clone eagerly instead when that's not the current one. (Except during
+  // graph capture, where keeping the memory of graph inputs alive is the
+  // user's responsibility anyway, and cloning eagerly would add a copy to
+  // every replay of the graph.) See "Streams and CUDA graphs" in
+  // README-cow.md.
+  const std::optional<c10::Stream> stream = current_stream(data_ptr.device());
   const bool capturing = stream.has_value() && stream->is_capturing();
-
-  // Until it is materialized, a lazy clone keeps using the original
-  // allocation, which the allocator only orders with respect to the stream it
-  // was allocated on. A lazy clone made on another stream (e.g., a copy made
-  // for a communication stream) would therefore need synchronization that an
-  // eager clone doesn't, so we clone eagerly instead. (Except during graph
-  // capture, where keeping the memory of graph inputs alive is the user's
-  // responsibility anyway, and the copy would be redone by every replay.)
-  if (stream.has_value() && !capturing && storage.allocator() != nullptr) {
-    const std::optional<bool> allocated_on_stream =
-        storage.allocator()->was_allocated_on_stream(data, *stream);
-    if (allocated_on_stream.has_value() && !*allocated_on_stream) {
-      c10::DeviceGuard device_guard(device);
-      return make_storage_impl(
-          StorageImpl::use_byte_size_t(),
-          storage.sym_nbytes(),
-          storage.allocator()->clone(data, storage.nbytes()),
-          storage.allocator(),
-          storage.resizable(),
-          storage.device_type());
+  if (stream.has_value()) {
+    bool eager = false;
+    if (!capturing && storage.allocator() != nullptr) {
+      const std::optional<bool> allocated_on_stream =
+          storage.allocator()->was_allocated_on_stream(data_ptr.get(), *stream);
+      eager = allocated_on_stream.has_value() && !*allocated_on_stream;
+    }
+    if (!eager && !simple) {
+      auto* ctx =
+          data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
+      TORCH_INTERNAL_ASSERT(ctx != nullptr);
+      if (ctx->is_unique()) {
+        // There are no other references, so we can move the data to the
+        // current stream and capture state, after any pending copies.
+        if (!capturing) {
+          ctx->wait_for_copies(*stream);
+        }
+        ctx->set_stream(*stream, capturing);
+      } else {
+        eager = ctx->stream() != stream || ctx->captured() != capturing;
+      }
+    }
+    if (eager) {
+      return eager_clone(storage);
     }
   }
 
@@ -132,25 +204,23 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     // Case 1) We have a simple data pointer: wrap it.
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
         storage._mutable_data_ptr_no_checks().move_context();
-    auto* ctx = new cow::COWDeleterContext(std::move(original_ctx));
 
     // Save this for the result.
-    new_data_ptr = make_data_ptr(data, *ctx, stream, capturing, device);
+    new_data_ptr = make_data_ptr(
+        data_ptr, *new cow::COWDeleterContext(std::move(original_ctx)));
 
     // Update this storage to the new copy on write context.
-    ctx->increment_refcount();
-    storage.set_data_ptr_noswap(make_data_ptr(
-        data, *ctx, /*clone_stream=*/std::nullopt, capturing, device));
+    storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr));
     storage.set_materializer(&materialize_cow);
+    if (stream.has_value()) {
+      new_data_ptr->cast_context<cow::COWDeleterContext>(cow::cow_deleter)
+          ->set_stream(*stream, capturing);
+    }
   } else {
     // Case 2): there is already a copy on write context. Just return a
     // new storage impl.
     TORCH_INTERNAL_ASSERT(storage.has_materializer());
-    auto* ref = data_ptr.cast_context<cow::COWReference>(cow::cow_deleter);
-    TORCH_INTERNAL_ASSERT(ref != nullptr);
-    ref->context->increment_refcount();
-    new_data_ptr =
-        make_data_ptr(data, *ref->context, stream, capturing, device);
+    new_data_ptr = copy_data_ptr(data_ptr);
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
@@ -172,159 +242,74 @@ void materialize_cow(StorageImpl* storage) {
       "Materializing a storage in the loop function of at::parallel_for is forbidden");
   const at::DataPtr& data_ptr = storage->data_ptr();
 
-  auto* ref = data_ptr.cast_context<cow::COWReference>(cow::cow_deleter);
-  TORCH_INTERNAL_ASSERT(ref != nullptr);
-  cow::COWDeleterContext* ctx = ref->context;
+  auto* ctx = data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
+  TORCH_INTERNAL_ASSERT(ctx != nullptr);
 
-  // Materialization enqueues a copy of the data on the current stream, or
-  // steals the data if this is the last reference to it. See "Streams and
-  // CUDA graphs" in README-cow.md for why the checks below are needed.
+  // Materialization copies the data on the current stream, or steals the data
+  // if this is the last reference to it. See "Streams and CUDA graphs" in
+  // README-cow.md for why the checks below are needed.
   //
-  // A copy is only allowed where it is ordered like the clone() that the lazy
-  // clone stands for, so we raise an error rather than synchronizing when it
-  // would not be. This has to happen before the refcount is decremented.
+  // Everything that can fail (the checks, allocating, copying, recording and
+  // waiting for events) happens before this reference gives up its count on
+  // the context, so that the storage remains a valid copy-on-write storage if
+  // it does. While we hold the count, the data can't be stolen or freed by
+  // another reference.
   //
-  // Stealing the data means writing to it on the current stream, which must
-  // be ordered after any copies of it that may still be pending on other
-  // streams. Those are waited for (on the device) below.
-  //
-  // Copies enqueued under CUDA graph capture only run when the graph is
-  // replayed, which the user orders with respect to other work, so they don't
-  // need to be waited for (and a capture couldn't wait for eager work).
+  // Whether we copy or steal is only known once the count is decremented. If
+  // this is the only reference, no other can be created concurrently (that
+  // would require reading this storage while we are writing it), so we will
+  // steal. Otherwise we copy, even if another thread concurrently frees the
+  // last other reference, in which case the copy was unnecessary (and the
+  // checks too strict), but correct.
   const c10::Device device = data_ptr.device();
   const std::optional<c10::Stream> stream = current_stream(device);
   const bool capturing = stream.has_value() && stream->is_capturing();
-  if (stream.has_value() && !ctx->is_unique()) {
-    // A copy made during graph capture is replayed with the graph, so it is
-    // only allowed if the lazy clone was also made during the capture. (We
-    // don't distinguish between captures, though.)
-    if (ref->made_while_capturing != capturing) {
-      const char* when = capturing ? "before the capture" : "during a capture";
-      if (ref->clone_stream.has_value()) {
-        TORCH_CHECK(
-            false,
-            "Cannot write to this tensor (or take its data_ptr()) ",
-            capturing ? "during" : "outside of",
-            " graph capture: it is a lazy copy (from _lazy_clone()) that was "
-            "made ",
-            when,
-            ", and writing to it requires copying it, which ",
-            capturing ? "the graph would redo on every replay"
-                      : "the replays of the graph would not redo",
-            ". If you only read the tensor, use const_data_ptr() instead of "
-            "data_ptr(). Otherwise, clone() it ",
-            capturing ? "before" : "during",
-            " the capture.");
-      } else {
-        TORCH_CHECK(
-            false,
-            "Cannot write to this tensor (or take its data_ptr()) ",
-            capturing ? "during" : "outside of",
-            " graph capture: a lazy copy of it (from _lazy_clone()) that was "
-            "made ",
-            when,
-            " is alive, and writing to it requires copying it, which ",
-            capturing ? "the graph would redo on every replay"
-                      : "the replays of the graph would not redo",
-            ". If you only read the tensor, use const_data_ptr() instead of "
-            "data_ptr(). Otherwise, free the lazy copies of it before writing "
-            "to it.");
-      }
-    }
-    if (ref->clone_stream.has_value()) {
-      // The copy must be enqueued on the stream the clone was made on, which
-      // is also the stream the new allocation belongs to.
-      TORCH_CHECK(
-          *ref->clone_stream == *stream,
-          "Cannot write to this tensor (or take its data_ptr()) on ",
-          *stream,
-          ": it is a lazy copy (from _lazy_clone()) that was made on ",
-          *ref->clone_stream,
-          ", and while the tensor it was copied from is alive, writing to it "
-          "requires copying it, which can't be done safely on another stream "
-          "without synchronizing the streams. If you only read the tensor, "
-          "use const_data_ptr() instead of data_ptr(). Otherwise, write to it "
-          "on the stream it was made on, or write to a clone() of it made on "
-          "this stream instead.");
-    } else if (storage->allocator() != nullptr) {
-      // For the storage that was lazily cloned from, the copy must be
-      // enqueued on the stream its memory was allocated on.
-      const std::optional<bool> allocated_on_stream =
-          storage->allocator()->was_allocated_on_stream(
-              data_ptr.get(), *stream);
-      if (capturing) {
-        // Memory allocated during capture comes from a private pool, for
-        // which the allocation stream is unknown. Memory with a known
-        // allocation stream was allocated before the capture.
-        TORCH_CHECK(
-            !allocated_on_stream.has_value(),
-            "Cannot write to this tensor (or take its data_ptr()) during "
-            "graph capture: a lazy copy of it (from _lazy_clone()) is alive, "
-            "so writing to it requires moving it to new memory inside of the "
-            "graph, while code outside of the graph (e.g., writing the inputs "
-            "of the graph) would keep using its old memory. If you only read "
-            "the tensor, use const_data_ptr() instead of data_ptr(). "
-            "Otherwise, free the lazy copies of it before writing to it.");
-      } else {
-        TORCH_CHECK(
-            allocated_on_stream.value_or(true),
-            "Cannot write to this tensor (or take its data_ptr()) on ",
-            *stream,
-            ": a lazy copy of it (from _lazy_clone()) is alive, so writing to "
-            "it requires copying it, which can't be done safely on a stream "
-            "other than the one its memory was allocated on without "
-            "synchronizing the streams. If you only read the tensor, use "
-            "const_data_ptr() instead of data_ptr(). Otherwise, write to it "
-            "on the stream its memory was allocated on, or free the lazy "
-            "copies of it first.");
-      }
-    }
-  }
-
-  auto result = ctx->decrement_refcount();
-  // This reference's count on the shared context is now accounted for (and
-  // the context may be gone), so the deleter must not decrement it again.
-  ref->context = nullptr;
-
-  // This must be set by each branch below.
-  std::optional<DataPtr> new_data_ptr;
-
-  if (std::holds_alternative<cow::COWDeleterContext::LastReference>(result)) {
-    // This is the only reference to the data. If there were any racing writes,
-    // the context ensured they finished before giving us the result.
-    auto last_reference =
-        std::get<cow::COWDeleterContext::LastReference>(std::move(result));
+  std::optional<DataPtr> copy;
+  if (ctx->is_unique()) {
+    // Stealing the data means writing to it on the current stream, which
+    // must be ordered after any copies of it that may still be pending.
+    // (During capture, we can't wait for eager work, but torch.cuda.graph
+    // synchronizes before capturing.)
     if (stream.has_value() && !capturing) {
-      for (const auto& [copy_stream, event] : last_reference.copy_events) {
-        if (copy_stream != *stream) {
-          event.block(*stream);
-        }
-      }
+      ctx->wait_for_copies(*stream);
     }
-    std::unique_ptr<void, DeleterFnPtr> data = std::move(last_reference.data);
-    TORCH_INTERNAL_ASSERT(data.get() == data_ptr.get());
-    new_data_ptr = DataPtr(
-        data.release(), data_ptr.get(), data.get_deleter(), data_ptr.device());
   } else {
-    TORCH_INTERNAL_ASSERT(
-        std::holds_alternative<cow::COWDeleterContext::NotLastReference>(
-            result));
-    // We don't need to consume the result, it's just a shared lock ensuring
-    // that the data will remain while we copy it.
+    if (stream.has_value()) {
+      check_copy_allowed(*ctx, *stream, capturing);
+    }
     c10::OptionalDeviceGuard device_guard;
     if (stream.has_value()) {
       device_guard.reset_device(device);
     }
-    new_data_ptr =
-        storage->allocator()->clone(data_ptr.get(), storage->nbytes());
-    if (stream.has_value() && !capturing) {
-      ctx->record_copy_event(*stream);
+    copy = storage->allocator()->clone(data_ptr.get(), storage->nbytes());
+    if (stream.has_value()) {
+      ctx->record_copy_event();
     }
   }
 
-  TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
-  // The old DataPtr's deleter frees `ref` when it goes out of scope.
-  storage->set_data_ptr_no_materialize(*std::move(new_data_ptr));
+  // Nothing below can fail.
+  auto result = ctx->decrement_refcount();
+
+  std::optional<DataPtr> new_data_ptr;
+  if (copy.has_value()) {
+    // If this turned out to be the last reference after all, the original
+    // data is freed along with `result`.
+    new_data_ptr = std::move(copy);
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        std::holds_alternative<cow::COWDeleterContext::LastReference>(result));
+    std::unique_ptr<void, DeleterFnPtr> data =
+        std::get<cow::COWDeleterContext::LastReference>(std::move(result));
+    TORCH_INTERNAL_ASSERT(data.get() == data_ptr.get());
+    new_data_ptr = DataPtr(
+        data.release(), data_ptr.get(), data.get_deleter(), data_ptr.device());
+  }
+
+  DataPtr old_data_ptr =
+      storage->set_data_ptr_no_materialize(*std::move(new_data_ptr));
+  // The refcount of the context was already decremented above. Release the
+  // reference to the context so the refcount doesn't get decremented again
+  old_data_ptr.release_context();
 }
 
 } // namespace c10::impl::cow

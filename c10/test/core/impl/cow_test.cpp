@@ -79,7 +79,7 @@ TEST_F(ContextTest, cow_deleter) {
   auto& context = *new cow::COWDeleterContext(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
-  cow::cow_deleter(new cow::COWReference{&context, std::nullopt, false});
+  cow::cow_deleter(&context);
   ASSERT_THAT(delete_count(), testing::Eq(1));
 }
 
@@ -155,9 +155,7 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
       /*size_bytes=*/5,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/
-          new cow::COWReference{
-              new cow::COWDeleterContext(std::move(data)), std::nullopt, false},
+          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
           cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
@@ -201,9 +199,7 @@ TEST(materialize_test, copy_on_write_single_reference) {
       /*size_bytes=*/4,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/
-          new cow::COWReference{
-              new cow::COWDeleterContext(std::move(data)), std::nullopt, false},
+          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
           cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
@@ -243,8 +239,8 @@ TEST(materialize_test, copy_on_write) {
   auto new_storage = cow::lazy_clone_storage(original_storage);
   ASSERT_THAT(new_storage, testing::NotNull());
 
-  auto context =
-      new_storage->data_ptr().cast_context<cow::COWReference>(cow::cow_deleter);
+  auto context = new_storage->data_ptr().cast_context<cow::COWDeleterContext>(
+      cow::cow_deleter);
   ASSERT_THAT(context, testing::NotNull());
 
   // Materialized storage has new copy of data.
@@ -257,6 +253,53 @@ TEST(materialize_test, copy_on_write) {
   ASSERT_TRUE(new_storage->nbytes() == original_storage.nbytes());
   ASSERT_TRUE(buffers_are_equal(
       new_storage->data(), original_storage.data(), new_storage->nbytes()));
+}
+
+// An allocator whose allocations can be made to fail.
+class FailingAllocator final : public Allocator {
+ public:
+  DataPtr allocate(size_t n) override {
+    TORCH_CHECK(!fail, "injected allocation failure");
+    return GetDefaultCPUAllocator()->allocate(n);
+  }
+  void copy_data(void* dest, const void* src, std::size_t count)
+      const override {
+    default_copy_data(dest, src, count);
+  }
+
+  bool fail = false;
+};
+
+TEST(materialize_test, allocation_failure_keeps_storage_valid) {
+  FailingAllocator allocator;
+  StorageImpl original_storage(
+      {}, /*size_bytes=*/4, &allocator, /*resizable=*/false);
+  std::memcpy(original_storage.mutable_data(), "abcd", 4);
+  void const* original_data = original_storage.data();
+
+  auto new_storage = cow::lazy_clone_storage(original_storage);
+  ASSERT_THAT(new_storage, testing::NotNull());
+
+  // Materializing the clone needs to copy, which fails.
+  allocator.fail = true;
+  ASSERT_ANY_THROW((void)new_storage->mutable_data());
+
+  // Both storages are still copy-on-write storages sharing the data.
+  ASSERT_THAT(*new_storage, is_copy_on_write());
+  ASSERT_THAT(original_storage, is_copy_on_write());
+  ASSERT_THAT(new_storage->data(), testing::Eq(original_data));
+
+  // Retrying succeeds once allocation succeeds.
+  allocator.fail = false;
+  ASSERT_THAT(new_storage->mutable_data(), testing::Ne(original_data));
+  ASSERT_THAT(*new_storage, testing::Not(is_copy_on_write()));
+  ASSERT_TRUE(buffers_are_equal(new_storage->data(), original_data, 4));
+
+  // The original is now the last reference, so it steals the data without
+  // allocating.
+  allocator.fail = true;
+  ASSERT_THAT(original_storage.mutable_data(), testing::Eq(original_data));
+  ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
 }
 
 TEST(lazy_clone_storage_test, sets_materializer) {

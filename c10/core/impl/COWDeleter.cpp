@@ -5,13 +5,7 @@
 namespace c10::impl {
 
 void cow::cow_deleter(void* ctx) {
-  auto* ref = static_cast<cow::COWReference*>(ctx);
-  // A materialized reference has already given up its count on the shared
-  // context (see materialize_cow), and only needs to be freed.
-  if (ref->context != nullptr) {
-    ref->context->decrement_refcount();
-  }
-  delete ref;
+  static_cast<cow::COWDeleterContext*>(ctx)->decrement_refcount();
 }
 
 cow::COWDeleterContext::COWDeleterContext(
@@ -32,7 +26,7 @@ auto cow::COWDeleterContext::decrement_refcount()
   TORCH_INTERNAL_ASSERT(refcount >= 0, refcount);
   if (refcount == 0) {
     std::unique_lock lock(mutex_);
-    LastReference result{std::move(data_), std::move(copy_events_)};
+    auto result = std::move(data_);
     lock.unlock();
     delete this;
     return {std::move(result)};
@@ -45,18 +39,29 @@ auto cow::COWDeleterContext::is_unique() const -> bool {
   return refcount_ == 1;
 }
 
-auto cow::COWDeleterContext::record_copy_event(c10::Stream stream) -> void {
-  std::lock_guard lock(copy_events_mutex_);
-  for (auto& [copy_stream, event] : copy_events_) {
-    if (copy_stream == stream) {
-      // Supersedes the previous event recorded on the same stream.
-      event.record(stream);
-      return;
-    }
+auto cow::COWDeleterContext::set_stream(c10::Stream stream, bool captured)
+    -> void {
+  stream_ = stream;
+  captured_ = captured;
+  std::lock_guard lock(copy_event_mutex_);
+  copy_event_.reset();
+}
+
+auto cow::COWDeleterContext::record_copy_event() -> void {
+  TORCH_INTERNAL_ASSERT(stream_.has_value());
+  std::lock_guard lock(copy_event_mutex_);
+  if (!copy_event_.has_value()) {
+    copy_event_.emplace(stream_->device_type());
   }
-  c10::Event event(stream.device_type());
-  event.record(stream);
-  copy_events_.emplace_back(stream, std::move(event));
+  // Supersedes the previous event: copies are all enqueued on stream_.
+  copy_event_->record(*stream_);
+}
+
+auto cow::COWDeleterContext::wait_for_copies(c10::Stream stream) -> void {
+  std::lock_guard lock(copy_event_mutex_);
+  if (copy_event_.has_value() && stream != stream_) {
+    copy_event_->block(stream);
+  }
 }
 
 cow::COWDeleterContext::~COWDeleterContext() {
