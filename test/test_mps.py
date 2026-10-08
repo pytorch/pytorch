@@ -5439,6 +5439,14 @@ class TestMPS(TestCaseMPS):
             event.record()
             event.synchronize()
 
+    def test_gil_held_wait_with_async_copy_from_numpy(self):
+        # Hangs if Metal's completion thread needs the GIL to drop the numpy array of a non-blocking copy
+        # while a wait that keeps the GIL (0-dim MPS index) is pending
+        idx = torch.tensor(3, device="mps")
+        y = torch.from_numpy(np.ones(1024, dtype=np.float32)).to("mps", non_blocking=True)
+        self.assertEqual(torch.arange(16, device="mps")[idx].item(), 3)
+        self.assertEqual(y.sum().item(), 1024)
+
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
     @parametrize("binop", ['add', 'sub', 'mul', 'div'])
