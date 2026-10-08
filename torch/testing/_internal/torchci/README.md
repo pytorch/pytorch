@@ -45,8 +45,9 @@ open-ended string-to-string maps.
 | `device_name` | string | The first visible device's name as its vendor reports it (`NVIDIA L4`, `AMD Instinct MI350X VF`, `Apple M2 Pro`, `Intel(R) Data Center GPU Max 1100`); empty with no device |
 
 `flags` maps the env var of every flag and setting registered with
-`include_in_repro` to its value in effect: `"1"` or `"0"` for flags (implied
-ones included), the value for other settings, and `""` for unset settings.
+`include_in_repro` to its value as set, unparsed (`PYTORCH_CUDA_ALLOC_CONF` is
+the allocator config string, such as `expandable_segments:True`), or `""` when
+unset. An unset flag that is on by default or implication is `"1"`.
 
 The report `properties` writer emits these keys when their values are nonempty:
 `torch_version`, `os_release`, `device_memory_mib`, `driver_version`,
