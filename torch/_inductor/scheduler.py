@@ -11030,7 +11030,10 @@ class Scheduler:
                 for read in relevant_reads
             ):
                 return False
-        return num_concurrent_reads <= 1
+        # CPU loop reordering is disabled, so multiple same-index reads in
+        # fused leaves cannot diverge through a loop transform. GPU remains
+        # conservative about reading a mutation buffer in multiple leaves.
+        return num_concurrent_reads <= 1 or mutating_node.is_cpu()
 
     @staticmethod
     def _same_index_with_prefix_size(read: MemoryDep, write: MemoryDep) -> bool:
