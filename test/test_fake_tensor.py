@@ -1056,6 +1056,34 @@ class FakeTensorTest(TestCase):
                     torch._C._dispatch_key_set(y)
                 )
 
+    def test_alias_fake_tensor(self):
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        x = fake_mode.from_tensor(
+            torch.randn(4, 6).t(),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.DYNAMIC],
+                constraint_sizes=[None, None],
+            ),
+        )
+        self.assertIsInstance(x.shape[0], torch.SymInt)
+        with fake_mode:
+            y = torch.ops.aten.alias.default(x)
+        self.assertEqual(y.shape, x.shape)
+        self.assertEqual(y.stride(), x.stride())
+        self.assertEqual(y.storage_offset(), x.storage_offset())
+        self.assertEqual(y.untyped_storage()._cdata, x.untyped_storage()._cdata)
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    def test_alias_fake_mkldnn(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+        with FakeTensorMode() as fake_mode:
+            x = fake_mode.from_tensor(torch.randn(2, 3).to_mkldnn())
+            y = torch.ops.aten.alias.default(x)
+        self.assertTrue(y.is_mkldnn)
+        self.assertEqual(torch._C._dispatch_key_set(y), torch._C._dispatch_key_set(x))
+
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
     def test_mkldnn_to_dense(self):
         from torch._subclasses.functional_tensor import (
