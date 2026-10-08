@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
+    skipCUDAIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -39,26 +40,24 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TEST_MULTIACCELERATOR,
-    TEST_XPU,
     TestCase,
 )
 
-
-def xpu_supports_sleep() -> bool:
-    try:
-        torch.xpu._sleep(10)
-        return True
-    except NotImplementedError:
-        return False
-
-
-TEST_XPU_SLEEP = TEST_XPU and xpu_supports_sleep()
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (
     torch.cuda.get_allocator_backend() == "cudaMallocAsync"
 )
 
 FIFTY_MIL_CYCLES = 50000000
+
+
+def _get_graph_by_device(device):
+    device_type = torch.device(device).type
+    if device_type == "cuda":
+        return torch.cuda.CUDAGraph()
+    elif device_type == "xpu":
+        return torch.xpu.XPUGraph()
+    raise AssertionError(f"don't know how to get the graph for device {device_type}")
 
 
 class TestMultiGPUDevice(TestCase):
@@ -178,7 +177,6 @@ class TestMultiGPUDevice(TestCase):
         # Similarly, both copy() ops are synchronized on s0.
         self.assertEqual(y, x)
 
-    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
     @deviceCountAtLeast(2)
     def test_copy_streams(self, devices):
         device_type = torch.device(devices[0]).type
@@ -370,7 +368,6 @@ class TestMultiGPUDevice(TestCase):
             )
             self.assertNotEqual(device_module.current_stream(), default_stream)
 
-    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
     @deviceCountAtLeast(2)
     def test_streams_multi_gpu_query(self, devices):
         device_module = torch.get_device_module(devices[0])
@@ -524,7 +521,6 @@ class TestMultiGPUDevice(TestCase):
             p2c.get()
             c2p.put(sync_func(device_module, FIFTY_MIL_CYCLES))
 
-    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5402")
     @deviceCountAtLeast(2)
     def test_stream_event_nogil(self, devices):
@@ -567,7 +563,6 @@ class TestMultiGPUDevice(TestCase):
             self.assertGreater(parent_time + child_time, total_time * 1.3)
 
     # This test is flaky for ROCm, see issue #62602
-    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
     @deviceCountAtLeast(2)
     def test_events_wait(self, devices):
         device_module = torch.get_device_module(devices[0])
@@ -596,7 +591,6 @@ class TestMultiGPUDevice(TestCase):
         self.assertTrue(s0.query())
         self.assertTrue(s1.query())
 
-    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
     @deviceCountAtLeast(2)
     def test_events_multi_gpu_query(self, devices):
         device_module = torch.get_device_module(devices[0])
@@ -640,7 +634,6 @@ class TestMultiGPUDevice(TestCase):
             self.assertTrue(e0.query())
             self.assertTrue(e1.query())
 
-    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5403")
     @deviceCountAtLeast(2)
     def test_caching_pinned_memory_multi_gpu(self, devices):
@@ -972,13 +965,9 @@ t2.start()
             )
         )
 
-
-@unittest.skipUnless(TEST_CUDA, "CUDA only tests!")
-class TestMultiGPUCUDA(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    def _check_memory_stat_consistency(self):
-        snapshot = torch.cuda.memory_snapshot()
+    def _check_memory_stat_consistency(self, device):
+        device_module = torch.get_device_module(device)
+        snapshot = device_module.memory_snapshot()
 
         expected_each_device = collections.defaultdict(
             lambda: collections.defaultdict(int)
@@ -1032,36 +1021,35 @@ class TestMultiGPUCUDA(TestCase):
             self.assertEqual(sum_requested, segment["requested_size"])
 
         for device, expected in expected_each_device.items():
-            stats = torch.cuda.memory_stats(device)
+            stats = device_module.memory_stats(device)
             for k, v in expected.items():
                 self.assertEqual(v, stats[k])
 
     @staticmethod
-    def _test_memory_stats_generator(self, device=None, N=35):
-        if device is None:
-            device = torch.cuda.current_device()
+    def _test_memory_stats_generator(self, device, N=35):
+        device_module = torch.get_device_module(device)
 
-        m0 = torch.cuda.memory_allocated(device)
-        last_m_arr = [torch.cuda.memory_allocated(device)]
-        max_m_arr = [torch.cuda.max_memory_allocated(device)]
-        last_r_arr = [torch.cuda.memory_reserved(device)]
-        max_r_arr = [torch.cuda.max_memory_reserved(device)]
+        m0 = device_module.memory_allocated(device)
+        last_m_arr = [device_module.memory_allocated(device)]
+        max_m_arr = [device_module.max_memory_allocated(device)]
+        last_r_arr = [device_module.memory_reserved(device)]
+        max_r_arr = [device_module.max_memory_reserved(device)]
 
         def alloc(*size):
-            with torch.cuda.device(device):
+            with device_module.device(device):
                 # NOTE: do **not** use methods that can have additional
                 #       memory overhead, e.g., inplace random sampling methods.
                 #       they can leave some memory occupied even after being
                 #       deallocated, e.g., initialized RNG state, causing some
                 #       memory checks below to fail.
-                return torch.cuda.FloatTensor(*size)
+                return torch.empty(*size, device=device)
 
         def assert_change(comp=1, empty_cache=False, reset_peak=False):
             # comp > 0: increased
             # comp = 0: equal
             # comp < 0: decreased
-            new_m = torch.cuda.memory_allocated(device)
-            new_max_m = torch.cuda.max_memory_allocated(device)
+            new_m = device_module.memory_allocated(device)
+            new_max_m = device_module.max_memory_allocated(device)
             if comp > 0:
                 self.assertGreater(new_m, last_m_arr[0])
             elif comp < 0:
@@ -1073,8 +1061,8 @@ class TestMultiGPUCUDA(TestCase):
             last_m_arr[0] = new_m
             max_m_arr[0] = new_max_m
 
-            new_r = torch.cuda.memory_reserved(device)
-            new_max_r = torch.cuda.max_memory_reserved(device)
+            new_r = device_module.memory_reserved(device)
+            new_max_r = device_module.max_memory_reserved(device)
             # emptying cache may happen (due to allocation or empty_cache), so
             # we can't assert new_c >= last_c
             self.assertLessEqual(new_r, new_max_r)
@@ -1086,37 +1074,45 @@ class TestMultiGPUCUDA(TestCase):
             stat_key_n_alloc = "num_device_alloc"
             stat_key_n_free = "num_device_free"
             if empty_cache:
-                num_sync_1 = torch.cuda.memory_stats(device).get(stat_key_n_sync, -1)
+                num_sync_1 = device_module.memory_stats(device).get(stat_key_n_sync, -1)
                 self.assertGreaterEqual(num_sync_1, 0)
-                num_alloc_1 = torch.cuda.memory_stats(device).get(stat_key_n_alloc, -1)
+                num_alloc_1 = device_module.memory_stats(device).get(
+                    stat_key_n_alloc, -1
+                )
                 # if current memory usage is greater than zero we must have
                 # allocated something
                 self.assertGreaterEqual(num_alloc_1, 0 if new_m == 0 else 1)
-                num_free_1 = torch.cuda.memory_stats(device).get(stat_key_n_free, -1)
+                num_free_1 = device_module.memory_stats(device).get(stat_key_n_free, -1)
                 self.assertGreaterEqual(num_free_1, 0)
                 # empty_cache will enforce the call of release_cached_blocks
-                torch.cuda.empty_cache()
-                num_sync_2 = torch.cuda.memory_stats(device).get(stat_key_n_sync, -1)
+                device_module.empty_cache()
+                num_sync_2 = device_module.memory_stats(device).get(stat_key_n_sync, -1)
                 self.assertEqual(num_sync_1 + 1, num_sync_2)
-                num_alloc_2 = torch.cuda.memory_stats(device).get(stat_key_n_alloc, -1)
+                num_alloc_2 = device_module.memory_stats(device).get(
+                    stat_key_n_alloc, -1
+                )
                 self.assertGreaterEqual(num_alloc_2, num_alloc_1)
-                num_free_2 = torch.cuda.memory_stats(device).get(stat_key_n_free, -1)
+                num_free_2 = device_module.memory_stats(device).get(stat_key_n_free, -1)
                 self.assertGreaterEqual(num_free_2, num_free_1)
 
-                new_r = torch.cuda.memory_reserved(device)
-                new_max_r = torch.cuda.max_memory_reserved(device)
+                new_r = device_module.memory_reserved(device)
+                new_max_r = device_module.max_memory_reserved(device)
                 self.assertLessEqual(new_r, last_r_arr[0])
                 self.assertLessEqual(new_r, new_max_r)
                 self.assertEqual(new_max_r, max_r_arr[0])
                 last_r_arr[0] = new_r
 
             if reset_peak:
-                torch.cuda.reset_peak_memory_stats(device)
-                self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
-                self.assertEqual(torch.cuda.max_memory_allocated(device), last_m_arr[0])
+                device_module.reset_peak_memory_stats(device)
+                self.assertEqual(device_module.memory_allocated(device), last_m_arr[0])
+                self.assertEqual(
+                    device_module.max_memory_allocated(device), last_m_arr[0]
+                )
                 max_m_arr[0] = last_m_arr[0]
-                self.assertEqual(torch.cuda.memory_reserved(device), last_r_arr[0])
-                self.assertEqual(torch.cuda.max_memory_reserved(device), last_r_arr[0])
+                self.assertEqual(device_module.memory_reserved(device), last_r_arr[0])
+                self.assertEqual(
+                    device_module.max_memory_reserved(device), last_r_arr[0]
+                )
                 max_r_arr[0] = last_r_arr[0]
 
         assert_change(0)
@@ -1127,7 +1123,7 @@ class TestMultiGPUCUDA(TestCase):
         yield
 
         tensors1 = [alloc(1), alloc(10, 20), alloc(200, 300, 2000)]
-        m1 = torch.cuda.memory_allocated(device)
+        m1 = device_module.memory_allocated(device)
         assert_change(1)
         yield
 
@@ -1179,29 +1175,33 @@ class TestMultiGPUCUDA(TestCase):
         del tensors2
         assert_change(-1, reset_peak=True)
         assert_change(0)
-        self.assertEqual(torch.cuda.memory_allocated(device), m1)
+        self.assertEqual(device_module.memory_allocated(device), m1)
         yield True
 
         del tensors1
         assert_change(-1, reset_peak=True)
-        self.assertEqual(torch.cuda.memory_allocated(device), m0)
+        self.assertEqual(device_module.memory_allocated(device), m0)
 
         # test empty_cache and reset_peak
         assert_change(0, empty_cache=True)
         assert_change(0, reset_peak=True)
 
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5642")
     @serialTest()
-    def test_memory_stats(self):
+    def test_memory_stats(self, device):
         gc.collect()
-        torch.cuda.empty_cache()
-        for _ in self._test_memory_stats_generator(self):
-            self._check_memory_stat_consistency()
+        torch.get_device_module(device).empty_cache()
+        for _ in self._test_memory_stats_generator(self, device):
+            self._check_memory_stat_consistency(device)
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/129860")
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    def test_memory_stats_multigpu(self):
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5642")
+    @deviceCountAtLeast(2)
+    def test_memory_stats_multigpu(self, devices):
+        device_module = torch.get_device_module(devices[0])
+
         # advance a generator with a end flag
         def advance(gen, end):
             if not end:
@@ -1212,22 +1212,18 @@ class TestMultiGPUCUDA(TestCase):
             return end
 
         # interlace
-        torch.cuda.empty_cache()
-        gen0 = self._test_memory_stats_generator(self, device="cuda:0", N=35)
-        gen1 = self._test_memory_stats_generator(
-            self, device=torch.device("cuda:1"), N=35
-        )
+        device_module.empty_cache()
+        gen0 = self._test_memory_stats_generator(self, device=devices[0], N=35)
+        gen1 = self._test_memory_stats_generator(self, device=devices[1], N=35)
         end0 = end1 = False
         while not (end0 and end1):
             end0 = advance(gen0, end0)
             end1 = advance(gen1, end1)
 
         # semi-random order
-        torch.cuda.empty_cache()
-        gen0 = self._test_memory_stats_generator(self, device=0, N=35)
-        gen1 = self._test_memory_stats_generator(
-            self, device=torch.device("cuda:1"), N=35
-        )
+        device_module.empty_cache()
+        gen0 = self._test_memory_stats_generator(self, device=devices[0], N=35)
+        gen1 = self._test_memory_stats_generator(self, device=devices[1], N=35)
         end0 = end1 = False
 
         while not (end0 and end1):
@@ -1241,34 +1237,38 @@ class TestMultiGPUCUDA(TestCase):
                 end1 = advance(gen1, end1)
                 t += 1
 
-    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
-    def test_graph_destroy_preserves_current_device(self):
+    @skipCUDAIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    @deviceCountAtLeast(2)
+    def test_graph_destroy_preserves_current_device(self, devices):
         # ~CUDAGraph runs when the last reference goes away, on whatever thread drops
         # it, so it must leave that thread's current device alone. The invariant is
         # device-generic; the regression it guards is ROCm-only, where the destructor
         # synchronizes the capture device to let deferred frees finish.
-        torch.cuda.set_device(0)
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.device(1):
+        device_module = torch.get_device_module(devices[0])
+        device_module.set_device(devices[0])
+        g = _get_graph_by_device(devices[0])
+        with device_module.device(devices[1]):
             # Capture on an explicit stream of this device. The default capture stream
             # is a process-wide singleton that may already belong to device 0, which
             # would move the capture (and so capture_dev_) off this device and leave
             # the assert below testing nothing.
-            s = torch.cuda.Stream()
-            a = torch.full((8,), 1, device="cuda:1")
+            s = device_module.Stream()
+            a = torch.full((8,), 1, device=devices[1])
             b = a + 1  # warm up before capture
-            with torch.cuda.graph(g, stream=s):
-                self.assertEqual(torch.cuda.current_device(), 1)
+            with device_module.graph(g, stream=s):
+                self.assertEqual(device_module.current_device(), 1)
                 b = a + 1
             g.replay()
-            torch.cuda.synchronize()
-        self.assertEqual(torch.cuda.current_device(), 0)
+            device_module.synchronize()
+        self.assertEqual(device_module.current_device(), 0)
         del a, b, g, s
         gc.collect()
-        self.assertEqual(torch.cuda.current_device(), 0)
+        self.assertEqual(device_module.current_device(), 0)
+
+
+@unittest.skipUnless(TEST_CUDA, "CUDA only tests!")
+class TestMultiGPUCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     @skipCUDANonDefaultStreamIf(True)
@@ -1432,7 +1432,7 @@ class TestMultiGPUCUDA(TestCase):
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA only tests!")
-class TestCudaCommCUDA(TestCase):
+class TestCudaComm(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def _test_broadcast(self, input):
