@@ -1392,21 +1392,9 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
-    # GCC >= 12's -Winterference-size warns that
-    # std::hardware_destructive_interference_size's value isn't guaranteed
-    # stable across compiler versions or -mtune/-mcpu flags -- relevant on
-    # aarch64, where cache line size genuinely varies by CPU implementation
-    # (unlike x86-64, where it's effectively fixed). c10's few uses of this
-    # constant (CUDAEvent.h, CUDACachingAllocator.cpp,
-    # XPUCachingAllocator.cpp, CachingHostAllocator.h) only need a fixed,
-    # reasonably-sized value to pad independent locks/counters apart and
-    # avoid false sharing -- they don't need the "true" hardware value to be
-    # correct, so pin it via GCC's own --param instead of letting -Werror
-    # fail the build wherever this constant happens to get used.
-    # append_cxx_flag_if_supported no-ops safely if the compiler doesn't
-    # support this --param.
-    append_cxx_flag_if_supported(
-      "--param=destructive-interference-size=64" CMAKE_CXX_FLAGS)
+    # Suppress GCC's warning without changing the value of
+    # std::hardware_destructive_interference_size in public headers.
+    append_cxx_flag_if_supported("-Wno-interference-size" CMAKE_CXX_FLAGS)
   endif()
   # needed for compat with newer versions of clang that use C++20 mangling rules
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
