@@ -1042,6 +1042,36 @@ class TestBlackwellTMALoadFusion(TestCase):
         self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
         FileCheck().check("tl.sum" if op != "amax" else "max2").run(code)
 
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("layer_norm", "centered_sum"))
+    @parametrize("shape", ((1024, 64, 128), (1000, 64, 128)))
+    def test_blackwell_mm_row_reduction_two_pass(
+        self, op: str, shape: tuple[int, int, int]
+    ):
+        """A row reduction reading a per-row result of the epilogue back fuses
+        into the mm template too."""
+        fn = {
+            "layer_norm": lambda a, b: TestBlackwellBMMReductionEpilogue._layer_norm(
+                (a @ b).float()
+            ),
+            "centered_sum": lambda a, b: (
+                (c := (a @ b).float()) - c.amax(-1, keepdim=True)
+            ).sum(-1),
+        }[op]
+        kernels, _ = self._run_reduction(
+            fn,
+            *shape,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            # rsqrt and the divisions may round differently from eager.
+            tol=0 if op == "centered_sum" else 1e-5,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+
     ROW_OPS = {
         "sum": lambda a, b: (a @ b).float().sum(-1),
         # Every row is negative, so unmasked out-of-range columns would win.
@@ -2366,6 +2396,123 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
             self.assertNotIn(
                 f"(({B}, {M}, {N}), ({M * N}, {N}, 1), torch.bfloat16)", code
             )
+
+    @staticmethod
+    def _layer_norm(c):
+        # The variance reads the mean back per row, as in a two-pass layer norm.
+        d = c - c.mean(-1, keepdim=True)
+        return d * torch.rsqrt((d * d).mean(-1, keepdim=True) + 1e-5)
+
+    TWO_PASS_OPS = {
+        "layer_norm": lambda a, b: TestBlackwellBMMReductionEpilogue._layer_norm(
+            (a @ b).float()
+        ),
+        "layer_norm_and_out": lambda a, b: (
+            (c := a @ b),
+            TestBlackwellBMMReductionEpilogue._layer_norm(c.float()),
+        ),
+        # Returning the stats makes the mean's division a node of its own that
+        # the variance reads back.
+        "layer_norm_stats": lambda a, b: (
+            (mean := (c := (a @ b).float()).mean(-1, keepdim=True)),
+            (rstd := torch.rsqrt(((c - mean) ** 2).mean(-1, keepdim=True) + 1e-5)),
+            (c - mean) * rstd,
+        ),
+        # Stats of an RMSNorm's output, which reads the RMS back per row.
+        "rms_norm_stats": lambda a, b, w: (
+            (
+                y := (c := (a @ b).float())
+                * torch.rsqrt(c.pow(2).mean(-1, keepdim=True) + 1e-5)
+                * w
+            ).mean(-1),
+            y.pow(2).mean(-1),
+        ),
+        "centered_sum": lambda a, b: (
+            (c := (a @ b).float()) - c.amax(-1, keepdim=True)
+        ).sum(-1),
+        # Viewing the rows as (M / 2, 2) leaves the stats of the normalized
+        # output a reduction node of their own, which joins the template's
+        # epilogue after its first reduction.
+        "rms_norm_viewed_stats": lambda a, b, w: (
+            (
+                y := (c := (a @ b).view(len(a), -1, 2, w.numel()).float())
+                * torch.rsqrt(c.pow(2).mean(-1, keepdim=True) + 1e-5)
+                * w
+            ),
+            (z := y.view(len(a), -1, w.numel())).mean(-1),
+            z * torch.rsqrt(z.pow(2).mean(-1, keepdim=True) + 1e-5),
+        ),
+    }
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", tuple(TWO_PASS_OPS))
+    # Many batches, M % BLOCK_M != 0, and an N tail with two tiles per batch.
+    @parametrize("shape", ((5139, 128, 64, 128), (300, 96, 64, 128), (64, 176, 64, 80)))
+    @parametrize("tma_store", (False, True))
+    def test_blackwell_bmm_row_reduction_two_pass(
+        self, op: str, shape: tuple[int, int, int, int], tma_store: bool
+    ):
+        """A row reduction that reads a per-row result of the epilogue back,
+        e.g. a two-pass layer norm's variance reading the mean, fuses when the
+        tile spans the output's columns, so the bmm output is never stored."""
+        B, M, _, N = shape
+        fn = self.TWO_PASS_OPS[op]
+        kernels, code = self._run_bmm_reduction(
+            fn,
+            *shape,
+            BlackwellBMMConfig(128, 128, 64, 3, 8),
+            extra_input=(N,) if fn.__code__.co_argcount == 3 else False,
+            # rsqrt and the divisions may round differently from eager.
+            tol=0 if op == "centered_sum" else 1e-5,
+            **{"triton.enable_template_tma_store": tma_store},
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        bmm_out = f"(({B}, {M}, {N}), ({M * N}, {N}, 1), torch.bfloat16)"
+        if op == "layer_norm_and_out":
+            self.assertIn(bmm_out, code)
+        else:
+            self.assertNotIn(bmm_out, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("case", ("stat_by_column", "other_row", "wide_n", "subtiled"))
+    def test_blackwell_bmm_row_reduction_two_pass_not_fused(self, case: str):
+        """A row reduction can't read a row result back at a column index of a
+        square output or at another row, nor before the result is complete,
+        i.e. when the tile doesn't span the output's columns or splits them
+        into subtiles."""
+        if case == "subtiled" and meta_ws_enabled():
+            self.skipTest("meta WS doesn't fuse reductions over subtiles")
+        fn = {
+            "stat_by_column": lambda a, b: (
+                (c := (a @ b).float()) - c.sum(-1)[:, None, :]
+            ).sum(-1),
+            "other_row": lambda a, b: (
+                (c := (a @ b).float()) - c.mean(-1, keepdim=True).roll(1, 1)
+            ).sum(-1),
+        }.get(case, self.TWO_PASS_OPS["layer_norm"])
+        kernels, _ = self._run_bmm_reduction(
+            fn,
+            300,
+            128,
+            64,
+            256 if case == "wide_n" else 128,
+            BlackwellBMMConfig(
+                128, 128, 64, 3, 8, epilogue_subtile=2 if case == "subtiled" else 1
+            ),
+            tol=1e-5 if case in ("wide_n", "subtiled") else 0,
+        )
+        # The first reduction still fuses; the one reading its result doesn't.
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertTrue(
+            any(k.startswith(("triton_red", "triton_per")) for k in kernels), kernels
+        )
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),

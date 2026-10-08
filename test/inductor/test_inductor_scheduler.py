@@ -3621,6 +3621,122 @@ class TestBMMMatrixReductionEpilogue(TestCase):
         )
 
 
+class TestBMMRowReductionTwoPass(TestCase):
+    """Gates of a row reduction of a (B, M, N) template output that reads a
+    per-row result of the epilogue back, e.g. a two-pass layer norm's variance
+    reading the mean."""
+
+    # Each batch's matrix is square, so its row and column indices have the
+    # same range.
+    B, M, N = 6, 128, 128
+
+    def setUp(self):
+        super().setUp()
+        self.template = Mock()
+        self.template.get_size.return_value = [
+            sympy.Integer(s) for s in (self.B, self.M, self.N)
+        ]
+        self.template.get_name.return_value = "buf0"
+        graph = Mock(sizevars=SizeVarAllocator(), cpp_wrapper=False)
+        self.enterContext(V.set_graph_handler(graph))
+        self.x, self.r = sympy.symbols("x r", integer=True, nonnegative=True)
+        template_node = Mock(spec=SchedulerNode)
+        template_node.is_template.return_value = True
+        self.buffers = {"buf0": Mock(defining_op=template_node)}
+        self.bodies = {}
+        self.enterContext(
+            patch(
+                "torch._inductor.codegen.simd.linear_loop_body",
+                lambda node: (self.bodies[node.get_name()], self.x, self.r),
+            )
+        )
+
+    def snode(self, name, reads, writes, reduction_type="sum", over_cols=True):
+        """A node over the (B * M, N) output, or its rows, with unnormalized
+        reads and writes as (buffer, index) over x and r."""
+        m, n, x, r = self.B * self.M, self.N, self.x, self.r
+        group = (m, n) if over_cols else (m, sympy.S.One)
+        node = Mock(spec=SchedulerNode)
+        node.get_name.return_value = name
+        node.get_buffer_names.return_value = OrderedSet([name])
+        node.used_buffer_names.return_value = OrderedSet(buf for buf, _ in reads)
+        node.group = ("cuda", group)
+        # Normalized dependencies lose x and r: a row-major read of the whole
+        # output merges into one contiguous var.
+        c0 = sympy.Symbol("c0", integer=True, nonnegative=True)
+        node.read_writes = Mock(
+            reads=OrderedSet(
+                MemoryDep(buf, c0, (c0,), (m * n,))
+                if index == n * x + r
+                else MemoryDep(buf, index, (x,), (m,))
+                for buf, index in reads
+            )
+        )
+        node.mutation_renames = {}
+        node.is_reduction.return_value = reduction_type is not None
+        node.is_template.return_value = False
+        node.unsplit_reduction.return_value = node
+        node.get_ranges.return_value = ([m], [n] if over_cols else [])
+        node.node = Mock(spec=ir.ComputedBuffer, data=None)
+        node.node.get_reduction_type.return_value = reduction_type
+        node.node.get_dtype.return_value = torch.float32
+        node.scheduler = Mock(name_to_buf=self.buffers)
+        self.buffers[name] = Mock(defining_op=node)
+        self.bodies[name] = Mock(
+            _reads=[MemoryDep(buf, index, (), ()) for buf, index in reads],
+            _writes=[MemoryDep(name, index, (), ()) for index in writes],
+        )
+        return node
+
+    def axis(self, node, *epilogue):
+        produced = OrderedSet(["buf0"]).union(
+            *(other.get_buffer_names() for other in epilogue)
+        )
+        return template_reduction_axis(node, self.template, produced)
+
+    def layer_norm(self):
+        n, x, r = self.N, self.x, self.r
+        mean = self.snode("buf1", [("buf0", n * x + r)], [x])
+        var = self.snode("buf2", [("buf0", n * x + r), ("buf1", x)], [x])
+        return mean, var
+
+    def test_axis(self):
+        n, x, r = self.N, self.x, self.r
+        mean, var = self.layer_norm()
+        self.assertEqual(self.axis(mean, mean), 0)
+        self.assertEqual(self.axis(var, mean, var), 0)
+        # The mean's division, a node over the rows.
+        div = self.snode("buf3", [("buf1", x)], [x], None, over_cols=False)
+        var = self.snode("buf4", [("buf0", n * x + r), ("buf3", x)], [x])
+        self.assertEqual(self.axis(var, mean, div, var), 0)
+
+    def test_axis_rejects_other_reads(self):
+        n, x, r = self.N, self.x, self.r
+        mean, _ = self.layer_norm()
+        # The mean read at the column index.
+        by_column = self.snode("buf2", [("buf0", n * x + r), ("buf1", r)], [x])
+        self.assertIsNone(self.axis(by_column, mean, by_column))
+        # The template output read at the row index.
+        by_row = self.snode("buf2", [("buf0", x)], [x])
+        self.assertIsNone(self.axis(by_row, by_row))
+        # A node over the rows that stores at another index, or reads the mean
+        # at the column index.
+        for reads, writes in (([("buf1", x)], [r]), ([("buf1", r)], [x])):
+            stat = self.snode("buf3", reads, writes, None, over_cols=False)
+            var = self.snode("buf4", [("buf0", n * x + r), ("buf3", x)], [x])
+            self.assertIsNone(self.axis(var, mean, stat, var))
+
+    def test_tile_fits(self):
+        mean, var = self.layer_norm()
+        fits = functools.partial(tile_fits_reduction_epilogue, template=self.template)
+        self.assertTrue(fits((128, 128, 1), epilogue_nodes=[mean, var]))
+        # The mean is only complete after the kernel when the tile doesn't
+        # span the columns, or after the last subtile.
+        self.assertFalse(fits((128, 64, 1), epilogue_nodes=[mean, var]))
+        with patch("torch._inductor.codegen.simd.meta_ws_enabled", return_value=False):
+            self.assertFalse(fits((128, 64, 2), epilogue_nodes=[mean, var]))
+
+
 class TestBMMRowPassLoadReuse(TestCase):
     """The row pass of a batched template output reuses loads that epilogue
     nodes before it made over the template's own indices, rather than reload
