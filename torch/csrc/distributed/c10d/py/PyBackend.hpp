@@ -535,6 +535,10 @@ class PyBackend : public Backend {
 
  private:
   static c10::intrusive_ptr<Backend> initSlotAndCast(py::object o) {
+    // None (e.g. split() on non-members) maps to nullptr.
+    if (o.is_none()) {
+      return nullptr;
+    }
     auto backend = o.cast<c10::intrusive_ptr<Backend>>();
     auto* pyobj = torch::utils::PyObjectPreservation::get_or_init(
         *backend, [&]() { return Py_NewRef(o.ptr()); });
