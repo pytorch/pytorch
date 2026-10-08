@@ -12434,11 +12434,19 @@ class Scheduler:
                 and isinstance(snode._body, LoopBody)
             )
             remove_redundant_argreduce_indices(list(loop_bodies))
-            return (
-                self._codegen_partitions()
-                if torch._inductor.config.graph_partition
-                else self._codegen(self.nodes)
-            )
+            try:
+                return (
+                    self._codegen_partitions()
+                    if torch._inductor.config.graph_partition
+                    else self._codegen(self.nodes)
+                )
+            finally:
+                from .codegen.simd import SIMDScheduling
+
+                # candidate_tilings is a class-level cache keyed on scheduler
+                # nodes; once codegen is done, its entries would only keep this
+                # graph (IR, FX graph, and e.g. frozen constants) alive.
+                SIMDScheduling.candidate_tilings.cache_clear()
 
     def _codegen_partition_wrapper(
         self,

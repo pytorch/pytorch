@@ -150,6 +150,18 @@ class TestScheduler(TestCase):
         snode.node = node
         return snode
 
+    @skipIf(not HAS_GPU, "candidate_tilings is used by the GPU scheduling backends")
+    @inductor_config.patch({"triton.coalesce_tiling_analysis": False})
+    def test_candidate_tilings_cache_cleared_after_codegen(self):
+        # The cache is keyed on scheduler nodes; leaving entries behind keeps
+        # the compiled graph (and e.g. frozen constants) alive after compile.
+        def fn(x):
+            return x.t() + x
+
+        torch._dynamo.reset()
+        torch.compile(fn)(torch.randn(64, 64, device=GPU_TYPE))
+        self.assertEqual(SIMDScheduling.candidate_tilings.cache_info().currsize, 0)
+
     def test_stable_topological_sort_schedule(self):
         consumer = self._mock_base_snode("consumer")
         independent = self._mock_base_snode("independent")
