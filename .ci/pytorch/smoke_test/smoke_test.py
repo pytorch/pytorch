@@ -348,11 +348,8 @@ def smoke_test_cuda(
                 version = imported_module._extension._check_cuda_version()
             print(f"{module['name']} CUDA: {version}")
 
-    # torch.compile is not supported on Python 3.15+ yet (it raises at runtime),
-    # so skip the compile smoke test there instead of failing the wheel test.
     if (
         torch_compile_check == "enabled"
-        and sys.version_info < (3, 15)
         and target_os
         in [
             "linux",
