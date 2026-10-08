@@ -6094,6 +6094,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.src_to_kernel = root.src_to_kernel
         # Same here, only define user-defined Triton kernels in the main graph
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
+        self.multi_kernel_state = MultiKernelState(parent_wrapper.multi_kernel_state)
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
