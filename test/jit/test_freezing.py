@@ -1542,7 +1542,7 @@ class TestFreezing(JitTestCase):
                 self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
 
             def forward(self, x: torch.Tensor, key: str) -> Any:
-                value: ModuleInterface = self.d[key]
+                value = torch.jit.annotate(ModuleInterface, self.d[key])
                 return value.forward(x)
 
         m = torch.jit.script(ModWithDict())
@@ -1559,7 +1559,7 @@ class TestFreezing(JitTestCase):
                 self.l = torch.nn.ModuleList([ImplementsInterface()])
 
             def forward(self, x: torch.Tensor, idx: int) -> Any:
-                value: ModuleInterface = self.l[idx]
+                value = torch.jit.annotate(ModuleInterface, self.l[idx])
                 return value.forward(x)
 
         m = torch.jit.script(ModWithList())
