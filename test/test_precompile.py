@@ -4429,13 +4429,17 @@ class TestPrecompileCapture(TestCase):
                     cap(self.model, self.x)
         self.assertFalse(os.path.exists(self.artifact))
 
-    def test_capture_takes_pathlike_paths_and_the_default_tracer(self):
+    def test_capture_takes_pathlike_paths(self):
         import pathlib
 
         artifact = pathlib.Path(self.dir) / "sub" / "m.py"
         cache = pathlib.Path(self.dir) / "sub" / "m.cache"
         with capture(
-            _files_fn, artifact_path=artifact, cache_path=cache, backend="eager"
+            _files_fn,
+            artifact_path=artifact,
+            cache_path=cache,
+            backend="eager",
+            tracer=MakeFxTracer(),
         ) as cap:
             cap(self.model, self.x)
         self.assertEqual(load(artifact, cache)(self.model, self.x), self.model(self.x))
@@ -4674,7 +4678,6 @@ class TestPrecompileDynamoCapture(TestCase):
         self.x3 = torch.randn(3, 4)
 
     def _capture(self, fn, **kwargs):
-        kwargs.setdefault("tracer", DynamoTracer())
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
 
     def _serve_in_fresh_process(self, calls, grads=None):
@@ -4694,6 +4697,20 @@ class TestPrecompileDynamoCapture(TestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
+
+    def test_capture_takes_pathlike_paths(self):
+        import pathlib
+
+        artifact = pathlib.Path(self.dir) / "sub" / "m.py"
+        cache = pathlib.Path(self.dir) / "sub" / "m.cache"
+        single = self.mod.single
+        with capture(
+            single, artifact_path=artifact, cache_path=cache, backend="eager"
+        ) as cap:
+            cap(self.model, self.x2)
+        self.assertEqual(
+            load(artifact, cache)(self.model, self.x2), single(self.model, self.x2)
+        )
 
     # The crossref harness keeps a dispatch mode active while the capture runs,
     # and Dynamo guards on that state; a fresh process has no such mode, so
