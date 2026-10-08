@@ -3414,6 +3414,16 @@
       ]
     }
   ],
+  "GB4518": [
+    {
+      "Gb_type": "Unsupported autograd.Function context `set_output_grad_dtype`",
+      "Context": "call_method {self} set_output_grad_dtype {args}",
+      "Explanation": "Dynamo only supports tracing a single ctx.set_output_grad_dtype call with constant torch.dtype or None arguments inside autograd.Function.apply.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB8843": [
     {
       "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
