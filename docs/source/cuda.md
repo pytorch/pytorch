@@ -335,6 +335,7 @@ Save after instantiation and before resetting or destroying the graph.
      CUDAPluggableAllocator
      change_current_allocator
      MemPool
+     LocalizedAllocator
 ```
 
 ```{eval-rst}
@@ -498,6 +499,130 @@ custom stream.
 The `GreenContext.set_context()` and `GreenContext.pop_context()` methods are
 deprecated compatibility APIs.
 
+To create contexts with disjoint SM allocations (CUDA driver and bindings
+13.1+), specify all groups in one operation:
+
+```python
+from torch.cuda.green_contexts import GreenContext, SMPartition
+
+a, b = GreenContext.split(
+    num_sms=(24, 40), coscheduled_sm_count=(8, 4), device_id=0
+)
+print(a.sm_count, b.sm_count)
+```
+
+To retain the remainder, use `SMPartition.split`. To subdivide a returned
+partition or remainder, create a context from it and split the resource queried
+through its `sm_partition` property. CUDA drivers can reject raw split outputs
+as already partitioned resources, so the context creation is explicit:
+
+```python
+sms = SMPartition.from_device(device_id=0)
+(first,), rest = sms.split(num_sms=4, coscheduled_sm_count=2)
+rest_ctx = GreenContext(sm_partition=rest)
+(second,), rest = rest_ctx.sm_partition.split(num_sms=4, coscheduled_sm_count=2)
+ctx = GreenContext(sm_partition=second, workqueue_scope="balanced")
+```
+
+Each split partitions its input resource. Its children and remainder are
+mutually disjoint, but overlap the parent. Results of separate splits on the same
+or overlapping input resources may overlap.
+CUDA evaluates new constraints when subdividing a resource; the remainder does
+not inherit the earlier split's alignment.
+Partitioning does not reserve SMs against other contexts or guarantee concurrent
+execution. Each split option accepts a scalar or a sequence. All sequences must
+have the same nonzero length; scalars are broadcast to that length. With scalars
+only, one group is created. The default `num_sms=0` discovers the largest group
+satisfying its constraints. Groups are evaluated in order, so an early discovery
+group can exhaust the SMs needed by later groups.
+A group with both `num_sms=0` and `backfill=True` consumes all remaining SMs,
+so it must be the last group. Otherwise, specify a positive SM count.
+CUDA validates hardware constraints without PyTorch rounding the requested sizes.
+CUDA permits kernels to use additional SMs in some configurations involving MPS
+or dynamic parallelism; see the
+[CUDA green-context documentation](https://docs.nvidia.com/cuda/cuda-driver-api/cuda_driver_api/group__CUDA__GREEN__CONTEXTS.html).
+
+`GreenContext.sm_count` reports the actual allocation, including for contexts
+created through the existing `num_sms` constructor. Independent constructor
+calls do not guarantee disjoint SMs. A context's `sm_partition` property returns
+a resource that can be subdivided and keeps its originating context alive.
+
+Locality domains describe hardware topology. With CUDA driver and bindings
+13.4+, add locality constraints when splitting a resource:
+
+```python
+from torch.cuda.green_contexts import get_num_locality_domains
+
+n = get_num_locality_domains(device_id=0)
+contexts = GreenContext.split(
+    coscheduled_sm_count=2,
+    locality_domain_ids=tuple(range(n)),
+    device_id=0,
+)
+```
+
+Here, the default zero SM count is broadcast to each locality domain and discovers
+its available SMs. Some device SMs may be outside all locality domains and remain
+unassigned. A domain can contain
+multiple partitions; its ID can also constrain subdivision through an existing
+context's queried SM resource, as shown above. Use `None` for a group with no
+locality constraint. Workqueue settings can be combined with either kind of split.
+
+`backfill=True` permits CUDA to fill a group with SMs outside its co-scheduling
+or locality constraints. It preserves the separation between sibling partitions.
+The `locality_domain_id` property on partitions and contexts reads CUDA's
+reported metadata and returns `None` if CUDA does not specify a domain.
+
+`get_num_locality_domains` returns `1` when the required software is unavailable.
+With CUDA driver and bindings 13.4+, it queries CUDA directly; invalid devices and
+failed queries raise. Supplying an explicit device index initializes only the
+driver, without initializing PyTorch CUDA state or creating a primary context.
+Driver initialization can still prevent CUDA use in subsequently forked children.
+
+`is_localization_supported` returns false for unsupported software or devices
+with at most one domain. Before driver initialization, it attempts a best-effort
+NVML capability check using `CUDA_VISIBLE_DEVICES`. If NVML cannot determine
+support, it raises; initialize CUDA explicitly before querying again if needed.
+After driver initialization, the query always uses CUDA and query errors
+propagate. The predicate does not initialize the driver or a context, so calling
+it does not poison subsequent forks.
+Actual splitting and context creation always use CUDA, independently of this
+capability check.
+
+### Localized allocations
+
+With CUDA driver and cuda.bindings 13.4+, `LocalizedAllocator` allocates physical
+memory on a specified locality domain. Use it with the existing `MemPool` API
+to cache and suballocate that memory. Construction initializes CUDA so validation
+uses the actual CUDA-visible topology. Allocation does not localize execution;
+use a green-context stream separately when compute localization is also desired.
+
+```python
+allocator = torch.cuda.LocalizedAllocator(locality_domain_id=0, device="cuda:0")
+with torch.cuda.device(allocator.device_id):
+    pool = torch.cuda.MemPool(allocator=allocator.allocator())
+with torch.cuda.use_mem_pool(pool, device="cuda:0"):
+    # x is allocated on locality domain 0
+    # the randn kernel runs non-localized
+    x = torch.randn(1024, device="cuda:0")
+```
+
+Use the allocator only on its owning device; cross-device access is not supported.
+Callback owners are retained for the process lifetime, so tensors can outlive the
+Python allocator and pool objects. One owner and primary-context reference per
+device/domain are deliberately retained through interpreter shutdown. Reclaiming
+physical memory waits for the allocation stream. Cleanup failures are logged, not
+raised; memory still in use after a failed stream wait is left for process exit
+to reclaim. During interpreter shutdown, callbacks skip CUDA cleanup entirely.
+
+```{warning}
+Concurrent allocator activity is unsupported. Other threads must not allocate,
+free, or query allocator state (including `MemPool.use_count()`) concurrently
+with this allocator. The ctypes callbacks acquire the GIL while holding the
+native allocator mutex; an allocator-state query can acquire these locks in the
+opposite order and deadlock.
+```
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
 ```
@@ -508,6 +633,9 @@ deprecated compatibility APIs.
     :nosignatures:
 
     GreenContext
+    SMPartition
+    get_num_locality_domains
+    is_localization_supported
 ```
 
 
