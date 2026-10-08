@@ -479,6 +479,49 @@ class TestMaxAutotune(TestCase):
         self.assertIn("a_desc = tl.make_tensor_descriptor(base=A", codes[0])
 
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize(
+        "fp32_precision,n,expect_tf32",
+        (("ieee", 512, False), ("tf32", 512, True), ("tf32", 128, False)),
+    )
+    def test_blackwell_bmm_template_allow_tf32(
+        self, fp32_precision: str, n: int, expect_tf32: bool
+    ) -> None:
+        # fp32 operands follow the same TF32 gate as the other GEMM templates,
+        # including its size threshold (min(N, K) >= 512).
+        if meta_ws_enabled() and not expect_tf32:
+            self.skipTest("Meta autoWS fails to warp-specialize IEEE fp32 dots")
+        a = torch.randint(-2, 3, (2, 256, 512), device=GPU_TYPE).float()
+        b = torch.randint(-2, 3, (2, 512, n), device=GPU_TYPE).float()
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            return choices[0].output_node()
+
+        old_precision = torch.backends.cuda.matmul.fp32_precision
+        torch.backends.cuda.matmul.fp32_precision = fp32_precision
+        try:
+            with (
+                mock.patch.dict(
+                    lowerings,
+                    {torch.ops.inductor_test.blackwell_bmm.default: lowering},
+                ),
+                config.patch(compile_threads=1),
+            ):
+                actual, codes = run_and_get_code(
+                    torch.compile(blackwell_bmm, fullgraph=True), a, b
+                )
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = old_precision
+
+        # Small integers are exact in both TF32 and IEEE fp32.
+        self.assertEqual(actual, torch.bmm(a, b), atol=0, rtol=0)
+        self.assertIn(f"ALLOW_TF32 : tl.constexpr = {expect_tf32}", codes[0])
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     def test_blackwell_bmm_template_rejects_misaligned_leading_stride(self) -> None:
         bsz, m, k, n = 2, 256, 256, 257
         a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
