@@ -321,10 +321,7 @@ class TestEnvironment:
             implied = implied_by_fn()
             enabled = enabled or implied
         if include_in_repro and (env_var is not None):
-            if env_var_val is not None:
-                TestEnvironment.env_var_values[env_var] = env_var_val
-            else:
-                TestEnvironment.env_var_values[env_var] = "1" if enabled else ""
+            TestEnvironment.env_var_values[env_var] = env_var_val or ("1" if enabled else "")
             if (enabled != default) and not implied:
                 TestEnvironment.repro_env_vars[env_var] = env_var_val
 
@@ -361,9 +358,9 @@ class TestEnvironment:
         parse_fn=lambda maybe_val_str: maybe_val_str,
     ):
         value = default if env_var is None else os.getenv(env_var)
-        if include_in_repro and (env_var is not None):
-            TestEnvironment.env_var_values[env_var] = value or ""
         value = parse_fn(value)
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = os.getenv(env_var) or ""
         if include_in_repro and (value != default):
             TestEnvironment.repro_env_vars[env_var] = value
 
