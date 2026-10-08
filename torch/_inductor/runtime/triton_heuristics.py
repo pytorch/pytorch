@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import builtins
+import contextlib
 import copy
 import dataclasses
 import enum
@@ -142,7 +143,7 @@ def _should_enable_triton_debug_asserts(inductor_meta: InductorMeta) -> bool:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container, Hashable
+    from collections.abc import Callable, Container, Generator, Hashable
 
     from torch._C._profiler import _RecordFunctionFast
     from torch._guards import CompileId
@@ -475,6 +476,32 @@ def check_autotune_cache(
 DEFER: Final[object] = object()
 
 
+# Thread-local opt-out for plugins; see ``disable_caching_autotuner_plugins``.
+_plugin_suppression = threading.local()
+
+
+def caching_autotuner_plugins_suppressed() -> bool:
+    return getattr(_plugin_suppression, "value", False)
+
+
+@contextlib.contextmanager
+def disable_caching_autotuner_plugins() -> Generator[None, None, None]:
+    """Bypass ``CachingAutotuner`` plugins on the current thread.
+
+    Compile-time benchmarking needs exactly one launcher to time, but a plugin
+    such as incremental autotuning takes ownership of ``launchers`` until many
+    real invocations have run. Checked where plugins are consulted, not at
+    construction, because ``PyCodeCache.load`` can return an autotuner built
+    outside this context.
+    """
+    prev = caching_autotuner_plugins_suppressed()
+    _plugin_suppression.value = True
+    try:
+        yield
+    finally:
+        _plugin_suppression.value = prev
+
+
 class CachingAutotunerPlugin:
     """Base class for ``CachingAutotuner`` plugins.
 
@@ -803,6 +830,11 @@ class CachingAutotuner(KernelInterface):
         self.compile_id = compile_id
         self.is_backward = is_backward
 
+    def _active_plugins(self) -> list[CachingAutotunerPlugin]:
+        if caching_autotuner_plugins_suppressed():
+            return []
+        return self._plugins
+
     def precompile(
         self,
         warm_cache_only=False,
@@ -824,7 +856,7 @@ class CachingAutotuner(KernelInterface):
             # creation entirely. We return without running
             # ``_precompile_worker`` / ``_make_launchers`` /
             # ``_dynamic_scale_rblock``.
-            for plugin in self._plugins:
+            for plugin in self._active_plugins():
                 if plugin.pre_compile(self) is not DEFER:
                     return
             self._precompile_worker()
@@ -2529,7 +2561,7 @@ class CachingAutotuner(KernelInterface):
                 **self.configs[0].kwargs,
             )
 
-        for plugin in self._plugins:
+        for plugin in self._active_plugins():
             if (
                 result := plugin.pre_dispatch(self, *args, stream=stream, **kwargs)
             ) is not DEFER:
@@ -2541,7 +2573,7 @@ class CachingAutotuner(KernelInterface):
                 self.precompile()
                 self.precompile_time_taken_ns = time.time_ns() - start_time
             if len(self.launchers) > 1:
-                for plugin in self._plugins:
+                for plugin in self._active_plugins():
                     if (
                         result := plugin.pre_autotune(
                             self, *args, stream=stream, **kwargs
