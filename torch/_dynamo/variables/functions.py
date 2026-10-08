@@ -732,6 +732,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             "optree.ops",
             "torch.utils._pytree",
             "torch.utils._cxx_pytree",
+            "torch.utils.pytree",
+            "torch.utils.pytree.python",
+            "torch.utils.pytree.cxx",
         }
     )
 

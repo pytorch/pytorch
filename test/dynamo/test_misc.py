@@ -43,6 +43,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils._pytree as python_pytree
 import torch.utils.cpp_extension
+import torch.utils.pytree as generic_pytree
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
@@ -120,6 +121,7 @@ if IS_FBCODE:
 
 
 pytree_modules = {
+    "generic": generic_pytree,
     "python": python_pytree,
 }
 if python_pytree._cxx_pytree_dynamo_traceable:
