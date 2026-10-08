@@ -2,7 +2,6 @@
 import functools
 import itertools
 import logging
-import math
 import operator
 import typing
 from collections import Counter
@@ -17,7 +16,7 @@ from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch._inductor.fx_utils import get_node_storage
-from torch._inductor.utils import get_gpu_type, is_strict_cuda_triton
+from torch._inductor.utils import get_gpu_type
 from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
@@ -33,6 +32,7 @@ from ..custom_graph_pass import get_custom_graph_passes
 from ..pattern_matcher import (
     Arg,
     CallFunction,
+    Ignored,
     init_once_fakemode,
     KeywordArg,
     Match,
@@ -641,14 +641,6 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
             fake_tensor = node.meta["val"]
             if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
-                continue
-
-            # Preserve NaN bit patterns; codegen canonicalizes floating NaN constants.
-            if (
-                is_strict_cuda_triton(fake_tensor.device)
-                and isinstance(value, float)
-                and math.isnan(value)
-            ):
                 continue
 
             # TODO - not sure about lossy uint->python value->uint conversions
@@ -1300,6 +1292,9 @@ def scatter_upon_const_tensor_extra_check(m):
             KeywordArg("shape"),
             KeywordArg("background_val"),
             dtype=KeywordArg("dtype"),
+            # the replacement takes its device from selector; scatter requires it
+            # to match the full's
+            device=Ignored(),
         ),
         KeywordArg("dim"),
         KeywordArg("selector"),
