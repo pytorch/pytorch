@@ -571,7 +571,18 @@ class Vectorized<float> {
   }
 #endif
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(tan)
+#if defined(CPU_CAPABILITY_SVE128) && !defined(AT_VEC_CUSTOM_MATH)
+  Vectorized<float> tanh() const {
+    return sve_to_neon(at::vec::tanh_impl(
+        neon_to_sve(values),
+        svptrue_b32(),
+        [](svfloat32_t input) -> svfloat32_t {
+          return neon_to_sve(Vectorized<float>(sve_to_neon(input)).exp_u20());
+        }));
+  }
+#else
   DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(tanh)
+#endif
   Vectorized<float> trunc() const {
     return Vectorized<float>(vrndq_f32(values));
   }
