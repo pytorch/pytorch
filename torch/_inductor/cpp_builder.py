@@ -2602,9 +2602,8 @@ class CppBuilder:
             # See above; we can currently assume this is not on MSVC.
             self._sources_args = f"-x c++-header {sources[0]}"
             if _is_clang(BuildOption.get_compiler()):
-                # clang 20 and above require an explicit -c option when precompiling
-                # clang 19 passes with a warning
-                self._cflags_args += " -c "
+                # -c: needed by clang 20+ when a config file adds linker flags (e.g. conda-forge).
+                self._cflags_args += " --compile "
                 if self._use_relative_path:
                     # Store PCH paths relative to -isysroot so the .pch can
                     # be used from a different build directory.  The matching
