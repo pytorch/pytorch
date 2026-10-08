@@ -1941,6 +1941,8 @@ def _linalg_solve_ex(
         dtype=B.dtype,
         device=B.device,
     )
+    if result_.numel() != 0 and not left and result_.is_complex():
+        result_ = result_.conj()
     shape = A.shape
     LU_ = torch.empty_strided(
         size=shape,
