@@ -1375,6 +1375,29 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    def test_blackwell_mm_reduction_epilogue_benchmark_casts_finish(self):
+        """For a bf16 column reduction, the benchmark's finish also pays for the
+        wrapper's cast to the output dtype, as the unfused side does."""
+        _, code = self._run_reduction(
+            self.COL_OPS["sum_bf16"],
+            1024,
+            128,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True, "benchmark_kernel": True},
+        )
+        finish = re.findall(
+            r"\.run\(\*args, stream=\w+\)\n\s+args\[\d+\]\[\d+:\d+\]"
+            r"\.view\(torch\.float32\)\.view\(\d+, 128\)\.sum\(dim=0\)"
+            r"\.to\(torch\.bfloat16\)",
+            code,
+        )
+        self.assertEqual(len(finish), 1, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     @parametrize("op", ("row", "col"))
     def test_blackwell_mm_reduction_epilogue_transposed_read(self, op: str):
         """A square output read transposed by a pointwise node must not fuse,

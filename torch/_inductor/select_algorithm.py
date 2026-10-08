@@ -2059,7 +2059,11 @@ class TritonTemplateKernel(TritonKernel):
         )
         n = self.output_node.get_size()[1]
         for column in self.column_reductions:
-            result.writeline(_column_partials_finish(f"args[{idx}]", column, n))
+            finish = _column_partials_finish(f"args[{idx}]", column, n)
+            # Like the wrapper, cast the fp32 partials to the output dtype.
+            if (dtype := V.graph.get_dtype(column.buffer)) != torch.float:
+                finish += f".to({dtype})"
+            result.writeline(finish)
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         # Grid args are only used for benchmarking, not correctness
