@@ -42,7 +42,7 @@ class TORCH_API NCCLSymmetricMemory : public SymmetricMemory {
 
   size_t get_buffer_size() override;
 
-  std::string get_group_name();
+  std::string get_group_name() override;
 
   bool has_multicast_support() override;
 
@@ -80,12 +80,6 @@ class TORCH_API NCCLSymmetricMemory : public SymmetricMemory {
   size_t get_window_offset();
 
  private:
-#ifdef USE_ROCM
-  friend class NCCLSymmetricMemoryAllocator;
-
-  void check_liveness() const;
-#endif
-
   c10::intrusive_ptr<NCCLPeerAllocInfo> pai_;
   size_t offset_;
   int rank_;
