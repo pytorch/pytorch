@@ -199,6 +199,64 @@ class StrictNumericsConfigTest(TestCase):
 )
 class StrictNumericsCompileTest(TestCase):
     @ops(
+        [op for op in op_db if op.name in ("abs", "neg", "angle", "frexp")],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    @parametrize("shared", (False, True))
+    def test_unary_nan_payload(self, device, dtype, op, numerics, upcast, shared):
+        if dtype in (torch.float16, torch.bfloat16):
+            x = _exhaustive_16bit(dtype, device)
+        else:
+            x = _min_max_specials(dtype, device)
+            if dtype == torch.float32:
+                x = torch.cat((x, _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)))
+            else:
+                finfo = torch.finfo(dtype)
+                edges = torch.tensor(
+                    [finfo.tiny * finfo.eps, finfo.tiny, finfo.max],
+                    dtype=dtype,
+                    device=device,
+                )
+                x = torch.cat((x, edges, -edges))
+
+        def fn(x):
+            result = op.op(x)
+            outputs = result if op.name == "frexp" else (result,)
+            if shared:
+                return (*outputs, outputs[0].double(), x + 1)
+            return outputs
+
+        result, codes = run_and_get_code(
+            torch.compile(
+                fn,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+        )
+        self.assertIn("@triton.jit", "\n".join(codes))
+        self.assertEqual(
+            tuple(t.view(_BIT_VIEW.get(t.dtype, t.dtype)) for t in result),
+            tuple(t.view(_BIT_VIEW.get(t.dtype, t.dtype)) for t in fn(x)),
+        )
+
+    @ops(
+        [op for op in op_db if op.name in ("abs", "neg", "angle")],
+        allowed_dtypes=(torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_unary_integer(self, device, dtype, op, numerics):
+        limits = torch.iinfo(dtype)
+        x = torch.tensor([limits.min, 0, 1, limits.max], dtype=dtype, device=device)
+        compiled = torch.compile(op.op, fullgraph=True, options={"numerics": numerics})
+        self.assertEqual(compiled(x), op.op(x))
+
+    @ops(
         [op for op in op_db if op.name in ("byte", "char", "short")],
         allowed_dtypes=(
             torch.float16,
@@ -770,6 +828,19 @@ _BIT_VIEW = {
 }
 
 
+def _min_max_specials(dtype, device):
+    x = torch.tensor(
+        [-float("inf"), -1.0, -0.0, 0.0, 1.0, float("inf")],
+        dtype=dtype,
+        device=device,
+    )
+    int_dtype = _BIT_VIEW[dtype]
+    bits = torch.tensor([float("inf"), float("nan")], dtype=dtype, device=device)
+    bits = bits.view(int_dtype) | torch.tensor([1, 17], dtype=int_dtype, device=device)
+    bits = torch.cat((bits, bits | torch.iinfo(int_dtype).min))
+    return torch.cat((x, bits.view(dtype)))
+
+
 def _diff_kind(a, b):
     r"""Classify mismatches as shape, value, NaN payload, or signed zero."""
     if isinstance(a, (tuple, list)):
@@ -881,15 +952,9 @@ POINTWISE_XFAIL = frozenset(
         ("special_ndtr", "float16"),
         ("true_divide", "bfloat16"),
         ("true_divide", "float16"),
-        ("abs", "bfloat16"),
-        ("abs", "float16"),
-        ("abs", "float32"),
         ("addcdiv", "bfloat16"),
         ("addcdiv", "float16"),
         ("addcdiv", "float32"),
-        ("angle", "bfloat16"),
-        ("angle", "float16"),
-        ("angle", "float32"),
         ("clamp", "bfloat16"),
         ("clamp", "float16"),
         ("clamp", "float32"),
@@ -904,7 +969,6 @@ POINTWISE_XFAIL = frozenset(
         ("div_floor_rounding", "bfloat16"),
         ("div_floor_rounding", "float16"),
         ("div_floor_rounding", "float32"),
-        ("double", "float16"),
         ("float_power", "bfloat16"),
         ("float_power", "float16"),
         ("float_power", "float32"),
@@ -917,9 +981,6 @@ POINTWISE_XFAIL = frozenset(
         ("fmin", "bfloat16"),
         ("fmin", "float16"),
         ("fmin", "float32"),
-        ("frexp", "bfloat16"),
-        ("frexp", "float16"),
-        ("frexp", "float32"),
         ("hypot", "float16"),
         ("hypot", "float32"),
         ("i0", "bfloat16"),
@@ -951,9 +1012,6 @@ POINTWISE_XFAIL = frozenset(
         ("mvlgamma_mvlgamma_p_5", "bfloat16"),
         ("mvlgamma_mvlgamma_p_5", "float16"),
         ("mvlgamma_mvlgamma_p_5", "float32"),
-        ("neg", "bfloat16"),
-        ("neg", "float16"),
-        ("neg", "float32"),
         ("nn_functional_gelu", "float32"),
         ("nn_functional_hardtanh", "bfloat16"),
         ("nn_functional_hardtanh", "float16"),
@@ -984,8 +1042,6 @@ POINTWISE_XFAIL = frozenset(
         ("special_bessel_j1", "float32"),
         ("special_bessel_y0", "float32"),
         ("special_bessel_y1", "float32"),
-        ("special_entr", "bfloat16"),
-        ("special_entr", "float16"),
         ("special_erfcx", "float32"),
         ("special_i1", "bfloat16"),
         ("special_i1", "float16"),
@@ -993,13 +1049,9 @@ POINTWISE_XFAIL = frozenset(
         ("special_log_ndtr", "float32"),
         ("special_modified_bessel_i0", "float32"),
         ("special_modified_bessel_i1", "float32"),
-        ("special_xlog1py", "bfloat16"),
-        ("special_xlog1py", "float16"),
         ("sub", "bfloat16"),
         ("sub", "float16"),
         ("sub", "float32"),
-        ("xlogy", "bfloat16"),
-        ("xlogy", "float16"),
     }
 )
 
@@ -1098,8 +1150,6 @@ BACKWARD_XFAIL = frozenset(
         ("special_log_ndtr", "float32"),
         ("special_modified_bessel_i0", "float32"),
         ("special_modified_bessel_i1", "float32"),
-        ("special_xlog1py", "bfloat16"),
-        ("special_xlog1py", "float16"),
         ("tanh", "bfloat16"),
         ("tanh", "float16"),
         ("tanh", "float32"),
@@ -1115,10 +1165,26 @@ NONFLOAT_XFAIL = frozenset(
 )
 
 
+# Preserve all floating dtype coverage after removing repaired xfail entries.
+FULL_DTYPE_POINTWISE_OPS = frozenset(
+    {
+        "abs",
+        "angle",
+        "double",
+        "frexp",
+        "neg",
+        "special_entr",
+        "special_xlog1py",
+        "xlogy",
+    }
+)
+
+
 class _strict_ops(ops):
-    def __init__(self, op_list, xfails):
+    def __init__(self, op_list, xfails, *, full_dtype_ops=()):
         super().__init__(op_list, allowed_dtypes=POINTWISE_DTYPES)
         self.xfails = xfails
+        self.full_dtype_ops = full_dtype_ops
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         for case in super()._parametrize_test(test, generic_cls, device_cls):
@@ -1129,6 +1195,7 @@ class _strict_ops(ops):
             if (
                 ALL_SAMPLES
                 or dtype == preferred
+                or _op_id(op) in self.full_dtype_ops
                 or (_op_id(op), _dtype_label(dtype)) in self.xfails
             ):
                 yield case
@@ -1403,7 +1470,9 @@ class PointwiseStrictNumericsTest(TestCase):
                 f"on (source, index, shape, kwargs, kind): {mismatches}.",
             )
 
-    @_strict_ops(POINTWISE_OPS, POINTWISE_XFAIL)
+    @_strict_ops(
+        POINTWISE_OPS, POINTWISE_XFAIL, full_dtype_ops=FULL_DTYPE_POINTWISE_OPS
+    )
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
@@ -1520,7 +1589,7 @@ class PointwiseStrictNumericsTest(TestCase):
             self._require_kernel(tested, "no differentiable sample")
         return mismatches
 
-    @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL)
+    @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL, full_dtype_ops=("special_xlog1py",))
     def test_pointwise_backward(self, device, dtype, op):
         mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(

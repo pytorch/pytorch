@@ -48,6 +48,7 @@ from . import config, inductor_prims
 from .utils import (
     is_bf16x9_matmul,
     is_gpu,
+    is_strict_cuda_triton,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
@@ -698,6 +699,8 @@ def angle(x: torch.Tensor) -> torch.Tensor:
     )
     pi = torch.scalar_tensor(math.pi, dtype=dtype, device=x.device)
     ret = torch.where(x < 0, pi, 0.0)
+    if is_strict_cuda_triton(x.device):
+        return torch.where(torch.isnan(x), x.to(dtype), ret)
     return torch.where(torch.isnan(x), float("nan"), ret)
 
 
