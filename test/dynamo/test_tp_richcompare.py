@@ -1,14 +1,15 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for richcompare_impl: unified comparison protocol in Dynamo."""
+"""Tests for tp_richcompare_impl: unified comparison protocol in Dynamo."""
 
 import operator
-import unittest
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._library.opaque_object import register_custom_class
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class _OpaqueVal(torch._custom_class_base.CustomClassBase):
@@ -34,6 +35,8 @@ register_custom_class(_OpaqueVal, typ="constant", hoist=True)
 
 
 class TpRichcompareTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_cmp_equals(self, a, b, op, *, expect_type_error=None):
         """Assert Dynamo's op(a, b) matches eager Python's op(a, b).
 
@@ -63,7 +66,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         if expect_type_error is not None:
             self.assertFalse(
                 expect_type_error,
-                f"Expected {op.__name__}({a!r}, {b!r}) to raise TypeError "
+                lambda msg: f"{msg}\nExpected {op.__name__}({a!r}, {b!r}) to raise TypeError "
                 f"but eager returned {expected!r}",
             )
 
@@ -84,59 +87,57 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
     _ORDERING_OPS = frozenset({operator.lt, operator.le, operator.gt, operator.ge})
     _LE_GE = frozenset({operator.le, operator.ge})
 
+    def _check_batched(self, expected, result, error_ops, labels):
+        for (op, label), exp, res in zip(labels, expected, result):
+            with self.subTest(op=op.__name__, order=label):
+                raised = isinstance(exp, TypeError)
+                self.assertEqual(raised, op in error_ops)
+                if raised:
+                    self.assertIn("not supported between", res)
+                else:
+                    self.assertEqual(res, exp)
+
+    @staticmethod
+    def _run_all_ops(a, b, *, as_str):
+        out = []
+        for op in TpRichcompareTests._ALL_OPS:
+            try:
+                out.append(op(a, b))
+            except TypeError as e:
+                out.append(str(e) if as_str else e)
+        return out
+
     def _assert_all_cmp_equals(self, a, b, *, error_ops=frozenset()):
-        """Assert all 6 comparison ops match eager for (a, b) and (b, a).
+        """Assert all 6 comparison ops match eager for (a, b) and (b, a), in one compile.
 
         error_ops: set of operator functions expected to raise TypeError.
         Use _ORDERING_OPS for types that support eq/ne but not ordering.
         """
-        for op in self._ALL_OPS:
-            with self.subTest(op=op.__name__, order="a,b"):
-                self._assert_cmp_equals(a, b, op, expect_type_error=(op in error_ops))
-            torch._dynamo.reset()
-            with self.subTest(op=op.__name__, order="b,a"):
-                self._assert_cmp_equals(b, a, op, expect_type_error=(op in error_ops))
-            torch._dynamo.reset()
+        run = self._run_all_ops
+        expected = run(a, b, as_str=False) + run(b, a, as_str=False)
 
-    def _assert_sourceless_cmp_equals(
-        self, make_a, make_b, op, *, expect_type_error=None
-    ):
-        """Like _assert_cmp_equals but for objects created inside the compile region."""
-        try:
-            expected = op(make_a(), make_b())
-        except TypeError:
-            if expect_type_error is not None:
-                self.assertTrue(expect_type_error)
-
-            def fn(_, _op=op, _make_a=make_a, _make_b=make_b):
-                try:
-                    return _op(_make_a(), _make_b())
-                except TypeError as e:
-                    return str(e)
-
-            result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-            self.assertIn("not supported between", result)
-            return
-
-        if expect_type_error is not None:
-            self.assertFalse(expect_type_error)
-
-        def fn(_, _op=op, _make_a=make_a, _make_b=make_b):
-            return _op(_make_a(), _make_b())
+        def fn(_):
+            return run(a, b, as_str=True) + run(b, a, as_str=True)
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
-        self.assertEqual(result, expected)
+        labels = [(op, o) for o in ("a,b", "b,a") for op in self._ALL_OPS]
+        self._check_batched(expected, result, error_ops, labels)
+        torch._dynamo.reset()
 
     def _assert_all_sourceless_cmp_equals(
         self, make_a, make_b, *, error_ops=frozenset()
     ):
         """Like _assert_all_cmp_equals but for objects created inside the compile region."""
-        for op in self._ALL_OPS:
-            with self.subTest(op=op.__name__):
-                self._assert_sourceless_cmp_equals(
-                    make_a, make_b, op, expect_type_error=(op in error_ops)
-                )
-            torch._dynamo.reset()
+        run = self._run_all_ops
+        expected = run(make_a(), make_b(), as_str=False)
+
+        def fn(_):
+            return run(make_a(), make_b(), as_str=True)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        labels = [(op, "a,b") for op in self._ALL_OPS]
+        self._check_batched(expected, result, error_ops, labels)
+        torch._dynamo.reset()
 
     # =====================================================================
     # Constants (ConstantVariable)
@@ -881,6 +882,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         # After registration: works
+        self.addCleanup(torch._dynamo.decorators._disallow_c_slot, sqlite3.Row)
         torch._dynamo.allow_c_slot(sqlite3.Row)
         self._assert_cmp_equals(row1, row1, operator.eq)
         self._assert_cmp_equals(row1, row2, operator.eq)
@@ -1574,21 +1576,6 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)([1, 2])
 
     # =====================================================================
-    # Event comparison (EventVariable)
-    # =====================================================================
-
-    @unittest.skipUnless(torch.cuda.is_available(), "requires CUDA")
-    def test_cuda_event_eq(self):
-        def fn(e1, e2):
-            return e1 == e2, e1 != e2, e1 == e1
-
-        e1 = torch.cuda.Event()
-        e2 = torch.cuda.Event()
-        expected = fn(e1, e2)
-        result = torch.compile(fn, backend="eager", fullgraph=True)(e1, e2)
-        self.assertEqual(result, expected)
-
-    # =====================================================================
     # itertools module comparison (ItertoolsVariable)
     # =====================================================================
 
@@ -1898,6 +1885,65 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         expected = fn(ks1, ks2)
         result = torch.compile(fn, backend="eager", fullgraph=True)(ks1, ks2)
         self.assertEqual(result, expected)
+
+    def test_unbound_builtin_cmp_dunder(self):
+        """type.__cmp__(a, b) invokes only the left type's slot (may be
+        NotImplemented) rather than the full comparison protocol."""
+
+        def fn():
+            return (
+                complex.__eq__(1 + 1j, 1 + 1j),
+                complex.__eq__(1 + 1j, 2 + 2j),
+                complex.__eq__(1 + 1j, 2),
+                complex.__ne__(1 + 1j, 1 + 1j),
+                complex.__eq__(1 + 1j, None),
+                complex.__lt__(1 + 1j, 2 + 2j),
+                int.__eq__(1, 1),
+                int.__lt__(1, 2),
+                int.__eq__(1, None),
+                float.__eq__(1.0, 2.0),
+                float.__lt__(1.0, 2.0),
+                str.__eq__("a", "a"),
+                bool.__eq__(True, 1),
+            )
+
+        expected = fn()
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(len(expected), len(result))
+        for e, r in zip(expected, result):
+            self.assertIs(r, e)
+
+
+# =====================================================================
+# Event comparison (EventVariable)
+# =====================================================================
+
+
+class TestEventComparisonDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_accelerator_event_eq(self, device):
+        def fn(e1, e2):
+            return e1 == e2, e1 != e2, e1 == e1
+
+        # torch.Event(device=device) and torch.<device>.Event() are
+        # different classes; test both to ensure Dynamo handles them
+        # correctly.
+        def Event():
+            return torch.Event(device=device)
+
+        def DeviceEvent():
+            return torch.get_device_module(device).Event()
+
+        for EventFactory in (Event, DeviceEvent):
+            e1 = EventFactory()
+            e2 = EventFactory()
+            expected = fn(e1, e2)
+            result = torch.compile(fn, backend="eager", fullgraph=True)(e1, e2)
+            self.assertEqual(result, expected)
+
+
+instantiate_device_type_tests(TestEventComparisonDevice, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":

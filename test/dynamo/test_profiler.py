@@ -10,10 +10,15 @@ from torch._dynamo.utils import chromium_event_timed, ChromiumEventLogger, dynam
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import ProfilerRecordFunctionContextVariable
 from torch.profiler import record_function
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TemporaryFileName,
+)
 
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dynamo_timed_profiling_isolated(self):
         # dynamo_timed functions should appear in profile traces.
         def inner_fn(x):
@@ -66,7 +71,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         # Check for the main dynamo event (follows pattern from test_dynamo_timed_profiling_backend_compile)
         self.assertTrue(
             any("(dynamo_timed)" in name for name in event_names),
-            f"Expected dynamo_timed events in profiler: {event_names}",
+            lambda msg: f"{msg}\nExpected dynamo_timed events in profiler: {event_names}",
         )
 
     def test_record_functions_thread_local(self):

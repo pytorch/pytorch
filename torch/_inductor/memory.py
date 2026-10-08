@@ -93,6 +93,11 @@ def get_freeable_input_buf(
     """
     Create and keep track of all input buffers that can be freed during the program
 
+    This is a naming-based ownership estimate.
+    Assumptions:
+    Inputs that ``is_nonfreeable_buffers`` are treated as persistent
+    All other graph inputs are assumed freeable after their last use.
+
     Returns:
         A dictionary containing all freeable input buffers, keyed by their names.
     """
@@ -521,6 +526,27 @@ def estimate_region_peak_memory(
     `cur_memory` (live bytes at the window boundary) and returns
     the maximum live bytes.
     """
+    peak, _, _ = estimate_region_memory(
+        nodes_in_window,
+        region_start=region_start,
+        region_end=region_end,
+        step_of=step_of,
+        graph_outputs=graph_outputs,
+        cur_memory=cur_memory,
+    )
+    return peak
+
+
+def estimate_region_memory(
+    nodes_in_window: Iterable[BaseSchedulerNode],
+    *,
+    region_start: int,
+    region_end: int,
+    step_of: Callable[[BaseSchedulerNode], int],
+    graph_outputs: OrderedSet[str],
+    cur_memory: int = 0,
+) -> tuple[int, list[int], list[int]]:
+    """Estimate the peak and live memory around each step in a schedule region."""
     R = region_end - region_start + 1
     region = [SNodeMemory(0, 0) for _ in range(R)]
 
@@ -552,12 +578,16 @@ def estimate_region_peak_memory(
 
     cur = cur_memory
     peak = cur
-    for af in region:
+    live_before = [0] * (R + 1)
+    live_after = [0] * R
+    for i, af in enumerate(region):
+        live_before[i] = cur
         cur += af.size_alloc
-        if cur > peak:
-            peak = cur
+        live_after[i] = cur
+        peak = max(peak, cur)
         cur -= af.size_free
-    return peak
+    live_before[R] = cur
+    return peak, live_before, live_after
 
 
 @dataclasses.dataclass
@@ -641,7 +671,7 @@ def topological_sort_lpmf(
     https://www.cs.york.ac.uk/rts/docs/DAC-1964-2006/PAPERS/2006/DAC06/PDFFILES/P0689.PDF
 
     The algorithm maintains the max memory so far.
-    At every iteration, for each scheduleable node, it computes:
+    At every iteration, for each schedulable node, it computes:
         - how much memory needs to be allocated for the output buffers of this node;
         - how much memory can be freed as a result of executing this node.
     This gives us two values for each node:

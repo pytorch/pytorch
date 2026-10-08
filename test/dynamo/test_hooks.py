@@ -11,6 +11,11 @@ import torch._dynamo.testing
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils.hooks import RemovableHandle
 
 
@@ -39,6 +44,8 @@ class ClassWithVal:
 
 
 class HooksTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_tensor_only_register_hook_in_graph_lambda(self):
         def fn(x):
             x.register_hook(lambda grad: grad * 2)
@@ -318,6 +325,86 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         result_eager.backward()
 
         self.assertEqual(x_compiled.grad, x_eager.grad)
+
+    def test_register_hook_identity_alias_fullgraph(self):
+        def fn(x):
+            y = x * x
+            y.register_hook(lambda grad: grad)
+            return y.sum()
+
+        x = torch.randn([2, 2], requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+
+        expected = fn(x_ref)
+        expected.backward()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = opt_fn(x)
+        actual.backward()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    def test_register_hook_input_mutation_rejected(self):
+        def fn(x):
+            y = x * x
+            y.register_hook(lambda grad: grad.mul_(2))
+            return y
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "(?s)Encountered input mutation during higher order op tracing.*"
+            "Found in register_hook",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(3, requires_grad=True)
+            )
+
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+
+        x = torch.randn(3, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+        grad = torch.randn_like(x)
+
+        expected = fn(x_ref)
+        expected.backward(grad.clone())
+
+        actual = torch.compile(fn, backend="eager")(x)
+        actual.backward(grad.clone())
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, x_ref.grad)
+        graph_breaks = torch._dynamo.utils.counters["graph_break"]
+        self.assertEqual(sum(graph_breaks.values()), 1)
+        self.assertTrue(
+            any(
+                "Encountered input mutation during higher order op tracing" in reason
+                for reason in graph_breaks
+            )
+        )
+
+    def test_register_post_accumulate_grad_hook_intermediate_unsupported(self):
+        def fn(x):
+            y = x.detach().requires_grad_()
+            y.register_post_accumulate_grad_hook(lambda tensor: None)
+            return (y * 2).sum()
+
+        error = "register_post_accumulate_grad_hook on an intermediate tensor"
+        with (
+            torch._dynamo.compiled_autograd._disable(),
+            self.assertRaisesRegex(RuntimeError, error),
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3))
+
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        with torch._dynamo.compiled_autograd._disable():
+            out = torch.compile(fn, backend="eager")(torch.randn(3))
+            out.backward()
+
+        graph_breaks = torch._dynamo.utils.counters["graph_break"]
+        self.assertTrue(any(error in reason for reason in graph_breaks))
 
     def test_hook_on_intermediate_with_container(self):
         glb_list = []
@@ -1153,8 +1240,12 @@ def forward(self, L_x_ : torch.Tensor):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_register_hook_on_intermediate_autograd_cache(self):
+
+class HooksTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_register_hook_on_intermediate_autograd_cache(self, device):
         from torch._dynamo.utils import counters
 
         def fn(x):
@@ -1167,21 +1258,21 @@ def forward(self, L_x_ : torch.Tensor):
             # First compile
             torch._dynamo.reset()
             counters.clear()
-            x = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn, fullgraph=True)(x).backward()
+            x = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn, fullgraph=True)(x).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # Second compile (force recompile to test cache)
             torch._dynamo.reset()
-            x2 = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn, fullgraph=True)(x2).backward()
+            x2 = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn, fullgraph=True)(x2).backward()  # noqa: UNSPECIFIED_BACKEND
 
             aot_counters = counters["aot_autograd"]
             self.assertEqual(aot_counters.get("autograd_cache_bypass", 0), 0)
         finally:
             torch._functorch.config.enable_autograd_cache = False
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_register_hook_on_intermediate_autograd_cache_different_hooks(self):
+    @onlyAccelerator
+    def test_register_hook_on_intermediate_autograd_cache_different_hooks(self, device):
         from torch._dynamo.utils import counters
 
         def fn_a(x):
@@ -1200,21 +1291,23 @@ def forward(self, L_x_ : torch.Tensor):
             counters.clear()
 
             # Compile fn_a
-            x = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn_a, fullgraph=True)(x).backward()
+            x = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn_a, fullgraph=True)(x).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # Compile fn_b (different hook — must NOT cache hit from fn_a)
-            x2 = torch.randn(4, device="cuda", requires_grad=True)
-            torch.compile(fn_b, fullgraph=True)(x2).backward()
+            x2 = torch.randn(4, device=device, requires_grad=True)
+            torch.compile(fn_b, fullgraph=True)(x2).backward()  # noqa: UNSPECIFIED_BACKEND
 
             # fn_b should give grad = 2 * 3.0 = 6.0, not 2 * 0.5 = 1.0
-            self.assertEqual(x2.grad, torch.tensor([6.0] * 4, device="cuda"))
+            self.assertEqual(x2.grad, torch.tensor([6.0] * 4, device=device))
             self.assertEqual(
                 counters["aot_autograd"].get("autograd_cache_bypass", 0), 0
             )
         finally:
             torch._functorch.config.enable_autograd_cache = False
 
+
+instantiate_device_type_tests(HooksTestsDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

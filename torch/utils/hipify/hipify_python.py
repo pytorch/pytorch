@@ -684,7 +684,7 @@ def is_caffe2_gpu_file(rel_filepath):
 
 
 class TrieNode:
-    """A Trie node whose children are represented as a directory of char: TrieNode.
+    """A Trie node whose children are represented as a dictionary of char: TrieNode.
        A special char '' represents end of word
     """
 
@@ -1136,11 +1136,22 @@ def hipify(
                                         is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
 
+    # `preprocessor` normalizes each path with `_to_unix_path` before testing
+    # membership in `all_files`, and `matched_files_iter` already yields
+    # `_to_unix_path`-normalized entries. Normalize `extra_files` here too so the
+    # two forms can match; otherwise on Windows the backslash spelling never equals
+    # the forward-slash form tested later, the `extra_files` escape hatch is
+    # effectively dead, and the source is silently skipped (never hipified).
+    normalized_extra_files = []
     for f in extra_files:
         if not os.path.isabs(f):
             f = os.path.join(output_directory, f)
+        f = _to_unix_path(f)
+        normalized_extra_files.append(f)
         if f not in all_files_set:
             all_files.append(f)
+            all_files_set.add(f)
+    extra_files = normalized_extra_files
 
     # List all files in header_include_paths to ensure they are hipified
     from pathlib import Path
@@ -1150,9 +1161,9 @@ def hipify(
         else:
             header_include_dir_path = Path(os.path.join(output_directory, header_include_dir))
         all_files.extend(
-            str(path) for path in header_include_dir_path.rglob('*') if path.is_file()
-            and _fnmatch(str(path), includes)
-            and (not _fnmatch(str(path), ignores))
+            _to_unix_path(str(path)) for path in header_include_dir_path.rglob('*') if path.is_file()
+            and _fnmatch(_to_unix_path(str(path)), includes)
+            and (not _fnmatch(_to_unix_path(str(path)), ignores))
             and match_extensions(path.name, header_extensions)
         )
 

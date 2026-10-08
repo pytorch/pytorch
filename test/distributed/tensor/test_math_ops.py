@@ -27,11 +27,13 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    LocalDTensorContinuousTestBase,
     map_local_for_rank,
+    NUM_DEVICES,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -40,7 +42,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 funcol = torch.ops.c10d_functional
 
 
-class DistMathOpsTest(DTensorTestBase):
+class DistMathOpsTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
@@ -420,7 +424,7 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertLessEqual(
                 comm_mode.get_total_counts(),
                 1,  # TODO: This should be 0!
-                f"comm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
+                lambda msg: f"{msg}\ncomm count={comm_mode.get_total_counts()}, norm_type={norm_type.__name__}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
 
@@ -777,7 +781,7 @@ class DistMathOpsTest(DTensorTestBase):
             # Verify gradient exists, has the right placement, and matches
             self.assertIsNotNone(
                 dist_x.grad,
-                msg=f"topk_dim={topk_dim}, shard_dim={shard_dim}",
+                msg=lambda msg: f"{msg}\ntopk_dim={topk_dim}, shard_dim={shard_dim}",
             )
             self.assertEqual(
                 dist_x.grad.full_tensor(),
@@ -842,20 +846,29 @@ class DistMathOpsTest(DTensorTestBase):
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
-        grad0 = torch.randn(12, 8)
-        grad1 = torch.randn(8, 8)
+        # dtype is _foreach_norm.Scalar's third argument: (self, ord, dtype).
+        for input_dtype, dtype in (
+            (torch.float32, None),
+            (torch.bfloat16, torch.float32),
+        ):
+            with self.subTest(input_dtype=input_dtype, dtype=dtype):
+                grad0 = torch.randn(12, 8, dtype=input_dtype)
+                grad1 = torch.randn(8, 8, dtype=input_dtype)
 
-        sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
-        sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
+                sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
+                sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
 
-        # non-sharded op
-        out = torch.ops.aten._foreach_norm([grad0, grad1], 2)
+                # non-sharded op
+                out = torch.ops.aten._foreach_norm([grad0, grad1], 2, dtype=dtype)
 
-        # sharded op
-        sharded_out = torch.ops.aten._foreach_norm([sharded_grad0, sharded_grad1], 2)
+                # sharded op
+                sharded_out = torch.ops.aten._foreach_norm(
+                    [sharded_grad0, sharded_grad1], 2, dtype=dtype
+                )
 
-        for o, so in zip(out, sharded_out):
-            self.assertEqual(so.full_tensor(), o)
+                for o, so in zip(out, sharded_out):
+                    self.assertEqual(so.dtype, o.dtype)
+                    self.assertEqual(so.full_tensor(), o)
 
     @with_comms
     def test_foreach_max_sharded(self):
@@ -989,6 +1002,18 @@ class DistMathOpsTest(DTensorTestBase):
 
             self.assertEqual(sharded_out[0].full_tensor(), expected0)
             self.assertEqual(sharded_out[1].full_tensor(), expected1)
+
+        # dtype sits where linalg__powsum has dim: _foreach_powsum.Scalar is (self, ord, dtype).
+        low = [grad0.bfloat16(), grad1.bfloat16()]
+        sharded_low = [distribute_tensor(t, device_mesh, [Shard(0)]) for t in low]
+        out = torch.ops.aten._foreach_powsum(low, 2, dtype=torch.float32)
+        sharded_out = torch.ops.aten._foreach_powsum(
+            sharded_low, 2, dtype=torch.float32
+        )
+        for o, so in zip(out, sharded_out):
+            self.assertEqual(so.placements, (Partial("sum"),))
+            self.assertEqual(so.dtype, o.dtype)
+            self.assertEqual(so.full_tensor(), o)
 
     @with_comms
     def test_foreach_norm_different_mesh(self):
@@ -1930,7 +1955,6 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(result.full_tensor(), expected)
         self.assertTrue(result.placements[0].is_shard(0))
 
-    @skipIfRocm
     @with_comms
     def test_normalization_ops(self):
         device_mesh = self.build_device_mesh()
@@ -2032,7 +2056,7 @@ class DistMathOpsTest(DTensorTestBase):
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
-    DistMathOpsTest,
+    DistMathOpsTest, base_class=LocalDTensorContinuousTestBase
 )
 
 if __name__ == "__main__":

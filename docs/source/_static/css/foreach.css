@@ -1,0 +1,8 @@
+dl.py.function > dt.sig[id^="torch.foreach."],
+dl.py.function > dt.sig[id^="torch.foreach."] ~ dt.sig {
+    display: block;
+    overflow-x: auto;
+    font-size: 0.875em;
+    line-height: 1.25;
+    white-space: nowrap;
+}

@@ -3,12 +3,15 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 from torch._inductor import config as inductor_config
+from torch._inductor.heuristics.registry import register_template_heuristic
 
 from ...kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
 from ...kernel.mm import (
     aten__fp8_mm,
+    aten__fp8_mm_v2,
     aten__int_mm,
     aten_addmm,
+    aten_addmm_dtype,
     aten_bias_addmm,
     aten_mm,
     aten_mm_dtype,
@@ -16,7 +19,6 @@ from ...kernel.mm import (
 from ...kernel.mm_plus_mm import aten_mm_plus_mm
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
-from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
 @register_template_heuristic(aten_mm_dtype.uid, "cuda")
 @register_template_heuristic(aten_mm_dtype.uid, "xpu")
 @register_template_heuristic(aten__fp8_mm.uid, None)
+@register_template_heuristic(aten__fp8_mm_v2.uid, None)
 @register_template_heuristic(aten__int_mm.uid, None)
 @register_template_heuristic(aten_bmm.uid, None)
 @register_template_heuristic(aten_mm_plus_mm.uid, None)
@@ -57,6 +60,8 @@ class ATenConfigHeuristics(TemplateConfigHeuristics):
 # None here indicates that this is valid for all device types on that op
 # Note (None, op) takes precedence over (device_type, None)
 @register_template_heuristic(aten_addmm.uid, None, op_name="addmm")
+@register_template_heuristic(aten_addmm_dtype.uid, "cuda", op_name="addmm")
+@register_template_heuristic(aten_addmm_dtype.uid, "xpu", op_name="addmm")
 @register_template_heuristic(aten_baddbmm.uid, None, op_name="baddbmm")
 class ATenAddMMConfigHeuristics(ATenConfigHeuristics):
     def get_extra_kwargs(

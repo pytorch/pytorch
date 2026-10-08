@@ -1705,9 +1705,15 @@ class _IVals:
             raise AssertionError(
                 f"expected node.op to be 'call_function', got {node.op!r}"
             )
-        b = self._is_mutable(node.target)
-        print("Checking mutability", node.target, b)
-        if not b:
+        if not isinstance(node.args[0], torch.fx.Node):
+            # update() can only replay a mutation of a single tensor.
+            fqn, _ = next(reversed(node.meta["nn_module_stack"].values()))
+            raise RuntimeError(
+                f"Cannot unflatten {node.format_node()}: it is used outside {fqn!r} "
+                f"but is not an output of its call signature, and it is not a "
+                f"single-tensor mutation that could be replayed."
+            )
+        if not self._is_mutable(node.target):
             # so the mutation was functionalized;
             # we will apply the original mutation later (see below)
             fqn, _ = next(reversed(node.meta["nn_module_stack"].values()))
@@ -1882,7 +1888,7 @@ def _sink_params(
 
         inputs_to_state_of_scope[node] = state_name
 
-    # Record name of remove inputs for return purpose.
+    # Record name of removed inputs for return purpose.
     inputs_removed: set[str] = set()
 
     for node, state_name in inputs_to_state_of_scope.items():

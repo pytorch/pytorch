@@ -187,7 +187,7 @@ if torch._C._has_mkldnn:
     def _is_valid_grouped_gemm_fusion(computation_nodes):
         """
         Here we check:
-        1. More than 1 GEMM nodes has been found.
+        1. More than 1 GEMM nodes have been found.
         2. All the GEMM nodes share the same activation.
         3. All the GEMM nodes have same weight size but different wgt node.
         """
@@ -1348,7 +1348,7 @@ if torch._C._has_mkldnn:
             bias_meta_value = linear_node.args[0].meta.get("val")
             if (
                 bias_meta_value is None
-                or meta_value.device.type != "cpu"
+                or bias_meta_value.device.type != "cpu"
                 or bias_meta_value.dim() != 1
                 or bias_meta_value.size(0) != weight_meta_value.size(1)
             ):

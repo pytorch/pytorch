@@ -6,14 +6,69 @@
 
 namespace c10::xpu::XPUCachingAllocator {
 
+struct ShareableHandle {
+  ptrdiff_t offset;
+  std::string handle;
+};
+
 class XPUAllocator : public DeviceAllocator {
  public:
   virtual void init(c10::DeviceIndex device_count) = 0;
   virtual void* raw_alloc(size_t size) = 0;
   virtual void raw_delete(void* ptr) = 0;
+  std::pair<size_t, size_t> getMemoryInfo(
+      c10::DeviceIndex device_index) override {
+    const auto& device = c10::xpu::get_raw_device(device_index);
+    const size_t total = device.get_info<sycl::info::device::global_mem_size>();
+    TORCH_CHECK(
+        device.has(sycl::aspect::ext_intel_free_memory),
+        "The device (",
+        device.get_info<sycl::info::device::name>(),
+        ") doesn't support querying the available free memory. ",
+        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
+        "to help us prioritize its implementation.");
+    const size_t free =
+        device.get_info<sycl::ext::intel::info::device::free_memory>();
+
+#if SYCL_COMPILER_VERSION >= 20260200
+    namespace syclex = sycl::ext::oneapi::experimental;
+    const auto arch = device.get_info<syclex::info::device::architecture>();
+    if (arch < syclex::architecture::intel_gpu_bmg_g21) {
+      return {free, total};
+    }
+    // See
+    // https://github.com/intel/compute-runtime/blob/master/programmers-guide/DEVICE_MEMORY_ACCOUNTING.md#umd-headroom.
+    constexpr double kIntegratedGpuUsableFraction = 0.94;
+#ifdef _WIN32
+    constexpr double kDiscreteGpuUsableFraction = 0.98;
+#else
+    constexpr double kDiscreteGpuUsableFraction = 0.95;
+#endif
+    const double usable_fraction =
+        device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)
+        ? kIntegratedGpuUsableFraction
+        : kDiscreteGpuUsableFraction;
+    const size_t free_adjust =
+        free + static_cast<size_t>((1 - usable_fraction) * total);
+    TORCH_CHECK(
+        free_adjust <= total, "Calculated free memory exceeds total memory.");
+    return {free_adjust, total};
+#else
+    return {free, total};
+#endif
+  }
 };
 
 C10_XPU_API extern std::atomic<XPUAllocator*> allocator;
+
+struct AllocatorState {
+  virtual ~AllocatorState() = default;
+};
+
+struct CheckpointDelta {
+  std::vector<void*> ptrs_freed;
+  std::vector<c10::DataPtr> dataptrs_allocd;
+};
 
 struct AllocatorConfigInfo {
   bool expandable_segments;
@@ -84,10 +139,14 @@ C10_XPU_API void attachAllocatorTraceTracker(
 
 C10_XPU_API SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0});
 
+C10_XPU_API ShareableHandle shareIpcHandle(void* ptr);
+
+C10_XPU_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
+
 C10_XPU_API void createOrIncrefPool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id,
-    XPUAllocator* allocator = nullptr);
+    std::shared_ptr<XPUAllocator> allocator_ptr = nullptr);
 
 C10_XPU_API void beginAllocateToPool(
     c10::DeviceIndex device,
@@ -98,43 +157,48 @@ C10_XPU_API void endAllocateToPool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
 
+C10_XPU_API void markCaptureBegin(c10::DeviceIndex device);
+
+C10_XPU_API void markCaptureEnd(c10::DeviceIndex device);
+
 C10_XPU_API void releasePool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
+
+C10_XPU_API void setNoSplit(
+    c10::DeviceIndex device,
+    c10::MempoolId_t mempool_id);
+
+// Register/unregister a pool as an OOM fallback. Callers must explicitly
+// call setUseOnOOM(..., false) before releasing the pool.
+C10_XPU_API void setUseOnOOM(
+    c10::DeviceIndex device,
+    c10::MempoolId_t mempool_id,
+    bool use_on_oom);
 
 C10_XPU_API int getPoolUseCount(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
 
+C10_XPU_API std::shared_ptr<AllocatorState> getCheckpointState(
+    c10::DeviceIndex device,
+    MempoolId_t id);
+
+C10_XPU_API CheckpointDelta setCheckpointPoolState(
+    c10::DeviceIndex device,
+    std::shared_ptr<AllocatorState> as);
+
+C10_XPU_API bool isHistoryEnabled();
+
+C10_XPU_API bool checkPoolLiveAllocations(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    const std::unordered_set<void*>& expected_live_allocations);
+
 } // namespace c10::xpu::XPUCachingAllocator
 
 namespace c10::xpu {
-
+// Keep BC only
 using c10::CaptureId_t;
 using c10::MempoolId_t;
-struct C10_XPU_API MemPool {
-  MemPool(
-      XPUCachingAllocator::XPUAllocator* allocator = nullptr,
-      bool is_user_created = true,
-      bool use_on_oom = false);
-  MemPool(const MemPool&) = delete;
-  MemPool(MemPool&&) = default;
-  MemPool& operator=(const MemPool&) = delete;
-  MemPool& operator=(MemPool&&) = default;
-  ~MemPool();
-
-  MempoolId_t id();
-  XPUCachingAllocator::XPUAllocator* allocator();
-  int use_count();
-  c10::DeviceIndex device();
-  static MempoolId_t graph_pool_handle(bool is_user_created = true);
-
- private:
-  static std::atomic<CaptureId_t> uid_;
-  static std::atomic<CaptureId_t> uuid_;
-  XPUCachingAllocator::XPUAllocator* allocator_;
-  bool is_user_created_;
-  MempoolId_t id_;
-  c10::DeviceIndex device_;
-};
 } // namespace c10::xpu

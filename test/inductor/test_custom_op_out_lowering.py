@@ -184,7 +184,7 @@ class TestCustomOpOutLowering(InductorTestCase):
             self.assertEqual(compiled_out, eager_out)
             source_code = "\n".join(code)
             FileCheck().check("aoti_torch_call_dispatcher").run(source_code)
-            output_assert = r'assert_size_stride\([^,]+,\s*\{4L?L?,\s*4L?L?\},\s*\{4L?L?,\s*1L?L?\},\s*"torch.ops.mylib.no_out_op.default"\)'
+            output_assert = r'assert_size_stride\([^,]+,\s*\{4L?L?,\s*4L?L?\},\s*\{4L?L?,\s*1L?L?\},\s*"torch.ops.mylib.no_out_op.default"(, .*)?\)'
             wrapper_codegen = common.get_wrapper_codegen_for_device(
                 "cpu", cpp_wrapper=True
             )
@@ -195,6 +195,97 @@ class TestCustomOpOutLowering(InductorTestCase):
             else:
                 FileCheck().check_regex(output_assert).run(source_code)
             self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
+
+    @parametrize("device", DEVICES)
+    def test_tensorless_op_falls_back_to_cpu(self, device):
+        """An op with no tensor in or out has no device to inherit, so it gets CPU.
+
+        find_device only comes back empty in that case, and there is nothing for the
+        kernel to sit on but the host. It used to be an allowlist of the ops that had
+        hit the assert so far.
+        """
+        from torch.fx.experimental.symbolic_shapes import constrain_range
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("tensorless() -> SymInt")
+            lib.impl("tensorless", lambda: 3, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("mylib::tensorless", lib=lib)
+            def _tensorless_fake():
+                ctx = torch.library.get_ctx()
+                sym = ctx._shape_env.create_unbacked_symint()
+                constrain_range(sym, min=0)
+                return sym
+
+            def f(x):
+                return x + torch.ops.mylib.tensorless()
+
+            x = torch.zeros(4, device=device)
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), torch.full_like(x, 3))
+
+    @parametrize("device", DEVICES)
+    def test_find_device_walks_dict_outputs(self, device):
+        """find_device has to see every container generate_output does.
+
+        generate_output builds a MultiOutput leaf per dict value, so a device it
+        cannot find in a dict is not "no device" -- it is a packed device that
+        contradicts the leaves hanging off it.
+        """
+        from torch._inductor.ir import FallbackKernel
+
+        t = torch.empty(4, device=device)
+        self.assertEqual(FallbackKernel.find_device(None, {"a": t}), t.device)
+        # Nested, because the list branch recurses back through find_device.
+        self.assertEqual(FallbackKernel.find_device(None, [{"a": t}]), t.device)
+        # No tensor anywhere still means no device, leaving the caller's default.
+        self.assertIsNone(FallbackKernel.find_device(None, {"a": 1}))
+
+    def test_dict_output_packs_buffers_not_keys(self):
+        """packed.outputs holds the MultiOutputs, the way the list branch does.
+
+        Iterating a dict yields its keys, so the values have to be asked for
+        explicitly. Dynamo rejects a dict return, so lower an fx graph directly.
+        """
+        from unittest import mock
+
+        from torch._inductor.ir import FallbackKernel, IRNode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        packed = []
+        create = FallbackKernel.create.__func__
+
+        def spy(cls, kernel, *args, **kwargs):
+            out = create(cls, kernel, *args, **kwargs)
+            if isinstance(out, dict):
+                packed.append(next(iter(out.values())).inputs[0])
+            return out
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("dict_out(Tensor x) -> Dict(str, Tensor)")
+            lib.impl(
+                "dict_out",
+                lambda x: {"a": x + 1, "b": x + 2},
+                "CompositeExplicitAutograd",
+            )
+
+            @torch.library.register_fake("mylib::dict_out", lib=lib)
+            def _dict_out_fake(x):
+                return {"a": torch.empty_like(x), "b": torch.empty_like(x)}
+
+            def f(x):
+                d = torch.ops.mylib.dict_out(x)
+                return d["a"] + d["b"]
+
+            x = torch.randn(4)
+            gm = make_fx(f, tracing_mode="fake")(x)
+            with mock.patch.object(FallbackKernel, "create", classmethod(spy)):
+                compiled = torch._inductor.compile(gm, [x])
+            self.assertEqual(compiled(x), f(x))
+
+        self.assertEqual(len(packed), 1)
+        for output in packed[0].outputs:
+            self.assertIsInstance(output, IRNode)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from .optimizer import (
     _device_dtype_check_for_fused,
     _differentiable_doc,
     _foreach_doc,
+    _functional_api_doc,
     _get_scalar_dtype,
     _get_value,
     _maximize_doc,
@@ -297,16 +298,12 @@ def adagrad(
     differentiable: bool = False,
     has_complex: bool = False,
     *,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     lr_decay: float,
     eps: float,
     maximize: bool,
 ) -> None:
-    r"""Functional API that performs Adagrad algorithm computation.
-
-    See :class:`~torch.optim.Adagrad` for details.
-    """
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
@@ -356,6 +353,9 @@ def adagrad(
     )
 
 
+adagrad.__doc__ = _functional_api_doc.format(optimizer="Adagrad")
+
+
 def _make_sparse(grad, grad_indices, values):
     size = grad.size()
     return torch.sparse_coo_tensor(grad_indices, values, size)
@@ -369,7 +369,7 @@ def _single_tensor_adagrad(
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
     *,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     lr_decay: float,
     eps: float,
@@ -410,7 +410,8 @@ def _single_tensor_adagrad(
             std = state_sum.sparse_mask(grad)
             std_values = std._values().sqrt_().add_(eps)
             param.add_(
-                _make_sparse(grad, grad_indices, grad_values / std_values), alpha=-clr
+                _make_sparse(grad, grad_indices, grad_values / std_values),
+                alpha=-clr,  # type: ignore[arg-type]
             )
         else:
             is_complex = torch.is_complex(param)
@@ -423,7 +424,7 @@ def _single_tensor_adagrad(
                 std = state_sum.sqrt() + eps
             else:
                 std = state_sum.sqrt().add_(eps)
-            param.addcdiv_(grad, std, value=-clr)
+            param.addcdiv_(grad, std, value=-clr)  # type: ignore[arg-type]
             if is_complex:
                 param = torch.view_as_complex(param)
                 state_sum = torch.view_as_complex(state_sum)
@@ -437,7 +438,7 @@ def _multi_tensor_adagrad(
     grad_scale: Tensor | None,
     found_inf: Tensor | None,
     *,
-    lr: float,
+    lr: float | Tensor,
     weight_decay: float,
     lr_decay: float,
     eps: float,

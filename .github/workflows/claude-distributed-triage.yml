@@ -71,30 +71,12 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Setup GitHub MCP Server
+      - name: Pre-pull GitHub MCP Server
         if: steps.gate.outputs.proceed == 'true'
-        run: |
-          mkdir -p /tmp/mcp-config
-          cat > /tmp/mcp-config/mcp-servers.json << 'EOF'
-          {
-            "mcpServers": {
-              "github": {
-                "command": "docker",
-                "args": [
-                  "run",
-                  "-i",
-                  "--rm",
-                  "-e",
-                  "GITHUB_PERSONAL_ACCESS_TOKEN",
-                  "ghcr.io/github/github-mcp-server:v0.30.1"
-                ],
-                "env": {
-                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ secrets.GITHUB_TOKEN }}"
-                }
-              }
-            }
-          }
-          EOF
+        env:
+          # claude-code-action v1.0.89 injects this image when GitHub MCP tools are allowed.
+          GITHUB_MCP_IMAGE: "ghcr.io/github/github-mcp-server:sha-23fa0dd"
+        run: docker pull "$GITHUB_MCP_IMAGE"
 
       - name: Configure AWS credentials via OIDC
         if: steps.gate.outputs.proceed == 'true'
@@ -110,6 +92,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRIAGE_HOOK_DEBUG_LOG: /tmp/triage_hooks.log
+          TRIAGE_ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
         with:
           use_bedrock: "true"
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -117,9 +100,8 @@ jobs:
           # so the actor is github-actions[bot]).
           allowed_bots: "*"
           claude_args: |
-            --model global.anthropic.claude-sonnet-4-5-20250929-v1:0
-            --mcp-config /tmp/mcp-config/mcp-servers.json
-            --allowedTools "mcp__github__issue_read,mcp__github__get_issue,mcp__github__issue_write,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__search_issues"
+            --model global.anthropic.claude-sonnet-5
+            --allowedTools "mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__search_issues"
           prompt: |
             /distributed-triage #${{ steps.issue.outputs.number }}
 

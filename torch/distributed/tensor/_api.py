@@ -467,8 +467,11 @@ class DTensor(torch.Tensor):
         Return a stable hash for AOT autograd caching.
         [See note: Tensor subclass stable hashing for AOT autograd cache]
         """
-        # Combine spec's stable hash with requires_grad
-        cache_data = self._spec._stable_hash() + str(self.requires_grad)
+        # Include local tensor device so different ranks produce distinct keys.
+        # AOTAutogradCachePickler has no device_id_agnostic normalization (unlike
+        # FxGraphCachePickler), so ranks sharing a disk cache need separate entries.
+        device = str(self._local_tensor.device)
+        cache_data = self._spec._stable_hash() + str(self.requires_grad) + device
         return hashlib.blake2b(cache_data.encode(), digest_size=16).hexdigest()
 
     def __coerce_tangent_metadata__(self):
@@ -727,7 +730,14 @@ class DTensor(torch.Tensor):
         3. ``Replicate()`` -> ``Shard(dim)``: local chunking (i.e. ``torch.chunk``)
         4. ``Partial()`` -> ``Replicate()``: ``all_reduce``
         5. ``Partial()`` -> ``Shard(dim)``: ``reduce_scatter``
+        6. ``Shard(dim)`` -> ``Partial("sum")``: local zero-filling. This
+           explicit-only conversion materializes a global-shape local tensor
+           on every rank and does not communicate.
 
+        Of conversions to ``Partial``, this public API supports only
+        ``Shard(dim)`` -> ``Partial("sum")``. Each rank places its local shard
+        at the corresponding offset in a zero-filled logical-shape tensor, so
+        summing across ranks reconstructs the original logical tensor.
 
         ``redistribute`` would correctly figure out the necessary redistribute steps for DTensors
         that are created either on 1-D or N-D DeviceMesh.
@@ -778,10 +788,16 @@ class DTensor(torch.Tensor):
         placements = list(placements)
         for i, placement in enumerate(placements):
             if placement.is_partial() and self.placements[i] != placement:
-                raise RuntimeError(
-                    f"Can not redistribute from {self.placements[i]} to {placement}, "
-                    "redistributing to Partial is for internal use only!"
-                )
+                source = self.placements[i]
+                if not (
+                    isinstance(source, Shard)
+                    and type(placement) is Partial
+                    and placement.reduce_op == "sum"
+                ):
+                    raise RuntimeError(
+                        f"Can not redistribute from {source} to {placement}, "
+                        "only Shard to Partial(sum) redistribution is supported!"
+                    )
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
                 placements[i] = Shard(placement.dim + self.ndim)

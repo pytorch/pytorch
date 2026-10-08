@@ -2,6 +2,8 @@
 
 #pragma once
 
+#ifdef USE_C10D_NCCL
+
 #include <ATen/ATen.h>
 #include <vector>
 
@@ -39,3 +41,5 @@ class BatchSendRecv {
 };
 
 } // namespace c10d::nccl2
+
+#endif // USE_C10D_NCCL

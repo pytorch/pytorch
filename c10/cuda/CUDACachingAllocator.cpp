@@ -7,6 +7,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/PeerToPeerAccess.h>
+#include <c10/cuda/impl/CUDAGraphMemory.h>
 #include <c10/util/Gauge.h>
 #include <c10/util/Logging.h>
 #include <c10/util/ScopeExit.h>
@@ -16,7 +17,6 @@
 #include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
-#include <c10/util/llvmMathExtras.h>
 #include <c10/util/static_tracepoint.h>
 
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
@@ -37,18 +37,21 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <exception>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <ranges>
-#include <regex>
 #include <set>
 #include <stack>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -77,6 +80,26 @@ namespace cuda::CUDACachingAllocator {
 
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
+
+namespace {
+// Process-wide expandable-segment virtual-address gauges. Bumped in the
+// ExpandableSegment ctor (after a successful reservation) and dtor; read by
+// getExpandableSegmentsReservedBytes()/getExpandableSegmentsCount() for ODS and
+// out-of-VM diagnostics. Relaxed atomics: plain counters, not used for
+// synchronization.
+std::atomic<size_t> g_expandable_segments_reserved_bytes{0};
+std::atomic<size_t> g_expandable_segments_count{0};
+} // namespace
+
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
+static int get_self_pid() {
+#ifdef _WIN32
+  return _getpid();
+#else
+  return getpid();
+#endif // _WIN32
+}
+#endif // defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
 
 namespace Native {
 
@@ -170,31 +193,31 @@ void decrease_stat_array(
 
 struct Block;
 struct PrivatePool;
-typedef bool (*Comparison)(const Block*, const Block*);
-static bool BlockComparatorSizeCounterAddress(const Block* a, const Block* b);
-static bool BlockComparatorAddress(const Block* a, const Block* b);
+
+struct BlockComparatorSizeCounterAddress {
+  bool operator()(const Block* a, const Block* b) const;
+};
+
+struct BlockComparatorAddress {
+  bool operator()(const Block* a, const Block* b) const;
+};
 
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
-      : blocks(BlockComparatorSizeCounterAddress),
-        blocks_by_addr(BlockComparatorAddress),
-        unmapped(BlockComparatorAddress),
-        is_small(small),
-        owner_PrivatePool(private_pool) {}
+      : is_small(small), owner_PrivatePool(private_pool) {}
 
   // Do not insert or erase a Block from blocks/blocks_by_addr directly; use
   // insert_into_blocks()/erase_from_blocks() instead.
-  std::set<Block*, Comparison> blocks;
-  std::set<Block*, Comparison> blocks_by_addr;
-  std::set<Block*, Comparison> unmapped;
+  std::set<Block*, BlockComparatorSizeCounterAddress> blocks;
+  std::set<Block*, BlockComparatorAddress> blocks_by_addr;
+  std::set<Block*, BlockComparatorAddress> unmapped;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
   int64_t get_free_blocks_call_count{0};
 
   // Add a Block into blocks set with updating gc counter.
-  std::pair<std::set<Block*, Comparison>::iterator, bool> insert_into_blocks(
-      Block* block);
+  std::pair<decltype(blocks)::iterator, bool> insert_into_blocks(Block* block);
   size_t erase_from_blocks(Block* block);
 
   MempoolId_t owner_MempoolId() const;
@@ -272,7 +295,7 @@ struct Block {
   }
 };
 
-std::pair<std::set<Block*, Comparison>::iterator, bool> BlockPool::
+std::pair<decltype(BlockPool::blocks)::iterator, bool> BlockPool::
     insert_into_blocks(Block* block) {
   block->gc_count_base = get_free_blocks_call_count;
   auto inserted = blocks.insert(block);
@@ -391,34 +414,114 @@ Instead these mapping have to be done manually. The allocator now has an
 `enablePeerAccess` method to do this.
 */
 
+// Address space to reserve for a segment that may still grow: 1 1/8 of device
+// memory, less any downsizing configured for the stream's reserve class.
+static size_t growableReserveBytes(
+    c10::DeviceIndex device,
+    std::optional<cudaStream_t> stream) {
+  cudaDeviceProp prop{};
+  C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+  // we allocate enough address space for 1 1/8 the total memory on the GPU.
+  // This allows for some cases where we have to unmap pages earlier in the
+  // segment to put them at the end.
+  const size_t full_reserve = prop.totalGlobalMem + prop.totalGlobalMem / 8;
+  // Serving streams may be tagged with a reserve class to downsize their VA
+  // reservation (see PYTORCH_CUDA_ALLOC_CONF expandable_segments_reserve*).
+  // Untagged streams keep the full reserve, so this path is a byte-for-byte
+  // no-op unless reserve config is set. A single allocation cannot span
+  // segments, so the reserve is raised to the floor, and the result is capped
+  // at the historical full reserve (see clamp_reserve_bytes).
+  if (!stream.has_value()) {
+    return full_reserve;
+  }
+  const std::string reserve_class =
+      getExpandableSegmentReserveClassForStream(*stream);
+  // Single locked snapshot so a concurrent setAllocatorSettings() re-parse
+  // cannot compose an inconsistent (reserve, class_known, floor) view.
+  const auto decision =
+      CUDAAllocatorConfig::expandable_segments_reserve_decision(
+          reserve_class, prop.totalGlobalMem);
+  if (decision.reserve_bytes.has_value() && !reserve_class.empty() &&
+      !decision.class_known) {
+    static std::mutex warn_mutex;
+    static ska::flat_hash_set<std::string> warned;
+    std::lock_guard<std::mutex> lock(warn_mutex);
+    if (warned.insert(reserve_class).second) {
+      TORCH_WARN(
+          "expandable_segments reserve class '",
+          reserve_class,
+          "' has no configured reserve in "
+          "expandable_segments_reserve_by_class; using the default reserve.");
+    }
+  }
+  return CUDAAllocatorConfig::clamp_reserve_bytes(decision, full_reserve);
+}
+
 struct ExpandableSegment {
   ExpandableSegment(
       c10::DeviceIndex device,
       std::optional<cudaStream_t> stream,
       size_t segment_size,
       std::vector<c10::DeviceIndex> peers,
-      Expandable_Segments_Handle_Type handle_type =
-          Expandable_Segments_Handle_Type::UNSPECIFIED)
+      // Set only by fromShared(), to the producer's exact handle count. An
+      // imported segment cannot grow: map() is reachable only from map_block()
+      // on segments the allocator owns in expandable_segments_, and an
+      // imported segment is never inserted there. Reserving growth headroom
+      // for one therefore strands 1 1/8 of device memory worth of address
+      // space apiece, which exhausts the 128 TiB user VA after a few hundred
+      // imports.
+      std::optional<size_t> imported_handles = std::nullopt)
       : device_(device),
         stream_(stream),
         // 2MB for small pool, 20MB for large pool
         segment_size_(segment_size),
-        peers_(std::move(peers)),
-        handle_type_(handle_type) {
-    cudaDeviceProp prop{};
-    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
+        peers_(std::move(peers)) {
     mapped_size_ = 0;
-    // we allocate enough address space for 1 1/8 the total memory on the GPU.
-    // This allows for some cases where we have to unmap pages earlier in the
-    // segment to put them at the end.
-    max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
+    max_handles_ = imported_handles.has_value()
+        ? *imported_handles
+        : numSegments(growableReserveBytes(device_, stream));
+    const size_t reserve_bytes = segment_size_ * max_handles_;
+    // Log expandable-segment VA context immediately BEFORE the (unchanged)
+    // driver check throws, so an out-of-virtual-memory crash is self-explaining
+    // in task logs. Built only on the failure branch -> perf-neutral on
+    // success.
+    auto logVaExhaustion = [&](const char* err_str) {
+      LOG(ERROR)
+          << "[ExpandableSegmentVA] Failed to reserve " << reserve_bytes
+          << " bytes (~" << (reserve_bytes >> 30)
+          << " GiB) of virtual address space for an expandable CUDA segment on device "
+          << static_cast<int>(device_) << " (driver reported: " << err_str
+          << "). This process already holds " << getExpandableSegmentsCount()
+          << " live expandable segment(s) reserving "
+          << getExpandableSegmentsReservedBytes()
+          << " bytes of virtual address space. This is virtual-address-space "
+             "(VSZ) exhaustion from expandable segments, not physical GPU OOM. "
+             "Reduce it via PYTORCH_CUDA_ALLOC_CONF expandable_segments_reserve / "
+             "expandable_segments_reserve_by_class, or by using fewer CUDA streams.";
+    };
 #ifdef USE_ROCM
-    C10_CUDA_CHECK(hipMemAddressReserve(
-        &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
+    hipError_t reserve_err =
+        hipMemAddressReserve(&ptr_, reserve_bytes, 0ULL, 0, 0ULL);
+    if (C10_UNLIKELY(reserve_err != hipSuccess)) {
+      const char* err_str = hipGetErrorString(reserve_err);
+      logVaExhaustion(err_str ? err_str : "unknown error");
+    }
+    C10_CUDA_CHECK(reserve_err);
 #else
-    C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
-        &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
+    CUresult reserve_err = DriverAPI::get()->cuMemAddressReserve_(
+        &ptr_, reserve_bytes, 0ULL, 0, 0ULL);
+    if (C10_UNLIKELY(reserve_err != CUDA_SUCCESS)) {
+      const char* err_str = nullptr;
+      DriverAPI::get()->cuGetErrorString_(reserve_err, &err_str);
+      logVaExhaustion(err_str ? err_str : "unknown error");
+    }
+    C10_CUDA_DRIVER_CHECK(reserve_err);
 #endif
+    // Reservation succeeded (a failure would have thrown above): publish
+    // gauges.
+    g_expandable_segments_reserved_bytes.fetch_add(
+        reserve_bytes, std::memory_order_relaxed);
+    g_expandable_segments_count.fetch_add(1, std::memory_order_relaxed);
   }
   ExpandableSegment(const ExpandableSegment&) = delete;
   ExpandableSegment(ExpandableSegment&&) = delete;
@@ -429,39 +532,12 @@ struct ExpandableSegment {
   // returns the actual range mapped, which may be
   // greater than requested if size is not aligned to segment_size_.
   // return size of 0 indicates OOM
-  // return nullptr indicates the handle type is not supported.
   SegmentRange map(SegmentRange range) {
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
     TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
     if (begin == end) {
       return rangeFromHandles(begin, end);
-    }
-
-    // In fbcode, IPC handle types for expandable segments are disabled by
-    // default because some jobs were failing (see
-    // https://github.com/pytorch/pytorch/pull/132890), but can be explicitly
-    // enabled via environment variable when IPC functionality is required
-    // (e.g., for multi-process communication with CTran). In non-fbcode
-    // builds, IPC handle types are enabled by default.
-#ifdef FBCODE_CAFFE2
-    constexpr bool default_enable_ipc = false;
-#else
-    constexpr bool default_enable_ipc = true;
-#endif
-    static const bool enable_ipc_handles =
-        c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
-            .value_or(default_enable_ipc);
-
-    // Determine IPC handle type upfront based on config and device capability.
-    // Resolve once per segment lifetime: fromShared() pre-sets handle_type_
-    // from the wire header, and subsequent in-place map() calls (for segment
-    // expansion) keep the same type. This avoids the old lazy try-fallback
-    // pattern that mutated a process-global config and could mis-attribute the
-    // handle type across devices.
-    if (enable_ipc_handles &&
-        handle_type_ == Expandable_Segments_Handle_Type::UNSPECIFIED) {
-      handle_type_ = detectHandleType(device_);
     }
 
     if (end > handles_.size()) {
@@ -472,8 +548,8 @@ struct ExpandableSegment {
       CUmemGenericAllocationHandle handle = 0;
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-      if (enable_ipc_handles) {
-        if (handle_type_ == Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+      if (ipcEnabled()) {
+        if (cuda::get_fabric_access(device_)) {
 #ifndef USE_ROCM
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
 #endif
@@ -567,38 +643,29 @@ struct ExpandableSegment {
   // other process, and then restored as an exapandable segment
   // via ExpandableSegment::fromShared(istream);
   SegmentRange share(SegmentRange range, std::ostream& buf) {
-    // IPC requires handle_type_ to have been resolved (which happens inside
-    // map() when enable_ipc_handles is true). If a caller tries to IPC-share
-    // a segment that was allocated with IPC handles disabled, fail loudly
-    // instead of writing an UNSPECIFIED type into the wire header.
     TORCH_CHECK(
-        handle_type_ != Expandable_Segments_Handle_Type::UNSPECIFIED,
+        ipcEnabled(),
         "Cannot share an expandable_segments allocation: IPC handles are ",
         "disabled. Set TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC=1 or disable ",
         "expandable_segments for cross-process tensors.");
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
 
-    // header.pid needs to be padded with 4 bytes and initialized with
-    // 0 values ​​to avoid random padding of different bytes each time,
-    // thereby ensuring that the handle can be correctly matched in
-    // ipcMemHandle_to_devptr.
     ShareHeader header{};
-#ifdef _WIN32
-    header.pid = _getpid();
-#else
-    header.pid = getpid();
-#endif
+    header.pid = get_self_pid();
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
-    header.handle_type = handle_type_;
+    header.handle_type = cuda::get_fabric_access(device_)
+        ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
+        : Expandable_Segments_Handle_Type::POSIX_FD;
 
     buf.write(reinterpret_cast<const char*>(&header), sizeof(ShareHeader));
     for (auto i : c10::irange(begin, end)) {
       auto& maybe_handle = handles_.at(i);
       TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
       auto& handle = *maybe_handle;
-      if (handle_type_ != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+      if (header.handle_type !=
+          Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         if (!handle.shareable_handle) {
           int fd = 0;
 #ifdef USE_ROCM
@@ -611,12 +678,8 @@ struct ExpandableSegment {
           handle.shareable_handle = fd;
           LOG(INFO) << "use posix fd to share expandable segments.";
         }
-        TORCH_CHECK(
-            handle.shareable_handle != std::nullopt,
-            "shareable_handle is null");
-        buf.write(
-            reinterpret_cast<const char*>(&*handle.shareable_handle),
-            sizeof(int));
+        const int fd = std::get<int>(*handle.shareable_handle);
+        buf.write(reinterpret_cast<const char*>(&fd), sizeof(fd));
       } else {
 #ifdef USE_ROCM
         TORCH_INTERNAL_ASSERT(
@@ -629,12 +692,9 @@ struct ExpandableSegment {
           handle.shareable_handle = fabric_handle;
           LOG(INFO) << "use fabric handle to share expandable segments.";
         }
-        TORCH_CHECK(
-            handle.shareable_handle != std::nullopt,
-            "shareable_handle is null");
-        buf.write(
-            reinterpret_cast<const char*>(&*handle.shareable_handle),
-            sizeof(CUmemFabricHandle));
+        const auto& exported =
+            std::get<CUmemFabricHandle>(*handle.shareable_handle);
+        buf.write(reinterpret_cast<const char*>(&exported), sizeof(exported));
 #endif
       }
     }
@@ -647,37 +707,24 @@ struct ExpandableSegment {
       std::istream& buf) {
     ShareHeader header{};
     buf.read(reinterpret_cast<char*>(&header), sizeof(ShareHeader));
-    // Sanitize the handle_type from the wire header: guard against corrupted
-    // or future-version payloads that somehow slipped past the version gate.
     TORCH_CHECK(
-        header.handle_type == Expandable_Segments_Handle_Type::UNSPECIFIED ||
-            header.handle_type == Expandable_Segments_Handle_Type::POSIX_FD ||
-            header.handle_type ==
-                Expandable_Segments_Handle_Type::FABRIC_HANDLE,
-        "Unknown Expandable_Segments_Handle_Type in IPC share header: ",
-        static_cast<int>(header.handle_type));
-#ifndef USE_ROCM
-    // If the producer exported a FABRIC handle, the consumer's device must
-    // also support fabric access; otherwise cuMemImportFromShareableHandle
-    // fails deep in the driver with an unhelpful error. Fail fast with an
-    // actionable diagnostic instead.
-    if (header.handle_type == Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
-      TORCH_CHECK(
-          cuda::get_fabric_access(device),
-          "expandable_segments IPC: received FABRIC handle from producer ",
-          "but consumer device ",
-          static_cast<int>(device),
-          " does not support fabric access. Configure ",
-          "PYTORCH_CUDA_ALLOC_CONF=expandable_segments_handle_type:posix_fd ",
-          "on the producer, or disable expandable_segments.");
-    }
-#endif
+        header.handle_type == Expandable_Segments_Handle_Type::POSIX_FD ||
+            (header.handle_type ==
+                 Expandable_Segments_Handle_Type::FABRIC_HANDLE &&
+             cuda::get_fabric_access(device)),
+        "Unsupported expandable_segments IPC handle type ",
+        static_cast<int>(header.handle_type),
+        " on device ",
+        static_cast<int>(device));
+    TORCH_CHECK(
+        header.num_handles > 0,
+        "IPC share header describes an empty expandable segment");
     auto segment = std::make_unique<ExpandableSegment>(
         device,
         std::nullopt,
         header.segment_size,
         std::move(peers),
-        header.handle_type);
+        header.num_handles);
 // older build setups (e.g. multiwheels) do not have this syscall, added 2020
 // but the kernel on the system might still support it.
 #ifndef _WIN32
@@ -699,6 +746,8 @@ struct ExpandableSegment {
           "The kernel on this machine does not support the pidfd_open syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
           "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
       TORCH_CHECK(pidfd != -1, "pidfd_open:", c10::utils::str_error(errno));
+      auto close_pidfd =
+          c10::make_scope_exit([&pidfd]() { close(static_cast<int>(pidfd)); });
       for (auto i : c10::irange(header.num_handles)) {
         (void)i;
         int fd = 0;
@@ -706,24 +755,15 @@ struct ExpandableSegment {
         auto myfd = syscall(SYS_pidfd_getfd, pidfd, fd, 0);
         if (myfd == -1) {
           auto err = errno;
-          close(static_cast<int>(pidfd));
-          for (auto& h : segment->handles_) {
-            TORCH_INTERNAL_ASSERT(h.has_value());
-            const Handle& handle = *h;
-#ifdef USE_ROCM
-            C10_CUDA_CHECK(hipMemRelease(handle.handle));
-#else
-            C10_CUDA_DRIVER_CHECK(
-                DriverAPI::get()->cuMemRelease_(handle.handle));
-#endif
-            h = std::nullopt;
-          }
           TORCH_CHECK(
               err != ENOSYS,
               "The kernel on this machine does not support the pidfd_getfd syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
               "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
           TORCH_CHECK(false, "pidfd_getfd: ", c10::utils::str_error(err));
         }
+        // close myfd on every path, including the import throwing below
+        auto close_myfd =
+            c10::make_scope_exit([&myfd]() { close(static_cast<int>(myfd)); });
         CUmemGenericAllocationHandle handle = 0;
 #ifdef USE_ROCM
 #if ROCM_VERSION >= 70100
@@ -746,15 +786,16 @@ struct ExpandableSegment {
             "}");
 #endif
         LOG(INFO) << "use posix fd to import expandable segments.";
-        close(static_cast<int>(myfd));
         segment->handles_.emplace_back(handle);
       }
-      close(static_cast<int>(pidfd));
 #endif // !_WIN32
     } else {
 #ifdef USE_ROCM
       TORCH_INTERNAL_ASSERT(
           false, "expandable segment with fabric handle not supported");
+#elif defined(_WIN32)
+      TORCH_CHECK(
+          false, "IPC expandable segments are not supported on Windows");
 #else
       for (auto i : c10::irange(header.num_handles)) {
         (void)i;
@@ -816,43 +857,35 @@ struct ExpandableSegment {
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
         ptr_, segment_size_ * max_handles_));
 #endif
+    // Decrement only after a successful free (the checks above throw on
+    // failure), so the gauges never under-report VA that is still reserved by
+    // the driver.
+    g_expandable_segments_reserved_bytes.fetch_sub(
+        segment_size_ * max_handles_, std::memory_order_relaxed);
+    g_expandable_segments_count.fetch_sub(1, std::memory_order_relaxed);
   }
 
  private:
-  // Decide the IPC handle type to use for this segment, based on the global
-  // config and per-device fabric capability. Called once per segment lifetime
-  // (gated on handle_type_ == UNSPECIFIED in map()). On ROCm, FABRIC handles
-  // are not supported and any FABRIC config is rejected with a clear error.
-  static Expandable_Segments_Handle_Type detectHandleType(
-      c10::DeviceIndex device) {
-#ifndef USE_ROCM
-    switch (CUDAAllocatorConfig::expandable_segments_handle_type()) {
-      case Expandable_Segments_Handle_Type::POSIX_FD:
-        return Expandable_Segments_Handle_Type::POSIX_FD;
-      case Expandable_Segments_Handle_Type::FABRIC_HANDLE:
-        TORCH_CHECK(
-            cuda::get_fabric_access(device),
-            "expandable_segments: FABRIC handle type configured but device ",
-            static_cast<int>(device),
-            " does not support fabric access. Set ",
-            "PYTORCH_CUDA_ALLOC_CONF=expandable_segments_handle_type:posix_fd ",
-            "or disable expandable_segments.");
-        return Expandable_Segments_Handle_Type::FABRIC_HANDLE;
-      case Expandable_Segments_Handle_Type::UNSPECIFIED:
-        return cuda::get_fabric_access(device)
-            ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
-            : Expandable_Segments_Handle_Type::POSIX_FD;
-    }
-    TORCH_INTERNAL_ASSERT(false, "unhandled Expandable_Segments_Handle_Type");
+  static bool ipcEnabled() {
+#ifdef _WIN32
+    return false;
 #else
-    TORCH_CHECK(
-        CUDAAllocatorConfig::expandable_segments_handle_type() !=
-            Expandable_Segments_Handle_Type::FABRIC_HANDLE,
-        "expandable_segments: FABRIC handle type is not supported on ROCm. ",
-        "Set PYTORCH_CUDA_ALLOC_CONF=expandable_segments_handle_type:posix_fd.");
-    (void)device;
-    return Expandable_Segments_Handle_Type::POSIX_FD;
+    // In fbcode, IPC handle types for expandable segments are disabled by
+    // default because some jobs were failing (see
+    // https://github.com/pytorch/pytorch/pull/132890), but can be explicitly
+    // enabled via environment variable when IPC functionality is required
+    // (e.g., for multi-process communication with CTran). In non-fbcode
+    // builds, IPC handle types are enabled by default.
+#ifdef FBCODE_CAFFE2
+    constexpr bool default_enable_ipc = false;
+#else
+    constexpr bool default_enable_ipc = true;
 #endif
+    static const bool enabled =
+        c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
+            .value_or(default_enable_ipc);
+    return enabled;
+#endif // _WIN32
   }
 
   void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
@@ -904,6 +937,7 @@ struct ExpandableSegment {
           maybe_handle->handle,
           0ULL));
 #endif
+      maybe_handle->mapped = true;
     }
     mapped_size_ += (end - begin) * segment_size_;
     setAccess(device_, begin, end);
@@ -920,10 +954,10 @@ struct ExpandableSegment {
     // cannot call c10::cuda::stream_synchronize because
     // it might grab the GIL which can lead to a deadlock
     // Locking order must be GIL -> Allocator Lock
+    cuda::CUDAGuard device_guard(device_);
     if (stream_) {
       C10_CUDA_CHECK(cudaStreamSynchronize(*stream_));
     } else {
-      cuda::CUDAGuard device_guard(device_);
       C10_CUDA_CHECK(cudaDeviceSynchronize());
     }
     for (auto i : c10::irange(begin, end)) {
@@ -931,15 +965,21 @@ struct ExpandableSegment {
       TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
       Handle h = *maybe_handle;
       maybe_handle = std::nullopt;
+      if (h.mapped) {
 #ifdef USE_ROCM
-      C10_CUDA_CHECK(hipMemUnmap(ptr() + segment_size_ * i, segment_size_));
+        C10_CUDA_CHECK(hipMemUnmap(ptr() + segment_size_ * i, segment_size_));
 #else
-      C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
-          ptr_ + segment_size_ * i, segment_size_));
+        C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
+            ptr_ + segment_size_ * i, segment_size_));
 #endif
+      }
       if (h.shareable_handle) {
 #ifndef _WIN32
-        close(std::get<int>(*h.shareable_handle));
+        // shareable_handle also holds CUmemFabricHandle for fabric segments;
+        // std::get_if skips those (no fd to close) instead of throwing.
+        if (auto* fd = std::get_if<int>(&*h.shareable_handle)) {
+          close(*fd);
+        }
 #endif
       }
 #ifdef USE_ROCM
@@ -991,30 +1031,25 @@ struct ExpandableSegment {
   struct Handle {
     CUmemGenericAllocationHandle handle;
     std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
+    // False for handles imported via fromShared but not yet cuMemMap'd, so
+    // unmapHandles can skip cuMemUnmap on ranges that were never mapped.
+    bool mapped = false;
   };
   struct ShareHeader {
-    // All fields have in-class default initializers so that
-    // ShareHeader header{}; and a single missing pair of braces cannot leak
-    // indeterminate bytes over IPC.
-#ifdef _WIN32
-    int pid = 0;
-#else
-    pid_t pid = 0;
-#endif
+    // Explicit padding preserves the v3 layout and stable byte-string keys.
+    int32_t pid = 0;
+    uint32_t padding = 0;
     size_t segment_size = 0;
     size_t num_handles = 0;
     Expandable_Segments_Handle_Type handle_type =
         Expandable_Segments_Handle_Type::UNSPECIFIED;
+    uint32_t padding_end = 0;
   };
+  static_assert(std::has_unique_object_representations_v<ShareHeader>);
   std::vector<std::optional<Handle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
   std::vector<c10::DeviceIndex> peers_;
-  // IPC handle type of the expandable segment. Resolved once per segment
-  // lifetime (see map() / detectHandleType) and serialized into ShareHeader
-  // so that the consumer can deserialize the correct handle shape.
-  Expandable_Segments_Handle_Type handle_type_ =
-      Expandable_Segments_Handle_Type::UNSPECIFIED;
 };
 #else
 struct ExpandableSegment {
@@ -1101,9 +1136,11 @@ struct RestoreResult {
   std::vector<Block*> allocations_created;
 };
 
-bool BlockComparatorSizeCounterAddress(const Block* a, const Block* b) {
+bool BlockComparatorSizeCounterAddress::operator()(
+    const Block* a,
+    const Block* b) const {
   if (a->stream != b->stream) {
-    return (uintptr_t)a->stream < (uintptr_t)b->stream;
+    return std::less<>{}(a->stream, b->stream);
   }
   if (a->size != b->size) {
     return a->size < b->size;
@@ -1111,14 +1148,14 @@ bool BlockComparatorSizeCounterAddress(const Block* a, const Block* b) {
   if (a->registration_counter != b->registration_counter) {
     return a->registration_counter < b->registration_counter;
   }
-  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
-bool BlockComparatorAddress(const Block* a, const Block* b) {
+bool BlockComparatorAddress::operator()(const Block* a, const Block* b) const {
   if (a->stream != b->stream) {
-    return (uintptr_t)a->stream < (uintptr_t)b->stream;
+    return std::less<>{}(a->stream, b->stream);
   }
-  return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
 // Info about OOM rejection, used to defer observer callbacks outside of lock
@@ -1159,6 +1196,7 @@ struct AllocParams {
   Block* block{nullptr};
   StatTypes stat_types = {false};
   cudaError_t err{cudaSuccess};
+  bool custom_allocator_failed{false};
   OomRejectionInfo oom_rejection_info;
 };
 
@@ -1295,6 +1333,7 @@ PrivatePoolState::PrivatePoolState(
 cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
+    p.custom_allocator_failed = *ptr == nullptr;
     return *ptr ? cudaSuccess : cudaErrorMemoryAllocation;
   } else {
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(ptr, size));
@@ -1326,9 +1365,14 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
     return "";
   }
   static bool nvml_init [[maybe_unused]] = []() {
-    TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
-    return true;
+    return NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_();
   }();
+  if (!nvml_init) {
+    TORCH_WARN_ONCE(
+        "nvmlInit_v2 failed; omitting per-process memory info from CUDA "
+        "out-of-memory messages.");
+    return "";
+  }
 
   // NOLINTNEXTLINE(*-c-arrays)
   char pci_id[80];
@@ -1341,10 +1385,14 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
       prop.pciDeviceID);
 
   nvmlDevice_t nvml_device = nullptr;
-  TORCH_INTERNAL_ASSERT(
-      NVML_SUCCESS ==
+  if (NVML_SUCCESS !=
       DriverAPI::get()->nvmlDeviceGetHandleByPciBusId_v2_(
-          pci_id, &nvml_device));
+          pci_id, &nvml_device)) {
+    TORCH_WARN_ONCE(
+        "nvmlDeviceGetHandleByPciBusId failed; omitting per-process memory "
+        "info from CUDA out-of-memory messages.");
+    return "";
+  }
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
   unsigned int size = procs.size();
@@ -1354,9 +1402,15 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
-  unsigned int self_pid = getpid();
+  if (NVML_SUCCESS != r) {
+    TORCH_WARN_ONCE(
+        "nvmlDeviceGetComputeRunningProcesses failed; omitting per-process "
+        "memory info from CUDA out-of-memory messages. This is expected on "
+        "platforms with partial NVML support such as Tegra/Jetson.");
+    return "";
+  }
+  unsigned int self_pid = get_self_pid();
   std::stringstream ss;
-  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
   for (auto i : c10::irange(size)) {
     auto& proc = procs[i];
@@ -1367,7 +1421,7 @@ static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
     }
     ss << " has " << format_size(proc.usedGpuMemory) << " memory in use. ";
   }
-  return ss.str();
+  return std::move(ss).str();
 #else
   return "";
 #endif
@@ -1377,8 +1431,55 @@ namespace Native {
 
 class DeviceCachingAllocator {
  private:
+  using DeferredCustomFree = std::pair<std::shared_ptr<CUDAAllocator>, void*>;
+
+  static void drain_deferred_custom_frees(
+      std::vector<DeferredCustomFree> frees) {
+    std::exception_ptr first_exception;
+    for (auto& [allocator, ptr] : frees) {
+      try {
+        allocator->raw_delete(ptr);
+      } catch (...) {
+        if (!first_exception) {
+          first_exception = std::current_exception();
+        }
+      }
+    }
+    if (first_exception) {
+      std::rethrow_exception(first_exception);
+    }
+  }
+
+  static void drain_deferred_custom_frees_noexcept(
+      std::vector<DeferredCustomFree> frees) noexcept {
+    try {
+      drain_deferred_custom_frees(std::move(frees));
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Exception while releasing a custom CUDA MemPool: "
+                 << e.what();
+    } catch (...) {
+      LOG(ERROR) << "Unknown exception while releasing a custom CUDA MemPool";
+    }
+  }
+
+  void drain_deferred_custom_frees_outside_lock(
+      std::unique_lock<std::recursive_mutex>& lock) {
+    auto frees = std::exchange(deferred_custom_frees_, {});
+    if (frees.empty()) {
+      return;
+    }
+    auto relock = c10::make_scope_exit([&]() { lock.lock(); });
+    lock.unlock();
+    drain_deferred_custom_frees_noexcept(std::move(frees));
+  }
+
   // lock around all operations
   mutable std::recursive_mutex mutex;
+
+  // Custom frees selected while holding mutex. A drain must exchange this into
+  // a local batch before unlocking so another thread cannot steal or append to
+  // the batch being freed.
+  std::vector<DeferredCustomFree> deferred_custom_frees_;
 
   // device statistics
   DeviceStats stats;
@@ -1401,23 +1502,13 @@ class DeviceCachingAllocator {
   // CUDAGraph capture, torch.cuda.use_mem_pool, ProcessGroupNCCL
   // registration, inductor cudagraph_trees warmup, and the allocator's own
   // try_mempool_fallback. Note: a non-empty list does NOT imply an active
-  // CUDA stream capture; for that, see num_active_captures_ below.
+  // CUDA stream capture; for that, see capture_tracker_ below.
   // Most of the time it's empty, so malloc can short-circuit on the hot path.
   std::vector<std::pair<MempoolId_t, std::function<bool(cudaStream_t)>>>
       allocation_scopes_;
 
-  // Count of in-progress CUDA stream captures on this device. Bumped by
-  // CUDAGraph's capture_begin / capture_end (and conditional-node helpers)
-  // around cudaStreamBeginCapture / cudaStreamEndCapture. Distinct from
-  // allocation_scopes_, which tracks pool routing — the latter can be
-  // populated without an active capture (e.g. torch.cuda.use_mem_pool,
-  // NCCL registration, inductor cudagraph_trees warmup, internal
-  // try_mempool_fallback).
-  //
-  // Plain int because all access is serialized through `mutex`. Promote to
-  // std::atomic<int> (relaxed) if begin/end ever need to race or if any
-  // reader wants lock-free access.
-  int num_active_captures_ = 0;
+  // Graph-specific capture state. CCA retains ownership of allocator Blocks.
+  CUDAGraphMemory::CaptureTracker capture_tracker_;
 
   // tracks which pools we can use as a last resort before ooming
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
@@ -1502,6 +1593,11 @@ class DeviceCachingAllocator {
   // intentional: metadata labels a region of source code, not a device.
   static thread_local std::string user_metadata;
 
+  // Tag recorded as internal_metadata_ on trace entries emitted while it is
+  // set (see malloc_with_address). Guarded by mutex, which the setter holds
+  // across the tagged region.
+  std::string internal_metadata_tag;
+
  public:
   explicit DeviceCachingAllocator(c10::DeviceIndex id)
       : device_id(id),
@@ -1561,6 +1657,19 @@ class DeviceCachingAllocator {
 
   std::string getUserMetadata() {
     return user_metadata;
+  }
+
+  void annotateMemory(Block* block, const std::string& metadata) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    record_trace(
+        TraceEntry::ANNOTATE,
+        int64_t(block->ptr),
+        block->requested_size,
+        block->stream,
+        block->device,
+        block->pool->owner_MempoolId(),
+        maybeGatherContext(RecordContext::ALLOC),
+        metadata);
   }
 
   bool checkPoolLiveAllocations(
@@ -1678,8 +1787,17 @@ class DeviceCachingAllocator {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
-
     std::unique_lock<std::recursive_mutex> lock(mutex);
+    // On exceptional exits, detach the pending queue while the mutex is still
+    // held, then invoke the external frees after unlocking.
+    auto deferred_free_cleanup = c10::make_scope_exit([&]() noexcept {
+      if (!lock.owns_lock()) {
+        return;
+      }
+      auto frees = std::exchange(deferred_custom_frees_, {});
+      lock.unlock();
+      drain_deferred_custom_frees_noexcept(std::move(frees));
+    });
 
     prepare_for_malloc(context, stream);
 
@@ -1715,6 +1833,7 @@ class DeviceCachingAllocator {
               AcceleratorAllocatorConfig::garbage_collection_threshold() >
                   0.0)) {
         garbage_collect_cached_blocks(context);
+        drain_deferred_custom_frees_outside_lock(lock);
       }
 
       // Attempt allocate
@@ -1730,21 +1849,25 @@ class DeviceCachingAllocator {
         // Skip retry chain - will be handled below in the !block_found path
       } else if (!block_found) {
         // Normal retry chain: try various strategies to free memory and retry
-        block_found =
-            // Try to use memory pools that have opted in as overflow before
-            // expensive memory freeing operations.
-            try_mempool_fallback(
-                params, size, stream, device_id, alloc_size, stats)
-            // Free enough available cached blocks to satisfy alloc and retry
-            // alloc.
-            || (release_available_cached_blocks(params, context) &&
-                alloc_block(params, false, context, lock))
-            // Free all non-split cached blocks and retry alloc.
-            // Only skip this during actual graph capture; user mempools
-            // should be able to reclaim cached memory.
-            || (C10_LIKELY(!is_capture_context()) &&
-                release_cached_blocks(context, {0, 0}) &&
-                alloc_block(params, true, context, lock));
+        // Try to use memory pools that have opted in as overflow before
+        // expensive memory freeing operations.
+        block_found = try_mempool_fallback(
+            params, size, stream, device_id, alloc_size, stats);
+
+        // Free enough available cached blocks to satisfy alloc and retry.
+        if (!block_found &&
+            release_available_cached_blocks(params, context, lock)) {
+          block_found = alloc_block(params, false, context, lock);
+        }
+
+        // Free all non-split cached blocks and retry alloc. Only skip this
+        // during actual graph capture; user mempools should be able to reclaim
+        // cached memory.
+        if (!block_found && C10_LIKELY(!is_capture_context())) {
+          release_cached_blocks(context, {0, 0});
+          drain_deferred_custom_frees_outside_lock(lock);
+          block_found = alloc_block(params, true, context, lock);
+        }
       }
     }
 
@@ -1880,6 +2003,37 @@ class DeviceCachingAllocator {
       // Note that at this point free_cached_blocks has already returned all
       // possible "cached" memory to the driver. The only remaining "cached"
       // memory is split from a larger block that is partially in-use.
+      //
+      // With expandable segments a single allocation cannot span segments, so a
+      // request larger than this stream's per-segment reserve fails even when
+      // the device has room -- which is otherwise baffling, since the message
+      // above will report plenty free. Only advise raising the reserve when the
+      // request would actually fit on the device; for a genuinely oversized
+      // request the reserve is not the problem.
+      std::string expandable_reserve_msg;
+      if (CUDAAllocatorConfig::expandable_segments() &&
+          alloc_size <= device_prop.totalGlobalMem) {
+        const std::string reserve_class =
+            getExpandableSegmentReserveClassForStream(stream);
+        const size_t total = device_prop.totalGlobalMem;
+        const size_t reserve = CUDAAllocatorConfig::clamp_reserve_bytes(
+            CUDAAllocatorConfig::expandable_segments_reserve_decision(
+                reserve_class, total),
+            total + total / 8);
+        if (reserve < alloc_size) {
+          expandable_reserve_msg =
+              " This allocation exceeds the expandable-segment reserve of " +
+              format_size(reserve) +
+              (reserve_class.empty()
+                   ? std::string(" for this stream")
+                   : " for stream reserve class '" + reserve_class + "'") +
+              ", and a single allocation cannot span expandable segments."
+              " Raise PYTORCH_CUDA_ALLOC_CONF expandable_segments_reserve or"
+              " expandable_segments_reserve_by_class (or unset it) so that a"
+              " segment is at least " +
+              format_size(alloc_size) + ".";
+        }
+      }
       TORCH_CHECK_WITH(
           OutOfMemoryError,
           false,
@@ -1902,10 +2056,30 @@ class DeviceCachingAllocator {
           format_size(
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
-          " If reserved but unallocated memory is large try setting",
-          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
-          " fragmentation.  See documentation for Memory Management "
-          " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
+          CUDAAllocatorConfig::expandable_segments()
+              // Suppressed when the reserve-specific hint below applies: that
+              // one says to RAISE the reserve, so the generic "you may be
+              // over-reserving, reduce it" advice would contradict it.
+              ? (!expandable_reserve_msg.empty()
+                     ? ""
+                     : " expandable_segments is enabled. If instead the process"
+                       " is running out of virtual address space (VSZ),"
+                       " expandable segments may be over-reserving VA (each"
+                       " segment reserves ~9/8 of device memory, times the"
+                       " number of streams); reduce it via"
+                       " PYTORCH_CUDA_ALLOC_CONF expandable_segments_reserve /"
+                       " expandable_segments_reserve_by_class.")
+              : " If reserved but unallocated memory is large try setting"
+                " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+                " fragmentation.  See documentation for Memory Management "
+                " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)",
+          expandable_reserve_msg,
+          params.custom_allocator_failed
+              ? " The custom allocator backing this MemPool returned nullptr."
+                " Check preceding allocator warnings or logs for the underlying"
+                " cause. This can indicate an allocator-specific error or memory"
+                " constraint, even when device-wide free memory is available."
+              : "");
     }
 
     bool split_remainder = should_split(
@@ -1950,17 +2124,12 @@ class DeviceCachingAllocator {
     const size_t prefix_size = requested_addr - block_begin;
 
     // mallocWithAddress may allocate both prefix block and requested block,
-    // and free prefix block later. This adds a fake malloc/free pair for prefix
-    // block. A metadata is added for better memory visualization.
-    const auto original_user_metadata = getUserMetadata();
-    const auto malloc_with_address_metadata = original_user_metadata.empty()
-        ? std::string("mallocWithAddress")
-        : original_user_metadata + "\nmallocWithAddress";
-    setUserMetadata(malloc_with_address_metadata);
-    auto restore_user_metadata =
-        c10::make_scope_exit([this, original_user_metadata]() {
-          setUserMetadata(original_user_metadata);
-        });
+    // and free prefix block later. This adds a fake malloc/free pair for
+    // prefix block. Tag the resulting trace entries for better memory
+    // visualization, without touching the user-set metadata.
+    internal_metadata_tag = "mallocWithAddress";
+    auto clear_internal_metadata =
+        c10::make_scope_exit([this]() { internal_metadata_tag.clear(); });
 
     Block* prefix_block = nullptr;
     Block* requested_source = containing_block;
@@ -2534,8 +2703,17 @@ class DeviceCachingAllocator {
   /** returns cached blocks to the system allocator **/
   void emptyCache(MempoolId_t mempool_id) {
     auto context = maybeGatherContext(RecordContext::ALL);
-    std::lock_guard<std::recursive_mutex> lock(mutex);
-    release_cached_blocks(context, mempool_id);
+    std::vector<DeferredCustomFree> frees;
+    try {
+      std::lock_guard<std::recursive_mutex> lock(mutex);
+      auto detach_deferred_frees = c10::make_scope_exit(
+          [&]() { frees = std::exchange(deferred_custom_frees_, {}); });
+      release_cached_blocks(context, mempool_id);
+    } catch (...) {
+      drain_deferred_custom_frees_noexcept(std::move(frees));
+      throw;
+    }
+    drain_deferred_custom_frees(std::move(frees));
   }
 
   /** Retrieves size of largest unused block held by the memory cache **/
@@ -2904,7 +3082,14 @@ class DeviceCachingAllocator {
       // in graph_pools and only return the blocks from it.
       auto pool = graph_pools.find(mempool_id);
       if (pool != graph_pools.end()) {
-        all_blocks = get_private_pool_head_blocks(pool->second.get());
+        // Not get_private_pool_head_blocks: in an expandable segment, a mapped
+        // run after an unmapped hole has a prev but is reported on its own.
+        const PrivatePool* pp = pool->second.get();
+        for (Block* b : get_all_blocks()) {
+          if (b->pool == &pp->small_blocks || b->pool == &pp->large_blocks) {
+            all_blocks.push_back(b);
+          }
+        }
       }
     } else {
       // When snapshot is called with non-default mempool_id, we return
@@ -2992,7 +3177,7 @@ class DeviceCachingAllocator {
   // them, the values are 1024, 1280, 1536, and 1792. So the function will
   // return 1280 as the nearest ceiling of power-2 division.
   static size_t roundup_power2_next_division(size_t size, size_t divisions) {
-    if (llvm::isPowerOf2_64(size)) {
+    if (std::has_single_bit(size)) {
       return size;
     }
 
@@ -3000,9 +3185,8 @@ class DeviceCachingAllocator {
 
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
-    size_t power2_floor = llvm::PowerOf2Floor(size);
-    size_t power2_division =
-        power2_floor >> (63 - llvm::countLeadingZeros(divisions));
+    size_t power2_floor = std::bit_floor(size);
+    size_t power2_division = power2_floor >> (std::bit_width(divisions) - 1);
     if (C10_UNLIKELY(power2_division == 0)) {
       return (power2_floor << 1);
     }
@@ -3154,16 +3338,27 @@ class DeviceCachingAllocator {
   // begin/end for one capture are not racing each other.
   void markCaptureBegin() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    num_active_captures_++;
+    capture_tracker_.captureBegin();
   }
 
   // Called by CUDAGraph after cudaStreamEndCapture.
   void markCaptureEnd() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    TORCH_INTERNAL_ASSERT(
-        num_active_captures_ > 0,
-        "markCaptureEnd called with no captures in progress");
-    num_active_captures_--;
+    capture_tracker_.captureEnd();
+  }
+
+  // Public entry to is_capture_context() for callers outside the allocator
+  // that must refuse host-blocking work under capture (e.g. symmetric
+  // memory allocation). Cheap when no capture is active on this device.
+  bool isCaptureContext() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    if (C10_LIKELY(!capture_tracker_.hasActiveCaptures())) {
+      return false;
+    }
+    // The default stream's handle is nullptr, which the driver resolves
+    // against the current device, so select this device for the query.
+    c10::cuda::CUDAGuard guard(device_id);
+    return is_capture_context();
   }
 
   // Called by CUDAGraph::reset and MemPool::~MemPool()
@@ -3187,6 +3382,7 @@ class DeviceCachingAllocator {
       // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
       bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
       TORCH_INTERNAL_ASSERT(inserted);
+      no_split_pools.erase(mempool_id);
     }
   }
 
@@ -3294,6 +3490,8 @@ class DeviceCachingAllocator {
   // returns the smallest possible address in any segment
   // where there is enough free address space to fit size
   // may be composed of free and unmapped segments
+  // returns nullptr if no segment can ever be large enough to fit size, i.e.
+  // size exceeds the per-stream expandable-segment reserve
   Block* find_expandable_block(
       c10::DeviceIndex device,
       cudaStream_t stream,
@@ -3334,6 +3532,17 @@ class DeviceCachingAllocator {
         device, stream, segment_size, devices_with_peer_access_));
 
     ExpandableSegment* es = expandable_segments_.back();
+    // A single allocation cannot span expandable segments, so if even a fresh
+    // segment is smaller than `size` no segment can ever satisfy the request.
+    // Report "no block" rather than returning a candidate that violates the
+    // contract above: the caller then fails the allocation through the normal
+    // OOM path, which notifies out-of-memory observers, counts the OOM, and
+    // retries after releasing cached blocks.
+    if (es->size() < size) {
+      expandable_segments_.pop_back();
+      delete es;
+      return nullptr;
+    }
     Block* candidate = new Block(device, stream, es->size(), pool, es->ptr());
     candidate->mapped = false;
     candidate->expandable_segment_ = es;
@@ -3425,6 +3634,11 @@ class DeviceCachingAllocator {
       size_t size,
       const std::shared_ptr<GatheredContext>& ctx) {
     Block* candidate = find_expandable_block(device, stream, pool, size);
+    if (!candidate) {
+      // No segment can ever be large enough for this allocation; fail the same
+      // way an exhausted device does so the caller runs the normal OOM path.
+      return nullptr;
+    }
     // Candidate is now a list free/unmapped blocks with at least size room:
     // unmapped -> null
     // unmapped -> free -> *
@@ -3571,7 +3785,7 @@ class DeviceCachingAllocator {
   // not mistaken for a real capture.
   //
   // Two layers, from cheapest to most expensive:
-  //   1. Device-wide counter: num_active_captures_ == 0 means no capture is
+  //   1. Device-wide state: CUDAGraphMemory reports whether a capture is
   //      in progress anywhere on this device, so the answer is trivially
   //      false. This is the common case and the hot path.
   //   2. Per-stream syscall: cudaStreamGetCaptureInfo on the current stream.
@@ -3580,10 +3794,10 @@ class DeviceCachingAllocator {
   //      device that has another stream capturing (eager-eligible) from the
   //      capturing stream itself (must follow capture rules).
   //
-  // The counter read is safe because all callers hold `mutex`
-  // (see num_active_captures_).
+  // The device-wide state read is safe because all callers hold `mutex`
+  // (see CUDAGraphMemory::CaptureTracker::hasActiveCaptures()).
   bool is_capture_context() {
-    if (C10_LIKELY(num_active_captures_ == 0)) {
+    if (C10_LIKELY(!capture_tracker_.hasActiveCaptures())) {
       return false;
     }
     cudaStream_t stream = cuda::getCurrentCUDAStream(device_id).stream();
@@ -3805,11 +4019,6 @@ class DeviceCachingAllocator {
     if (isRetry) {
       stats.num_alloc_retries += 1;
     }
-#ifdef FBCODE_CAFFE2
-    bool in_fbcode = true;
-#else
-    bool in_fbcode = false;
-#endif
 
     if (allowed_memory_maximum.has_value() &&
         total_allocated_memory + size > allowed_memory_maximum.value()) {
@@ -3847,10 +4056,7 @@ class DeviceCachingAllocator {
       }
     }
 
-    if (
-        // Temporarily disable checkpointing & cudagraphs internally
-        p.is_expandable_segments_active &&
-        !(in_fbcode && p.pool->owner_PrivatePool)) {
+    if (p.is_expandable_segments_active) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
@@ -3864,31 +4070,44 @@ class DeviceCachingAllocator {
       }
       return bool(p.block);
     } else {
-      if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
+      const bool has_custom_allocator =
+          p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator();
+      const bool release_lock =
+          CUDAAllocatorConfig::release_lock_on_cudamalloc() ||
+          has_custom_allocator;
+      if (release_lock) {
         // At scope exit, acquire the lock again. This provides safety against
         // any potential exceptions in the cudaMallocMaybeCapturing function.
+        // Custom allocators are arbitrary external code and may acquire the
+        // Python GIL or their own locks, so never invoke them while holding the
+        // caching allocator mutex.
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
         lock.unlock();
         p.err = cudaMallocMaybeCapturing(&ptr, size, p);
       } else {
         p.err = cudaMallocMaybeCapturing(&ptr, size, p);
       }
-      if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
+      if (release_lock) {
         TORCH_CHECK(
-            lock.owns_lock(), "Failed to acquire lock after cudaMalloc");
+            lock.owns_lock(),
+            "Failed to acquire lock after external allocation");
       }
 
       if (p.err != cudaSuccess) {
         if (p.err == cudaErrorMemoryAllocation) {
+          // Logged on every failed attempt, including ones recovered by the
+          // release-and-retry path, since each retry is a costly perf signal.
+          // INFO (opt-in via TORCH_CPP_LOG_LEVEL=INFO) so workloads that
+          // intentionally run near-full are not spammed by default (#193195).
           {
             size_t device_free = 0;
             size_t device_total = 0;
             (void)cudaMemGetInfo(&device_free, &device_total);
-            LOG(WARNING) << "memory allocation failed with OOM on device "
-                         << static_cast<int>(device_id)
-                         << " while trying to allocate " << size
-                         << " bytes (free: " << device_free
-                         << ", total: " << device_total << ").";
+            LOG(INFO) << "memory allocation failed with OOM on device "
+                      << static_cast<int>(device_id)
+                      << " while trying to allocate " << size
+                      << " bytes (free: " << device_free
+                      << ", total: " << device_total << ").";
           }
           // If this is the first attempt (!isRetry), we can forgive and clear
           // CUDA's internal error state.
@@ -3955,7 +4174,13 @@ class DeviceCachingAllocator {
   /** to satisfy the target size **/
   bool release_available_cached_blocks(
       const AllocParams& p,
-      const std::shared_ptr<GatheredContext>& context) {
+      const std::shared_ptr<GatheredContext>& context,
+      std::unique_lock<std::recursive_mutex>& lock) {
+    // Drain only after this function's traversal and all its iterators have
+    // finished. This also drains partial reclamation when the return value is
+    // false and drains safely on exceptional exits.
+    auto drain_deferred_frees = c10::make_scope_exit(
+        [&]() { drain_deferred_custom_frees_outside_lock(lock); });
     if (AcceleratorAllocatorConfig::max_split_size() ==
         std::numeric_limits<size_t>::max())
       return false;
@@ -4086,9 +4311,13 @@ class DeviceCachingAllocator {
 
     auto* pool = block->pool;
     if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
-      // If there is an active mempool with a given allocator,
-      // we use the given allocator's delete function.
-      pool->owner_PrivatePool->allocator()->raw_delete(block->ptr);
+      // Calling an arbitrary custom allocator while holding the caching
+      // allocator mutex can deadlock against the callback's own locks (in
+      // particular, the Python GIL). Retain the allocator in the pending queue;
+      // the reclamation owner detaches that queue before unlocking and
+      // invoking the frees.
+      deferred_custom_frees_.emplace_back(
+          pool->owner_PrivatePool->allocator_, block->ptr);
     } else {
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     }
@@ -4390,7 +4619,8 @@ class DeviceCachingAllocator {
       cudaStream_t stream,
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::shared_ptr<GatheredContext> context) {
+      std::shared_ptr<GatheredContext> context,
+      std::optional<std::string> metadata_override = std::nullopt) {
     if (!record_history && trace_trackers_.empty())
       return;
     std::string compile_string = "N/A";
@@ -4407,7 +4637,8 @@ class DeviceCachingAllocator {
         getApproximateTime(),
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
         compile_string,
-        user_metadata);
+        metadata_override ? std::move(*metadata_override) : user_metadata);
+    te.internal_metadata_ = internal_metadata_tag;
 
     // Callbacks should not include any Pytorch call
     for (const auto& cb : trace_trackers_) {
@@ -4702,6 +4933,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->popCompileContext();
   }
 
+  bool supportsUserMetadata() override {
+    return true;
+  }
+
   void setUserMetadata(const std::string& metadata) override {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
@@ -4712,6 +4947,13 @@ class NativeCachingAllocator : public CUDAAllocator {
     c10::DeviceIndex device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     return device_allocator[device]->getUserMetadata();
+  }
+
+  void annotateMemory(const void* ptr, const std::string& metadata) override {
+    Block* block = get_allocated_block(ptr);
+    TORCH_CHECK(
+        block, "annotateMemory: no live allocation found at pointer ", ptr);
+    device_allocator[block->device]->annotateMemory(block, metadata);
   }
 
   bool isHistoryEnabled() override {
@@ -5035,6 +5277,14 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->markCaptureEnd();
   }
 
+  bool isCaptureContext(c10::DeviceIndex device) override {
+    // Before init() no CUDAGraph can have begun a capture.
+    if (device < 0 || static_cast<size_t>(device) >= device_allocator.size()) {
+      return false;
+    }
+    return device_allocator[device]->isCaptureContext();
+  }
+
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
     device_allocator[device]->releasePool(std::move(mempool_id));
@@ -5139,10 +5389,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   // to the other process to sort the object. Then we recreate part of the
   // exandable segment necessary to load the allocation.
 
-  // ipcMemHandle_to_devptr caches the mapping from shareable handle to
-  // this process' memory mapping information for that share to ensure we do not
-  // create it twice. When the shared_ptr is no longer in use we clean up the
-  // cache.
+  // Cache each (device, handle) mapping until its last shared_ptr is freed.
 
   std::mutex IpcMutex;
   struct MemHandleCacheEntry {
@@ -5205,11 +5452,16 @@ class NativeCachingAllocator : public CUDAAllocator {
     std::weak_ptr<void> wp_;
   };
 
-  ska::flat_hash_map<std::string, MemHandleCacheEntry> ipcMemHandle_to_devptr;
+  using IpcCacheKey = std::pair<c10::DeviceIndex, std::string>;
+  ska::flat_hash_map<IpcCacheKey, MemHandleCacheEntry, c10::hash<IpcCacheKey>>
+      ipcMemHandle_to_devptr;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override {
+    c10::DeviceIndex curr_device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&curr_device));
+    IpcCacheKey key{curr_device, handle};
     std::lock_guard<std::mutex> lock(IpcMutex);
 
-    auto iter = ipcMemHandle_to_devptr.find(handle);
+    auto iter = ipcMemHandle_to_devptr.find(key);
     if (iter != ipcMemHandle_to_devptr.end()) {
       auto devptr = iter->second.wp_.lock();
       // the weak_ptr should always be valid because we delete the entry from
@@ -5218,18 +5470,16 @@ class NativeCachingAllocator : public CUDAAllocator {
       TORCH_INTERNAL_ASSERT(devptr, "entry in cache has missing shared_ptr");
       return devptr;
     }
-    c10::DeviceIndex curr_device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&curr_device));
     auto inserted = ipcMemHandle_to_devptr.insert(
         iter,
-        {handle,
+        {key,
          MemHandleCacheEntry(
              curr_device, handle, *device_allocator[curr_device])});
-    auto sp = std::shared_ptr<void>(
-        inserted->second.ptr(), [handle, this](void* ptr) {
+    auto sp =
+        std::shared_ptr<void>(inserted->second.ptr(), [key, this](void* ptr) {
           std::unique_lock<std::mutex> deleter_lock(IpcMutex);
 
-          auto it = ipcMemHandle_to_devptr.find(handle);
+          auto it = ipcMemHandle_to_devptr.find(key);
           TORCH_INTERNAL_ASSERT(it != ipcMemHandle_to_devptr.end());
           auto entry = std::move(it->second);
           ipcMemHandle_to_devptr.erase(it);
@@ -5338,5 +5588,51 @@ struct BackendStaticInitializer {
 
 std::atomic<CUDAAllocator*> allocator;
 static BackendStaticInitializer backend_static_initializer;
+
+namespace {
+std::mutex& expandableSegmentReserveClassMutex() {
+  static std::mutex m;
+  return m;
+}
+ska::flat_hash_map<cudaStream_t, std::string>&
+expandableSegmentReserveClassMap() {
+  static ska::flat_hash_map<cudaStream_t, std::string> m;
+  return m;
+}
+} // namespace
+
+void setExpandableSegmentReserveClassForStream(
+    cudaStream_t stream,
+    const std::string& reserve_class) {
+  std::lock_guard<std::mutex> lock(expandableSegmentReserveClassMutex());
+  if (reserve_class.empty()) {
+    expandableSegmentReserveClassMap().erase(stream);
+  } else {
+    expandableSegmentReserveClassMap()[stream] = reserve_class;
+  }
+}
+
+std::string getExpandableSegmentReserveClassForStream(cudaStream_t stream) {
+  std::lock_guard<std::mutex> lock(expandableSegmentReserveClassMutex());
+  auto& map = expandableSegmentReserveClassMap();
+  auto it = map.find(stream);
+  return it != map.end() ? it->second : std::string{};
+}
+
+void setDefaultExpandableSegmentReserveFractionForClass(
+    const std::string& reserve_class,
+    double fraction) {
+  CUDAAllocatorConfig::set_default_reserve_for_class(
+      reserve_class,
+      ExpandableSegmentReserveSpec{/*is_fraction=*/true, fraction});
+}
+
+size_t getExpandableSegmentsReservedBytes() {
+  return g_expandable_segments_reserved_bytes.load(std::memory_order_relaxed);
+}
+
+size_t getExpandableSegmentsCount() {
+  return g_expandable_segments_count.load(std::memory_order_relaxed);
+}
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10

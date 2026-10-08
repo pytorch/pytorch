@@ -58,6 +58,7 @@ class CUDASymmetricMemory : public SymmetricMemory {
   void wait_signal(int src_rank, int channel, size_t timeout_ms) override;
 
   int get_rank() override;
+  std::string get_group_name() override;
   int get_world_size() override;
   c10::Device get_device() override;
   bool world_within_direct_access() override;
@@ -81,6 +82,8 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
       std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs,
       std::vector<void*> buffers,
       std::vector<void*> signal_pads,
+      void* mc_signal_pad_addr,
+      size_t barrier_state_offset,
       HandleType mc_handle,
       void* mc_addr,
       size_t buffer_size,
@@ -93,6 +96,9 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
+  void* mc_signal_pad_addr_;
+  // Bytes from a signal pad to the multimem barrier's state; see alloc().
+  size_t barrier_state_offset_;
   HandleType mc_handle_;
   void* mc_addr_;
   size_t buffer_size_;
@@ -113,7 +119,10 @@ struct Block : public c10::intrusive_ptr_target {
   int device_idx;
   size_t block_size;
   size_t buffer_size;
-  size_t signal_pad_offset;
+  // Byte offset from the allocation base (alloc_ref->ptr) to the start of the
+  // user buffer. The signal pad occupies the first two thirds of
+  // [0, buffer_offset) and the multimem barrier's state the last; see alloc().
+  size_t buffer_offset;
   std::optional<std::string> default_group_name;
   std::map<std::string, c10::intrusive_ptr<CUDAPeerAllocInfo>> symm_mems;
 
@@ -122,7 +131,7 @@ struct Block : public c10::intrusive_ptr_target {
       int device_idx,
       size_t block_size,
       size_t buffer_size,
-      size_t signal_pad_offset,
+      size_t buffer_offset,
       const std::optional<std::string>& group_name);
 };
 

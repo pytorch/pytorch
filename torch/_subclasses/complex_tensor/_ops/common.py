@@ -25,6 +25,10 @@ TableType: TypeAlias = dict[OpType, Callable]
 # Mapping from ops to implementations
 COMPLEX_OPS_TABLE: TableType = {}
 
+# Ops that expand complex multiply into four real ops (different accumulation order
+# than native complex BLAS).
+BINARY_NONLINEAR_OPS: set[OpType] = set()
+
 COMPLEX_TO_REAL = {
     torch.complex128: torch.float64,
     torch.complex64: torch.float32,
@@ -202,6 +206,12 @@ def _get_op_name(op: OpType) -> str:
     return str(op).split(".", 1)[1]
 
 
+def is_binary_nonlinear_op(op: OpType) -> bool:
+    if isinstance(op, OpOverload):
+        op = op.overloadpacket
+    return op in BINARY_NONLINEAR_OPS
+
+
 def _get_func_name(op: OpType) -> str:
     """Get the name of the implementation function from the op."""
     return f"{_get_op_name(op)}_impl"
@@ -226,6 +236,7 @@ def register_binary_nonlinear(
     op: OpType,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
     """Register a "multiplication-style" op, e.g. aten.mul, aten.mm, ..."""
+    BINARY_NONLINEAR_OPS.add(op)
 
     def impl(
         a: ComplexTensor, b: ComplexTensor, *args: Any, **kwargs: Any

@@ -694,15 +694,7 @@ class TestXNNPACKSerDes(TestCase):
         if use_bias:
             conv_bias = torch.rand(output_channels)
 
-        # This is done just to find the output shape of the result
-        # so that the shape of weight for the following linear layer
-        # can be determined.
-        result = F.conv2d(
-            input_data, conv_weight, conv_bias, strides, paddings, dilations, groups
-        )
-        linear_input_shape = result.shape[1]
-
-        linear_weight = torch.rand((linear_weight_output_dim, linear_input_shape))
+        linear_weight = torch.rand((linear_weight_output_dim, output_channels))
         linear_bias = None
         if use_bias:
             linear_bias = torch.rand(linear_weight_output_dim)

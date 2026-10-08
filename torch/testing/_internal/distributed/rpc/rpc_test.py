@@ -589,7 +589,7 @@ def async_cuda_sleep_and_set_to_one(t):
     new_stream = torch.cuda.Stream(device)
     new_stream.wait_stream(original_stream)
     with torch.cuda.stream(new_stream):
-        torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
         t.fill_(1)
         fut = Future(devices=[device])
         fut.set_result(t)
@@ -599,7 +599,7 @@ def async_cuda_sleep_and_set_to_one(t):
 @rpc.functions.async_execution
 def async_cuda_nested_add(to, x, y, z):
     def cb(fut):
-        torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
         return fut.value() + z
 
     return rpc.rpc_async(to, torch.add, args=(x, y)).then(cb)
@@ -736,7 +736,7 @@ class MyConvNetForMNIST(nn.Module):
         x = x.to_here() if is_rref else x
         with torch.cuda.stream(torch.cuda.current_stream(self.device)):
             # intentionally adding delay to current CUDA stream
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            torch.cuda._sleep(FIFTY_MIL_CYCLES)
             return self.net(x)
 
     def __getstate__(self):
@@ -1085,7 +1085,7 @@ class RpcTestCommon:
                     tensor = torch.zeros((100,), device="cuda:0")
                     add_tensor = torch.ones((100,), device="cuda:0")
                     expected_tensor = tensor + add_tensor
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
                 tensor += add_tensor
                 if sparse_tensor:
                     tensor = tensor.coalesce()
@@ -2640,7 +2640,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             with self.assertRaisesRegex(ValueError, expected_err):
                 fut.wait()
             # This barrier prevents a race condition where the main thread exits
-            # context manager before the remote function has ran.
+            # context manager before the remote function has run.
             dist.barrier()
 
         # Validate that trainers log errors when running functions.
@@ -5662,7 +5662,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         x.record_stream(s1)
         y.record_stream(s1)
         with torch.cuda.stream(s1):
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            torch.cuda._sleep(FIFTY_MIL_CYCLES)
             z = x + y
         s0.wait_stream(s1)
         z.record_stream(s0)
@@ -6022,7 +6022,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def _return_tensor_view(i):
         with torch.cuda.stream(torch.cuda.current_stream(0)):
             x = torch.ones(1000, 200).cuda(0) * i
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            torch.cuda._sleep(FIFTY_MIL_CYCLES)
             # serialization of the return value will create a new tensor from the
             # view, which is done outside of the user function.
             return x.split(100)[0]
@@ -6153,7 +6153,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         with torch.cuda.device("cuda:0"):
             stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
                 tensor0.fill_(1)
                 parent_future.set_result(tensor0)
         with torch.cuda.device("cuda:1"):
@@ -6172,7 +6172,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         # don't access the parent future.
         def cb(fut):
             with torch.cuda.device("cuda:1"):
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
                 tensor1.fill_(1)
                 return tensor1
 
@@ -6180,7 +6180,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         with torch.cuda.device("cuda:0"):
             stream = torch.cuda.Stream()
             with torch.cuda.stream(stream):
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                torch.cuda._sleep(int(100 * get_cycles_per_ms()))
                 tensor0.fill_(1)
                 parent_future.set_result(tensor0)
         with self.assertRaisesRegex(

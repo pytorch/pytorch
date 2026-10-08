@@ -2,7 +2,6 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
-#include <c10/cuda/CUDAGuard.h>
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
@@ -188,10 +187,15 @@ bool get_fabric_access(c10::DeviceIndex dev) {
       fabricCliqueId_[dev] = kCliqueIdUnsupported;
       return false;
     }
-    TORCH_CHECK(
-        NVML_SUCCESS ==
-        DriverAPI::get()->nvmlDeviceGetGpuFabricInfoV_(
-            nvml_device, &fabricInfo));
+    auto nvml_fabric_result = DriverAPI::get()->nvmlDeviceGetGpuFabricInfoV_(
+        nvml_device, &fabricInfo);
+    if (nvml_fabric_result != NVML_SUCCESS) {
+      TORCH_WARN_ONCE(
+          "nvmlDeviceGetGpuFabricInfoV failed. This function is only supported on sm90+");
+      cache = 0;
+      fabricCliqueId_[dev] = kCliqueIdUnsupported;
+      return false;
+    }
     auto state = fabricInfo.state != NVML_GPU_FABRIC_STATE_NOT_SUPPORTED;
     if (state) {
       fabricCliqueId_[dev] = static_cast<int>(fabricInfo.cliqueId);

@@ -110,7 +110,7 @@ assert lazy_result.cpu() == add_two_maybe(t, maybe_true)
 Woo-hoo! This works too!
 Unfortunately, this flexibility comes with a few downsides. Remember that backends need to translate aten ops into some much lower-level operations that an accelerator understands. The translation process may be time-consuming. Although, usually, it's well worth it!
 
-However, if a non-trivial model is wildly dynamic and contains loops that always run different number of times or if statements one after another that explode into different traces every time you run the model, the backend will spend non-trivial amount of time compiling each trace even though the latter is used only for a few times.
+However, if a non-trivial model is wildly dynamic and contains loops that always run a different number of times or if statements one after another that explode into different traces every time you run the model, the backend will spend non-trivial amount of time compiling each trace even though the latter is used only for a few times.
 
 Alright, at this point, you should have learned the main ideas behind Lazy Tensor, most common usage patterns and APIs.
 Also, you are hopefully as inspired and motivated about Lazy Tensor as I am.
@@ -272,10 +272,10 @@ print(torch._lazy.metrics.counter_names())
 
 If you are seeing any ops with the prefix: `aten::`
 
-*Sometimes* you could replace such ops with similar that LT does support. More often than not, we will have to just live with it until LT matures.
+*Sometimes* you could replace such ops with similar ones that LT does support. More often than not, we will have to just live with it until LT matures.
 
 Another handy API is `torch._lazy.wait_device_ops()`. Remember, we said that `mark_step()` breaks up the current trace and kicks off a computation asynchronously? If downstream there are no blocking operations such as `print`, `item()`, `to`, LT will happily continue tracing.
-If you would like to time how much exactly time computation and tracing took for some model without including device transfers or printing, you could stick `torch._lazy.wait_device_ops()` and `time.perf_counter()` right after it. Don't forget another `time.perf_counter()` before the trace start!
+If you would like to time exactly how much time computation and tracing took for some model without including device transfers or printing, you could stick `torch._lazy.wait_device_ops()` and `time.perf_counter()` right after it. Don't forget another `time.perf_counter()` before the trace start!
 
 This concludes our brief introduction to LT. Hopefully, you'll remember the main takeaways:
 

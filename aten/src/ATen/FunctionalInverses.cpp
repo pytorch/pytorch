@@ -239,7 +239,7 @@ Tensor FunctionalInverses::split_Tensor_inverse(const Tensor& base, const Tensor
     auto dim_size = base.sym_size(dim);
     auto start = split_size * mutated_view_idx;
     auto end = split_size + start;
-    if (end > dim_size) end = dim_size;
+    if (end > dim_size) end = std::move(dim_size);
 
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
@@ -258,7 +258,7 @@ Tensor FunctionalInverses::split_with_sizes_inverse(const Tensor& base, const Te
         start += split_sizes[i];
     }
     auto end = start + split_sizes[mutated_view_idx];
-    if (end > dim_size) end = dim_size;
+    if (end > dim_size) end = std::move(dim_size);
 
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.

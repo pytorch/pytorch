@@ -619,7 +619,17 @@ class FunctionalCallableWithEpilogue:
 
     def __call__(self, *args, **kwargs):
         # Functionalize to inline the epilogue graph (copy_ ops) for better fusion.
-        functionalized = torch.func.functionalize(self.orig_callable)
+        # Python functionalization so mutable custom ops reach auto_functionalized_v2.
+        from torch._subclasses.functional_tensor import (
+            dispatch_functionalize,
+            FunctionalTensorMode,
+        )
+
+        functionalized = dispatch_functionalize(
+            self.orig_callable,
+            FunctionalTensorMode(),
+            propagate_input_mutations=True,
+        )
         if self._boxed_call:
             # Not all callers respect _boxed_call (e.g. reenter_make_fx
             # always calls f(*args)). Detect which convention was used.

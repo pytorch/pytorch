@@ -202,8 +202,12 @@ static at::Tensor& mul_out(
       self.is_contiguous() ? at::OptionalIntArrayRef(std::nullopt)
                            : self.strides());
 
-  AT_DISPATCH_ALL_TYPES_AND2(
-      kHalf, kBFloat16, t_output, "mul_Scalar_out", [&]() {
+  // kBool is included so torch.export'ed graphs that do `bool_tensor * scalar`
+  // (e.g. `aten.gt(...) * 38` to lift mask values into the int range) dispatch
+  // cleanly. Bool participates in PyTorch's type promotion and is allowed by
+  // upstream `aten::mul`, so the kernel should follow suit.
+  AT_DISPATCH_ALL_TYPES_AND3(
+      kHalf, kBFloat16, kBool, t_output, "mul_Scalar_out", [&]() {
         using output_t = scalar_t;
         output_t* output_ptr = output.mutable_data_ptr<output_t>();
 
@@ -212,16 +216,22 @@ static at::Tensor& mul_out(
 
         at::parallel_for(0, num_elements, 1, [&](int64_t start, int64_t end) {
           for (int64_t i = start; i < end; ++i) {
-            AT_DISPATCH_ALL_TYPES_AND2(
-                kHalf, kBFloat16, other.type(), "mul_Scalar_other", [&]() {
+            AT_DISPATCH_ALL_TYPES_AND3(
+                kHalf,
+                kBFloat16,
+                kBool,
+                other.type(),
+                "mul_Scalar_other",
+                [&]() {
                   using other_t = scalar_t;
 
                   output_t other_casted = static_cast<output_t>(
                       reinterpret_cast<const other_t*>(other.data_ptr())[0]);
 
-                  AT_DISPATCH_ALL_TYPES_AND2(
+                  AT_DISPATCH_ALL_TYPES_AND3(
                       kHalf,
                       kBFloat16,
+                      kBool,
                       self.scalar_type(),
                       "mul_Scalar_self",
                       [&]() {
@@ -1450,7 +1460,34 @@ REGISTER_CPU_KERNEL(
         output_size = KernelInput(3).toInt();
       }
 
-      KernelOutput(0) = at::repeat_interleave(self, repeats, dim, output_size);
+      const bool isSingletonCpuFastPath = self.device().is_cpu() &&
+          repeats.device().is_cpu() && self.layout() == c10::kStrided &&
+          repeats.layout() == c10::kStrided && self.is_contiguous() &&
+          repeats.is_contiguous() && self.dim() == 1 && self.numel() == 1 &&
+          repeats.dim() == 1 && repeats.numel() == 1 &&
+          (!dim.has_value() || dim.value() == 0 || dim.value() == -1) &&
+          !output_size.has_value() && !self.is_conj() && !self.is_neg() &&
+          (at::isIntegralType(self.scalar_type(), /*includeBool=*/true) ||
+           at::isFloatingType(self.scalar_type())) &&
+          (repeats.scalar_type() == at::kInt ||
+           repeats.scalar_type() == at::kLong);
+      if (isSingletonCpuFastPath) [[likely]] {
+        const auto repeatCount = repeats.item<int64_t>();
+        TORCH_CHECK(repeatCount >= 0, "repeats can not be negative");
+        if (KernelOutput(0).isNone() ||
+            KernelOutput(0).toTensor().scalar_type() != self.scalar_type() ||
+            KernelOutput(0).toTensor().device() != self.device() ||
+            KernelOutput(0).toTensor().layout() != self.layout()) [[unlikely]] {
+          executionFrame.setPersistentIValue(
+              node_->outputs()[0]->id(), at::empty({0}, self.options()));
+        }
+        auto& repeatOutput = KernelOutput(0).toTensor();
+        repeatOutput.resize_({repeatCount});
+        repeatOutput.fill_(self.item());
+      } else {
+        KernelOutput(0) =
+            at::repeat_interleave(self, repeats, dim, output_size);
+      }
     })
 
 } // namespace torch::nativert

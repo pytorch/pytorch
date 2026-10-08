@@ -540,51 +540,21 @@ void reflection_pad2d_out_template(
   TORCH_CHECK(canUse32BitIndexMath(input_),
     "input tensor must fit into 32-bit index math");
 
-  int plane_dim = 0;
-  int dim_h = 1;
-  int dim_w = 2;
-  int nbatch = 1;
+  const auto output_size = at::native::padding::pad_shape_check(
+      input_, padding, /*dim=*/2, /*is_reflection=*/true);
+  output.resize_(output_size);
 
-  at::native::padding::check_valid_input<2>(input_, padding);
-
-  if (input_.ndimension() == 4) {
-    nbatch = input_.size(0);
-    plane_dim++;
-    dim_h++;
-    dim_w++;
-  }
-
-  int64_t pad_l = padding[0];
-  int64_t pad_r = padding[1];
-  int64_t pad_t = padding[2];
-  int64_t pad_b = padding[3];
-
-  int nplane = input_.size(plane_dim);
-  int input_h = input_.size(dim_h);
-  int input_w = input_.size(dim_w);
-
-  TORCH_CHECK(pad_l < input_w && pad_r < input_w,
-    "Padding size should be less than the corresponding input dimension, but "
-    "got: padding (", pad_l, ", ", pad_r, ") at dimension ", dim_w,
-    " of input ", input_.sizes());
-
-  TORCH_CHECK(pad_t < input_h && pad_b < input_h,
-    "Padding size should be less than the corresponding input dimension, but "
-    "got: padding (", pad_t, ", ", pad_b, ") at dimension ", dim_h,
-    " of input ", input_.sizes());
-
-  int output_h = input_h + pad_t + pad_b;
-  int output_w  = input_w + pad_l + pad_r;
-
-  TORCH_CHECK(output_w >= 1 || output_h >= 1,
-    "input (H: ", input_h, ", W: ", input_w, ") is too small.  Calculated "
-    "output H: ", output_h, " W: ", output_w);
-
-  if (input_.ndimension() == 3) {
-    output.resize_({nplane, output_h, output_w});
-  } else {
-    output.resize_({nbatch, nplane, output_h, output_w});
-  }
+  const auto ndim = input_.ndimension();
+  const int nbatch = ndim == 4 ? input_.size(0) : 1;
+  const int nplane = input_.size(ndim - 3);
+  const int64_t input_h = input_.size(ndim - 2);
+  const int64_t input_w = input_.size(ndim - 1);
+  const int64_t output_h = output_size[ndim - 2];
+  const int64_t output_w = output_size[ndim - 1];
+  const int pad_l = padding[0];
+  const int pad_r = padding[1];
+  const int pad_t = padding[2];
+  const int pad_b = padding[3];
   if (output.numel() == 0) {
     return;
   }
@@ -628,44 +598,19 @@ void reflection_pad2d_backward_out_template(
     return;
   }
 
-  int plane_dim = 0;
-  int dim_h = 1;
-  int dim_w = 2;
-  int nbatch = 1;
+  at::native::padding::pad_backward_shape_check(grad_output_, input, padding, /*dim=*/2);
 
-  if (input.ndimension() == 4) {
-    nbatch = input.size(0);
-    plane_dim++;
-    dim_h++;
-    dim_w++;
-  }
-
-  int64_t pad_l = padding[0];
-  int64_t pad_r = padding[1];
-  int64_t pad_t = padding[2];
-  int64_t pad_b = padding[3];
-
-  int nplane = input.size(plane_dim);
-  int input_h = input.size(dim_h);
-  int input_w = input.size(dim_w);
-
-  int output_h = input_h + pad_t + pad_b;
-  int output_w = input_w + pad_l + pad_r;
-
-  TORCH_CHECK(
-      output_w == grad_output_.size(dim_w),
-      "grad_output width "
-      "unexpected. Expected: ",
-      output_w,
-      ", Got: ",
-      grad_output_.size(dim_w));
-  TORCH_CHECK(
-      output_h == grad_output_.size(dim_h),
-      "grad_output height "
-      "unexpected. Expected: ",
-      output_h,
-      ", Got: ",
-      grad_output_.size(dim_h));
+  const auto ndim = input.ndimension();
+  const int nbatch = ndim == 4 ? input.size(0) : 1;
+  const int nplane = input.size(ndim - 3);
+  const int64_t input_h = input.size(ndim - 2);
+  const int64_t input_w = input.size(ndim - 1);
+  const int64_t output_h = input_h + padding[2] + padding[3];
+  const int64_t output_w = input_w + padding[0] + padding[1];
+  const int pad_l = padding[0];
+  const int pad_r = padding[1];
+  const int pad_t = padding[2];
+  const int pad_b = padding[3];
 
   Tensor grad_output = grad_output_.contiguous();
 

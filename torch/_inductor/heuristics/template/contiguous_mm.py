@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._inductor.heuristics.registry import register_template_heuristic
 
 from ...ir import get_free_symbols
 from ...kernel.mm import (
@@ -13,7 +14,6 @@ from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...utils import use_contiguous
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
-from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:

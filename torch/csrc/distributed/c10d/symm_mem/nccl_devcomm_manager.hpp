@@ -34,22 +34,13 @@ class TORCH_API NCCLDevCommManager {
   // @param device The CUDA device this manager is associated with
   explicit NCCLDevCommManager(const c10::Device device) : device_(device) {}
 
-  // Per-device singleton: lazily creates one manager per CUDA device so
-  // callers on different devices don't share state.
-  static NCCLDevCommManager& get(const c10::Device device) {
-    static std::mutex mu;
-    static std::
-        unordered_map<c10::DeviceIndex, std::unique_ptr<NCCLDevCommManager>>
-            managers;
-    std::lock_guard<std::mutex> lock(mu);
-    auto& slot = managers[device.index()];
-    if (!slot) {
-      slot =
-          std::unique_ptr<NCCLDevCommManager>(new NCCLDevCommManager(device));
-      LOG(INFO) << "[NCCLDevCommManager] created manager for device=" << device;
-    }
-    return *slot;
-  }
+  // Per-device singleton: Defined out-of-line in nccl_devcomm_manager.cpp
+  // (libtorch_cuda) so the function-local registry is process-wide. An inline
+  // definition is hidden by
+  // `-fvisibility-inlines-hidden`, so a separately linked DSO (e.g.
+  // torch._nccl_ep) gets its own empty map and cannot see ProcessGroup / hook
+  // registration.
+  static NCCLDevCommManager& get(const c10::Device device);
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   // Get an NCCL device communicator for a group, for the caller function.  By
@@ -190,6 +181,21 @@ class TORCH_API NCCLDevCommManager {
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     devcomm_registry_.erase(group_name);
 #endif
+  }
+
+  // Identity-safe unregister: drop the entry only if the currently-registered
+  // comm is still `comm`. A stale producer whose comm was already replaced by a
+  // successor under the same `group_name` becomes a no-op, so it cannot clobber
+  // the successor -- no isAborted()-style discipline needed at the call site.
+  void unregister_comm(const std::string& group_name, ncclComm_t comm) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = group_to_comm_.find(group_name);
+    if (it != group_to_comm_.end() && it->second == comm) {
+      group_to_comm_.erase(it);
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+      devcomm_registry_.erase(group_name);
+#endif
+    }
   }
 
   // Destructor: Clean up all registered device communicators.

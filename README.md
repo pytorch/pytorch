@@ -38,9 +38,6 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
   - [Docker Image](#docker-image)
     - [Using pre-built images](#using-pre-built-images)
     - [Building the image yourself](#building-the-image-yourself)
-  - [Building the Documentation](#building-the-documentation)
-    - [Troubleshooting CI Errors](#troubleshooting-ci-errors)
-    - [Building a PDF](#building-a-pdf)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Resources](#resources)
@@ -61,7 +58,6 @@ At a granular level, PyTorch is a library that consists of the following compone
 | ---- | --- |
 | [**torch**](https://pytorch.org/docs/stable/torch.html) | A Tensor library like NumPy, with strong GPU support |
 | [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | A tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
-| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | A compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
 | [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | A neural networks library deeply integrated with autograd designed for maximum flexibility |
 | [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
 | [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
@@ -112,7 +108,7 @@ PyTorch is not a Python binding into a monolithic C++ framework.
 It is built to be deeply integrated into Python.
 You can use it naturally like you would use [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
 You can write your new neural network layers in Python itself, using your favorite libraries
-and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
+and use packages such as [Cython](https://cython.org/) and [Numba](https://numba.pydata.org/).
 Our goal is to not reinvent the wheel where appropriate.
 
 ### Imperative Experiences
@@ -209,7 +205,7 @@ If you want to compile with CUDA support, [select a supported version of CUDA fr
 Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/backend/latest/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver, and NVIDIA hardware.
 
 If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
-Other potentially useful environment variables may be found in `setup.py`.  If
+Other potentially useful environment variables are documented in [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).  If
 CUDA is installed in a non-standard location, set PATH so that the nvcc you
 want to use can be found (e.g., `export PATH=/usr/local/cuda-12.8/bin:$PATH`).
 
@@ -223,7 +219,7 @@ If you want to compile with ROCm support, install
 By default the build system expects ROCm to be installed in `/opt/rocm`. If ROCm is installed in a different directory, the `ROCM_PATH` environment variable must be set to the ROCm installation directory. The build system automatically detects the AMD GPU architecture. Optionally, the AMD GPU architecture can be explicitly set with the `PYTORCH_ROCM_ARCH` environment variable [AMD GPU architecture](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-gpus)
 
 If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
-Other potentially useful environment variables may be found in `setup.py`.
+Other potentially useful environment variables are documented in [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
 
 ##### Intel GPU Support
 If you want to compile with Intel GPU support, follow these
@@ -231,7 +227,7 @@ If you want to compile with Intel GPU support, follow these
 - Intel GPU is supported for Linux and Windows.
 
 If you want to disable Intel GPU support, export the environment variable `USE_XPU=0`.
-Other potentially useful environment variables may be found in `setup.py`.
+Other potentially useful environment variables are documented in [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
 
 #### Get the PyTorch Source
 
@@ -380,25 +376,30 @@ python -m pip install --no-build-isolation -v -e .
 
 ##### Adjust Build Options (Optional)
 
-You can adjust the configuration of cmake variables optionally (without building first), by doing
-the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
-with such a step.
+You can adjust the configuration of CMake variables through environment variables, which the
+build forwards to CMake (see [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake) for
+the full list). For example, pointing the build at a specific Conda prefix, CuDNN, or BLAS:
 
 On Linux
 
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-CMAKE_ONLY=1 python setup.py build
-ccmake build  # or cmake-gui build
+spin develop
 ```
 
 On macOS
 
 ```bash
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
-MACOSX_DEPLOYMENT_TARGET=11.0 CMAKE_ONLY=1 python setup.py build
-ccmake build  # or cmake-gui build
+MACOSX_DEPLOYMENT_TARGET=11.0 spin develop
 ```
+
+After a first `spin develop`, you can inspect or adjust the CMake cache interactively with
+`ccmake build` (or `cmake-gui build`) and rebuild with `spin develop`; your edits persist, because
+reconfiguration does not use `--fresh` and environment variables only seed cache entries that are
+not already set. The corollary: once a variable is in the cache, changing its environment variable
+no longer affects it -- edit the cache directly (or delete `build/CMakeCache.txt`) to change it.
+The build type and compiler are the exception; the build always re-applies them.
 
 ### Docker Image
 
@@ -418,7 +419,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 **NOTE:** Must be built with a Docker version >= 23.0
 
-The Dockerfile is supplied to build images with CUDA 12.1 support and cuDNN v9.
+The Dockerfile is supplied to build images with CUDA 12.6 support and cuDNN v9.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default, as the Dockerfile uses system Python.
 
@@ -428,125 +429,11 @@ make -f docker.Makefile
 ```
 
 You can also pass the `CMAKE_VARS="..."` environment variable to specify additional CMake variables to be passed to CMake during the build.
-See [setup.py](./setup.py) for the list of available variables.
+See [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake) for the list of available variables.
 
 ```bash
 make -f docker.Makefile
 ```
-
-### Building the Documentation
-
-To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org)
-and the `pytorch_sphinx_theme2`.
-
-Before you build the documentation locally, ensure `torch` is
-installed in your environment. For small fixes, you can install the
-nightly version as described in [Getting Started](https://pytorch.org/get-started/locally/).
-
-For more complex fixes, such as adding a new module and docstrings for
-the new module, you might need to install torch [from source](#from-source).
-See [Docstring Guidelines](https://github.com/pytorch/pytorch/wiki/Docstring-Guidelines)
-for docstring conventions.
-
-```bash
-cd docs/
-pip install -r requirements.txt
-make html
-make serve
-```
-
-Run `make` to get a list of all available output formats.
-
-If you get a katex error run `npm install katex`.  If it persists, try
-`npm install -g katex`
-
-> [!NOTE]
-> If you see a numpy incompatibility error, run:
-> ```
-> pip install 'numpy<2'
-> ```
-
-
-#### Troubleshooting CI Errors
-Your build may show errors you didn't have locally - here's how to find the errors relevant to the docs.
-
-If the build has any errors, you will see something like this on the PR:
-
-<img width="781" height="400" alt="Monosnap Update installation instructions for doc build · Pull Request #169534 · pytorch:pytorch 2025-12-18 18-22-53" src="https://github.com/user-attachments/assets/49a3dfe7-81c2-4246-852b-bc3f807e95af" />
-
-Any doc-related errors will occur in jobs that include "doc" somewhere in the title. It doesn't look like any of these jobs are relevant to our docs.
-
-
-Let's take a look anyway. Click on the job to see the logs:
-
-<img width="1187" height="668" alt="Monosnap Update installation instructions for doc build · pytorch:pytorch@7380336 2025-12-18 18-24-15" src="https://github.com/user-attachments/assets/117df543-8356-4323-8e1c-ef02a95554ba" />
-
-And we can be sure that this job does not involve docs.
-
-Looking at this build, we can see these jobs are relevant to our docs - and they didn't have any errors:
-
-<img width="777" height="395" alt="Check the docs jobs" src="https://github.com/user-attachments/assets/5d7c196b-2d40-49ad-87e3-f57de6e14a5b" />
-
-You might also see a comment on the PR like this:
-
-<img width="651" height="246" alt="PR Comment" src="https://github.com/user-attachments/assets/27e0120a-ba33-4b1c-b4a5-bf3064520586" />
-
-We can see that some of these issues are relevant to our docs.
-
-Open the logs by clicking on the `gh` link:
-
-<img width="873" height="360" alt="View Logs" src="https://github.com/user-attachments/assets/ab5b862f-8026-489c-b95e-a6cd4257e4b7" />
-
-And here we can see there is a doc-related error:
-
-<img width="1117" height="433" alt="Doc Error" src="https://github.com/user-attachments/assets/0a275921-736d-43a7-ab0f-3e8854d43280" />
-
-You can always find the relevant doc builds by going to the `Checks` tab on your PR, and scrolling down to `pull`.
-
-<img width="481" height="561" alt="checks" src="https://github.com/user-attachments/assets/eef18f2b-7134-4e2e-bd90-bcdc12800132" />
-
-You can either click through or toggle the accordion to see all of the jobs here, where you can see the docs jobs highlighted:
-
-<img width="570" height="611" alt="jobs" src="https://github.com/user-attachments/assets/f62812ca-caee-421b-863c-54f38fd28d46" />
-
-If you click through, you'll see the doc jobs at the bottom, like this:
-
-<img width="354" height="312" alt="View Docs jobs" src="https://github.com/user-attachments/assets/8fadb935-5314-4c4b-a1b5-133781754f03" />
-
-
-#### Building a PDF
-
-To compile a PDF of all PyTorch documentation, ensure you have
-`texlive` and LaTeX installed. On macOS, you can install them using:
-
-```
-brew install --cask mactex
-```
-
-To create the PDF:
-
-1. Run:
-
-   ```
-   make latexpdf
-   ```
-
-   This will generate the necessary files in the `build/latex` directory.
-
-2. Navigate to this directory and execute:
-
-   ```
-   make LATEXOPTS="-interaction=nonstopmode"
-   ```
-
-   This will produce a `pytorch.pdf` with the desired content. Run this
-   command one more time so that it generates the correct table
-   of contents and index.
-
-> [!NOTE]
-> To view the Table of Contents, switch to the **Table of Contents**
-> view in your PDF viewer.
-
 
 ### Previous Versions
 
@@ -577,29 +464,19 @@ Pointers to get you started:
 
 ## Communication
 * Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
-* GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-* Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
+* GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc. See the [issue lifecycle](CONTRIBUTING.md#issue-lifecycle) for how they are handled.
+* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc.
 * Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
 * For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
 
 ## Releases and Contributing
 
-Typically, PyTorch has three minor releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
-
-We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
-
-If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
-Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
-
-To learn more about making a contribution to PyTorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
+To report issues or contribute changes to PyTorch, see [CONTRIBUTING.md](CONTRIBUTING.md).
+For information about PyTorch releases, see [RELEASE.md](RELEASE.md).
 
 ## The Team
 
-PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
-
-PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), [Alban Desmaison](https://github.com/albanD), [Piotr Bialecki](https://github.com/ptrblck) and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
-A non-exhaustive but growing list needs to mention: [Trevor Killeen](https://github.com/killeent), [Sasank Chilamkurthy](https://github.com/chsasank), [Sergey Zagoruyko](https://github.com/szagoruyko), [Adam Lerer](https://github.com/adamlerer), [Francisco Massa](https://github.com/fmassa), [Alykhan Tejani](https://github.com/alykhantejani), [Luca Antiga](https://github.com/lantiga), [Alban Desmaison](https://github.com/albanD), [Andreas Koepf](https://github.com/andreaskoepf), [James Bradbury](https://github.com/jekbradbury), [Zeming Lin](https://github.com/ebetica), [Yuandong Tian](https://github.com/yuandong-tian), [Guillaume Lample](https://github.com/glample), [Marat Dukhan](https://github.com/Maratyszcza), [Natalia Gimelshein](https://github.com/ngimel), [Christian Sarofeen](https://github.com/csarofeen), [Martin Raison](https://github.com/martinraison), [Edward Yang](https://github.com/ezyang), [Zachary Devito](https://github.com/zdevito). <!-- codespell:ignore -->
+PyTorch is a community-driven project with several skillful [engineers and researchers](https://docs.pytorch.org/docs/stable/community/persons_of_interest.html) contributing to it.
 
 Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 

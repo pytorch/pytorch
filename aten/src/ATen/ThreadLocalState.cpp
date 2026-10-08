@@ -8,17 +8,21 @@
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/DTensorState.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 
 namespace at {
 
 ThreadLocalState::ThreadLocalState()
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
+      fake_tensor_mode_state_(c10::impl::FakeTensorModeTLS::get_state()),
       debug_info_(c10::ThreadLocalDebugInfo::current()),
       rf_tls_(at::get_record_function_tls_()), functorch_tls_(functorch::getCopyOfFuncTorchTLS()),
       autograd_tls_(c10::AutogradState::get_tls_state()),
       torch_dispatch_mode_state_(c10::impl::TorchDispatchModeTLS::get_state()), python_dispatcher_state_(c10::impl::PythonDispatcherTLS::get_state()),
       python_torch_function_state_(at::impl::PythonTorchFunctionTLS::get_state()),
-      saved_tensors_default_hooks_state_(at::SavedTensorDefaultHooks::get_tls_state()), functionalization_reapply_views_state_(at::functionalization::impl::getFunctionalizationReapplyViewsTLS()),
+      saved_tensors_default_hooks_state_(at::SavedTensorDefaultHooks::get_tls_state()),
+      node_creation_hooks_state_(at::impl::NodeCreationHooks::get_tls_state()),
+      functionalization_reapply_views_state_(at::functionalization::impl::getFunctionalizationReapplyViewsTLS()),
       dtensor_allow_implicit_replication_(at::get_dtensor_allow_implicit_replication()),
       saved_objects_(at::impl::ThreadLocalPythonObjects::get_state()) {
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && !defined(BUILD_LITE_INTERPRETER)
@@ -30,6 +34,10 @@ ThreadLocalState::ThreadLocalState()
 
 void ThreadLocalState::set_grad_mode(bool enabled) {
   autograd_tls_.set_grad_mode(enabled);
+}
+
+bool ThreadLocalState::get_grad_mode() const {
+  return autograd_tls_.get_grad_mode();
 }
 
 void ThreadLocalState::set_multithreading_enabled(bool enabled) {
@@ -51,7 +59,11 @@ void ThreadLocalState::setThreadLocalState(
 
   at::SavedTensorDefaultHooks::set_tls_state(state.saved_tensors_default_hooks_state_);
 
+  at::impl::NodeCreationHooks::set_tls_state(state.node_creation_hooks_state_);
+
   c10::impl::PythonDispatcherTLS::set_state(state.python_dispatcher_state_);
+
+  c10::impl::FakeTensorModeTLS::create_state(state.fake_tensor_mode_state_);
 
   at::set_dtensor_allow_implicit_replication(state.dtensor_allow_implicit_replication_);
 

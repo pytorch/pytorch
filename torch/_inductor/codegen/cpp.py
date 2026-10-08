@@ -28,11 +28,13 @@ from .. import config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..debug import set_kernel_post_grad_provenance_tracing
 from ..loop_body import LoopBody
 from ..scheduler import (
+    _LoopStateSnapshot,
     BaseSchedulerNode,
     BaseScheduling,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
+    refresh_group_node_dependencies,
     Scheduler,
     SchedulerNode,
 )
@@ -630,14 +632,18 @@ class RecordOptimizationContext:
         return self.current_node
 
 
-def decltype_promoted(*args):
+def arith_promoted(op, a, b):
+    args = (a, b)
     if any(isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args):
         raise AssertionError("Promotion of vector types is not supported")
 
-    if (dt := get_promote_dtype(args)) is not None:
-        return DTYPE_TO_CPP[dt]
-    else:
-        return f"decltype({args[0]})"
+    dtype = get_promote_dtype(args)
+    cpp_type = DTYPE_TO_CPP[dtype] if dtype is not None else f"decltype({a})"
+    if dtype in (torch.int32, torch.int64):
+        # signed overflow is UB in C++; int8/int16 promote to int and cannot overflow
+        cast = f"static_cast<std::make_unsigned_t<{cpp_type}>>"
+        return f"{cpp_type}({cast}({a}) {op} {cast}({b}))"
+    return f"{cpp_type}({a} {op} {b})"
 
 
 class CppOverrides(OpOverrides):
@@ -645,15 +651,15 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def add(a, b):
-        return f"{decltype_promoted(a, b)}({a} + {b})"
+        return arith_promoted("+", a, b)
 
     @staticmethod
     def sub(a, b):
-        return f"{decltype_promoted(a, b)}({a} - {b})"
+        return arith_promoted("-", a, b)
 
     @staticmethod
     def mul(a, b):
-        return f"{decltype_promoted(a, b)}({a} * {b})"
+        return arith_promoted("*", a, b)
 
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
@@ -1012,6 +1018,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"std::max({a}, {b})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         return f"{a} ? {b} : {c}"
 
@@ -1330,9 +1341,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def expm1(x):
-        # decompose for a better performance
-        vec_one = f"decltype({x})(1)"
-        return f"{x}.exp() - {vec_one}"
+        return f"{x}.expm1()"
 
     @staticmethod
     def erf(x):
@@ -1541,10 +1550,11 @@ class CppVecOverrides(CppOverrides):
                 "remainder vec implementation expect the same inputs' dtype."
             )
         if is_integer_dtype(a.dtype):
-            # Doing blend to set the remaining bits of b to non-zero
-            _t = f"decltype({a})"
-            if V.kernel._get_raw_num_vectors(b.dtype) < 1:
-                b = f"{_t}::blend<{(1 << V.kernel.tiling_factor) - 1}>({_t}(1), {b})"
+            # Padded divisor lanes must stay non-zero: masked tail loads
+            # zero-fill the unused lanes, and a zero there trips the
+            # divide-by-zero check even though the lane is never stored.
+            _t = f"decltype({b})"
+            b = f"{_t}::set({_t}(1), {b}, {cexpr_index(V.kernel.num_elems)})"
             return f"remainder_integral({a}, {b})"
         return f"{a} - ({CppVecOverrides.floordiv(a, b)}) * {b}"
 
@@ -1717,6 +1727,10 @@ class CppVecOverrides(CppOverrides):
             return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
+    def fmaximum(a, b):
+        return f"decltype({a})::blendv({a}, {b}, {a} < {b})"
+
+    @staticmethod
     def square(a):
         return f"{a} * {a}"
 
@@ -1831,17 +1845,15 @@ class CppVecOverrides(CppOverrides):
         dtype = result.dtype
         body_code = f"{var}()"
 
-        def maskify_or_vecify(code):
-            return (
-                f"{V.kernel._get_mask_type()}::from({code})"
-                if dtype == torch.bool
-                else f"{V.kernel._get_vec_type(dtype)}({code})"
-            )
+        def maskify_or_vecify(code, is_vec=False):
+            if dtype == torch.bool:
+                if is_vec:
+                    num_vectors = V.kernel._get_num_vectors(torch.float)
+                    return f"inductor_vec_mask_cast<float,{num_vectors}>({code})"
+                return f"{V.kernel._get_mask_type()}::from({code})"
+            return code if is_vec else f"{V.kernel._get_vec_type(dtype)}({code})"
 
-        if result.is_vec:
-            body_code_vec = body_code
-        else:
-            body_code_vec = maskify_or_vecify(body_code)
+        body_code_vec = maskify_or_vecify(body_code, result.is_vec)
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
         # loading bool as VecMask<float, N>
         other_code_vec = maskify_or_vecify(other_code)
@@ -2304,6 +2316,9 @@ class CppKernel(Kernel):
         csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
+    def _use_parallel_atomic_add(self):
+        return config.cpp.dynamic_threads or self.num_threads != 1
+
     def store(self, name, index, value, mode=None):
         if "buf" not in name:
             raise AssertionError('expected "buf" in name')
@@ -2312,7 +2327,7 @@ class CppKernel(Kernel):
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
-            if not config.cpp.dynamic_threads and self.num_threads == 1:
+            if not self._use_parallel_atomic_add():
                 line = f"{var}[{cexpr_index(index)}] += {value};"
             else:
                 dtype = V.graph.get_dtype(name)
@@ -2893,11 +2908,6 @@ class CppVecKernel(CppKernel):
             raise AssertionError("expected num_vectors >= 1")
         return num_vectors
 
-    def _get_raw_num_vectors(self, dtype: torch.dtype) -> float:
-        # This utility function is used to check if the vector lanes has been
-        # fully utilized. For example, uint8 will only use 1/4 of the vector lanes.
-        return self.tiling_factor * dtype.itemsize * 8 / self.vec_isa.bit_width()
-
     def _get_vec_type(self, dtype: torch.dtype) -> str:
         num_vectors = self._get_num_vectors(dtype)
         if num_vectors == 1:
@@ -2915,7 +2925,7 @@ class CppVecKernel(CppKernel):
         if mask.dtype != torch.bool:
             raise AssertionError(repr(mask))
         num_vectors = self._get_num_vectors(dtype)
-        return f"{mask}.template cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>()"
+        return f"inductor_vec_mask_cast<{DTYPE_TO_CPP[dtype]},{num_vectors}>({mask})"
 
     def _get_vec_load_line(
         self,
@@ -3190,7 +3200,7 @@ class CppVecKernel(CppKernel):
             code = self._get_store_line(value, var, index, dtype)
             self.stores.splice(code.map(lambda x: DeferredLine(name, x)))
         elif mode == "atomic_add":
-            if not config.cpp.dynamic_threads and self.num_threads == 1:
+            if not self._use_parallel_atomic_add():
                 code = self._get_store_line(
                     f"{value}",
                     var,
@@ -3203,6 +3213,8 @@ class CppVecKernel(CppKernel):
                 n_src = self._get_num_vectors(dtype)
                 n_idx = self._get_num_vectors(torch.int64)
                 cdtype = DTYPE_TO_CPP[dtype]
+                # ops.index_expr re-applies subclass index transforms, so a caller
+                # that already transformed must pass the untransformed index
                 index = ops.index_expr(index, torch.int64).value
                 if isinstance(index, CppCSEVariable) and not index.is_vec:
                     index = self.broadcast(index)
@@ -4013,7 +4025,9 @@ class CppTile2DKernel(CppVecKernel):
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
         else:
-            new_index = self.transform_indexing(index)
+            # the parallel atomic_add path re-applies transform_indexing via ops.index_expr
+            vec_atomic_add = mode == "atomic_add" and self._use_parallel_atomic_add()
+            new_index = index if vec_atomic_add else self.transform_indexing(index)
             super().store(name, new_index, value, mode)
 
     def codegen_inner_loops(self, code):
@@ -5128,20 +5142,22 @@ class CppScheduling(BaseScheduling):
     def reset_kernel_group(self):
         self.kernel_group = KernelGroup()
 
-    def _get_indexing_ranges_exprs(self, node):
+    def _get_indexing_ranges_exprs(self, node) -> ir.ExtraIndexingConstraints:
         if isinstance(node, FusedSchedulerNode):
             if len(node.snodes) <= 0:
                 raise AssertionError(node.snodes)
             var_ranges = None
             indexing_exprs = OrderedSet[Any]()
             for snode in node.snodes:
-                v, exprs = self._get_indexing_ranges_exprs(snode)
+                constraints = self._get_indexing_ranges_exprs(snode)
                 if var_ranges is None:
-                    var_ranges = v
-                if var_ranges != v:
-                    raise AssertionError((var_ranges, v, node.snodes))
-                indexing_exprs.update(exprs)
-            return var_ranges, list(indexing_exprs)
+                    var_ranges = constraints.ranges
+                if var_ranges != constraints.ranges:
+                    raise AssertionError((var_ranges, constraints.ranges, node.snodes))
+                indexing_exprs.update(constraints.exprs)
+            if var_ranges is None:
+                raise AssertionError("expected at least one snode to set var_ranges")
+            return ir.ExtraIndexingConstraints(var_ranges, list(indexing_exprs))
 
         if not isinstance(node, SchedulerNode):
             raise AssertionError("expected isinstance(node, SchedulerNode)")
@@ -5149,20 +5165,9 @@ class CppScheduling(BaseScheduling):
         if not isinstance(comp_buffer, ir.ComputedBuffer):
             raise AssertionError("expected isinstance(comp_buffer, ir.ComputedBuffer)")
         _, body, _ = comp_buffer.get_default_sizes_body()
-        return body.var_ranges, list(body.indexing_exprs.values())
-
-    def _snapshot_node_loop_states(self, node):
-        if isinstance(node, SchedulerNode):
-            return [(node, node.snapshot_loop_state())]
-
-        if not isinstance(node, FusedSchedulerNode):
-            raise AssertionError("expected isinstance(node, FusedSchedulerNode)")
-        snapshots = []
-        for snode in node.snodes:
-            if not isinstance(snode, SchedulerNode):
-                raise AssertionError("expected isinstance(snode, SchedulerNode)")
-            snapshots.append((snode, snode.snapshot_loop_state()))
-        return snapshots
+        return ir.ExtraIndexingConstraints(
+            body.var_ranges, list(body.indexing_exprs.values())
+        )
 
     def _align_compatible_range_nodes(self, node1, node2):
         if not isinstance(node1, (SchedulerNode, FusedSchedulerNode)):
@@ -5212,6 +5217,13 @@ class CppScheduling(BaseScheduling):
                 snode.recompute_size_and_body(
                     extra_indexing_constraints=node_to_recomp_indexing_constraints
                 )
+            ref_group = ref_node.snodes[0].group
+            if any(snode.group != ref_group for snode in ref_node.snodes[1:]):
+                # Simplification picked a different loop factorization per snode
+                return False
+            # Update the reference to avoid comparing with the stale one
+            ref_node.group = ref_group
+            refresh_group_node_dependencies(ref_node)
 
         _, (vars1, _) = node1.group
         _, (vars2, _) = node2.group
@@ -5324,13 +5336,11 @@ class CppScheduling(BaseScheduling):
         if ranges1 != ranges2:
             return False
 
-        snapshots = self._snapshot_node_loop_states(node_to_recomp)
-        snapshots.extend(self._snapshot_node_loop_states(ref_node))
+        snapshot = _LoopStateSnapshot.create((node_to_recomp, ref_node))
         try:
             return self._align_compatible_range_nodes(node1, node2)
         finally:
-            for node, state in reversed(snapshots):
-                node.restore_loop_state(state)
+            snapshot.restore()
 
     def _can_fuse_horizontal_impl(self, node1, node2):
         if not (
@@ -5598,7 +5608,7 @@ class CppScheduling(BaseScheduling):
 
         if extra_indexing_ranges is None:
             raise AssertionError("extra_indexing_ranges is None")
-        extra_indexing_constraints = (
+        extra_indexing_constraints = ir.ExtraIndexingConstraints(
             extra_indexing_ranges,
             list(extra_indexing_exprs),
         )
@@ -5718,13 +5728,16 @@ class CppScheduling(BaseScheduling):
                             def is_contiguous_index(x):
                                 return x == contiguous_index_expr
 
+                            # Users of a mutation output load the mutated buffer's
+                            # name, so they may have no read of this buffer.
                             return is_contiguous_index(write_index_expr) and all(
                                 isinstance(user.node, SchedulerNode)
-                                and is_contiguous_index(
-                                    user.node._body.get_read_expr(
+                                and (
+                                    read_exprs := user.node._body.get_all_read_expr(
                                         scheduler_buffer.get_name()
-                                    ),
+                                    )
                                 )
+                                and is_contiguous_index(read_exprs[0])
                                 for user in scheduler_buffer.users
                             )
 
@@ -5988,7 +6001,8 @@ class CppScheduling(BaseScheduling):
                 user.node.mark_run()
 
         self.codegen_comment(node_schedule, kernel_name)
-        kernel.call_kernel(kernel_name, ctb)
+        with V.graph.wrapper_code.kernel_profile_scope(kernel_name, node_schedule):
+            kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
 
@@ -6054,19 +6068,11 @@ class CppScheduling(BaseScheduling):
                 src_code, self.kernel_group.scheduled_nodes
             )
             self.codegen_comment(self.kernel_group.scheduled_nodes, kernel_name)
-            if config.cpp.enable_kernel_profile:
-                V.graph.wrapper_code.write_kernel_context_guard_begin()
-            if (
-                config.cpp.enable_kernel_profile
-                and config.cpp.enable_kernel_context_guard
+            with V.graph.wrapper_code.kernel_profile_scope(
+                kernel_name,
+                self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
             ):
-                V.graph.wrapper_code.write_kernel_context_guard(
-                    kernel_name,
-                    self.kernel_group.scheduled_nodes,  # type: ignore[arg-type]
-                )
-            self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
-            if config.cpp.enable_kernel_profile:
-                V.graph.wrapper_code.write_kernel_context_guard_end()
+                self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.reset_kernel_group()
         self._set_flush_status(False)
@@ -6366,7 +6372,12 @@ class LoopNest:
         for loop in self.loops:
             if loop.is_reduction != is_reduction:
                 break
-            num_steps = num_steps * FloorDiv(loop.size, loop.steps)
+            # Trip count of `for (var = 0; var < size; var += steps)`. The bound
+            # is `size` and the increment is `steps`, so a loop with size < steps
+            # (a vectorized loop narrower than the vector width) still runs one
+            # iteration. Use CeilDiv, not FloorDiv, which would count 0 and zero
+            # out the whole product.
+            num_steps = num_steps * CeilDiv(loop.size, loop.steps)
             max_depth += 1
 
         def get_simd_vec_depth(loops):

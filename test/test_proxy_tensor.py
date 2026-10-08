@@ -1,7 +1,13 @@
 # Owner(s): ["module: ProxyTensor"]
 # ruff: noqa: F841
 
-from torch.testing._internal.common_utils import TestCase, run_tests, xfailIfNoAcceleratorTriton
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+    xfailIfNoAcceleratorTriton,
+)
 import torch
 import torch._dynamo
 import unittest
@@ -41,8 +47,6 @@ import itertools
 from pathlib import Path
 
 aten = torch.ops.aten
-
-HAS_CUDA = torch.cuda.is_available()
 
 
 def strip_end(s, suffix):
@@ -149,6 +153,8 @@ class UnwrapTensor(torch.Tensor):
         return func(*args, **kwargs)
 
 class TestGenericProxyTensor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # WARNING: if any of your inputs are index tensors, DO NOT use this
     # function
     def _test(self, f, inps):
@@ -778,23 +784,6 @@ def forward(self, x_1):
         traced = make_fx(f, decomposition_table={torch.ops.aten.t.default: nop})(torch.randn(5))
         self.assertEqual(len([n for n in traced.graph.nodes if n.target == torch.ops.aten.t.default]), 0)
 
-
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
-    def test_amp_cache(self):
-        layer = torch.nn.Conv2d(3, 3, 3).cuda()
-
-        def f(x, w):
-            return torch.nn.functional.conv2d(x, w, stride=layer.stride)
-
-        inp = torch.randn(4, 3, 10, 10, device='cuda')
-        with torch.autocast('cuda'):
-            out_graph = make_fx(f)(inp, layer.weight).graph
-            out_graph2 = make_fx(f)(inp, layer.weight).graph
-
-        self.assertEqual(len(out_graph.nodes), len(out_graph2.nodes))
-        for a, b in zip(out_graph.nodes, out_graph2.nodes):
-            self.assertEqual(a.op, b.op)
-
     def test_strides(self):
         def f(x):
             self.assertTrue(x.is_contiguous())
@@ -822,27 +811,6 @@ def forward(self, x_1):
 
         self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
 
-    @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
-    def test_T244632748(self):
-        class TestModule(torch.nn.Module):
-            def forward(self, x):
-                return x + (x.shape[0] * 2)
-
-        mod = TestModule()
-        sample = torch.randn((5, 5)).to("cuda")
-        dim0 = torch.export.Dim.DYNAMIC(max=100)
-        dynamic_shapes = {"x": (dim0, torch.export.Dim.STATIC)}
-        ep = torch.export.export(mod, (sample,), dynamic_shapes=dynamic_shapes)
-        gm = ep.module()
-        symint = list(gm.graph.nodes)[3].meta["val"]
-        list(gm.graph.nodes)[3].replace_all_uses_with(symint)
-        gm.graph.eliminate_dead_code()
-
-        inductor_fx = torch._inductor.aot_compile(
-            gm, (sample,), options={"fx_wrapper": True, "compile_threads": 1}
-        )
-
 
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
@@ -860,6 +828,8 @@ del TestGenericProxyTensor
 
 
 class TestRealProxyTensor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_error_on_data_dependent_ops(self):
         def f():
             x = torch.randn([])
@@ -899,6 +869,8 @@ class TestRealProxyTensor(TestCase):
         self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
 
 class TestFakeProxyTensor(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_issue82547(self):
         x = nn.Parameter(torch.randn(3, 3))
 
@@ -1027,6 +999,8 @@ def _trace(f, *args):
 
 # TODO: Need to test the guards themselves specifically as well
 class TestSymbolicTracing(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
         """
         Tests fn traced with trace_inputs against test_inputs
@@ -1354,23 +1328,6 @@ def forward(self, x_1):
         # 1 ok)
         self.assertEqual(len(gm.shape_env.guards), 0)
 
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
-    def test_cpu_scalar_cuda(self):
-        # Extracted from wave2vec2
-        def f(a, b):
-            return (a * b) @ b
-
-        r = str(
-            make_fx(f, tracing_mode="symbolic")(
-                torch.tensor(1.0), torch.randn(2, 2, device='cuda')
-            ).code
-        ).strip()
-        self.assertExpectedInline(r, """\
-def forward(self, a_1, b_1):
-    mul = torch.ops.aten.mul.Tensor(a_1, b_1);  a_1 = None
-    mm = torch.ops.aten.mm.default(mul, b_1);  mul = b_1 = None
-    return mm""")
-
     def test_binary_broadcast(self):
         def f(a, b):
             c = a * b
@@ -1452,9 +1409,8 @@ def forward(self, a_1):
             r, """\
 def forward(self, x_1):
     sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size_int, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size_int = None
     select = torch.ops.aten.select.int(x_1, 0, 0)
-    copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = copy_ = None
+    fill_ = torch.ops.aten.fill_.Scalar(select, sym_size_int);  select = sym_size_int = fill_ = None
     return x_1"""
         )
 
@@ -1492,11 +1448,9 @@ def forward(self, gravity_1, mask_1):
 def forward(self, crop_camera_1, mask_1):
     index = torch.ops.aten.index.Tensor(crop_camera_1, [mask_1])
     eye = torch.ops.aten.eye.default(3, device = device(type='cpu'), pin_memory = False)
-    _tensor_constant0 = self._tensor_constant0
-    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
     select = torch.ops.aten.select.int(eye, 0, 0)
     select_1 = torch.ops.aten.select.int(select, 0, 0);  select = None
-    copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = copy_ = None
+    fill_ = torch.ops.aten.fill_.Scalar(select_1, -1);  select_1 = fill_ = None
     sym_size_int = torch.ops.aten.sym_size.int(index, 0)
     expand = torch.ops.aten.expand.default(eye, [sym_size_int, 3, 3])
     view = torch.ops.aten.view.default(expand, [sym_size_int, 3, 3]);  expand = None
@@ -1607,18 +1561,6 @@ def forward(self, x_1, y_1):
             return r.view(12, -1, 192)
         make_fx(f, tracing_mode="symbolic")(torch.tensor(24))
 
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
-    def test_view_divisibility_unbacked_relatively_prime(self):
-        # See https://github.com/pytorch/pytorch/issues/123651
-        def f(x):
-            i0 = x.item()
-            # To trigger the original issue, the max bound has to
-            # be chosen such that 448 / 447 < 2 (which it is.)
-            torch._check(i0 > 0)
-            torch._check(i0 <= 448)
-            return torch.zeros(256 * i0).view(-1, 447)
-        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device="cuda"))
-
     def test_unbacked_unify_guard(self):
         def f(x, y):
             z = torch.zeros(x.item())
@@ -1635,61 +1577,6 @@ def forward(self, x_1, y_1):
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = zeros = None
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")
-
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
-    @unittest.expectedFailure
-    def test_unbacked_unify_guard_transitivity(self):
-        def f(x1, x2, y):
-            z1 = torch.zeros(x1.item())
-            z2 = torch.zeros(x2.item())
-            torch._check(z1.size(0) == z2.size(0))  # refines i0 = i1
-            torch._check(z2.size(0) == y.size(0))  # refines i0 = s0
-            if z1.size(0) == 4:
-                return y * 2
-            else:
-                return y + 2
-
-        gm = make_fx(f, tracing_mode="symbolic")(
-            torch.tensor(10, device="cuda"),
-            torch.tensor(10, device="cuda"),
-            torch.randn(10, device="cuda")
-        )
-        insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
-        gm.recompile()
-        r = str(gm.code).strip()
-        # self.assertExpectedInline(
-        #     r, """"""
-        # )
-
-    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
-    def test_unbacked_unify_dependency_violation(self):
-        def f(x1, x2, x3, y):
-            z1 = x1.item()
-            torch._check(z1 // 9 == 1)
-            z2 = x2.item()
-            z3 = x3.item()
-            torch._check(z1 == z2 + z3)
-            return y * 2
-        # NB: inputs are done as CUDA to ensure they aren't queried to be
-        # backed
-
-        gm = make_fx(f, tracing_mode="symbolic")(
-            torch.tensor(10, device="cuda"), torch.tensor(5, device="cuda"),
-            torch.tensor(5, device="cuda"), torch.randn(1, device="cuda")
-        )
-        insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
-        gm.recompile()
-        self.assertEqual(gm(
-            torch.tensor(12, device="cuda"), torch.tensor(6, device="cuda"),
-            torch.tensor(6, device="cuda"), torch.tensor([1.0], device="cuda")),
-            torch.tensor([2.0], device="cuda")
-        )
-        with self.assertRaises(RuntimeError):
-            gm(
-                torch.tensor(20, device="cuda"), torch.tensor(10, device="cuda"),
-                torch.tensor(10, device="cuda"), torch.tensor([1.0], device="cuda")
-            )
-
 
     def test_split_unbacked_sizes(self):
         def f(lengths, values):
@@ -2096,6 +1983,74 @@ L['a'].size()[1] <= 18""")
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
         self.assertExpectedInline(show_guards(tensor), """""")
 
+    @skipIfTorchDynamo("make_fx cannot trace dynamo-optimized functions")
+    def test_make_fx_second_order_grad(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/175477
+        weight = torch.randn(4, 3, requires_grad=True)
+
+        def fn(x, weight):
+            x = x.detach().requires_grad_(True)
+            h = x @ weight.T
+            mean = h.mean(-1, keepdim=True)
+            var = h.var(-1, keepdim=True, correction=0)
+            h = (h - mean) / torch.sqrt(var + 1e-5)
+            energy = (h ** 2).sum()
+            force = -torch.autograd.grad(energy, x, create_graph=True)[0]
+            return energy, force
+
+        traced = make_fx(fn, tracing_mode="symbolic", _allow_non_fake_inputs=True)(
+            torch.randn(3, 3), weight.clone().requires_grad_(True)
+        )
+        self.assertFalse(
+            any(
+                n.op == "call_function" and n.target == torch.ops.aten.detach.default
+                for n in traced.graph.nodes
+            )
+        )
+
+        x = torch.randn(3, 3)
+        target_energy = torch.randn(())
+        target_force = torch.randn(3, 3)
+
+        def loss_fn(e, f):
+            return (e - target_energy).pow(2) + (f - target_force).pow(2).sum()
+
+        w1 = weight.detach().clone().requires_grad_(True)
+        e1, f1 = fn(x, w1)
+        loss_fn(e1, f1).backward()
+
+        w2 = weight.detach().clone().requires_grad_(True)
+        e2, f2 = traced(x, w2)
+        loss_fn(e2, f2).backward()
+
+        self.assertEqual(w1.grad, w2.grad)
+
+        traced_explicit = make_fx(
+            fn,
+            decomposition_table={},
+            tracing_mode="symbolic",
+            _allow_non_fake_inputs=True,
+        )(torch.randn(3, 3), weight.clone().requires_grad_(True))
+        self.assertTrue(
+            any(
+                n.op == "call_function" and n.target == torch.ops.aten.detach.default
+                for n in traced_explicit.graph.nodes
+            )
+        )
+
+        def detach_only(x):
+            return x.detach() * 2
+
+        traced_pre_dispatch = make_fx(detach_only, pre_dispatch=True)(
+            torch.randn(2, requires_grad=True)
+        )
+        self.assertTrue(
+            any(
+                n.op == "call_function" and n.target == torch.ops.aten.detach.default
+                for n in traced_pre_dispatch.graph.nodes
+            )
+        )
+
 
 make_fx_failures = {
     # unknown
@@ -2146,7 +2101,6 @@ fake_tensor_failures = set()
 symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
-    xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
@@ -2177,8 +2131,7 @@ out_symbolic_tensor_failures = {
     xfail('argmax', ''),
     xfail('argmin', ''),
     xfail('gather', ''),
-    xfail('linalg.pinv', ''),
-    xfail('linalg.pinv', 'hermitian'),
+    xfail('histogramdd', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
@@ -2249,6 +2202,8 @@ filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps(make_fx_failures.union(only_real_tensor_failures))
     def test_make_fx_exhaustive(self, device, dtype, op):
@@ -2279,9 +2234,151 @@ class TestProxyTensorOpInfo(TestCase):
         _test_make_fx_helper(self, device, dtype, op, "symbolic", out=True)
 
 
-only_for = ("cpu")
-instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_for)
+instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for="cpu")
 
+
+class TestGenericProxyTensorDevice(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_amp_cache(self, device):
+        layer = torch.nn.Conv2d(3, 3, 3).to(device)
+
+        def f(x, w):
+            return torch.nn.functional.conv2d(x, w, stride=layer.stride)
+
+        inp = torch.randn(4, 3, 10, 10, device=device)
+        with torch.autocast(torch.device(device).type):
+            out_graph = make_fx(f)(inp, layer.weight).graph
+            out_graph2 = make_fx(f)(inp, layer.weight).graph
+
+        self.assertEqual(len(out_graph.nodes), len(out_graph2.nodes))
+        for a, b in zip(out_graph.nodes, out_graph2.nodes):
+            self.assertEqual(a.op, b.op)
+
+    @xfailIfNoAcceleratorTriton
+    def test_T244632748(self, device):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return x + (x.shape[0] * 2)
+
+        mod = TestModule()
+        sample = torch.randn((5, 5)).to(device)
+        dim0 = torch.export.Dim.DYNAMIC(max=100)
+        dynamic_shapes = {"x": (dim0, torch.export.Dim.STATIC)}
+        ep = torch.export.export(mod, (sample,), dynamic_shapes=dynamic_shapes)
+        gm = ep.module()
+        symint = list(gm.graph.nodes)[3].meta["val"]
+        list(gm.graph.nodes)[3].replace_all_uses_with(symint)
+        gm.graph.eliminate_dead_code()
+
+        inductor_fx = torch._inductor.aot_compile(
+            gm, (sample,), options={"fx_wrapper": True, "compile_threads": 1}
+        )
+
+
+instantiate_device_type_tests(TestGenericProxyTensorDevice, globals(), only_for="cuda")
+
+
+class TestSymbolicTracingDevice(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_cpu_scalar_cuda(self, device):
+        # Extracted from wave2vec2
+        def f(a, b):
+            return (a * b) @ b
+
+        r = str(
+            make_fx(f, tracing_mode="symbolic")(
+                torch.tensor(1.0), torch.randn(2, 2, device=device)
+            ).code
+        ).strip()
+        self.assertExpectedInline(
+            r,
+            """\
+def forward(self, a_1, b_1):
+    mul = torch.ops.aten.mul.Tensor(a_1, b_1);  a_1 = None
+    mm = torch.ops.aten.mm.default(mul, b_1);  mul = b_1 = None
+    return mm""",
+        )
+
+
+instantiate_device_type_tests(TestSymbolicTracingDevice, globals(), only_for="cuda")
+
+
+class TestUnbackedSymbolicTracingDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_view_divisibility_unbacked_relatively_prime(self, device):
+        # See https://github.com/pytorch/pytorch/issues/123651
+        def f(x):
+            i0 = x.item()
+            # To trigger the original issue, the max bound has to
+            # be chosen such that 448 / 447 < 2 (which it is.)
+            torch._check(i0 > 0)
+            torch._check(i0 <= 448)
+            return torch.zeros(256 * i0).view(-1, 447)
+
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device=device))
+
+    @unittest.expectedFailure
+    def test_unbacked_unify_guard_transitivity(self, device):
+        def f(x1, x2, y):
+            z1 = torch.zeros(x1.item())
+            z2 = torch.zeros(x2.item())
+            torch._check(z1.size(0) == z2.size(0))  # refines i0 = i1
+            torch._check(z2.size(0) == y.size(0))  # refines i0 = s0
+            if z1.size(0) == 4:
+                return y * 2
+            else:
+                return y + 2
+
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.tensor(10, device=device),
+            torch.tensor(10, device=device),
+            torch.randn(10, device=device),
+        )
+        insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
+        gm.recompile()
+        r = str(gm.code).strip()
+        # self.assertExpectedInline(
+        #     r, """"""
+        # )
+
+    def test_unbacked_unify_dependency_violation(self, device):
+        def f(x1, x2, x3, y):
+            z1 = x1.item()
+            torch._check(z1 // 9 == 1)
+            z2 = x2.item()
+            z3 = x3.item()
+            torch._check(z1 == z2 + z3)
+            return y * 2
+
+        # NB: inputs are done as CUDA to ensure they aren't queried to be
+        # backed
+
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.tensor(10, device=device),
+            torch.tensor(5, device=device),
+            torch.tensor(5, device=device),
+            torch.randn(1, device=device),
+        )
+        insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
+        gm.recompile()
+        self.assertEqual(gm(
+            torch.tensor(12, device=device),
+            torch.tensor(6, device=device),
+            torch.tensor(6, device=device),
+            torch.tensor([1.0], device=device),
+        ), torch.tensor([2.0], device=device))
+        with self.assertRaises(RuntimeError):
+            gm(
+                torch.tensor(20, device=device),
+                torch.tensor(10, device=device),
+                torch.tensor(10, device=device),
+                torch.tensor([1.0], device=device),
+            )
+
+instantiate_device_type_tests(TestUnbackedSymbolicTracingDevice, globals(), except_for="cpu")
 
 if __name__ == '__main__':
     run_tests()

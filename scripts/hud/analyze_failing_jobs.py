@@ -42,11 +42,22 @@ HUD_API = "https://hud.pytorch.org/api/hud/pytorch/pytorch"
 # we fetch whole pages and trim to the exact commit count requested.
 PER_PAGE = 100
 
-# Conclusions without a completed signal for a commit/job pair. "pending" is an
-# in-progress run (no result yet), so it is treated as no-data rather than
-# breaking a streak -- otherwise an in-flight rerun at the tip would reset the
-# streak of a job that is otherwise consistently failing.
-SKIPPED_CONCLUSIONS = {"neutral", "skipped", "pending"}
+# Conclusions without a completed signal for a commit/job pair. "pending",
+# "queued" and "in_progress" are in-flight runs (no result yet), so they are
+# treated as no-data rather than breaking a streak -- otherwise an in-flight
+# rerun, or a runner-queue backlog at the tip, would look like a failure streak
+# for a job that is actually green (queue-backlogged jobs report "queued").
+# "cancelled" is a superseded/aborted run (e.g. a concurrency cancel-in-progress
+# when a newer commit lands), not a real result -- counting it as a failure
+# makes jobs that are otherwise skipped/green look like they are failing.
+SKIPPED_CONCLUSIONS = {
+    "neutral",
+    "skipped",
+    "pending",
+    "queued",
+    "in_progress",
+    "cancelled",
+}
 # Two failures whose captured error text is at least this similar are treated
 # as the same underlying failure.
 SIMILARITY_THRESHOLD = 0.75
@@ -58,7 +69,7 @@ def is_skipped(job: dict[str, Any]) -> bool:
 
 def is_failure(job: dict[str, Any]) -> bool:
     conclusion = job.get("conclusion")
-    return conclusion is not None and conclusion not in ("success", "pending")
+    return conclusion is not None and conclusion != "success" and not is_skipped(job)
 
 
 def transpose_grid(

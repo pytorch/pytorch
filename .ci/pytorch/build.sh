@@ -13,7 +13,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # shellcheck source=./rocm_utils.sh
   source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
-  export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx1033"
+
+  if command -v sccache >/dev/null; then
+    SCCACHE_PATH="$(command -v sccache)"
+    export CMAKE_C_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export CMAKE_CXX_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export CMAKE_HIP_COMPILER_LAUNCHER="${SCCACHE_PATH}"
+    export HIP_CLANG_LAUNCHER="${SCCACHE_PATH}"
+  fi
 fi
 
 echo "Python version:"
@@ -56,6 +63,11 @@ if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
+  # Build for z15 to enable full ZVECTOR support
+  export CFLAGS="$CFLAGS -march=z15"
+  export CXXFLAGS="$CXXFLAGS -march=z15"
+fi
 
 # mkl-static/mkl-include are pip-installed into the active Python environment
 # (a conda env or a venv), not provided by conda. Detect MKL directly rather
@@ -101,7 +113,12 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
   export USE_CUDA=0
   export USE_MKLDNN=0
 
-  export SLEEF_TARGET_EXEC_USE_QEMU=ON
+  # common.sh exports CC=gcc/CXX=g++ for every *gcc* BUILD_ENVIRONMENT, which
+  # matches this one and clobbers the cross toolchain the image sets. Put it
+  # back, or CMake configures for riscv64 while compiling with the host gcc.
+  export CC="riscv64-linux-gnu-gcc-${GCC_VERSION}"
+  export CXX="riscv64-linux-gnu-g++-${GCC_VERSION}"
+
   # Restrict chown to the workspace and the cross-compile sysroot/venv we
   # actually write into. The workspace path differs by runner: EC2 docker
   # mounts it at /var/lib/jenkins/workspace and GITHUB_WORKSPACE points at
@@ -115,6 +132,47 @@ if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
     fi
   done
 
+  # third_party/protobuf (v21.12) would build a protoc for the target, which this
+  # x86_64 host cannot execute, and the workflow no longer registers qemu-riscv64
+  # with binfmt_misc -- that went away with the EC2 build path in #189113. Use the
+  # host protoc from the image instead, which is the cross-compilation path
+  # cmake/ProtoBuf.cmake documents and what conda-forge does for the same reason.
+  # Ubuntu noble ships protobuf-compiler at 3.21.12, matching the vendored copy, so
+  # generated sources stay compatible with the libprotobuf built for the target.
+  export CAFFE2_CUSTOM_PROTOC_EXECUTABLE=/usr/bin/protoc
+
+  # SLEEF generates headers with small host tools (mkrename and friends). Its
+  # cross-compilation path imports them from NATIVE_BUILD_DIR; the branch keyed on
+  # SLEEF_TARGET_EXEC_USE_QEMU instead builds them for the target and runs them
+  # under emulation, which is why that variable used to be set here and why it is
+  # not any more (see the protoc note above -- same missing binfmt_misc).
+  #
+  # The option set mirrors aten/src/ATen/CMakeLists.txt so the native build
+  # produces exactly the tools the cross build then imports; SLEEF_BUILD_TESTS and
+  # friends change which host executables exist, so a mismatch here surfaces later
+  # as a missing IMPORTED_LOCATION.
+  SLEEF_NATIVE_BUILD_DIR="${HOME}/sleef-native"
+  cmake -S third_party/sleef -B "${SLEEF_NATIVE_BUILD_DIR}" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=gcc \
+      -DSLEEF_BUILD_SHARED_LIBS=OFF \
+      -DSLEEF_BUILD_DFT=OFF \
+      -DSLEEF_BUILD_GNUABI_LIBS=OFF \
+      -DSLEEF_BUILD_TESTS=OFF \
+      -DSLEEF_BUILD_SCALAR_LIB=OFF \
+      -DSLEEF_DISABLE_OPENMP=ON
+  cmake --build "${SLEEF_NATIVE_BUILD_DIR}"
+
+  # NATIVE_BUILD_DIR is a sleef-internal name, so it is passed as a CMake define
+  # rather than added to the environment forwarding in cmake/EnvVarForwarding.cmake.
+  # Append rather than assign: scikit-build-core reads SKBUILD_CMAKE_DEFINE as a
+  # ';'-separated list, so overwriting it would silently drop anything an outer
+  # caller had set.
+  export SKBUILD_CMAKE_DEFINE="${SKBUILD_CMAKE_DEFINE:+${SKBUILD_CMAKE_DEFINE};}NATIVE_BUILD_DIR=${SLEEF_NATIVE_BUILD_DIR}"
+
+elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  export USE_CUDA=0
+  export USE_MKLDNN=0
 fi
 
 # Use special scripts for Android builds
@@ -135,9 +193,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
-      # Set ROCM_ARCH to gfx906 for CI builds, if user doesn't override.
-      echo "Limiting PYTORCH_ROCM_ARCH to gfx906 for CI builds"
-      export PYTORCH_ROCM_ARCH="gfx906"
+    echo "PYTORCH_ROCM_ARCH must be set for ROCm CI builds" >&2
+    exit 1
   fi
 
   # hipify sources
@@ -180,18 +237,16 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   exit 1
 fi
 
-# We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
-# memory to build and will OOM
-
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
-  J=2  # default to 2 jobs
-  case "$RUNNER" in
-    linux.12xlarge.memory|linux.24xlarge.memory)
-      J=24
-      ;;
-  esac
-  echo "Building FlashAttention with job limit $J"
-  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
+# FlashAttention kernels need large amounts of memory to compile and can OOM at
+# full build parallelism. Only workflows that select a reviewed high-memory
+# build runner should opt in to the larger target-specific pool.
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  FLASH_ATTENTION_MAX_JOBS=2
+  if [[ "${FLASH_ATTENTION_LARGE_MEMORY_BUILD:-false}" == "true" ]]; then
+    FLASH_ATTENTION_MAX_JOBS=24
+  fi
+  export FLASH_ATTENTION_MAX_JOBS
+  echo "Limiting FlashAttention compilation to ${FLASH_ATTENTION_MAX_JOBS} jobs"
 fi
 
 # TODO: Removeme once all the wrappers are gone
@@ -249,16 +304,11 @@ if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUI
   git config --global --add safe.directory /var/lib/jenkins/workspace
 fi
 
-# check that setup.py would fail with bad arguments
-echo "The next three invocations are expected to fail with invalid command error messages."
-( ! get_exit_code python setup.py bad_argument )
-( ! get_exit_code python setup.py clean] )
-( ! get_exit_code python setup.py clean bad_argument )
-
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # rocm builds fail when WERROR=1
   # XLA test build fails when WERROR=1
   # s390x builds currently fail when WERROR=1
+  # riscv64 builds currently fail when WERROR=1
   # Release xpu build stress with WERROR=1
   # set only when building other architectures
   # or building non-XLA tests.
@@ -270,11 +320,8 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
       python -mpip install numpy==2.0.2
     fi
 
-    WERROR=1 python setup.py clean
-
     WERROR=1 python -m build --wheel --no-isolation
   else
-    python setup.py clean
     if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
       source .ci/pytorch/install_cache_xla.sh
     fi
@@ -282,13 +329,50 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
   pip_install_whl "$(echo dist/*.whl)"
 
+  # native-AOT stage 2: export DSL kernels, relink torch_cuda with them embedded, and
+  # patch the library back into the wheel test jobs get (tools/native_aot/build_stage2.py).
+  #
+  # CUDA-only, as in .ci/wheel/linux/build.sh: --wheel makes stage 2 refuse a torch that
+  # does not import, and in the ASan and TSan images `import torch` cannot work.
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    # Installed HERE, not in .ci/docker/requirements-ci.txt, which every image
+    # shares: that would put ~190 MB of CUDA-only tooling into the CPU/ROCm/XPU images.
+    #
+    # ONE owner of the decision: stage 2 prints the verdict, we install only on RUN.
+    if [[ "$(python tools/native_aot/build_stage2.py --print-verdict)" == "RUN" ]]; then
+      install_cutlass_dsl
+      retry bash scripts/install_triton_wheel.sh
+    fi
+    # One wheel expected; a stale second would be glued into one argument. nullglob
+    # so an empty dist/ counts as zero.
+    naot_wheels=()
+    shopt -s nullglob
+    naot_wheels=(dist/*.whl)
+    shopt -u nullglob
+    if [[ ${#naot_wheels[@]} -ne 1 ]]; then
+      echo "native-AOT: expected exactly one wheel in dist/, found ${#naot_wheels[@]}" >&2
+      exit 1
+    fi
+    python tools/native_aot/build_stage2.py --wheel "${naot_wheels[0]}"
+  fi  # BUILD_ENVIRONMENT == *cuda*
+
+  # Regression test for gh-189388: a cross build must ship a SOABI-tagged _C.
+  # This job builds a wheel and never imports it -- the smoke test below is gated
+  # on *full-debug* -- so a wrongly named extension module otherwise passes
+  # silently. The check reads the wheel's own tags rather than this interpreter's
+  # sysconfig, so it does not depend on which python is active here. Pass the
+  # glob unquoted: dist/ may hold more than one wheel.
+  if [[ "$BUILD_ENVIRONMENT" == *riscv64*cross* ]]; then
+    python .ci/pytorch/check_wheel_soabi.py dist/*.whl
+  fi
+
   # Smoke-test tools/build_with_debinfo.py against the real build tree: it must
   # still emit a debug-rebuild plan with a -g compile and the libtorch_python
   # relink. This guards against build-system changes (e.g. a new
   # CONFIGURE_DEPENDS glob scheme) silently breaking the tool, which only works
   # on a from-source build that test jobs don't have. --dry-run reads the tree
   # without rebuilding, so it leaves the checkout clean (assert_git_not_dirty).
-  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && grep -q "csrc/Module.cpp" build/compile_commands.json; then
+  if [[ -f build/compile_commands.json ]] && command -v ninja > /dev/null && [[ "${USE_NINJA}" != "0" ]] && grep -q "csrc/Module.cpp" build/compile_commands.json; then
     debinfo_plan="$(python tools/build_with_debinfo.py --dry-run torch/csrc/Module.cpp)"
     echo "${debinfo_plan}"
     grep -qE ' -g( |$)' <<< "$debinfo_plan" || { echo "ERROR: build_with_debinfo --dry-run emitted no -g debug compile flag"; exit 1; }
@@ -348,26 +432,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-    # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
-    sudo rm -f /opt/cache/bin/cc
-    sudo rm -f /opt/cache/bin/c++
-    sudo rm -f /opt/cache/bin/gcc
-    sudo rm -f /opt/cache/bin/g++
-    # Restore original clang compilers that were backed up during sccache wrapping.
-    # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
-    # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
-    if [[ -d /opt/rocm/llvm/bin ]]; then
-      pushd /opt/rocm/llvm/bin
-      if [[ -d original ]]; then
-        sudo mv original/clang .
-        sudo mv original/clang++ .
-      fi
-      sudo rm -rf original
-      popd
-    fi
-
     # Build rocm-composable-kernel (ck4inductor) wheel alongside PyTorch.
-    # Placed outside the /opt/rocm/llvm/bin pushd so `dist/` resolves to the repo root.
     build_rocm_ck_wheel dist/
   fi
 

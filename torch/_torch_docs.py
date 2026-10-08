@@ -241,6 +241,15 @@ Example::
 )
 
 add_docstr(
+    torch.abs_,
+    r"""
+abs_(input) -> Tensor
+
+In-place version of :func:`torch.abs`
+""",
+)
+
+add_docstr(
     torch.absolute,
     r"""
 absolute(input: Tensor, *, out: Optional[Tensor]) -> Tensor
@@ -277,11 +286,29 @@ Example::
 )
 
 add_docstr(
+    torch.acos_,
+    r"""
+acos_(input) -> Tensor
+
+In-place version of :func:`torch.acos`
+""",
+)
+
+add_docstr(
     torch.arccos,
     r"""
 arccos(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.acos`.
+""",
+)
+
+add_docstr(
+    torch.arccos_,
+    r"""
+arccos_(input) -> Tensor
+
+In-place version of :func:`torch.arccos`
 """,
 )
 
@@ -317,11 +344,29 @@ Example::
 )
 
 add_docstr(
+    torch.acosh_,
+    r"""
+acosh_(input) -> Tensor
+
+In-place version of :func:`torch.acosh`
+""",
+)
+
+add_docstr(
     torch.arccosh,
     r"""
 arccosh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.acosh`.
+""",
+)
+
+add_docstr(
+    torch.arccosh_,
+    r"""
+arccosh_(input) -> Tensor
+
+In-place version of :func:`torch.arccosh`
 """,
 )
 
@@ -731,6 +776,15 @@ Example::
 )
 
 add_docstr(
+    torch.addmv_,
+    r"""
+addmv_(input, mat, vec, *, beta=1, alpha=1) -> Tensor
+
+In-place version of :func:`torch.addmv`
+""",
+)
+
+add_docstr(
     torch.addr,
     r"""
 addr(input, vec1, vec2, *, beta=1, alpha=1, out=None) -> Tensor
@@ -1006,6 +1060,24 @@ Example::
 )
 
 add_docstr(
+    torch.alpha_dropout_,
+    r"""
+alpha_dropout_(input, p, train) -> Tensor
+
+In-place version of :func:`torch.alpha_dropout`
+""",
+)
+
+add_docstr(
+    torch.as_strided_,
+    r"""
+as_strided_(input, size, stride, storage_offset=None) -> Tensor
+
+In-place version of :func:`torch.as_strided`
+""",
+)
+
+add_docstr(
     torch.as_tensor,
     r"""
 as_tensor(data: Any, *, dtype: Optional[dtype] = None, device: Optional[DeviceLikeType]) -> Tensor
@@ -1086,11 +1158,29 @@ Example::
 )
 
 add_docstr(
+    torch.asin_,
+    r"""
+asin_(input) -> Tensor
+
+In-place version of :func:`torch.asin`
+""",
+)
+
+add_docstr(
     torch.arcsin,
     r"""
 arcsin(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.asin`.
+""",
+)
+
+add_docstr(
+    torch.arcsin_,
+    r"""
+arcsin_(input) -> Tensor
+
+In-place version of :func:`torch.arcsin`
 """,
 )
 
@@ -1122,11 +1212,29 @@ Example::
 )
 
 add_docstr(
+    torch.asinh_,
+    r"""
+asinh_(input) -> Tensor
+
+In-place version of :func:`torch.asinh`
+""",
+)
+
+add_docstr(
     torch.arcsinh,
     r"""
 arcsinh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.asinh`.
+""",
+)
+
+add_docstr(
+    torch.arcsinh_,
+    r"""
+arcsinh_(input) -> Tensor
+
+In-place version of :func:`torch.arcsinh`
 """,
 )
 
@@ -1158,11 +1266,29 @@ Example::
 )
 
 add_docstr(
+    torch.atan_,
+    r"""
+atan_(input) -> Tensor
+
+In-place version of :func:`torch.atan`
+""",
+)
+
+add_docstr(
     torch.arctan,
     r"""
 arctan(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.atan`.
+""",
+)
+
+add_docstr(
+    torch.arctan_,
+    r"""
+arctan_(input) -> Tensor
+
+In-place version of :func:`torch.arctan`
 """,
 )
 
@@ -1239,11 +1365,29 @@ Example::
 )
 
 add_docstr(
+    torch.atanh_,
+    r"""
+atanh_(input) -> Tensor
+
+In-place version of :func:`torch.atanh`
+""",
+)
+
+add_docstr(
     torch.arctanh,
     r"""
 arctanh(input: Tensor, *, out: Optional[Tensor]) -> Tensor
 
 Alias for :func:`torch.atanh`.
+""",
+)
+
+add_docstr(
+    torch.arctanh_,
+    r"""
+arctanh_(input) -> Tensor
+
+In-place version of :func:`torch.arctanh`
 """,
 )
 
@@ -1276,10 +1420,11 @@ returned tensor will have the same history.
 
 When :attr:`obj` is not a tensor, NumPy array, or DLPack capsule but implements Python's
 buffer protocol then the buffer is interpreted as an array of bytes grouped according to
-the size of the datatype passed to the :attr:`dtype` keyword argument. (If no datatype is
-passed then the default floating point datatype is used, instead.) The returned tensor
-will have the specified datatype (or default floating point datatype if none is specified)
-and, by default, be on the CPU device and share memory with the buffer.
+the size of the datatype passed to the :attr:`dtype` keyword argument. If no :attr:`dtype`
+is passed then it is inferred from the buffer's format, and an error is raised if the
+format cannot be mapped to a PyTorch datatype, in which case :attr:`dtype` must be passed
+explicitly. The returned tensor will have the specified (or inferred) datatype and, by
+default, be on the CPU device and share memory with the buffer.
 
 When :attr:`obj` is a NumPy scalar, the returned tensor will be a 0-dimensional tensor on
 the CPU and that doesn't share its memory (i.e. ``copy=True``). By default datatype will
@@ -2482,6 +2627,15 @@ Example::
 )
 
 add_docstr(
+    torch.ceil_,
+    r"""
+ceil_(input) -> Tensor
+
+In-place version of :func:`torch.ceil`
+""",
+)
+
+add_docstr(
     torch.real,
     r"""
 real(input) -> Tensor
@@ -2621,6 +2775,15 @@ Example::
     >>> torch.reciprocal(a)
     tensor([-2.1763, -0.4713, -0.6986,  1.3702])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.reciprocal_,
+    r"""
+reciprocal_(input) -> Tensor
+
+In-place version of :func:`torch.reciprocal`
+""",
 )
 
 add_docstr(
@@ -2815,11 +2978,29 @@ Example::
 )
 
 add_docstr(
+    torch.clamp_,
+    r"""
+clamp_(input, min=None, max=None) -> Tensor
+
+In-place version of :func:`torch.clamp`
+""",
+)
+
+add_docstr(
     torch.clip,
     r"""
 clip(input, min=None, max=None, *, out=None) -> Tensor
 
 Alias for :func:`torch.clamp`.
+""",
+)
+
+add_docstr(
+    torch.clip_,
+    r"""
+clip_(input, min=None, max=None) -> Tensor
+
+In-place version of :func:`torch.clip`
 """,
 )
 
@@ -2963,6 +3144,15 @@ Example::
     >>> torch.conj_physical(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
     tensor([-1 - 1j, -2 - 2j, 3 + 3j])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.conj_physical_,
+    r"""
+conj_physical_(input) -> Tensor
+
+In-place version of :func:`torch.conj_physical`
+""",
 )
 
 add_docstr(
@@ -3132,6 +3322,15 @@ Example::
 )
 
 add_docstr(
+    torch.cos_,
+    r"""
+cos_(input) -> Tensor
+
+In-place version of :func:`torch.cos`
+""",
+)
+
+add_docstr(
     torch.cosh,
     r"""
 cosh(input, *, out=None) -> Tensor
@@ -3158,6 +3357,15 @@ Example::
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.cosh_,
+    r"""
+cosh_(input) -> Tensor
+
+In-place version of :func:`torch.cosh`
+""",
 )
 
 add_docstr(
@@ -4065,11 +4273,29 @@ Alias for :func:`torch.special.erf`.
 )
 
 add_docstr(
+    torch.erf_,
+    r"""
+erf_(input) -> Tensor
+
+In-place version of :func:`torch.erf`
+""",
+)
+
+add_docstr(
     torch.erfc,
     r"""
 erfc(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.erfc`.
+""",
+)
+
+add_docstr(
+    torch.erfc_,
+    r"""
+erfc_(input) -> Tensor
+
+In-place version of :func:`torch.erfc`
 """,
 )
 
@@ -4108,6 +4334,15 @@ Example::
 )
 
 add_docstr(
+    torch.exp_,
+    r"""
+exp_(input) -> Tensor
+
+In-place version of :func:`torch.exp`
+""",
+)
+
+add_docstr(
     torch.exp2,
     r"""
 exp2(input, *, out=None) -> Tensor
@@ -4117,11 +4352,29 @@ Alias for :func:`torch.special.exp2`.
 )
 
 add_docstr(
+    torch.exp2_,
+    r"""
+exp2_(input) -> Tensor
+
+In-place version of :func:`torch.exp2`
+""",
+)
+
+add_docstr(
     torch.expm1,
     r"""
 expm1(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.expm1`.
+""",
+)
+
+add_docstr(
+    torch.expm1_,
+    r"""
+expm1_(input) -> Tensor
+
+In-place version of :func:`torch.expm1`
 """,
 )
 
@@ -4184,6 +4437,15 @@ Example::
     >>> torch.floor(a)
     tensor([-1.,  1., -1., -1.])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.floor_,
+    r"""
+floor_(input) -> Tensor
+
+In-place version of :func:`torch.floor`
+""",
 )
 
 add_docstr(
@@ -4291,6 +4553,15 @@ Example::
 
     >>> torch.frac(torch.tensor([1, 2.5, -3.2]))
     tensor([ 0.0000,  0.5000, -0.2000])
+""",
+)
+
+add_docstr(
+    torch.frac_,
+    r"""
+frac_(input) -> Tensor
+
+In-place version of :func:`torch.frac`
 """,
 )
 
@@ -4608,6 +4879,15 @@ Example::
     >>> torch.gcd(a, c)
     tensor([1, 1, 3])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.gcd_,
+    r"""
+gcd_(input, other) -> Tensor
+
+In-place version of :func:`torch.gcd`
+""",
 )
 
 add_docstr(
@@ -5255,6 +5535,15 @@ Alias for :func:`torch.special.i0`.
 )
 
 add_docstr(
+    torch.i0_,
+    r"""
+i0_(input) -> Tensor
+
+In-place version of :func:`torch.i0`
+""",
+)
+
+add_docstr(
     torch.igamma,
     r"""
 igamma(input, other, *, out=None) -> Tensor
@@ -5796,6 +6085,15 @@ Example::
 )
 
 add_docstr(
+    torch.lcm_,
+    r"""
+lcm_(input, other) -> Tensor
+
+In-place version of :func:`torch.lcm`
+""",
+)
+
+add_docstr(
     torch.ldexp,
     r"""
 ldexp(input, other, *, out=None) -> Tensor
@@ -5827,6 +6125,15 @@ Example::
 
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.ldexp_,
+    r"""
+ldexp_(input, other) -> Tensor
+
+In-place version of :func:`torch.ldexp`
+""",
 )
 
 add_docstr(
@@ -6010,6 +6317,15 @@ Example::
 )
 
 add_docstr(
+    torch.log_,
+    r"""
+log_(input) -> Tensor
+
+In-place version of :func:`torch.log`
+""",
+)
+
+add_docstr(
     torch.log10,
     r"""
 log10(input: Tensor, *, out: Optional[Tensor]) -> Tensor
@@ -6039,6 +6355,15 @@ Example::
     tensor([-0.2820, -0.0290, -0.1392, -0.8857, -0.6476])
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.log10_,
+    r"""
+log10_(input) -> Tensor
+
+In-place version of :func:`torch.log10`
+""",
 )
 
 add_docstr(
@@ -6072,6 +6397,15 @@ Example::
 )
 
 add_docstr(
+    torch.log1p_,
+    r"""
+log1p_(input) -> Tensor
+
+In-place version of :func:`torch.log1p`
+""",
+)
+
+add_docstr(
     torch.log2,
     r"""
 log2(input: Tensor, *, out: Optional[Tensor]) -> Tensor
@@ -6101,6 +6435,15 @@ Example::
     tensor([-0.2483, -0.3213, -0.0042, -0.9196, -4.3504])
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.log2_,
+    r"""
+log2_(input) -> Tensor
+
+In-place version of :func:`torch.log2`
+""",
 )
 
 add_docstr(
@@ -6162,6 +6505,15 @@ add_docstr(
 xlogy(input, other, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.xlogy`.
+""",
+)
+
+add_docstr(
+    torch.xlogy_,
+    r"""
+xlogy_(input, other) -> Tensor
+
+In-place version of :func:`torch.xlogy`
 """,
 )
 
@@ -6968,7 +7320,8 @@ Returns the median of the values in :attr:`input`.
     compute the mean of both medians, use :func:`torch.quantile` with ``q=0.5`` instead.
 
 .. warning::
-    This function produces deterministic (sub)gradients unlike ``median(dim=0)``
+    This function spreads the (sub)gradient evenly over every element equal to the
+    median, while ``median(dim=0)`` sends it to the element at the returned index.
 
 Args:
     {input}
@@ -7003,9 +7356,9 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 .. warning::
     ``indices`` does not necessarily contain the first occurrence of each
     median value found, unless it is unique.
-    The exact implementation details are device-specific.
-    Do not expect the same result when run on CPU and GPU in general.
-    For the same reason do not expect the gradients to be deterministic.
+    The exact implementation details are device-specific: CUDA returns the
+    first occurrence, while other devices may return another one.
+    Do not expect the same indices, or the same gradients, on CPU and GPU.
 
 Args:
     {input}
@@ -8099,6 +8452,15 @@ Example::
 )
 
 add_docstr(
+    torch.nan_to_num_,
+    r"""
+nan_to_num_(input, nan=0.0, posinf=None, neginf=None) -> Tensor
+
+In-place version of :func:`torch.nan_to_num`
+""",
+)
+
+add_docstr(
     torch.ne,
     r"""
 ne(input, other, *, out=None) -> Tensor
@@ -8164,11 +8526,29 @@ Example::
 )
 
 add_docstr(
+    torch.neg_,
+    r"""
+neg_(input) -> Tensor
+
+In-place version of :func:`torch.neg`
+""",
+)
+
+add_docstr(
     torch.negative,
     r"""
 negative(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.neg`
+""",
+)
+
+add_docstr(
+    torch.negative_,
+    r"""
+negative_(input) -> Tensor
+
+In-place version of :func:`torch.negative`
 """,
 )
 
@@ -8871,6 +9251,15 @@ Example::
 )
 
 add_docstr(
+    torch.rad2deg_,
+    r"""
+rad2deg_(input) -> Tensor
+
+In-place version of :func:`torch.rad2deg`
+""",
+)
+
+add_docstr(
     torch.deg2rad,
     r"""
 deg2rad(input, *, out=None) -> Tensor
@@ -8893,6 +9282,15 @@ Example::
             [ 1.5708, -1.5708]])
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.deg2rad_,
+    r"""
+deg2rad_(input) -> Tensor
+
+In-place version of :func:`torch.deg2rad`
+""",
 )
 
 add_docstr(
@@ -9555,6 +9953,15 @@ Example::
 )
 
 add_docstr(
+    torch.round_,
+    r"""
+round_(input, *, decimals=0) -> Tensor
+
+In-place version of :func:`torch.round`
+""",
+)
+
+add_docstr(
     torch.rsqrt,
     r"""
 rsqrt(input, *, out=None) -> Tensor
@@ -9580,6 +9987,15 @@ Example::
     >>> torch.rsqrt(a)
     tensor([    nan,  1.8351,  0.8053,     nan])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.rsqrt_,
+    r"""
+rsqrt_(input) -> Tensor
+
+In-place version of :func:`torch.rsqrt`
+""",
 )
 
 add_docstr(
@@ -9804,11 +10220,29 @@ Alias for :func:`torch.special.expit`.
 )
 
 add_docstr(
+    torch.sigmoid_,
+    r"""
+sigmoid_(input) -> Tensor
+
+In-place version of :func:`torch.sigmoid`
+""",
+)
+
+add_docstr(
     torch.logit,
     r"""
 logit(input, eps=None, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.logit`.
+""",
+)
+
+add_docstr(
+    torch.logit_,
+    r"""
+logit_(input, eps=None) -> Tensor
+
+In-place version of :func:`torch.logit`
 """,
 )
 
@@ -9929,11 +10363,29 @@ Example::
 )
 
 add_docstr(
+    torch.sin_,
+    r"""
+sin_(input) -> Tensor
+
+In-place version of :func:`torch.sin`
+""",
+)
+
+add_docstr(
     torch.sinc,
     r"""
 sinc(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.sinc`.
+""",
+)
+
+add_docstr(
+    torch.sinc_,
+    r"""
+sinc_(input) -> Tensor
+
+In-place version of :func:`torch.sinc`
 """,
 )
 
@@ -9964,6 +10416,15 @@ Example::
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
 
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.sinh_,
+    r"""
+sinh_(input) -> Tensor
+
+In-place version of :func:`torch.sinh`
+""",
 )
 
 add_docstr(
@@ -10561,6 +11022,15 @@ Example::
 )
 
 add_docstr(
+    torch.sqrt_,
+    r"""
+sqrt_(input) -> Tensor
+
+In-place version of :func:`torch.sqrt`
+""",
+)
+
+add_docstr(
     torch.square,
     r"""
 square(input: Tensor, *, out: Optional[Tensor]) -> Tensor
@@ -10581,6 +11051,15 @@ Example::
     >>> torch.square(a)
     tensor([ 4.3077,  1.0457,  0.0069,  0.2310])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.square_,
+    r"""
+square_(input) -> Tensor
+
+In-place version of :func:`torch.square`
+""",
 )
 
 add_docstr(
@@ -11342,6 +11821,15 @@ Example::
 )
 
 add_docstr(
+    torch.tan_,
+    r"""
+tan_(input) -> Tensor
+
+In-place version of :func:`torch.tan`
+""",
+)
+
+add_docstr(
     torch.tanh,
     r"""
 tanh(input, *, out=None) -> Tensor
@@ -11367,6 +11855,15 @@ Example::
     >>> torch.tanh(a)
     tensor([ 0.7156, -0.6218,  0.8257,  0.2553])
 """.format(**common_args),
+)
+
+add_docstr(
+    torch.tanh_,
+    r"""
+tanh_(input) -> Tensor
+
+In-place version of :func:`torch.tanh`
+""",
 )
 
 add_docstr(
@@ -11847,6 +12344,15 @@ Example::
 )
 
 add_docstr(
+    torch.trunc_,
+    r"""
+trunc_(input) -> Tensor
+
+In-place version of :func:`torch.trunc`
+""",
+)
+
+add_docstr(
     torch.fake_quantize_per_tensor_affine,
     r"""
 fake_quantize_per_tensor_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
@@ -11942,11 +12448,29 @@ Example::
 )
 
 add_docstr(
+    torch.fill_,
+    r"""
+fill_(input, value) -> Tensor
+
+In-place version of :func:`torch.fill`
+""",
+)
+
+add_docstr(
     torch.fix,
     r"""
 fix(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.trunc`
+""",
+)
+
+add_docstr(
+    torch.fix_,
+    r"""
+fix_(input) -> Tensor
+
+In-place version of :func:`torch.fix`
 """,
 )
 
@@ -12171,6 +12695,15 @@ defined by the variable argument :attr:`size`.
     nondeterministic behavior from using the data as an input to an operation.
     Floating point and complex tensors are filled with NaN, and integer tensors
     are filled with the maximum value.
+
+.. warning::
+    For ``dtype=torch.bool``, the uninitialized bytes may hold values other
+    than ``0`` (``False``) and ``1`` (``True``), which are not valid booleans.
+    The behavior of operations that read such values is undefined: they may be
+    preserved as-is or normalized to ``1`` depending on the operation, device
+    and memory layout. Write to the tensor (e.g. with :meth:`~Tensor.fill_` or
+    :meth:`~Tensor.copy_`) before reading from it, or use :func:`torch.zeros`
+    instead.
 
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
@@ -13662,7 +14195,7 @@ Arguments:
 
 .. warning::
 
-    Both blocking and interprocess are not supported right now and are noops.
+    The ``interprocess`` argument is not honored right now and is a noop.
 
 Returns:
     Event: An torch.Event object.
@@ -13877,6 +14410,80 @@ Returns:
 Example:
     >>> g_cuda = torch.Generator(device='cuda')
     >>> current_state = g_cuda.graphsafe_get_state()
+""",
+)
+
+add_docstr(
+    torch.Generator.philox_state,
+    r"""
+Generator.philox_state(increment) -> tuple[Tensor, Tensor, Tensor]
+
+Reserves ``increment`` values from this generator's Philox4x32-10 stream and
+returns the reserved position as ``(seed, offset, intragraph_offset)``, three
+1-element ``int64`` tensors. This is the same reservation protocol the
+built-in CUDA random kernels use (``PhiloxCudaState`` in C++), so kernels
+built on it draw from the same stream as, and compose with, the built-in
+random operations. Only Philox-based generators (currently CUDA) support this
+method.
+
+**What the reservation grants.** With ``effective_offset =
+(uint64(offset) + uint64(intragraph_offset)) % 2**64`` (both operands
+reinterpreted back from int64 to uint64 first; see below), the caller owns
+the Philox counter values ``effective_offset / 4`` through
+``effective_offset / 4 + ceil(increment / 4) - 1`` (the counter advances once
+per 4 generated values), at the fixed ``seed``, for **every** subsequence.
+Following the built-in kernels' convention of one subsequence per thread
+(``curand_init(seed, subsequence, effective_offset, ...)``, where the counter
+occupies ``counter.x/y`` and the subsequence ``counter.z/w``), a thread may
+generate up to ``increment`` values rounded up to a multiple of 4. The
+generator's offset advances by that rounded amount, so ``increment`` must be
+at least the number of 32-bit values any single thread of the consuming
+kernel generates.
+
+**int64 reinterpretation.** Seed and offset are unsigned 64-bit quantities
+returned bit-exactly in ``int64`` tensors (PyTorch tensors have no uint64
+arithmetic support); values at or above ``2**63`` appear negative. Kernels
+should reinterpret the bits back to uint64 (e.g. load as int64 and bitcast);
+for host-side inspection use ``.item() & (2**64 - 1)``. The offset wraps
+modulo ``2**64`` on advancement.
+
+**Graph capture.** The two return modes mirror the C++ ``PhiloxCudaState``
+protocol. Outside capture (``HostState``), ``seed`` and ``offset`` are CPU
+tensors holding the current values; ``.item()`` is cheap and does not
+synchronize, so callers pass the values as scalar kernel arguments. During
+capture (``DevState``, under :class:`torch.accelerator.Graph` or
+:class:`torch.cuda.CUDAGraph`), ``seed`` and ``offset`` are CUDA tensors
+aliasing generator state that each replay refills with the values current at
+replay time, so kernels must load them from device memory at run time.
+``intragraph_offset`` is always a CPU tensor: 0 outside capture, and this
+reservation's position within the graph during capture. Callers branch on
+capture state (e.g. :func:`torch.cuda.is_current_stream_capturing`, or the
+device of the returned tensors), exactly like the built-in kernels branch on
+``PhiloxCudaState`` via ``at::cuda::philox::unpack``.
+
+.. warning::
+    Tensors returned during capture alias the capture's state: their contents
+    are undefined until the first replay and they must not be used after the
+    graph is destroyed.
+
+Arguments:
+    increment (int): Number of Philox outputs to reserve. Must be
+        non-negative and at most ``2**64 - 1``; the offset it advances
+        wraps modulo ``2**64`` (under graph capture, where the intragraph
+        offset starts at 0, the total reserved within one graph must stay
+        below ``2**64``).
+
+Returns:
+    tuple[Tensor, Tensor, Tensor]: ``(seed, offset, intragraph_offset)``,
+    each a 1-element ``int64`` tensor. ``seed`` and ``offset`` hold the
+    generator's seed and the reserved stream position as uint64 bits (CPU
+    tensors outside capture, CUDA tensors aliasing generator state during
+    capture); ``intragraph_offset`` is always a CPU tensor holding this
+    reservation's position within the capturing graph (0 outside capture).
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> seed, offset, intragraph = g_cuda.philox_state(4)
 """,
 )
 
@@ -14309,54 +14916,47 @@ are freshly created instead of aliasing the input.
 """,
 )
 
-for unary_base_func_name in (
-    "exp",
-    "sqrt",
-    "abs",
-    "acos",
-    "asin",
-    "atan",
-    "ceil",
-    "cos",
-    "cosh",
-    "erf",
-    "erfc",
-    "expm1",
-    "floor",
-    "log",
-    "log10",
-    "log1p",
-    "log2",
-    "neg",
-    "tan",
-    "tanh",
-    "sin",
-    "sinh",
-    "round",
-    "lgamma",
-    "frac",
-    "reciprocal",
-    "sigmoid",
-    "trunc",
-    "zero",
-):
-    unary_foreach_func_name = f"_foreach_{unary_base_func_name}"
-    if hasattr(torch, unary_foreach_func_name):
+# Create docs for our private APIs that will link to the public ones
+for private_func_name in dir(torch):
+    if not private_func_name.startswith("_foreach_"):
+        continue
+    if private_func_name == "_foreach_powsum":
+        continue
+    foreach_func_name = private_func_name.removeprefix("_foreach_")
+    private_func = getattr(torch, private_func_name)
+    if private_func.__doc__ is None:
         add_docstr(
-            getattr(torch, unary_foreach_func_name),
+            private_func,
             rf"""
-{unary_foreach_func_name}(self: List[Tensor]) -> List[Tensor]
-
-Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
+Please use our public :func:`torch.foreach.{foreach_func_name}` instead.
+This private API is maintained during migration to support backwards
+compatibility.
             """,
         )
-    unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
-    if hasattr(torch, unary_inplace_foreach_func_name):
-        add_docstr(
-            getattr(torch, unary_inplace_foreach_func_name),
-            rf"""
-{unary_inplace_foreach_func_name}(self: List[Tensor]) -> None
 
-Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
-        """,
-        )
+add_docstr(
+    torch.detach_,
+    r"""
+detach_(input) -> Tensor
+
+In-place version of :func:`torch.detach`
+""",
+)
+
+add_docstr(
+    torch.feature_alpha_dropout_,
+    r"""
+feature_alpha_dropout_(input, p, train) -> Tensor
+
+In-place version of :func:`torch.feature_alpha_dropout`
+""",
+)
+
+add_docstr(
+    torch.feature_dropout_,
+    r"""
+feature_dropout_(input, p, train) -> Tensor
+
+In-place version of :func:`torch.feature_dropout`
+""",
+)

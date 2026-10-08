@@ -13,11 +13,11 @@ from torch.utils import (
     hooks as hooks,
 )
 from torch.utils.backend_registration import (
-    generate_methods_for_privateuse1_backend,
-    rename_privateuse1_backend,
+    generate_methods_for_privateuse1_backend as generate_methods_for_privateuse1_backend,
+    rename_privateuse1_backend as rename_privateuse1_backend,
 )
-from torch.utils.cpp_backtrace import get_cpp_backtrace
-from torch.utils.throughput_benchmark import ThroughputBenchmark
+from torch.utils.cpp_backtrace import get_cpp_backtrace as get_cpp_backtrace
+from torch.utils.throughput_benchmark import ThroughputBenchmark as ThroughputBenchmark
 
 
 def set_module(obj, mod):

@@ -29,8 +29,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfTorchDynamo,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
@@ -243,7 +245,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         # once - so in total 2 (1 fwd + 1 bwd)
         self.assertEqual(len(codes), 2)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False, True])
     def test_flex_attention(self, serialize):
         def _squared(score, b, h, m, n):
@@ -268,7 +270,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             a * b,
             b,
             dtype=torch.bfloat16,
-            device="cuda",
+            device=device_type,
             requires_grad=True,
         )
 
@@ -428,7 +430,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         ):
             opt_fn(x, y)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False, True])
     def test_selective_ac_flex(self, serialize):
         class FlexAttentionModule(torch.nn.Module):
@@ -519,9 +521,9 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
                 return output
 
         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
-            "cuda", dtype=torch.bfloat16
+            device_type, dtype=torch.bfloat16
         )
-        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+        x = torch.ones(8, 1024, 512, device=device_type, dtype=torch.bfloat16)
         compiled_module = torch.compile(
             flex_module, backend=aot_eager_regional_inductor(), fullgraph=True
         )
@@ -749,7 +751,7 @@ def forward(self, tangents_0):
         # self.assertEqual(len(codes), 2)
         self.assertEqual(result, fn(c))
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_unbacked_expr_size_input(self):
         def fn(c):
             d = torch.concat([c, c], dim=0)
@@ -757,7 +759,7 @@ def forward(self, tangents_0):
                 d = d + 1
             return d
 
-        c = torch.randn((64, 32), device="cuda", requires_grad=True)
+        c = torch.randn((64, 32), device=device_type, requires_grad=True)
         torch._dynamo.decorators.mark_unbacked(c, 0)
 
         opt_fn = torch.compile(
@@ -948,7 +950,7 @@ def forward(self, arg0_1, arg1_1):
                 ignore_empty_lines=True,
             )
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False])  # , True
     def test_flex_attention(self, serialize):
         def _squared(score, b, h, m, n):
@@ -982,7 +984,7 @@ def forward(self, arg0_1, arg1_1):
             a * b,
             b,
             dtype=torch.bfloat16,
-            device="cuda",
+            device=device_type,
             requires_grad=True,
         )
 
@@ -1033,83 +1035,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 ignore_empty_lines=True,
             )
 
-    @parametrize("serialize", [False])  # , True
-    def test_max_autotune_no_cudagraphs(self, serialize):
-        """Test that max-autotune-no-cudagraphs options are properly applied inductor_config_patches."""
-        import torch._inductor.config as inductor_config
-
-        nested_config = get_invoke_subgraph_compile_options(
-            inductor_config_patches={
-                "max_autotune": True,
-                "triton.cudagraphs": False,
-            }
-        )
-
-        @torch.compiler.nested_compile_region(options=nested_config)
-        def g(sin, y):
-            mul = sin * y
-            add = mul + 1
-            return add
-
-        def fn(x, y):
-            sin = torch.sin(x)
-            add = g(sin, y)
-            return torch.sin(add)
-
-        # Hook to verify options
-        original_compile = torch._inductor.compile_fx._compile_fx_inner
-        captured_options = []
-
-        def verify_options(*args, **kwargs):
-            options = kwargs.get("inductor_config_patches", {})
-            captured_options.append(options)
-
-            # Verify config is set as expected from explicit options
-            if not torch._inductor.config.max_autotune:
-                raise AssertionError("max_autotune should be True")
-            if inductor_config.triton.cudagraphs:
-                raise AssertionError("triton.cudagraphs should be False")
-
-            return original_compile(*args, **kwargs)
-
-        torch._inductor.compile_fx._compile_fx_inner = verify_options
-
-        try:
-            # Use backend without options - they come from annotations
-            backend = aot_eager_regional_inductor(
-                serialize=serialize, on_invoke_subgraph=True
-            )
-
-            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
-            x = torch.randn(10, requires_grad=True)
-            y = torch.randn(10, requires_grad=True)
-
-            # Run and check that options were passed
-            _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
-            self.assertEqual(len(codes), 2)
-
-            # Verify that compilation happened
-            self.assertTrue(
-                len(captured_options) > 0, "Compilation should have occurred"
-            )
-
-        finally:
-            torch._inductor.compile_fx._compile_fx_inner = original_compile
-
-    def test_invalid_inductor_config(self):
-        """Test that invalid inductor config keys are caught with a clear error."""
-
-        with self.assertRaisesRegex(
-            ValueError,
-            "Invalid inductor config key 'invalid_config_key'",
-        ):
-            get_invoke_subgraph_compile_options(
-                inductor_config_patches={
-                    "invalid_config_key": True,
-                }
-            )
-
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False])  # , True
     def test_selective_ac_flex(self, serialize):
         # must decompose the following fallback ops in inductor
@@ -1217,9 +1143,9 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 return output
 
         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
-            "cuda", dtype=torch.bfloat16
+            device_type, dtype=torch.bfloat16
         )
-        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+        x = torch.ones(8, 1024, 512, device=device_type, dtype=torch.bfloat16)
         compiled_module = torch.compile(
             flex_module,
             backend=aot_eager_regional_inductor(serialize, on_invoke_subgraph=True),
@@ -1288,10 +1214,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         else:
             partitioner = test_partitioner
 
-        config_patches = {
-            "max_autotune": True,
-            "triton.cudagraphs": False,
-        }
+        config_patches = {}
         decompositions = {}
         nested_config = get_invoke_subgraph_compile_options(
             config_patches, decompositions, partitioner
@@ -1627,7 +1550,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         fn(x).sum().backward()
         self.assertEqual(x.grad, x * 3)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("serialize", [False])
     def test_comprehensive_padding_saved_tensor_stride(self, serialize):
         # When an op inside a nested_compile_region produces a tensor whose
@@ -1655,9 +1578,15 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
         def fn(x, w):
             return loss_region(x, w)
 
-        x = torch.randn(64, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        x = torch.randn(
+            64, 32, device=device_type, dtype=torch.bfloat16, requires_grad=True
+        )
         w = torch.randn(
-            out_features, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+            out_features,
+            32,
+            device=device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
         )
 
         x_ref = x.detach().clone().requires_grad_()

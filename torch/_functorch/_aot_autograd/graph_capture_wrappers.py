@@ -1150,6 +1150,8 @@ def create_functionalized_fn(
                 flat_outs, outs_spec = pytree.tree_flatten(f_outs)
                 flat_outs = [from_fun(o) for o in flat_outs]
                 num_outs = len(meta.output_info)
+                # User outputs come after the inputs mutated outside the graph.
+                num_mutated_runtime_inps = meta.num_mutated_inp_runtime_indices
 
                 for i in range(num_outs):
                     info = meta.output_info[i]
@@ -1163,7 +1165,7 @@ def create_functionalized_fn(
                         == MutationType.MUTATED_IN_GRAPH
                     ):
                         fw_args = args[0] if trace_joint else args
-                        flat_outs[i] = fw_args[info.base_idx]
+                        flat_outs[num_mutated_runtime_inps + i] = fw_args[info.base_idx]
                 return pytree.tree_unflatten(flat_outs, outs_spec), f_outs_descs
 
             return pytree.tree_map(from_fun, f_outs), f_outs_descs
@@ -1471,14 +1473,15 @@ def aot_dispatch_subclass(
     # That's why we created a fresh metadata object on the dense -> dense function here,
     # and plumb it back up to the partitioner.
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
-    meta_updated = run_functionalized_fw_and_collect_metadata(
-        without_output_descs(metadata_fn),
-        # pyrefly: ignore [bad-argument-type]
-        flat_args_descs=primals_unwrapped_descs,
-        static_input_indices=remapped_static_indices,
-        keep_input_mutations=meta.keep_input_mutations,
-        # pyrefly: ignore [not-iterable]
-    )(*primals_unwrapped)
+    with torch._dynamo.eval_frame._use_eager_on_nested_compile():
+        meta_updated = run_functionalized_fw_and_collect_metadata(
+            without_output_descs(metadata_fn),
+            # pyrefly: ignore [bad-argument-type]
+            flat_args_descs=primals_unwrapped_descs,
+            static_input_indices=remapped_static_indices,
+            keep_input_mutations=meta.keep_input_mutations,
+            # pyrefly: ignore [not-iterable]
+        )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
 

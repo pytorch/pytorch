@@ -163,7 +163,7 @@ static at::Tensor& flatten_copy_out(
 
 namespace {
 
-// This is annoying and sily, but it's solving a real problem: the
+// This is annoying and silly, but it's solving a real problem: the
 // _MSC_VER version causes an ICE on our old clang5 builds. The
 // non-_MSC_VER version is a syntax error according to MSVC. Use the
 // appropriate version depending on if we're MSVC or not.
@@ -785,8 +785,8 @@ std::vector<at::Tensor> unsqueezeVarStackInputs(
     const int64_t dim) {
   std::vector<at::Tensor> result;
   result.reserve(inputs.size());
-  for (const auto i : c10::irange(inputs.size())) {
-    result.push_back(at::native::unsqueeze(inputs[i], dim));
+  for (const auto& input : inputs) {
+    result.push_back(at::native::unsqueeze(input, dim));
   }
   return result;
 }

@@ -1160,6 +1160,13 @@ Args:
     non_blocking (bool, optional): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
         cases, this argument has no effect. Default: ``False``
+
+.. note::
+
+    When :attr:`non_blocking` is ``True`` and the copy is issued on a
+    non-default CUDA stream, the caller is responsible for proper
+    cross-stream synchronization. See :ref:`cuda-stream-semantics` for
+    the required pattern.
 """,
 )
 
@@ -2355,7 +2362,7 @@ Note:
 
 Args:
     dim (int): dimension along which to index
-    index (Tensor): indices of ``source`` to select from,
+    index (Tensor): indices of :attr:`self` to add to,
             should have dtype either `torch.int64` or `torch.int32`
     source (Tensor): the tensor containing values to add
 
@@ -5175,6 +5182,13 @@ Here are the ways to call ``to``:
     When :attr:`copy` is set, a new Tensor is created even when the Tensor
     already matches the desired conversion.
 
+.. note::
+
+    When :attr:`non_blocking` is ``True`` and the conversion is issued on
+    a non-default CUDA stream, the caller is responsible for proper
+    cross-stream synchronization. See :ref:`cuda-stream-semantics` for
+    the required pattern.
+
 Example::
 
     >>> tensor = torch.randn(2, 2)  # Initially dtype=float32, device=cpu
@@ -6114,6 +6128,17 @@ If any of the above conditions are not met, an error is thrown.
     This overload is not supported by TorchScript, and using it in a Torchscript
     program will cause undefined behavior.
 
+.. warning::
+
+    Viewing a tensor as ``torch.bool`` reinterprets its bytes without
+    converting them. A ``torch.bool`` tensor must only contain the byte values
+    ``0`` (``False``) and ``1`` (``True``). If any byte of the viewed data has
+    another value, the behavior of operations on the returned tensor is
+    undefined: depending on the operation, device and memory layout, such bytes
+    may be preserved as-is or normalized to ``1``, and eager mode and
+    :func:`torch.compile` may give different results. To convert values to
+    booleans, use :meth:`~Tensor.bool` (or ``self != 0``) instead.
+
 
 Args:
     dtype (:class:`torch.dtype`): the desired dtype
@@ -6555,8 +6580,9 @@ The allowed dtype of :attr:``grad`` for this tensor.
 
 :attr:``grad_dtype`` can be set to a specific dtype or ``None``. By default,
 ``t.grad_dtype == t.dtype``. When not None, the autograd engine casts
-incoming gradients to this dtype. This attribute is only accessible and
-settable for leaf tensors.
+incoming gradients to this dtype. This attribute is readable for both leaf and
+non-leaf tensors, but can only be set for leaf tensors. For a non-leaf tensor,
+it reports the gradient dtype declared by the Function that produced the tensor.
 
 .. warning::
     Use with caution. Diverging the dtypes of a tensor and its gradient may
@@ -6761,7 +6787,7 @@ If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
 
 .. warning::
-    The use of :func:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
+    The use of :attr:`Tensor.T` on tensors of dimension other than 2 to reverse their shape
     is deprecated and it will throw an error in a future release. Consider :attr:`~.Tensor.mT`
     to transpose batches of matrices or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse
     the dimensions of a tensor.

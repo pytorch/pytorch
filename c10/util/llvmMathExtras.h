@@ -400,6 +400,7 @@ constexpr inline bool isShiftedUInt(uint64_t x) {
       N + S <= 64, "isShiftedUInt<N, S> with N + S > 64 is too wide.");
   // Per the two static_asserts above, S must be strictly less than 64.  So
   // 1 << S is not undefined behavior.
+  // NOLINTNEXTLINE(bugprone-chained-comparison)
   return isUInt<N + S>(x) && (x % (UINT64_C(1) << S) == 0);
 }
 

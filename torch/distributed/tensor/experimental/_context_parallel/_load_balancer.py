@@ -72,6 +72,15 @@ class _LoadBalancer(ABC):
             - when `restore == True`, this method returns an indices tensor `restore_idx`
             such that Q[rearrange_idx][restore_idx] == Q, i.e. restoring the rearranged tensor
             back to the original status before rearranging.
+
+        Sharding contract:
+            After rearranging, Context Parallel shards `Q[rearrange_idx]` with
+            `Shard(seq_dim)`, which follows `torch.chunk` semantics: the sequence is
+            split into `world_size` contiguous, equal-sized chunks and chunk `r` is
+            assigned to rank `r`. Implementations must therefore lay out
+            `rearrange_idx` so that each such contiguous chunk is well-balanced --
+            i.e. group each rank's positions together (rank-major), not interleaved
+            by any other axis such as document.
         """
 
 
@@ -255,37 +264,33 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
             seq_length % (2 * world_size) == 0 for seq_length in seq_length_per_doc
         ):
             raise AssertionError
-        chunk_length_per_doc = [
-            seq_length // (2 * world_size) for seq_length in seq_length_per_doc
-        ]
 
-        indices = []
+        # For each document, split it into 2 * world_size equal chunks and pair
+        # chunk r with chunk (2 * world_size - 1 - r), so row r holds rank r's
+        # head+tail chunks (the same strategy as _HeadTailLoadBalancer). Stacking
+        # the per-document rows rank-wise (dim=1) and flattening lays the indices
+        # out rank-major, so a contiguous per-rank shard gives each rank a
+        # head+tail slice of every document. A document-major layout would instead
+        # let the cut fall mid-document, imbalancing work for mixed-length docs.
+        head_idx = torch.arange(world_size, device=device)
+        tail_idx = 2 * world_size - 1 - head_idx
+        per_doc_rank_chunks = []
         document_start_idx = 0
-        for seq_length, chunk_length in zip(seq_length_per_doc, chunk_length_per_doc):
-            # Generate the indices for the current document
-            for rank in range(world_size):
-                head_chunk_start_idx = document_start_idx + chunk_length * rank
-                tail_chunk_end_idx = document_start_idx + chunk_length * (
-                    2 * world_size - rank
-                )
-                indices.append(
-                    torch.arange(
-                        head_chunk_start_idx,
-                        head_chunk_start_idx + chunk_length,
-                        device=device,
-                    )
-                )
-                indices.append(
-                    torch.arange(
-                        tail_chunk_end_idx - chunk_length,
-                        tail_chunk_end_idx,
-                        device=device,
-                    )
-                )
-
+        for seq_length in seq_length_per_doc:
+            chunk_length = seq_length // (2 * world_size)
+            chunks = torch.arange(
+                document_start_idx,
+                document_start_idx + seq_length,
+                device=device,
+            ).view(2 * world_size, chunk_length)
+            # (world_size, 2, chunk_length) -> (world_size, 2 * chunk_length):
+            # row r is rank r's head chunk followed by its tail chunk.
+            paired = torch.stack([chunks[head_idx], chunks[tail_idx]], dim=1)
+            per_doc_rank_chunks.append(paired.reshape(world_size, -1))
             document_start_idx += seq_length
 
-        indices_tensor = torch.cat(indices)
+        # (world_size, seq_len / world_size) flattened rank-major.
+        indices_tensor = torch.cat(per_doc_rank_chunks, dim=1).reshape(-1)
         if restore:
             indices_tensor = torch.argsort(indices_tensor)
 
@@ -386,7 +391,7 @@ class _PTRRLoadBalancer(_LoadBalancer):
             (i.e. `self.block_mask` must have shape (B, 1, seq_len, seq_len) or (1, 1, seq_len, seq_len)).
 
         Example:
-            Here is the document causal mask for attention whereq_len == kv_len == 16 * BLOCK_SIZE
+            Here is the document causal mask for attention where q_len == kv_len == 16 * BLOCK_SIZE
             (each entry is a block):
                                         KV_index
                     [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  -> row value = 1

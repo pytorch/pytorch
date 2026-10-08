@@ -1,9 +1,16 @@
 #include <gtest/gtest.h>
 
+#include <c10/core/CPUAllocator.h>
 #include <c10/core/ConstantSymNodeImpl.h>
+#include <c10/core/Storage.h>
 #include <c10/core/SymInt.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/SymNodeImpl.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
+
+#include <string>
+#include <vector>
 
 using namespace c10;
 #ifndef C10_MOBILE
@@ -22,6 +29,72 @@ TEST(SymIntTest, ConcreteInts) {
 
 TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
+}
+
+namespace {
+class SymNodeWithoutStr final : public SymNodeImpl {
+ public:
+  bool is_int() override {
+    return true;
+  }
+};
+} // namespace
+
+TEST(SymIntTest, SymIntArrayRefErrorDistinguishesHeapAllocatedConcrete) {
+  const std::vector<SymInt> values{
+      SymInt(SymInt::min_representable_int() - 1), SymInt(5)};
+
+  try {
+    (void)c10::asIntArrayRefSlow(values, __FILE__, __LINE__);
+    FAIL() << "Expected asIntArrayRefSlow to reject heap-allocated SymInt";
+  } catch (const c10::Error& e) {
+    const std::string message = e.what_without_backtrace();
+    EXPECT_NE(
+        message.find("heap-allocated concrete SymInt at index 0"),
+        std::string::npos)
+        << message;
+    EXPECT_NE(
+        message.find("cannot represent heap-allocated SymInt values"),
+        std::string::npos)
+        << message;
+    EXPECT_NE(message.find("asIntArrayRefSlowAlloc"), std::string::npos)
+        << message;
+    EXPECT_EQ(message.find("guard/specialize"), std::string::npos) << message;
+    EXPECT_EQ(message.find("Found symbolic SymInt"), std::string::npos)
+        << message;
+    EXPECT_EQ(message.find("symbolic shapes"), std::string::npos) << message;
+  }
+}
+
+TEST(SymIntTest, SymIntArrayRefErrorHandlesSymNodeWithoutStr) {
+  const std::vector<SymInt> values{
+      SymInt(5), SymInt(SymNode(c10::make_intrusive<SymNodeWithoutStr>()))};
+
+  try {
+    (void)c10::asIntArrayRefSlow(values, __FILE__, __LINE__);
+    FAIL() << "Expected asIntArrayRefSlow to reject symbolic SymInt";
+  } catch (const c10::Error& e) {
+    const std::string message = e.what_without_backtrace();
+    EXPECT_NE(
+        message.find("Found symbolic SymInt at index 1"), std::string::npos)
+        << message;
+    EXPECT_NE(
+        message.find(
+            "value and full array unavailable because stringification failed"),
+        std::string::npos)
+        << message;
+    EXPECT_NE(message.find("FakeTensorMode"), std::string::npos) << message;
+    EXPECT_EQ(message.find("NYI"), std::string::npos) << message;
+  }
+}
+
+TEST(SymIntTest, SymIntArrayRefAcceptsConcreteIntArrayRefBridge) {
+  const std::vector<int64_t> values{2, -1, SymInt::min_representable_int()};
+  const auto sym_values = c10::fromIntArrayRefSlow(values);
+  const auto int_values =
+      c10::asIntArrayRefSlow(sym_values, __FILE__, __LINE__);
+
+  EXPECT_EQ(int_values, at::IntArrayRef(values));
 }
 
 #if !C10_UBSAN_ENABLED
@@ -61,6 +134,10 @@ class ConstantIntPretendingToBeSymbolicSymNodeImpl
 
   c10::SymNode wrap_bool(bool b) override {
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(b));
+  }
+
+  c10::SymNode clone() override {
+    return wrap_int(int_());
   }
 
   SymNode add(const SymNode& other) override {
@@ -200,5 +277,58 @@ struct MaxWrapper<SymInt> {
 TEST(SymIntTest, MinMax) {
   test_operator<MinWrapper>();
   test_operator<MaxWrapper>();
+}
+
+// Test copying sizes/strides after materialization.
+TEST(SymIntTest, MaterializedShapeSurvivesTensorImplCopy) {
+  Storage storage(
+      Storage::use_byte_size_t(), /*size_bytes=*/0, GetCPUAllocator());
+  auto impl = c10::make_intrusive<TensorImpl>(
+      std::move(storage),
+      DispatchKeySet(DispatchKey::CPU),
+      caffe2::TypeMeta::Make<float>());
+  std::vector<SymInt> sizes{
+      create_symbolic_symint(2), create_symbolic_symint(3)};
+  std::vector<SymInt> strides{
+      create_symbolic_symint(3), create_symbolic_symint(1)};
+  impl->set_sizes_and_strides(sizes, strides);
+
+  const std::vector<int64_t> expected_sizes{2, 3};
+  const std::vector<int64_t> expected_strides{3, 1};
+
+  // Materialize the caches on the original before copying.
+  ASSERT_EQ(impl->sizes(), IntArrayRef(expected_sizes));
+  ASSERT_EQ(impl->strides(), IntArrayRef(expected_strides));
+
+  auto copy = impl->shallow_copy_and_detach(
+      /*version_counter=*/c10::VariableVersion(/*version=*/0),
+      /*allow_tensor_metadata_change=*/true);
+  EXPECT_EQ(copy->sizes(), IntArrayRef(expected_sizes));
+  EXPECT_EQ(copy->strides(), IntArrayRef(expected_strides));
+}
+
+// ExtraMeta can exist without SymbolicShapeMeta (e.g. it only holds
+// BackendMeta); going symbolic must still create the SymbolicShapeMeta.
+TEST(SymIntTest, SetSymbolicSizesWithExistingExtraMeta) {
+  Storage storage(
+      Storage::use_byte_size_t(), /*size_bytes=*/0, GetCPUAllocator());
+  auto impl = c10::make_intrusive<TensorImpl>(
+      std::move(storage),
+      DispatchKeySet(DispatchKey::CPU),
+      caffe2::TypeMeta::Make<float>());
+  auto backend_meta = c10::make_intrusive<BackendMeta>();
+  impl->set_backend_meta(backend_meta);
+
+  std::vector<SymInt> sizes{
+      create_symbolic_symint(2), create_symbolic_symint(3)};
+  std::vector<SymInt> strides{
+      create_symbolic_symint(3), create_symbolic_symint(1)};
+  impl->set_sizes_and_strides(sizes, strides);
+
+  const std::vector<int64_t> expected_sizes{2, 3};
+  const std::vector<int64_t> expected_strides{3, 1};
+  EXPECT_EQ(impl->sizes(), IntArrayRef(expected_sizes));
+  EXPECT_EQ(impl->strides(), IntArrayRef(expected_strides));
+  EXPECT_EQ(impl->get_backend_meta(), backend_meta.get());
 }
 #endif

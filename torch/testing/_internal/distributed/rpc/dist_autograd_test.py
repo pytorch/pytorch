@@ -518,7 +518,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
 
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
-            # NB: RRef.to_here() always passes the autograd context to the
+            # NB: RRef.to_here() always passes the autograd context to
             # the callee, as the caller does not know whether the return
             # value would contain a requires_grad tensor or not.
             #

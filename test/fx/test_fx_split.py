@@ -2,12 +2,13 @@
 
 import dataclasses
 from collections import defaultdict
+from unittest import mock
 
 import torch
 import torch.fx.passes.operator_support as op_support
 import torch.fx.passes.splitter_base as splitter_base
 from torch.fx.passes.split_utils import split_by_tags
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 @torch.jit.script
@@ -24,6 +25,69 @@ def wrapped_add(_dataclass, y):
 
 
 class TestFXSplit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_all_supported_nodes_skip_fusion_dependency_analysis(self) -> None:
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x) + torch.cos(x)
+
+        class AllOperatorSupport(op_support.OperatorSupportBase):
+            def is_node_supported(self, submodules, node) -> bool:
+                return True
+
+        class SinOnlyOperatorSupport(op_support.OperatorSupportBase):
+            def is_node_supported(self, submodules, node) -> bool:
+                return node.target is torch.sin
+
+        class TestSplitter(splitter_base._SplitterBase):
+            def __init__(
+                self,
+                module,
+                sample_input,
+                operator_support,
+                *,
+                skip_fusion=False,
+            ):
+                super().__init__(
+                    module,
+                    sample_input,
+                    operator_support,
+                    splitter_base._SplitterSettingBase(skip_fusion=skip_fusion),
+                )
+
+        for operator_support, skip_fusion, expect_fusion_analysis in (
+            (AllOperatorSupport(), False, False),
+            (SinOnlyOperatorSupport(), False, True),
+            (SinOnlyOperatorSupport(), True, False),
+        ):
+            gm = torch.fx.symbolic_trace(TestModule())
+            with (
+                mock.patch.object(
+                    splitter_base,
+                    "FxNetAccFusionsFinder",
+                    wraps=splitter_base.FxNetAccFusionsFinder,
+                ) as fusion_finder,
+                mock.patch.object(
+                    splitter_base._SplitterBase,
+                    "update_deps_for_fusions",
+                    autospec=True,
+                ) as update_deps,
+            ):
+                splitter = TestSplitter(
+                    gm,
+                    (torch.randn(2, 3),),
+                    operator_support,
+                    skip_fusion=skip_fusion,
+                )
+
+            if expect_fusion_analysis:
+                fusion_finder.assert_called_once()
+            else:
+                fusion_finder.assert_not_called()
+            update_deps.assert_called_once_with(splitter)
+            self.assertEqual(splitter.fusions, {})
+
     def test_split_preserve_node_meta(self):
         class TestModule(torch.nn.Module):
             def forward(self, x, y):
@@ -113,8 +177,81 @@ class TestFXSplit(TestCase):
         split_module_result = split_result(test_input)
         self.assertTrue(torch.equal(original_result, split_module_result))
 
+    def test_update_deps_for_fusions_matches_per_member_form(self):
+        """
+        update_deps_for_fusions() processes each fusion group once rather than
+        once per member. Assert it produces the same dependency graph as the
+        per-member form it replaced, on a grouping where members have distinct
+        outside dependencies and distinct outside users.
+        """
+
+        class Chain(torch.nn.Module):
+            def forward(self, x):
+                a = torch.sin(x)
+                b = torch.cos(a)
+                c = a + b
+                d = torch.sin(c)
+                e = c * d
+                return e - b
+
+        class AllSupported(op_support.OperatorSupportBase):
+            def is_node_supported(self, submodules, node) -> bool:
+                return True
+
+        class Splitter(splitter_base._SplitterBase):
+            def __init__(self, module, sample_input, operator_support):
+                super().__init__(
+                    module,
+                    sample_input,
+                    operator_support,
+                    splitter_base._SplitterSettingBase(),
+                )
+
+        def reference(deps, fusions):
+            """The per-member form, verbatim."""
+            for node in fusions:
+                fusion = fusions[node]
+                for fused_neighbor in fusion:
+                    deps[node].update(deps[fused_neighbor] - fusion)
+                    for user in fused_neighbor.users:
+                        if user not in fusion:
+                            deps[user].add(node)
+            return deps
+
+        def normalise(deps):
+            return {k.name: sorted(n.name for n in v) for k, v in deps.items() if v}
+
+        gm = torch.fx.symbolic_trace(Chain())
+        splitter = Splitter(gm, [torch.randn(4, 4)], AllSupported())
+
+        callables = [
+            n for n in gm.graph.nodes if n.op in splitter_base.CALLABLE_NODE_OPS
+        ]
+        self.assertGreaterEqual(len(callables), 4)
+
+        # One group spanning several nodes, built the way FxNetAccFusionsFinder
+        # builds them: every member maps to the same set object.
+        group = set(callables[:3])
+        fusions = dict.fromkeys(group, group)
+
+        splitter.fusions = fusions
+        splitter.deps = splitter.find_deps()
+        splitter.update_deps_for_fusions()
+        actual = normalise(splitter.deps)
+
+        expected = normalise(reference(splitter.find_deps(), fusions))
+
+        self.assertEqual(actual, expected)
+
+        # The documented contract: members of a fusion share their outer deps.
+        member_deps = [splitter.deps[n] - group for n in group]
+        for other in member_deps[1:]:
+            self.assertEqual(member_deps[0], other)
+
 
 class TestSplitByTags(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class TestModule(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -194,7 +331,7 @@ class TestSplitByTags(TestCase):
             if idx < len(tags):
                 self.assertTrue(
                     name == tags[idx],
-                    f"split_gm has an incorrect submodule named {name}",
+                    lambda msg: f"{msg}\nsplit_gm has an incorrect submodule named {name}",
                 )
 
         # Ensure each submodule has expected (ordered) call_module node(s).
@@ -209,7 +346,7 @@ class TestSplitByTags(TestCase):
                 self.assertTrue(
                     node.name == tag_node[f"{sub_name}"][node_idx],
                     # pyre-fixme[61]: `name` is undefined, or not always defined.
-                    f"{sub_name} has incorrectly include {node.name}",
+                    lambda msg: f"{msg}\n{sub_name} has incorrectly include {node.name}",
                 )
                 node_idx += 1
             sub_graph_idx += 1
@@ -227,6 +364,8 @@ class TestSplitByTags(TestCase):
 
 
 class TestSplitOutputType(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class TestModule(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()

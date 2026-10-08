@@ -177,11 +177,6 @@ mkldnn_supported = [
 # arguments are already in MKLDNN.
 # TODO: Determine whether this can be removed after type inference.
 mkldnn_supported_unknown = [operator.add, operator.mul]
-mkldnn_map = {
-    nn.Conv2d: th_mkldnn.MkldnnConv2d,
-    nn.Linear: th_mkldnn.MkldnnLinear,
-    nn.BatchNorm2d: lambda a, _: th_mkldnn.MkldnnBatchNorm(a),
-}
 
 
 def modules_to_mkldnn(
@@ -192,6 +187,13 @@ def modules_to_mkldnn(
     then we do so and create a mapping to allow us to convert from the MKLDNN
     version of the module to the original.
     """
+    # Built lazily so importing this module does not compile any TorchScript
+    # ScriptModule via torch.utils.mkldnn.
+    mkldnn_map = {
+        nn.Conv2d: th_mkldnn.MkldnnConv2d,
+        nn.Linear: th_mkldnn.MkldnnLinear,
+        nn.BatchNorm2d: lambda a, _: th_mkldnn.MkldnnBatchNorm(a),
+    }
     old_modules: dict[nn.Module, nn.Module] = {}
     for node in nodes:
         if node.op == "call_module":

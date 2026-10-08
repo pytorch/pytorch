@@ -17,8 +17,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
-from torch._subclasses import FakeTensor, FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake
+from torch._subclasses.fake_tensor import is_fake, is_fake_tensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
+    from torch._subclasses import FakeTensorMode
     from torch.types import IntLikeType
 
     from .descriptors import AOTInput, AOTOutput
@@ -516,6 +516,9 @@ class ViewAndMutationMeta:
 
     # Number of opaque objects saved for backward
     num_opaque_objects_saved_for_bw: int | None = None
+
+    # Whether each saved tensor is also a graph input.
+    saved_tensor_is_graph_input: list[bool] = field(default_factory=list)
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
@@ -698,8 +701,7 @@ class ViewAndMutationMeta:
         # Eventually, we should kill this and replace with real backward guards.
         # (we want to precompute the "runtime" types, so replace FakeTensor with torch.Tensor)
         self.output_types = [
-            torch.Tensor if isinstance(x, FakeTensor) else type(x)
-            for x in self.traced_tangents
+            torch.Tensor if is_fake_tensor(x) else type(x) for x in self.traced_tangents
         ]
 
         self.is_rng_op_functionalized = config.functionalize_rng_ops
@@ -996,6 +998,9 @@ class GraphSignature:
     input_tokens: list[GraphInputName]
     output_tokens: list[GraphOutputName]
 
+    # Input mutations that occur exclusively in backward stay in the graph.
+    inputs_mutated_in_backward: list[GraphInputName] = field(default_factory=list)
+
     @classmethod
     def from_tracing_metadata(
         cls,
@@ -1056,14 +1061,24 @@ class GraphSignature:
 
         names = [*input_tokens, *parameters, *buffers, *user_inputs]
         mutations: list[str] = []
+        backward_mutation_indices = view_mutation_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw
+        inputs_mutated_in_backward = [
+            graph_inputs[num_tokens + idx] for idx in backward_mutation_indices
+        ]
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
+            if (
+                trace_joint
+                and idx < len(parameters)
+                and (input_info.mutates_data or idx in backward_mutation_indices)
+            ):
+                raise RuntimeError(
+                    "Mutating module parameters while exporting a joint "
+                    "forward/backward graph is not supported. Only buffers "
+                    "can be mutated as module state. If this state does "
+                    "not need gradients, register it as a buffer instead. "
+                    f"Found mutation on parameter {parameters[idx]!r}."
+                )
             if input_info.mutates_data:
-                if trace_joint:
-                    # Only buffers can be mutated, not parameters
-                    if idx < len(parameters):
-                        raise AssertionError(
-                            f"expected idx ({idx}) >= len(parameters) ({len(parameters)}) when tracing joint"
-                        )
                 mutations.append(names[idx + num_tokens])
 
         if len(mutations) != view_mutation_metadata.num_mutated_inp_runtime_indices:
@@ -1116,6 +1131,7 @@ class GraphSignature:
             inputs_to_buffers=inputs_to_buffers,  # type: ignore[arg-type]
             inputs_to_parameters=inputs_to_parameters,  # type: ignore[arg-type]
             user_inputs_to_mutate=user_inputs_to_mutate,
+            inputs_mutated_in_backward=inputs_mutated_in_backward,  # type: ignore[arg-type]
             buffers_to_mutate=buffers_to_mutate,  # type: ignore[arg-type]
             parameters_to_mutate=parameters_to_mutate,  # type: ignore[arg-type]
             in_spec=in_spec,
@@ -1244,7 +1260,7 @@ class AOTState:
 
     # Whether or not we need to handle autograd when doing graph capture and
     # compilation.  Although the calling convention for non-autograd graph
-    # capture in AOTAutograd is simple and can be relied upon, the autograph
+    # capture in AOTAutograd is simple and can be relied upon, the autograd
     # capture calling convention is quite complicated and in general you are
     # only expected to pass to aot_stage2_compile to process.
     needs_autograd: bool

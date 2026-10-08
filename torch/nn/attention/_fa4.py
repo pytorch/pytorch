@@ -10,6 +10,7 @@ from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
 from . import _registry
+from ._utils import _empty_with_matching_layout
 
 
 if TYPE_CHECKING:
@@ -33,6 +34,7 @@ class _FA4Handle:
 
     def remove(self) -> None:
         self.library = None
+        torch._C._set_sdp_use_fa4(False)
 
 
 @cache
@@ -53,7 +55,9 @@ def register_flash_attention_fa4(
     global _FA4_MODULE_PATH
     _ = _fa4_import_module(module_path)
     _FA4_MODULE_PATH = module_path
-    return _FA4Handle(_fa4_register_kernels())
+    handle = _FA4Handle(_fa4_register_kernels())
+    torch._C._set_sdp_use_fa4(True)
+    return handle
 
 
 @cache
@@ -207,6 +211,12 @@ def _fa4_run_forward(
     if _FA4_MODULE_PATH is None:
         raise RuntimeError("FA4 not registered")
     module = _fa4_import_module(_FA4_MODULE_PATH)
+    if _get_device_major(query.device) != 10:
+        # SplitKV is SM100-only; the support check already rejects num_splits > 1
+        num_splits = 1
+    elif num_splits is None:
+        # FA4 runs its SplitKV heuristic when num_splits < 1
+        num_splits = 1 if torch.are_deterministic_algorithms_enabled() else 0
 
     kwargs: dict[str, Any] = {
         "softmax_scale": scale,
@@ -220,10 +230,10 @@ def _fa4_run_forward(
         "max_seqlen_k": max_k,
         "seqused_k": seqused_k.contiguous() if seqused_k is not None else None,
         "page_table": block_table,
-        "num_splits": num_splits or 1,
+        "num_splits": num_splits,
         "out": out,
     }
-    out, lse = module._flash_attn_fwd(query, key, value, **kwargs)
+    out, lse, *_ = module._flash_attn_fwd(query, key, value, **kwargs)
     return out, lse.contiguous()
 
 
@@ -447,10 +457,7 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         raise RuntimeError(f"FA4 SDPA forward unsupported: {error}")
     q, k, v = _transpose_dense(query, key, value)
 
-    # Pre-allocate output with query's strides (BHSD layout), then create
-    # a BSHD view for the kernel. This ensures the returned output has
-    # the same memory layout as the input query.
-    out_bhsd = torch.empty_like(query)
+    out_bhsd = _empty_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
     out_bshd = out_bhsd.transpose(1, 2)
 
     max_q_flash = q.size(1)

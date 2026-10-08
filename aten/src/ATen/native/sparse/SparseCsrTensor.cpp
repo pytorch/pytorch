@@ -3,9 +3,6 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/Layout.h>
-#include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
@@ -24,14 +21,12 @@
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_bsc_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_with_dims_native.h>
-#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 #include <ATen/ops/_validate_sparse_compressed_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_csc_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsr_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsc_tensor_args_native.h>
-#include <ATen/ops/aminmax.h>
 #include <ATen/ops/ccol_indices_native.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/col_indices_native.h>
@@ -551,7 +546,10 @@ static DimVector _estimate_sparse_compressed_tensor_size(
                       (block_ndim == 2 ? std::max<int64_t>(1, values.size(batch_ndim + 1)) : 1),
                       (block_ndim == 2 ? std::max<int64_t>(1, values.size(batch_ndim + 2)) : 1)
   };
-  DimVector size = DimVector(compressed_indices.sizes().slice(0, batch_ndim));
+  const auto batch_sizes = compressed_indices.sizes().slice(0, batch_ndim);
+  DimVector size;
+  size.reserve(batch_sizes.size() + 2);
+  size.append(batch_sizes.begin(), batch_sizes.end());
   int64_t compressed_dim_size = (compressed_indices.dim() > 0 && compressed_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
   int64_t plain_dim_size = AT_DISPATCH_INTEGRAL_TYPES(plain_indices.scalar_type(), "estimate_sparse_compressed_tensor_size",
                                                       [&]() -> int64_t {

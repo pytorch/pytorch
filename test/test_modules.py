@@ -11,11 +11,11 @@ import torch
 from torch._subclasses.meta_utils import assert_metadata_eq
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, onlyAccelerator, toleranceOverride, tol, skipMeta, skipMPS)
+    instantiate_device_type_tests, onlyAccelerator, toleranceOverride, tol, skipMeta, skipMPS)
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM)
+    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_ROCM, HardwareClassification)
 from unittest.mock import patch, call
 
 
@@ -25,6 +25,7 @@ if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
 
 class TestModule(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     precision = 1e-5
@@ -445,8 +446,7 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True, training=training)
-        if "xpu" in device and module_info.name == "nn.MultiheadAttention":
-            self.skipTest("GradcheckError issue in MultiheadAttention, https://github.com/intel/torch-xpu-ops/issues/2356")
+
         # === Set nondet tol for gradcheck to user-defined value if on CUDA and cudNN is enabled
         gradcheck_nondet_tol = 0.0
         if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled) or torch.device(device).type == 'xpu':
@@ -824,40 +824,12 @@ class TestModule(TestCase):
             except AttributeError as e:
                 if "'training'" in str(e):
                     self.assertTrue(module_info.train_and_eval_differ,
-                                    f"The ModuleInfo entry for {module_info.name} has "
+                                    lambda msg: f"{msg}\nThe ModuleInfo entry for {module_info.name} has "
                                     "train_and_eval_differ=False, but the training mode was found to "
                                     "affect the forward pass. Consider setting train_and_eval_differ=True "
                                     "for this ModuleInfo entry.")
                 else:
                     raise e
-
-
-    @onlyCPU
-    @modules(module_db)
-    def test_device_ctx_init(self, device, dtype, module_info, training):
-        module_cls = module_info.module_cls
-        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
-                                                       requires_grad=False, training=training)
-        with torch.device('meta'):
-            module_inputs_meta = module_info.module_inputs_func(module_info, device=None, dtype=dtype,
-                                                                requires_grad=False, training=training)
-
-        for module_input, module_input_meta in zip(module_inputs, module_inputs_meta):
-            c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
-
-            c_args_meta, c_kwargs_meta = module_input_meta.constructor_input.args, module_input_meta.constructor_input.kwargs
-
-            m_cpu = module_cls(*c_args, **c_kwargs)
-
-            with torch.device('meta'):
-                m = module_cls(*c_args_meta, **c_kwargs_meta)
-
-            for (p_meta, p_cpu) in chain(zip(m.parameters(), m_cpu.parameters()),
-                                         zip(m.buffers(), m_cpu.buffers())):
-                if torch.nn.parameter.is_lazy(p_meta):
-                    continue
-                self.assertTrue(p_meta.is_meta)
-                assert_metadata_eq(self.assertEqual, p_meta, p_cpu)
 
 
     @modules([module for module in module_db if module.module_error_inputs_func is not None])
@@ -1011,7 +983,39 @@ class TestModule(TestCase):
                 self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
 
 
+class TestModuleCPUOnly(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    @modules(module_db)
+    def test_device_ctx_init(self, dtype, module_info, training):
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
+                                                       requires_grad=False, training=training)
+        with torch.device('meta'):
+            module_inputs_meta = module_info.module_inputs_func(module_info, device=None, dtype=dtype,
+                                                                requires_grad=False, training=training)
+
+        for module_input, module_input_meta in zip(module_inputs, module_inputs_meta):
+            c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+
+            c_args_meta, c_kwargs_meta = module_input_meta.constructor_input.args, module_input_meta.constructor_input.kwargs
+
+            m_cpu = module_cls(*c_args, **c_kwargs)
+
+            with torch.device('meta'):
+                m = module_cls(*c_args_meta, **c_kwargs_meta)
+
+            for (p_meta, p_cpu) in chain(zip(m.parameters(), m_cpu.parameters()),
+                                         zip(m.buffers(), m_cpu.buffers())):
+                if torch.nn.parameter.is_lazy(p_meta):
+                    continue
+                self.assertTrue(p_meta.is_meta)
+                assert_metadata_eq(self.assertEqual, p_meta, p_cpu)
+
+
 class TestJitReplaceSubmodule(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_jit_replace_submodule(self):
         from torch.jit._recursive import wrap_cpp_module
 
@@ -1282,6 +1286,7 @@ class TestJitReplaceSubmodule(TestCase):
 
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True, allow_xpu=True)
+instantiate_device_type_tests(TestModuleCPUOnly, globals(), only_for="cpu")
 
 if __name__ == '__main__':
     run_tests()

@@ -385,6 +385,24 @@ class Tensor {
     return defined;
   }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+  /**
+   * @brief Checks whether the tensor has an associated storage.
+   *
+   * Returns false for undefined tensors and for tensors that do not own a
+   * storage (e.g. sparse tensors).
+   *
+   * @return true if the tensor has a storage, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.14.
+   */
+  bool has_storage() const {
+    bool has_storage = false;
+    STABLE_TORCH_ERROR_CODE_CHECK(torch_has_storage(ath_.get(), &has_storage));
+    return has_storage;
+  }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
   /**
    * @brief Returns the storage offset of the tensor.
    *

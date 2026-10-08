@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import copy
-from typing import TYPE_CHECKING
+from typing import ClassVar, TYPE_CHECKING
 
 import torch
 import torch.distributed.checkpoint as dcp
@@ -100,9 +100,23 @@ class ComposabilityTest(MultiProcContinuousTest):
     def device(self):
         return self.rank
 
+    # The workers are reused for every test in this class, and each new mesh adds
+    # NCCL communicators that hold /dev/shm until the workers exit, so build each
+    # distinct mesh once and share it across tests.
+    _meshes: ClassVar[dict[tuple, DeviceMesh]] = {}
+
+    @classmethod
+    def _get_mesh(cls, mesh_shape, mesh_dim_names) -> DeviceMesh:
+        key = (mesh_shape, mesh_dim_names)
+        if key not in cls._meshes:
+            cls._meshes[key] = init_device_mesh(
+                device_type, mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+            )
+        return cls._meshes[key]
+
     @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @skip_if_lt_x_gpu(8)
     def test_pp_and_dcp(self):
         """
         Test that pipeline parallelism and distributed checkpointing can be used together and
@@ -178,14 +192,14 @@ class ComposabilityTest(MultiProcContinuousTest):
                 self.assertIn(
                     param_name,
                     sd_param_names,
-                    f"Parameter name '{param_name}' not found in state_dict.",
+                    lambda msg: f"{msg}\nParameter name '{param_name}' not found in state_dict.",
                 )
 
         _dcp_test(self)
 
     @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @skip_if_lt_x_gpu(8)
     @parametrize(
         "ScheduleClass",
         [
@@ -210,11 +224,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         pp_size = 2
         num_microbatches = 8
         dp_size = self.world_size // (tp_size * pp_size)
-        device_mesh = init_device_mesh(
-            device_type,
-            mesh_shape=(dp_size, pp_size, tp_size),
-            mesh_dim_names=("dp", "pp", "tp"),
-        )
+        device_mesh = self._get_mesh((dp_size, pp_size, tp_size), ("dp", "pp", "tp"))
         dp_mesh = device_mesh["dp"]
         tp_mesh = device_mesh["tp"]
         pp_mesh = device_mesh["pp"]
@@ -327,8 +337,8 @@ class ComposabilityTest(MultiProcContinuousTest):
                 optimizer.step()
 
     @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @skip_if_lt_x_gpu(8)
     @parametrize(
         "ScheduleClass",
         [
@@ -352,11 +362,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         pp_size = 2
         num_microbatches = 8
         replicate_size = self.world_size // (pp_size)
-        device_mesh = init_device_mesh(
-            device_type,
-            mesh_shape=(replicate_size, pp_size),
-            mesh_dim_names=("replicate", "pp"),
-        )
+        device_mesh = self._get_mesh((replicate_size, pp_size), ("replicate", "pp"))
         torch.manual_seed(42)
         dp_mesh = device_mesh["replicate"]
         pp_mesh = device_mesh["pp"]
@@ -511,8 +517,8 @@ class ComposabilityTest(MultiProcContinuousTest):
                 ref_optimizer.step()
 
     @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(8)
     @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
+    @skip_if_lt_x_gpu(8)
     @parametrize(
         "ScheduleClass",
         [
@@ -529,11 +535,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         pp_size = 2
         num_microbatches = 8
         replicate_size = self.world_size // (pp_size)
-        device_mesh = init_device_mesh(
-            device_type,
-            mesh_shape=(replicate_size, pp_size),
-            mesh_dim_names=("replicate", "pp"),
-        )
+        device_mesh = self._get_mesh((replicate_size, pp_size), ("replicate", "pp"))
         torch.manual_seed(42)
         dp_mesh = device_mesh["replicate"]
         pp_mesh = device_mesh["pp"]

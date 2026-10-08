@@ -1,5 +1,5 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
-#include <c10/util/Array.h>
+#include <array>
 namespace sdp {
 namespace {
 
@@ -15,17 +15,19 @@ bool check_head_dim_size_cpp(sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
-  if (!(query_size_last == key_size_last &&
-        query_size_last == value_size_last)) {
+  const bool same_head_dim_size =
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(key_size_last)) &&
+      TORCH_GUARD_OR_FALSE(query_size_last.sym_eq(value_size_last));
+  if (!same_head_dim_size) {
     if (debug) {
       TORCH_WARN(
           "Flash attention requires q,k,v to have the same last dimension.",
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
-          params.key.sym_size(-1),
+          key_size_last,
           ", Value.size(-1): ",
-          params.value.sym_size(-1),
+          value_size_last,
           " instead.");
     }
     return false;
@@ -35,19 +37,19 @@ bool check_head_dim_size_cpp(sdp_params const& params, bool debug) {
 
 bool use_flash_attention_cpp(sdp_params const& params, bool debug) {
   constexpr auto cpp_supported_flash_dtypes =
-      c10::array_of<at::ScalarType>(at::kFloat, at::kDouble, at::kBFloat16, at::kHalf);
+      std::to_array<at::ScalarType>({at::kFloat, at::kDouble, at::kBFloat16, at::kHalf});
 
   // Define gate functions that determine if a flash kernel can be run
-  constexpr auto constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
-      check_runtime_disabled_flash,
+  constexpr auto constraints = std::to_array<bool (*)(sdp_params const&, bool)>(
+      {check_runtime_disabled_flash,
       check_nested_tensor,
       check_for_dropout,
       check_tensor_shapes,
-      check_batch_size_and_num_heads_dense<true /*supports_grouped_query_attention*/>,
+      check_batch_size_and_num_heads_dense<true /*supports_gqa*/, true, true /*supports_mqa*/>,
       check_attn_mask_shape,
       check_head_dim_size_cpp,
       check_nonzero_sequence_lengths_dense,
-      check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>);
+      check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>});
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;

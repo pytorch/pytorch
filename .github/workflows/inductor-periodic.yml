@@ -31,7 +31,6 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: amd-do
       opt_out_experiments: lf
 
   periodic-dynamo-benchmarks-build:
@@ -40,31 +39,30 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      runner: linux.4xlarge.memory
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0;8.6'
       test-matrix: |
         { include: [
-          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
-          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-22-225-h100" },
+          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   periodic-dynamo-benchmarks-test:
@@ -77,9 +75,9 @@ jobs:
       build-environment: ${{ needs.periodic-dynamo-benchmarks-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix }}
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   rocm-periodic-dynamo-benchmarks-build:
@@ -89,22 +87,24 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-rocm-py3.10-mi350
+      build-environment: linux-jammy-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      rocm-arch-list: gfx950
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
         ]}
+      build-additional-packages: "fbgemm"
     secrets: inherit
 
   rocm-periodic-dynamo-benchmarks-test:
@@ -124,19 +124,18 @@ jobs:
       - get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      runner: linux.4xlarge.memory
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100" },
         ]}
       build-additional-packages: "vision audio fbgemm torchao"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
   inductor-smoke-test:
@@ -149,9 +148,9 @@ jobs:
       build-environment: ${{ needs.inductor-smoke-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-smoke-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-smoke-build.outputs.test-matrix }}
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
-      cuda-version: "13.0"
+      cuda-version: "13.2"
     secrets: inherit
 
 
@@ -160,51 +159,51 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: linux-jammy-py3.11-gcc11-build
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "linux.2xlarge.avx2" },
-          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "linux.2xlarge.avx2" },
-          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_freezing_avx2_huggingface", shard: 1, num_shards: 1, runner: "linux.10xlarge.avx2" },
-          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
-          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
-          { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
-          { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
-          { config: "cpu_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_freezing_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_freezing_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_amp_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_amp_freezing_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_amp_freezing_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_freezing_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_freezing_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_aot_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_aot_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
+          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "mt-l-x86iavx2-8-32" },
+          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "mt-l-x86iavx2-8-32" },
+          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_freezing_avx2_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iavx2-40-160" },
+          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },
+          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },
+          { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },
+          { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },
+          { config: "cpu_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_freezing_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_freezing_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_amp_freezing_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_amp_freezing_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_amp_freezing_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_freezing_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_freezing_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_aot_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_aot_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
         ]}
       build-additional-packages: "vision audio torchao"
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: cpu
     secrets: inherit
@@ -219,7 +218,7 @@ jobs:
       build-environment: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.test-matrix }}
-      python-version: "3.10"
+      python-version: "3.11"
       compiler: gcc11
       cuda-version: cpu
     secrets: inherit
