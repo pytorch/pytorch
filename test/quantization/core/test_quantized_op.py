@@ -5069,8 +5069,6 @@ class TestQuantizedEmbeddingOps(TestQuantizedEmbeddingOpsBase):
             self.assertEqual(unpacked_weight.q_per_channel_zero_points(), qweight.q_per_channel_zero_points())
 
 
-
-
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate,
                                       optimized_qparams, num_batches, data_type=np.float32):
 
@@ -5086,7 +5084,6 @@ class TestQuantizedEmbeddingOps(TestQuantizedEmbeddingOpsBase):
         split_weights = torch.split(unsplit_weight, 1, dim=split_dim)
         for weight in split_weights:
             self._test_embedding_bag_unpack_impl(pack_fn, unpack_fn, bit_rate, optimized_qparams, weight)
-
 
 
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
@@ -5166,7 +5163,7 @@ class TestQuantizedEmbeddingOps(TestQuantizedEmbeddingOpsBase):
                                                include_last_offset,
                                                fallback_to_no_sparse,
                                                sparsity=sparsity,
-                                                atol=1.0, rtol=1e-1)
+                                               atol=1.0, rtol=1e-1)
 
     """ Tests the correctness of the quantized 8 bit embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
@@ -6139,255 +6136,6 @@ class TestQuantizedConv(TestCase):
                     Y_scale, Y_zero_point, use_bias, "add_relu", use_channelwise, False,
                     input_dtype=X_qdtype, output_dtype=X_qdtype, X2_scale=X2_scale, X2_zero_point=X2_zero_point)
 
-    # TODO: merge this test with test_qconv2d when CUDNN runtime flags becomes available
-    """Tests the correctness of quantized 2D convolution cudnn op."""
-    @given(batch_size=st.integers(1, 3),
-           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
-           input_channels_per_group=st.integers(1, 32),
-           height=st.integers(10, 16),
-           width=st.integers(7, 14),
-           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
-           output_channels_per_group=st.integers(1, 32),
-           groups=st.integers(1, 1),  # currently padding only supports groups=1
-           kernel_h=st.integers(1, 7),
-           kernel_w=st.integers(1, 7),
-           stride_h=st.integers(1, 2),
-           stride_w=st.integers(1, 2),
-           pad_h=st.integers(0, 2),
-           pad_w=st.integers(0, 2),
-           # result for dilation == 2 is not correct
-           # dilation=st.integers(1, 2),
-           # currently cudnn has only been verified to work for dilation = 1
-           # TODO: check backend works for dilation > 1
-           dilation=st.integers(1, 1),
-           X_scale=st.floats(1.2, 1.6),
-           X_zero_point=st.sampled_from([0]),
-           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
-           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
-           Y_scale=st.floats(4.2, 5.6),
-           Y_zero_point=st.sampled_from([0]),
-           use_bias=st.booleans(),
-           # TODO: enable channelwise
-           use_channelwise=st.sampled_from([False]))
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
-    @unittest.skip("not currently working and feature isn't used")
-    def test_qconv2d_cudnn(
-            self,
-            batch_size,
-            input_channels_per_group,
-            height,
-            width,
-            output_channels_per_group,
-            groups,
-            kernel_h,
-            kernel_w,
-            stride_h,
-            stride_w,
-            pad_h,
-            pad_w,
-            dilation,
-            X_scale,
-            X_zero_point,
-            W_scale,
-            W_zero_point,
-            Y_scale,
-            Y_zero_point,
-            use_bias,
-            use_channelwise,
-    ):
-        input_channels = input_channels_per_group * groups
-        output_channels = output_channels_per_group * groups
-        kernels = (kernel_h, kernel_w)
-        strides = (stride_h, stride_w)
-        pads = (pad_h, pad_w)
-        dilations = (dilation, dilation)
-
-        qconv = torch.ops.quantized.conv2d
-        conv_op = torch.nn.Conv2d(
-            input_channels,
-            output_channels,
-            kernels,
-            strides,
-            pads,
-            dilations,
-            groups,
-        ).to(torch.device("cuda"))
-        self._test_qconv_impl(
-            qconv, torch.ops.quantized.conv2d_prepack, conv_op, batch_size,
-            input_channels_per_group, (height, width),
-            output_channels_per_group, groups, kernels, strides, pads, None,
-            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
-            Y_scale, Y_zero_point, use_bias, "none", use_channelwise, False,
-            device=torch.device("cuda"),
-            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
-
-    @given(batch_size=st.integers(1, 3),
-           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
-           input_channels_per_group=st.integers(1, 32),
-           height=st.integers(10, 16),
-           width=st.integers(7, 14),
-           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
-           output_channels_per_group=st.integers(1, 32),
-           groups=st.integers(1, 1),  # currently padding only supports groups=1
-           kernel_h=st.integers(1, 7),
-           kernel_w=st.integers(1, 7),
-           stride_h=st.integers(1, 2),
-           stride_w=st.integers(1, 2),
-           pad_h=st.integers(0, 2),
-           pad_w=st.integers(0, 2),
-           # result for dilation == 2 is not correct
-           # dilation=st.integers(1, 2),
-           # currently cudnn has only been verified to work for dilation = 1
-           # TODO: check backend works for dilation > 1
-           dilation=st.integers(1, 1),
-           X_scale=st.floats(1.2, 1.6),
-           X_zero_point=st.sampled_from([0]),
-           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
-           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
-           Y_scale=st.floats(4.2, 5.6),
-           Y_zero_point=st.sampled_from([0]),
-           use_bias=st.booleans(),
-           # TODO: enable channelwise
-           use_channelwise=st.sampled_from([False]))
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
-    @unittest.skip("not currently working and feature isn't used")
-    def test_qconv2d_relu_cudnn(
-            self,
-            batch_size,
-            input_channels_per_group,
-            height,
-            width,
-            output_channels_per_group,
-            groups,
-            kernel_h,
-            kernel_w,
-            stride_h,
-            stride_w,
-            pad_h,
-            pad_w,
-            dilation,
-            X_scale,
-            X_zero_point,
-            W_scale,
-            W_zero_point,
-            Y_scale,
-            Y_zero_point,
-            use_bias,
-            use_channelwise,
-    ):
-        input_channels = input_channels_per_group * groups
-        output_channels = output_channels_per_group * groups
-        kernels = (kernel_h, kernel_w)
-        strides = (stride_h, stride_w)
-        pads = (pad_h, pad_w)
-        dilations = (dilation, dilation)
-
-        qconv = torch.ops.quantized.conv2d_relu
-        conv_op = torch.nn.Conv2d(
-            input_channels,
-            output_channels,
-            kernels,
-            strides,
-            pads,
-            dilations,
-            groups,
-        ).to(torch.device("cuda"))
-        self._test_qconv_impl(
-            qconv, torch.ops.quantized.conv2d_prepack, conv_op, batch_size,
-            input_channels_per_group, (height, width),
-            output_channels_per_group, groups, kernels, strides, pads, None,
-            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
-            Y_scale, Y_zero_point, use_bias, "relu", use_channelwise, False,
-            device=torch.device("cuda"),
-            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
-
-    @unittest.skip("used for local benchmarking, comment when we want to run it")
-    def test_benchmark(self):
-        batch_size = 16
-        in_channel = 64
-        out_channel = 64
-        kernel_size = 3
-        height = 256
-        width = 256
-        print(
-            "parameters:",
-            "batch_size:", batch_size,
-            "in_channel:", in_channel,
-            "out_channel:", out_channel,
-            "kernel_size:", kernel_size,
-            "height:", height,
-            "width:", width
-        )
-        conv = torch.nn.Conv2d(in_channel, out_channel, kernel_size).cuda()
-        input = torch.randn((batch_size, in_channel, height, width), device='cuda')
-        weight = conv.weight.detach()
-        stride = (1, 1)
-        padding = (0, 0)
-        dilation = (1, 1)
-        groups = 1
-        conv_op = torch.nn.functional.conv2d
-        # profile
-        from torch.profiler import profile, ProfilerActivity
-
-        def trace_handler(p):
-            output = p.key_averages().table(sort_by="self_cpu_time_total", row_limit=10)
-            p.export_chrome_trace("/tmp/trace_" + str(p.step_num) + ".json")
-
-        my_schedule = torch.profiler.schedule(
-            wait=5,
-            warmup=5,
-            active=20)
-
-        # fp32 benchmark
-        with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                schedule=my_schedule,
-                on_trace_ready=trace_handler) as prof:
-            for _ in range(30):
-                conv_op(input, weight, None, stride, padding, dilation, groups)
-                prof.step()
-
-        print("fp32 benchmark result:")
-        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
-
-        # fp16 benchmark
-        input_fp16 = input.to(torch.float16)
-        weight_fp16 = input.to(torch.float16)
-
-        with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                schedule=my_schedule,
-                on_trace_ready=trace_handler) as prof:
-            for _ in range(30):
-                conv_op(input_fp16, weight_fp16, None, stride, padding, dilation, groups)
-                prof.step()
-
-        print("fp16 benchmark result:")
-        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
-
-        input_int8 = torch.quantize_per_tensor(input, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
-        weight_int8 = torch.quantize_per_tensor(weight, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
-        scale = 1.0
-        zero_point = 0
-        conv_op = torch.ops.quantized.conv2d
-        weight_prepacked = torch.ops.quantized.conv2d_prepack(weight_int8, None, stride, padding, dilation, groups)
-        with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                schedule=my_schedule,
-                on_trace_ready=trace_handler) as prof:
-            for _ in range(30):
-                conv_op(input_int8, weight_prepacked, scale, zero_point)
-                prof.step()
-
-        print("int8 benchmark result:")
-        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
-
     """Tests the correctness of quantized convolution op."""
     @override_qengines
     def test_qconv_transpose1d(self):
@@ -6959,156 +6707,6 @@ class TestQuantizedConv(TestCase):
                 [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
                 Y_scale, Y_zero_point, use_bias, "relu", use_channelwise, False,
                 input_dtype=X_qdtype, output_dtype=X_qdtype)
-
-    # TODO: merge this test with test_qconv1d when CUDNN runtime flags becomes available
-    """Tests the correctness of quantized 1D convolution cudnn op."""
-    @given(batch_size=st.integers(1, 6),
-           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
-           input_channels_per_group=st.integers(1, 32),
-           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
-           output_channels_per_group=st.integers(1, 32),
-           groups=st.integers(1, 1),  # currently padding only supports groups=1
-           length=st.integers(4, 16),
-           kernel=st.integers(1, 7),
-           stride=st.integers(1, 2),
-           pad=st.integers(0, 2),
-           # currently cudnn has only been verified to work for dilation = 1
-           # TODO: check backend works for dilation > 1
-           dilation=st.integers(1, 1),
-           X_scale=st.floats(1.2, 1.6),
-           # currently conv cudnn backend is only implemented for int8 symmetric
-           X_zero_point=st.sampled_from([0]),
-           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
-           # currently conv cudnn backend is only implemented for int8 symmetric
-           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
-           Y_scale=st.floats(4.2, 5.6),
-           # currently conv cudnn backend is only implemented for int8 symmetric
-           Y_zero_point=st.sampled_from([0]),
-           use_bias=st.booleans(),
-           # TODO: enable channelwise
-           use_channelwise=st.sampled_from([False]))
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
-    @unittest.skip("not currently working and feature isn't used")
-    def test_qconv1d_cudnn(
-        self,
-        batch_size,
-        input_channels_per_group,
-        output_channels_per_group,
-        groups,
-        length,
-        kernel,
-        stride,
-        pad,
-        dilation,
-        X_scale,
-        X_zero_point,
-        W_scale,
-        W_zero_point,
-        Y_scale,
-        Y_zero_point,
-        use_bias,
-        use_channelwise,
-    ):
-        input_channels = input_channels_per_group * groups
-        output_channels = output_channels_per_group * groups
-
-        conv1d = torch.nn.Conv1d(
-            input_channels,
-            output_channels,
-            kernel,
-            stride,
-            pad,
-            dilation,
-            groups,
-        ).to(torch.device("cuda"))
-        qconv_prepack = torch.ops.quantized.conv1d_prepack
-        qconv = torch.ops.quantized.conv1d
-
-        self._test_qconv_impl(
-            qconv, qconv_prepack, conv1d, batch_size,
-            input_channels_per_group, (length, ),
-            output_channels_per_group, groups, kernel, [stride], [pad], None,
-            [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
-            Y_scale, Y_zero_point, use_bias, "none", use_channelwise, False,
-            device=torch.device("cuda"),
-            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
-
-    @given(batch_size=st.integers(1, 6),
-           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
-           input_channels_per_group=st.integers(1, 32),
-           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
-           output_channels_per_group=st.integers(1, 32),
-           groups=st.integers(1, 1),  # currently padding only supports groups=1
-           length=st.integers(4, 16),
-           kernel=st.integers(1, 7),
-           stride=st.integers(1, 2),
-           pad=st.integers(0, 2),
-           # currently cudnn has only been verified to work for dilation = 1
-           # TODO: check backend works for dilation > 1
-           dilation=st.integers(1, 1),
-           X_scale=st.floats(1.2, 1.6),
-           # currently conv cudnn backend is only implemented for int8 symmetric
-           X_zero_point=st.sampled_from([0]),
-           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
-           # currently conv cudnn backend is only implemented for int8 symmetric
-           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
-           Y_scale=st.floats(4.2, 5.6),
-           # currently conv cudnn backend is only implemented for int8 symmetric
-           Y_zero_point=st.sampled_from([0]),
-           use_bias=st.booleans(),
-           # TODO: enable channelwise
-           use_channelwise=st.sampled_from([False]))
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
-    @unittest.skip("not currently working and feature isn't used")
-    def test_qconv1d_relu_cudnn(
-        self,
-        batch_size,
-        input_channels_per_group,
-        output_channels_per_group,
-        groups,
-        length,
-        kernel,
-        stride,
-        pad,
-        dilation,
-        X_scale,
-        X_zero_point,
-        W_scale,
-        W_zero_point,
-        Y_scale,
-        Y_zero_point,
-        use_bias,
-        use_channelwise,
-    ):
-        input_channels = input_channels_per_group * groups
-        output_channels = output_channels_per_group * groups
-
-        conv1d = torch.nn.Conv1d(
-            input_channels,
-            output_channels,
-            kernel,
-            stride,
-            pad,
-            dilation,
-            groups,
-        ).to(torch.device("cuda"))
-        qconv_prepack = torch.ops.quantized.conv1d_prepack
-        qconv = torch.ops.quantized.conv1d_relu
-
-        self._test_qconv_impl(
-            qconv, qconv_prepack, conv1d, batch_size,
-            input_channels_per_group, (length, ),
-            output_channels_per_group, groups, kernel, [stride], [pad], None,
-            [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
-            Y_scale, Y_zero_point, use_bias, "relu", use_channelwise, False,
-            device=torch.device("cuda"),
-            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
 
     @given(batch_size=st.integers(1, 4),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16]),
@@ -8674,7 +8272,6 @@ class TestQuantizedConv(TestCase):
         self._test_qconv_fp8_helper(3, pointwise_post_op)
 
 
-
 class TestPadding(TestCase):
     @given(batch_size=st.integers(1, 64),
            channels=st.integers(1, 64),
@@ -9644,6 +9241,415 @@ class TestQuantizedOpsAccelerator(TestQuantizedOpsBase):
 
 instantiate_device_type_tests(TestQuantizedOpsAccelerator, globals())
 instantiate_device_type_tests(TestQuantizedEmbeddingOpsAccelerator, globals(), allow_xpu=True)
+
+
+class TestQuantizedConvCUDA(TestCase):
+
+    # TODO: merge this test with test_qconv2d when CUDNN runtime flags becomes available
+    """Tests the correctness of quantized 2D convolution cudnn op."""
+    @given(batch_size=st.integers(1, 3),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           input_channels_per_group=st.integers(1, 32),
+           height=st.integers(10, 16),
+           width=st.integers(7, 14),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           output_channels_per_group=st.integers(1, 32),
+           groups=st.integers(1, 1),  # currently padding only supports groups=1
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           # result for dilation == 2 is not correct
+           # dilation=st.integers(1, 2),
+           # currently cudnn has only been verified to work for dilation = 1
+           # TODO: check backend works for dilation > 1
+           dilation=st.integers(1, 1),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.sampled_from([0]),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.sampled_from([0]),
+           use_bias=st.booleans(),
+           # TODO: enable channelwise
+           use_channelwise=st.sampled_from([False]))
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
+    def test_qconv2d_cudnn(
+            self,
+            device,
+            batch_size,
+            input_channels_per_group,
+            height,
+            width,
+            output_channels_per_group,
+            groups,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+            pad_h,
+            pad_w,
+            dilation,
+            X_scale,
+            X_zero_point,
+            W_scale,
+            W_zero_point,
+            Y_scale,
+            Y_zero_point,
+            use_bias,
+            use_channelwise,
+    ):
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        kernels = (kernel_h, kernel_w)
+        strides = (stride_h, stride_w)
+        pads = (pad_h, pad_w)
+        dilations = (dilation, dilation)
+
+        qconv = torch.ops.quantized.conv2d
+        conv_op = torch.nn.Conv2d(
+            input_channels,
+            output_channels,
+            kernels,
+            strides,
+            pads,
+            dilations,
+            groups,
+        ).to(device)
+        self._test_qconv_impl(
+            qconv, torch.ops.quantized.conv2d_prepack, conv_op, batch_size,
+            input_channels_per_group, (height, width),
+            output_channels_per_group, groups, kernels, strides, pads, None,
+            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, "none", use_channelwise, False,
+            device=device,
+            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
+
+    @given(batch_size=st.integers(1, 3),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           input_channels_per_group=st.integers(1, 32),
+           height=st.integers(10, 16),
+           width=st.integers(7, 14),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           output_channels_per_group=st.integers(1, 32),
+           groups=st.integers(1, 1),  # currently padding only supports groups=1
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           # result for dilation == 2 is not correct
+           # dilation=st.integers(1, 2),
+           # currently cudnn has only been verified to work for dilation = 1
+           # TODO: check backend works for dilation > 1
+           dilation=st.integers(1, 1),
+           X_scale=st.floats(1.2, 1.6),
+           X_zero_point=st.sampled_from([0]),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           Y_zero_point=st.sampled_from([0]),
+           use_bias=st.booleans(),
+           # TODO: enable channelwise
+           use_channelwise=st.sampled_from([False]))
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
+    def test_qconv2d_relu_cudnn(
+            self,
+            device,
+            batch_size,
+            input_channels_per_group,
+            height,
+            width,
+            output_channels_per_group,
+            groups,
+            kernel_h,
+            kernel_w,
+            stride_h,
+            stride_w,
+            pad_h,
+            pad_w,
+            dilation,
+            X_scale,
+            X_zero_point,
+            W_scale,
+            W_zero_point,
+            Y_scale,
+            Y_zero_point,
+            use_bias,
+            use_channelwise,
+    ):
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        kernels = (kernel_h, kernel_w)
+        strides = (stride_h, stride_w)
+        pads = (pad_h, pad_w)
+        dilations = (dilation, dilation)
+
+        qconv = torch.ops.quantized.conv2d_relu
+        conv_op = torch.nn.Conv2d(
+            input_channels,
+            output_channels,
+            kernels,
+            strides,
+            pads,
+            dilations,
+            groups,
+        ).to(device)
+        self._test_qconv_impl(
+            qconv, torch.ops.quantized.conv2d_prepack, conv_op, batch_size,
+            input_channels_per_group, (height, width),
+            output_channels_per_group, groups, kernels, strides, pads, None,
+            dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, "relu", use_channelwise, False,
+            device=device,
+            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
+
+    @unittest.skip("used for local benchmarking, comment when we want to run it")
+    def test_benchmark(self, device):
+        batch_size = 16
+        in_channel = 64
+        out_channel = 64
+        kernel_size = 3
+        height = 256
+        width = 256
+        print(
+            "parameters:",
+            "batch_size:", batch_size,
+            "in_channel:", in_channel,
+            "out_channel:", out_channel,
+            "kernel_size:", kernel_size,
+            "height:", height,
+            "width:", width
+        )
+        conv = torch.nn.Conv2d(in_channel, out_channel, kernel_size).to(device)
+        input = torch.randn((batch_size, in_channel, height, width), device=device)
+        weight = conv.weight.detach()
+        stride = (1, 1)
+        padding = (0, 0)
+        dilation = (1, 1)
+        groups = 1
+        conv_op = torch.nn.functional.conv2d
+        # profile
+        from torch.profiler import profile, ProfilerActivity
+
+        def trace_handler(p):
+            output = p.key_averages().table(sort_by="self_cpu_time_total", row_limit=10)
+            p.export_chrome_trace("/tmp/trace_" + str(p.step_num) + ".json")
+
+        my_schedule = torch.profiler.schedule(
+            wait=5,
+            warmup=5,
+            active=20)
+
+        # fp32 benchmark
+        with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                schedule=my_schedule,
+                on_trace_ready=trace_handler) as prof:
+            for _ in range(30):
+                conv_op(input, weight, None, stride, padding, dilation, groups)
+                prof.step()
+
+        print("fp32 benchmark result:")
+        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+
+        # fp16 benchmark
+        input_fp16 = input.to(torch.float16)
+        weight_fp16 = input.to(torch.float16)
+
+        with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                schedule=my_schedule,
+                on_trace_ready=trace_handler) as prof:
+            for _ in range(30):
+                conv_op(input_fp16, weight_fp16, None, stride, padding, dilation, groups)
+                prof.step()
+
+        print("fp16 benchmark result:")
+        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+
+        input_int8 = torch.quantize_per_tensor(input, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
+        weight_int8 = torch.quantize_per_tensor(weight, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
+        scale = 1.0
+        zero_point = 0
+        conv_op = torch.ops.quantized.conv2d
+        weight_prepacked = torch.ops.quantized.conv2d_prepack(weight_int8, None, stride, padding, dilation, groups)
+        with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                schedule=my_schedule,
+                on_trace_ready=trace_handler) as prof:
+            for _ in range(30):
+                conv_op(input_int8, weight_prepacked, scale, zero_point)
+                prof.step()
+
+        print("int8 benchmark result:")
+        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+
+    # TODO: merge this test with test_qconv1d when CUDNN runtime flags becomes available
+    """Tests the correctness of quantized 1D convolution cudnn op."""
+    @given(batch_size=st.integers(1, 6),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           input_channels_per_group=st.integers(1, 32),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           output_channels_per_group=st.integers(1, 32),
+           groups=st.integers(1, 1),  # currently padding only supports groups=1
+           length=st.integers(4, 16),
+           kernel=st.integers(1, 7),
+           stride=st.integers(1, 2),
+           pad=st.integers(0, 2),
+           # currently cudnn has only been verified to work for dilation = 1
+           # TODO: check backend works for dilation > 1
+           dilation=st.integers(1, 1),
+           X_scale=st.floats(1.2, 1.6),
+           # currently conv cudnn backend is only implemented for int8 symmetric
+           X_zero_point=st.sampled_from([0]),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           # currently conv cudnn backend is only implemented for int8 symmetric
+           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           # currently conv cudnn backend is only implemented for int8 symmetric
+           Y_zero_point=st.sampled_from([0]),
+           use_bias=st.booleans(),
+           # TODO: enable channelwise
+           use_channelwise=st.sampled_from([False]))
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
+    def test_qconv1d_cudnn(
+        self,
+            device,
+        batch_size,
+        input_channels_per_group,
+        output_channels_per_group,
+        groups,
+        length,
+        kernel,
+        stride,
+        pad,
+        dilation,
+        X_scale,
+        X_zero_point,
+        W_scale,
+        W_zero_point,
+        Y_scale,
+        Y_zero_point,
+        use_bias,
+        use_channelwise,
+    ):
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+
+        conv1d = torch.nn.Conv1d(
+            input_channels,
+            output_channels,
+            kernel,
+            stride,
+            pad,
+            dilation,
+            groups,
+        ).to(device)
+        qconv_prepack = torch.ops.quantized.conv1d_prepack
+        qconv = torch.ops.quantized.conv1d
+
+        self._test_qconv_impl(
+            qconv, qconv_prepack, conv1d, batch_size,
+            input_channels_per_group, (length, ),
+            output_channels_per_group, groups, kernel, [stride], [pad], None,
+            [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, "none", use_channelwise, False,
+            device=device,
+            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
+
+    @given(batch_size=st.integers(1, 6),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           input_channels_per_group=st.integers(1, 32),
+           # cudnn only supports multiples of 4, but we have explicitly added padding on the backend
+           output_channels_per_group=st.integers(1, 32),
+           groups=st.integers(1, 1),  # currently padding only supports groups=1
+           length=st.integers(4, 16),
+           kernel=st.integers(1, 7),
+           stride=st.integers(1, 2),
+           pad=st.integers(0, 2),
+           # currently cudnn has only been verified to work for dilation = 1
+           # TODO: check backend works for dilation > 1
+           dilation=st.integers(1, 1),
+           X_scale=st.floats(1.2, 1.6),
+           # currently conv cudnn backend is only implemented for int8 symmetric
+           X_zero_point=st.sampled_from([0]),
+           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
+           # currently conv cudnn backend is only implemented for int8 symmetric
+           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
+           Y_scale=st.floats(4.2, 5.6),
+           # currently conv cudnn backend is only implemented for int8 symmetric
+           Y_zero_point=st.sampled_from([0]),
+           use_bias=st.booleans(),
+           # TODO: enable channelwise
+           use_channelwise=st.sampled_from([False]))
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skip("not currently working and feature isn't used")
+    def test_qconv1d_relu_cudnn(
+        self,
+            device,
+        batch_size,
+        input_channels_per_group,
+        output_channels_per_group,
+        groups,
+        length,
+        kernel,
+        stride,
+        pad,
+        dilation,
+        X_scale,
+        X_zero_point,
+        W_scale,
+        W_zero_point,
+        Y_scale,
+        Y_zero_point,
+        use_bias,
+        use_channelwise,
+    ):
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+
+        conv1d = torch.nn.Conv1d(
+            input_channels,
+            output_channels,
+            kernel,
+            stride,
+            pad,
+            dilation,
+            groups,
+        ).to(device)
+        qconv_prepack = torch.ops.quantized.conv1d_prepack
+        qconv = torch.ops.quantized.conv1d_relu
+
+        self._test_qconv_impl(
+            qconv, qconv_prepack, conv1d, batch_size,
+            input_channels_per_group, (length, ),
+            output_channels_per_group, groups, kernel, [stride], [pad], None,
+            [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, "relu", use_channelwise, False,
+            device=device,
+            input_dtype=torch.qint8, weight_dtype=torch.qint8, output_dtype=torch.qint8)
+
+
+instantiate_device_type_tests(TestQuantizedConvCUDA, globals(), only_for='cuda')
 
 
 if __name__ == "__main__":
