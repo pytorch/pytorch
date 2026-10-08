@@ -102,6 +102,22 @@ class TestFlyDSLTemplate(TestCase):
             reason = flydsl_utils._flydsl_runtime_unavailable_reason()
         self.assertIsNone(reason)
 
+    def test_runtime_unavailable_for_unsupported_release(self):
+        package_spec = SimpleNamespace(submodule_search_locations=["package"])
+        with (
+            mock.patch.object(flydsl_utils, "find_spec", return_value=package_spec),
+            mock.patch.object(
+                flydsl_utils, "_pathfinder_find_spec", return_value=SimpleNamespace()
+            ),
+            mock.patch.object(
+                flydsl_utils,
+                "_available_version",
+                return_value=SimpleNamespace(release=(0, 4, 0)),
+            ),
+        ):
+            reason = flydsl_utils._flydsl_runtime_unavailable_reason()
+        self.assertIn("expected `0.3.x`", reason)
+
     def test_unavailable_runtime_declines_choice(self):
         template_name = f"flydsl_unavailable_test_{id(self)}"
         self.addCleanup(FlyDSLTemplate.all_templates.pop, template_name, None)
