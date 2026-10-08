@@ -1759,4 +1759,10 @@ Tensor le_Tensor_meta(const Tensor& self, const Tensor& other) {
       "le", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
 }
 
+Tensor le_Scalar_meta(const Tensor& self, const Scalar& other) {
+  const bool symbolic = is_symbolic_operand(self) || other.isSymInt();
+  return elementwise_binary_ref_meta(
+      "le", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
 } // namespace at::native
