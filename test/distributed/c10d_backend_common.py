@@ -161,13 +161,53 @@ class C10dBackendTest:
         )
 
 
-def instantiate_backend_tests(namespace, suite_name, base_class, backends):
+class C10dBackendTestContinuous:
+    """Reuse workers, creating a fresh process group before each test method."""
+
+    world_size = 2
+    timeout = timedelta(seconds=60)
+
+    @classmethod
+    def backend_str(cls):
+        return cls.backend_name
+
+    @property
+    def device(self):
+        if self.device_type == "cuda":
+            return torch.device("cuda", self.rank)
+        return torch.device(self.device_type)
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        if "_store_prefix" not in cls.__dict__:
+            cls._store_prefix = rdvz_file
+        if cls.device_type == "cuda":
+            torch.cuda.set_device(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @classmethod
+    def _run_test_given_id(cls, test_id, **kwargs):
+        # Reuse Python workers, not communicators. Keep the first collective
+        # in every method on a freshly initialized process group.
+        iteration = cls.__dict__.get("_test_iteration", 0)
+        if iteration:
+            dist.destroy_process_group()
+            cls.pg = None
+            # Never race deletion of the previous FileStore's rendezvous file.
+            cls._init_pg(cls.rank, cls.world_size, f"{cls._store_prefix}.{iteration}")
+        cls._test_iteration = iteration + 1
+        super()._run_test_given_id(test_id, **kwargs)
+
+
+def instantiate_backend_tests(
+    namespace, suite_name, base_class, backends, *, harness=MultiProcessTestCase
+):
     for backend in backends:
         backend_name = backend.name.replace("-", " ").title().replace(" ", "")
         class_name = f"{backend_name}{suite_name}Test"
         test_class = type(
             class_name,
-            (base_class, MultiProcessTestCase),
+            (base_class, harness),
             {
                 "__module__": namespace["__name__"],
                 "backend_name": backend.name,
