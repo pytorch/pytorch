@@ -28,3 +28,16 @@ runs:
         python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
+
+    # TODO: drop the lookup above for job.check_run_id once this never fails
+    - name: Check job.check_run_id matches the job id
+      if: steps.get-job-id.outputs.job-id != ''
+      shell: bash
+      run: |
+        if [[ "${JOB_ID}" != "${CHECK_RUN_ID}" ]]; then
+          echo "::error::job.check_run_id '${CHECK_RUN_ID}' != job id '${JOB_ID}'"
+          exit 1
+        fi
+      env:
+        JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+        CHECK_RUN_ID: ${{ job.check_run_id }}
