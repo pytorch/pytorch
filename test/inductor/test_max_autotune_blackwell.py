@@ -11,6 +11,7 @@ from torch._inductor.heuristics.registry import (
     get_template_heuristic,
     override_template_heuristics,
 )
+from torch._inductor.heuristics.template import bmm as bmm_heuristics
 from torch._inductor.heuristics.template.bmm import (
     CUDABlackwellBMMTemplateConfigHeuristic,
 )
@@ -22,7 +23,10 @@ from torch._inductor.heuristics.template.triton import (
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
     TMATemplateConfigMixin,
 )
-from torch._inductor.kernel.bmm import blackwell_ws_persistent_tma_bmm_template
+from torch._inductor.kernel.bmm import (
+    blackwell_ws_persistent_tma_bmm_template,
+    BlackwellBMMConfig,
+)
 from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.kernel_inputs import MMKernelInputs
@@ -1227,7 +1231,6 @@ class TestBlackwellBMMTemplate(TestCase):
         fn,
         *args,
         epilogue_subtile: int | None = None,
-        data_partition_factor: int = 1,
         host_side_tma: bool = False,
         expect_choice: bool = True,
         dynamic: bool = False,
@@ -1242,7 +1245,6 @@ class TestBlackwellBMMTemplate(TestCase):
                     if template_config["BLOCK_M"] == 128:
                         if epilogue_subtile is not None:
                             template_config["EPILOGUE_SUBTILE"] = epilogue_subtile
-                        template_config["DATA_PARTITION_FACTOR"] = data_partition_factor
                         yield template_config
                         return
 
@@ -1293,7 +1295,6 @@ class TestBlackwellBMMTemplate(TestCase):
         "Need Blackwell with device-side TMA support in Triton",
     )
     @parametrize("epilogue_subtile", (1, 2, 4))
-    @parametrize("data_partition_factor", (1, 2))
     @parametrize("transpose_a", (False, True))
     @parametrize("transpose_b", (False, True))
     @parametrize("broadcast", ("none", "a", "b", "ab"))
@@ -1301,18 +1302,13 @@ class TestBlackwellBMMTemplate(TestCase):
     def test_blackwell_bmm_template(
         self,
         epilogue_subtile: int,
-        data_partition_factor: int,
         transpose_a: bool,
         transpose_b: bool,
         broadcast: str,
         host_side_tma: bool,
     ):
-        if (epilogue_subtile != 1 or data_partition_factor != 1) and (
-            broadcast != "none" or host_side_tma
-        ):
-            self.skipTest("subtiling and data partitioning do not depend on loads")
-        if data_partition_factor != 1 and (transpose_b or not transpose_a):
-            self.skipTest("one operand layout is enough for data partitioning")
+        if epilogue_subtile != 1 and (broadcast != "none" or host_side_tma):
+            self.skipTest("epilogue subtiling does not depend on the operand loads")
         if host_side_tma and broadcast == "ab":
             self.skipTest("broadcast operands always use device-side descriptors")
         if (broadcast == "a" and transpose_b) or (broadcast == "b" and transpose_a):
@@ -1342,7 +1338,6 @@ class TestBlackwellBMMTemplate(TestCase):
                 a,
                 b,
                 epilogue_subtile=epilogue_subtile,
-                data_partition_factor=data_partition_factor,
                 host_side_tma=host_side_tma,
             )
 
@@ -1377,12 +1372,38 @@ class TestBlackwellBMMTemplate(TestCase):
         self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", code)
         self.assertIn("ALLOW_TF32 : tl.constexpr = False", code)
         if meta_ws_enabled():
-            self.assertIn(
-                f"DATA_PARTITION_FACTOR : tl.constexpr = {data_partition_factor}", code
-            )
+            self.assertIn("DATA_PARTITION_FACTOR : tl.constexpr = 1", code)
             self.assertIn("SEPARATE_EPILOGUE_STORE : tl.constexpr = True", code)
         else:
             self.assertNotIn("data_partition_factor", code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("broadcast_a", (False, True))
+    def test_blackwell_bmm_template_data_partition_needs_broadcast_a(
+        self, broadcast_a: bool
+    ):
+        # Data partitioning mis-slices rank-3 A loads, so a DPF > 1 config is
+        # only offered when A is batch-broadcast (rank-2 descriptor).
+        a = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        a = a.expand(4, -1, -1) if broadcast_a else a.repeat(4, 1, 1)
+        b = torch.randn(4, 256, 128, device=GPU_TYPE, dtype=torch.bfloat16)
+        configs = (BlackwellBMMConfig(128, 128, 64, 4, 8, data_partition_factor=2),)
+        with mock.patch.object(
+            bmm_heuristics, "BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS", configs
+        ):
+            if not broadcast_a:
+                with self.assertRaisesRegex(
+                    BackendCompilerFailed, "rejected the input"
+                ):
+                    self._compile_blackwell_bmm(
+                        blackwell_bmm, a, b, expect_choice=False
+                    )
+                return
+            actual, _ = self._compile_blackwell_bmm(blackwell_bmm, a, b)
+        torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
