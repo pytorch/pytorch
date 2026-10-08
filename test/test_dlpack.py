@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNotRocm,
     skipMeta,
     skipMPS,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -329,25 +330,27 @@ class TestTorchDlPackDevice(TestCase):
         y5_dl = torch.from_dlpack(y5)
         self.assertEqual(y5, y5_dl)
 
-    @skipMeta
-    @onlyCUDA
+    @onlyAccelerator
+    @skipMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
-        stream_a = torch.cuda.Stream()
-        stream_b = torch.cuda.Stream()
+        stream_a = torch.Stream()
+        stream_b = torch.Stream()
         # DLPack protocol helps establish a correct stream order
         # (hence data dependency) at the exchange boundary.
         # the `tensor.__dlpack__` method will insert a synchronization event
         # in the current stream to make sure that it was correctly populated.
-        with torch.cuda.stream(stream_a):
+        with stream_a:
             x = make_tensor((5,), dtype=dtype, device=device) + 1
-            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.native_handle))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z, x)
 
-    @skipMeta
-    @onlyCUDA
+    @onlyAccelerator
+    @skipMPS
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @dtypes(
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,
@@ -357,12 +360,12 @@ class TestTorchDlPackDevice(TestCase):
         torch.float4_e2m1fn_x2,
     )
     def test_dlpack_conversion_with_diff_streams_narrow_precision(self, device, dtype):
-        stream_a = torch.cuda.Stream()
-        stream_b = torch.cuda.Stream()
-        with torch.cuda.stream(stream_a):
+        stream_a = torch.Stream()
+        stream_b = torch.Stream()
+        with stream_a:
             x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
             x = x.view(dtype)
-            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.native_handle))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
