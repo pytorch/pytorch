@@ -5799,7 +5799,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 else value
             )
 
-        do_upcast = pytree.tree_any(low_precision_fp_var, value)
+        # The value's tracked dtype can differ from src_dtype (e.g. it is already
+        # fp32 under codegen_upcast_to_fp32), so promote on src_dtype as well to
+        # keep the accumulator and the final cast consistent with the source.
+        do_upcast = low_precision_fp(src_dtype) or pytree.tree_any(
+            low_precision_fp_var, value
+        )
         original_dtype = dtype
         original_src_dtype = src_dtype
         if do_upcast:
@@ -6572,11 +6577,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not all(isinstance(x, TritonCSEVariable) for x in result_tuple):
             raise AssertionError("all result_tuple entries must be TritonCSEVariable")
 
-        # If BF16/F16 upcasting was done, ensure the output is downcast to the
-        # expected dtype.
+        # If BF16/F16 upcasting was done, ensure value outputs are downcast to
+        # the expected dtype. Index-only arg reductions must remain integers.
         if do_upcast:
             for i, result in enumerate(result_tuple):
-                if reduction_type in arg_with_value_reduction_types and i > 0:
+                if reduction_type in arg_index_reduction_types or (
+                    reduction_type in arg_with_value_reduction_types and i > 0
+                ):
                     continue
                 target_dtype = (
                     original_src_dtype
@@ -6584,10 +6591,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     in (arg_value_reduction_types + arg_with_value_reduction_types)
                     else original_dtype
                 )
-                if result.dtype != target_dtype:
+                compute_dtype = upcast_compute_type(target_dtype)
+                if result.dtype != compute_dtype:
                     self.post_loop_combine.writeline(
-                        f"{result} = {result}.to({triton_compute_type(target_dtype)})"
+                        f"{result} = {result}.to({triton_type(compute_dtype)})"
                     )
+                    result.dtype = compute_dtype
 
         return result_var
 
@@ -9084,6 +9093,7 @@ class TritonScheduling(SIMDScheduling):
         with (
             preserve_rng_state(),
             device_interface.device(V.graph.get_current_device_or_throw()),  # type: ignore[attr-defined]
+            triton_heuristics.disable_caching_autotuner_plugins(),
         ):
             ms = None
 
@@ -9251,6 +9261,7 @@ class TritonScheduling(SIMDScheduling):
             kernels.sort(key=lambda k: k.persistent_reduction)
         return kernels
 
+    @triton_heuristics.disable_caching_autotuner_plugins()
     def benchmark_combo_kernel(self, node_list, node_benchmark_results):
         """
         Benchmark combo kernel partitions and return total execution time.
