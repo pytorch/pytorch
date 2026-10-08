@@ -877,19 +877,21 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
                 "no supported GemmConfig matches "
                 f"config_constraints={config_constraints!r} for this call"
             )
-    if tuned:
-        quack_configs = flex_gemm_search_space(legal_configs, varlen=grouped_mm)
-    else:
-        from torch._inductor.virtualized import V
+    from torch._inductor.virtualized import V
 
-        sizevars = V.graph.sizevars
-        mat1, mat2 = (
-            gemm_input_nodes[i] for i in (op_spec.mat1_index, op_spec.mat2_index)
+    sizevars = V.graph.sizevars
+    mat1, mat2 = (gemm_input_nodes[i] for i in (op_spec.mat1_index, op_spec.mat2_index))
+    m_hint = sizevars.optimization_hint(mat1.get_size()[-2])
+    n_hint = sizevars.optimization_hint(mat2.get_size()[-1])
+    # Block-scaled calls keep QuACK's shape-aware blockscaled default.
+    dense_shape = None if blockscaled is not None else (m_hint, n_hint)
+    if tuned:
+        quack_configs = flex_gemm_search_space(
+            legal_configs,
+            varlen=grouped_mm,
+            dense_shape=dense_shape if gemm_op is torch.ops.aten.mm.default else None,
         )
-        m_hint = sizevars.optimization_hint(mat1.get_size()[-2])
-        n_hint = sizevars.optimization_hint(mat2.get_size()[-1])
-        # Block-scaled calls keep QuACK's shape-aware blockscaled default.
-        dense_shape = None if blockscaled is not None else (m_hint, n_hint)
+    else:
         default = flex_gemm_default_config(
             legal_configs, varlen=grouped_mm, dense_shape=dense_shape
         )
