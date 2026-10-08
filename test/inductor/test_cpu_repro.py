@@ -15,6 +15,7 @@ from unittest.mock import patch
 import sympy
 
 import torch
+import torch._functorch.config as functorch_config
 from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounterWithBackend, rand_strided
@@ -181,6 +182,153 @@ class CPUReproTests(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "to be True"):
             compiled(torch.rand(10))
+
+    def _check_interpolate_mutated_input_backward(
+        self, fn, activation_memory_budget=1.0
+    ):
+        torch.manual_seed(0)
+        base = torch.randn(1, 3, 16, 16)
+        mean = torch.randn(3, 1, 1)
+        std = torch.randn(3, 1, 1).abs().add(0.5)
+
+        def make_args():
+            base_arg = base.detach().clone().requires_grad_(True)
+            x_arg = (base_arg * 1.0).squeeze(0)
+            mean_arg = mean.detach().clone().requires_grad_(True)
+            std_arg = std.detach().clone().requires_grad_(True)
+            return base_arg, x_arg, mean_arg, std_arg
+
+        def run(fn_to_run):
+            base_arg, x_arg, mean_arg, std_arg = make_args()
+            y, z = fn_to_run(x_arg, mean_arg, std_arg)
+            (y.sum() + z.sum()).backward()
+            return y.detach(), z.detach(), base_arg.grad, mean_arg.grad, std_arg.grad
+
+        expected = run(fn)
+        with functorch_config.patch(activation_memory_budget=activation_memory_budget):
+            actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
+        # mean/std grads are 256-term float32 sums; without vectorization
+        # (ATEN_CPU_CAPABILITY=default) inductor sums them sequentially.
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("activation_memory_budget", (0, 1))
+    def test_interpolate_mutated_input_backward(self, activation_memory_budget):
+        def fn(x, mean, std):
+            y = F.interpolate(
+                x[:, :8, :8].unsqueeze(0),
+                size=(4, 4),
+                mode="bilinear",
+                align_corners=False,
+            )
+            x.sub_(mean).div_(std)
+            return y, x
+
+        self._check_interpolate_mutated_input_backward(fn, activation_memory_budget)
+
+    def test_interpolate_mutated_input_backward_with_effect_token(self):
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::_issue185497_effect", mutates_args=())
+        def effect(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @effect.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effect, EffectType.ORDERED)
+
+        try:
+
+            def fn(x, mean, std):
+                torch.ops.test._issue185497_effect(x)
+                y = F.interpolate(
+                    x[:, :8, :8].unsqueeze(0),
+                    size=(4, 4),
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                x.sub_(mean).div_(std)
+                return y, x
+
+            self._check_interpolate_mutated_input_backward(fn)
+        finally:
+            handle.destroy()
+
+    @parametrize("activation_memory_budget", (0, 1))
+    def test_in_graph_mutated_grad_input_backward(self, activation_memory_budget):
+        def fn(w, x):
+            result = w.sin()
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(w):
+                w.copy_(x)
+            return result
+
+        w = torch.randn(4, requires_grad=True)
+        x = torch.randn(4)
+        expected = w.detach().sin()
+        # The preserved version counter makes backward read the updated data.
+        expected_grad = x.cos()
+
+        with functorch_config.patch(
+            activation_memory_budget=activation_memory_budget,
+            enable_autograd_cache=False,
+        ):
+            actual = torch.compile(fn, backend="inductor", fullgraph=True)(w, x)
+            actual.sum().backward()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(w, x)
+        self.assertEqual(w.grad, expected_grad)
+
+    @parametrize("activation_memory_budget", (0, 1))
+    def test_mutated_input_clone_saved_for_backward(self, activation_memory_budget):
+        def fn(x, y):
+            result = x.T.clone() * y
+            x.add_(1)
+            return result, x
+
+        def run(fn_to_run):
+            base = torch.randn(2, 4, requires_grad=True)
+            x = base * 1.0
+            y = torch.randn(4, 2, requires_grad=True)
+            result, mutated_x = fn_to_run(x, y)
+            result.sum().backward()
+            return result.detach(), mutated_x.detach(), base.grad, y.grad
+
+        torch.manual_seed(0)
+        expected = run(fn)
+        torch.manual_seed(0)
+        with functorch_config.patch(activation_memory_budget=activation_memory_budget):
+            actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
+
+        self.assertEqual(actual, expected)
+
+    @parametrize("activation_memory_budget", (0, 1))
+    def test_mutated_subclass_input_saved_for_backward(self, activation_memory_budget):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def fn(x, y):
+            result = x.clone() * y
+            x.add_(1)
+            return result, x
+
+        def run(fn_to_run):
+            # The subclass requires grad while its components do not.
+            leaf = TwoTensor(torch.randn(2, 4), torch.randn(2, 4)).requires_grad_(True)
+            x = leaf * 1.0
+            y = torch.randn(2, 4, requires_grad=True)
+            result, mutated_x = fn_to_run(x, y)
+            result.sum().backward()
+            return result.a, mutated_x.a, leaf.grad.a, leaf.grad.b, y.grad
+
+        torch.manual_seed(0)
+        expected = run(fn)
+        torch.manual_seed(0)
+        with functorch_config.patch(activation_memory_budget=activation_memory_budget):
+            actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
+
+        self.assertEqual(actual, expected)
 
     @skipIfNoLapack
     def test_torch_linalg_qr_tuple_slice(self):
@@ -1815,6 +1963,22 @@ class CPUReproTests(TestCase):
         self.assertEqual(
             torch.unique(sliced_actual[:, 0]).numel(), sliced_actual.size(0)
         )
+
+    def test_randperm_full_index_add_issue_196631(self):
+        from torch._dynamo.utils import counters
+
+        def fn(x, y):
+            index = torch.randperm(x.size(0))
+            return torch.index_add(x, 0, index, y), index
+
+        x = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+        y = torch.arange(12, dtype=torch.float32).reshape(3, 4) * 10
+
+        counters.clear()
+        actual, index = torch.compile(fn, backend="inductor", fullgraph=True)(x, y)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        expected = torch.index_add(x, 0, index, y)
+        self.assertEqual(actual, expected)
 
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
@@ -4749,6 +4913,20 @@ class CPUReproTests(TestCase):
             self.assertEqual(metrics.generated_kernel_count, 1)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
+    def test_compatible_ranges_fusion_into_fused_node(self):
+        def fn(x):
+            v1 = F.layer_norm(x.float(), (x.shape[-1],))
+            v2 = F.max_pool2d(v1, kernel_size=1, stride=1, padding=0)
+            v3 = torch.transpose(v2, 2, 3)
+            return v2, torch.clamp(v3, min=-0.66, max=0.53)
+
+        metrics.reset()
+        torch._dynamo.reset()
+        x = torch.rand(3, 1, 2, 2)
+        opt_fn = torch.compile(fn, backend="inductor")
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
     def test_lowp_fp_neg_abs(self):
         def fn(x):
             return x.neg().abs()
@@ -5492,6 +5670,68 @@ class CPUReproTests(TestCase):
                 torch.compile(fn, backend="inductor")().dtype,
                 dtype if dtype else torch.float32,
             )
+
+    @parametrize(
+        "mean_dtype,std_dtype",
+        [
+            (torch.float16, torch.float32),
+            (torch.bfloat16, torch.float32),
+            (torch.float32, torch.float64),
+            (torch.float64, torch.float32),
+        ],
+    )
+    def test_aten_normal_tensor_tensor_mixed_dtype(self, mean_dtype, std_dtype):
+        # aten.normal(Tensor, Tensor) takes its output dtype from mean,
+        # not from elementwise promotion between mean and std. See #194547.
+        mean = torch.zeros(8, dtype=mean_dtype)
+        std = torch.ones(8, dtype=std_dtype)
+
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        eager = fn(mean, std)
+
+        for backend in ("aot_eager_decomp_partition", "inductor"):
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, backend=backend)(mean, std)
+            self.assertEqual(compiled.dtype, eager.dtype)
+            self.assertEqual(compiled.dtype, mean.dtype)
+            self.assertEqual(compiled.shape, eager.shape)
+
+    def test_aten_normal_tensor_scalar_dtype(self):
+        mean = torch.zeros(8, dtype=torch.float16)
+        eager = torch.normal(mean, 1.0)
+
+        compiled = torch.compile(
+            lambda mean: torch.normal(mean, 1.0),
+            backend="inductor",
+        )(mean)
+
+        self.assertEqual(compiled.dtype, eager.dtype)
+        self.assertEqual(compiled.dtype, mean.dtype)
+
+    def test_aten_normal_scalar_tensor_dtype(self):
+        std = torch.ones(8, dtype=torch.float16)
+        eager = torch.normal(0.0, std)
+
+        compiled = torch.compile(
+            lambda std: torch.normal(0.0, std),
+            backend="inductor",
+        )(std)
+
+        self.assertEqual(compiled.dtype, eager.dtype)
+        self.assertEqual(compiled.dtype, std.dtype)
+
+    def test_aten_normal_tensor_tensor_broadcast_dtype(self):
+        mean = torch.zeros(3, 1, dtype=torch.float16)
+        std = torch.ones(1, 4, dtype=torch.float32)
+
+        eager = torch.normal(mean, std)
+        compiled = torch.compile(torch.normal, backend="inductor")(mean, std)
+
+        self.assertEqual(compiled.dtype, torch.float16)
+        self.assertEqual(compiled.shape, (3, 4))
+        self.assertEqual(compiled.shape, eager.shape)
 
     def test_group_norm_vec(self):
         class M(torch.nn.Module):
@@ -7739,6 +7979,42 @@ class CPUReproTests(TestCase):
             )
         )
         self.assertTrue(cuda_storage.has_exceeded_max_reads())
+
+    def test_masked_bool_vec(self):
+        # Regression test for gh-198613
+        def fn_cmp_slice(a):
+            y = a > 0
+            y[1:] = y[:-1].clone()
+            return y
+
+        def fn_cmp_pad(a):
+            y = a > 0
+            return F.pad(y[:-1], (0, 0, 1, 0))
+
+        def fn_to_bool(a):
+            y = a.bool()
+            y[1:] = y[:-1].clone()
+            return y
+
+        def fn_bitwise_bool(a, b):
+            y = (a > 0) & (b > 0)
+            y[1:] = y[:-1].clone()
+            return y
+
+        for dtype in [torch.int64, torch.int32, torch.uint8, torch.float64]:
+            if dtype.is_floating_point:
+                a = torch.randn((4, 64), dtype=dtype)
+                b = torch.randn((4, 64), dtype=dtype)
+            elif dtype == torch.uint8:
+                a = torch.randint(0, 5, (4, 64), dtype=dtype)
+                b = torch.randint(0, 5, (4, 64), dtype=dtype)
+            else:
+                a = torch.randint(-5, 5, (4, 64), dtype=dtype)
+                b = torch.randint(-5, 5, (4, 64), dtype=dtype)
+
+            for fn in [fn_cmp_slice, fn_cmp_pad, fn_to_bool]:
+                self.common(fn, (a,))
+            self.common(fn_bitwise_bool, (a, b))
 
 
 if __name__ == "__main__":

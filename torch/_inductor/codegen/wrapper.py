@@ -469,6 +469,21 @@ def codegen_reinterpret_view_helper(data):
     return base_lay.size, base_lay.stride, base_lay.offset, base_lay.dtype, True
 
 
+def codegen_reinterpret_view_layout_match(data, size, stride, offset):
+    """Whether wrapper codegen reuses `data`, and its dtype before any cast."""
+    d_size, d_stride, d_offset, d_dtype, collapsible = codegen_reinterpret_view_helper(
+        data
+    )
+    if collapsible and offset == d_offset:
+        return size == d_size and stride == d_stride, d_dtype
+    return (
+        size == data.layout.size
+        and stride == data.layout.stride
+        and offset == data.layout.offset,
+        data.dtype,
+    )
+
+
 # TODO: Move to a well known place
 TritonMetaParams = dict[str, int]
 TritonGrid = (
@@ -679,6 +694,21 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                         )
                     else:
                         compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
+                    symbols_included.add(symbol_name)
+                elif (
+                    symbol_name in unqualified_loads
+                    and symbol_name not in ("triton", "tl")
+                    and inspect.ismodule(symbol)
+                    and (
+                        symbol.__name__ == "triton"
+                        or symbol.__name__.startswith("triton.")
+                    )
+                ):
+                    # Module objects have __name__ but not __module__, so they
+                    # need a qualified import rather than a from-import.
+                    compile_wrapper.writeline(
+                        f"import {symbol.__name__} as {symbol_name}"
+                    )
                     symbols_included.add(symbol_name)
                 elif (
                     symbol_name in unqualified_loads
@@ -3692,10 +3722,6 @@ class PythonWrapperCodegen(CodeGen):
         # In this case, x.data.layout == x.layout is (10, 10), the reinterpret view will return buf0,
         # but buf0 need to be viewed from (2, 5, 10) to (10, 10).
         # So we need to dig into the chain to find the innermost buffer's layout.
-        d_size, d_stride, d_offset, d_dtype, collapsible = (
-            codegen_reinterpret_view_helper(data)
-        )
-
         def apply_reinterpret(
             name, tgt_size, tgt_stride, tgt_offset, cast_dtype, base_dtype
         ):
@@ -3708,17 +3734,9 @@ class PythonWrapperCodegen(CodeGen):
             return expr
 
         name = data.get_name()
-        collapsed = collapsible and offset == d_offset
-        if collapsed:
-            same_layout = size == d_size and stride == d_stride
-            base_dtype = d_dtype
-        else:
-            same_layout = (
-                size == data.layout.size
-                and stride == data.layout.stride
-                and offset == data.layout.offset
-            )
-            base_dtype = data.dtype
+        same_layout, base_dtype = codegen_reinterpret_view_layout_match(
+            data, size, stride, offset
+        )
 
         if same_layout:
             if dtype is not None and dtype != base_dtype:
