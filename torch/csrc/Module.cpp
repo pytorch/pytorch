@@ -3485,8 +3485,9 @@ Call this whenever a new thread is created in order to propagate values from
       "_is_cow_tensor",
       [](const at::Tensor& tensor) {
         TORCH_CHECK(
-            !tensor.key_set().has(c10::DispatchKey::Python),
-            "_is_cow_tensor is not defined for Python tensor subclasses");
+            !tensor.is_fake() &&
+                !tensor.key_set().has(c10::DispatchKey::Python),
+            "_is_cow_tensor is not defined for Python tensor subclasses or FakeTensors");
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");
