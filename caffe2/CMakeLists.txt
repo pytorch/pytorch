@@ -710,8 +710,17 @@ if(USE_ROCM)
         endforeach()
       endif()
       if(_have_async_mm_arch)
+        # ck_tile does not compile for every arch, so build the kernel for
+        # gfx942/gfx950 only.
+        set(_async_mm_no_arch_opts)
+        foreach(ARCH IN LISTS PYTORCH_ROCM_ARCH)
+          if(NOT ARCH MATCHES "^gfx9(42|50)$")
+            list(APPEND _async_mm_no_arch_opts "--no-offload-arch=${ARCH}")
+          endif()
+        endforeach()
         set_source_files_properties(${ASYNC_MM_HIP_FILE} PROPERTIES
-          COMPILE_DEFINITIONS USE_ROCM_ASYNC_MM)
+          COMPILE_DEFINITIONS USE_ROCM_ASYNC_MM
+          COMPILE_OPTIONS "${_async_mm_no_arch_opts}")
       endif()
     endif()
   endif()
@@ -2231,6 +2240,9 @@ if(BUILD_TEST)
   if(USE_ROCM)
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
+      # hipify renames cuda_foo_test to hip_foo_test; keep the CUDA binary
+      # name so ROCm and CUDA C++ test reports line up.
+      string(REGEX REPLACE "^hip_" "cuda_" test_name ${test_name})
       if(test_src MATCHES "^.*\.hip$")
         set_source_files_properties(${test_src} PROPERTIES LANGUAGE HIP)
         add_executable(${test_name} "${test_src}")
