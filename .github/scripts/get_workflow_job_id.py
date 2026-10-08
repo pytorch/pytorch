@@ -110,11 +110,6 @@ def parse_args() -> Any:
         "runner_name",
         help="The name of the runner to retrieve the job id, should be RUNNER_NAME",
     )
-    parser.add_argument(
-        "--check-run-id",
-        default=None,
-        help="The job.check_run_id context, compared against the runner name lookup",
-    )
 
     return parser.parse_args()
 
@@ -122,7 +117,6 @@ def parse_args() -> Any:
 def fetch_jobs(url: str, headers: dict[str, str]) -> list[dict[str, str]]:
     response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
     jobs = response["jobs"]
-    requests = 1
     if type(jobs) is not list:
         raise AssertionError(f"Expected jobs to be a list, got {type(jobs).__name__}")
     while "next" in links:
@@ -130,9 +124,7 @@ def fetch_jobs(url: str, headers: dict[str, str]) -> list[dict[str, str]]:
             links["next"]["url"], headers=headers, reader=parse_json_and_links
         )
         jobs.extend(response["jobs"])
-        requests += 1
 
-    print(f"Listed {len(jobs)} jobs in {requests} requests")
     return jobs
 
 
@@ -151,18 +143,16 @@ def fetch_jobs(url: str, headers: dict[str, str]) -> list[dict[str, str]]:
 # running.
 
 
-def github_api() -> tuple[str, dict[str, str]]:
-    # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
-    repo = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "Authorization": "token " + os.environ["GITHUB_TOKEN"],
-    }
-    return f"https://api.github.com/repos/{repo}", headers
-
-
 def find_job_id_name(args: Any) -> tuple[str, str]:
-    PYTORCH_GITHUB_API, REQUEST_HEADERS = github_api()
+    # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
+    PYTORCH_REPO = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
+    PYTORCH_GITHUB_API = f"https://api.github.com/repos/{PYTORCH_REPO}"
+    GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+    REQUEST_HEADERS = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": "token " + GITHUB_TOKEN,
+    }
+
     url = f"{PYTORCH_GITHUB_API}/actions/runs/{args.workflow_run_id}/jobs?per_page=100"
     jobs = fetch_jobs(url, REQUEST_HEADERS)
 
@@ -177,30 +167,6 @@ def find_job_id_name(args: Any) -> tuple[str, str]:
     raise RuntimeError(f"Can't find job id for runner {args.runner_name}")
 
 
-def find_job_id_name_by_check_run_id(check_run_id: str) -> tuple[str, str]:
-    # job.check_run_id is the workflow job id, so only the name needs a request
-    api, headers = github_api()
-    url = f"{api}/actions/jobs/{check_run_id}"
-    job = fetch_url(url, headers=headers, reader=json.load)
-    return (job["id"], job["name"])
-
-
-def compare_check_run_id(check_run_id: str, expected: tuple[str, str] | None) -> None:
-    if not check_run_id:
-        print("::warning::job.check_run_id is empty")
-        return
-    try:
-        job_id, job_name = find_job_id_name_by_check_run_id(check_run_id)
-    except Exception as e:
-        print(f"::warning::job.check_run_id lookup failed: {e!r}")
-        return
-    actual = (str(job_id), job_name)
-    if actual == expected:
-        print(f"::notice::job.check_run_id lookup matches: {actual}")
-    else:
-        print(f"::warning::job.check_run_id lookup mismatch: {actual} != {expected}")
-
-
 def set_output(name: str, val: Any) -> None:
     print(f"Setting output {name}={val}")
     if os.getenv("GITHUB_OUTPUT"):
@@ -212,21 +178,15 @@ def set_output(name: str, val: Any) -> None:
 
 def main() -> None:
     args = parse_args()
-    expected = None
     try:
         # Get both the job ID and job name because we have already spent a request
         # here to get the job info
         job_id, job_name = find_job_id_name(args)
         set_output("job-id", job_id)
         set_output("job-name", job_name)
-        expected = (str(job_id), job_name)
     except Exception as e:
         print(repr(e), file=sys.stderr)
         print(f"workflow-{args.workflow_run_id}")
-
-    # TODO: switch to the job.check_run_id lookup once CI shows it always matches
-    if args.check_run_id is not None:
-        compare_check_run_id(args.check_run_id, expected)
 
 
 if __name__ == "__main__":
