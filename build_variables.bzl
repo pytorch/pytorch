@@ -1561,6 +1561,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/WeightNorm.cpp",
     "aten/src/ATen/native/group_norm.cpp",
     "aten/src/ATen/native/layer_norm.cpp",
+    "aten/src/ATen/native/mxfp_mm_kernel.cpp",
     "aten/src/ATen/native/AmpKernels.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
     "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",

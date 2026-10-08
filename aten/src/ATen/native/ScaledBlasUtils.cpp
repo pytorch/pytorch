@@ -277,6 +277,116 @@ bool is_two_level_nvfp4(
 
 } // namespace
 
+bool has_mxfp_scale(ArrayRef<Tensor> scales) {
+  for (const auto& scale : scales) {
+    if (scale.scalar_type() == ScalarType::Float8_e8m0fnu) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void validate_mxfp_cpu(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    const Tensor& out) {
+  TORCH_CHECK_VALUE(
+      mat_a.dim() == 2 && mat_b.dim() == 2, "MXFP operands must be matrices");
+  TORCH_CHECK_VALUE(
+      has_mxfp_scale(scale_a) && has_mxfp_scale(scale_b),
+      "MXFP scales must both have dtype Float8_e8m0fnu");
+
+  const auto input_dtype = mat_a.scalar_type();
+  const bool is_mxfp4 = input_dtype == ScalarType::Float4_e2m1fn_x2;
+  TORCH_CHECK_VALUE(
+      mat_b.scalar_type() == input_dtype &&
+          (is_mxfp4 || input_dtype == ScalarType::Float8_e4m3fn),
+      "MXFP operands must both have dtype Float8_e4m3fn or Float4_e2m1fn_x2");
+
+  const int64_t packing = is_mxfp4 ? 2 : 1;
+  const int64_t logical_k = packing * mat_a.size(1);
+  TORCH_CHECK_VALUE(
+      mat_a.size(1) == mat_b.size(0),
+      "MXFP operand shapes cannot be multiplied: ",
+      mat_a.sizes(),
+      " and ",
+      mat_b.sizes());
+  const int64_t k_blocks = (logical_k + 31) / 32;
+  TORCH_CHECK_VALUE(
+      scale_a.dim() == 2 && scale_a.size(0) == mat_a.size(0) &&
+          scale_a.size(1) == k_blocks,
+      "MXFP scale_a must have shape (", mat_a.size(0), ", ", k_blocks,
+      "), got ", scale_a.sizes());
+  TORCH_CHECK_VALUE(
+      scale_b.dim() == 2 && scale_b.size(0) == mat_b.size(1) &&
+          scale_b.size(1) == k_blocks,
+      "MXFP scale_b must have shape (", mat_b.size(1), ", ", k_blocks,
+      "), got ", scale_b.sizes());
+  TORCH_CHECK_VALUE(
+      scale_a.is_contiguous(), "MXFP scale_a must be contiguous");
+  TORCH_CHECK_VALUE(
+      scale_b.is_contiguous(), "MXFP scale_b must be contiguous");
+  TORCH_CHECK_VALUE(mat_a.is_contiguous(), "MXFP mat_a must be row-major");
+  TORCH_CHECK_VALUE(
+      mat_b.numel() == 0 ||
+          (mat_b.size(0) == 1 && mat_b.stride(1) == 1) ||
+          (mat_b.size(1) == 1 && mat_b.stride(0) == 1) ||
+          (mat_b.stride(0) == 1 && mat_b.stride(1) == mat_b.size(0)),
+      "MXFP mat_b must be column-major");
+  TORCH_CHECK_VALUE(
+      out.scalar_type() == ScalarType::Half ||
+      out.scalar_type() == ScalarType::BFloat16 ||
+      out.scalar_type() == ScalarType::Float,
+      "CPU MXFP output must have dtype Float16, BFloat16, or Float32, got ",
+      out.scalar_type());
+  TORCH_CHECK_VALUE(out.is_contiguous(), "CPU MXFP output must be contiguous");
+  TORCH_CHECK_VALUE(
+      !bias.has_value() || bias->numel() == mat_b.size(1),
+      "Bias must be size ",
+      mat_b.size(1),
+      " but got ",
+      bias.has_value() ? bias->numel() : 0);
+  TORCH_CHECK_VALUE(
+      !bias.has_value() || bias->scalar_type() == ScalarType::Half ||
+          bias->scalar_type() == ScalarType::BFloat16 ||
+          bias->scalar_type() == ScalarType::Float,
+      "CPU MXFP bias must have dtype Float16, BFloat16, or Float32, got ",
+      bias.has_value() ? bias->scalar_type() : ScalarType::Undefined);
+}
+
+bool validate_cpu_mxfp_v2_inputs(
+    const Tensor& mat_a,
+    ArrayRef<Tensor> scale_a,
+    ArrayRef<ScalingType> recipe_a,
+    ArrayRef<SwizzleType> swizzle_a,
+    ArrayRef<Tensor> scale_b,
+    ArrayRef<ScalingType> recipe_b,
+    ArrayRef<SwizzleType> swizzle_b) {
+  if (!mat_a.device().is_cpu() ||
+      (!has_mxfp_scale(scale_a) && !has_mxfp_scale(scale_b))) {
+    return false;
+  }
+  TORCH_CHECK_VALUE(
+      scale_a.size() == 1 && scale_b.size() == 1 &&
+          is_single_recipe(
+              recipe_a,
+              recipe_b,
+              ScalingType::BlockWise1x32,
+              ScalingType::BlockWise1x32),
+      "CPU MXFP requires one BlockWise1x32 scale per operand");
+  const auto is_no_swizzle = [](ArrayRef<SwizzleType> swizzle) {
+    return swizzle.empty() ||
+        (swizzle.size() == 1 && swizzle[0] == SwizzleType::NO_SWIZZLE);
+  };
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      is_no_swizzle(swizzle_a) && is_no_swizzle(swizzle_b),
+      "CPU MXFP only supports NO_SWIZZLE");
+  return true;
+}
+
 // Eager-and-meta validation for `_scaled_mm_v2`. Mirrors a subset of the
 // kernel-side checks so torch.compile tracing fails fast with the same
 // messages users get in eager. We deliberately *don't* duplicate checks
