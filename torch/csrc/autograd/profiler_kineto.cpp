@@ -986,7 +986,7 @@ KinetoEvent::KinetoEvent(
   }
 
   result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
-    auto arg_data = parseArgData(op.inputs_, op.concrete_inputs_);
+    auto arg_data = parseArgData(op.inputs_);
     shapes_ = std::move(arg_data.shapesForKinetoEvent);
     structured_input_shapes_ = std::move(arg_data.shapes);
     structured_input_strides_ = std::move(arg_data.strides);
@@ -1173,7 +1173,7 @@ int64_t KinetoEvent::privateuse1ElapsedUs() const {
 }
 
 void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
-  return result_->visit(c10::overloaded(
+  result_->visit(c10::overloaded(
       [&in](const ExtraFields<EventType::TorchOp>& e) -> void {
         const size_t n = e.perf_event_counters_->size();
         // should be rare
