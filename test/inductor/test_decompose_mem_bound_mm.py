@@ -643,6 +643,8 @@ instantiate_device_type_tests(
     only_for=("cpu", "cuda", "xpu"),
     allow_xpu=True,
 )
+
+
 class _FakeDevice:
     def __init__(self, device_type):
         self.type = device_type
