@@ -45,6 +45,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_distributed import (
+    core_dumps_disabled,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -275,6 +276,20 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 
         # Restore original settings
         symm_mem.set_signal_pad_size(original_size)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_handle_group_name(self) -> None:
+        """A handle reports the group it was rendezvoused on."""
+        self._init_process()
+        group = dist.new_group(list(range(self.world_size)))
+        t = symm_mem.empty(64, device=self.device)
+        world = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        other = symm_mem.rendezvous(t, group=group)
+        self.assertEqual(world.group_name, dist.group.WORLD.group_name)
+        self.assertEqual(other.group_name, group.group_name)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -2135,12 +2150,13 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         )
         torch.manual_seed(42 + self.rank)
 
-    # These timeout tests are skipped on ROCm because timeout calls trap(), which
-    # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The functionality
-    # is there, meaning timeout is happening correctly. However, there isn't a nice way
-    # to test it as the current executing thread will coredump and exit.
-    @skip_if_rocm_multiprocess
+    # The device-side timeout calls trap(), which surfaces as a catchable
+    # RuntimeError at the next synchronize() on both CUDA (__trap) and ROCm
+    # (abort() -> hipErrorLaunchFailure). On ROCm the HIP runtime only keeps
+    # the fault catchable when core dumps are disabled; otherwise it aborts
+    # the process (the -SIGABRT seen locally). CI already runs with
+    # --ulimit core=0, and core_dumps_disabled() makes this hold on a dev box
+    # too, so the block timing out must stay open through synchronize().
     @skip_if_lt_x_gpu(2)
     def test_barrier_timeout(self) -> None:
         self._init_process()
@@ -2149,7 +2165,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
-            with self.assertRaises(RuntimeError):
+            with core_dumps_disabled(), self.assertRaises(RuntimeError):
                 symm_mem_hdl.barrier(timeout_ms=1000)
                 torch.cuda.synchronize()
         else:
@@ -2161,12 +2177,13 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
-    # These timeout tests are skipped on ROCm because timeout calls trap(), which
-    # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The functionality
-    # is there, meaning timeout is happening correctly. However, there isn't a nice way
-    # to test it as the current executing thread will coredump and exit.
-    @skip_if_rocm_multiprocess
+    # The device-side timeout calls trap(), which surfaces as a catchable
+    # RuntimeError at the next synchronize() on both CUDA (__trap) and ROCm
+    # (abort() -> hipErrorLaunchFailure). On ROCm the HIP runtime only keeps
+    # the fault catchable when core dumps are disabled; otherwise it aborts
+    # the process (the -SIGABRT seen locally). CI already runs with
+    # --ulimit core=0, and core_dumps_disabled() makes this hold on a dev box
+    # too, so the block timing out must stay open through synchronize().
     @skip_if_lt_x_gpu(2)
     def test_put_signal_timeout(self) -> None:
         self._init_process()
@@ -2175,7 +2192,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
-            with self.assertRaises(RuntimeError):
+            with core_dumps_disabled(), self.assertRaises(RuntimeError):
                 # First, put a signal into rank 1's signal pad. Since rank 1
                 # doesn't wait on this signal, the subsequent put will timeout.
                 symm_mem_hdl.put_signal(dst_rank=1)
@@ -2190,12 +2207,13 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
-    # These timeout tests are skipped on ROCm because timeout calls trap(), which
-    # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The functionality
-    # is there, meaning timeout is happening correctly. However, there isn't a nice way
-    # to test it as the current executing thread will coredump and exit.
-    @skip_if_rocm_multiprocess
+    # The device-side timeout calls trap(), which surfaces as a catchable
+    # RuntimeError at the next synchronize() on both CUDA (__trap) and ROCm
+    # (abort() -> hipErrorLaunchFailure). On ROCm the HIP runtime only keeps
+    # the fault catchable when core dumps are disabled; otherwise it aborts
+    # the process (the -SIGABRT seen locally). CI already runs with
+    # --ulimit core=0, and core_dumps_disabled() makes this hold on a dev box
+    # too, so the block timing out must stay open through synchronize().
     @skip_if_lt_x_gpu(2)
     def test_wait_signal_timeout(self) -> None:
         self._init_process()
@@ -2204,7 +2222,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
-            with self.assertRaises(RuntimeError):
+            with core_dumps_disabled(), self.assertRaises(RuntimeError):
                 symm_mem_hdl.wait_signal(src_rank=1, timeout_ms=1000)
                 torch.cuda.synchronize()
         else:
