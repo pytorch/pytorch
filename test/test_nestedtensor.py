@@ -19,6 +19,7 @@ import torch._dynamo
 import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
+from torch._inductor.codegen.common import BackendFeature, has_backend_feature
 from torch.nested._internal.nested_tensor import (
     _rebuild_njt,
     buffer_from_jagged,
@@ -8155,6 +8156,19 @@ torch.cuda.synchronize()
         self.assertEqual(compiled_output, expected_output, rtol=1e-3, atol=1e-3)
 
         # === Verify that computation fusion happens. ===
+        # Each fused op is gated on the backend features its kernel needs:
+        # _jagged_to_padded_dense_forward on INDIRECT_INDEXING and
+        # _padded_dense_to_jagged_forward on BUCKETIZE + INDIRECT_INDEXING.
+        # CPU (CppScheduling) fuses the former but falls back for the latter,
+        # which does not declare BUCKETIZE.
+        has_indirect_indexing = has_backend_feature(
+            torch.device(device), BackendFeature.INDIRECT_INDEXING
+        )
+        has_bucketize = has_backend_feature(
+            torch.device(device), BackendFeature.BUCKETIZE
+        )
+        fused = has_indirect_indexing and has_bucketize
+
         # Fallback op call -> fusion didn't happen.
         fallback_op_calls_present = any(
             "torch.ops.aten._padded_dense_to_jagged_forward.default("
@@ -8164,17 +8178,16 @@ torch.cuda.synchronize()
             for i in range(len(generated_code))
         )
 
-        # NB: Fusion isn't supported on CPU.
-        self.assertEqual("cuda" in device, not fallback_op_calls_present)
+        self.assertEqual(fused, not fallback_op_calls_present)
 
         for i in range(len(generated_code)):
             # Examine buffer construction lines in the generated code to determine
-            # whether fusion occurred. If fusion happens, a 3D buffer with shape
+            # whether fusion occurred. If both ops fuse, a 3D buffer with shape
             # (B, max_seqlen, D) should never be materialized.
             buffer_constructions = [
                 line.strip()
                 for line in generated_code[i].split("\n")
-                if "empty_strided_cuda(" in line
+                if f"empty_strided_{torch.device(device).type}(" in line
             ]
 
             buffer_dims = [
@@ -8183,7 +8196,7 @@ torch.cuda.synchronize()
                 for t in buffer_constructions
             ]
 
-            if "cuda" in device:
+            if fused:
                 self.assertFalse(any(d == 3 for d in buffer_dims))
 
     @dtypes(torch.float32)

@@ -1,11 +1,20 @@
 # Owner(s): ["module: inductor"]
 
 from functools import partial
-from unittest import skipIf
+from unittest import mock, skipIf
 
 import torch
 from torch._inductor import config
-from torch._inductor.codegen.common import BackendFeature, has_backend_feature
+from torch._inductor.codegen.common import (
+    BackendFeature,
+    custom_backend_codegen_configs,
+    custom_backend_passes,
+    device_codegens,
+    has_backend_feature,
+    init_backend_registration,
+    register_backend_for_device,
+)
+from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.ir import Pointwise
 from torch._inductor.lowering import make_fallback, make_pointwise, register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -19,6 +28,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     requires_gpu,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 # These tests check issues for lowerings that aren't in the main pytorch repo
@@ -281,7 +291,7 @@ class TestCustomLowering(InductorTestCase):
 class TestJaggedAtenLowerings(InductorTestCase):
     """Fused vs. fallback behavior of the jagged <-> padded dense lowerings."""
 
-    def test_jagged_to_padded_dense_fused(self, device):
+    def test_jagged_to_padded_dense_fused_or_fallback(self, device):
         values = torch.randn(10, 5, device=device)
         offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
         max_length = offsets.diff().max().item()
@@ -292,16 +302,21 @@ class TestJaggedAtenLowerings(InductorTestCase):
                 values, [offsets], [max_length], padding_value
             )
 
-        # The fused kernel only uses ops every backend supports, so no device
-        # should fall back to the ATen kernel.
+        # The fused kernel uses indirect_indexing + masked, so only backends
+        # declaring BackendFeature.INDIRECT_INDEXING fuse; the rest fall back.
         expected = fn(values, offsets, max_length)
         actual, code = run_and_get_code(
             torch.compile(fn, fullgraph=True), values, offsets, max_length
         )
         self.assertEqual(actual, expected)
-        self.assertNotIn(
-            "torch.ops.aten._jagged_to_padded_dense_forward", "".join(code)
-        )
+        if has_backend_feature(torch.device(device), BackendFeature.INDIRECT_INDEXING):
+            self.assertNotIn(
+                "torch.ops.aten._jagged_to_padded_dense_forward", "".join(code)
+            )
+        else:
+            self.assertIn(
+                "torch.ops.aten._jagged_to_padded_dense_forward", "".join(code)
+            )
 
     def test_padded_dense_to_jagged_fused_or_fallback(self, device):
         values = torch.randn(10, 5, device=device)
@@ -317,14 +332,22 @@ class TestJaggedAtenLowerings(InductorTestCase):
                 padded, [offsets], total_L
             )
 
-        # get_inverse_offsets emits ops.bucketize, so only backends declaring
-        # BackendFeature.BUCKETIZE take the fused path; the rest fall back.
+        # get_inverse_offsets emits ops.bucketize and the fused gather uses
+        # indirect_indexing, so only backends declaring both BUCKETIZE and
+        # INDIRECT_INDEXING take the fused path; the rest fall back.
         expected = fn(padded, offsets, total_L)
         actual, code = run_and_get_code(
             torch.compile(fn, fullgraph=True), padded, offsets, total_L
         )
         self.assertEqual(actual, expected)
-        if has_backend_feature(device, BackendFeature.BUCKETIZE):
+        has_bucketize = has_backend_feature(
+            torch.device(device), BackendFeature.BUCKETIZE
+        )
+        has_indirect_indexing = has_backend_feature(
+            torch.device(device), BackendFeature.INDIRECT_INDEXING
+        )
+        fused = has_bucketize and has_indirect_indexing
+        if fused:
             self.assertNotIn(
                 "torch.ops.aten._padded_dense_to_jagged_forward", "".join(code)
             )
@@ -334,8 +357,59 @@ class TestJaggedAtenLowerings(InductorTestCase):
             )
 
 
+class TestJaggedOutOfTreeBackend(InductorTestCase):
+    """An out-of-tree backend opts into (or out of) the fused jagged lowerings
+    by declaring the feature on its registered scheduling."""
+
+    def test_lowering_falls_back_when_scheduling_drops_feature(self):
+        # Same op fuses on the default CPU scheduling (which declares
+        # INDIRECT_INDEXING); registering a scheduling without it must make
+        # the lowering pick the ATen fallback. This is the mechanism an
+        # out-of-tree backend controls via register_backend_for_device.
+        init_backend_registration()
+        orig = device_codegens["cpu"]
+
+        class NoIndirectIndexing(CppScheduling):
+            backend_features = OrderedSet(
+                [
+                    BackendFeature.INPLACE_BUFFERS,
+                    BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
+                ]
+            )
+
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 1, 3, 8, 10], dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+
+        def fn(values, offsets, max_length):
+            return torch.ops.aten._jagged_to_padded_dense_forward(
+                values, [offsets], [max_length], 1.3
+            )
+
+        with (
+            mock.patch.dict(device_codegens),
+            mock.patch.dict(custom_backend_codegen_configs),
+            mock.patch.dict(custom_backend_passes),
+        ):
+            register_backend_for_device(
+                "cpu",
+                NoIndirectIndexing,
+                orig.wrapper_codegen,
+                orig.cpp_wrapper_codegen,
+                orig.fx_wrapper_codegen,
+            )
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), values, offsets, max_length
+            )
+        self.assertEqual(actual, fn(values, offsets, max_length))
+        self.assertIn("torch.ops.aten._jagged_to_padded_dense_forward", "".join(code))
+
+
 instantiate_device_type_tests(
-    TestJaggedAtenLowerings, globals(), only_for=("cpu", "cuda")
+    TestJaggedAtenLowerings,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
