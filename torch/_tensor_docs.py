@@ -1155,6 +1155,9 @@ The :attr:`src` tensor must be :ref:`broadcastable <broadcasting-semantics>`
 with the :attr:`self` tensor. It may be of a different data type or reside on a
 different device.
 
+See :ref:`cuda-device-to-host-copies` for guidance on repeated CUDA-to-CPU
+transfers and reusing CPU buffers.
+
 Args:
     src (Tensor): the source tensor to copy from
     non_blocking (bool, optional): if ``True`` and this copy is between CPU and GPU,
@@ -5124,6 +5127,9 @@ to(*args, **kwargs) -> Tensor
 
 Performs Tensor dtype and/or device conversion. A :class:`torch.dtype` and :class:`torch.device` are
 inferred from the arguments of ``self.to(*args, **kwargs)``.
+
+See :ref:`cuda-device-to-host-copies` for guidance on repeated CUDA-to-CPU
+transfers and reusing CPU buffers.
 
 .. note::
 
