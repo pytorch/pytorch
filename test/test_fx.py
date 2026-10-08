@@ -86,6 +86,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     run_tests,
+    skipIfFreeThreaded,
     skipIfTorchDynamo,
     xfailIf,
     xfailIfNoAcceleratorTriton,
@@ -744,6 +745,8 @@ class TestFX(JitTestCase):
         self.assertIn("wrapped_decorated_fn", m.code)
         self.assertEqual(m(1), 1)
 
+    @skipIfTorchDynamo("Dynamo does not free right away")
+    @skipIfFreeThreaded("deferred refcounting frees some objects only in gc")
     def test_trace_does_not_keep_tracer_alive(self):
         # The wrappers patched in while tracing close over the patcher and the
         # tracer; once tracing finishes they must not keep the tracer (and the

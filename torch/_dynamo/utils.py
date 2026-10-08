@@ -4191,8 +4191,9 @@ def _wrap_graph_break_with_torch_runtime_err(gb_fn: Callable[[], NoReturn]) -> N
     try:
         gb_fn()
     except Unsupported as e:
-        exc = TorchRuntimeError(str(e), getattr(e, "real_stack", None))
-        raise exc.with_traceback(e.__traceback__) from None
+        raise TorchRuntimeError(str(e), getattr(e, "real_stack", None)).with_traceback(
+            e.__traceback__
+        ) from None
     raise AssertionError("should be unreachable")
 
 
@@ -4649,16 +4650,14 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
         real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
-        # Bind e as a default, not a local: a local would keep it, and through
-        # its traceback this frame (real args, the copied nn_module), alive in
-        # a reference cycle after the graph break is handled.
         _wrap_graph_break_with_torch_runtime_err(
-            lambda exn=e: unimplemented(
+            functools.partial(
+                unimplemented,
                 gb_type="RuntimeError when trying to get real value from fx.Node",
                 context="",
                 explanation="",
                 hints=[*graph_break_hints.USER_ERROR],
-                from_exc=exn,
+                from_exc=e,
             )
         )
         raise AssertionError("should not be reachable") from None

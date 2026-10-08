@@ -104,6 +104,7 @@ from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
+    skipIfFreeThreaded,
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -16386,6 +16387,9 @@ fn
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.param)
 
+    # Free-threaded builds immortalize code objects, so the cleanup hooks that
+    # run when the compiled code object dies never fire there.
+    @skipIfFreeThreaded("code objects are immortal, cleanup hooks never run")
     def test_discarded_graph_module_freed_without_gc(self):
         # The GraphModule handed to the backend and its Graph reference each
         # other (graph.owning_module). Once the compiled code is discarded, the
