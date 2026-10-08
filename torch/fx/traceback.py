@@ -368,15 +368,6 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
 MEMORY_BUDGET_ANNOTATION_KEY = "_region_activation_memory_budget"
 
 
-@contextmanager
-def _dynamo_region_activation_memory_budget(budget: float) -> Iterator[None]:
-    with (
-        annotate({MEMORY_BUDGET_ANNOTATION_KEY: budget}),
-        preserve_node_meta(),
-    ):
-        yield
-
-
 def _get_memory_budget_annotation(node: Node) -> float | None:
     """
     Read the ``region_activation_memory_budget`` annotation off an FX node,
@@ -388,6 +379,39 @@ def _get_memory_budget_annotation(node: Node) -> float | None:
     if not isinstance(custom, dict):
         return None
     return custom.get(MEMORY_BUDGET_ANNOTATION_KEY)
+
+
+def _get_float_annotations(node: Node) -> tuple[tuple[str, float], ...]:
+    """
+    Read the float-valued entries of an FX node's annotations. These are the
+    annotations that can resume across a graph break, and the AOTAutograd cache
+    keys on them since joint passes may read them.
+    """
+    custom = node.meta.get("custom")
+    if not isinstance(custom, dict):
+        return ()
+    return tuple((k, v) for k, v in custom.items() if type(v) is float)
+
+
+def _resumable_annotation(
+    annotation: dict[str, Any],
+) -> tuple[tuple[str, float], ...] | None:
+    """
+    Dynamo re-enters ``annotate`` after a graph break by LOAD_CONSTing the
+    annotation as a tuple of pairs. Only str keys with exact float values are
+    supported; returns None for any other annotation.
+    """
+    if not all(type(k) is str and type(v) is float for k, v in annotation.items()):
+        return None
+    return tuple(annotation.items())
+
+
+@contextmanager
+def _dynamo_resume_annotate(
+    annotation: tuple[tuple[str, float], ...],
+) -> Iterator[None]:
+    with annotate(dict(annotation)), preserve_node_meta():
+        yield
 
 
 @compatibility(is_backward_compatible=False)

@@ -641,7 +641,9 @@ def region_activation_memory_budget(
             "torch.autograd.graph.region_activation_memory_budget can only be "
             "used inside a torch.compile region; it has no effect in eager mode."
         )
-    return fx_traceback._dynamo_region_activation_memory_budget(float(budget))
+    return fx_traceback.annotate(
+        {fx_traceback.MEMORY_BUDGET_ANNOTATION_KEY: float(budget)}
+    )
 
 
 def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
