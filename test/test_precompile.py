@@ -4808,7 +4808,7 @@ class TestPrecompileDynamoCapture(TestCase):
             self.assertNotEqual(last, checkpoint)
         # The last save() covered every call, so exit writes nothing more.
         self.assertEqual(write.call_count, 2)
-        with self.assertRaisesRegex(PrecompileError, "not active"):
+        with self.assertRaisesRegex(PrecompileError, "already exited"):
             cap.save()
         self.assertTrue(cap.summary().complete)
         # The refused save() is a raised call; raising out of the block writes
@@ -4862,15 +4862,19 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(TypeError, "tracer must be"):
             self._capture(self.mod.single, tracer=object())
         cap = self._capture(self.mod.single, backend="eager")
-        with self.assertRaisesRegex(PrecompileError, "not active"):
+        with self.assertRaisesRegex(PrecompileError, "before calling it"):
             cap(self.model, self.x2)
         with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
             with cap:
-                pass
-        with self.assertRaisesRegex(PrecompileError, "already been entered"):
+                with self.assertRaisesRegex(PrecompileError, "already been entered"):
+                    with cap:
+                        pass
+        # Once its block exits the capture is spent, with the same message as a
+        # MakeFxTracer capture's.
+        with self.assertRaisesRegex(PrecompileError, "already exited"):
             with cap:
                 pass
-        with self.assertRaisesRegex(PrecompileError, "not active"):
+        with self.assertRaisesRegex(PrecompileError, "already exited"):
             cap(self.model, self.x2)
 
         class Reentrant(torch.nn.Module):
