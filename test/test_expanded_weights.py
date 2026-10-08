@@ -1059,7 +1059,7 @@ for test_param in supported_tests:
                 )
             ),
         )
-    if TEST_ACCELERATOR and test.test_accelerator:
+    if TEST_ACCELERATOR and test.test_accelerator and accelerator in ("cuda", "xpu"):
         # since this checks derivatives, only use double for precision
         setattr(
             TestExpandedWeightModule,
