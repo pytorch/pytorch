@@ -4867,6 +4867,32 @@ class SubgraphTracer(fx.Tracer):
 
         return MutationInfo(False, "", ())
 
+    def has_aliased_input_mutation(self) -> MutationInfo:
+        from torch._dynamo.variables.higher_order_ops import get_tensor_storages
+        from torch._higher_order_ops.utils import _collect_fake_inputs
+
+        # Functionalization treats each subgraph input as an independent tensor,
+        # so aliased inputs are only safe if none of them is written.
+        placeholders = self.graph.find_nodes(op="placeholder")
+        storages: dict[int, set[StorageWeakRef]] = {}
+        storage_counts: collections.Counter[StorageWeakRef] = collections.Counter()
+        for idx, node in enumerate(placeholders):
+            example_value = _collect_fake_inputs([node])[0]
+            if isinstance(example_value, torch.Tensor):
+                storages[idx] = get_tensor_storages(example_value)
+                storage_counts.update(storages[idx])
+
+        mutated_indices = tuple(
+            i
+            for i in self.has_input_mutation().mutated_input_indices
+            if any(storage_counts[s] > 1 for s in storages[i])
+        )
+        if mutated_indices:
+            mutated_nodes = [placeholders[i] for i in mutated_indices]
+            msg = f"Mutation of aliased input detected at {mutated_nodes}"
+            return MutationInfo(True, msg, mutated_indices)
+        return MutationInfo(False, "", ())
+
     def has_aliasing(self, *, allow_input_input_aliasing: bool = False) -> AliasingInfo:
         from torch._dynamo.variables.higher_order_ops import get_tensor_storages
         from torch._higher_order_ops.utils import _collect_fake_inputs
