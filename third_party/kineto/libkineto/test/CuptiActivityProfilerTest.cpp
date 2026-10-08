@@ -673,22 +673,30 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
 
   profiler.recordThreadInfo();
 
-  auto cpuOps = std::make_unique<MockCpuActivityBuffer>(
-      start_time_ns, start_time_ns + duration_ns);
-  cpuOps->addOp("op1", start_time_ns + 10, start_time_ns + 50, 1);
-  cpuOps->addOp("op_record", start_time_ns + 60, start_time_ns + 80, 100);
-  cpuOps->addOp("op_wait", start_time_ns + 90, start_time_ns + 110, 200);
-  cpuOps->addOp("op_evt_sync", start_time_ns + 120, start_time_ns + 140, 300);
-  profiler.transferCpuTrace(std::move(cpuOps));
-
   constexpr uint32_t kEventId = 7777;
   constexpr uint32_t kContextId = 7;
   constexpr uint32_t kDeviceId = 3;
-  constexpr uint32_t kRecordCorrId = 100;
-  constexpr uint32_t kWaitCorrId = 200;
-  constexpr uint32_t kEvtSyncCorrId = 300;
-  constexpr uint32_t kEventStreamId = 11;
+  constexpr uint32_t kRecordCorrId = uint32_t{1} << 31;
+  constexpr uint32_t kWaitCorrId = kRecordCorrId + 1;
+  constexpr uint32_t kEvtSyncCorrId = kRecordCorrId + 2;
+  constexpr uint32_t kEventStreamId =
+      static_cast<uint32_t>(CUPTI_SYNCHRONIZATION_INVALID_VALUE);
+  constexpr int32_t kEventTraceStreamId = -1;
   constexpr uint32_t kWaitStreamId = 13;
+
+  auto cpuOps = std::make_unique<MockCpuActivityBuffer>(
+      start_time_ns, start_time_ns + duration_ns);
+  cpuOps->addOp("op1", start_time_ns + 10, start_time_ns + 50, 1);
+  cpuOps->addOp(
+      "op_record", start_time_ns + 60, start_time_ns + 80, kRecordCorrId);
+  cpuOps->addOp(
+      "op_wait", start_time_ns + 90, start_time_ns + 110, kWaitCorrId);
+  cpuOps->addOp(
+      "op_evt_sync",
+      start_time_ns + 120,
+      start_time_ns + 140,
+      kEvtSyncCorrId);
+  profiler.transferCpuTrace(std::move(cpuOps));
 
   // Wait events and synchronization records are added
   // before the CUDA_EVENT and kernel they reference, as CUPTI
@@ -740,7 +748,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
           << "Stream Wait Event should reference the correct event ID";
       EXPECT_EQ(json["wait_on_cuda_event_record_corr_id"], kRecordCorrId)
           << "Stream Wait Event corr_id should be populated despite out-of-order records";
-      EXPECT_EQ(json["wait_on_stream"], kEventStreamId)
+      EXPECT_EQ(json["wait_on_stream"], kEventTraceStreamId)
           << "Stream Wait Event should reference stream the event was recorded on";
       RecordingTypedMetadataVisitor typedMetadata;
       activity->visitTypedMetadata(typedMetadata);
@@ -752,7 +760,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
           static_cast<int64_t>(kRecordCorrId));
       EXPECT_EQ(
           typedMetadata.get(CudaMetadataFields::kWaitOnStream),
-          static_cast<int64_t>(kEventStreamId));
+          static_cast<int64_t>(kEventTraceStreamId));
       streamWaitFound++;
     }
     if (metadata.find("Event Sync") != std::string::npos) {
@@ -761,7 +769,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
           << "Event Sync should reference the correct event ID";
       EXPECT_EQ(json["wait_on_cuda_event_record_corr_id"], kRecordCorrId)
           << "Event Sync corr_id should be populated despite out-of-order records";
-      EXPECT_EQ(json["wait_on_stream"], kEventStreamId)
+      EXPECT_EQ(json["wait_on_stream"], kEventTraceStreamId)
           << "Event Sync should reference stream the event was recorded on";
       RecordingTypedMetadataVisitor typedMetadata;
       activity->visitTypedMetadata(typedMetadata);
@@ -773,7 +781,7 @@ TEST_F(CuptiActivityProfilerTest, SyncEventCorrIdOutOfOrder) {
           static_cast<int64_t>(kRecordCorrId));
       EXPECT_EQ(
           typedMetadata.get(CudaMetadataFields::kWaitOnStream),
-          static_cast<int64_t>(kEventStreamId));
+          static_cast<int64_t>(kEventTraceStreamId));
       eventSyncFound++;
     }
   }

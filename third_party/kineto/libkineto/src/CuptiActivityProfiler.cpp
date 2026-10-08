@@ -158,7 +158,7 @@ void CuptiActivityProfiler::pushCorrelationIdImpl(
       (type == CorrelationFlowType::User)
       ? CuptiActivityApi::CorrelationFlowType::User
       : CuptiActivityApi::CorrelationFlowType::Default;
-  CuptiActivityApi::pushCorrelationID(id, cuptiType);
+  CuptiActivityApi::pushCorrelationID(static_cast<int>(id), cuptiType);
 }
 
 void CuptiActivityProfiler::popCorrelationIdImpl(CorrelationFlowType type) {
@@ -457,7 +457,7 @@ void CuptiActivityProfiler::handleCudaSyncActivity(
     auto maybe_wait_event_info = getWaitEventInfo(
         activity->contextId, activity->cudaEventId, activity->correlationId);
     if (maybe_wait_event_info) {
-      src_stream = maybe_wait_event_info->stream;
+      src_stream = streamIdForTrace(maybe_wait_event_info->stream);
       src_corrid = maybe_wait_event_info->correlationId;
     }
   }

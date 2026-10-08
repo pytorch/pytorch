@@ -27,7 +27,7 @@ class CuptiActivityBuffer {
   }
   CuptiActivityBuffer() = delete;
   ~CuptiActivityBuffer() = default;
-  CuptiActivityBuffer(const CuptiActivityBuffer&) = default;
+  CuptiActivityBuffer(const CuptiActivityBuffer&) = delete;
   CuptiActivityBuffer& operator=(const CuptiActivityBuffer&) = delete;
   CuptiActivityBuffer(CuptiActivityBuffer&&) = default;
   CuptiActivityBuffer& operator=(CuptiActivityBuffer&&) = default;

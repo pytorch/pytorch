@@ -65,9 +65,7 @@ bool CuptiActivityApi::isAvailable(uint32_t& version) const {
       CUPTI_CALL_NOWARN(cuptiGetVersion(&version)) == CUPTI_SUCCESS;
 }
 
-void CuptiActivityApi::pushCorrelationID(
-    uint64_t id,
-    CorrelationFlowType type) {
+void CuptiActivityApi::pushCorrelationID(int id, CorrelationFlowType type) {
   if (!singleton().externalCorrelationEnabled_.load(
           std::memory_order_relaxed)) {
     return;

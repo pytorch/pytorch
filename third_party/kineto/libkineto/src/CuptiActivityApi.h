@@ -52,7 +52,7 @@ class CuptiActivityApi {
 
   static CuptiActivityApi& singleton();
 
-  static void pushCorrelationID(uint64_t id, CorrelationFlowType type);
+  static void pushCorrelationID(int id, CorrelationFlowType type);
   static void popCorrelationID(CorrelationFlowType type);
 
   virtual bool isAvailable(uint32_t& version) const;

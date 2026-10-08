@@ -542,8 +542,8 @@ void Config::printActivityProfilerConfig(std::ostream& s) const {
 
   fmt::print(
       s,
-      "  Max GPU buffer size: {}MB\n",
-      activitiesMaxGpuBufferSize() / 1024 / 1024);
+      "  Max GPU buffer size: {:.0f}MB\n",
+      static_cast<double>(activitiesMaxGpuBufferSize()) / 1024.0 / 1024.0);
 
   std::vector<std::string> activities;
   activities.reserve(selectedActivityTypes_.size());
