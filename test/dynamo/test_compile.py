@@ -1,9 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
+import gc
 import inspect
 import io
 import os
 import tempfile
+import weakref
 from unittest.mock import patch
 
 import torch
@@ -43,6 +45,24 @@ class InPlaceCompilationTests(TestCase):
         self.assertEqual(model(x), ref)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
+
+    def test_compiled_module_freed_without_gc(self):
+        # The compiled __call__ is stored on the module; it must not reference
+        # the module back, or dropping the module (and its parameters) would
+        # wait for the cyclic GC.
+        for make in (ToyModel, lambda: torch.nn.Linear(10, 10)):
+            torch._dynamo.reset()
+            model = make()
+            model.compile(backend="eager")
+            model(torch.randn(10, 10))
+            model_ref = weakref.ref(model)
+            gc.collect()
+            gc.disable()
+            try:
+                del model
+                self.assertIsNone(model_ref())
+            finally:
+                gc.enable()
 
     def test_overwrite_call_impl(self):
         torch._dynamo.reset()

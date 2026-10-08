@@ -1782,7 +1782,7 @@ class Module:
 
     def _wrapped_call_impl(self, *args, **kwargs):
         if self._compiled_call_impl is not None:
-            return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
+            return self._compiled_call_impl(self, *args, **kwargs)  # type: ignore[misc]
         else:
             return self._call_impl(*args, **kwargs)
 
@@ -3063,4 +3063,18 @@ class Module:
 
         See :func:`torch.compile` for details on the arguments for this function.
         """
-        self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
+        # Compile the unbound _call_impl and pass self when calling it (see
+        # _wrapped_call_impl). A compiled bound method stored on self would
+        # reference self, keeping the module and all of its parameters in a
+        # reference cycle until the cyclic GC runs.
+        from torch._dynamo import config as dynamo_config, external_utils
+        from torch._dynamo.eval_frame import OptimizedModule
+
+        call_impl = type(self)._call_impl
+        if not (
+            dynamo_config.wrap_top_frame or dynamo_config.debug_force_nested_calls
+        ) and OptimizedModule._forward_has_skip_rule(self):
+            # What torch.compile does for a bound _call_impl of such a module;
+            # see OptimizedModule._should_wrap_module_call_impl.
+            call_impl = external_utils.wrap_inline(call_impl)
+        self._compiled_call_impl = torch.compile(call_impl, *args, **kwargs)
