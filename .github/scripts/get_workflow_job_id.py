@@ -1,6 +1,5 @@
-# Helper to get the id of the currently running job in a GitHub Actions
-# workflow. GitHub does not provide this information to workflow runs, so we
-# need to figure it out based on what they *do* provide.
+# Helper to get the id and name of the currently running job in a GitHub Actions
+# workflow. GitHub provides the id as job.check_run_id, but not the name.
 from __future__ import annotations
 
 import argparse
@@ -128,7 +127,7 @@ def fetch_jobs(url: str, headers: dict[str, str]) -> list[dict[str, str]]:
     return jobs
 
 
-# Our strategy is to retrieve the parent workflow run, then filter its jobs on
+# Without job.check_run_id, we retrieve the parent workflow run, then filter its jobs on
 # RUNNER_NAME to figure out which job we're currently running.
 #
 # Why RUNNER_NAME? Because it's the only thing that uniquely identifies a job within a workflow.
@@ -152,6 +151,13 @@ def find_job_id_name(args: Any) -> tuple[str, str]:
         "Accept": "application/vnd.github.v3+json",
         "Authorization": "token " + GITHUB_TOKEN,
     }
+
+    # Read from the environment so the action and an older checkout of this
+    # script stay compatible
+    if check_run_id := os.environ.get("CHECK_RUN_ID"):
+        url = f"{PYTORCH_GITHUB_API}/actions/jobs/{check_run_id}"
+        job = fetch_url(url, headers=REQUEST_HEADERS, reader=json.load)
+        return (job["id"], job["name"])
 
     url = f"{PYTORCH_GITHUB_API}/actions/runs/{args.workflow_run_id}/jobs?per_page=100"
     jobs = fetch_jobs(url, REQUEST_HEADERS)
