@@ -4394,50 +4394,52 @@ class TestSparse(TestSparseBase):
 
 
 class TestSparseOneOff(TestCase):
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_cuda_from_cpu(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_sparse_from_cpu(self, device):
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
+            torch.sparse_coo_tensor(torch.zeros(1, 4, device=device).long(),
                                     torch.randn(4, 4, 4),
                                     [3, 4, 4])
 
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
+            torch.sparse_coo_tensor(torch.zeros(1, 4, device=device).long(),
                                     torch.randn(4, 4, 4, 0),
                                     [3, 4, 4, 0])
 
         with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected all tensors to be on the same device"):
-            torch.sparse_coo_tensor(torch.empty(1, 0).long().cuda(),
+            torch.sparse_coo_tensor(torch.empty(1, 0, device=device).long(),
                                     torch.randn(0, 4, 4, 0),
                                     [0, 4, 4, 0])
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_cuda_sparse_cpu_dense_add(self):
+    @onlyAccelerator
+    def test_sparse_cpu_dense_add(self, device):
         x = torch.zeros(3, 4, 4)
-        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
-                                           torch.randn(4, 4, 4).cuda(),
+        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4, device=device).long(),
+                                           torch.randn(4, 4, 4, device=device),
                                            [3, 4, 4])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a .* tensor, but got a CPU tensor"):
             x + sparse_y
 
         x = torch.zeros(3, 4, 4, 0)
-        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().cuda(),
-                                           torch.randn(4, 4, 4, 0).cuda(),
+        sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4, device=device).long(),
+                                           torch.randn(4, 4, 4, 0, device=device),
                                            [3, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a .* tensor, but got a CPU tensor"):
             x + sparse_y
 
         x = torch.zeros(0, 4, 4, 0)
-        sparse_y = torch.sparse_coo_tensor(torch.empty(1, 0).long().cuda(),
-                                           torch.randn(0, 4, 4, 0).cuda(),
+        sparse_y = torch.sparse_coo_tensor(torch.empty(1, 0, device=device).long(),
+                                           torch.randn(0, 4, 4, 0, device=device),
                                            [0, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a .* tensor, but got a CPU tensor"):
             x + sparse_y
 
 
@@ -5900,6 +5902,8 @@ instantiate_device_type_tests(TestSparseOnlyCPU, globals(), only_for="cpu")
 
 # e.g., TestSparseCPU and TestSparseCUDA
 instantiate_device_type_tests(TestSparse, globals(), allow_mps=True, except_for='meta')
+
+instantiate_device_type_tests(TestSparseOneOff, globals(), allow_mps=True, except_for='meta')
 
 instantiate_device_type_tests(TestSparseAny, globals(), except_for='meta')
 
