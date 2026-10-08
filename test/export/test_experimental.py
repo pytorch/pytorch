@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
     onlyAccelerator,
+    skipCUDAIf,
 )
 from torch.testing._internal.common_utils import HardwareClassification, TEST_CUDA
 from torch.utils import _pytree as pytree
@@ -93,6 +94,8 @@ class GlobalContext:
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_joint_basic(self) -> None:
         class Module(torch.nn.Module):
             def __init__(self) -> None:
@@ -1232,11 +1235,7 @@ def forward(self, args_0):
                 msg=lambda msg: f"{msg}\n{label}: buffer mutation mismatch",
             )
 
-
-class TestExperimentCPU(TestCase):
-    hw_classification = HardwareClassification.CPU
-
-    def _assert_blockmask_partial_replays_bound_tensors(self, device, make_mask_mod):
+    def _assert_blockmask_partial_replays_bound_tensors(self, make_mask_mod):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch.nn.attention.flex_attention import BlockMask, create_block_mask
 
@@ -1260,7 +1259,7 @@ class TestExperimentCPU(TestCase):
                 H=1,
                 Q_LEN=8,
                 KV_LEN=8,
-                device=device,
+                device="cpu",
                 BLOCK_SIZE=4,
             )
 
@@ -1287,9 +1286,8 @@ class TestExperimentCPU(TestCase):
         self.assertFalse(torch.equal(replayed_batch1, expected_batch0))
         self.assertTrue(torch.equal(replayed_batch1, expected_batch1))
 
-    def test_blockmask_partial_extraction_replays_bound_tensors(self, device):
+    def test_blockmask_partial_extraction_replays_bound_tensors(self):
         self._assert_blockmask_partial_replays_bound_tensors(
-            device,
             lambda mask_rule, attn_regions, document_ids: functools.partial(
                 mask_rule,
                 attn_regions=attn_regions,
@@ -1297,9 +1295,8 @@ class TestExperimentCPU(TestCase):
             ),
         )
 
-    def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self, device):
+    def test_blockmask_recursive_partial_extraction_replays_bound_tensors(self):
         self._assert_blockmask_partial_replays_bound_tensors(
-            device,
             lambda mask_rule, attn_regions, document_ids: functools.partial(
                 functools.partial(mask_rule, attn_regions=attn_regions),
                 document_ids=document_ids,
@@ -1307,7 +1304,6 @@ class TestExperimentCPU(TestCase):
         )
 
     def test_blockmask_self_referential_function_closure_extraction(self):
-        device = "cpu"
         from torch.nn.attention.flex_attention import create_block_mask
 
         _register_blockmask_pytree()
@@ -1324,10 +1320,10 @@ class TestExperimentCPU(TestCase):
             return mask_mod
 
         mask_a = create_block_mask(
-            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device=device, BLOCK_SIZE=4
+            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
         )
         mask_b = create_block_mask(
-            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device=device, BLOCK_SIZE=4
+            make_mask_mod(), B=1, H=1, Q_LEN=8, KV_LEN=8, device="cpu", BLOCK_SIZE=4
         )
 
         leaves_a, spec_a = pytree.tree_flatten(mask_a)
@@ -1568,8 +1564,8 @@ class TestExperimentDevice(TestCase):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+    @skipCUDAIf(
+        not IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
         "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_aot_export_flex_attention_callable_mask_mod(self, device):
@@ -1640,8 +1636,8 @@ class TestExperimentDevice(TestCase):
         self.assertEqual(out_eager.shape, out_export.shape)
         self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
 
-    @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+    @skipCUDAIf(
+        not IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
         "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_aot_export_flex_attention_with_blockmask_placeholders(self, device):
@@ -2001,7 +1997,6 @@ def forward(self, arg0_1):
         self.assertTrue(callable(restored.mask_mod))
 
 
-instantiate_device_type_tests(TestExperimentCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(
     TestExperimentDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
