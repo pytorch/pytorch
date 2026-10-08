@@ -100,10 +100,9 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
 
         output_layout = kernel_inputs.output_layout()
         flatten_output = len(output_layout.size) == 2
-        tma_store = (
-            flatten_output
-            and config.triton.enable_template_tma_store
-            and can_use_tma(output_layout=output_layout)
+        rank3_output = len(output_layout.size) == 3
+        tma_store = config.triton.enable_template_tma_store and can_use_tma(
+            output_layout=output_layout
         )
         descriptor_options = {
             "NUM_SMS": get_num_sms(),
@@ -113,7 +112,6 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             "A_BROADCAST_BATCH": a_broadcast,
             "B_BROADCAST_BATCH": b_broadcast,
             "FLATTEN_OUTPUT": flatten_output,
-            "tma_store": tma_store,
             # The grid needs the logical problem, not the flattened output size.
             "call_sizes": (batch, m, n),
         }
@@ -150,6 +148,8 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "DATA_PARTITION_FACTOR": candidate.data_partition_factor,
                 "SEPARATE_EPILOGUE_STORE": candidate.separate_epilogue_store,
                 "TWO_CTAS": two_ctas,
+                "RANK3_TMA_OUTPUT": tma_store and rank3_output,
+                "tma_store": tma_store,
                 **descriptor_options,
             }
             if two_ctas:
