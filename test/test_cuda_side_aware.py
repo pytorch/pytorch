@@ -11,18 +11,18 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _supported():
-    if not torch.cuda.is_available() or not hasattr(torch._C, "_cuda_localityInterleavedAllocator"):
+    if not torch.cuda.is_available() or not hasattr(torch._C, "_cuda_side_aware_register_range"):
         return False
     if torch.cuda.get_device_capability() != (10, 7):
         return False
     try:
         torch.cuda.memory.LocalityInterleavedAllocator()
         return True
-    except RuntimeError:  # driver without locality domains, or not two domains
+    except RuntimeError:  # no locality domains (driver or cuda.bindings < 13.4), or not two
         return False
 
 
-@unittest.skipUnless(_supported(), "needs an sm_107 device with two locality domains and CUDA >= 13.4")
+@unittest.skipUnless(_supported(), "needs an sm_107 device with two locality domains and cuda.bindings 13.4+")
 class TestSideAware(TestCase):
     N = (64 << 20) // 2 + 12345  # >= 64 MiB of fp32, odd length so the last chunk is partial
 

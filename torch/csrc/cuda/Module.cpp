@@ -26,7 +26,6 @@
 #include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <c10/cuda/CUDALocalityAllocator.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #ifdef USE_NCCL
@@ -1455,11 +1454,16 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         malloc_fn, free_fn);
   });
 
-  m.def("_cuda_localityInterleavedAllocator", []() {
-    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-        c10::cuda::LocalityAllocator::raw_alloc,
-        c10::cuda::LocalityAllocator::raw_free);
-  });
+  m.def(
+      "_cuda_side_aware_register_range",
+      [](c10::DeviceIndex device, uintptr_t base, size_t size) {
+        at::native::side_aware::register_striped_range(device, base, size);
+      });
+  m.def(
+      "_cuda_side_aware_unregister_range",
+      [](c10::DeviceIndex device, uintptr_t base) {
+        at::native::side_aware::unregister_striped_range(device, base);
+      });
   m.def("_cuda_set_side_aware", [](bool enabled) {
     at::native::side_aware::set_enabled(enabled);
   });

@@ -8,11 +8,31 @@
 #include <cuda_runtime_api.h>
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <vector>
 
 namespace at::native::side_aware {
+
+constexpr size_t kPageBytes = size_t(2) << 20; // one locality-domain page
+constexpr size_t kBlockAlign = 2 * kPageBytes; // a side-0 page followed by a side-1 page
+
+// Registry of side-striped VA ranges: ranges whose 2 MiB page at address
+// `addr` is backed by locality domain (addr >> 21) & 1. An allocator
+// (torch.cuda.memory.LocalityInterleavedAllocator) registers each range it
+// reserves; operands inside a registered range are eligible for the
+// side-aware schedule. `base` must be 4 MiB aligned, `size` a multiple of
+// 4 MiB, and the first 4 MiB (page 0 on side 0, page 1 on side 1) mapped and
+// reserved for the allocator's own use: the first live range registered on a
+// device serves as the probe for that device's SM side map, which is built
+// once, on the first eligible launch. A range must stay mapped until it is
+// unregistered. Registration takes a mutex; contains() is lock-free and is
+// called on every eligible launch.
+TORCH_CUDA_CPP_API void register_striped_range(c10::DeviceIndex device, uintptr_t base, size_t size);
+TORCH_CUDA_CPP_API void unregister_striped_range(c10::DeviceIndex device, uintptr_t base);
+// True if [ptr, ptr + bytes) lies inside one registered range of `device`.
+TORCH_CUDA_CPP_API bool contains(c10::DeviceIndex device, const void* ptr, size_t bytes);
 
 // Per-(device, stream) launch state.
 struct Context {
@@ -64,7 +84,7 @@ struct DefaultLaunchTimer {
   }
 };
 // Fills `ctx` for `stream`. False if its device is not an sm_107 device with
-// an arena and an SM side map, or the stream is capturing a graph.
+// a registered range and an SM side map, or the stream is capturing a graph.
 TORCH_CUDA_CPP_API bool get_context(
     const c10::cuda::CUDAStream& stream,
     Context* ctx);
