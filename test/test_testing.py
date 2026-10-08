@@ -1054,8 +1054,9 @@ class TestImported(TestCase):
         with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
             (Path(tmp) / "identity_report.py").write_text(textwrap.dedent(self.IDENTITY_SOURCE))
             (Path(tmp) / "identity_helpers.py").write_text(textwrap.dedent(self.IDENTITY_HELPERS))
-            # The launched module's node id, relative to the repo root.
-            expected_file = (Path(tmp) / "identity_report.py").resolve().relative_to(_TEST_DIR.parent).as_posix()
+            # file is the launched module's node id, relative to the repo root; the
+            # table drops the temporary directory.
+            tmp_nodeid = Path(tmp).resolve().relative_to(_TEST_DIR.parent).as_posix()
             # In process, identities come from collection; under xdist, from the
             # worker's setup reports.
             for mode, args in (("in_process", []), ("xdist", ["-n", "1"])):
@@ -1064,28 +1065,30 @@ class TestImported(TestCase):
                 t1_ms = int(time.time() * 1000)
                 self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
                 runs = _runs(report)
+                rows = []
                 for run in runs:
                     _assert_run_line(self, run, t0_ms, t1_ms)
-                    self.assertEqual(run["file"], expected_file)
-                lines = (f"{run['suite']}::{run['case_name']} -> {run['declared_case_name']}" for run in runs)
-                rendered[mode] = "\n".join(sorted(lines))
+                    file = run["file"].removeprefix(f"{tmp_nodeid}/")
+                    rows.append((file, run["suite"], run["case_name"], run["language"], run["declared_case_name"]))
+                rendered[mode] = "\n".join(" | ".join(row) for row in sorted(rows))
         self.assertEqual(rendered["xdist"], rendered["in_process"])
+        # Rows are file | suite | case_name | language | declared_case_name.
         # test_added is a lambda and test_made_cpu a factory's inner function named
         # test, so both keep their collected name.
         self.assertExpectedInline(rendered["in_process"], """\
-::test_module_function -> test_module_function
-::test_pytest_ids[a::b] -> test_pytest_ids
-::test_pytest_ids[c[d]] -> test_pytest_ids
-TestDecorated::test_decorated -> test_decorated
-TestDeviceCPU::test_device_cpu -> test_device
-TestDeviceCPU::test_dtype_cpu_float32 -> test_dtype
-TestDeviceCPU::test_dtype_cpu_float64 -> test_dtype
-TestFactoryCPU::test_made_cpu -> test_made_cpu
-TestImported::test_imported -> test_imported
-TestInner::test_nested -> test_nested
-TestParametrize::test_parametrize_value_1 -> test_parametrize
-TestSetattr::test_added -> test_added
-TestUnittest::test_unittest -> test_unittest""")
+identity_report.py |  | test_module_function | python | test_module_function
+identity_report.py |  | test_pytest_ids[a::b] | python | test_pytest_ids
+identity_report.py |  | test_pytest_ids[c[d]] | python | test_pytest_ids
+identity_report.py | TestDecorated | test_decorated | python | test_decorated
+identity_report.py | TestDeviceCPU | test_device_cpu | python | test_device
+identity_report.py | TestDeviceCPU | test_dtype_cpu_float32 | python | test_dtype
+identity_report.py | TestDeviceCPU | test_dtype_cpu_float64 | python | test_dtype
+identity_report.py | TestFactoryCPU | test_made_cpu | python | test_made_cpu
+identity_report.py | TestImported | test_imported | python | test_imported
+identity_report.py | TestInner | test_nested | python | test_nested
+identity_report.py | TestParametrize | test_parametrize_value_1 | python | test_parametrize
+identity_report.py | TestSetattr | test_added | python | test_added
+identity_report.py | TestUnittest | test_unittest | python | test_unittest""")
 
     SUBTESTS_SOURCE = """
 import unittest
