@@ -201,10 +201,10 @@ def _evaluate_candidate(
         _record_skip(ctx, "input_not_node", node_name)
         return None
 
+    mask_node: fx.Node | None = None
     if is_scatter_reduce or is_index_add:
         scatter_dim, index_node = output_node.args[1], output_node.args[2]
         values_node = output_node.args[3]
-        mask_node = None
         if (
             not isinstance(scatter_dim, int)
             or not isinstance(index_node, fx.Node)
@@ -215,7 +215,12 @@ def _evaluate_candidate(
     else:
         # pyrefly: ignore [bad-index]
         indices_pos, mask_pos = _SCATTER_ARGS[output_node.target]
-        mask_node = output_node.args[mask_pos] if mask_pos is not None else None
+        if mask_pos is not None:
+            mask_arg = output_node.args[mask_pos]
+            if not isinstance(mask_arg, fx.Node):
+                _record_skip(ctx, "no_meta", node_name)
+                return None
+            mask_node = mask_arg
         values_pos = 3 if output_node.target is _MASKED_INDEX_PUT_TARGET else 2
         values_node = output_node.args[values_pos]
         scatter_dim, index_node = _extract_scatter_dim_and_index(
@@ -362,7 +367,6 @@ def _evaluate_candidate(
         writes_per_slot=writes_per_slot,
         dtype=input_meta["dtype"],
         acc_dtype=acc_dtype,
-        # pyrefly: ignore [bad-argument-type]
         mask_node=mask_node,
     )
 
