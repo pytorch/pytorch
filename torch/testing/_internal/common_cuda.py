@@ -209,6 +209,18 @@ def evaluate_platform_supports_ck_sdpa():
     else:
         return False
 
+# Gate for RDNA 3/3.5, which supports SDPA but up to 256
+def evaluate_platform_sdpa_supports_hdim512():
+    if not TEST_WITH_ROCM:
+        return True
+    if not torch.cuda.is_available():
+        return False
+    gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
+    if gcn_arch_name.startswith('gfx11'):
+        return False
+    return True
+
+
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         # NOTE: gfx1250 is omitted until mem-efficient-attention artifacts ship
@@ -251,6 +263,7 @@ PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
 
+PLATFORM_FUSED_ATTENTION_SUPPORTS_HDIM512: bool = LazyVal(lambda: evaluate_platform_sdpa_supports_hdim512())
 
 def evaluate_platform_supports_bf16():
     if torch.version.cuda:
@@ -704,12 +717,16 @@ def _xfail_cuda_on_windows_wrapper(test_fn):
 
 
 def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
-    """Mark a CUDA test as expected failure on Windows with SM >= 8.9.
+    """Mark a CUDA test as expected failure on Windows with NVIDIA SM >= 8.9.
 
     Works for both device-parameterized tests and plain TestCase CUDA tests.
     CPU/XPU variants of device-parameterized tests are unaffected.
     """
-    return _xfail_cuda_on_windows_wrapper(test_fn) if IS_WINDOWS and SM89OrLater else test_fn
+    return (
+        _xfail_cuda_on_windows_wrapper(test_fn)
+        if IS_WINDOWS and not TEST_WITH_ROCM and SM89OrLater
+        else test_fn
+    )
 
 
 # When using nvcc from the CUDA toolkit its version must be at least the one from ptxas bundled with Triton

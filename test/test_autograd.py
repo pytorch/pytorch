@@ -86,7 +86,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIf,
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -4646,7 +4645,6 @@ class TestAutograd(TestCase):
         # graph was freed, causing a RuntimeError here.
         self.assertEqual(saved_ctx[0].saved_tensors, (p,))
 
-    @xfailIf(TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 13))
     def test_custom_autograd_repeated_grad_grad(self):
         # This test failed the equality check in PR #22983; it's an interesting
         # and different test case worth enshrining.  mult1 is not testing
@@ -12264,6 +12262,9 @@ get_out().sum().backward()
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory
                 cwd=os.path.dirname(os.path.realpath(__file__)),
+                # Python 3.13+ colorizes tracebacks when FORCE_COLOR is set,
+                # which splits the error message checked below
+                env={**os.environ, "PYTHON_COLORS": "0"},
                 # It is ok to have an extra long timeout here as a timeout means the test failed
                 timeout=20,
             )
@@ -13860,7 +13861,6 @@ class TestAutogradDeviceType(TestCase):
             with self.assertRaises(RuntimeError):
                 x.grad = torch.randn(5, 5, device=devices[1])
 
-    @dtypesIfMPS(torch.float32)
     @deviceCountAtLeast(1)
     @dtypes(torch.float, torch.double)
     def test_requires_grad_factory(self, devices, dtype):
@@ -14792,6 +14792,7 @@ class TestAutogradDeviceType(TestCase):
         self.assertEqual(result, x * 2)
 
     @skipXPUIf(True, "torch._C._scatter Not implemented on XPU, issue #143239")
+    @onlyAccelerator
     def test_checkpointing_without_reentrant_dataparallel(self, device):
         """
         Verifies gradient correctness when checkpoint without reentrant autograd
