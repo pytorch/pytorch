@@ -1264,33 +1264,34 @@ class TestFastCudaLauncherCompileResult(TestCase):
             )
             return out
 
-        from triton.runtime._allocation import _allocator
-
-        previous_allocator = _allocator.get()
         patcher, results = self._patch_build_fast_launcher()
         alloc_fn = mock.Mock(
             side_effect=lambda size, _alignment, _stream: torch.empty(
                 size, dtype=torch.uint8, device="cuda"
             )
         )
-        triton.set_allocator(alloc_fn)
-        try:
-            with patcher:
-                for _ in range(3):
-                    a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16)
-                    b = torch.randn((N, K), device="cuda", dtype=torch.bfloat16)
-                    self.assertEqual(gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2)
-        finally:
-            triton.set_allocator(previous_allocator)
+        allocator_var = SimpleNamespace(get=lambda: alloc_fn)
 
-        self.assertGreater(alloc_fn.call_count, 0)
-        for call in alloc_fn.call_args_list:
-            self.assertGreater(call.args[0], 0)
+        with (
+            patcher,
+            mock.patch(
+                "torch._inductor.runtime.static_triton_launcher._triton_allocator_var",
+                return_value=allocator_var,
+            ),
+        ):
+            for _ in range(3):
+                a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16)
+                b = torch.randn((N, K), device="cuda", dtype=torch.bfloat16)
+                self.assertEqual(gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2)
+
         self.assertTrue(results, "_build_fast_launcher was not reached")
         self.assertFalse(
             any(results),
             "global-scratch kernels must use the regular static launcher",
         )
+        self.assertGreater(alloc_fn.call_count, 0)
+        for call in alloc_fn.call_args_list:
+            self.assertGreater(call.args[0], 0)
 
 
 if __name__ == "__main__":

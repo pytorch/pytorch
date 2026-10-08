@@ -10,6 +10,10 @@ from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -197,6 +201,19 @@ class TestInductorConfig(TestCase):
                 torch.randn(10)
             ),
         )
+
+    @parametrize(
+        "key",
+        (
+            "fusion_memory_timeline_peak_memory_increase_gb",
+            "fusion_memory_timeline_peak_memory_pct_threshold",
+        ),
+    )
+    @parametrize("value", (None, 0.0, 0.5))
+    def test_fusion_memory_timeline_peak_options(self, key, value):
+        self.assertIsNone(getattr(config, key))
+        optimized = torch.compile(dummy_fn, options={key: value})
+        self.assertEqual(optimized.get_compiler_config()[key], value)
 
     def test_api_options(self):
         reduce_overhead_opts = torch._inductor.list_mode_options("reduce-overhead")
@@ -521,6 +538,9 @@ class TestInductorConfig(TestCase):
         called = False
         z.grad_fn.apply(torch.tensor(0))
         self.assertFalse(called)
+
+
+instantiate_parametrized_tests(TestInductorConfig)
 
 
 if __name__ == "__main__":

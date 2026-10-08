@@ -240,6 +240,8 @@ def meta__transformer_encoder_layer_fwd(
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
 @out_wrapper()
 def linalg_cross(self, other, *, dim=-1):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     x_d = self.ndim
     y_d = other.ndim
     torch._check(
@@ -247,7 +249,7 @@ def linalg_cross(self, other, *, dim=-1):
         lambda: "linalg.cross: inputs must have the same number of dimensions.",
     )
     torch._check(
-        self.size(dim) == 3 and other.size(dim) == 3,
+        sym_and(self.size(dim) == 3, other.size(dim) == 3),
         lambda: (
             f"linalg.cross: inputs dimension {dim} must have length 3. "
             f"Got {self.size(dim)} and {other.size(dim)}"
@@ -376,7 +378,10 @@ def meta_fft_c2c(self, dim, normalization, forward):
     if not dim:
         return self.clone()
 
-    if device_hint(self) == "cpu" and not torch.backends.mkl.is_available():
+    # MPS and PocketFFT (CPU without MKL) return contiguous outputs
+    if device_hint(self) == "mps" or (
+        device_hint(self) == "cpu" and not torch.backends.mkl.is_available()
+    ):
         return self.new_empty(self.size())
 
     out_sizes = self.size()
@@ -482,7 +487,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
         return output
 
-    elif torch.backends.mkl.is_available():
+    elif device_hint(self) != "mps" and torch.backends.mkl.is_available():
         # _fft_r2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         sorted_dims = _sort_dims(self, dim, exclude_last=True)
         output = self.new_empty(
@@ -739,7 +744,7 @@ def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int)
                 temp = self.clone(memory_format=torch.contiguous_format)
             return _exec_fft(output, temp, out_sizes, [dim[-1]], forward=False)
 
-    elif torch.backends.mkl.is_available():
+    elif device_hint(self) != "mps" and torch.backends.mkl.is_available():
         # _fft_c2r_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         input = self
         if len(dim) > 1:
@@ -4472,13 +4477,18 @@ def meta__dyn_quant_pack_4bit_weight(
         weights.dtype is torch.uint8,
         lambda: f"expected w to be uint8, got {weights.dtype}",
     )
-    if torch.backends.kleidiai.is_available() and (
-        (block_size == in_features and scales_zeros.dtype == torch.float)
-        or (
-            block_size < in_features
-            and block_size % 32 == 0
-            and in_features % block_size == 0
-            and scales_zeros.dtype == torch.bfloat16
+    # Mirror can_use_kleidiai
+    if (
+        torch.backends.kleidiai.is_available()
+        and torch.cpu.get_capabilities().get("dot")
+        and (
+            (block_size == in_features and scales_zeros.dtype == torch.float)
+            or (
+                block_size < in_features
+                and block_size % 32 == 0
+                and in_features % block_size == 0
+                and scales_zeros.dtype == torch.bfloat16
+            )
         )
     ):
         packed_weight_size = get_kai_packed_weight_size(
@@ -4749,8 +4759,6 @@ def meta_median(input):
 )
 @out_wrapper("values", "indices")
 def meta_median_mode_dim(input, dim=-1, keepdim=False):
-    if device_hint(input) == "cuda":
-        utils.alert_not_deterministic("median CUDA with indices output")
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
     return (
@@ -6072,6 +6080,24 @@ def full(size, fill_value, *args, **kwargs):
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
 
+    # Only check direct symbols. A compound expression may overflow before its
+    # generated C++ check.
+    if (
+        isinstance(fill_value, (torch.SymInt, torch.SymFloat))
+        and fill_value.node.expr.is_Symbol
+        and utils.is_integer_dtype(dtype)
+    ):
+        info = torch.iinfo(dtype)
+
+        def error_msg():
+            return f"value cannot be converted to type {dtype} without overflow"
+
+        is_int = isinstance(fill_value, torch.SymInt)
+        if not (is_int and dtype in (torch.int64, torch.uint64)):
+            lower = -info.max if is_int and not dtype.is_signed else info.min
+            torch._check(lower <= fill_value, error_msg)
+            torch._check(fill_value < info.max + 1, error_msg)
+
     return torch.empty(size, *args, **kwargs)
 
 
@@ -6567,6 +6593,12 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     S_KV = key.size(-2)
     D_V = value.size(-1)
 
+    torch._check(
+        S_KV == value.size(-2),
+        lambda: f"key sequence length ({S_KV}) must match "
+        f"value sequence length ({value.size(-2)})",
+    )
+
     if attn_bias is not None:
         bias_s_kv = attn_bias.size(-1)
         if bias_s_kv != 1:
@@ -6754,10 +6786,12 @@ def meta__scaled_dot_product_attention_math_for_mps(
             batch_size = 1
             for i in range(x.dim() - 3):
                 batch_size *= x.shape[i]
-            return x.view(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
+            return x.reshape(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
         else:
             return x, False
 
+    batch_shape = torch.broadcast_shapes(*(t.shape[:-3] for t in (query, key, value)))
+    query = query.expand(*batch_shape, *query.shape[-3:])
     q_, unsqueezed = ensure_4d(query)
     k_, _ = ensure_4d(key)
     v_, _ = ensure_4d(value)
@@ -8299,8 +8333,44 @@ def meta_bucketize_scalar(
     )
 
 
+@register_meta([aten._histogramdd_bin_edges.default])
+def meta_histogramdd_bin_edges(self, bins, range=None, weight=None, density=False):
+    torch._check(
+        self.shape[-1] == len(bins),
+        lambda: (
+            "histogramdd: The size of bins must be equal to the innermost "
+            "dimension of the input."
+        ),
+    )
+    return [self.new_empty((bin_count + 1,)) for bin_count in bins]
+
+
+@register_meta([aten._histogramdd_from_bin_cts.default])
+def meta_histogramdd_from_bin_cts(self, bins, range=None, weight=None, density=False):
+    torch._check(
+        self.shape[-1] == len(bins),
+        lambda: (
+            "histogramdd: The size of bins must be equal to the innermost "
+            "dimension of the input."
+        ),
+    )
+    return self.new_empty(bins)
+
+
+@register_meta([aten._histogramdd_from_bin_tensors.default])
+def meta_histogramdd_from_bin_tensors(self, bins, weight=None, density=False):
+    torch._check(
+        self.shape[-1] == len(bins),
+        lambda: (
+            "histogramdd: The size of bins must be equal to the innermost "
+            "dimension of the input."
+        ),
+    )
+    return self.new_empty([edges.numel() - 1 for edges in bins])
+
+
 @register_meta([aten.histc])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_histc(input, bins=100, min=0, max=0):
     fn_name = "histc()"
     if device_hint(input) == "cpu":
@@ -9343,6 +9413,28 @@ import torch._refs.nn.functional
 import torch._refs.special
 
 
+# Ops whose C++ Meta kernels are SymInt-aware and faithful to their Python
+# decomps. activate_meta doesn't register the Python version as their Meta
+# kernel, and FakeTensorMode doesn't run their decomps.
+cpp_meta_supports_symint_ops = {
+    aten.empty.memory_format,
+    aten.empty_strided.default,
+    aten.as_strided_scatter.default,
+    aten.as_strided.default,
+    aten.as_strided_.default,
+    aten.zeros.default,
+    aten.detach.default,
+    aten.view_as_real.default,
+    aten.view_as_complex.default,
+    aten.set_.source_Storage_storage_offset,
+    aten._sparse_coo_tensor_with_dims_and_tensors.default,
+    aten.stack.default,
+    aten.arange.default,
+    aten.arange.start,
+    aten.arange.start_step,
+}
+
+
 def activate_meta():
     activate_meta_table = {}
 
@@ -9367,6 +9459,11 @@ def activate_meta():
                 f"op_overload must be OpOverload, got {type(op_overload)}"
             )
 
+        # Use the symint-aware C++ meta kernels; a Python Meta kernel would
+        # shadow them under the Python dispatcher.
+        if op_overload in cpp_meta_supports_symint_ops:
+            continue
+
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
         if torch._C._dispatch_has_kernel_for_dispatch_key(
@@ -9390,14 +9487,11 @@ def activate_meta():
         elif (
             op_overload.name()
             in {
-                "aten::empty_strided",  # causing infinite recursion, test_meta.py
                 "aten::clone",  # causing infinite recursion
                 "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite
                 "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64
                 "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
-                "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
-                "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
             }
         ):
             pass

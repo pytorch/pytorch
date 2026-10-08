@@ -1109,6 +1109,35 @@ print(torch.xpu.is_initialized())
         self.assertGreaterEqual(before_free_bytes, after_free_bytes)
         self.assertEqual(before_total_bytes, after_total_bytes)
 
+    @unittest.skipIf(not HAS_PYZES, "requires pyzes")
+    @unittest.skipIf(not Xe2_Or_Later, "not available")
+    @unittest.skip("See https://github.com/intel/torch-xpu-ops/issues/5015")
+    @serialTest()
+    def test_mem_get_info_with_pyzes(self):
+        torch.xpu.synchronize()
+        torch.xpu.empty_cache()
+        free_bytes, total_bytes = torch.xpu.mem_get_info()
+        memory_handle = torch.xpu._zes_get_memory_handle()
+
+        from ctypes import byref
+
+        import pyzes
+
+        mem_state = pyzes.zes_mem_state_t()
+        rc = pyzes.zesMemoryGetState(memory_handle, byref(mem_state))
+        if rc != pyzes.ZE_RESULT_SUCCESS:
+            self.fail("Failed to get memory state from Level Zero Sysman")
+
+        mem_props = pyzes.zes_mem_properties_t()
+        mem_props.stype = pyzes.ZES_STRUCTURE_TYPE_MEM_PROPERTIES
+
+        rc = pyzes.zesMemoryGetProperties(memory_handle, byref(mem_props))
+        if rc != pyzes.ZE_RESULT_SUCCESS:
+            self.fail("Failed to get memory properties from Level Zero Sysman")
+
+        self.assertEqual(free_bytes, mem_state.free)
+        self.assertEqual(total_bytes, mem_props.physicalSize)
+
     def test_get_arch_list(self):
         arch_list = torch.xpu.get_arch_list()
         if not arch_list:
@@ -1624,6 +1653,9 @@ if __name__ == "__main__":
     allocator_lib = ctypes.CDLL(dummy_allocator)
     called_dummy_alloc = ctypes.c_int.in_dll(allocator_lib, "called_dummy_alloc")
     called_dummy_free = ctypes.c_int.in_dll(allocator_lib, "called_dummy_free")
+    # mem_get_info() must still work while the pluggable allocator is active.
+    _, _ = torch.xpu.mem_get_info()
+    _, _ = torch.accelerator.get_memory_info()
     print(called_dummy_alloc.value, called_dummy_free.value)
 """
         rc = check_output(test_script).splitlines()[-1]
@@ -1820,6 +1852,22 @@ if __name__ == "__main__":
         # After exiting context, should be back on default stream
         restored_handle = module.get_xpu_work_stream(tensor, api_capsule)
         self.assertEqual(default_handle, restored_handle)
+
+    @parametrize("copy", [None, True, False])
+    def test_dlpack_conversion_with_device(self, copy):
+        if self.expandable_segments:
+            self.skipTest("Skipping DLPack test for expandable segments allocator.")
+        x = make_tensor((5,), dtype=torch.float32, device="xpu")
+
+        # Same-device exercises maybeCopyTensor's dlDeviceToTorchDevice path which requires
+        # the data pointer for XPU.
+        z = torch.from_dlpack(x, device=x.device, copy=copy)
+        self.assertEqual(z, x)
+        self.assertEqual(z.device, x.device)
+        if copy:
+            self.assertNotEqual(z.data_ptr(), x.data_ptr())
+        else:
+            self.assertEqual(z.data_ptr(), x.data_ptr())
 
     def test_storage_pin_memory(self):
         t = torch.empty(10, pin_memory=True)
