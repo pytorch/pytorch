@@ -389,7 +389,7 @@ class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
     """With lazy_init, communicators are created on first use."""
 
     @staticmethod
-    def _lazy_opts() -> dist.ProcessGroupNCCL.Options:
+    def _lazy_opts() -> "dist.ProcessGroupNCCL.Options":
         opts = dist.ProcessGroupNCCL.Options()
         opts.lazy_init = True
         return opts
