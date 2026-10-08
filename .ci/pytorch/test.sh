@@ -1922,8 +1922,8 @@ test_distributed_single_gpu() {
 
 test_distributed_4gpu() {
   # Distributed tests that need more GPUs than the standard 2-GPU distributed
-  # runner provides (3-4 GPU tests), run on runners with 4-GPU labels (e.g. ROCm
-  # gfx950.4). Selection reuses the native `multigpu` marker machinery (see
+  # runner provides (3-4 GPU tests), run on runners with 4-GPU labels.
+  # Selection reuses the native `multigpu` marker machinery (see
   # test/conftest.py): --distributed-tests discovers every distributed test file
   # dynamically, --multigpu-filter multigpu keeps the process-spawning tests, and
   # --multigpu-min-gpus 3 keeps only those needing more than the standard 2-GPU
