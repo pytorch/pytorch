@@ -8772,7 +8772,7 @@ class TestLinalgSVD(TestCase):
         self.assertEqual((U[..., :k] * S.unsqueeze(-2)) @ Vh[..., :k, :], A.to(ref_dtype), atol=vec_atol, rtol=0)
 
 
-class TestLinalgCudaOnly(TestCase, _TestLinalgMixin):
+class TestLinalgCuda(TestCase, _TestLinalgMixin):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
     hw_classification = HardwareClassification.CUDA
 
@@ -11893,7 +11893,7 @@ class TestGroupedMM(TestCase):
 
 instantiate_device_type_tests(TestLinalgDevice, globals())
 instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
-instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestLinalgCuda, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestLinalgCpu, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
