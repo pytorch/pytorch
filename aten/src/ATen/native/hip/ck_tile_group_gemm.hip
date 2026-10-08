@@ -133,8 +133,6 @@ namespace at::hip::detail {
 		// Fills one ck_tile::GemmTransKernelArg per group on the device. 
 		// Basically extracts A, B, and output ptrs and strides for one GEMM and puts in in the corresponding entry in the group_args array.
 		// This is a kernel intended to be launched with one thread per group on the device so offs is never read on the host.
-		
-		// TODO: Generally is offs actually on the device not host? Double check this.
 		template <typename DataType>
 		__global__ void prepare_grouped_gemm_data(
 				const DataType* A,                          // base pointer of mat_a (2D (sumM, K) / (M, sumK), or 3D (G, M, K))
@@ -273,6 +271,8 @@ namespace at::hip::detail {
 				return result;
 			};
 
+			// extract A, B, and output ptrs and strides for one GEMM and puts in in the corresponding entry in the group_args array.
+			// we do this concurrently via the device launch, one thread per GEMM.
 			prepare_grouped_gemm_data<DataType><<<1, group_count, 0, stream>>>(
 					reinterpret_cast<const DataType*>(mat_a.const_data_ptr()),
 					reinterpret_cast<const DataType*>(mat_b.const_data_ptr()),
