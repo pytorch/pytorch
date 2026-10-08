@@ -106,10 +106,10 @@ class _SymmemWork(dist._Work):
         self._event = None
         return True
 
-    def get_future(self) -> torch.futures.Future[bool]:
-        fut: torch.futures.Future[bool] = torch.futures.Future()
-        fut.set_result(True)
-        return fut
+    def get_future(self) -> torch.futures.Future[list[torch.Tensor]]:
+        raise NotImplementedError(
+            "get_future() is not supported by the symmem backend; use wait() instead"
+        )
 
 
 _DEFAULT_WORKSPACE_BYTES: int = 128 * 1024 * 1024

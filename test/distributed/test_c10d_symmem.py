@@ -502,13 +502,13 @@ class TestSymmemBackendCollectives(MultiProcessTestCase):
         self._destroy_pg()
 
     @skip_if_lt_x_gpu(2)
-    def test_get_future(self):
+    def test_get_future_not_supported(self):
         self._init_pg()
         t = torch.ones(4, device=self.device) * (self.rank + 1)
         work = dist.all_reduce(t, async_op=True)
-        fut = work.get_future()
-        fut.wait()
-        torch.cuda.synchronize(self.device)
+        with self.assertRaisesRegex(NotImplementedError, "get_future.*not supported"):
+            work.get_future()
+        work.wait()
         self.assertEqual(t, torch.full((4,), 3.0, device=self.device))
         self._destroy_pg()
 
