@@ -2200,8 +2200,13 @@ class TritonTemplateKernel(TritonKernel):
         tile_index = index.xreplace(
             {s: e.expr for s, e in self.range_tree_nodes.items()}
         )
-        if tile_index != layout.stride[0] * x + r:
+        # Descriptor shapes and coordinates are int32.
+        if tile_index != layout.stride[0] * x + r or max(layout.size) >= 2**31:
             return False
+        offsets = [
+            texpr(o) if self.index_dtype == "tl.int32" else f"({texpr(o)}).to(tl.int32)"
+            for o in origin
+        ]
         var = self.args.output(name)
         desc = self.prologue_cache.get(var)
         if desc is None:
@@ -2219,7 +2224,7 @@ class TritonTemplateKernel(TritonKernel):
         self.stores.writeline(
             DeferredLine(
                 name,
-                f"{desc}.store([{texpr(origin[0])}, {texpr(origin[1])}], "
+                f"{desc}.store([{', '.join(offsets)}], "
                 f"tl.broadcast_to({value}, [{rows}, {cols}])"
                 f".to({triton_type(layout.dtype)}))",
             )

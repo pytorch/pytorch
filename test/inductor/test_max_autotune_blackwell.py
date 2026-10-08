@@ -929,13 +929,16 @@ class TestBlackwellTMALoadFusion(TestCase):
         autows=(1, False),
         dynamic=None,
         fused_ms=0.0,
+        unfused_ms=1e-9,
         **patches,
     ):
         """Compile fn with only the given configs as Triton choices. Under
         template autoWS, only the (DATA_PARTITION_FACTOR, TWO_CTAS) = autows
         variants of them. Fused epilogue benchmarks report fused_ms, or call
-        it if it's a function, so by default every fusion the gates allow is
-        kept."""
+        it if it's a function, and unfused node benchmarks unfused_ms (None
+        times them for real). Both are tiny by default, so every fusion the
+        gates allow is kept regardless of GPU timing noise; unfused_ms stays
+        positive so equal timings don't reject a fusion."""
         keys = [
             ("triton::blackwell_ws_persistent_tma", "cuda", op)
             for op in ("mm", "addmm")
@@ -986,6 +989,15 @@ class TestBlackwellTMALoadFusion(TestCase):
                         fused_ms() if callable(fused_ms) else fused_ms,
                         "",
                     ),
+                ),
+                (
+                    contextlib.nullcontext()
+                    if unfused_ms is None
+                    else mock.patch.object(
+                        Scheduler,
+                        "benchmark_fused_nodes",
+                        return_value=(unfused_ms, ""),
+                    )
                 ),
             ):
                 return run_and_get_code(torch.compile(fn, dynamic=dynamic), *args)
@@ -1464,9 +1476,6 @@ class TestBlackwellTMALoadFusion(TestCase):
             200,
             BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
             tol=1e-5,
-            # The kernels after the template are benchmarked for real on top of
-            # fused_ms, so offset them for the fusion to always win.
-            fused_ms=-1.0,
             **{"triton.template_reduction_epilogue": True},
         )
         self.assertEqual(
@@ -1796,6 +1805,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                 BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
                 BlackwellGPUGemmConfig(128, 64, 64, 3, 8),
                 tol=1e-5,
+                unfused_ms=None,
                 **{
                     "triton.template_reduction_epilogue": True,
                     "benchmark_template_fusion": True,

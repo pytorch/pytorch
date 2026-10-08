@@ -1305,6 +1305,40 @@ class TestScheduler(TestCase):
         self.assertLess(budget(tile, 3, props=SimpleNamespace()), 0)
         self.assertEqual(budget({}, 3), 0)
 
+    def test_tile_tma_store_int32_coordinates(self):
+        """A post-reduction TMA store passes the tile origin as the descriptor's
+        int32 coordinates, also when a large output makes the kernel index in
+        int64, and falls back to tl.store when the output's shape exceeds int32."""
+        x, r, cm, cn = sympy.symbols("xtile r0_tile offs_cm offs_cn_i", integer=True)
+
+        def store_line(rows, index_dtype):
+            layout = ir.FixedLayout(
+                torch.device("cuda"), torch.bfloat16, [rows, 128], [128, 1]
+            )
+            kernel = Mock(
+                _tile_tma_store_ctx=((x, r), [cm, cn], (128, 128)),
+                tma_store_epilogue_outputs={"buf1"},
+                range_tree_nodes={},
+                prologue_cache={},
+                block_ptr_id=iter([1]),
+                index_dtype=index_dtype,
+            )
+            graph = Mock(sizevars=SizeVarAllocator())
+            graph.get_buffer.return_value.get_layout.return_value = layout
+            with V.set_graph_handler(graph):
+                if not TritonTemplateKernel._tile_tma_store(
+                    kernel, "buf1", 128 * x + r, "tmp0"
+                ):
+                    return None
+            return kernel.stores.writeline.call_args.args[0].line
+
+        self.assertIn(".store([offs_cm, offs_cn_i], ", store_line(4096, "tl.int32"))
+        self.assertIn(
+            ".store([(offs_cm).to(tl.int32), (offs_cn_i).to(tl.int32)], ",
+            store_line(2**24, "tl.int64"),
+        )
+        self.assertIsNone(store_line(2**31, "tl.int64"))
+
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
         node1 = self._mock_base_snode("node1")
