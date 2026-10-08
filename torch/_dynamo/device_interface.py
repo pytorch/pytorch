@@ -20,6 +20,7 @@ import time
 from collections import namedtuple
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from enum import auto, Enum
 from typing import Any, Literal
 
 import torch
@@ -35,6 +36,38 @@ else:
 # Recording the device properties in the main process but used in worker process.
 caching_worker_device_properties: dict[str, Any] = {}
 caching_worker_current_devices: dict[str, int] = {}
+
+
+class BackendFeature(Enum):
+    """Framework-wide capability bits for device backends.
+
+    Members are split into two tiers inlined as comments below.
+
+    Inductor-codegen-tier members are consumed by ``has_backend_feature`` /
+    ``V.graph.has_feature``.  Framework-level members (``GPU``,
+    ``ONLINE_SOFTMAX``, ...) are consumed via
+    :meth:`DeviceInterface.backend_features` by eager, dispatcher, and
+    downstream libraries.
+
+    A backend overrides :meth:`DeviceInterface.backend_features` to
+    advertise the members it supports.  Adding a new framework-level member
+    requires a PR; semantic changes to an existing member require an RFC.
+    """
+
+    # -- Inductor codegen capabilities (migrated from _inductor/codegen/common.py) --
+    FOREACH = auto()
+    BUCKETIZE = auto()
+    INPLACE_BUFFERS = auto()
+    MASKED_SCATTER_WITH_INDEX = auto()
+    SCAN = auto()
+    SORT = auto()
+    TUPLE_REDUCTION = auto()
+    PREFER_STORE_LOOP_ORDER = auto()
+    TRITON_TEMPLATES = auto()
+    REDUCE_TO_SINGLE_ELEMENT = auto()
+    # -- framework-level (incl. eager) capabilities --
+    GPU = auto()
+    ONLINE_SOFTMAX = auto()
 
 
 class DeviceInterface:
@@ -172,6 +205,21 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        """Return the set of :class:`BackendFeature` members this backend supports.
+
+        Base default is empty (unknown backends stay conservative).  In-tree
+        backends override to declare their actual capabilities.  Returns a
+        fresh ``set`` each call so callers may mutate it.
+
+        Only static metadata is allowed to be returned here. When overriding,
+        methods related to the driver and C bindings must not be called, as
+        this function is called during inductor import and each backend
+        registration.
+        """
+        return set()
+
+    @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         raise NotImplementedError
 
@@ -193,14 +241,17 @@ class DeviceInterface:
         """
         return False
 
-    @staticmethod
-    def is_gpu() -> bool:
+    @classmethod
+    def is_gpu(cls) -> bool:
         """
         Returns True if Inductor should treat this device as a GPU-class
         accelerator (device guards, GPU codegen/fusion, cudagraph eligibility).
-        Defaults to False so unknown backends stay conservative until they opt in.
+        Derived from :meth:`backend_features` (``BackendFeature.GPU`` membership).
+        ``GPU`` is per device type, not per device. Subclasses that predate
+        backend_features() may override this method directly. Defaults to
+        False so unknown backends stay conservative until they opt in.
         """
-        return False
+        return BackendFeature.GPU in cls.backend_features(None)
 
     @classmethod
     def exposes_streams(cls) -> bool:
@@ -291,10 +342,6 @@ class CudaInterface(DeviceInterface):
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
 
-    @staticmethod
-    def is_gpu() -> bool:
-        return True
-
     # pyrefly: ignore [bad-override]
     class Worker:
         @staticmethod
@@ -359,6 +406,18 @@ class CudaInterface(DeviceInterface):
             return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
     @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        return {
+            BackendFeature.FOREACH,
+            BackendFeature.BUCKETIZE,
+            BackendFeature.SCAN,
+            BackendFeature.SORT,
+            BackendFeature.TRITON_TEMPLATES,
+            BackendFeature.GPU,
+            BackendFeature.ONLINE_SOFTMAX,
+        }
+
+    @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         # Use the Worker API (device properties cached in the main process
         # before fork) instead of torch.cuda.get_device_properties directly, so
@@ -398,10 +457,6 @@ class MtiaInterface(DeviceInterface):
     device = torch.mtia.device  # type: ignore[assignment]
     Event = torch.mtia.Event  # type: ignore[assignment]
     Stream = torch.mtia.Stream  # type: ignore[assignment]
-
-    @staticmethod
-    def is_gpu() -> bool:
-        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -485,6 +540,10 @@ class MtiaInterface(DeviceInterface):
         return cc
 
     @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        return {BackendFeature.GPU}
+
+    @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         return True
 
@@ -509,10 +568,6 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
-
-    @staticmethod
-    def is_gpu() -> bool:
-        return True
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -579,6 +634,15 @@ class XpuInterface(DeviceInterface):
         return cc
 
     @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        return {
+            BackendFeature.FOREACH,
+            BackendFeature.TRITON_TEMPLATES,
+            BackendFeature.GPU,
+            BackendFeature.ONLINE_SOFTMAX,
+        }
+
+    @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         return torch.xpu.is_bf16_supported()
 
@@ -637,6 +701,10 @@ class CpuInterface(DeviceInterface):
         return ""
 
     @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        return {BackendFeature.FOREACH, BackendFeature.SORT}
+
+    @staticmethod
     def get_raw_stream(device_idx: Any) -> int:
         return 0
 
@@ -664,10 +732,6 @@ class CpuInterface(DeviceInterface):
 
 class MpsInterface(DeviceInterface):
     @staticmethod
-    def is_gpu() -> bool:
-        return True
-
-    @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         return True
 
@@ -690,6 +754,10 @@ class MpsInterface(DeviceInterface):
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> str:
         return ""
+
+    @staticmethod
+    def backend_features(device: torch.types.Device = None) -> set[BackendFeature]:
+        return {BackendFeature.GPU}
 
     @staticmethod
     def synchronize(device: torch.types.Device = None) -> None:
@@ -752,6 +820,7 @@ class TpuInterface(DeviceInterface):
 
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
+_registry_change_callbacks: list[Callable[[], None]] = []
 
 
 def register_interface_for_device(
@@ -759,22 +828,25 @@ def register_interface_for_device(
 ) -> None:
     """Register a DeviceInterface for a device type.
 
-    Registration must happen before ``torch._inductor.utils`` is imported:
-    the registry-derived GPU classification (GPU_TYPES / is_gpu() /
-    get_gpu_type()) is scanned exactly once, at that import. In-tree backends
-    satisfy this by construction (init_device_reg() runs inside the scan
-    itself). Out-of-tree backends register at package import, either
-    autoloaded during ``import torch`` (TORCH_DEVICE_BACKEND_AUTOLOAD) or via
-    an explicit ``import torch_npu``-style import, both of which precede any
-    import of inductor. Registering later is not supported and will not be
-    reflected in the snapshot.
+    In-tree backends are registered by init_device_reg(), which runs lazily
+    inside the first registry scan. Out-of-tree backends register at package
+    import, either autoloaded during ``import torch``
+    (TORCH_DEVICE_BACKEND_AUTOLOAD) or via an explicit ``import torch_npu``-
+    style import. Registration is also supported after inductor import, up
+    to the first compilation: _registry_change_callbacks fire here so
+    registry snapshots (e.g. torch._inductor.utils.GPU_TYPES) refresh
+    themselves in place. Registration during compilation is not supported.
+    Callbacks must not raise.
     """
     if isinstance(device, torch.device):
         device = device.type
     device_interfaces[device] = device_interface
+    # Invalidate before notifying: a raising callback must not skip this.
     from .variables.user_defined import UserDefinedClassVariable
 
     UserDefinedClassVariable._in_graph_classes.cache_clear()
+    for callback in _registry_change_callbacks:
+        callback()
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:
