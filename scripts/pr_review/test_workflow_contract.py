@@ -2846,6 +2846,8 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
             "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
             "CLAUDE_CODE_SUBAGENT_MODEL",
             "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
+            # Pinned to "0" by test_the_action_gets_the_read_only_job_token.
+            "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
             "CLAUDE_OUTCOME",
             "DONE_LABEL",
             "EFFECTIVE_STATUS",
@@ -3313,11 +3315,20 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
         # This is about GitHub credentials only. The job DOES hold an AWS
         # session — it assumes REVIEW_ROLE deliberately, and that role's narrow
         # scope is what TestReviewRoleSeparationIsPinned exists for.
+        #
+        # ONE EXCEPTION, by exact text: the review step hands the action this
+        # job's own token, scoped by the job's `contents: read`. Without it the
+        # action mints a Claude App token instead, so the job held a GitHub
+        # credential either way; this one has permissions this file pins.
+        # Pinned by test_the_action_gets_the_read_only_job_token below.
+        code = self.code
+        if code.count(self.ACTION_TOKEN_LINE) == 1:
+            code = code.replace(self.ACTION_TOKEN_LINE, "")
         pattern = r"\bsecrets\b|github\s*\[|github\s*\.\s*token|\btoJSON\b"
         offenders = [
-            ln.strip() for ln in self.code.splitlines() if re.search(pattern, ln, re.I)
+            ln.strip() for ln in code.splitlines() if re.search(pattern, ln, re.I)
         ]
-        folded = re.search(pattern, " ".join(self.code.split()), re.I)
+        folded = re.search(pattern, " ".join(code.split()), re.I)
         self.assertEqual(
             offenders,
             [],
@@ -3329,6 +3340,56 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
             folded,
             f"the review job names a GitHub credential across a line break "
             f"({folded.group(0) if folded else ''!r})",
+        )
+
+    ACTION_TOKEN_LINE = "          github_token: ${{ github.token }}"
+
+    def test_the_action_gets_the_read_only_job_token(self):
+        """Contributors without write access get re-reviewed only while both
+        inputs hold: the action ignores `allowed_non_write_users` unless
+        `github_token` is set, and without `github_token` it falls back to the
+        OIDC exchange that refuses those contributors. The token must be this
+        job's own, whose scope is the `contents: read` pinned with the job's
+        permissions, never a secret or another job's token.
+        """
+        # The step is found by what it RUNS, not by a marker another step could
+        # carry: exactly one step uses the pinned action, and it is `claude`.
+        steps = [
+            s
+            for s in self.code.split("- name:")
+            if re.search(r"(?m)^\s*uses:\s*anthropics/claude-code-action@", s)
+        ]
+        self.assertEqual(len(steps), 1, "expected one claude-code-action step")
+        self.assertRegex(steps[0], r"(?m)^\s*id:\s*claude\s*$")
+        # allowed_non_write_users turns on a scrub that refuses to install
+        # Claude Code without bubblewrap, which this sudo-less job cannot add.
+        # In the step's `env:`, not `with:`, where it would be an unknown input.
+        env = re.search(r"(?ms)^ {8}env:\s*\n(.*?)(?=^ {8}\S)", steps[0])
+        self.assertIsNotNone(env, "the claude step declares no env:")
+        self.assertRegex(
+            env.group(1), r'(?m)^ {10}CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"$'
+        )
+        inputs = with_block(steps[0])
+        self.assertEqual(
+            [ln.strip() for ln in inputs if re.match(r"\s*github_token\s*:", ln)],
+            [self.ACTION_TOKEN_LINE.strip()],
+        )
+        # Adjacent and whole: a more-indented line under either would continue
+        # its scalar and change the value YAML reads.
+        i = inputs.index(self.ACTION_TOKEN_LINE)
+        indent = len(self.ACTION_TOKEN_LINE) - len(self.ACTION_TOKEN_LINE.lstrip())
+        self.assertEqual(inputs[i + 1], " " * indent + 'allowed_non_write_users: "*"')
+        nxt = next((ln for ln in inputs[i + 2 :] if ln.strip()), None)
+        if nxt is not None:
+            self.assertEqual(
+                len(nxt) - len(nxt.lstrip()),
+                indent,
+                "a continuation line follows allowed_non_write_users",
+            )
+        self.assertEqual(
+            self.code.count(self.ACTION_TOKEN_LINE),
+            1,
+            "the job token is handed to exactly one step, the review",
         )
 
     def test_review_job_caches_nothing(self):
