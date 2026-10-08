@@ -1319,6 +1319,33 @@ def optim_error_inputs_func_sgd(device, dtype):
                 error_type=ValueError,
                 error_regex="Invalid momentum value: -0.5",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=float("nan")),
+                    desc="lr should not be NaN",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid learning rate: nan",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, momentum=float("nan")),
+                    desc="momentum should not be NaN",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid momentum value: nan",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, weight_decay=float("nan")),
+                    desc="weight_decay should not be NaN",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid weight_decay value: nan",
+            ),
         ]
     return error_inputs
 

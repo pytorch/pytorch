@@ -1756,7 +1756,10 @@ def _get_cpp_stdlib_args(
             " -Wl,--exclude-libs,ALL",
         ]
     elif config.is_fbcode():
-        lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
+        # Without an explicit libgcc_lib, clang falls back to the host's system
+        # GCC install for -lstdc++, which can be newer than the platform runtime
+        # and yield a .so that fails to load (e.g. GLIBCXX_3.4.30 not found).
+        lib_dir_paths = [build_paths.libgcc_lib, sysconfig.get_config_var("LIBDIR")]
         libs.append("stdc++")
 
     return lib_dir_paths, libs, passthrough_args
@@ -2601,11 +2604,14 @@ class CppBuilder:
                 )
             # See above; we can currently assume this is not on MSVC.
             self._sources_args = f"-x c++-header {sources[0]}"
-            if self._use_relative_path and _is_clang(BuildOption.get_compiler()):
-                # Store PCH paths relative to -isysroot so the .pch can
-                # be used from a different build directory.  The matching
-                # -isysroot is injected by build_fbcode_re().
-                self._cflags_args += " -relocatable-pch -Xclang -fno-pch-timestamp "
+            if _is_clang(BuildOption.get_compiler()):
+                # -c: needed by clang 20+ when a config file adds linker flags (e.g. conda-forge).
+                self._cflags_args += " --compile "
+                if self._use_relative_path:
+                    # Store PCH paths relative to -isysroot so the .pch can
+                    # be used from a different build directory.  The matching
+                    # -isysroot is injected by build_fbcode_re().
+                    self._cflags_args += " -relocatable-pch -Xclang -fno-pch-timestamp "
         else:
             self._sources_args = " ".join(sources)
 
