@@ -134,7 +134,7 @@ void CuptiCallbackApi::__callback_switchboard(
 
   // make a copy of the callback list so we avoid holding lock
   // in common case this should be just one func pointer copy
-  std::array<CuptiCallbackFn, MAX_CB_FNS_PER_CB> callbacks;
+  std::array<CuptiCallbackFn, MAX_CB_FNS_PER_CB> callbacks{};
   size_t num_cbs = 0;
   {
     ReaderLockGuard rl(callbackLock_);
@@ -177,20 +177,18 @@ void CuptiCallbackApi::initCallbackApi() {
 CuptiCallbackApi::CallbackList* CuptiCallbackApi::CallbackTable::lookup(
     CUpti_CallbackDomain domain,
     CuptiCallBackID cbid) {
-  size_t idx;
-
   switch (domain) {
     case CUPTI_CB_DOMAIN_RESOURCE:
       assert(cbid >= CuptiCallBackID::__RESOURCE_CB_DOMAIN_START);
       assert(cbid < CuptiCallBackID::__RESOURCE_CB_DOMAIN_END);
-      idx = domainIndex(cbid, CuptiCallBackID::__RESOURCE_CB_DOMAIN_START);
-      return &resource.at(idx);
+      return &resource.at(
+          domainIndex(cbid, CuptiCallBackID::__RESOURCE_CB_DOMAIN_START));
 
     case CUPTI_CB_DOMAIN_RUNTIME_API:
       assert(cbid >= CuptiCallBackID::__RUNTIME_CB_DOMAIN_START);
       assert(cbid < CuptiCallBackID::__RUNTIME_CB_DOMAIN_END);
-      idx = domainIndex(cbid, CuptiCallBackID::__RUNTIME_CB_DOMAIN_START);
-      return &runtime.at(idx);
+      return &runtime.at(
+          domainIndex(cbid, CuptiCallBackID::__RUNTIME_CB_DOMAIN_START));
 
     default:
       LOG(WARNING) << " Unsupported callback domain : " << domain;

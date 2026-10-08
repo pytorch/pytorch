@@ -73,6 +73,7 @@ ActivityProfilerController::ActivityProfilerController(
   // Initialize LoggerCollectors before ActivityProfiler to log
   // CUPTI and CUDA driver versions.
   // Keep a reference to handle safe static de-initialization.
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   loggerCollectors_ = loggerCollectors();
   for (auto& collector : loggerCollectors_) {
     Logger::addLoggerObserver(collector.get());

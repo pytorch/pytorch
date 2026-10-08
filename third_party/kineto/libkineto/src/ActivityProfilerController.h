@@ -36,6 +36,8 @@ class ActivityProfilerController : public ConfigLoader::ConfigHandler {
   ActivityProfilerController(const ActivityProfilerController&) = delete;
   ActivityProfilerController& operator=(const ActivityProfilerController&) =
       delete;
+  ActivityProfilerController(ActivityProfilerController&&) = delete;
+  ActivityProfilerController& operator=(ActivityProfilerController&&) = delete;
 
   ~ActivityProfilerController() override;
 

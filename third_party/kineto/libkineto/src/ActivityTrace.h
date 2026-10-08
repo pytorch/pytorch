@@ -44,6 +44,7 @@ class ActivityTrace : public ActivityTraceInterface {
   std::unique_ptr<MemoryTraceLogger> memLogger_;
 
   // Alternative logger used by save() if protocol prefix is specified
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const ActivityLoggerFactory& loggerFactory_;
 };
 

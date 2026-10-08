@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 // TODO(T90238193)
@@ -26,8 +27,10 @@
 
 using namespace KINETO_NAMESPACE;
 
+// NOLINTBEGIN(readability-named-parameter)
 class MockActivityLogger : public libkineto::ActivityLogger {
  public:
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   explicit MockActivityLogger(const std::string& url) : url_(url) {}
 
   void handleDeviceInfo(const libkineto::DeviceInfo&, int64_t) override {}
@@ -55,7 +58,9 @@ class MockActivityLogger : public libkineto::ActivityLogger {
  private:
   std::string url_;
 };
+// NOLINTEND(readability-named-parameter)
 
+// NOLINTBEGIN(readability-named-parameter)
 class CountingLogger : public libkineto::ActivityLogger {
  public:
   explicit CountingLogger(std::shared_ptr<int> counter)
@@ -84,7 +89,9 @@ class CountingLogger : public libkineto::ActivityLogger {
  private:
   std::shared_ptr<int> counter_;
 };
+// NOLINTEND(readability-named-parameter)
 
+// NOLINTBEGIN(readability-named-parameter)
 class WarningObserver : public libkineto::ILoggerObserver {
  public:
   void write(const std::string& message, libkineto::LoggerOutputType ot)
@@ -113,6 +120,7 @@ class WarningObserver : public libkineto::ILoggerObserver {
  private:
   std::vector<std::string> warnings_;
 };
+// NOLINTEND(readability-named-parameter)
 
 // Basic public API functionality
 TEST(RegisterLoggerFactoryTest, BasicPublicAPI) {

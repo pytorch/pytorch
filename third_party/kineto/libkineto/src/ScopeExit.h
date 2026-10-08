@@ -15,6 +15,10 @@ template <typename T>
 class ScopeExit {
  public:
   explicit ScopeExit(T t) : t(t) {}
+  ScopeExit(const ScopeExit&) = delete;
+  ScopeExit& operator=(const ScopeExit&) = delete;
+  ScopeExit(ScopeExit&&) = delete;
+  ScopeExit& operator=(ScopeExit&&) = delete;
   ~ScopeExit() {
     t();
   }

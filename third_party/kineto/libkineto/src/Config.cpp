@@ -51,6 +51,7 @@ constexpr size_t kDefaultCuptiDeviceBufferSize(3200000);
 // Default value set by CUPTI is 250
 constexpr size_t kDefaultCuptiDeviceBufferPoolLimit(20);
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 // Activity Profiler
 constexpr char kActivitiesEnabledKey[] = "ACTIVITIES_ENABLED";
 constexpr char kCuptiPerThreadBufferEnabledKey[] =
@@ -159,6 +160,7 @@ constexpr char kLogVerboseLevelKey[] = "VERBOSE_LOG_LEVEL";
 constexpr char kLogVerboseModulesKey[] = "VERBOSE_LOG_MODULES";
 
 constexpr char kCustomConfigKey[] = "CUSTOM_CONFIG";
+// NOLINTEND(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 
 namespace {
 
@@ -260,7 +262,6 @@ std::optional<nanoseconds> parseMilliseconds(const string& text) noexcept {
 Config::Config()
     : verboseLogLevel_(-1),
       activityProfilerEnabled_(true),
-      perThreadBufferEnabled_(false),
       activitiesLogFile_(defaultTraceFileName()),
       activitiesLogUrl_(fmt::format("file://{}", activitiesLogFile_)),
       activitiesMaxGpuBufferSize_(kDefaultActivitiesMaxGpuBufferSize),
@@ -434,19 +435,18 @@ bool Config::handleOption(const std::string& name, std::string& val) {
   }
 
   // TODO: Deprecate Client Interface
-  else if (!name.compare(kClientInterfaceEnableOpInputsCollection)) {
+  else if (
+      !name.compare(kClientInterfaceEnableOpInputsCollection) ||
+      !name.compare(kProfileReportInputShapes)) {
     enableReportInputShapes_ = toBool(val);
-  } else if (!name.compare(kPythonStackTrace)) {
+  } else if (
+      !name.compare(kPythonStackTrace) || !name.compare(kProfileWithStack)) {
     enableWithStack_ = toBool(val);
   }
 
   // Profiler Config
-  else if (!name.compare(kProfileReportInputShapes)) {
-    enableReportInputShapes_ = toBool(val);
-  } else if (!name.compare(kProfileProfileMemory)) {
+  else if (!name.compare(kProfileProfileMemory)) {
     enableProfileMemory_ = toBool(val);
-  } else if (!name.compare(kProfileWithStack)) {
-    enableWithStack_ = toBool(val);
   } else if (!name.compare(kProfileWithFlops)) {
     enableWithFlops_ = toBool(val);
   } else if (!name.compare(kProfileWithModules)) {
@@ -542,8 +542,8 @@ void Config::printActivityProfilerConfig(std::ostream& s) const {
 
   fmt::print(
       s,
-      "  Max GPU buffer size: {:.0f}MB\n",
-      static_cast<double>(activitiesMaxGpuBufferSize()) / 1024.0 / 1024.0);
+      "  Max GPU buffer size: {}MB\n",
+      activitiesMaxGpuBufferSize() / 1024 / 1024);
 
   std::vector<std::string> activities;
   activities.reserve(selectedActivityTypes_.size());

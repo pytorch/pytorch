@@ -884,7 +884,7 @@ void ChromeTraceLogger::handleActivity(const libkineto::ITraceActivity& op) {
     duration += 2; // Still need it to end at the original point rounded up.
   }
 
-  int external_id = 0;
+  int64_t external_id = 0;
   if (op.linkedActivity()) {
     external_id = op.linkedActivity()->correlationId();
   } else {
@@ -1001,10 +1001,12 @@ void ChromeTraceLogger::handleGenericLink(const ITraceActivity& act) {
   if (!traceOf_) {
     return;
   }
+  // NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   static struct {
     int type;
     char name[16];
   } flow_names[] = {{kLinkFwdBwd, "fwdbwd"}, {kLinkAsyncCpuGpu, "ac2g"}};
+  // NOLINTEND(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   for (auto& flow : flow_names) {
     if (act.flowType() == flow.type) {
       // Link the activities via flow ID in source and destination.

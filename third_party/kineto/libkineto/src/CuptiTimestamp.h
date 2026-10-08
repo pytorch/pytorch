@@ -28,24 +28,24 @@ bool& use_cupti_tsc();
 // we use the default system clock so no conversion needed.
 inline int64_t convertCuptiTimestamp(uint64_t timestamp) {
 #if defined(_WIN32) || CUDA_VERSION < 11060
-  return timestamp;
+  return static_cast<int64_t>(timestamp);
 #else
   if (use_cupti_tsc()) {
     return get_time_converter()(timestamp);
   } else {
-    return timestamp;
+    return static_cast<int64_t>(timestamp);
   }
 #endif
 }
 
 inline int64_t convertCuptiDuration(uint64_t start, uint64_t end) {
 #if defined(_WIN32) || CUDA_VERSION < 11060
-  return end - start;
+  return static_cast<int64_t>(end - start);
 #else
   if (use_cupti_tsc()) {
     return get_time_converter()(end) - get_time_converter()(start);
   } else {
-    return end - start;
+    return static_cast<int64_t>(end - start);
   }
 #endif
 }

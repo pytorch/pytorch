@@ -11,14 +11,16 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
-#include <stdlib.h> // NOLINT(modernize-deprecated-headers) required for malloc free
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <optional>
+#include <utility>
 #include <variant>
 
 #include "include/Config.h"
@@ -136,6 +138,12 @@ class RecordingTypedMetadataVisitor final : public ITypedMetadataVisitor {
 
 // Provides ability to easily create a few test CUPTI ops
 struct MockCuptiActivityBuffer {
+  MockCuptiActivityBuffer() = default;
+  MockCuptiActivityBuffer(const MockCuptiActivityBuffer&) = delete;
+  MockCuptiActivityBuffer& operator=(const MockCuptiActivityBuffer&) = delete;
+  MockCuptiActivityBuffer(MockCuptiActivityBuffer&&) = delete;
+  MockCuptiActivityBuffer& operator=(MockCuptiActivityBuffer&&) = delete;
+
   void addCorrelationActivity(
       int64_t correlation,
       CUpti_ExternalCorrelationKind externalKind,
@@ -260,7 +268,8 @@ struct MockCuptiActivityBuffer {
 
   template <class T>
   T& createActivity(int64_t start_ns, int64_t end_ns, int64_t correlation) {
-    T& act = *static_cast<T*>(malloc(sizeof(T)));
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    T& act = *static_cast<T*>(std::malloc(sizeof(T)));
     std::memset(&act, 0, sizeof(act));
     act.start = start_ns;
     act.end = end_ns;
@@ -270,7 +279,8 @@ struct MockCuptiActivityBuffer {
 
   template <class T>
   T& createActivity(int64_t correlation) {
-    T& act = *static_cast<T*>(malloc(sizeof(T)));
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    T& act = *static_cast<T*>(std::malloc(sizeof(T)));
     std::memset(&act, 0, sizeof(act));
     act.correlationId = correlation;
     return act;
@@ -278,7 +288,8 @@ struct MockCuptiActivityBuffer {
 
   ~MockCuptiActivityBuffer() {
     for (CUpti_Activity* act : activities) {
-      free(act);
+      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+      std::free(act);
     }
   }
 
@@ -840,7 +851,6 @@ TEST_F(CuptiActivityProfilerTest, GpuNCCLCollectiveTest) {
   }
 
   std::vector<int64_t> groupRanks(64, 0);
-  std::string groupRanksStr;
   if (!groupRanks.empty() && groupRanks.size() <= kTruncatLength) {
     metadataMap.emplace(
         kGroupRanks, fmt::format("\"[{}]\"", fmt::join(groupRanks, ", ")));
@@ -870,12 +880,17 @@ TEST_F(CuptiActivityProfilerTest, GpuNCCLCollectiveTest) {
   // Set up GPU events with two collectives: one after its correlation
   // record (in-order) and one before (out-of-order), to verify metadata
   // propagation works regardless of CUPTI buffer ordering.
+  constexpr uint32_t kFirstCorrelationId = uint32_t{1} << 31;
+  constexpr uint32_t kSecondCorrelationId = kFirstCorrelationId + 1;
   auto gpuOps = std::make_unique<MockCuptiActivityBuffer>();
-  gpuOps->addCorrelationActivity(1, CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, 1);
-  gpuOps->addCollectiveActivity(kernelLaunchTime + 5, kernelLaunchTime + 10, 1);
+  gpuOps->addCorrelationActivity(
+      kFirstCorrelationId, CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, 1);
   gpuOps->addCollectiveActivity(
-      kernelLaunchTime + 15, kernelLaunchTime + 20, 2);
-  gpuOps->addCorrelationActivity(2, CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, 1);
+      kernelLaunchTime + 5, kernelLaunchTime + 10, kFirstCorrelationId);
+  gpuOps->addCollectiveActivity(
+      kernelLaunchTime + 15, kernelLaunchTime + 20, kSecondCorrelationId);
+  gpuOps->addCorrelationActivity(
+      kSecondCorrelationId, CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0, 1);
   cuptiActivities_.activityBuffer = std::move(gpuOps);
 
   // Process trace

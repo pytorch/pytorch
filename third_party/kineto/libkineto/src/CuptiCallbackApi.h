@@ -62,6 +62,9 @@ class CuptiCallbackApi {
   CuptiCallbackApi() = default;
   CuptiCallbackApi(const CuptiCallbackApi&) = delete;
   CuptiCallbackApi& operator=(const CuptiCallbackApi&) = delete;
+  CuptiCallbackApi(CuptiCallbackApi&&) = delete;
+  CuptiCallbackApi& operator=(CuptiCallbackApi&&) = delete;
+  ~CuptiCallbackApi() = default;
 
   static CuptiCallbackApi& singleton();
 
@@ -148,7 +151,7 @@ class CuptiCallbackApi {
   using ReaderLockGuard = std::shared_lock<ReaderWriterLock>;
   using WriteLockGuard = std::unique_lock<ReaderWriterLock>;
   ReaderWriterLock callbackLock_;
-  CUptiResult lastCuptiStatus_;
+  CUptiResult lastCuptiStatus_{CUPTI_ERROR_NOT_INITIALIZED};
   CUpti_SubscriberHandle subscriber_{nullptr};
 };
 

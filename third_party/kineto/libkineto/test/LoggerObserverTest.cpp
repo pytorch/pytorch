@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 // TODO(T90238193)
@@ -20,11 +21,19 @@
 
 using namespace KINETO_NAMESPACE;
 
+static_assert(std::is_array_v<decltype(kCancellationStage)>);
+static_assert(std::is_array_v<decltype(kWarmUpStage)>);
+static_assert(std::is_array_v<decltype(kCollectionStage)>);
+static_assert(std::is_array_v<decltype(kPostProcessingStage)>);
+static_assert(std::is_array_v<decltype(kEmptyTrace)>);
+
 #if !USE_GOOGLE_LOG
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 constexpr char InfoTestStr[] = "Checking LOG(INFO)";
 constexpr char WarningTestStr[] = "Checking LOG(WARNING)";
 constexpr char ErrorTestStr[] = "Checking LOG(ERROR)";
+// NOLINTEND(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 
 TEST(LoggerObserverTest, SingleCollectorObserver) {
   // Add a LoggerObserverCollector to collect all logs during the trace.
@@ -55,7 +64,7 @@ TEST(LoggerObserverTest, SingleCollectorObserver) {
 
 // Writes NUM_OF_MESSAGES_FOR_EACH_TYPE messages for each INFO, WARNING, and
 // ERROR.
-void* writeSeveralMessages() {
+static void* writeSeveralMessages() {
   for (int i = 0; i < NUM_OF_MESSAGES_FOR_EACH_TYPE; i++) {
     LOG(INFO) << InfoTestStr;
     LOG(WARNING) << WarningTestStr;
@@ -77,6 +86,7 @@ TEST(LoggerObserverTest, FourCollectorObserver) {
 
   // Launch NUM_OF_WRITE_THREADS threads writing several messages.
   std::vector<std::thread> ListOfThreads;
+  ListOfThreads.reserve(NUM_OF_WRITE_THREADS);
   for (int i = 0; i < NUM_OF_WRITE_THREADS; i++) {
     ListOfThreads.emplace_back(writeSeveralMessages);
   }
@@ -87,7 +97,7 @@ TEST(LoggerObserverTest, FourCollectorObserver) {
   }
 
   auto lc1MD = lc1->extractCollectorMetadata();
-  int InfoCount = 0, WarnCount = 0, ErrorCount = 0;
+  size_t InfoCount = 0, WarnCount = 0, ErrorCount = 0;
   for (auto& md : lc1MD) {
     InfoCount += md.first == LoggerOutputType::INFO ? md.second.size() : 0;
     WarnCount += md.first == LoggerOutputType::WARNING ? md.second.size() : 0;

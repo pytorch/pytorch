@@ -290,10 +290,12 @@ void CuptiActivityProfiler::buildProcessingState(
 inline void CuptiActivityProfiler::handleCorrelationActivity(
     const CUpti_ActivityExternalCorrelation* correlation) {
   if (correlation->externalKind == CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM0) {
-    cpuCorrelationMap_[correlation->correlationId] = correlation->externalId;
+    cpuCorrelationMap_[correlation->correlationId] =
+        static_cast<int64_t>(correlation->externalId);
   } else if (
       correlation->externalKind == CUPTI_EXTERNAL_CORRELATION_KIND_CUSTOM1) {
-    userCorrelationMap_[correlation->correlationId] = correlation->externalId;
+    userCorrelationMap_[correlation->correlationId] =
+        static_cast<int64_t>(correlation->externalId);
   } else {
     LOG(WARNING) << "Invalid CUpti_ActivityExternalCorrelation sent to "
                     "handleCuptiActivity";
@@ -312,10 +314,10 @@ void CuptiActivityProfiler::handleRuntimeActivity(
   VLOG(2) << activity->correlationId
           << ": CUPTI_ACTIVITY_KIND_RUNTIME, cbid=" << activity->cbid
           << " tid=" << activity->threadId;
-  int32_t tid = activity->threadId;
+  int32_t tid = static_cast<int32_t>(activity->threadId);
   const auto& it = resourceInfo_.find({processId(), tid});
   if (it != resourceInfo_.end()) {
-    tid = it->second.id;
+    tid = static_cast<int32_t>(it->second.id);
   }
   const ITraceActivity* linked =
       linkedActivity(activity->correlationId, cpuCorrelationMap_);
@@ -340,10 +342,10 @@ void CuptiActivityProfiler::handleDriverActivity(
   VLOG(2) << activity->correlationId
           << ": CUPTI_ACTIVITY_KIND_DRIVER, cbid=" << activity->cbid
           << " tid=" << activity->threadId;
-  int32_t tid = activity->threadId;
+  int32_t tid = static_cast<int32_t>(activity->threadId);
   const auto& it = resourceInfo_.find({processId(), tid});
   if (it != resourceInfo_.end()) {
-    tid = it->second.id;
+    tid = static_cast<int32_t>(it->second.id);
   }
   const ITraceActivity* linked =
       linkedActivity(activity->correlationId, cpuCorrelationMap_);
@@ -449,8 +451,8 @@ void CuptiActivityProfiler::handleCudaSyncActivity(
   }
 
   auto device_id = contextIdtoDeviceId(activity->contextId);
-  int32_t src_stream = -1;
-  int32_t src_corrid = -1;
+  int64_t src_stream = -1;
+  int64_t src_corrid = -1;
   if (isEventSync(activity->type)) {
     auto maybe_wait_event_info = getWaitEventInfo(
         activity->contextId, activity->cudaEventId, activity->correlationId);

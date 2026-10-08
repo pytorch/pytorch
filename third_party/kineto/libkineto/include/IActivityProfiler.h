@@ -48,7 +48,9 @@ enum class TraceStatus {
 struct DeviceInfo {
   int64_t id; // process id
   int64_t sortIndex; // position in trace view
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::string name; // process name
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::string label; // device label
 };
 
@@ -65,6 +67,7 @@ struct ResourceInfo {
   int64_t sortIndex; // position in trace view
   int64_t deviceId; // id of device which owns this resource (specified in
                     // DeviceInfo.id)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const std::string name; // resource name
   ResourceType resourceType{ResourceType::UNKNOWN};
 };
@@ -97,6 +100,7 @@ class IActivityProfilerSession {
 
   virtual void processTrace(
       ActivityLogger& logger,
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       [[maybe_unused]] getLinkedActivityCallback getLinkedActivity,
       [[maybe_unused]] int64_t startTime,
       [[maybe_unused]] int64_t endTime) {

@@ -39,7 +39,9 @@ class ActivityLogger {
   virtual ~ActivityLogger() = default;
 
   struct OverheadInfo {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     explicit OverheadInfo(const std::string& name) : name(name) {}
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::string name;
   };
 

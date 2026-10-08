@@ -47,7 +47,7 @@ Logger::Logger(int severity, int line, const char* filePath, int errnum)
 
   const auto tt =
       std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-  std::tm tm_result;
+  std::tm tm_result{};
   get_local_time(&tt, &tm_result);
   const char* file = std::strrchr(filePath, '/');
   fmt::print(
@@ -63,6 +63,7 @@ Logger::Logger(int severity, int line, const char* filePath, int errnum)
 Logger::~Logger() {
 #ifdef __linux__
   if (errnum_ != 0) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     thread_local char buf[1024];
     buf_ << " : " << strerror_r(errnum_, buf, sizeof(buf));
   }
@@ -80,6 +81,7 @@ Logger::~Logger() {
   }
 
   // Finally, print to terminal or console.
+  // NOLINTNEXTLINE(performance-avoid-endl)
   out_ << buf_.str() << std::endl;
 }
 
@@ -195,6 +197,7 @@ void Logger::writeStageCancellation(
 USTLoggerStageGuard::~USTLoggerStageGuard() {
   try {
     UST_LOGGER_MARK_COMPLETED(stage_);
+    // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) {
   }
 }

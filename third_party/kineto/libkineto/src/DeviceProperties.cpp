@@ -49,7 +49,7 @@ namespace DevicePropertyFields = libkineto::DevicePropertyMetadataFields;
 #if defined(HAS_CUPTI) || defined(HAS_ROCTRACER)
 static std::vector<gpuDeviceProp> createDeviceProps() {
   std::vector<gpuDeviceProp> props;
-  int device_count;
+  int device_count = 0;
   gpuError_t error_id = gpuGetDeviceCount(&device_count);
   // Return empty vector if error.
   if (error_id != gpuSuccess) {
@@ -58,7 +58,7 @@ static std::vector<gpuDeviceProp> createDeviceProps() {
   }
   VLOG(0) << "Device count is " << device_count;
   for (int i = 0; i < device_count; ++i) {
-    gpuDeviceProp prop;
+    gpuDeviceProp prop{};
     error_id = gpuGetDeviceProperties(&prop, i);
     // Return empty vector if any device property fail to get.
     if (error_id != gpuSuccess) {
@@ -163,14 +163,14 @@ float blocksPerSm(const CUpti_ActivityKernelType& kernel) {
   if (sm_count == 0) {
     return std::numeric_limits<float>::infinity();
   }
-  return (kernel.gridX * kernel.gridY * kernel.gridZ) /
+  return static_cast<float>(kernel.gridX) * kernel.gridY * kernel.gridZ /
       static_cast<float>(sm_count);
 }
 
 float warpsPerSm(const CUpti_ActivityKernelType& kernel) {
   constexpr int threads_per_warp = 32;
-  return blocksPerSm(kernel) * (kernel.blockX * kernel.blockY * kernel.blockZ) /
-      threads_per_warp;
+  return blocksPerSm(kernel) * static_cast<float>(kernel.blockX) *
+      kernel.blockY * kernel.blockZ / threads_per_warp;
 }
 
 OccupancyMetrics computeOccupancyMetrics(
@@ -187,7 +187,8 @@ OccupancyMetrics computeOccupancyMetrics(
   float blocksPerSm = -1.0;
   int sm_count = smCount(kernel.deviceId);
   if (sm_count != 0) {
-    blocksPerSm = (kernel.gridX * kernel.gridY * kernel.gridZ) /
+    blocksPerSm = static_cast<float>(kernel.gridX) * kernel.gridY *
+        kernel.gridZ /
         static_cast<float>(sm_count);
   }
 
@@ -211,8 +212,9 @@ OccupancyMetrics computeOccupancyMetrics(
       dynamicSmemSize);
   if (status == CUDA_OCC_SUCCESS) {
     float effectiveBlocksPerSm = std::min<float>(
-        metrics.result.activeBlocksPerMultiprocessor, blocksPerSm);
-    metrics.occupancy = effectiveBlocksPerSm * blockSize /
+        static_cast<float>(metrics.result.activeBlocksPerMultiprocessor),
+        blocksPerSm);
+    metrics.occupancy = effectiveBlocksPerSm * static_cast<float>(blockSize) /
         static_cast<float>(props[kernel.deviceId].maxThreadsPerMultiProcessor);
   } else {
     LOG_EVERY_N(ERROR, 1000)
