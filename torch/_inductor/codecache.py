@@ -1511,6 +1511,57 @@ class FxGraphHashDetails:
                     return True
         return False
 
+    @classmethod
+    def _collect_tensor_device_types(
+        cls, value: object, device_types: OrderedSet[str]
+    ) -> None:
+        if isinstance(value, torch.Tensor):
+            device_types.add(value.device.type)
+            return
+        if isinstance(value, (list, tuple, OrderedSet, frozenset)):
+            for item in value:
+                cls._collect_tensor_device_types(item, device_types)
+            return
+        if isinstance(value, dict):
+            for item in itertools.chain(value.keys(), value.values()):
+                cls._collect_tensor_device_types(item, device_types)
+
+    @classmethod
+    def _graph_device_types(
+        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
+    ) -> OrderedSet[str]:
+        device_types: OrderedSet[str] = OrderedSet()
+        cls._collect_tensor_device_types(example_inputs, device_types)
+        if gm is None:
+            return device_types
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                cls._collect_tensor_device_types(
+                    cls._tensor_metadata(node), device_types
+                )
+                factory_device = cls._factory_device_type(node)
+                if factory_device is not None:
+                    device_types.add(factory_device)
+        return device_types
+
+    @classmethod
+    def _mm_template_allow_tf32(
+        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
+    ) -> tuple[tuple[str, bool], ...]:
+        # NotImplementedError means this device has no DeviceInterface.
+        # allow_tf32() itself is not caught: a broken implementation should
+        # fail the compile instead of being cached as ALLOW_TF32=False.
+        flags: list[tuple[str, bool]] = []
+        for device_type in sorted(cls._graph_device_types(gm, example_inputs)):
+            try:
+                iface = get_interface_for_device(device_type)
+            except NotImplementedError:
+                continue
+            flags.append((device_type, bool(iface.allow_tf32())))
+        return tuple(flags)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule | None,
@@ -1646,6 +1697,11 @@ class FxGraphHashDetails:
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
+        # MM template ALLOW_TF32 follows DeviceInterface.allow_tf32. CUDA's
+        # precision string is already in cuda_matmul_settings; this records the
+        # resolved flag for every device in the graph so other backends
+        # invalidate the FX graph cache when their flag changes.
+        self.mm_template_allow_tf32 = self._mm_template_allow_tf32(gm, example_inputs)
 
         # compile-on-one-rank changes wrapper and kernel codegen (runtime device
         # resolution, DeviceProperties(index=None)) even for graphs that contain no
