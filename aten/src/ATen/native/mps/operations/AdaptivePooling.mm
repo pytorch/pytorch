@@ -136,7 +136,20 @@ Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size
       isizeH >= osizeH && isizeW >= osizeW && isizeH % osizeH == 0 && isizeW % osizeW == 0;
   const bool divisible_upsample = isizeH <= osizeH && isizeW <= osizeW && osizeH % isizeH == 0 && osizeW % isizeW == 0;
   if (!divisible_downsample && !divisible_upsample) {
-    mps::adaptive_avg_pool2d_metal(input, output, false);
+    TORCH_CHECK(input.dtype() == output.dtype(),
+                "expected dtype ",
+                input.dtype(),
+                " for `output` but got dtype ",
+                output.dtype());
+    auto output_shape = input.sizes().vec();
+    output_shape[input.dim() - 2] = osizeH;
+    output_shape[input.dim() - 1] = osizeW;
+    if (output.sizes() != IntArrayRef(output_shape)) {
+      output.resize_(output_shape, input.suggest_memory_format());
+    }
+    if (output.numel() != 0) {
+      mps::adaptive_avg_pool2d_metal(input, output, false);
+    }
     return output;
   }
 
@@ -211,9 +224,10 @@ Tensor adaptive_avg_pool2d_backward_mps(const Tensor& gradOutput, const Tensor& 
   int64_t strideH = 0, strideW = 0;
   int64_t kernel_sizeH = 0, kernel_sizeW = 0;
 
-  const bool regular_downsample = isizeH >= osizeH && isizeW >= osizeW && isizeH % osizeH == 0 && isizeW % osizeW == 0;
-  const bool regular_upsample = isizeH <= osizeH && isizeW <= osizeW && osizeH % isizeH == 0 && osizeW % isizeW == 0;
-  if (!regular_downsample && !regular_upsample) {
+  const bool divisible_downsample =
+      isizeH >= osizeH && isizeW >= osizeW && isizeH % osizeH == 0 && isizeW % osizeW == 0;
+  const bool divisible_upsample = isizeH <= osizeH && isizeW <= osizeW && osizeH % isizeH == 0 && osizeW % isizeW == 0;
+  if (!divisible_downsample && !divisible_upsample) {
     auto gradInput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     if (gradInput.numel() != 0) {
       mps::adaptive_avg_pool2d_metal(gradOutput, gradInput, true);

@@ -624,6 +624,42 @@ class TestPoolingNN(NNTestCase):
 class TestPoolingNNDevice(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @parametrize_test("layout", ["unbatched", "contiguous", "channels_last"])
+    @parametrize_test("out_shape", ["empty", "wrong_shape"])
+    def test_adaptive_avg_pool2d_out_resize(self, device, layout, out_shape):
+        shape = (2, 5, 7) if layout == "unbatched" else (2, 3, 5, 7)
+        input = make_tensor(shape, device=device, dtype=torch.float32)
+        memory_format = (
+            torch.channels_last
+            if layout == "channels_last"
+            else torch.contiguous_format
+        )
+        input = input.contiguous(memory_format=memory_format)
+        output_size = (3, 4)
+        output = torch.empty(
+            (0,) if out_shape == "empty" else (*shape[:-2], 2, 2),
+            device=device,
+            dtype=input.dtype,
+        )
+
+        result = torch.ops.aten.adaptive_avg_pool2d.out(input, output_size, out=output)
+
+        self.assertIs(result, output)
+        self.assertEqual(output, F.adaptive_avg_pool2d(input.cpu(), output_size))
+        self.assertTrue(output.is_contiguous(memory_format=memory_format))
+
+    def test_adaptive_avg_pool2d_out_dtype(self, device):
+        input = make_tensor((2, 3, 5, 7), device=device, dtype=torch.float32)
+        output = torch.empty((2, 3, 3, 4), device=device, dtype=torch.float16)
+        with self.assertRaisesRegex(RuntimeError, r"[Ee]xpected.*(dtype|type)"):
+            torch.ops.aten.adaptive_avg_pool2d.out(input, (3, 4), out=output)
+
+    def test_adaptive_avg_pool2d_out_empty_batch(self, device):
+        input = torch.empty((0, 3, 5, 7), device=device)
+        output = torch.empty(0, device=device)
+        torch.ops.aten.adaptive_avg_pool2d.out(input, (3, 4), out=output)
+        self.assertEqual(output.shape, (0, 3, 3, 4))
+
     def test_adaptive_pooling_avg_nhwc(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32).to(device)
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
@@ -2484,6 +2520,20 @@ class TestPoolingNNCudaOnly(NNTestCase):
 
 class TestPoolingNNMpsOnly(NNTestCase):
     hw_classification = HardwareClassification.MPS
+
+    @parametrize_test("shape", [(2, 5, 7), (2, 3, 5, 7)])
+    def test_adaptive_avg_pool2d_strided_out(self, device, shape):
+        input = make_tensor(shape, device=device, dtype=torch.float32)
+        output_size = (3, 4)
+        storage = input.new_full((*shape[:-2], 3, 9), nan)
+        output = storage[..., 1::2]
+        strides = output.stride()
+
+        torch.ops.aten.adaptive_avg_pool2d.out(input, output_size, out=output)
+
+        self.assertEqual(output, F.adaptive_avg_pool2d(input.cpu(), output_size))
+        self.assertEqual(output.stride(), strides)
+        self.assertTrue(torch.isnan(storage[..., ::2]).all())
 
     # Max: verify against unfold+amax. (Avg int is implementation-defined.)
     @dtypes(torch.uint8, torch.int8, torch.short, torch.int, torch.long)
