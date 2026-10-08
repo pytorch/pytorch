@@ -9,10 +9,11 @@ from torch.backends import cuda as _cuda
 
 log = logging.getLogger(__name__)
 _pathfinder_find_spec = PathFinder.find_spec
-# FlyDSL >=0.3 ``@fx.struct`` values must expose ``__cache_signature__()``.
-_FLYDSL_MINIMUM_RELEASE = (0, 3)
+# FlyDSL 0.3.x ``@fx.struct`` values must expose ``__cache_signature__()``.
+_FLYDSL_SUPPORTED_RELEASE = (0, 3)
 # The private APIs used by PyTorch's temporary AOT adapter moved before 0.3.2.
 _FLYDSL_AOT_MINIMUM_RELEASE = (0, 3, 2)
+_FLYDSL_AOT_MAXIMUM_RELEASE = (0, 4)
 
 
 def _flydsl_runtime_unavailable_reason() -> str | None:
@@ -38,9 +39,11 @@ def _flydsl_runtime_unavailable_reason() -> str | None:
     flydsl_version = _available_version("flydsl")
     if flydsl_version is None:
         return "missing or invalid FlyDSL version metadata"
-    if flydsl_version.release < _FLYDSL_MINIMUM_RELEASE:
-        minimum = ".".join(map(str, _FLYDSL_MINIMUM_RELEASE))
-        return f"unsupported FlyDSL version `{flydsl_version}` (expected `>={minimum}`)"
+    if flydsl_version.release[:2] != _FLYDSL_SUPPORTED_RELEASE:
+        supported = ".".join(map(str, _FLYDSL_SUPPORTED_RELEASE))
+        return (
+            f"unsupported FlyDSL version `{flydsl_version}` (expected `{supported}.x`)"
+        )
 
     return None
 
@@ -51,11 +54,16 @@ def _flydsl_aot_runtime_unavailable_reason() -> str | None:
         return reason
 
     flydsl_version = _available_version("flydsl")
-    if flydsl_version is None or flydsl_version.release < _FLYDSL_AOT_MINIMUM_RELEASE:
+    if (
+        flydsl_version is None
+        or flydsl_version.release < _FLYDSL_AOT_MINIMUM_RELEASE
+        or flydsl_version.release >= _FLYDSL_AOT_MAXIMUM_RELEASE
+    ):
         minimum = ".".join(map(str, _FLYDSL_AOT_MINIMUM_RELEASE))
+        maximum = ".".join(map(str, _FLYDSL_AOT_MAXIMUM_RELEASE))
         return (
             f"unsupported FlyDSL version `{flydsl_version}` for AOT compilation "
-            f"(expected `>={minimum}`)"
+            f"(expected `>={minimum},<{maximum}`)"
         )
     return None
 
