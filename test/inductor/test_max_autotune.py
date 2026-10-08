@@ -287,9 +287,7 @@ class TestMaxAutotune(TestCase):
                     if template_config["BLOCK_M"] == 128:
                         if epilogue_subtile is not None:
                             template_config["EPILOGUE_SUBTILE"] = epilogue_subtile
-                        template_config["DATA_PARTITION_FACTOR"] = (
-                            data_partition_factor
-                        )
+                        template_config["DATA_PARTITION_FACTOR"] = data_partition_factor
                         yield template_config
                         return
 
