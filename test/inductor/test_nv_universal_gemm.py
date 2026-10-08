@@ -3042,6 +3042,108 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 (1, 3) if cold_cache else (),
             )
 
+    def test_grouped_gemm_candidates_sample_tile_shapes(self):
+        from torch._inductor.codegen.nv_universal_gemm import (
+            nv_universal_gemm as nvgemm,
+        )
+
+        def kernel(tile_shape, cluster_shape, use_2cta_mma):
+            return SimpleNamespace(
+                metadata=SimpleNamespace(
+                    design=SimpleNamespace(
+                        tile_shape=tile_shape,
+                        cluster_shape=cluster_shape,
+                        use_2cta_mma=use_2cta_mma,
+                    )
+                ),
+                get_workspace_size=lambda _args: SimpleNamespace(size_bytes=0),
+            )
+
+        tile_shapes = ((128, 128, 64), (256, 128, 64), (256, 256, 64))
+        cluster_shapes = (
+            (2, 1, 1),
+            (2, 2, 1),
+            (2, 4, 1),
+            (4, 1, 1),
+            (4, 2, 1),
+            (4, 4, 1),
+        )
+        kernels = [
+            kernel(tile_shape, cluster_shape, True)
+            for tile_shape in tile_shapes
+            for cluster_shape in cluster_shapes
+        ]
+        kernels.extend(
+            kernel(tile_shape, (1, 1, 1), False)
+            for tile_shape in ((64, 128, 64), (128, 128, 64))
+        )
+
+        selected = nvgemm._select_grouped_gemm_kernels(kernels, 10)
+
+        self.assertEqual(nvgemm._select_grouped_gemm_kernels(kernels, 0), [])
+        self.assertEqual(len(selected), 10)
+        self.assertEqual(
+            sum(kernel.metadata.design.use_2cta_mma for kernel in selected), 8
+        )
+        self.assertEqual(
+            {
+                kernel.metadata.design.tile_shape
+                for kernel in selected
+                if kernel.metadata.design.use_2cta_mma
+            },
+            set(tile_shapes),
+        )
+        for tile_shape in tile_shapes:
+            selected_clusters = {
+                kernel.metadata.design.cluster_shape
+                for kernel in selected
+                if kernel.metadata.design.tile_shape == tile_shape
+            }
+            self.assertIn((2, 1, 1), selected_clusters)
+            self.assertIn((4, 1, 1), selected_clusters)
+
+        choices = []
+        input_nodes = [MagicMock() for _ in range(3)]
+        for node in input_nodes:
+            node.get_layout.return_value = MagicMock()
+            node.get_dtype.return_value = torch.bfloat16
+        with (
+            patch.object(
+                nvgemm,
+                "_create_dummy_tensor_from_layout",
+                return_value=torch.empty(1),
+            ),
+            patch.object(nvgemm, "_create_gemm_arguments", return_value=object()),
+            patch.object(nvgemm, "get_cuda_arch", return_value=100),
+            patch.object(nvgemm, "nvgemm_max_configs", return_value=10),
+            patch.object(
+                nvgemm,
+                "prefer_pdl_kernels",
+                side_effect=lambda non_efc, efc, _use_pdl: (non_efc, efc),
+            ),
+            patch.object(
+                nvgemm,
+                "NVUniversalGemmCaller",
+                side_effect=lambda **kwargs: SimpleNamespace(kernel=kwargs["kernel"]),
+            ),
+            patch(
+                "torch._inductor.codegen.nv_universal_gemm.kernel_cache.partition_compatible_kernels",
+                return_value=(kernels, []),
+            ),
+        ):
+            nvgemm._add_nv_gemm_choices_impl(
+                choices,
+                SimpleNamespace(size=(32, 8)),
+                input_nodes,
+                nvgemm.GemmVariant.GROUPED_GEMM,
+                torch.float32,
+            )
+
+        self.assertEqual(
+            [id(choice.kernel) for choice in choices],
+            [id(selected_kernel) for selected_kernel in selected],
+        )
+
     def test_grouped_benchmark_generates_valid_offsets(self):
         from torch._inductor.autotune_process import TensorMeta
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
