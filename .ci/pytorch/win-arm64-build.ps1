@@ -30,5 +30,6 @@ $env:SCRIPT_HELPERS_DIR = Join-Path $ScriptParentDir "win-test-helpers\arm64"
 
 # Run the main build script
 & "$env:SCRIPT_HELPERS_DIR\build_pytorch.ps1"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "BUILD PASSED"

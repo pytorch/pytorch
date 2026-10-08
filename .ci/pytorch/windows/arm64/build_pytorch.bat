@@ -49,12 +49,13 @@ sccache --show-stats
 
 :: Call PyTorch build script
 python -m build --wheel --no-isolation --outdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+set BUILD_EXITCODE=%errorlevel%
 
 :: show sccache stats
 sccache --show-stats
 
 :: Check if installation was successful
-if %errorlevel% neq 0 (
-    echo "Failed on build_pytorch. (exitcode = %errorlevel%)"
+if %BUILD_EXITCODE% neq 0 (
+    echo "Failed on build_pytorch. (exitcode = %BUILD_EXITCODE%)"
     exit /b 1
 )
