@@ -551,18 +551,21 @@ class _PartialReduction(NamedTuple):
     node: Any
     buffer: str
     op: str
-    offset: int
-    tiles: int
-    size: int
+    offset: int | sympy.Expr
+    tiles: int | sympy.Expr
+    size: int | sympy.Expr
 
 
-def _partials_finish(ws: str, reduction: _PartialReduction) -> str:
+def _partials_finish(
+    ws: str, reduction: _PartialReduction, pexpr: Callable[[sympy.Expr], str]
+) -> str:
     """The wrapper expression that reduces reduction's partials in workspace
-    tensor ws."""
-    end = reduction.offset + reduction.tiles * reduction.size * torch.float32.itemsize
+    tensor ws, printing sizes with pexpr."""
+    offset, tiles, size = reduction.offset, reduction.tiles, reduction.size
+    end = offset + tiles * size * torch.float32.itemsize
     return (
-        f"{ws}[{reduction.offset}:{end}].view(torch.float32)"
-        f".view({reduction.tiles}, {reduction.size}).{reduction.op}(dim=0)"
+        f"{ws}[{pexpr(offset)}:{pexpr(end)}].view(torch.float32)"
+        f".view({pexpr(tiles)}, {pexpr(size)}).{reduction.op}(dim=0)"
     )
 
 
@@ -2048,8 +2051,11 @@ class TritonTemplateKernel(TritonKernel):
         if self.workspace_arg is None:
             raise AssertionError("reduction partials need a workspace")
         ws = self.workspace_arg.outer_name
+        pexpr = V.graph.wrapper_code.codegen_python_sizevar
         for reduction in self.partial_reductions:
-            codegen_reduced_buffer(reduction.buffer, _partials_finish(ws, reduction))
+            codegen_reduced_buffer(
+                reduction.buffer, _partials_finish(ws, reduction, pexpr)
+            )
         scheduler = V.graph.scheduler
         backend = scheduler.get_backend(self.output_node.get_device())
         # The buffers the template's fused nodes last read are already queued
@@ -2086,8 +2092,17 @@ class TritonTemplateKernel(TritonKernel):
             if isinstance(sig, WorkspaceArg)
             and sig.outer_name == self.workspace_arg.outer_name
         )
+
+        def hint(expr: sympy.Expr) -> str:
+            # Same hints as get_args, so the slices match the workspace.
+            return str(
+                V.graph.sizevars.optimization_hint_with_override(
+                    expr, hint_override=self.hint_override
+                )
+            )
+
         for reduction in self.partial_reductions:
-            finish = _partials_finish(f"args[{idx}]", reduction)
+            finish = _partials_finish(f"args[{idx}]", reduction, hint)
             # Like the wrapper, cast the fp32 partials to the output dtype.
             if (dtype := V.graph.get_dtype(reduction.buffer)) != torch.float:
                 finish += f".to({dtype})"
@@ -2337,19 +2352,29 @@ class TritonTemplateKernel(TritonKernel):
                 name = stage2.get_outputs()[0].node.get_name()
             # One partial per tile along the reduced dim.
             if columns:
-                tiles, size = ceildiv(int(m), rows), int(n)
+                tiles, size = ceildiv(m, rows), n
                 tile_idx = f"{origin[0]} // {rows}"
             else:
-                tiles, size = ceildiv(int(n), cols), int(m)
+                tiles, size = ceildiv(n, cols), m
                 tile_idx = f"{origin[1]} // {cols}"
-            nbytes = tiles * size * torch.float32.itemsize
             ws = next(
                 (w for w in self.args.workspace_args if w.inner_name == "ws_ptr"), None
             )
             # Partials share ws_ptr with the template's workspace (e.g. TMA
             # descriptors): align them to 16 bytes, and rebind workspace_arg to
-            # the joined arg so the wrapper allocates both.
-            pad = -int(ws.count) % 16 if ws is not None else 0
+            # the joined arg so the wrapper allocates both. Regions are padded
+            # to 16 bytes, so only the template's own (static) workspace needs
+            # a leading pad, even when M is dynamic.
+            count = ws.count if ws is not None else sympy.S.Zero
+            if V.graph.sizevars.statically_known_multiple_of(count, 16):
+                pad = 0
+            elif isinstance(count, (int, sympy.Integer)):
+                pad = -int(count) % 16
+            else:
+                raise AssertionError(
+                    f"can't 16-byte align partials after {count} workspace bytes"
+                )
+            nbytes = 16 * ceildiv(tiles * size * torch.float32.itemsize, 16)
             ws_ptr, ws_name, offset = self.args.workspace(pad + nbytes, False)
             self.workspace_arg = next(
                 w for w in self.args.workspace_args if w.outer_name == ws_name
@@ -2373,8 +2398,9 @@ class TritonTemplateKernel(TritonKernel):
                 in_bounds = f"({origin[1]} < {n})"
                 mask = in_bounds if mask == "None" else f"{mask} & {in_bounds}"
             self.post_loop_store.writeline(
-                f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
-                f"{size} * ({tile_idx}) + {indexing.index_str}, "
+                f"tl.store(({ws_ptr} + {self.index_to_str(offset)})"
+                f".to(tl.pointer_type(tl.float32)) + "
+                f"{self.index_to_str(size)} * ({tile_idx}) + {indexing.index_str}, "
                 f"{value}, {mask})"
             )
 
