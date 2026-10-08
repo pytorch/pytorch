@@ -1680,6 +1680,29 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    def test_blackwell_mm_reduction_epilogue_benchmark_casts_finish(self):
+        """For a bf16 column reduction, the benchmark's finish also pays for the
+        wrapper's cast to the output dtype, as the unfused side does."""
+        _, code = self._run_reduction(
+            self.COL_OPS["sum_bf16"],
+            1024,
+            128,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True, "benchmark_kernel": True},
+        )
+        finish = re.findall(
+            r"\.run\(\*args, stream=\w+\)\n\s+args\[\d+\]\[\d+:\d+\]"
+            r"\.view\(torch\.float32\)\.view\(\d+, 128\)\.sum\(dim=0\)"
+            r"\.to\(torch\.bfloat16\)",
+            code,
+        )
+        self.assertEqual(len(finish), 1, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     def test_blackwell_mm_reduction_epilogue_benchmark_mix_order(self):
         """Epilogue benchmarking times the real mix-order reduction kernel, and
         restores its nodes for codegen afterwards."""
@@ -1853,6 +1876,41 @@ class TestBlackwellTMALoadFusion(TestCase):
         )
         self._assert_row_fused(kernels, code)
         self.assertEqual(len(re.findall(r"tma_descriptor\d+\.store\(", code)), 2)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("M", (1024, 1000))
+    @parametrize("template_out", (True, False))
+    def test_blackwell_mm_row_reduction_epilogue_tma_stores_after_reduction(
+        self, M: int, template_out: bool
+    ):
+        """The template output and a full-tile output computed after the row
+        reduction both keep their TMA stores, also on a ragged last row tile."""
+
+        def fn(a, b):
+            c = a @ b
+            x = c.float()
+            out = (x - x.amax(-1, keepdim=True)).to(c.dtype)
+            return (c, out) if template_out else out
+
+        kernels, code = self._run_reduction(
+            fn,
+            M,
+            64,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{
+                "triton.template_reduction_epilogue": True,
+                "triton.enable_template_tma_store": True,
+            },
+        )
+        self._assert_row_fused(kernels, code, "amax")
+        self.assertEqual(
+            len(re.findall(r"tma_descriptor\d+\.store\(", code)), 1 + template_out
+        )
+        self.assertNotIn("tl.store(", code)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
