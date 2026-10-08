@@ -36,38 +36,24 @@ if torch.backends.mps.is_available():
             "linalg.ldl_solve",
             "linalg.matrix_power",
             "linalg.matrix_sqrth",
-            "linalg.solve_triangular",
             "linalg.tensorinv",
             "log_softmaxwith_dtype",
             "nn.functional.channel_shuffle",
             "nn.functional.conv3d",
-            "nn.functional.padreplicate_negative",
             "ormqr",
             "renorm",
             "sparse.sampled_addmm",
-            "to_sparse",
-            "triangular_solve",
-        }
-
-        MACOS_BEFORE_14_4_XFAILLIST = {
-            # These ops work fine in 14.4 but fail in 14.2 or 13.x
-            "fft.hfft2": [torch.complex64],
-        }
-
-        MACOS_BEFORE_15_0_XFAILLIST = {
-            # matrix_exp is disabled on MPS before macOS 15 (TORCH_CHECK): MPSGraph
-            # complex matmul is numerically unreliable there and breaks the
-            # scale-and-square recurrence, so the op raises for every dtype.
-            "matrix_exp": None,
         }
 
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
+            # No 5-D bicubic sampler on MPS. float32 only: f16/bf16 are skipped below.
+            # TODO: drop this when MPS has 5-D bicubic.
+            "nn.functional.grid_sample": [torch.float32],
             "linalg.eig": None,
             "linalg.eigvals": None,
             "hash_tensor": None,
-            "heaviside": None,
             # "kthvalue": None,
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
@@ -239,15 +225,6 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int16,
             ],
-            "nn.functional.nll_loss": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.bool,
-                torch.int8,
-            ],
-            "nn.functional.padreplicate_negative": [torch.bool],
             "nn.functional.pdist": None,
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
@@ -274,7 +251,7 @@ if torch.backends.mps.is_available():
             # int64 lacks atomic_binary_op in Metal; the old MPSGraph path cast
             # to int32 (silently lossy). amin/amax for int64 go through the
             # sign-flip encode + ulong atomic_min/max bracket and work fine.
-            # bool prod/mean are excluded via dtypesIfMPS in the OpInfo itself.
+            # bool prod is excluded via dtypesIfMPS in the OpInfo, and mean doesn't list bool.
             "scatter_reduceprod": [torch.int64],
             "_segment_reducelengths": None,
             "_segment_reduceoffsets": None,
@@ -494,32 +471,6 @@ if torch.backends.mps.is_available():
                         DecorateInfo(unittest.expectedFailure, dtypes=xfaillist[key]),
                     )
 
-            if (
-                key in MACOS_BEFORE_14_4_XFAILLIST
-                and key not in xfail_exclusion
-                and (MACOS_VERSION < 14.4)
-            ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_14_4_XFAILLIST[key],
-                    ),
-                )
-
-            if (
-                key in MACOS_BEFORE_15_0_XFAILLIST
-                and key not in xfail_exclusion
-                and (MACOS_VERSION < 15.0)
-            ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_15_0_XFAILLIST[key],
-                    ),
-                )
-
             # If op is not supported for complex types, expect it to fail
             if key in UNSUPPORTED_COMPLEX_OPS:
                 addDecorator(
@@ -535,6 +486,9 @@ if torch.backends.mps.is_available():
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
+            # No 5-D bicubic sampler on MPS; the grad leg fails in its forward call.
+            # TODO: drop this when MPS has 5-D bicubic.
+            "nn.functional.grid_sample": [torch.float32],
             "sparse.mmreduce": [torch.float32],  # csr not supported
             "linalg.householder_product": None,
             "linalg.lstsq": [torch.float32],
@@ -634,31 +588,6 @@ if torch.backends.mps.is_available():
 
         return ops
 
-    def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
-        # Error input samples do not take a dtype argument.
-        XFAILLIST = {
-            # Exceptions are not raised
-            "__rmod__",
-            "__rsub__",
-            "__rpow__",
-            "clamp_max",
-            "clamp_min",
-            "masked_scatter",
-            # MPS does not support tensor dimensions > 16
-            "amax",
-            "amin",
-            "aminmax",
-        }
-
-        def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
-            op.decorators = op.decorators + (d,)
-
-        for op in ops:
-            key = op.name + op.variant_test_name
-            if key in XFAILLIST:
-                addDecorator(op, DecorateInfo(unittest.expectedFailure))
-
-        return ops
 else:
 
     def mps_ops_modifier(
@@ -670,7 +599,4 @@ else:
         return ops
 
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
-        return ops
-
-    def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         return ops

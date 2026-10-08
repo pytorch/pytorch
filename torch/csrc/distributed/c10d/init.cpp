@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
 #include <string_view>
 #include <utility>
@@ -383,7 +384,8 @@ class PythonStore : public ::c10d::Store {
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "append");
     if (!fn) {
-      return Store::append(key, value);
+      Store::append(key, value);
+      return;
     }
     // Call function with a py::bytes object for the value.
     fn(key, toPyBytes(value));
@@ -416,7 +418,8 @@ class PythonStore : public ::c10d::Store {
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "multi_set");
     if (!fn) {
-      return Store::multiSet(keys, values);
+      Store::multiSet(keys, values);
+      return;
     }
 
     fn(keys, toPyBytes(values));
@@ -655,7 +658,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                  bool skip_all_reduce_unused_params,
                  bool use_python_reducer,
                  std::vector<int64_t> bucket_bytes_cap_list,
-                 bool batched_grad_copy) {
+                 bool batched_grad_copy,
+                 bool lazy_bucket_allocation) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -673,7 +677,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                     skip_all_reduce_unused_params,
                     use_python_reducer,
                     std::move(bucket_bytes_cap_list),
-                    batched_grad_copy);
+                    batched_grad_copy,
+                    lazy_bucket_allocation);
               }),
           py::arg("params"),
           py::arg("bucket_indices"),
@@ -689,7 +694,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("skip_all_reduce_unused_params") = false,
           py::arg("use_python_reducer") = false,
           py::arg("bucket_bytes_cap_list") = std::vector<int64_t>(),
-          py::arg("batched_grad_copy") = false)
+          py::arg("batched_grad_copy") = false,
+          py::arg("lazy_bucket_allocation") = false)
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
@@ -808,18 +814,31 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_check_reducer_finalized",
-          [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
+          [](::c10d::Reducer& reducer) { reducer.check_finalized(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_reset_state",
-          [](::c10d::Reducer& reducer) { return reducer.reset_state(); },
+          [](::c10d::Reducer& reducer) { reducer.reset_state(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_update_process_group",
           [](::c10d::Reducer& reducer,
              c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
-            return reducer.update_process_group(std::move(new_process_group));
+            reducer.update_process_group(std::move(new_process_group));
           },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_manual_finalization_required",
+          &::c10d::Reducer::set_manual_finalization_required,
+          py::arg("required"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_should_finalize_after_backward",
+          &::c10d::Reducer::should_finalize_after_backward,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_finalize_backward_manual",
+          &::c10d::Reducer::finalize_backward_manual,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -1141,7 +1160,7 @@ Example:
   module.def(
       "_set_allow_inflight_collective_as_graph_input",
       [](bool value) {
-        return ::c10d::set_allow_inflight_collective_as_graph_input(value);
+        ::c10d::set_allow_inflight_collective_as_graph_input(value);
       },
       py::arg("value"));
 
@@ -1153,13 +1172,13 @@ Example:
   module.def(
       "_unregister_process_group",
       [](const std::string& group_name) {
-        return ::c10d::unregister_process_group(group_name);
+        ::c10d::unregister_process_group(group_name);
       },
       py::arg("group_name"));
 
   // Remove all process groups from the native registry
   module.def("_unregister_all_process_groups", []() {
-    return ::c10d::unregister_all_process_groups();
+    ::c10d::unregister_all_process_groups();
   });
 
 #ifdef USE_NVSHMEM
@@ -1173,6 +1192,11 @@ Example:
   // Check if NVSHMEM is available on current system.
   module.def(
       "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
+
+  module.def(
+      "_release_nvshmem_team_pool",
+      ::c10d::nvshmem_extension::release_nvshmem_team_pool,
+      py::arg("group_name"));
 #endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
@@ -1427,6 +1451,7 @@ Example:
           &::c10d::symmetric_memory::get_mempool_allocator)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
+      .def_property_readonly("group_name", &SymmetricMemory::get_group_name)
       .def_property_readonly(
           "buffer_ptrs",
           [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
@@ -2840,7 +2865,7 @@ Arguments:
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->monitoredBarrier(opts, waitAllRanks);
+                self->monitoredBarrier(opts, waitAllRanks);
               },
               py::arg("timeout") = std::nullopt,
               py::arg("wait_all_ranks") = false,
@@ -2929,7 +2954,7 @@ experimental and subject to breakage without warning.)")
               "_set_default_backend",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const ::c10d::ProcessGroup::BackendType& backendType) {
-                return self->setDefaultBackend(backendType);
+                self->setDefaultBackend(backendType);
               },
               py::arg("backend_type"),
               py::call_guard<py::gil_scoped_release>())
@@ -3117,6 +3142,21 @@ Arguments:
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
       .export_values();
 
+  // Getter for a Backend property that is backed by a virtual method. C++
+  // subclasses (ProcessGroupNCCL, ...) don't rebind these properties, so for
+  // them the getter must dispatch virtually to reach their override. For a
+  // Python subclass (PyBackend), reaching Backend's own property means the
+  // subclass doesn't override it or is calling super(); both want Backend's
+  // implementation, and dispatching virtually would go through the trampoline
+  // back into Python. This assumes PyBackend is the only trampoline below
+  // Backend.
+#define BACKEND_VIRTUAL_PROPERTY(method)                      \
+  [](::c10d::Backend& self) {                                 \
+    return dynamic_cast<::c10d::PyBackend*>(&self) != nullptr \
+        ? self.::c10d::Backend::method()                      \
+        : self.method();                                      \
+  }
+
   // TODO: The collection definitions handles direct instantiation of
   // ProcessGroup subclasses (e.g. dist.ProcessGroupGloo). This is not supported
   // and should be removed once all tests are transitioned
@@ -3152,15 +3192,15 @@ Arguments:
               py::arg("value"))
           .def_property_readonly(
               "supports_splitting",
-              &::c10d::Backend::supportsSplitting,
+              BACKEND_VIRTUAL_PROPERTY(supportsSplitting),
               "(test whether the backend supports splitting)")
           .def_property_readonly(
               "supports_coalescing",
-              &::c10d::Backend::supportsCoalescing,
+              BACKEND_VIRTUAL_PROPERTY(supportsCoalescing),
               "(test whether the backend supports coalescing)")
           .def_property_readonly(
               "_supports_time_estimate",
-              &::c10d::Backend::supportsTimeEstimation,
+              BACKEND_VIRTUAL_PROPERTY(supportsTimeEstimation),
               R"(Test whether the backend supports collective time estimation.
 
 This API is experimental and subject to change.)")
@@ -3178,11 +3218,11 @@ This API is experimental and subject to change.)")
 This API is experimental and subject to change.)")
           .def_property_readonly(
               "supports_shrinking",
-              &::c10d::Backend::supportsShrinking,
+              BACKEND_VIRTUAL_PROPERTY(supportsShrinking),
               "(test whether the backend supports communicator shrinking)")
           .def_property_readonly(
               "supports_reconfigure",
-              &::c10d::Backend::supportsReconfigure,
+              BACKEND_VIRTUAL_PROPERTY(supportsReconfigure),
               "(test whether the backend supports reconfigure for fault tolerance)")
           .def(
               "set_timeout",
@@ -3218,7 +3258,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "Reconfigure the backend with a new set of peers for fault tolerance")
           .def_property_readonly(
               "supports_window",
-              &::c10d::Backend::supportsWindow,
+              BACKEND_VIRTUAL_PROPERTY(supportsWindow),
               "(test whether the backend supports one-sided window operations)")
           .def(
               "new_window",
@@ -3587,7 +3627,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return self->monitoredBarrier(opts, waitAllRanks);
+                self->monitoredBarrier(opts, waitAllRanks);
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
@@ -3704,11 +3744,14 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "bound_device_id",
               &::c10d::Backend::getBoundDeviceId,
               &::c10d::Backend::setBoundDeviceId)
-          .def_property_readonly("options", &::c10d::Backend::getBackendOptions)
+          .def_property_readonly(
+              "options", BACKEND_VIRTUAL_PROPERTY(getBackendOptions))
           .def(
               "get_error",
               &::c10d::Backend::getError,
               py::call_guard<py::gil_scoped_release>());
+
+#undef BACKEND_VIRTUAL_PROPERTY
 
   // base Backend::Options binding
   // TODO: Maybe we can consider how to merge this with
@@ -3917,11 +3960,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               R"(Create a new ProcessGroupNCCL instance.)")
-          .def(
-              "_comm_ptr",
+          .def("_comm_ptr", &::c10d::ProcessGroupNCCL::getCommPtr)
+          .def_property_readonly(
+              "comm_ptr",
               &::c10d::ProcessGroupNCCL::getCommPtr,
               R"(
-            Get the communicator of the current device.
+            The communicator of the current device, as an opaque handle.
 
             .. warning ::
                 Unsafe to use. The collectives launched into the communicator
@@ -4334,6 +4378,22 @@ Returns:
           .def(
               "perform_nocolor_split",
               &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
+          .def("_comm_ptr", &::c10d::nccl2::ProcessGroupNCCL::getCommPtr)
+          .def_property_readonly(
+              "comm_ptr",
+              &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,
+              R"(
+            This process group's ``ncclComm_t``, as an opaque handle.
+
+            The process group holds a single communicator, created in its
+            constructor, so the value does not depend on the current device.
+
+            .. warning ::
+                The communicator is owned by the process group. Do not modify
+                or free it. Collectives launched into it from outside the
+                process group are not monitored by the watchdog, so check the
+                communicator's readiness before launching any.
+            )")
           .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
@@ -4392,6 +4452,17 @@ Returns:
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
             self.getPrimary()->performNocolorSplit(device);
           })
+      .def(
+          "_comm_ptr",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return self.getPrimary()->getCommPtr();
+          })
+      .def_property_readonly(
+          "comm_ptr",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return self.getPrimary()->getCommPtr();
+          },
+          R"(The primary communicator's ``ncclComm_t``, as an opaque handle.)")
       .def_property_readonly(
           "options",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
@@ -5054,6 +5125,15 @@ a RuntimeError; on CUDA it triggers a device-side assert. The process group
 owns the hook, so the returned handle only has to be kept if the check should
 be removed again via remove().)")
       .def("remove", &::c10d::NanCheckHook::remove);
+
+  py::class_<::c10d::HealthCheckHook>(module, "HealthCheckHook")
+      .def_static(
+          "attach",
+          &::c10d::HealthCheckHook::attach,
+          py::arg("pg"),
+          R"(
+Attach health reporting to every backend in a process group that supports
+abort hooks. The backends own the registered hooks for their lifetimes.)");
 
   module.def(
       "_dump_fr_trace_json",

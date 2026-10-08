@@ -60,7 +60,6 @@ from .codegen.common import (
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
-    TensorArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -73,19 +72,25 @@ from .codegen.triton import (
     TritonScheduling,
     TritonSymbols,
 )
-from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
+from .codegen.triton_utils import (
+    config_of,
+    equal_1_arg_indices,
+    signature_to_meta,
+    triton_meta_device_props,
+)
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
-from .runtime.hints import DeviceProperties, TritonMeta
+from .runtime.hints import TritonMeta
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
+    fp32_matmul_precision_key,
     get_dtype_size,
     is_gpu,
     Placeholder,
@@ -494,6 +499,10 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         if mode != "atomic_add":
             raise AssertionError("Only atomic_add is supported for inner stores")
 
+        # Record it on the kernel: these atomics never pass through
+        # TritonKernel.store, so nothing else would mark the kernel as using them.
+        self.kernel.atomic_add_found = True
+
         buf_name = self._add_kernel_input(name)
         index_str = self._broadcast_index(index, f"{value}.shape")
         return f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
@@ -590,7 +599,7 @@ class TritonTemplateKernel(TritonKernel):
         )
         if tma_2d:
             # By default `construct_range_trees` will return the range_trees in the order
-            # ["z", "y", "x", "r0_", "r1_"] (see simd.py:all_prefixes)
+            # ["z", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
             # and this order defines what the kernel block shape will be. So if the template
             # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
             # trees in the order ["y", "x"]. This would mean that the template would need to transpose
@@ -653,6 +662,9 @@ class TritonTemplateKernel(TritonKernel):
 
         # input buffers which we are allowed to prologue fuse into
         self.prologue_supported_inputs: OrderedSet[str] = OrderedSet()
+        # Track prologue-fusion-supported input indices before duplicate
+        # arguments are deduplicated.
+        self._prologue_fusion_supported_input_indices: OrderedSet[int] = OrderedSet()
 
         # input buffers which we are fusing into
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
@@ -710,6 +722,15 @@ class TritonTemplateKernel(TritonKernel):
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"
 
+    def _finalize_prologue_supported_inputs(self) -> None:
+        # Remove a prologue-fusible buffer if it also appears at an unsupported
+        # template input position.
+        self.prologue_supported_inputs -= OrderedSet(
+            input_node.get_name()
+            for index, input_node in enumerate(self.input_nodes)
+            if index not in self._prologue_fusion_supported_input_indices
+        )
+
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
         # (never accessed).
@@ -719,6 +740,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.args.sizevars,
                 self.args.workspace_args,
                 self.prologue_supported_inputs,
+                # Record occurrence-only changes for generated-code cache replay.
+                self._prologue_fusion_supported_input_indices,
                 self.frozen_layouts_cnt,
             ]
         )
@@ -742,6 +765,7 @@ class TritonTemplateKernel(TritonKernel):
     def replay_cached_events(self, events: RecordedEventsType) -> None:
         for f, args, kwargs in events:
             getattr(self, f)(*args, **kwargs)
+        self._finalize_prologue_supported_inputs()
 
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
@@ -908,20 +932,24 @@ class TritonTemplateKernel(TritonKernel):
                 argdefs=argdefs,
                 is_template=True,
             ),
-            "device": DeviceProperties.create(self.output_node.get_device()),
+            "device": triton_meta_device_props(self.output_node.get_device()),
             "constants": {},
         }
-        triton_meta["configs"] = [config_of(signature)]
+        # Rendered from a deferred hook, so the body -- including any subgraph
+        # modifications that emit atomics -- already exists at this point.
+        triton_meta["configs"] = [
+            config_of(signature, pointer_range_override=self.pointer_range_override())
+        ]
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", None)
         waves_per_eu = self.meta.get("waves_per_eu", None)
         kpack = self.meta.get("kpack", None)
-        if matrix_instr_nonkdim:
+        if matrix_instr_nonkdim is not None:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
-        if waves_per_eu:
+        if waves_per_eu is not None:
             triton_meta["waves_per_eu"] = waves_per_eu
-        if kpack:
+        if kpack is not None:
             triton_meta["kpack"] = kpack
 
         # tlx options carry dynamic string keys outside the TritonMeta schema.
@@ -934,28 +962,8 @@ class TritonTemplateKernel(TritonKernel):
             self.triton_meta = triton_meta
         else:
             self.triton_meta.update(triton_meta)
-
-        # Upgrade signature for host-side TMA: pointer args that the launcher
-        # will replace with TensorDescriptors need tensordesc<> types so Triton
-        # compiles the kernel with the correct arg types.
-        if self.host_tma_descriptor_args:
-            from .codegen.triton_utils import _type_of
-
-            sig = self.triton_meta["signature"]
-            for argname, arg in zip(argdefs, signature):
-                if (
-                    isinstance(arg, TensorArg)
-                    and arg.name in self.host_tma_descriptor_args
-                ):
-                    info = self.host_tma_descriptor_args[arg.name]
-                    block_shape = (
-                        info["block_shape"]
-                        if isinstance(info, dict)
-                        else info.block_shape
-                    )
-                    dtype = V.graph.get_dtype(arg.buffer)
-                    inner = _type_of(dtype)[1:]  # strip "*": *bf16 -> bf16
-                    sig[argname.name] = f"tensordesc<{inner}{list(block_shape)}>"
+        if not config.emulate_precision_casts:
+            self.triton_meta.setdefault("enable_fp_fusion", True)
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
@@ -963,22 +971,10 @@ class TritonTemplateKernel(TritonKernel):
             **FixedGrid.setup_grid_as_args(),
         }
         if self.host_tma_descriptor_args:
-            # This meta is repr'd into the generated module, so every value must
-            # be a plain resolved dict. Epilogue accesses register a
-            # TensorDescriptorOptions (whose block shape is still symbolic), which
-            # only TritonKernel.inductor_meta_per_kernel knows how to resolve.
-            unsupported = [
-                inner
-                for inner, info in self.host_tma_descriptor_args.items()
-                if not isinstance(info, dict)
-            ]
-            if unsupported:
-                raise NotImplementedError(
-                    "host-side TMA for template epilogue accesses is not supported "
-                    f"(unresolved descriptors: {unsupported})"
-                )
-            inductor_meta["host_tma_descriptor_args"] = dict(
-                self.host_tma_descriptor_args
+            # This meta is repr'd into the generated module, so epilogue-registered
+            # TensorDescriptorOptions must be resolved to plain dims first.
+            inductor_meta["host_tma_descriptor_args"] = (
+                self.resolved_host_tma_descriptor_args()
             )
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
@@ -1067,10 +1063,11 @@ class TritonTemplateKernel(TritonKernel):
             self.args.input_buffers[input_node.get_name()] = arg_name
 
         # The args may be duplicated, so renaming must be after args are de-duplicated.
-        for name in argnames:
+        for named_index, name in enumerate(argnames, start=self.prefix_args):
             input_node = self.named_input_nodes[name]
             if self.prologue_loads_all_inputs:
                 self.prologue_supported_inputs.add(input_node.get_name())
+                self._prologue_fusion_supported_input_indices.add(named_index)
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
             if input_node.get_name() in self.prologue_fused_inputs:
@@ -1343,6 +1340,10 @@ class TritonTemplateKernel(TritonKernel):
         input_node = self.named_input_nodes[input_name]
         if not self.prologue_loads_all_inputs:
             self.prologue_supported_inputs.add(input_node.get_name())
+            named_input_index = self.prefix_args + list(self.named_input_nodes).index(
+                input_name
+            )
+            self._prologue_fusion_supported_input_indices.add(named_input_index)
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
@@ -1878,10 +1879,9 @@ class TritonTemplateKernel(TritonKernel):
                 *self.extra_template_env_fns,
             ]
         }
-        return PartialRender(
-            template.render(**template_env, **kwargs),
-            self.render_hooks,
-        )
+        rendered_template = template.render(**template_env, **kwargs)
+        self._finalize_prologue_supported_inputs()
+        return PartialRender(rendered_template, self.render_hooks)
 
     def make_load(self, name, indices, mask):
         """
@@ -2777,6 +2777,7 @@ class GeneratedCodeCache:
                 "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
+                "emulate_precision_casts": config.emulate_precision_casts,
                 "triton_meta": triton_meta,
             }
         )
@@ -3428,6 +3429,7 @@ class ExternKernelChoice:
         input_nodes,
         layout,
         ordered_kwargs_for_cpp_kernel=(),
+        benchmark_request_kwargs=None,
         **kwargs,
     ):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
@@ -3437,6 +3439,7 @@ class ExternKernelChoice:
             layout,
             kwargs,
             has_out_variant=self.has_out_variant,
+            benchmark_request_kwargs=benchmark_request_kwargs,
         )
 
     @property
@@ -3519,6 +3522,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         if (
             config.profile_bandwidth_with_do_bench_using_profiling
             and not self._benchmark_with_cudagraphs
+            and not self.bmreq.config_cudagraph_benchmarking
         ):
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)
@@ -3593,10 +3597,12 @@ class ExternKernelCaller(ChoiceCaller):
         kwargs=None,
         *,
         has_out_variant=True,
+        benchmark_request_kwargs=None,
     ) -> None:
         super().__init__(choice.name, input_nodes, layout, description="")
         self.choice = choice
         self.kwargs = kwargs or {}
+        self.benchmark_request_kwargs = benchmark_request_kwargs or {}
         self.has_out_variant = has_out_variant
         self.gm = choice.gm
         self.bmreq: BenchmarkRequest | None = None
@@ -3648,6 +3654,8 @@ class ExternKernelCaller(ChoiceCaller):
             callable_path=self.choice.call_name(),
             kwargs=self.kwargs,
             has_out_variant=self.has_out_variant,
+            benchmark_device_type=device.type,
+            **self.benchmark_request_kwargs,
         )
 
     def __str__(self) -> str:
@@ -3692,6 +3700,10 @@ class ExternKernelCaller(ChoiceCaller):
                 *[
                     f"{kwarg}={repr(self.kwargs[kwarg])}"
                     for kwarg in sorted(self.kwargs.keys())
+                ],
+                *[
+                    f"benchmark_{kwarg}={repr(self.benchmark_request_kwargs[kwarg])}"
+                    for kwarg in sorted(self.benchmark_request_kwargs.keys())
                 ],
                 self.choice.hash_key(),
             ]
@@ -3902,6 +3914,30 @@ def create_inputs_key(input_nodes) -> str:
     return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
 
 
+def create_benchmark_cache_key(
+    inputs_key: str,
+    device_type: str,
+    benchmark_with_cudagraphs: bool,
+) -> str:
+    """Separate timing and prescreen caches by the effective benchmark policy."""
+    if benchmark_with_cudagraphs:
+        policy = "cudagraph_required"
+    elif (
+        device_type == "cuda"
+        and config.autotune_cudagraph_benchmarking
+        and config.max_autotune
+    ):
+        policy = "cudagraph_auto"
+    else:
+        policy = "eager"
+    cache_key = f"{inputs_key}:benchmark_policy={policy}"
+    if policy != "eager":
+        cache_key += (
+            f":cudagraph_unroll={max(1, config.autotune_cudagraph_benchmarking_iters)}"
+        )
+    return cache_key
+
+
 def create_precompile_key(
     name: str, inputs_key: str, choices: list[ChoiceCaller]
 ) -> str:
@@ -3909,7 +3945,7 @@ def create_precompile_key(
         [
             name,
             inputs_key,
-            torch.get_float32_matmul_precision(),
+            fp32_matmul_precision_key(),
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
@@ -4186,6 +4222,9 @@ class AlgorithmSelectorCache(PersistentCache):
         if benchmark_with_cudagraphs:
             for choice in choices:
                 choice._benchmark_with_cudagraphs = True
+                bmreq = _benchmark_request_for_choice(choice)
+                if bmreq is not None:
+                    bmreq.benchmark_with_cudagraphs = True
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
@@ -4213,31 +4252,37 @@ class AlgorithmSelectorCache(PersistentCache):
             return node, choice
 
         inputs_key = create_inputs_key(input_nodes)
+        benchmark_inputs_key = create_benchmark_cache_key(
+            inputs_key,
+            layout.device.type,
+            benchmark_with_cudagraphs,
+        )
 
         has_cutlass = any(isinstance(c, CUTLASSTemplateCaller) for c in choices)
         if config.autotune_in_subproc or has_cutlass:
-            # Warmup the subprocess pool early so it's ready for benchmarking
-            torch._inductor.autotune_process.get_tuning_process_pool()
+            # Initialize the worker pool (subprocess or thread) so it will warmup early.
+            torch._inductor.autotune_process.get_tuning_pool()
 
         precompile_fn = self.make_precompile_fn(
             choices,
             name,
             inputs_key,
+            benchmark_inputs_key=benchmark_inputs_key,
             precompilation_timeout_seconds=precompilation_timeout_seconds,
         )
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
             if use_pipelined_autotuning():
-                if config.benchmark_epilogue_fusion:
+                if config.benchmark_template_fusion:
                     raise AssertionError(
-                        "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
+                        "Benchmarking template fusion will cause gpu contention with pipelined autotuning"
                     )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)
                 ]
                 # Make sure the autotune subprocess for benchmarking is fed as much as possible
                 # Extern kernels do not have to precompile, so can feed them before triton
-                AsyncAutotuner.start(extern_kernels, inputs_key)
+                AsyncAutotuner.start(extern_kernels, benchmark_inputs_key)
                 triton_kernels = [
                     c for c in choices if not AlgorithmSelectorCache._is_extern(c)
                 ]
@@ -4250,7 +4295,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         input_nodes,
                         layout,
                         input_gen_fns,
-                        inputs_key,
+                        benchmark_inputs_key,
                         triton_kernels,
                         precompile_fn,
                     )
@@ -4277,7 +4322,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
                     # Await autotuning in subproc pool
                     autotune_start_ts = time.time()
-                    results = AsyncAutotuner.get_results(final_choices, inputs_key)
+                    results = AsyncAutotuner.get_results(
+                        final_choices, benchmark_inputs_key
+                    )
                     if not any(math.isfinite(timing) for timing in results.values()):
                         raise self.create_no_valid_choices(
                             name, "All choices failed to benchmark for backend."
@@ -4306,7 +4353,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         input_nodes,
                         layout,
                         input_gen_fns,
-                        inputs_key,
+                        benchmark_inputs_key,
                         filtered_choices,
                         precompile_fn,
                         hint_override=hint_override,
@@ -4355,7 +4402,7 @@ class AlgorithmSelectorCache(PersistentCache):
             input_nodes,
             layout,
             input_gen_fns,
-            inputs_key,
+            benchmark_inputs_key,
             choices,
             precompile_fn,
             best_config_future=best_config_future,
@@ -4783,6 +4830,7 @@ class AlgorithmSelectorCache(PersistentCache):
         choices,
         name: str,
         inputs_key: str,
+        benchmark_inputs_key: str | None = None,
         precompilation_timeout_seconds: int | None = 60 * 60,
     ) -> Callable[[], dict[ChoiceCaller, float]]:
         """
@@ -4817,7 +4865,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timings = self.lookup(
             choices,
             name,
-            inputs_key,
+            benchmark_inputs_key or inputs_key,
             benchmark=None,
         )
 
@@ -4953,6 +5001,7 @@ class AlgorithmSelectorCache(PersistentCache):
                             swizzle_type_a=c.bmreq.swizzle_type_a,
                             swizzle_type_b=c.bmreq.swizzle_type_b,
                             has_bias_epilogue=c.bmreq.has_bias_epilogue,
+                            has_output_scale=c.bmreq.has_output_scale,
                             swap_ab=c.bmreq.swap_ab,
                             metadata=c.bmreq.kernel.metadata,
                         )
@@ -5468,7 +5517,7 @@ class AlgorithmSelectorCache(PersistentCache):
             except CUDACompileError:
                 if not isinstance(choice, CUTLASSTemplateCaller):
                     log.exception(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
+                        "CUDA compilation error during autotuning. Ignoring this choice."
                     )
                 timing = float("inf")
             except NotImplementedError:
@@ -6257,7 +6306,7 @@ def autotune_select_algorithm(*args, **kwargs):
 
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
-            torch._inductor.config.benchmark_epilogue_fusion
+            torch._inductor.config.benchmark_template_fusion
             or torch._inductor.config.pipeline_max_autotune_gemm
         )
 

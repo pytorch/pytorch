@@ -15,6 +15,20 @@
 @end
 
 namespace at::mps {
+namespace {
+// Returns true if the command buffer failed to execute (e.g. was aborted by the driver)
+bool commandBufferFailed(id<MTLCommandBuffer> cb, bool& is_oom, int32_t& code, std::string& message) {
+  if (cb.status != MTLCommandBufferStatusError) {
+    return false;
+  }
+  NSError* error = cb.error;
+  is_oom = [error.domain isEqualToString:MTLCommandBufferErrorDomain] && error.code == MTLCommandBufferErrorOutOfMemory;
+  code = error ? static_cast<int32_t>(error.code) : 0;
+  message = error ? std::string(error.localizedDescription.UTF8String) : std::string("unknown error");
+  return true;
+}
+} // namespace
+
 //-----------------------------------------------------------------
 //  MPSStream
 //-----------------------------------------------------------------
@@ -102,6 +116,7 @@ void MPSStream::synchronize(SyncType syncType) {
 
 void MPSStream::commit() {
   if (_enableCommitAndContinue) {
+    addErrorHandler();
     [commandBuffer() commitAndContinue];
   } else {
     flush();
@@ -113,6 +128,10 @@ void MPSStream::commitAndWait() {
     // the previous command buffer (if exists) has already been committed,
     // so we just wait until it's completed and then dispose it.
     [_prevCommandBuffer waitUntilCompleted];
+    CommandBufferError error;
+    if (commandBufferFailed(_prevCommandBuffer, error.is_oom, error.code, error.message)) {
+      recordCommandBufferError(std::move(error));
+    }
     [_prevCommandBuffer release];
     _prevCommandBuffer = nil;
     checkLastError();
@@ -121,6 +140,11 @@ void MPSStream::commitAndWait() {
   if (_commandBuffer) {
     [_commandBuffer commit];
     [_commandBuffer waitUntilCompleted];
+    // check the status directly, as the completed handlers may not have run yet
+    CommandBufferError error;
+    if (commandBufferFailed(_commandBuffer, error.is_oom, error.code, error.message)) {
+      recordCommandBufferError(std::move(error));
+    }
     [_commandBuffer release];
     _commandBuffer = nil;
     checkLastError();
@@ -129,6 +153,7 @@ void MPSStream::commitAndWait() {
 
 void MPSStream::commitAndContinue() {
   assert(_commandBuffer);
+  addErrorHandler();
   [_commandBuffer commitAndContinue];
 }
 
@@ -142,6 +167,7 @@ void MPSStream::endKernelCoalescing() {
 
 void MPSStream::flush() {
   if (_commandBuffer) {
+    addErrorHandler();
     [_commandBuffer commit];
     // if commitAndContinue is disabled (e.g., for Profiler), we keep the command
     // buffer so we could wait on it later, if required.
@@ -151,6 +177,28 @@ void MPSStream::flush() {
       [_commandBuffer release];
     }
     _commandBuffer = nil;
+  }
+}
+
+void MPSStream::addErrorHandler() {
+  // Metal reports execution errors (e.g. when the resources referenced by a command buffer
+  // exceed the working set limit) only once the command buffer completes, and it skips
+  // the whole command buffer, leaving its outputs unwritten. Record the first such error
+  // so that checkLastError() raises it at the next synchronization point, rather than
+  // silently returning garbage, similar to how CUDA reports asynchronous errors.
+  [commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
+    CommandBufferError error;
+    if (commandBufferFailed(cb, error.is_oom, error.code, error.message)) {
+      recordCommandBufferError(std::move(error));
+    }
+  }];
+}
+
+void MPSStream::recordCommandBufferError(CommandBufferError error) {
+  std::lock_guard<std::mutex> lock(_commandBufferErrorMutex);
+  // keep the first error, as the subsequent ones are likely caused by it
+  if (!_commandBufferError) {
+    _commandBufferError = std::move(error);
   }
 }
 
@@ -257,6 +305,17 @@ id<MTLBuffer> MPSStream::getErrorBuffer() {
 }
 
 void MPSStream::checkLastError() {
+  std::optional<CommandBufferError> cb_error;
+  {
+    std::lock_guard<std::mutex> lock(_commandBufferErrorMutex);
+    std::swap(cb_error, _commandBufferError);
+  }
+  if (cb_error) {
+    const auto msg = "MPS command buffer execution failed: " + cb_error->message +
+        ". This error may have been asynchronously reported, so the stack trace below might be incorrect.";
+    TORCH_CHECK_WITH(OutOfMemoryError, !cb_error->is_oom, msg);
+    throw c10::AcceleratorError({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, cb_error->code, msg);
+  }
   auto msgs = reinterpret_cast<c10::metal::ErrorMessages*>([_errorBuffer contents]);
   if (!msgs) {
     return;
@@ -325,6 +384,15 @@ void initStreamPool() {
 MPSStream* getStreamFromPool() {
   c10::call_once(stream_pool_flag, initStreamPool);
   return stream_pool[stream_pool_counter++ % kMPSStreamsPerPool];
+}
+
+MPSStream* getStreamByID(int64_t stream_id) {
+  if (stream_id == 0) {
+    return at::mps::getDefaultMPSStream();
+  }
+  TORCH_CHECK(stream_id >= 1 && stream_id <= kMPSStreamsPerPool, "stream_id=", stream_id, " not found");
+  c10::call_once(stream_pool_flag, initStreamPool);
+  return stream_pool[stream_id - 1];
 }
 
 void synchronizeAllMPSStreams(SyncType syncType) {
