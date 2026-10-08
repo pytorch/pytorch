@@ -439,6 +439,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def sign(x: CSEVariable) -> str:
+        # metal::sign has no integer overloads
+        if x.dtype is not None and not x.dtype.is_floating_point:
+            return f"static_cast<decltype({x})>(({x} > 0) - ({x} < 0))"
         return f"metal::sign({x})"
 
     @staticmethod
