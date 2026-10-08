@@ -26,7 +26,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    requires_cuda,
+    requires_accelerator,
     run_tests,
     TestCase,
 )
@@ -175,7 +175,7 @@ register_pytree_node(
 )
 
 
-@requires_cuda
+@requires_accelerator
 class DTensorExportTest(TestCase):
     def tearDown(self):
         super().tearDown()
@@ -188,7 +188,7 @@ class DTensorExportTest(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
+        self.device_type = torch.accelerator.current_accelerator().type
 
     def _run_test(self, export_fn, test_annotation=False):
         dp_degree = 2
