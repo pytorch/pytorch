@@ -1130,10 +1130,10 @@ void launch_vectorized_layer_norm_kernel(
     T* Y_data2 = Y_data;
 
     while (remaining > 0) {
-      X_data2 += N * blocks.x;
+      X_data2 += static_cast<int64_t>(N) * blocks.x;
       mean_data2 += blocks.x;
       rstd_data2 += blocks.x;
-      Y_data2 += N * blocks.x;
+      Y_data2 += static_cast<int64_t>(N) * blocks.x;
 
       blocks.x = (remaining > blocks.x) ? blocks.x : remaining;
 

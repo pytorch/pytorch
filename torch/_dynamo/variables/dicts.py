@@ -94,6 +94,10 @@ def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     return issubclass(obj.python_type(), dict)
 
 
+def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
+    return obj.python_type() is dict
+
+
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
     """PyAnySet_Check(other) || PyDictViewSet_Check(other)"""
     try:

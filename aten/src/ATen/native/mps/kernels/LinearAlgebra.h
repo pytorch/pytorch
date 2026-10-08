@@ -33,6 +33,8 @@ struct TriangularSolveParams {
   bool transpose; // op transposes A
   bool conj; // op conjugates A (adjoint when combined with transpose)
   bool unit; // unit (implicit 1) diagonal
+  bool b_col_major; // B is column-major (element (r, c) at r + c * n)
+  bool x_col_major; // X is column-major
 };
 
 C10_METAL_CONSTEXPR uint32_t kTriangularSolveTileSize = 8;

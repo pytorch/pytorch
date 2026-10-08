@@ -692,7 +692,7 @@ PyObject* dynamo__custom_eval_frame(
   return eval_result;
 }
 
-PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
+PyObject* dynamo_set_code_exec_strategy(PyObject* /*dummy*/, PyObject* args) {
   PyObject* code_obj = nullptr;
   PyObject* strategy_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &code_obj, &strategy_obj)) {

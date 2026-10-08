@@ -8,7 +8,7 @@ import operator
 import types
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any, final, NamedTuple, TYPE_CHECKING
 
@@ -333,6 +333,19 @@ def default_decompositions() -> "CustomDecompTable":
     return CustomDecompTable()
 
 
+def _raise_joint_parameter_mutation_error(
+    mutated_parameters: Iterable[str | None],
+) -> None:
+    names = [repr(name) for name in mutated_parameters]
+    parameter_word = "parameter" if len(names) == 1 else "parameters"
+    raise RuntimeError(
+        "Mutating module parameters while exporting a joint forward/backward "
+        "graph is not supported. Only buffers can be mutated as module state. "
+        "If this state does not need gradients, register it as a buffer "
+        f"instead. Found mutation on {parameter_word}: {', '.join(names)}."
+    )
+
+
 def _decompose_and_get_gm_with_new_signature_constants(
     ep: "ExportedProgram",
     *,
@@ -357,6 +370,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
         return (
             joint_loss_index is not None
             or ep.graph_signature.backward_signature is not None
+        )
+
+    if joint_loss_index is not None and ep.graph_signature.parameters_to_mutate:
+        _raise_joint_parameter_mutation_error(
+            ep.graph_signature.parameters_to_mutate.values()
         )
 
     if not _is_joint_ir_decomp(ep, joint_loss_index):
@@ -724,6 +742,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # (3) graph_signature.user_inputs_to_mutate tells us buffer & input mutations
     # map (3) -> (2) for input order, -> (1) for input type
     user_inputs_index = {name: i for i, name in enumerate(graph_signature.user_inputs)}
+    backward_mutated_parameters = []
+    for name in graph_signature.inputs_mutated_in_backward:
+        input_spec = ep.graph_signature.input_specs[user_inputs_index[name]]
+        if input_spec.kind == InputKind.PARAMETER:
+            backward_mutated_parameters.append(input_spec.target)
+    if backward_mutated_parameters:
+        _raise_joint_parameter_mutation_error(backward_mutated_parameters)
     mutation_names = list(graph_signature.user_inputs_to_mutate.keys())
     expected_names = [node.name for node in new_outputs[: len(mutation_names)]]
     if mutation_names != expected_names:
@@ -733,6 +758,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
     for output_name, input_name in graph_signature.user_inputs_to_mutate.items():
         i = user_inputs_index[input_name]
         input_spec = ep.graph_signature.input_specs[i]
+        if input_spec.kind == InputKind.PARAMETER:
+            _raise_joint_parameter_mutation_error([input_spec.target])
         if input_spec.kind not in (InputKind.USER_INPUT, InputKind.BUFFER):
             raise AssertionError(
                 f"expected input_spec.kind to be USER_INPUT or BUFFER, got {input_spec.kind}"
@@ -862,6 +889,10 @@ def _common_getitem_elimination_pass(
             if not isinstance(module, torch.fx.GraphModule):
                 continue
 
+            # Signatures name root-graph nodes, and names repeat across
+            # subgraphs, so only root dedups may rewrite them.
+            is_root_graph = module is gm
+
             node_id: dict[torch.fx.Node, str] = {}
             getitems: dict[str, torch.fx.Node] = {}
             for node in list(module.graph.nodes):
@@ -870,11 +901,12 @@ def _common_getitem_elimination_pass(
                     new_id = f"{node_id[source]}.{idx}"
                     if new_id in getitems:
                         node.replace_all_uses_with(getitems[new_id])
-                        for entry in module_call_graph:
-                            if entry.signature is not None:
-                                entry.signature.replace_all_uses_with(
-                                    node, getitems[new_id]
-                                )
+                        if is_root_graph:
+                            for entry in module_call_graph:
+                                if entry.signature is not None:
+                                    entry.signature.replace_all_uses_with(
+                                        node, getitems[new_id]
+                                    )
                         module.graph.erase_node(node)
                     else:
                         getitems[new_id] = node

@@ -40,6 +40,15 @@ typedef struct ncclWindow_vidmem* ncclWindow_t;
 #define NCCL_WIN_COLL_SYMMETRIC 0x01
 #endif
 
+// ncclCommRevoke, which reconfigure depends on, landed in NCCL 2.28. RCCL
+// exports it from 2.30.4, but before 2.30.7 a nonblocking init with a missing
+// rank blocks instead of returning ncclInProgress, so reconfigure cannot honor
+// its timeout there.
+#if (defined(USE_ROCM) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 7)) || \
+    (!defined(USE_ROCM) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0))
+#define NCCL_HAS_COMM_REVOKE
+#endif
+
 namespace c10d::nccl2 {
 /**
  * Abstract interface for NCCL API operations.

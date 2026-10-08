@@ -26,8 +26,8 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, onlyCPU, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
-    dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
+    OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    dtypesIfCPU, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
     precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
@@ -521,7 +521,6 @@ class TestReductions(TestCase):
 
     @skipIfNoSciPy
     @dtypes(torch.float32, torch.double, torch.complex64, torch.complex128)
-    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_logsumexp(self, device, dtype):
         from scipy.special import logsumexp
         a = torch.randn(5, 4, device=device, dtype=dtype)
@@ -554,7 +553,6 @@ class TestReductions(TestCase):
 
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
-    @dtypesIfMPS(torch.complex64)
     def test_logcumsumexp_complex(self, device, dtype):
         # logcumsumexp is a more precise way to compute than ``log(cumsum(exp(a)))``
         # and faster than ``[log(sum(exp(a[:i]))) for i in range(a.shape[0])]``
@@ -904,7 +902,6 @@ class TestReductions(TestCase):
         self.assertEqual(a_float.mean(), a.mean(dtype=torch.float32))
 
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
-    @dtypesIfMPS(torch.half, torch.bfloat16, torch.float)
     def test_mean_out_is_alias_of_return(self, dtype, device):
         a = torch.tensor([[[1.0, 1.0, 1.0, 1.0]], [[2.0, 2.0, 2.0, 2.0]], [[3.0, 3.0, 3.0, 3.0]]],
                          dtype=dtype, device=device)
@@ -1195,7 +1192,6 @@ class TestReductions(TestCase):
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.float, torch.bfloat16)
-    @dtypesIfMPS(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
@@ -1209,7 +1205,6 @@ class TestReductions(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*complex_types())
-    @dtypesIfMPS(torch.complex64)
     def test_invalid_0dim_aminmax(self, device, dtype):
         with self.assertRaisesRegex(TypeError, 'not implemented'):
             torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
@@ -1690,6 +1685,19 @@ class TestReductions(TestCase):
             test_dtype_bfloat16(True, False)
             test_dtype_bfloat16(False, True)
             test_dtype_bfloat16(True, True)
+
+    @onlyCUDA
+    @largeTensorTest("10GB", "cuda")
+    @serialTest()
+    def test_bucketization_int32_overflow(self, device):
+        # More than INT_MAX elements; the launch configuration must not
+        # narrow numel to int (it did on ROCm via hipify's ::min rewrite).
+        x = torch.zeros(2**31 + 1, dtype=torch.uint8, device=device)
+        x[-1] = 2
+        boundaries = torch.tensor([0, 1], dtype=torch.uint8, device=device)
+        out = torch.bucketize(x, boundaries, out_int32=True)
+        self.assertEqual(out[0].item(), 0)
+        self.assertEqual(out[-1].item(), 2)
 
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     @skipIfMPS
@@ -2711,6 +2719,21 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
+    # CUDA median with dim returns the first occurrence of the median value
+    @onlyCUDA
+    @dtypes(torch.int8, torch.int32, torch.half, torch.float)
+    def test_median_dim_index_is_first_occurrence(self, device, dtype):
+        for size in [(7, 1100), (5, 19999)]:
+            t = torch.randint(0, 4, size, device=device).to(dtype)
+            if dtype.is_floating_point:
+                t[0, 5::3] = float('nan')
+                t[1] = float('nan')
+            # dim=0 reduces strided slices
+            for op, dim in product([torch.median, torch.nanmedian], [0, 1]):
+                values, indices = op(t, dim)
+                is_median = (t == values.unsqueeze(dim)) | (t.isnan() & values.isnan().unsqueeze(dim))
+                self.assertEqual(indices, is_median.int().argmax(dim))
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/pull/138657 discovers a latent bug")
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
@@ -2840,7 +2863,6 @@ class TestReductions(TestCase):
             torch.quantile(torch.empty(over_cap, dtype=torch.float32, device=device), 0.5)
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfMPS(torch.float)  # no float64 on MPS; exercises the sort fallback
     def test_quantile_partial_selection(self, device, dtype):
         # Stresses the CPU shared-pass selection (and the sort fallback on CUDA):
         # many quantiles (deep recursion), adversarial value layouts, and batched
@@ -3392,7 +3414,6 @@ class TestReductions(TestCase):
         test_against_np(linear, bins=20, min=0, max=0.99)
 
     @dtypes(torch.float32, torch.float64)
-    @dtypesIfMPS(torch.float32)  # MPS cannot allocate float64 tensors
     @expectedFailureXPU  # XPU _histc_out_xpu (out-of-tree) does not enforce dtype check yet
     def test_histc_out_dtype(self, device, dtype):
         x = torch.randn(8, dtype=dtype, device=device)

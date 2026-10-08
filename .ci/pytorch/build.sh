@@ -193,9 +193,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
-      # Set ROCM_ARCH to gfx906 for CI builds, if user doesn't override.
-      echo "Limiting PYTORCH_ROCM_ARCH to gfx906 for CI builds"
-      export PYTORCH_ROCM_ARCH="gfx906"
+    echo "PYTORCH_ROCM_ARCH must be set for ROCm CI builds" >&2
+    exit 1
   fi
 
   # hipify sources
@@ -342,6 +341,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     # ONE owner of the decision: stage 2 prints the verdict, we install only on RUN.
     if [[ "$(python tools/native_aot/build_stage2.py --print-verdict)" == "RUN" ]]; then
       install_cutlass_dsl
+      retry bash scripts/install_triton_wheel.sh
     fi
     # One wheel expected; a stale second would be glued into one argument. nullglob
     # so an empty dist/ counts as zero.

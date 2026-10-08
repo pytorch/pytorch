@@ -292,6 +292,38 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b.count(b"i"), 4)
         self.assertEqual(b.count(b"i", 6), 2)
 
+    @make_dynamo_test
+    def test_hex(self):
+        b = self.type2test(b"\x01\x02\xff")
+        self.assertEqual(b.hex(), "0102ff")
+        self.assertEqual(b.hex(":", 2), "01:02ff")
+        self.assertEqual(b.hex("-", -2), "0102-ff")
+        with self.assertRaises(OverflowError):
+            b.hex("-", 1 << 100)
+
+    @make_dynamo_test
+    def test_decode(self):
+        b = self.type2test(b"foo\xc3\xa9")
+        self.assertEqual(b.decode(), "foo\xe9")
+        self.assertEqual(b.decode("utf-8", "strict"), "foo\xe9")
+
+        invalid = self.type2test(b"\xffabc")
+        self.assertEqual(invalid.decode(errors="replace"), "\ufffdabc")
+
+    def test_input_bytearray_hex_decode(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.hex(), ba.decode("latin-1")
+
+        self.assertEqual(
+            fn(bytearray(b"abc")),
+            ("616263", "abc"),
+        )
+        self.assertEqual(
+            fn(bytearray(b"\xff\x00")),
+            ("ff00", "\xff\x00"),
+        )
+
     def test_inplace_concat_arg_mutation(self):
         # Regression: missing sq_inplace_concat fell back to constant-folding
         # operator.iadd on the live bytearray, then skip-to-eager ran += again.

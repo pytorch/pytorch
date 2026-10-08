@@ -622,6 +622,51 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertEqual(tls.mesh.ndim, 1)
         self.assertEqual(tls.mesh.size(), shard_size)
 
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_single_rank_byte_payload(self):
+        # A size-1 shard mesh skips the all-gather, so FSDP copies the payload
+        # directly, including a byte view into its typed cached output
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+        byte_payload = False
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            if byte_payload:
+                return (local_tensor.view(torch.uint8),), outer_size
+            return (local_tensor,), outer_size
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            (weight,) = (t.view(metadata) for t in all_gather_outputs)
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(weight)
+                return
+            return weight, (weight,)
+
+        model = nn.Linear(16, 8, bias=False, device=device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=mesh)
+        local_weight = model.weight._local_tensor
+        local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
+        local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
+        inp = torch.randn((2, 16), device=device_type)
+        for iteration in range(2):
+            byte_payload = iteration == 1
+            output = model(inp)
+            ref_output = ref_model(inp)
+            self.assertEqual(output, ref_output)
+            output.sum().backward()
+            ref_output.sum().backward()
+            check_sharded_parity(self, ref_model, model)
+
 
 if __name__ == "__main__":
     run_tests()

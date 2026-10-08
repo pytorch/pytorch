@@ -812,6 +812,70 @@ class TestTritonHeuristics(TestCase):
                         self.assertNotEqual(configs, fallback, msg=arch)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @parametrize(
+        "arch,f16_count,int8_count,int8_kpack",
+        [
+            ("gfx908", 0, 1, 2),
+            ("gfx90a", 0, 1, 2),
+            ("gfx942", 0, 0, 1),
+            ("gfx950", 1, 1, 1),
+        ],
+    )
+    def test_rocm_prune_block_k_underfills_mfma(
+        self, arch, f16_count, int8_count, int8_kpack
+    ):
+        if not torch.version.hip:
+            self.skipTest("ROCm-specific MFMA config pruning")
+        from torch._inductor.heuristics.template.triton import (
+            BaseHeuristicSingleton,
+            GemmConfig,
+            ROCmConfigHeuristic,
+            ROCmGemmConfig,
+        )
+        from torch._inductor.utils import kpack_supported
+
+        with (
+            patch("torch._inductor.utils.rocm_gfx_arch", return_value=arch),
+            patch.object(BaseHeuristicSingleton, "_instances", {}),
+        ):
+            heuristic = ROCmConfigHeuristic()
+            heuristic.should_scale_configs = False
+            self.assertEqual(kpack_supported(), arch != "gfx950")
+
+            def configs_for(mm_configs, dsize):
+                heuristic.mm_configs = mm_configs
+                return list(
+                    heuristic.get_mm_configs()(
+                        1, 256, 128, dtype_size=dsize, op_name="mm"
+                    )
+                )
+
+            underfilled = ROCmGemmConfig(
+                16, 64, 16, 2, 4, group_m=8, matrix_instr_nonkdim=16, kpack=2
+            )
+            valid = ROCmGemmConfig(
+                16, 64, 32, 2, 4, group_m=8, matrix_instr_nonkdim=16, kpack=2
+            )
+            # f16 has kdim=16 on CDNA1/2/3; gfx950 skips underfill pruning.
+            self.assertEqual(len(configs_for([underfilled], 2)), f16_count)
+            self.assertEqual(len(configs_for([valid], 2)), 1)
+
+            # int8 has kdim=16 on CDNA1/2, but kdim=32 on CDNA3.
+            self.assertEqual(len(configs_for([valid], 1)), int8_count)
+
+            # Unknown dtype kdim skips pruning on every target.
+            self.assertEqual(len(configs_for([underfilled], 8)), 1)
+
+            # Implicit kpack is clamped on CDNA3, preserving both int8 configs.
+            int8_configs = [
+                GemmConfig(64, 64, 32, 2, 4),
+                GemmConfig(128, 128, 32, 2, 8),
+            ]
+            configs = configs_for(int8_configs, 1)
+            self.assertEqual(len(configs), len(int8_configs))
+            self.assertEqual([c.kwargs["kpack"] for c in configs], [int8_kpack] * 2)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_compile_time_autotune_not_repeated_at_runtime(self):
         def fn(x):
             return (x + 1).sum(dim=1)

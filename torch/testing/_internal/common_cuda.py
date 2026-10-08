@@ -717,12 +717,16 @@ def _xfail_cuda_on_windows_wrapper(test_fn):
 
 
 def xfailCUDAIfSM89OrLaterOnWindows(test_fn):
-    """Mark a CUDA test as expected failure on Windows with SM >= 8.9.
+    """Mark a CUDA test as expected failure on Windows with NVIDIA SM >= 8.9.
 
     Works for both device-parameterized tests and plain TestCase CUDA tests.
     CPU/XPU variants of device-parameterized tests are unaffected.
     """
-    return _xfail_cuda_on_windows_wrapper(test_fn) if IS_WINDOWS and SM89OrLater else test_fn
+    return (
+        _xfail_cuda_on_windows_wrapper(test_fn)
+        if IS_WINDOWS and not TEST_WITH_ROCM and SM89OrLater
+        else test_fn
+    )
 
 
 # When using nvcc from the CUDA toolkit its version must be at least the one from ptxas bundled with Triton

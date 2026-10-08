@@ -6,6 +6,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 
+#include <optional>
+
 namespace c10d {
 
 // PyBackend is a pybind11 trampoline class to allow a Python
@@ -293,16 +295,8 @@ class PyBackend : public Backend {
 
   c10::intrusive_ptr<Options> getBackendOptions() override {
     pybind11::gil_scoped_acquire gil;
-    auto self = pybind11::cast(this);
-    auto cls = pybind11::type::of(self);
-    if (pybind11::hasattr(cls, "options")) {
-      auto attr = cls.attr("options");
-      if (PyObject_IsInstance(
-              attr.ptr(), reinterpret_cast<PyObject*>(&PyProperty_Type)) ||
-          !pybind11::isinstance<pybind11::cpp_function>(attr)) {
-        return pybind11::getattr(self, "options")
-            .cast<c10::intrusive_ptr<Options>>();
-      }
+    if (auto o = getPropertyOverride("options")) {
+      return o->cast<c10::intrusive_ptr<Options>>();
     }
     return Backend::getBackendOptions();
   }
@@ -358,10 +352,7 @@ class PyBackend : public Backend {
   }
 
   // -- Bool properties --
-  // These are bound as def_property_readonly, so Python subclasses override
-  // them with @property. get_override won't find @property descriptors, so
-  // we use py::getattr to access them through normal Python attribute
-  // resolution, which handles both @property and regular methods.
+  // These are bound as def_property_readonly; see getPropertyOverride.
 
   bool supportsSplitting() const override {
     return getPropertyOverride(
@@ -515,15 +506,26 @@ class PyBackend : public Backend {
     return backend;
   }
 
+  // Returns the value of the Python subclass's override of the readonly
+  // property `name`, or std::nullopt if it doesn't override it. get_override
+  // can't see properties (or plain class attributes), so compare the attribute
+  // found on the subclass against the base Backend's. An override that calls
+  // super().<name> gets Backend's implementation without coming back here, see
+  // BACKEND_VIRTUAL_PROPERTY in init.cpp. Requires the GIL.
+  std::optional<pybind11::object> getPropertyOverride(const char* name) const {
+    auto self = pybind11::cast(static_cast<const Backend*>(this));
+    auto cls = pybind11::type::of(self);
+    auto base = pybind11::type::of<Backend>();
+    if (cls.attr(name).is(base.attr(name))) {
+      return std::nullopt;
+    }
+    return self.attr(name);
+  }
+
   bool getPropertyOverride(const char* name, bool defaultValue) const {
     pybind11::gil_scoped_acquire gil;
-    auto self = pybind11::cast(this);
-    auto cls = pybind11::type::of(self);
-    if (pybind11::hasattr(cls, name)) {
-      auto attr = cls.attr(name);
-      if (!pybind11::isinstance<pybind11::cpp_function>(attr)) {
-        return pybind11::getattr(self, name).cast<bool>();
-      }
+    if (auto o = getPropertyOverride(name)) {
+      return o->cast<bool>();
     }
     return defaultValue;
   }

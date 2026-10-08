@@ -78,6 +78,7 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
     disable_gc,
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -1496,6 +1497,15 @@ class BottomlessReduce:
         return (BottomlessReduce, (BottomlessReduce(),))
 
 
+# On fbcode's Python 3.14 an unbounded recursion through the C pickler can run
+# past the interpreter's stack-address recursion guard and segfault the whole
+# test process instead of raising RecursionError.
+skipIfCPicklerOverflowCrashes = unittest.skipIf(
+    IS_FBCODE and sys.version_info >= (3, 14),
+    "C pickler stack overflow segfaults instead of raising RecursionError",
+)
+
+
 class WritesBackOnReduce:
     # Reducing it writes onto the function it is stashed on, while that
     # function's __dict__ is being walked.
@@ -1868,6 +1878,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertIn("Linear", msg)
         self.assertIn("external_data", msg)
 
+    @skipIfCPicklerOverflowCrashes
     def test_save_guidance_when_a_default_overflows_the_pickler(self):
         # A value in an unpruned slot that recurses without bound in the C
         # pickler raises RecursionError; it gets the same guidance and the
@@ -11566,6 +11577,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.b.c(), "c!")
         self.assertFalse(hasattr(out.b.c, "a"))
 
+    @skipIfCPicklerOverflowCrashes
     def test_pickler_prunes_an_entry_that_overflows_the_probe(self):
         # A recursion overflow inside the probe counts as unpicklable: the entry
         # is dropped with a warning and the save succeeds. The guard pickler

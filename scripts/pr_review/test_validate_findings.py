@@ -481,5 +481,40 @@ class TestTheAdvisoryChannelIsBounded(ValidatorHarness):
         self.assertNotIn("not a usable repo path", err)
 
 
+class TestRunsThePublishSideCheck(unittest.TestCase):
+    """A finding the publish job would drop is reported here, not passed."""
+
+    def test_a_finding_failing_the_publish_check_is_reported(self):
+        import contextlib
+        import io
+        from unittest import mock
+
+        import validate_findings
+
+        with tempfile.TemporaryDirectory() as td:
+            findings = Path(td) / "findings.json"
+            findings.write_text(json.dumps(_verdict([_finding(5)])))
+            diff_file = Path(td) / "diff.txt"
+            diff_file.write_text(DIFF)
+            argv = [
+                "validate_findings.py",
+                "--findings-file",
+                str(findings),
+                "--diff-file",
+                str(diff_file),
+            ]
+            err = io.StringIO()
+            with (
+                mock.patch("sys.argv", argv),
+                mock.patch(
+                    "extract_verdict.is_publishable_finding", return_value=False
+                ),
+                contextlib.redirect_stderr(err),
+            ):
+                code = validate_findings.main()
+        self.assertEqual(code, 1, err.getvalue())
+        self.assertIn("failed_publish_check", err.getvalue())
+
+
 if __name__ == "__main__":
     run_this_suite()

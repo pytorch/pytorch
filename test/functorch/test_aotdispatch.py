@@ -6432,14 +6432,15 @@ class <lambda>(torch.nn.Module):
         def f(x, y):
             return (torch.matmul(x, y),)
 
-        self.assertTrue(_is_op_registered_to_fake_rule(torch.ops.aten.item.default))
+        ops = [torch.ops.aten.item.default, torch.ops.aten.nonzero_numpy.default]
+        self.assertTrue(all(_is_op_registered_to_fake_rule(op) for op in ops))
         aot_export_joint_simple(
             f,
             [torch.randn(2, 3), torch.randn(3, 4)],
             trace_joint=False,
             decompositions={},
         )
-        self.assertTrue(_is_op_registered_to_fake_rule(torch.ops.aten.item.default))
+        self.assertTrue(all(_is_op_registered_to_fake_rule(op) for op in ops))
 
     def test_aot_export_module_keeps_raw_decomposition_semantics(self):
         class M(torch.nn.Module):

@@ -608,6 +608,7 @@ function(torch_optimize_layout_if_enabled tgt)
     set(_prebolt "$<TARGET_FILE_DIR:${tgt}>/prebolt/$<TARGET_FILE_NAME:${tgt}>")
     add_custom_command(
       TARGET ${tgt} POST_BUILD
+      BYPRODUCTS "${_logfile}"
       COMMAND "${CMAKE_COMMAND}" -E make_directory "$<PATH:GET_PARENT_PATH,${_logfile}>"
       COMMAND "${CMAKE_COMMAND}" -E make_directory "$<PATH:GET_PARENT_PATH,${_prebolt}>"
       COMMAND "${CMAKE_COMMAND}" -E rename "$<TARGET_FILE:${tgt}>" "${_prebolt}"
@@ -621,5 +622,6 @@ function(torch_optimize_layout_if_enabled tgt)
       COMMENT "Optimizing $<TARGET_FILE_NAME:${tgt}> with LLVM BOLT (original kept in prebolt/)"
       VERBATIM
     )
+    add_dependencies(bolt_profile_quality_summary ${tgt})
   endif()
 endfunction()

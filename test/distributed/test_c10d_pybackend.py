@@ -7,13 +7,22 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import (
+    _create_work_from_future,
     Backend as C10DBackend,
     ErrorType,
+    FakeStore,
     ReconfigureOptions,
 )
-from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.distributed.distributed_c10d import _get_default_group, is_gloo_available
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    requires_gloo,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+if is_gloo_available():
+    from torch._C._distributed_c10d import _ProcessGroupWrapper
 
 
 class RecordingWork(dist._Work):
@@ -503,6 +512,240 @@ class TestPyBackend(TestCase):
         group.shutdown()
         self.assertTrue(backend.aborted)
         self.assertTrue(backend.shut_down)
+
+
+CAPABILITY_PROPERTIES = (
+    "supports_splitting",
+    "supports_coalescing",
+    "_supports_time_estimate",
+    "supports_shrinking",
+    "supports_reconfigure",
+    "supports_window",
+)
+
+
+class BareBackend(C10DBackend):
+    """Overrides none of the capability properties or options."""
+
+    def getBackendName(self):
+        return "bare-python-backend"
+
+
+class PropertyOverrideBackend(C10DBackend):
+    def __init__(self, rank, world):
+        super().__init__(rank, world)
+        self._options = C10DBackend.Options(
+            "property-override", timeout=timedelta(seconds=5)
+        )
+
+    @property
+    def supports_splitting(self):
+        return True
+
+    @property
+    def supports_coalescing(self):
+        return True
+
+    @property
+    def _supports_time_estimate(self):
+        return True
+
+    @property
+    def supports_shrinking(self):
+        return True
+
+    @property
+    def supports_reconfigure(self):
+        return True
+
+    @property
+    def supports_window(self):
+        return True
+
+    @property
+    def options(self):
+        return self._options
+
+
+class ClassAttributeOverrideBackend(C10DBackend):
+    supports_splitting = True
+    supports_coalescing = True
+    _supports_time_estimate = True
+    supports_shrinking = True
+    supports_reconfigure = True
+    supports_window = True
+    options = C10DBackend.Options("class-attribute", timeout=timedelta(seconds=5))
+
+
+class SuperDelegatingBackend(BareBackend):
+    """Overrides that delegate back to the C++ base implementation."""
+
+    def __init__(self, rank, world):
+        super().__init__(rank, world)
+        self.evaluations = 0
+
+    @property
+    def supports_splitting(self):
+        self.evaluations += 1
+        return not super().supports_splitting
+
+    @property
+    def options(self):
+        return super().options
+
+
+def cpp_property_values(backend):
+    """Reads the capability properties through C++ callers of the virtuals
+    rather than through Python attribute access on the backend."""
+    group = create_process_group(backend)
+    # ProcessGroupWrapper forwards these virtuals to the wrapped backend; its
+    # constructor doesn't use the gloo helper, so pass the backend itself.
+    wrapper = _ProcessGroupWrapper(backend, backend)
+    return {
+        "supports_splitting": wrapper.supports_splitting,
+        "supports_coalescing": wrapper.supports_coalescing,
+        "_supports_time_estimate": wrapper._supports_time_estimate,
+        "supports_shrinking": wrapper.supports_shrinking,
+        "supports_reconfigure": group.supports_reconfigure,
+        "supports_window": group.supports_window,
+    }, wrapper
+
+
+class TestPyBackendPropertyOverrides(TestCase):
+    def test_no_overrides_use_base_defaults(self) -> None:
+        backend = BareBackend(0, 1)
+        for attr in CAPABILITY_PROPERTIES:
+            with self.subTest(attr=attr):
+                self.assertFalse(getattr(backend, attr))
+        with self.assertRaisesRegex(
+            RuntimeError, "does not implement getBackendOptions"
+        ):
+            backend.options
+
+    @requires_gloo()
+    def test_no_overrides_use_base_defaults_from_cpp(self) -> None:
+        backend = BareBackend(0, 1)
+        values, wrapper = cpp_property_values(backend)
+        self.assertEqual(values, dict.fromkeys(CAPABILITY_PROPERTIES, False))
+        with self.assertRaisesRegex(
+            RuntimeError, "does not implement getBackendOptions"
+        ):
+            wrapper.options
+
+    def test_no_overrides_split_group_reads_options(self) -> None:
+        # ProcessGroup::splitGroup reads the parent's options from C++ when no
+        # opts are passed.
+        group = create_process_group(BareBackend(0, 1))
+        with self.assertRaisesRegex(
+            RuntimeError, "does not implement getBackendOptions"
+        ):
+            group.split_group([0])
+
+    @requires_gloo()
+    def test_overrides_honored_from_cpp(self) -> None:
+        for cls, name in (
+            (PropertyOverrideBackend, "property-override"),
+            (ClassAttributeOverrideBackend, "class-attribute"),
+        ):
+            with self.subTest(cls=cls.__name__):
+                backend = cls(0, 1)
+                for attr in CAPABILITY_PROPERTIES:
+                    self.assertTrue(getattr(backend, attr))
+                values, wrapper = cpp_property_values(backend)
+                self.assertEqual(values, dict.fromkeys(CAPABILITY_PROPERTIES, True))
+                self.assertEqual(wrapper.options.backend, name)
+
+    @requires_gloo()
+    def test_override_delegating_to_super(self) -> None:
+        # super() means Backend's implementation, evaluated once, whether the
+        # property is read from Python or from C++.
+        backend = SuperDelegatingBackend(0, 1)
+        self.assertTrue(backend.supports_splitting)
+        self.assertEqual(backend.evaluations, 1)
+        values, wrapper = cpp_property_values(backend)
+        self.assertTrue(values["supports_splitting"])
+        self.assertEqual(backend.evaluations, 2)
+        with self.assertRaisesRegex(
+            RuntimeError, "does not implement getBackendOptions"
+        ):
+            wrapper.options
+
+    @requires_gloo()
+    def test_python_subclass_of_cpp_backend(self) -> None:
+        # Inheriting from or calling super() on a C++ backend's property
+        # reaches the C++ subclass's override, not Backend's.
+        from torch._C._distributed_c10d import ProcessGroupGloo
+
+        class InheritingGloo(ProcessGroupGloo):
+            pass
+
+        class NegatingGloo(ProcessGroupGloo):
+            @property
+            def supports_splitting(self):
+                return not super().supports_splitting
+
+        gloo_value = ProcessGroupGloo(dist.HashStore(), 0, 1).supports_splitting
+        self.assertTrue(gloo_value)
+        self.assertEqual(
+            InheritingGloo(dist.HashStore(), 0, 1).supports_splitting, gloo_value
+        )
+        self.assertEqual(
+            NegatingGloo(dist.HashStore(), 0, 1).supports_splitting, not gloo_value
+        )
+
+
+class SplittableBackend(C10DBackend):
+    """Minimal backend that only declares supports_splitting."""
+
+    def getBackendName(self):
+        return "splittable-python-backend"
+
+    @property
+    def supports_splitting(self):
+        return True
+
+    def allreduce(self, tensor_list, opts):
+        for tensor in tensor_list:
+            tensor.add_(1)
+        future = torch.futures.Future()
+        future.set_result(tensor_list)
+        return _create_work_from_future(future)
+
+    def split(self, store, ranks, opts):
+        return SplittableBackend(ranks.index(self.rank()), len(ranks))
+
+
+class TestPyBackendSplitGroup(TestCase):
+    def test_split_group(self) -> None:
+        dist.Backend.register_backend(
+            "pybackend_split",
+            lambda opts, pg_options: SplittableBackend(
+                opts.group_rank, opts.group_size
+            ),
+            extended_api=True,
+            devices=["cpu"],
+        )
+        dist.init_process_group(
+            "pybackend_split", rank=0, world_size=2, store=FakeStore()
+        )
+        try:
+            # Without pg_options, ProcessGroup::splitGroup reads the parent's
+            # options from C++; the backend doesn't define them.
+            with self.assertRaisesRegex(
+                RuntimeError, "does not implement getBackendOptions"
+            ):
+                dist.split_group(split_ranks=[[0]])
+            split = dist.split_group(
+                split_ranks=[[0]], pg_options=C10DBackend.Options("pybackend_split")
+            )
+            backend = split._get_backend(torch.device("cpu"))
+            self.assertIsInstance(backend, SplittableBackend)
+            self.assertEqual(split.size(), 1)
+            t = torch.zeros(2)
+            dist.all_reduce(t, group=split)
+            self.assertEqual(t, torch.ones(2))
+        finally:
+            dist.destroy_process_group()
 
 
 class TestPyBackendProcessGroup(MultiProcessTestCase):

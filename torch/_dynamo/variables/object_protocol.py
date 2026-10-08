@@ -2317,10 +2317,14 @@ def _resolve_descriptor_get(
         tg_vt = variables.TupleGetterVariable(type_attr, source=source)
         return tg_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, staticmethod):
-        sm_vt = variables.StaticMethodVariable(type_attr, source=source)
+        sm_vt = variables.StaticMethodVariable.from_descriptor(
+            tx, type_attr, source=source
+        )
         return sm_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, classmethod):
-        cm_vt = variables.ClassMethodVariable(type_attr, source=source)
+        cm_vt = variables.ClassMethodVariable.from_descriptor(
+            tx, type_attr, name, source=source
+        )
         return cm_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.ClassMethodDescriptorType):
         cmd_vt = variables.ClassMethodDescriptorVariable(type_attr, source=source)
@@ -2475,7 +2479,16 @@ def generic_getattr(
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
-            return tx.output.side_effects.load_attr(obj, name)
+            value = tx.output.side_effects.load_attr(obj, name)
+            # A pending store of a descriptor onto a class lands in cls.__dict__,
+            # so reading it back has to run tp_descr_get the way type_getattro
+            # does -- otherwise `C.h = staticmethod(f); type(C.h)` reports
+            # staticmethod instead of function.
+            if isinstance(
+                value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
+            ):
+                return value.tp_descr_get_impl(tx, obj, obj)
+            return value
         if tx.output.side_effects.has_pending_mutation_of_attr(
             obj, name, AttrMutationKind.INSTANCE_DICT
         ):

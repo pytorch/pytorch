@@ -36,6 +36,7 @@ from torch._export.serde.serialize import (
     serialize,
     SerializeError,
 )
+from torch._export.utils import wrap_method
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._library.opaque_object import get_opaque_type_name, register_custom_class
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -721,6 +722,20 @@ def forward(self, x):
             g.nodes[0].inputs[0].arg.as_tensor.name,
             g.nodes[1].inputs[0].arg.as_tensor.name,
         )
+
+    def test_canonicalize_empty_output(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x
+
+            def some_method(self) -> list[torch.Tensor]:
+                return []
+
+        ep = export(wrap_method(Module().some_method), (), strict=True)
+        self.assertEqual(ep.graph_signature.output_specs, [])
+        s = ExportedProgramSerializer().serialize(ep)
+        c = canonicalize(s.exported_program)
+        self.assertEqual(c.graph_module.graph.outputs, [])
 
     def test_int_list(self) -> None:
         class M(torch.nn.Module):
