@@ -6,8 +6,8 @@ flushed as tests finish; readers skip a torn last line.
 
 ## Path
 
-`<dir>/<dir name>-<report_uuid>.jsonl`, for example
-`test/torchci-reports/test_type_info/test_type_info-919108f7-52d1-4320-9bac-f847db4148a8.jsonl`.
+`<prefix>-<report_uuid>.report.jsonl`, for example
+`test/torchci-reports/test_type_info-919108f7-52d1-4320-9bac-f847db4148a8.report.jsonl`.
 Each process writes its own file under a new uuid4.
 
 ## Schema version 0.1
@@ -88,6 +88,6 @@ With PyTorch built from this branch, from `test/`:
 
 ```bash
 python -m pytest test_type_info.py -p torch.testing._internal.torchci.plugin \
-    --torchci-report-dir=/tmp/torchci-reports/test_type_info
-cat /tmp/torchci-reports/test_type_info/*.jsonl | python -m json.tool --json-lines
+    --torchci-report-prefix=/tmp/torchci-reports/test_type_info
+cat /tmp/torchci-reports/test_type_info-*.report.jsonl | python -m json.tool --json-lines
 ```
