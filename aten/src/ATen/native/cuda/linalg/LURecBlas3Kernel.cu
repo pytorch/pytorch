@@ -828,8 +828,23 @@ void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Te
 namespace ldl {
 
 // Panel width. Wider panels cut the memory traffic of the trailing GEMMs,
-// at the price of more work in the panel. Tuned on H100 for all dtypes.
-constexpr int panel_width(int n) {
+// at the price of more work in the panel.
+template <typename scalar_t>
+int panel_width(int n) {
+  const auto* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major * 10 + prop->minor == 100) {
+    // Tuned on GB200 for indefinite and positive definite inputs
+    if constexpr (std::is_same_v<scalar_t, float>) {
+      return n < 1024 ? 32 : (n <= 8192 ? 24 : (n <= 16384 ? 32 : 48));
+    } else if constexpr (std::is_same_v<scalar_t, double>) {
+      return n <= 768 ? 24 : (n <= 6144 ? 16 : (n < 16384 ? 32 : 96));
+    } else if constexpr (std::is_same_v<scalar_t, c10::complex<float>>) {
+      return n <= 1536 ? 24 : (n <= 4096 ? 16 : (n <= 12288 ? 32 : 96));
+    } else {
+      return n <= 256 ? 32 : (n <= 6144 ? 16 : (n <= 12288 ? 48 : (n <= 20480 ? 64 : 96)));
+    }
+  }
+  // Tuned on H100 for all dtypes
   return n <= 4096 ? 32 : (n <= 8192 ? 64 : (n <= 16384 ? 96 : 128));
 }
 
@@ -1263,7 +1278,7 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
   auto* dpart_max = static_cast<real_t*>(part_max.data_ptr());
   auto* dpart_idx = static_cast<int*>(part_idx.data_ptr());
 
-  const auto nb = ldl::panel_width(n);
+  const auto nb = ldl::panel_width<scalar_t>(n);
   int step = 0;
 
   // Right-Down-Diagonal-looking blocked LDLT/LDLH:
