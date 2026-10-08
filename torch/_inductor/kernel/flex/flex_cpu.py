@@ -16,6 +16,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 
 from ...codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
 from ...ir import Buffer, ExternKernel, FixedLayout, TensorBox
+from ...lowering import to_dtype
 from ...select_algorithm import autotune_select_algorithm
 from .common import (
     build_subgraph_buffer,
@@ -88,11 +89,15 @@ def lower_cpu(
         mask_graph,
     ) = block_mask
 
-    if query.dtype != key.dtype or query.dtype != value.dtype:
+    # Key/value may be in a lower precision than query, e.g. an FP8 KV cache.
+    kv_dtypes = [query.dtype, torch.float8_e4m3fn, torch.float8_e5m2]
+    if query.dtype == torch.float:
+        kv_dtypes += [torch.bfloat16, torch.float16]
+    if key.dtype not in kv_dtypes or value.dtype not in kv_dtypes:
         raise ValueError(
-            f"Mixed query, key, and value dtype is not supported on this platform, "
-            f"got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
-            f"and value.dtype: {value.dtype}."
+            f"Unsupported key/value dtype on CPU for query.dtype: {query.dtype}, "
+            f"got key.dtype: {key.dtype} and value.dtype: {value.dtype}. "
+            f"Supported key/value dtypes are {kv_dtypes}."
         )
 
     if kernel_options["OUTPUT_LOGSUMEXP"]:
@@ -231,6 +236,18 @@ def lower_cpu(
         if isinstance(item, TensorBox):
             fake_buffers.append(item.data.data)  # type: ignore[attr-defined]
 
+    # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+    # In flash decoding, the partition size of doing the parallelism on KV length dim
+    PARTITION_SIZE = kernel_options.get("PARTITION_SIZE", 128)
+    if not CppFlexAttentionTemplate.use_flex_decoding(
+        query, key, PARTITION_SIZE, SPARSE_KV_BLOCK_SIZE
+    ):
+        # Only the decoding template reads lower-precision key/value directly
+        key = to_dtype(key, query.get_dtype())
+        value = to_dtype(value, query.get_dtype())
+
     # CPU kernel requires last dim to be contiguous
     query, key, value = map(contiguous_last_dim, [query, key, value])
 
@@ -311,11 +328,6 @@ def lower_cpu(
         ]
 
     skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
-    # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
-    # In flash decoding, the partition size of doing the parallelism on KV length dim
-    PARTITION_SIZE = kernel_options.get("PARTITION_SIZE", 128)
     if not V.graph.sizevars.evaluate_expr(
         sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
     ):
