@@ -704,6 +704,13 @@ def captured_signal_pad_order(
     )
 
 
+# Bounds for gated_signal_pad_order's polls. A slow device can only let a
+# broken guard pass (blocked probe), or fail a correct one if launches take
+# over a minute (finish timeout); see its docstring.
+_GATE_BLOCKED_PROBE_S = 1.0
+_GATE_FINISH_TIMEOUT_S = 60.0
+
+
 def gated_signal_pad_order(
     launches_a: list[Callable[[], object]],
     launches_b: list[Callable[[], object]],
@@ -725,6 +732,10 @@ def gated_signal_pad_order(
     stays busy while a stream is gated. ``between``, if given, runs after
     ``launches_a`` are issued and before ``launches_b``. Requires
     cuda.bindings."""
+    # With blocking launches, launching an op correctly ordered behind the
+    # gated one waits on the host before the gate can open.
+    if os.environ.get("CUDA_LAUNCH_BLOCKING") == "1":
+        raise unittest.SkipTest("deadlocks with CUDA_LAUNCH_BLOCKING=1")
     from cuda.bindings import driver as drv
 
     from torch.cuda._utils import _check_cuda_bindings_driver as check
@@ -744,7 +755,7 @@ def gated_signal_pad_order(
         ptr = gates[i].data_ptr()
         check(drv.cuStreamWriteValue32(opener.cuda_stream, ptr, 1, 0))
 
-    def finishes(event: torch.cuda.Event, timeout: float) -> bool:
+    def finished_within(event: torch.cuda.Event, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while not event.query():
             if time.monotonic() > deadline:
@@ -765,9 +776,10 @@ def gated_signal_pad_order(
             for launch in launches_b:
                 launch()
             b_done.record()
-        while_gated = finishes(b_done, 1.0 if expect_ordered else 60.0)
+        probe = _GATE_BLOCKED_PROBE_S if expect_ordered else _GATE_FINISH_TIMEOUT_S
+        while_gated = finished_within(b_done, probe)
         open_gate(0)
-        after_open = finishes(b_done, 60.0)
+        after_open = finished_within(b_done, _GATE_FINISH_TIMEOUT_S)
     finally:
         open_gate(0)
         open_gate(1)
