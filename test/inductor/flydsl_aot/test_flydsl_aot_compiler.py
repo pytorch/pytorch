@@ -159,27 +159,21 @@ class FlyDSLAOTAvailabilityTest(TestCase):
             reason = flydsl_utils._flydsl_aot_runtime_unavailable_reason()
         self.assertIsNone(reason)
 
-    def test_aot_runtime_has_no_upper_version_bound(self):
-        package_spec = SimpleNamespace(submodule_search_locations=["package"])
+    def test_aot_runtime_rejects_flydsl_0_4(self):
         with (
             mock.patch.object(
                 flydsl_utils,
-                "find_spec",
-                return_value=package_spec,
-            ),
-            mock.patch.object(
-                flydsl_utils,
-                "_pathfinder_find_spec",
-                return_value=SimpleNamespace(),
+                "_flydsl_runtime_unavailable_reason",
+                return_value=None,
             ),
             mock.patch.object(
                 flydsl_utils,
                 "_available_version",
-                return_value=SimpleNamespace(release=(1, 0, 0)),
+                return_value=SimpleNamespace(release=(0, 4, 0)),
             ),
         ):
             reason = flydsl_utils._flydsl_aot_runtime_unavailable_reason()
-        self.assertIsNone(reason)
+        self.assertIn(">=0.3.2,<0.4", reason)
 
 
 @unittest.skipUnless(HAS_FLYDSL, "FlyDSL is not available")
