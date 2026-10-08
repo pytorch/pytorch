@@ -1057,6 +1057,16 @@ def torch_key() -> bytes:
         return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
+# Bound at import so tests that mock.patch torch_key/triton_key don't break it.
+_cache_key_prefetchers = (torch_key.prefetch, triton_key.prefetch)  # type: ignore[attr-defined]
+
+
+def prefetch_cache_keys() -> None:
+    """Start computing torch_key and triton_key in a background thread."""
+    for prefetch in _cache_key_prefetchers:
+        prefetch()
+
+
 def get_inductor_root() -> str:
     return os.path.dirname(__file__)
 

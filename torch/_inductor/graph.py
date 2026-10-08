@@ -75,7 +75,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .fx_utils import count_flops_fx
+from .fx_utils import count_flops_fx, get_mutated_storages
 from .ir import (
     assign_origin_node,
     Constant,
@@ -100,6 +100,7 @@ from .lowering import (
     lowerings,
     make_fallback,
     maybe_layout_constraints,
+    mutate_to,
     needs_realized_inputs,
     require_contiguous,
     tag_to_layout_constraint,
@@ -521,6 +522,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_buffers: OrderedSet[str] = OrderedSet()
         self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
         self.mutated_buffers: OrderedSet[str] = OrderedSet()
+        # Fake storages some node writes in place. A buffer over such storage
+        # must not be computed straight into another buffer (see ConcatKernel).
+        self.mutated_storages: OrderedSet[int] = get_mutated_storages(gm)
         self.sdpa_constraint_cache: dict[tuple, ir.IRNode] = {}
         # Buffers that are neither recycled nor freed. Aliasing kernels rely on
         # the second half: some have no output variable to free at all.
@@ -547,6 +551,14 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_input_idxs: list[int] = []
         self.name_to_buffer: dict[str, ir.Buffer] = {}
         self.name_to_users: defaultdict[str, list[ir.IRNode]] = defaultdict(list)
+        # Buffers that share memory through a realized alias (e.g. the output of a
+        # fallback view kernel such as aten.view.dtype), in both directions: the
+        # aliased buffer maps to its aliases and each alias to the buffer it
+        # aliases. Built incrementally by mark_buffer_mutated from the tail of
+        # self.buffers, which relies on self.buffers only being appended to while
+        # lowering.
+        self._buffer_aliases: defaultdict[str, list[str]] = defaultdict(list)
+        self._buffer_aliases_indexed_upto: int = 0
         self.name_to_op: dict[str, ir.Operation] = {}
         # Side table for CuteDSL capture nodes (may include ReinterpretViews)
         self._cutedsl_capture_nodes: dict[str, ir.IRNode] = {}
@@ -1214,11 +1226,35 @@ class GraphLowering(torch.fx.Interpreter):
             raise AssertionError(f"Expected str, got {type(name)}")
         self.mutated_buffers.add(name)
 
-        if name not in self.name_to_users:
-            return
+        # Buffers that share memory with the mutated one through an alias (e.g.
+        # buf0 = aten.view.dtype(arg0) lowered as a fallback kernel) read the
+        # mutated memory too, whichever of them is mutated, so their pending,
+        # not-yet-realized users must be realized before the mutation as well.
+        # Otherwise they are materialized later and observe the mutated value:
+        #     y = x.view(torch.int32) * 2; y.sub_(-4); x[:, 2:5] = 2
+        #     return y.view(torch.int64)      # was computed from the mutated x
+        for buf in self.buffers[self._buffer_aliases_indexed_upto :]:
+            aliases = buf.get_inputs_that_alias_output()
+            # A NoneLayout node that lists several aliases (e.g. an in-place
+            # coalesced collective) does not make them alias one another, so
+            # skip it like Scheduler.compute_dependencies does.
+            if isinstance(buf.layout, ir.NoneLayout) and len(aliases) > 1:
+                continue
+            for aliased in aliases:
+                self._buffer_aliases[aliased].append(buf.get_name())
+                self._buffer_aliases[buf.get_name()].append(aliased)
+        self._buffer_aliases_indexed_upto = len(self.buffers)
 
-        for user in self.name_to_users[name]:
-            user.realize()
+        names = [name]
+        seen = OrderedSet([name])
+        while names:
+            current = names.pop()
+            for user in self.name_to_users.get(current, ()):
+                user.realize()
+            for alias in self._buffer_aliases.get(current, ()):
+                if alias not in seen:
+                    seen.add(alias)
+                    names.append(alias)
 
     def get_original_value_of_constant(self, name: str) -> torch.Tensor:
         """
@@ -1886,7 +1922,7 @@ class GraphLowering(torch.fx.Interpreter):
                 if already_reflected(old_arg, new_arg):
                     continue
 
-                self.call_function(torch.ops.aten.copy_.default, (old_arg, new_arg), {})
+                mutate_to(old_arg, new_arg, share_value=True)
             return
 
         if not isinstance(fx_node.target, torch._ops.OpOverload):
@@ -1900,8 +1936,12 @@ class GraphLowering(torch.fx.Interpreter):
             if old_arg is new_arg:
                 return
             if schema_arg.alias_info is not None and schema_arg.alias_info.is_write:
-                # The lowering for copy_ is smart enough to "replace" old_arg with
-                # new_arg in all future uses so a copy_ kernel never gets emitted.
+                # new_arg is the copy made for the layout constraint, which
+                # nothing else reads, so an old_arg that is not realized can
+                # take its buffer and no copy kernel is emitted. A realized
+                # old_arg may be read by name already: new_arg is copied into
+                # it in place. new_arg has old_arg's dtype, device and size, so
+                # the conversions of the copy_ lowering are not needed.
                 # old_arg, new_arg may be immutable_list
                 if isinstance(old_arg, ir.IRNode):
                     old_arg = (old_arg,)  # type: ignore[assignment]
@@ -1910,9 +1950,7 @@ class GraphLowering(torch.fx.Interpreter):
                 for old_arg_item, new_arg_item in zip(old_arg, new_arg):  # type: ignore[call-overload]
                     if already_reflected(old_arg_item, new_arg_item):
                         continue
-                    self.call_function(
-                        torch.ops.aten.copy_.default, (old_arg_item, new_arg_item), {}
-                    )
+                    mutate_to(old_arg_item, new_arg_item, share_value=True)
 
         schema = fx_node.target._schema
         for idx, (old_arg, new_arg) in enumerate(zip(old_args, new_args)):
@@ -3258,6 +3296,7 @@ class SubgraphLowering(GraphLowering):
         while isinstance(root, SubgraphLowering):
             root = root.parent
         root.constants[name] = data
+        root.allocated_constant_name[name] = self.allocated_constant_name[name]
         return name
 
     def init_wrapper_code(

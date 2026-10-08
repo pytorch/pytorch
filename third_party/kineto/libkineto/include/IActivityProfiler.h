@@ -18,7 +18,7 @@
 
 /* This file includes an abstract base class for an activity profiler
  * that can be implemented by multiple tracing agents in the application.
- * The high level Kineto profiler can co-ordinate start and end of tracing
+ * The high level Kineto profiler can coordinate start and end of tracing
  * and combine together events from multiple such activity profilers.
  */
 

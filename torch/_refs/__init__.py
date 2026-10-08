@@ -3574,13 +3574,15 @@ def _scalar_type_name(dtype: torch.dtype) -> str:
     return dtype_name[:1].upper() + dtype_name[1:]
 
 
-def _check_native_layer_norm_cuda_param_dtype(
+def _check_native_layer_norm_gpu_param_dtype(
     input: Tensor,
     normalized_ndim: int,
     weight: Tensor | None,
     bias: Tensor | None,
 ) -> None:
-    if input.device.type != "cuda":
+    # CUDA and XPU kernels reject mismatched weight/bias dtypes once there is
+    # at least one row to normalize.
+    if input.device.type not in ("cuda", "xpu"):
         return
 
     mismatched_dtype = None
@@ -3658,7 +3660,7 @@ def native_layer_norm(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
-    _check_native_layer_norm_cuda_param_dtype(input, normalized_ndim, weight, bias)
+    _check_native_layer_norm_gpu_param_dtype(input, normalized_ndim, weight, bias)
 
     input = contiguous(input)
     if weight is not None:
@@ -6729,15 +6731,9 @@ def log_normal(self, mean=1, std=2, generator=None):
 
 
 # NOTE: the device and dtype will be ignored when shape is None
+# NOTE: normal follows its native overload's output dtype instead of promoting.
 @register_decomposition(aten.normal)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=(
-        "mean",
-        "std",
-    ),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def normal(
     mean=0,
     std=1,
@@ -6771,6 +6767,11 @@ def normal(
         size = _broadcast_shapes(*(t.shape for t in tensors))
         dtype = tensors[0].dtype
         device = tensors[0].device
+
+        if isinstance(mean, TensorLike):
+            mean = _maybe_convert_to_dtype(mean, dtype)
+        if isinstance(std, TensorLike):
+            std = _maybe_convert_to_dtype(std, dtype)
     else:
         torch._check(
             not isinstance(mean, TensorLike) and not isinstance(std, TensorLike),
@@ -6793,6 +6794,7 @@ def normal(
 
 @register_decomposition(aten.normal_)
 def normal_(self, mean=0, std=1, *, generator=None):
+    # pyrefly: ignore [unexpected-keyword]
     return normal(mean, std, self.shape, out=self, generator=generator)
 
 
