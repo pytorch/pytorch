@@ -6784,5 +6784,16 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB8504": [
+    {
+      "Gb_type": "Encountered mutation of an aliased input during higher order op tracing",
+      "Context": "context",
+      "Explanation": "Higher order ops do not support mutating an input that shares storage with another input. Found in {name}",
+      "Hints": [
+        "Clone one of the aliased inputs before the call, or stop mutating it.",
+        "Please open an issue."
+      ]
+    }
   ]
 }
