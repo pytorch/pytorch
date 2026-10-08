@@ -635,7 +635,7 @@ class _VarlenVsSdpaMixin:
             start_idx = end_idx
 
 
-class TestVarlenAttention(_VarlenVsSdpaMixin, NNTestCase):
+class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     # NOTE: These tests exercise the flash backends, which every accelerator can in
     # principle provide, but they stay CUDA-specific for now: the backend matrix is
     # spelled in terms of FA2/FA3/FA4 and SM capabilities, and only CUDA has a varlen
@@ -2664,7 +2664,7 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
 
 
 instantiate_device_type_tests(TestVarlenAttentionDevice, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestVarlenAttentionCUDA, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestVarlenAttentionCuDNN, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
