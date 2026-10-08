@@ -199,6 +199,8 @@
   - test/test_mps.py
   - test/inductor/test_mps_basic.py
   - torch/testing/_internal/common_mps.py
+  - torch/testing/_internal/common_methods_invocations.py
+  - torch/testing/_internal/opinfo/**
   - aten/src/ATen/native/native_functions.yaml
   - aten/src/ATen/mps/**
   - aten/src/ATen/native/mps/**
@@ -207,6 +209,7 @@
   - malfet
   - kurtamohler
   - jhavukainen
+  - Isalia20
 
   mandatory_checks_name:
   - EasyCLA
@@ -587,6 +590,23 @@
   - Lint
   - pull
 
+- name: Complex Compilation
+  patterns:
+  - torch/_subclasses/complex_tensor/**
+  - test/complex_tensor/**
+  - torch/_functorch/_aot_autograd/complex_decomposition.py
+  - test/dynamo/test_complex.py
+  approved_by:
+  - hameerabbasi
+  - amjames
+  - eellison
+  - ezyang
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+  - inductor
+
 - name: Testing (Temporarily used for test refactoring)
   patterns:
   - torch/testing/**
@@ -610,8 +630,8 @@
   - atalman
   - blaine-rister
   - bobrenjc93
+  - BoyuanFeng
   - d4l3k
-  - dcci
   - desertfire
   - digantdesai
   - dolpm
@@ -632,13 +652,15 @@
   - jeanschmidt
   - kapilsh
   - karthickai
-  - kqfu
   - laithsakka
   - liangel-02
   - Microve
   - mlazos
+  - nandesuka
+  - NicolasHug
   - njriasan
   - oulgen
+  - pdesupinski
   - pianpwk
   - ryanzhang22
   - sanketpurandare
@@ -649,7 +671,6 @@
   - slayton58
   - soulitzer
   - tushar00jain
-  - vkuzo
   - warrendeng
   - wconstab
   - weifengpy

@@ -262,18 +262,42 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         if self._compiled_module is None:
             self._compiled_module = self._compile_for_benchmarking()
 
+    def _ensure_benchmark_request(
+        self,
+    ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
+        """Create the benchmark request under the caller's active policy."""
+        self._ensure_compiled()
+        if self._bmreq is None:
+            self._bmreq = self._create_benchmark_request()
+        return self._bmreq
+
     def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
         """Regular benchmarking: compile if needed, then use benchmarker."""
-        self._ensure_compiled()
+        bmreq = (
+            self._ensure_benchmark_request()
+            if self.layout.device.type != "cpu"
+            else None
+        )
+        if bmreq is None:
+            self._ensure_compiled()
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
 
         def fn() -> Any:
             return bm_func([*sym_inputs, *args])
 
+        if bmreq is not None:
+            bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
+            if (
+                config.profile_bandwidth_with_do_bench_using_profiling
+                and not self._benchmark_with_cudagraphs
+                and not bmreq.config_cudagraph_benchmarking
+            ):
+                return do_bench_using_profiling(fn)
+            return bmreq.benchmark_run_fn(fn, out=out)
+
         if self._benchmark_with_cudagraphs:
             return benchmarker.benchmark_gpu_with_cuda_graph(fn)
-
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(fn)
         return benchmarker.benchmark(
