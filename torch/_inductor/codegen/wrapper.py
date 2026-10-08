@@ -5245,6 +5245,8 @@ class PythonWrapperCodegen(CodeGen):
             )
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
+        elif isinstance(s, pytree.TreeSpec):
+            return f"torch.utils._pytree.treespec_loads({pytree.treespec_dumps(s)!r})"
         elif isinstance(s, (ir.Buffer, ir.MutableBox, ReinterpretView)):
             return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]

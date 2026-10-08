@@ -17,6 +17,7 @@ import torch._inductor.test_case
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch._dynamo import config as dynamo_config
+from torch._dynamo.decorators import leaf_function
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
     triton_kernel_wrapper_functional,
@@ -36,7 +37,10 @@ from torch._inductor.utils import (
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     get_func_call,
@@ -7251,6 +7255,90 @@ if HAS_CUDA_AND_TRITON:
         tl.store(out_ptr + offs, x + y, mask=mask)
         custom_store(out_ptr + offs, x + y, mask=mask)
 
+
+@unittest.skipUnless(
+    (HAS_GPU or TRITON_HAS_CPU) and hasattr(__import__("triton"), "set_allocator"),
+    "requires Triton with allocator support",
+)
+class TestTritonAllocator(torch._inductor.test_case.TestCase):
+    @parametrize("size", [4, 17])
+    def test_registration_and_cache_hit(self, device, size):
+        import triton
+        from triton.runtime._allocation import _allocator, NullAllocator
+
+        def allocator(size, alignment, stream):
+            return torch.empty(size, device=device, dtype=torch.int8)
+
+        def fn(x):
+            triton.set_allocator(allocator)
+            return x.sin()
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.randn(size, device=device)
+        expected = x.sin()
+        previous = _allocator.get()
+        try:
+            triton.set_allocator(NullAllocator())
+            self.assertEqual(compiled(x), expected)
+            self.assertIs(_allocator.get(), allocator)
+
+            triton.set_allocator(NullAllocator())
+            self.assertEqual(compiled(x), expected)
+            self.assertIs(_allocator.get(), allocator)
+            self.assertEqual(counter.frame_count, 1)
+        finally:
+            triton.set_allocator(previous)
+
+    def test_ordered_registrations(self, device):
+        import triton
+        from triton.runtime._allocation import _allocator, NullAllocator
+
+        def first_allocator(size, alignment, stream):
+            return torch.empty(size, device=device, dtype=torch.int8)
+
+        def second_allocator(size, alignment, stream):
+            return torch.empty(size, device=device, dtype=torch.int32)
+
+        seen = []
+
+        @leaf_function
+        def record_allocator():
+            seen.append(_allocator.get())
+
+        @record_allocator.register_fake
+        def record_allocator_fake():
+            return None
+
+        def fn(x):
+            triton.set_allocator(first_allocator)
+            record_allocator()
+            triton.set_allocator(second_allocator)
+            record_allocator()
+            return x.sin()
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.randn(4, device=device)
+        expected = x.sin()
+        previous = _allocator.get()
+        try:
+            triton.set_allocator(NullAllocator())
+            self.assertEqual(compiled(x), expected)
+            self.assertEqual(seen, [first_allocator, second_allocator])
+            self.assertIs(_allocator.get(), second_allocator)
+
+            seen.clear()
+            triton.set_allocator(NullAllocator())
+            self.assertEqual(compiled(x), expected)
+            self.assertEqual(seen, [first_allocator, second_allocator])
+            self.assertIs(_allocator.get(), second_allocator)
+            self.assertEqual(counter.frame_count, 1)
+        finally:
+            triton.set_allocator(previous)
+
+
+instantiate_device_type_tests(TestTritonAllocator, globals(), only_for="cpu")
 
 common_utils.instantiate_parametrized_tests(KernelTests)
 common_utils.instantiate_parametrized_tests(CustomOpTests)
