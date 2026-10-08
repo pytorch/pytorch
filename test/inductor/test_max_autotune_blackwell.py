@@ -4,6 +4,7 @@ from unittest import mock
 
 import torch
 from torch._dynamo.exc import BackendCompilerFailed
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.autows_utils import meta_ws_enabled
 from torch._inductor.heuristics.registry import (
@@ -1921,7 +1922,7 @@ class TestBlackwellBMMTemplate(TestCase):
         "Need Blackwell with device-side TMA support in Triton",
     )
     @parametrize("op", ("bmm", "baddbmm"))
-    @parametrize("bias_shape", ("full", "row", "scalar"))
+    @parametrize("bias_shape", ("full", "batch1", "matrix", "row", "scalar"))
     @parametrize("tma", ("off", "default", "tma_store", "host_tma_store"))
     def test_tuned_bmm_offers_blackwell_bmm_template(
         self, op: str, bias_shape: str, tma: str
@@ -1930,15 +1931,17 @@ class TestBlackwellBMMTemplate(TestCase):
             self.skipTest("bmm has no bias")
         # M and N tails exercise the masked bias loads and the rank-3 store.
         bsz, m, k, n = 6, 200, 264, 136
-        # Small integers keep the fp32 accumulation exact.
+        # Small integers and power-of-two scalars keep the result exact.
+        shape, alpha, beta = {
+            "full": ((bsz, m, n), 2.0, 0.5),
+            "batch1": ((1, m, n), 1, 1),
+            "matrix": ((m, n), 0.5, -1),
+            "row": ((n,), -1, 2),
+            "scalar": ((), 2.0, 0.5),
+        }[bias_shape]
         a = torch.randint(-1, 2, (bsz, m, k), device=GPU_TYPE).bfloat16()
         b = torch.randint(-1, 2, (bsz, k, n), device=GPU_TYPE).bfloat16()
-        bias = torch.randint(
-            -4,
-            5,
-            {"full": (bsz, m, n), "row": (n,), "scalar": ()}[bias_shape],
-            device=GPU_TYPE,
-        ).bfloat16()
+        bias = torch.randint(-4, 5, shape, device=GPU_TYPE).bfloat16()
 
         if op == "bmm":
 
@@ -1948,11 +1951,12 @@ class TestBlackwellBMMTemplate(TestCase):
         else:
 
             def fn(a, b, bias):
-                return torch.baddbmm(bias, a, b, alpha=2.0, beta=0.5)
+                return torch.baddbmm(bias, a, b, alpha=alpha, beta=beta)
 
-        expected = fn(a.float(), b.float(), bias.float()).bfloat16()
+        expected = fn(a.double(), b.double(), bias.double()).bfloat16()
         enabled = tma != "off"
         offered, spy = self._offered_bmm_choices()
+        counters.clear()
         with (
             spy,
             config.patch(
@@ -1971,10 +1975,16 @@ class TestBlackwellBMMTemplate(TestCase):
         ):
             actual, codes = run_and_get_code(torch.compile(fn), a, b, bias)
 
+        # Lowered by tuned_{op}, i.e. post_grad did not unfuse baddbmm to bmm + add.
+        self.assertTrue(
+            any(key.startswith(f"aten.{op}_") for key in counters["aten_mm_info"])
+        )
         # The gates keep today's choices when the flag is off.
         self.assertEqual(any("blackwell_bmm" in c.name for c in offered), enabled)
         # The persistent queue over batches and tiles is unique to the template.
         self.assertEqual("num_tiles = BATCH * num_tiles_per_batch" in codes[0], enabled)
+        if enabled:
+            self.assertIn(f"USE_META_WS : tl.constexpr = {meta_ws_enabled()}", codes[0])
         if tma == "host_tma_store":
             self.assertIn("host_tma_descriptor_args", codes[0])
         self.assertEqual(actual, expected, atol=0, rtol=0)
@@ -1983,15 +1993,19 @@ class TestBlackwellBMMTemplate(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    def test_tuned_baddbmm_blackwell_bmm_beta_zero_ignores_nan_bias(self):
-        # Like eager, beta=0 must ignore the bias, including its NaNs.
+    @parametrize("alpha", (1, 2))
+    def test_tuned_baddbmm_blackwell_bmm_beta_zero_ignores_nonfinite_bias(
+        self, alpha: float
+    ):
+        # Like eager, beta=0 must ignore the bias, including its NaNs and infs.
         bsz, m, k, n = 4, 256, 256, 128
         a = torch.randint(-1, 2, (bsz, m, k), device=GPU_TYPE).bfloat16()
         b = torch.randint(-1, 2, (bsz, k, n), device=GPU_TYPE).bfloat16()
         bias = torch.full((bsz, m, n), float("nan"), device=GPU_TYPE).bfloat16()
+        bias[1], bias[2] = float("inf"), float("-inf")
 
         def fn(bias, a, b):
-            return torch.baddbmm(bias, a, b, beta=0)
+            return torch.baddbmm(bias, a, b, alpha=alpha, beta=0)
 
         with config.patch(
             {
@@ -2005,7 +2019,8 @@ class TestBlackwellBMMTemplate(TestCase):
             actual, codes = run_and_get_code(torch.compile(fn), bias, a, b)
 
         self.assertIn("num_tiles = BATCH * num_tiles_per_batch", codes[0])
-        self.assertEqual(actual, fn(bias, a, b), atol=0, rtol=0)
+        expected = fn(bias.double(), a.double(), b.double()).bfloat16()
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
