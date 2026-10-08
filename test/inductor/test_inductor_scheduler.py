@@ -1,8 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+from concurrent.futures import Future
 from unittest import skipIf
-from unittest.mock import Mock, patch, PropertyMock
+from unittest.mock import call, Mock, patch, PropertyMock
 
 import sympy
 
@@ -756,6 +757,50 @@ class TestScheduler(TestCase):
         expected = current if memory_guard_enabled else retired
         scheduler.fuse_if_speedup.assert_called_once_with(
             template, expected, speedup, fused_nodes
+        )
+
+    def test_pending_template_fusions_sharing_a_compile_future(self):
+        # Two identical template + epilogue pairs render the same fused kernel
+        # source, so async compile hands both pending fusions one future.
+        scheduler = object.__new__(Scheduler)
+        nodes = {
+            name: self._mock_base_snode(name)
+            for name in ("template1", "epilogue1", "template2", "epilogue2")
+        }
+        for name in ("template1", "template2"):
+            nodes[name].is_template.return_value = True
+            nodes[name].get_template_node.return_value = None
+        scheduler.name_to_fused_node = dict(nodes)
+        scheduler._fusion_memory_state = None
+        scheduler.fuse_if_speedup = Mock(return_value=True)
+        future = Future()
+        future.set_result(None)
+        pending = {
+            i: PendingFusion(
+                Mock(),
+                nodes[f"template{i}"],
+                nodes[f"epilogue{i}"],
+                Mock(future=future),
+            )
+            for i in (1, 2)
+        }
+        fused_nodes = OrderedSet(nodes.values())
+
+        scheduler._evaluate_pending_template_fusions(
+            {nodes[f"epilogue{i}"]: [pending[i]] for i in (1, 2)}, fused_nodes
+        )
+
+        self.assertEqual(scheduler.fuse_if_speedup.call_count, 2)
+        scheduler.fuse_if_speedup.assert_has_calls(
+            [
+                call(
+                    nodes[f"template{i}"],
+                    nodes[f"epilogue{i}"],
+                    pending[i].callable_fn,
+                    fused_nodes,
+                )
+                for i in (1, 2)
+            ]
         )
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
