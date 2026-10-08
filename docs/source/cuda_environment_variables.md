@@ -18,6 +18,7 @@ For more information on CUDA runtime environment variables, see [CUDA Environmen
 | `TORCH_CUBLASLT_UNIFIED_WORKSPACE` | Controls whether cached cuBLAS and cuBLASLt workspaces share an allocation. This only takes effect when `TORCH_CUBLAS_WORKSPACE_CACHE=1`. |
 | `TORCH_NCCL_USE_COMM_NONBLOCKING` | If set to `1`, enables non-blocking error handling in NCCL. |
 | `TORCH_CUDNN_V8_API_DEBUG` | If set to `1`, sanity check whether cuDNN V8 is being used. |
+| `TORCH_BREAKABLE_CUDA_GRAPHS_DEBUG` | If set to `1` before importing PyTorch, tracks side-stream fork and join events during breakable CUDA graph capture and includes unjoined stream IDs in capture errors. |
 
 **CUDA Runtime and Libraries Environment Variables**
 

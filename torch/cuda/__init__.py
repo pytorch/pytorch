@@ -31,6 +31,13 @@ from torch.types import Device
 
 from . import _device_limits, gds
 from ._utils import _get_device_index
+from .breakable_graphs import (
+    breakable_graph,
+    BreakableCUDAGraph,
+    force_no_graph,
+    is_in_breakable_graph,
+    no_graph,
+)
 from .graphs import (
     CUDAGraph,
     export_dot,
@@ -2189,6 +2196,7 @@ __all__ = [
     "ShortStorage",
     # pyrefly: ignore [bad-dunder-all]
     "ShortTensor",
+    "BreakableCUDAGraph",
     "CUDAGraph",
     "CudaError",
     "DeferredCudaCallError",
@@ -2199,6 +2207,8 @@ __all__ = [
     "StreamContext",
     "GreenContext",
     "amp",
+    "breakable_graph",
+    "breakable_graphs",
     "caching_allocator_alloc",
     "caching_allocator_delete",
     "caching_allocator_disabled",
@@ -2220,6 +2230,7 @@ __all__ = [
     "empty_cache",
     "export_dot",
     "export_graph_data",
+    "force_no_graph",
     "get_allocator_backend",
     "CUDAPluggableAllocator",
     "change_current_allocator",
@@ -2247,6 +2258,7 @@ __all__ = [
     "is_available",
     "is_bf16_supported",
     "is_current_stream_capturing",
+    "is_in_breakable_graph",
     "is_initialized",
     "is_tf32_supported",
     "jiterator",
@@ -2275,6 +2287,7 @@ __all__ = [
     "clock_rate",
     "nccl",
     "nvtx",
+    "no_graph",
     "profiler",
     "random",
     "reset_accumulated_host_memory_stats",
