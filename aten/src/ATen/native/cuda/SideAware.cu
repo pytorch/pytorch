@@ -25,21 +25,13 @@ constexpr int kSamples = 9;
 
 std::atomic<bool>& enabled_flag() {
   static std::atomic<bool> flag{[] {
-    const char* env = std::getenv("PYTORCH_CUDA_SIDE_AWARE");
+    const char* env = std::getenv("PYTORCH_SIDE_AWARE");
     return env == nullptr || std::strcmp(env, "0") != 0;
   }()};
   return flag;
 }
 
 std::atomic<uint64_t> launches{0};
-
-bool calibrate_enabled() {
-  static const bool value = [] {
-    const char* env = std::getenv("PYTORCH_SIDE_AWARE_CALIBRATE");
-    return env == nullptr || std::strcmp(env, "0") != 0;
-  }();
-  return value;
-}
 
 // One slot per registered range, guarded by a sequence lock: writers (under
 // Ranges::mutex) make `seq` odd, update the slot, and make it even again;
@@ -228,9 +220,6 @@ void unregister_striped_range(c10::DeviceIndex device, uintptr_t base) {
 }
 
 bool contains(c10::DeviceIndex device, const void* ptr, size_t bytes) {
-  if (device < 0 || device >= C10_COMPILE_TIME_MAX_GPUS) {
-    return false;
-  }
   const auto addr = reinterpret_cast<uintptr_t>(ptr);
   for (const auto& slot : ranges(device).slots) {
     uintptr_t base = 0, end = 0;
@@ -264,19 +253,40 @@ void count_launch() {
   launches.fetch_add(1, std::memory_order_relaxed);
 }
 
-bool Calibration::use_side(cudaStream_t stream, size_t bytes, cudaEvent_t* stop, const char* name) {
+Calibration::Calibration() {
+  static const bool forced = [] {
+    const char* env = std::getenv("PYTORCH_SIDE_AWARE_CALIBRATE");
+    return env != nullptr && std::strcmp(env, "0") == 0;
+  }();
+  if (forced) {
+    decision_.store(1, std::memory_order_relaxed);
+  }
+}
+
+// Under mutex_. On a bailout, handed-out stop events may still be recorded,
+// so the events are leaked rather than destroyed.
+bool Calibration::decide(bool side) {
+  decision_.store(side ? 1 : -1, std::memory_order_release);
+  return side;
+}
+
+bool Calibration::use_side(
+    c10::DeviceIndex device, cudaStream_t stream, size_t bytes, cudaEvent_t* stop, const char* name) {
   *stop = nullptr;
   if (const int decision = decision_.load(std::memory_order_acquire); decision != 0) {
     return decision > 0;
-  }
-  if (!calibrate_enabled()) {
-    return true;
   }
   std::lock_guard<std::mutex> lock(mutex_);
   if (const int decision = decision_.load(std::memory_order_relaxed); decision != 0) {
     return decision > 0;
   }
-  if (issued_ < 4 * kSamplesPerPath) {
+  if (issued_ == 0) {
+    device_ = device;
+  } else if (device != device_) {
+    return decide(false); // events of two devices cannot be compared
+  }
+  constexpr int kTimed = 2 * kSamplesPerPath;
+  if (issued_ < 2 * kTimed) {
     // Launches go D D* S S* D D* S S*: only the second of each pair is timed
     // (*), so a timed kernel follows one of its own kind as in steady state.
     // Timing strictly alternating launches biases both kernels low (each one
@@ -293,15 +303,26 @@ bool Calibration::use_side(cudaStream_t stream, size_t bytes, cudaEvent_t* stop,
     }
     return side;
   }
-  // Every sample is issued; until all have run (or another thread has not
-  // recorded its stop event yet), keep the default kernel.
+  // Every sample is issued; until all stops are recorded and have run, keep
+  // the default kernel, and give up after kMaxPendingLaunches.
+  if (++pending_ > kMaxPendingLaunches) {
+    return decide(false);
+  }
+  if (recorded_.load(std::memory_order_acquire) < kTimed) {
+    return false;
+  }
   double best[2] = {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
-  for (int i = 0; i < 2 * kSamplesPerPath; ++i) {
+  for (int i = 0; i < kTimed; ++i) {
     float ms = 0;
     const cudaError_t err = cudaEventElapsedTime(&ms, events_[i][0], events_[i][1]);
     if (err != cudaSuccess) {
+      // As in at::cuda::CUDAEvent::query: clear only the error this call raised.
       (void)cudaGetLastError();
-      return false;
+      if (err == cudaErrorNotReady) {
+        return false;
+      }
+      TORCH_WARN("side-aware calibration failed (", cudaGetErrorString(err), "); using the default kernel");
+      return decide(false);
     }
     best[i % 2] = std::min(best[i % 2], double(ms) / double(bytes_[i])); // [0] default, [1] side
   }
@@ -310,13 +331,12 @@ bool Calibration::use_side(cudaStream_t stream, size_t bytes, cudaEvent_t* stop,
     C10_CUDA_CHECK(cudaEventDestroy(pair[1]));
   }
   const bool side = best[1] < best[0];
-  decision_.store(side ? 1 : -1, std::memory_order_release);
   if (std::getenv("PYTORCH_SIDE_AWARE_DEBUG") != nullptr) {
     const char* with = std::strstr(name, "[with F = ");
     std::fprintf(stderr, "[side_aware] calibrated: default %.2f, side %.2f TB/s -> %s: %.240s\n",
                  1e-9 / best[0], 1e-9 / best[1], side ? "side" : "default", with ? with : name);
   }
-  return side;
+  return decide(side);
 }
 
 bool get_context(const c10::cuda::CUDAStream& stream, Context* ctx) {
@@ -330,7 +350,13 @@ bool get_context(const c10::cuda::CUDAStream& stream, Context* ctx) {
   DeviceState& st = state(device);
   // First-use cudaMalloc/cudaMemset must not invalidate another thread's capture.
   c10::cuda::CUDAStreamCaptureModeGuard relaxed(cudaStreamCaptureModeRelaxed);
-  std::call_once(st.init, [&] { init_device(device, st); });
+  std::call_once(st.init, [&] {
+    try {
+      init_device(device, st);
+    } catch (const c10::Error& e) { // fall back to the default kernel rather than fail the op
+      TORCH_WARN("side-aware schedule disabled on device ", device, ": ", e.what_without_backtrace());
+    }
+  });
   if (!st.valid) {
     return false;
   }

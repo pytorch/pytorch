@@ -1330,9 +1330,11 @@ class _CUDAAllocator:
         return self._allocator
 
 
-_LOCALITY_ARENA_BYTES = 64 << 30  # VA per device; physical pages are mapped as the arena grows
+# VA per device; physical pages are mapped as the arena grows.
+_LOCALITY_ARENA_BYTES = 64 << 30
 _LOCALITY_PAGE_BYTES = 2 << 20  # one locality-domain page
-_LOCALITY_BLOCK_BYTES = 4 << 20  # block alignment: a side-0 page followed by a side-1 page
+# Block alignment: a side-0 page followed by a side-1 page.
+_LOCALITY_BLOCK_BYTES = 4 << 20
 _LOCALITY_ALLOC_FN = ctypes.CFUNCTYPE(
     ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
 )
@@ -1356,7 +1358,7 @@ class _LocalityArena:
     """
 
     def __init__(self, device: int) -> None:
-        from ._utils import _cuda_bindings_driver
+        from ._utils import _check_cuda_bindings_driver, _cuda_bindings_driver
         from .green_contexts import get_num_locality_domains
 
         domains = get_num_locality_domains(device)
@@ -1368,9 +1370,7 @@ class _LocalityArena:
         drv = _cuda_bindings_driver
         self.device = device
         self._drv = drv
-        self._success = drv.CUresult.CUDA_SUCCESS
-        check = self._check
-        self._oom = drv.CUresult.CUDA_ERROR_OUT_OF_MEMORY
+        self._check = check = _check_cuda_bindings_driver
         self._props = []
         for domain in range(2):
             prop = drv.CUmemAllocationProp()
@@ -1396,47 +1396,44 @@ class _LocalityArena:
         self._access.location.id = device
         self._access.flags = drv.CUmemAccess_flags.CU_MEM_ACCESS_FLAGS_PROT_READWRITE
         # Retained for the process lifetime, like this arena.
-        self._context = check(drv.cuDevicePrimaryCtxRetain(check(drv.cuDeviceGet(device))))
+        self._context = check(
+            drv.cuDevicePrimaryCtxRetain(check(drv.cuDeviceGet(device)))
+        )
         self._lock = threading.Lock()
         self._base = 0
         self._top = 0  # bytes handed out by the bump pointer; pages below are mapped
         self._free: list[tuple[int, int]] = []  # sorted (size, base)
         self._live: dict[int, int] = {}  # base -> size
         self._is_finalizing = sys.is_finalizing
-        self._log_error = logging.getLogger(__name__).error
         self._alloc_cb = _LOCALITY_ALLOC_FN(self._alloc_callback)
         self._free_cb = _LOCALITY_FREE_FN(self._free_callback)
         self.alloc_ptr = ctypes.cast(self._alloc_cb, ctypes.c_void_p).value
         self.free_ptr = ctypes.cast(self._free_cb, ctypes.c_void_p).value
 
-    def _check(self, result: Any) -> Any:
-        err, *out = result
-        if err != self._success:
-            raise RuntimeError(f"CUDA driver error {err!r}")
-        return out[0] if len(out) == 1 else None
-
     def _map_pages(self, begin: int, end: int) -> Any:
         """Maps offsets [begin, end), page P on domain P & 1; on failure unmaps them and returns the error."""
         drv = self._drv
+        ok = drv.CUresult.CUDA_SUCCESS
         offset = begin
-        err = self._success
+        err = ok
         while offset < end:
             addr = self._base + offset
             err, handle = drv.cuMemCreate(
                 _LOCALITY_PAGE_BYTES, self._props[(addr >> 21) & 1], 0
             )
-            if err != self._success:
+            if err != ok:
                 break
             (err,) = drv.cuMemMap(addr, _LOCALITY_PAGE_BYTES, 0, handle, 0)
-            self._check(drv.cuMemRelease(handle))  # the mapping, if any, keeps the memory alive
-            if err != self._success:
+            # The mapping, if any, keeps the memory alive.
+            self._check(drv.cuMemRelease(handle))
+            if err != ok:
                 break
             offset += _LOCALITY_PAGE_BYTES
-        if err == self._success:
+        if err == ok:
             (err,) = drv.cuMemSetAccess(
                 self._base + begin, end - begin, [self._access], 1
             )
-        if err != self._success and offset > begin:
+        if err != ok and offset > begin:
             self._check(drv.cuMemUnmap(self._base + begin, offset - begin))
         return err
 
@@ -1444,17 +1441,21 @@ class _LocalityArena:
         drv = self._drv
         base = int(
             self._check(
-                drv.cuMemAddressReserve(_LOCALITY_ARENA_BYTES, _LOCALITY_BLOCK_BYTES, 0, 0)
+                drv.cuMemAddressReserve(
+                    _LOCALITY_ARENA_BYTES, _LOCALITY_BLOCK_BYTES, 0, 0
+                )
             )
         )
         self._base = base
         err = self._map_pages(0, _LOCALITY_BLOCK_BYTES)  # the two probe pages
-        if err != self._success:
+        if err != drv.CUresult.CUDA_SUCCESS:
             self._base = 0
             self._check(drv.cuMemAddressFree(base, _LOCALITY_ARENA_BYTES))
             self._check((err,))
         self._top = _LOCALITY_BLOCK_BYTES
-        torch._C._cuda_side_aware_register_range(self.device, base, _LOCALITY_ARENA_BYTES)
+        torch._C._cuda_side_aware_register_range(
+            self.device, base, _LOCALITY_ARENA_BYTES
+        )
 
     def allocate(self, size: int, device: int) -> int:
         if size == 0:
@@ -1463,7 +1464,11 @@ class _LocalityArena:
             raise RuntimeError(
                 f"LocalityInterleavedAllocator for device {self.device} called for device {device}"
             )
-        nbytes = -(-size // _LOCALITY_BLOCK_BYTES) * _LOCALITY_BLOCK_BYTES
+        nbytes = (
+            (size + _LOCALITY_BLOCK_BYTES - 1)
+            // _LOCALITY_BLOCK_BYTES
+            * _LOCALITY_BLOCK_BYTES
+        )
         with self._lock:
             i = bisect.bisect_left(self._free, (nbytes, 0))
             if i < len(self._free):  # best fit; the 4 MiB-aligned remainder stays free
@@ -1478,7 +1483,7 @@ class _LocalityArena:
                     if nbytes > _LOCALITY_ARENA_BYTES - self._top:
                         return 0
                     err = self._map_pages(self._top, self._top + nbytes)
-                    if err == self._oom:
+                    if err == self._drv.CUresult.CUDA_ERROR_OUT_OF_MEMORY:
                         return 0  # the caching allocator reports OOM
                     self._check((err,))
                 finally:
@@ -1511,7 +1516,9 @@ class _LocalityArena:
                 return 0
             return self.allocate(size, device)
         except BaseException:
-            self._report("allocation")
+            logging.getLogger(__name__).exception(
+                "LocalityInterleavedAllocator allocation failed"
+            )
             return 0
 
     def _free_callback(
@@ -1521,16 +1528,9 @@ class _LocalityArena:
             if ptr:
                 self.free(ptr, stream or 0)
         except BaseException:
-            self._report("free")
-
-    def _report(self, operation: str) -> None:
-        try:
-            if not self._is_finalizing():
-                self._log_error(
-                    "LocalityInterleavedAllocator %s failed", operation, exc_info=True
-                )
-        except BaseException:
-            pass
+            logging.getLogger(__name__).exception(
+                "LocalityInterleavedAllocator free failed"
+            )
 
 
 # Native pools retain only callback addresses, so each arena (and its callbacks)
@@ -1577,8 +1577,9 @@ class LocalityInterleavedAllocator(_CUDAAllocator):
                 # A module dict alone can be cleared before the last native pool is torn down.
                 ctypes.pythonapi.Py_IncRef(ctypes.py_object(arena))
                 _LOCALITY_ARENAS[device_id] = arena
-        self._arena = arena
-        super().__init__(torch._C._cuda_customAllocator(arena.alloc_ptr, arena.free_ptr))
+        super().__init__(
+            torch._C._cuda_customAllocator(arena.alloc_ptr, arena.free_ptr)
+        )
 
 
 class CUDAPluggableAllocator(_CUDAAllocator):

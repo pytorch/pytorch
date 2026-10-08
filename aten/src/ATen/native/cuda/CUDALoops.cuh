@@ -339,9 +339,9 @@ static inline void launch_vectorized_kernel(
   // Similar check in vectorized_elementwise_kernel() as well. Both should be in sync.
   int tws = at::detail::getCUDAHooks().isGPUArch({"gfx942"}, curDevice) ? 16 : elems_per_thread<io_size>();
 #else
-  // Operands from the locality-interleaved arena: send each chunk to an SM on
-  // its memory side.
-  side_aware::DefaultLaunchTimer side_aware_timer; // records a calibration sample after the default launch below
+  // Operands in a side-striped range: send each chunk to an SM on its memory
+  // side. The timer records a calibration sample after the default launch below.
+  side_aware::DefaultLaunchTimer side_aware_timer;
   if (side_aware::try_launch_side_aware(N, f, data, side_aware_timer)) {
     return;
   }

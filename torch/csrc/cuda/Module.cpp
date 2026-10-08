@@ -1454,28 +1454,15 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         malloc_fn, free_fn);
   });
 
-  m.def(
-      "_cuda_side_aware_register_range",
-      [](c10::DeviceIndex device, uintptr_t base, size_t size) {
-        at::native::side_aware::register_striped_range(device, base, size);
-      });
+  namespace side_aware = at::native::side_aware;
+  m.def("_cuda_side_aware_register_range", &side_aware::register_striped_range);
   m.def(
       "_cuda_side_aware_unregister_range",
-      [](c10::DeviceIndex device, uintptr_t base) {
-        at::native::side_aware::unregister_striped_range(device, base);
-      });
-  m.def("_cuda_set_side_aware", [](bool enabled) {
-    at::native::side_aware::set_enabled(enabled);
-  });
-  m.def("_cuda_get_side_aware", []() {
-    return at::native::side_aware::enabled();
-  });
-  m.def("_cuda_side_aware_launch_count", []() {
-    return at::native::side_aware::launch_count();
-  });
-  m.def("_cuda_side_aware_sm_sides", [](c10::DeviceIndex device) {
-    return at::native::side_aware::sm_sides(device);
-  });
+      &side_aware::unregister_striped_range);
+  m.def("_cuda_set_side_aware", &side_aware::set_enabled);
+  m.def("_cuda_get_side_aware", &side_aware::enabled);
+  m.def("_cuda_side_aware_launch_count", &side_aware::launch_count);
+  m.def("_cuda_side_aware_sm_sides", &side_aware::sm_sides);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<

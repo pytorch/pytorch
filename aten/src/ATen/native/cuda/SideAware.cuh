@@ -7,20 +7,19 @@
 //
 // Tensors from torch.cuda.memory.LocalityInterleavedAllocator lie in a
 // registered side-striped range (SideAwareState.h), where
-// side(addr) = (addr >> 21) & 1, and start 4 MiB aligned, so element i of
-// same-dtype operands lies on one side. The work unit is a 64 KiB chunk of the PRIMARY operand (the widest
-// element type, ties to the output), i.e. one element range in every operand.
+// side(addr) = (addr >> 21) & 1. The work unit is a 64 KiB chunk of the
+// PRIMARY operand (the widest element type, ties to the output), i.e. one
+// element range in every operand, sent to the primary's side. Other operands
+// share that side when they start at the same offset within 4 MiB (e.g. all at
+// block starts); otherwise only locality is lost, not correctness.
 // Persistent CTAs (2 x 512 threads per SM) claim chunks from the queue of their
 // SM's side and steal from the other queue when theirs is empty. Output
 // elements are independent and computed by the same functor, so results are
 // bitwise identical to the default vectorized kernel.
 //
 // try_launch_side_aware() is called from launch_vectorized_kernel (contiguous,
-// no dynamic casting, 32-bit indexing) and returns false, launching nothing,
-// unless the schedule is enabled, every operand lies in a registered range,
-// the primary operand is 64 KiB aligned and at least 64 MiB, the device has an
-// SM side map, and this functor's calibration (SideAwareState.h) found the
-// side kernel faster than the default one.
+// no dynamic casting, 32-bit indexing) and launches nothing unless every check
+// in try_launch_impl passes (see its reject reasons).
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/FunctionTraits.h>
@@ -154,18 +153,11 @@ __device__ __forceinline__ void compute_store(
   }
 }
 
-template <class... T>
-constexpr size_t max_size() {
-  size_t widest = 0;
-  ((widest = sizeof(T) > widest ? sizeof(T) : widest), ...);
-  return widest;
-}
-
 template <class F, class Out, class... In>
 __global__ void __launch_bounds__(kThreads, kCtasPerSm) side_aware_kernel(
     Context ctx, Chunking chunking, size_t n, F f, Out* out, const In*... in) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1070
-  constexpr size_t kWidest = max_size<Out, In...>();
+  constexpr size_t kWidest = std::max({sizeof(Out), sizeof(In)...});
   constexpr int kVec = int(16 / kWidest); // 16 B of the widest operand
   // At most 64 input values per thread per group: 64 registers (2 x 512
   // threads per SM) hold them once a 16-bit type is widened to its opmath
@@ -204,20 +196,22 @@ bool try_launch_impl(
     const std::array<char*, sizeof...(In) + 1>& data,
     DefaultLaunchTimer& timer,
     std::index_sequence<I...>) {
-  constexpr size_t kWidest = max_size<Out, In...>();
+  if (!enabled()) {
+    return false;
+  }
+  constexpr size_t kWidest = std::max({sizeof(Out), sizeof(In)...});
   constexpr size_t sizes[] = {sizeof(Out), sizeof(In)...};
   const size_t n = size_t(N);
   static const bool debug = std::getenv("PYTORCH_SIDE_AWARE_DEBUG") != nullptr;
   auto reject = [&](const char* why, size_t i) {
     if (debug) {
       std::fprintf(stderr, "[side_aware] reject: %s (operand %zu, n %zu, widest %zu, ptr %p, sizes", why, i, n,
-                   kWidest, (void*)data[i < sizeof...(In) + 1 ? i : 0]);
+                   kWidest, (void*)data[i]);
       for (size_t s : sizes) std::fprintf(stderr, " %zu", s);
       std::fprintf(stderr, ")\n");
     }
     return false;
   };
-  if (!enabled()) return reject("disabled", 0);
   if (n * kWidest < kMinPrimaryBytes) return reject("too small", 0);
   const auto stream = at::cuda::getCurrentCUDAStream();
   const c10::DeviceIndex device = stream.device_index();
@@ -237,9 +231,10 @@ bool try_launch_impl(
   size_t bytes = 0;
   for (size_t s : sizes) bytes += n * s;
   cudaEvent_t stop = nullptr;
-  if (!calibration.use_side(stream.stream(), bytes, &stop, __PRETTY_FUNCTION__)) {
+  if (!calibration.use_side(device, stream.stream(), bytes, &stop, __PRETTY_FUNCTION__)) {
     timer.stop = stop; // not a temporary DefaultLaunchTimer: its destructor would record now
     timer.stream = stream.stream();
+    timer.calibration = &calibration;
     return reject("calibrated (or calibrating) to the default kernel", 0);
   }
   const uint64_t chunk_elems = kChunkBytes / kWidest;
@@ -257,6 +252,7 @@ bool try_launch_impl(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   if (stop != nullptr) {
     C10_CUDA_CHECK(cudaEventRecord(stop, stream.stream()));
+    calibration.stop_recorded();
   }
   count_launch();
   return true;
