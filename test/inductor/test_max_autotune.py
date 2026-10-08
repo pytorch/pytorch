@@ -181,6 +181,44 @@ def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return a.new_empty((a.shape[0], a.shape[1], b.shape[2]))
 
 
+_BLACKWELL_BMM_PERSISTENT_SHAPE = (160, 128, 264, 128)
+# Options for test_blackwell_bmm_template; unspecified options use its defaults.
+_BLACKWELL_BMM_CASES = {
+    **{
+        f"subtile_{s}_dpf{d}": {"epilogue_subtile": s, "data_partition_factor": d}
+        for s in (1, 2, 4)
+        for d in (1, 2)
+    },
+    # Stride-0 batch operands keep a shared rank-2 descriptor.
+    **{f"broadcast_{o}": {"broadcast": o} for o in ("a", "b", "ab")},
+    # More tiles than SMs, so workers move between batches.
+    **{
+        f"persistent_transpose_{t or 'none'}": {
+            "shape": _BLACKWELL_BMM_PERSISTENT_SHAPE,
+            "transpose": t,
+        }
+        for t in ("", "a", "b", "ab")
+    },
+    **{
+        f"host_side_tma_broadcast_{o or 'none'}": {
+            "shape": _BLACKWELL_BMM_PERSISTENT_SHAPE,
+            "broadcast": o,
+            "host_side_tma": True,
+        }
+        for o in ("", "b")
+    },
+    # fp32 follows the shared TF32 gate, including min(N, K) >= 512.
+    **{
+        f"fp32_{p}_n{n}": {
+            "shape": (2, 256, 512, n),
+            "transpose": "",
+            "fp32_precision": p,
+        }
+        for p, n in (("ieee", 512), ("tf32", 512), ("tf32", 128))
+    },
+}
+
+
 @torch.library.custom_op("inductor_test::blackwell_bmm_flat", mutates_args={})
 def blackwell_bmm_flat(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return torch.bmm(a, b).flatten(0, 1)
@@ -229,52 +267,30 @@ class TestMaxAutotune(TestCase):
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
 
-    def _run_blackwell_bmm_template(
+    def _compile_blackwell_bmm(
         self,
-        broadcast_a: bool,
-        broadcast_b: bool,
-        data_partition_factor: int,
-        epilogue_subtile: int,
-        shape: tuple[int, int, int, int] = (3, 256, 8193, 128),
-        check_global_persistence: bool = False,
-        transpose_a: bool = True,
-        transpose_b: bool = False,
+        fn,
+        *args,
+        epilogue_subtile: int | None = None,
+        data_partition_factor: int = 1,
         host_side_tma: bool = False,
-    ) -> torch.Tensor:
-        bsz, m, k, n = shape
-        if broadcast_a:
-            a = torch.randn(m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-            if transpose_a:
-                a = a.T.contiguous().T
-            a = a.unsqueeze(0).expand(bsz, -1, -1)
-        else:
-            a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-            if transpose_a:
-                a = a.transpose(1, 2).contiguous().transpose(1, 2)
-        if broadcast_b:
-            b = torch.randn(k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-            if transpose_b:
-                b = b.T.contiguous().T
-            b = b.unsqueeze(0).expand(bsz, -1, -1)
-        else:
-            b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-            if transpose_b:
-                b = b.transpose(1, 2).contiguous().transpose(1, 2)
+        expect_choice: bool = True,
+        dynamic: bool = False,
+    ):
+        """Compile ``fn`` with ``blackwell_bmm`` lowered to one template choice."""
 
         class TestBlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
             def _get_template_configs_impl(self, kernel_inputs, op_name):
                 for template_config in super()._get_template_configs_impl(
                     kernel_inputs, op_name
                 ):
-                    if (
-                        template_config["BLOCK_M"] == 128
-                        and template_config["BLOCK_N"] == 128
-                    ):
-                        yield {
-                            **template_config,
-                            "DATA_PARTITION_FACTOR": data_partition_factor,
-                            "EPILOGUE_SUBTILE": epilogue_subtile,
-                        }
+                    if template_config["BLOCK_M"] == 128:
+                        if epilogue_subtile is not None:
+                            template_config["EPILOGUE_SUBTILE"] = epilogue_subtile
+                        template_config["DATA_PARTITION_FACTOR"] = (
+                            data_partition_factor
+                        )
+                        yield template_config
                         return
 
         def lowering(a_node, b_node):
@@ -283,6 +299,9 @@ class TestMaxAutotune(TestCase):
                 [blackwell_ws_persistent_tma_bmm_template],
                 "bmm",
             )
+            if not expect_choice:
+                self.assertEqual(choices, [])
+                raise NoValidChoicesError("Blackwell BMM template rejected the input")
             return choices[0].output_node()
 
         with (
@@ -302,128 +321,120 @@ class TestMaxAutotune(TestCase):
                 **{"triton.enable_host_side_tma": host_side_tma},
             ),
         ):
-            actual, codes = run_and_get_code(
-                torch.compile(lambda x, y: blackwell_bmm(x, y), fullgraph=True),
-                a,
-                b,
+            return run_and_get_code(
+                torch.compile(fn, fullgraph=True, dynamic=dynamic), *args
             )
 
-        torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
+    @staticmethod
+    def _blackwell_bmm_operand(bsz, rows, cols, broadcast, transpose, dtype):
+        shape = (cols, rows) if transpose else (rows, cols)
+        if not broadcast:
+            shape = (bsz, *shape)
+        if dtype == torch.float32:
+            # Small integers are exact in both TF32 and IEEE fp32.
+            t = torch.randint(-2, 3, shape, device=GPU_TYPE).float()
+        else:
+            t = torch.randn(shape, device=GPU_TYPE, dtype=dtype)
+        if transpose:
+            t = t.transpose(-1, -2)
+        return t.expand(bsz, rows, cols)
+
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("case", list(_BLACKWELL_BMM_CASES))
+    def test_blackwell_bmm_template(self, case: str) -> None:
+        opts = {
+            "shape": (3, 256, 8193, 128),
+            "broadcast": "",
+            "transpose": "a",
+            "epilogue_subtile": 1,
+            "data_partition_factor": 1,
+            "host_side_tma": False,
+            "fp32_precision": None,
+            **_BLACKWELL_BMM_CASES[case],
+        }
+        bsz, m, k, n = opts["shape"]
+        precision = opts["fp32_precision"]
+        dtype = torch.bfloat16 if precision is None else torch.float32
+        expect_tf32 = precision == "tf32" and min(n, k) >= 512
+        if precision is not None and meta_ws_enabled() and not expect_tf32:
+            self.skipTest("Meta autoWS fails to warp-specialize IEEE fp32 dots")
+        a, b = (
+            self._blackwell_bmm_operand(
+                bsz,
+                rows,
+                cols,
+                broadcast=name in opts["broadcast"],
+                transpose=name in opts["transpose"],
+                dtype=dtype,
+            )
+            for name, rows, cols in (("a", m, k), ("b", k, n))
+        )
+
+        def compile_bmm(host_side_tma):
+            torch._dynamo.reset()
+            return self._compile_blackwell_bmm(
+                blackwell_bmm,
+                a,
+                b,
+                epilogue_subtile=opts["epilogue_subtile"],
+                data_partition_factor=opts["data_partition_factor"],
+                host_side_tma=host_side_tma,
+            )
+
+        old_precision = torch.backends.cuda.matmul.fp32_precision
+        if precision is not None:
+            torch.backends.cuda.matmul.fp32_precision = precision
+        try:
+            actual, codes = compile_bmm(opts["host_side_tma"])
+            if opts["host_side_tma"]:
+                # Host-built descriptors must match the device-side path exactly.
+                expected, _ = compile_bmm(False)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = old_precision
+
+        if precision is None:
+            torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
+        else:
+            self.assertEqual(actual, torch.bmm(a, b), atol=0, rtol=0)
+        code = codes[0]
         # Rank-3 operands go through tma_descriptor(); broadcast operands keep
         # a device-side rank-2 descriptor.
-        for name, broadcast in (("A", broadcast_a), ("B", broadcast_b)):
+        for name in ("A", "B"):
             desc = f"{name.lower()}_desc"
-            if broadcast:
-                self.assertIn(
-                    f"{desc} = triton.language.make_tensor_descriptor", codes[0]
-                )
-            elif host_side_tma:
-                self.assertIn(f"{desc} = {name}\n", codes[0])
-                self.assertIn("host_tma_descriptor_args", codes[0])
+            if name.lower() in opts["broadcast"]:
+                self.assertIn(f"{desc} = triton.language.make_tensor_descriptor", code)
+            elif opts["host_side_tma"]:
+                self.assertIn(f"{desc} = {name}\n", code)
+                self.assertIn("host_tma_descriptor_args", code)
             else:
                 self.assertRegex(
-                    codes[0],
+                    code,
                     rf"{desc} = tl\.make_tensor_descriptor\(base={name}, "
                     r"shape=\[\d+, \d+, \d+\], strides=\[\d+, \d+, 1\], "
                     r"block_shape=\[1, \d+, \d+\]\)",
                 )
-        self.assertNotIn("two_ctas=True", codes[0])
-        self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", codes[0])
-        if check_global_persistence:
-            self.assertNotIn("tl.program_id(1)", codes[0])
-            self.assertIn("for tile_id in tl.range", codes[0])
-            self.assertIn("num_tiles = BATCH * num_tiles_per_batch", codes[0])
+        # One global persistent queue over batches and tiles.
+        self.assertNotIn("tl.program_id(1)", code)
+        self.assertIn("for tile_id in tl.range", code)
+        self.assertIn("num_tiles = BATCH * num_tiles_per_batch", code)
+        self.assertNotIn("two_ctas=True", code)
+        subtile = opts["epilogue_subtile"]
+        self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {subtile}", code)
+        self.assertIn(f"ALLOW_TF32 : tl.constexpr = {expect_tf32}", code)
         if meta_ws_enabled():
-            self.assertIn(
-                f"DATA_PARTITION_FACTOR : tl.constexpr = {data_partition_factor}",
-                codes[0],
-            )
-            self.assertIn("SEPARATE_EPILOGUE_STORE : tl.constexpr = True", codes[0])
+            dpf = opts["data_partition_factor"]
+            self.assertIn(f"DATA_PARTITION_FACTOR : tl.constexpr = {dpf}", code)
+            self.assertIn("SEPARATE_EPILOGUE_STORE : tl.constexpr = True", code)
         else:
-            self.assertNotIn("data_partition_factor", codes[0])
-        return actual
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    @parametrize("data_partition_factor", (1, 2))
-    @parametrize("epilogue_subtile", (1, 2, 4))
-    def test_blackwell_bmm_template(
-        self,
-        data_partition_factor: int,
-        epilogue_subtile: int,
-    ) -> None:
-        self._run_blackwell_bmm_template(
-            broadcast_a=False,
-            broadcast_b=False,
-            data_partition_factor=data_partition_factor,
-            epilogue_subtile=epilogue_subtile,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    def test_blackwell_bmm_template_broadcast_b(self) -> None:
-        self._run_blackwell_bmm_template(
-            broadcast_a=False,
-            broadcast_b=True,
-            data_partition_factor=1,
-            epilogue_subtile=1,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    @parametrize("broadcast_b", (False, True))
-    def test_blackwell_bmm_template_broadcast_a(self, broadcast_b: bool) -> None:
-        self._run_blackwell_bmm_template(
-            broadcast_a=True,
-            broadcast_b=broadcast_b,
-            data_partition_factor=1,
-            epilogue_subtile=1,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    @parametrize("transpose_a", (False, True))
-    @parametrize("transpose_b", (False, True))
-    def test_blackwell_bmm_template_global_persistence(
-        self, transpose_a: bool, transpose_b: bool
-    ) -> None:
-        # More logical tiles than SMs makes each of the first workers process
-        # a second tile from a different batch through the same rank-3 TMA
-        # descriptors.
-        self._run_blackwell_bmm_template(
-            broadcast_a=False,
-            broadcast_b=False,
-            data_partition_factor=1,
-            epilogue_subtile=1,
-            shape=(160, 128, 264, 128),
-            check_global_persistence=True,
-            transpose_a=transpose_a,
-            transpose_b=transpose_b,
-        )
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    @parametrize("broadcast_b", (False, True))
-    def test_blackwell_bmm_template_host_side_tma(self, broadcast_b: bool) -> None:
-        # Host-built rank-3 descriptors must match the device-side path exactly.
-        outputs = []
-        for host_side_tma in (False, True):
-            torch.manual_seed(0)
-            torch._dynamo.reset()
-            outputs.append(
-                self._run_blackwell_bmm_template(
-                    broadcast_a=False,
-                    broadcast_b=broadcast_b,
-                    data_partition_factor=1,
-                    epilogue_subtile=1,
-                    shape=(160, 128, 264, 128),
-                    host_side_tma=host_side_tma,
-                )
-            )
-        self.assertTrue(torch.equal(outputs[0], outputs[1]))
+            self.assertNotIn("data_partition_factor", code)
 
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     @parametrize("case", ("storage_offset", "aliased_operands"))
     def test_blackwell_bmm_template_host_side_tma_fallback(self, case: str) -> None:
         # Operands a host descriptor cannot describe keep device descriptors.
-        bsz, m, k, n = 4, 256, 256, 256
-        x = torch.randint(-2, 3, (bsz + 1, m, k), device=GPU_TYPE).bfloat16()
-        y = torch.randint(-2, 3, (bsz, k, n), device=GPU_TYPE).bfloat16()
+        x = torch.randint(-2, 3, (5, 256, 256), device=GPU_TYPE).bfloat16()
+        y = torch.randint(-2, 3, (4, 256, 256), device=GPU_TYPE).bfloat16()
         if case == "storage_offset":
             fn, args, expected = (
                 lambda x, y: blackwell_bmm(x[1:], y),
@@ -431,170 +442,37 @@ class TestMaxAutotune(TestCase):
                 torch.bmm(x[1:], y),
             )
         else:
-            fn, args, expected = (
-                lambda x: blackwell_bmm(x, x),
-                (x,),
-                torch.bmm(x, x),
-            )
-
-        class TestBlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
-            def _get_template_configs_impl(self, kernel_inputs, op_name):
-                for template_config in super()._get_template_configs_impl(
-                    kernel_inputs, op_name
-                ):
-                    if template_config["BLOCK_M"] == 128:
-                        yield template_config
-                        return
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                MMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            return choices[0].output_node()
-
-        with (
-            override_template_heuristics(
-                device_type=GPU_TYPE,
-                template_op_pairs=[
-                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
-                ],
-                override_heuristic_class=TestBlackwellBMMHeuristic,
-            ),
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
-            ),
-            config.patch(
-                compile_threads=1, **{"triton.enable_host_side_tma": True}
-            ),
-        ):
-            actual, codes = run_and_get_code(
-                torch.compile(fn, fullgraph=True), *args
-            )
-
+            fn, args, expected = lambda x: blackwell_bmm(x, x), (x,), torch.bmm(x, x)
+        actual, codes = self._compile_blackwell_bmm(fn, *args, host_side_tma=True)
         self.assertEqual(actual, expected, atol=0, rtol=0)
         self.assertIn("HOST_SIDE_TMA : tl.constexpr = False", codes[0])
         self.assertIn("a_desc = tl.make_tensor_descriptor(base=A", codes[0])
 
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     @parametrize(
-        "fp32_precision,n,expect_tf32",
-        (("ieee", 512, False), ("tf32", 512, True), ("tf32", 128, False)),
+        "case", ("misaligned_leading_stride", "zero_k", "dynamic_shapes", "batch_inner")
     )
-    def test_blackwell_bmm_template_allow_tf32(
-        self, fp32_precision: str, n: int, expect_tf32: bool
-    ) -> None:
-        # fp32 operands follow the same TF32 gate as the other GEMM templates,
-        # including its size threshold (min(N, K) >= 512).
-        if meta_ws_enabled() and not expect_tf32:
-            self.skipTest("Meta autoWS fails to warp-specialize IEEE fp32 dots")
-        a = torch.randint(-2, 3, (2, 256, 512), device=GPU_TYPE).float()
-        b = torch.randint(-2, 3, (2, 512, n), device=GPU_TYPE).float()
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                MMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            return choices[0].output_node()
-
-        old_precision = torch.backends.cuda.matmul.fp32_precision
-        torch.backends.cuda.matmul.fp32_precision = fp32_precision
-        try:
-            with (
-                mock.patch.dict(
-                    lowerings,
-                    {torch.ops.inductor_test.blackwell_bmm.default: lowering},
-                ),
-                config.patch(compile_threads=1),
-            ):
-                actual, codes = run_and_get_code(
-                    torch.compile(blackwell_bmm, fullgraph=True), a, b
-                )
-        finally:
-            torch.backends.cuda.matmul.fp32_precision = old_precision
-
-        # Small integers are exact in both TF32 and IEEE fp32.
-        self.assertEqual(actual, torch.bmm(a, b), atol=0, rtol=0)
-        self.assertIn(f"ALLOW_TF32 : tl.constexpr = {expect_tf32}", codes[0])
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    def test_blackwell_bmm_template_rejects_misaligned_leading_stride(self) -> None:
-        bsz, m, k, n = 2, 256, 256, 257
+    def test_blackwell_bmm_template_rejects(self, case: str) -> None:
+        bsz, m, k, n = {
+            "misaligned_leading_stride": (2, 256, 256, 257),
+            "zero_k": (2, 256, 0, 128),
+            # Keeps every stride 16-byte aligned so only the layout check fails.
+            "batch_inner": (8, 256, 256, 128),
+        }.get(case, (2, 256, 256, 128))
         a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                MMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
+        if case == "batch_inner":
+            # Batch is the only contiguous dim, so no matrix dim suits TMA.
+            a = torch.randn(m, k, bsz, device=GPU_TYPE, dtype=torch.bfloat16)
+            a = a.permute(2, 0, 1)
+        with self.assertRaisesRegex(BackendCompilerFailed, "rejected the input"):
+            self._compile_blackwell_bmm(
+                blackwell_bmm,
+                a,
+                b,
+                expect_choice=False,
+                dynamic=case == "dynamic_shapes",
             )
-            self.assertEqual(choices, [])
-            raise NoValidChoicesError("Blackwell BMM template was correctly rejected")
-
-        with (
-            self.assertRaisesRegex(BackendCompilerFailed, "correctly rejected"),
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
-            ),
-            config.patch(compile_threads=1),
-        ):
-            torch.compile(blackwell_bmm, fullgraph=True)(a, b)
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    def test_blackwell_bmm_template_rejects_zero_k(self) -> None:
-        bsz, m, k, n = 2, 256, 0, 128
-        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                MMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            self.assertEqual(choices, [])
-            raise NoValidChoicesError("Blackwell BMM template rejected zero K")
-
-        with (
-            self.assertRaisesRegex(BackendCompilerFailed, "rejected zero K"),
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
-            ),
-            config.patch(compile_threads=1),
-        ):
-            torch.compile(blackwell_bmm, fullgraph=True)(a, b)
-
-    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
-    def test_blackwell_bmm_template_rejects_dynamic_shapes(self) -> None:
-        bsz, m, k, n = 2, 256, 256, 128
-        a = torch.randn(bsz, m, k, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(bsz, k, n, device=GPU_TYPE, dtype=torch.bfloat16)
-
-        def lowering(a_node, b_node):
-            choices = V.choices.get_template_configs(
-                MMKernelInputs([a_node, b_node]),
-                [blackwell_ws_persistent_tma_bmm_template],
-                "bmm",
-            )
-            self.assertEqual(choices, [])
-            raise NoValidChoicesError("Blackwell BMM template rejected dynamic shapes")
-
-        with (
-            self.assertRaisesRegex(BackendCompilerFailed, "rejected dynamic shapes"),
-            mock.patch.dict(
-                lowerings,
-                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
-            ),
-            config.patch(compile_threads=1),
-        ):
-            torch.compile(blackwell_bmm, fullgraph=True, dynamic=True)(a, b)
 
     def _assert_blackwell_bmm_2cta_rejected(
         self,
