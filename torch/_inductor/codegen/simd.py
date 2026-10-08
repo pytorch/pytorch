@@ -825,6 +825,34 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         """
         raise NotImplementedError
 
+    def mix_order_partial_finishes(
+        self, ws_name: str, nsplit: str, rnumel: str, rename: dict[str, str]
+    ) -> list[tuple[str, str]]:
+        """
+        The wrapper's reduction of each mix-order partial in the workspace, as
+        ``(buffer_name, expr)``. The split-size benchmark times these same
+        expressions, so the two can't drift.
+        """
+        finishes = []
+        stride = f"({nsplit}) * ({rnumel})"
+        for idx, partial_accum in enumerate(self.saved_partial_accumulate):
+            buffer_name = rename.get(
+                partial_accum.buffer_name, partial_accum.buffer_name
+            )
+            if (
+                buffer_name in V.graph.removed_buffers
+                or buffer_name in self.removed_buffers
+            ):
+                continue
+            finishes.append(
+                (
+                    buffer_name,
+                    f"{ws_name}[{idx} * {stride} : ({idx} + 1) * {stride}]"
+                    f".view({nsplit}, {rnumel}).{partial_accum.reduction_type}(dim=0)",
+                )
+            )
+        return finishes
+
     def get_unfused_epilogues(self) -> list[Any]:
         """Return epilogue nodes that were not fused into the kernel.
 
@@ -3677,18 +3705,36 @@ class SIMDScheduling(BaseScheduling):
         )
         return converted_nodes, SIMDKernelFeatures(node_schedule, numel, rnumel)
 
+    @staticmethod
+    def _mix_order_rename(node2_reductions) -> dict[str, str]:
+        """Maps each split reduction's intermediate output to its final
+        reduction output, which the mix-order kernel's partials finish into."""
+        rename = {}
+        if node2_reductions and node2_reductions[0].node._split_size:
+            for subnode in node2_reductions:
+                bufname = subnode.get_outputs()[0].node.get_name()
+                username = (
+                    subnode.get_outputs()[0]
+                    .users[0]
+                    .node.get_outputs()[0]
+                    .node.get_name()
+                )
+                rename[bufname] = username
+        return rename
+
     def _benchmark_mix_order_kernel(
-        self, kernel_features, split_size
+        self, kernel_features, split_size, rename
     ) -> tuple[float, str]:
         kernel = self._create_kernel_for_mix_order_reduction(
             kernel_features, split_size
         )
+        kernel.mix_order_benchmark_rename = rename
         _, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel, for_benchmark=True
         )
         return self.benchmark_codegened_module(PyCodeCache.load(src_code))
 
-    def _tuned_mix_order_split_size(self, kernel_features, initial_split_size):
+    def _tuned_mix_order_split_size(self, kernel_features, initial_split_size, rename):
         """The split size codegen_mix_order_reduction uses: initial_split_size,
         autotuned when enabled."""
         kernel = self._create_kernel_for_mix_order_reduction(
@@ -3709,7 +3755,7 @@ class SIMDScheduling(BaseScheduling):
 
             def _bench(candidate_split_size):
                 ms, _ = self._benchmark_mix_order_kernel(
-                    kernel_features, candidate_split_size
+                    kernel_features, candidate_split_size, rename
                 )
                 return ms
 
@@ -3736,10 +3782,11 @@ class SIMDScheduling(BaseScheduling):
             _, kernel_features = self._mix_order_kernel_features(
                 node1, node2_reductions, numel, rnumel
             )
+            rename = self._mix_order_rename(node2_reductions)
             split_size = self._tuned_mix_order_split_size(
-                kernel_features, self._mix_order_split_size(node1, numel)
+                kernel_features, self._mix_order_split_size(node1, numel), rename
             )
-            return self._benchmark_mix_order_kernel(kernel_features, split_size)
+            return self._benchmark_mix_order_kernel(kernel_features, split_size, rename)
         finally:
             snapshot.restore()
             for subnode in node2_reductions:
@@ -3762,9 +3809,12 @@ class SIMDScheduling(BaseScheduling):
             node1, node2_reductions, numel, rnumel
         )
         node_schedule = kernel_features.node_schedule
+        rename = self._mix_order_rename(node2_reductions)
         kernel = self._create_kernel_for_mix_order_reduction(
             kernel_features,
-            self._tuned_mix_order_split_size(kernel_features, initial_split_size),
+            self._tuned_mix_order_split_size(
+                kernel_features, initial_split_size, rename
+            ),
         )
 
         ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
@@ -3774,29 +3824,14 @@ class SIMDScheduling(BaseScheduling):
 
         # rename intermediate reduction output to final reduction
         # output
-        is_split_reduction = bool(node2_reductions[0].node._split_size)
-        rename = {}
-        if is_split_reduction:
+        if rename:
             for subnode in node2_reductions:
-                bufname = subnode.get_outputs()[0].node.get_name()
-                username = (
-                    subnode.get_outputs()[0]
-                    .users[0]
-                    .node.get_outputs()[0]
-                    .node.get_name()
-                )
-                rename[bufname] = username
                 if not self.scheduler:
                     raise AssertionError("expected self.scheduler to be set")
                 self.scheduler.removed_ops.add(
                     subnode.get_outputs()[0].users[0].node.get_name()
                 )
-                V.graph.removed_buffers.add(bufname)
-
-            for partial_accum in kernel.saved_partial_accumulate:
-                partial_accum.buffer_name = rename.get(
-                    partial_accum.buffer_name, partial_accum.buffer_name
-                )
+                V.graph.removed_buffers.add(subnode.get_outputs()[0].node.get_name())
 
         kernel_name = self.define_kernel(src_code, node_schedule, kernel)
         kernel.kernel_name = kernel_name
@@ -3827,19 +3862,9 @@ class SIMDScheduling(BaseScheduling):
         nsplit = V.graph.wrapper_code.codegen_python_sizevar(
             (numel + kernel.rsplit_size - 1) // kernel.rsplit_size
         )
-        for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
-            buffer_name = partial_accum.buffer_name
-            if buffer_name in V.graph.removed_buffers:
-                continue
-
-            stride_str = f"({nsplit}) * ({rnumel})"
-            start = f"{idx} * {stride_str}"
-            end = f"({idx} + 1) * {stride_str}"
-            opname = partial_accum.reduction_type
-            reduced = (
-                f"{ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
-            )
-
+        for buffer_name, reduced in kernel.mix_order_partial_finishes(
+            ws_name, nsplit, str(rnumel), rename
+        ):
             codegen_reduced_buffer(buffer_name, reduced)
 
         kernel.deallocate_workspaces()
