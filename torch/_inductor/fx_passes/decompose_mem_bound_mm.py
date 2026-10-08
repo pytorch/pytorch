@@ -19,7 +19,7 @@ aten = torch.ops.aten
 log = logging.getLogger(__name__)
 
 # TODO: need a better strategy for decomposing mm
-# The following two constants are for CUDA device only
+# The following two constants are for GPU/accelerator devices
 MIN_FIRST_DIMENSION_DECOMPOSITION = 10240
 MAX_OTHER_DIMENSION_DECOMPOSITION = 32
 # The following two constants are for CPU device only
@@ -126,7 +126,7 @@ def should_decompose_mm(mat1, mat2) -> bool:
             - Both matrices must be 2-dimensional.
             - If the configuration option `skip_dynamic_shape_dim_check` is False:
                 - Decomposition is only considered for statically-shaped matrices.
-                - For CUDA devices: `mat1.shape[0]` must be at least `min_first_dimension_decomposition`,
+                - For GPU/accelerator devices: `mat1.shape[0]` must be at least `min_first_dimension_decomposition`,
                   and both dimensions of `mat2` must be less than `max_other_dimension_decomposition`.
                 - For CPU devices: All relevant dimensions must be less than or equal to their respective
                   CPU decomposition thresholds.
@@ -136,8 +136,8 @@ def should_decompose_mm(mat1, mat2) -> bool:
                 - The same dimension and device checks apply, but allow for dynamic/static uncertainty.
             - Returns False if any of the above conditions are not met.
     Notes:
-        - Relies on helper functions such as `is_node_meta_valid`, `check_device`, `statically_known_true`,
-          and `statically_known_false`, as well as configuration values like
+        - Relies on helper functions such as `is_node_meta_valid`, `check_device`, `check_gpu_device`,
+          `statically_known_true` and `statically_known_false`, as well as configuration values like
           `min_first_dimension_decomposition`, `max_other_dimension_decomposition`, etc.
         - Designed for use in graph optimization or fusion passes where decomposing large or dynamic
           matrix multiplications can improve performance or memory usage.

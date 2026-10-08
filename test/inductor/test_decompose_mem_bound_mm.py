@@ -10,6 +10,7 @@ from torch._inductor.fx_passes.decompose_mem_bound_mm import (
     check_device,
     check_gpu_device,
     should_decompose_bmm,
+    should_decompose_mm,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -653,14 +654,11 @@ class _FakeTensor:
 
 
 class TestCheckGpuDevice(TestCase):
-    """check_gpu_device gates the accelerator branch of decompose_mm_pass.
-
-    Kept out of TestDecomposeMemMM because these cases need no GPU; the
-    operands are duck-typed objects that only carry ``.device``.
-    """
-
     def test_same_registered_gpu_device_types(self):
-        for device_type in ("cuda", "xpu", "mps", "mtia"):
+        from torch._inductor.utils import GPU_TYPES
+
+        # Every registered GPU-class device type takes the accelerator branch.
+        for device_type in GPU_TYPES:
             fake_a = _FakeTensor(device_type)
             fake_b = _FakeTensor(device_type)
             self.assertTrue(check_gpu_device(fake_a, fake_b))
@@ -679,6 +677,42 @@ class TestCheckGpuDevice(TestCase):
         fake_a = _FakeTensor("cuda")
         fake_b = _FakeTensor("cpu")
         self.assertFalse(check_gpu_device(fake_a, fake_b))
+
+
+class _FakeVal:
+    def __init__(self, shape, device_type):
+        self.shape = shape
+        self.device = _FakeDevice(device_type)
+        self.dtype = torch.float32
+
+
+def _node_with_val(val, name):
+    graph = torch.fx.Graph()
+    node = graph.placeholder(name)
+    node.meta["val"] = val
+    return node
+
+
+class TestDecomposeMmDeviceGate(TestCase):
+    @torch._inductor.config.patch(post_grad_fusion_options={"decompose_mm_pass": {}})
+    def test_gate_admits_registered_gpu_device_types(self):
+        # mps-classified operands meet the accelerator thresholds
+        # (m >= 10240, k, n < 32): the gate flips from False to True,
+        # which is the behavior this PR adds.
+        mat1 = _node_with_val(_FakeVal((10240, 8), "mps"), "mat1")
+        mat2 = _node_with_val(_FakeVal((8, 8), "mps"), "mat2")
+        self.assertTrue(should_decompose_mm(mat1, mat2))
+        b1 = _node_with_val(_FakeVal((10240, 8, 8), "mps"), "b1")
+        b2 = _node_with_val(_FakeVal((10240, 8, 8), "mps"), "b2")
+        self.assertTrue(should_decompose_bmm(b1, b2))
+
+    @torch._inductor.config.patch(post_grad_fusion_options={"decompose_mm_pass": {}})
+    def test_gate_keeps_cpu_on_cpu_thresholds(self):
+        # The same shapes stay on the CPU thresholds (False), proving that
+        # in-tree device families keep their original per-family semantics.
+        mat1 = _node_with_val(_FakeVal((10240, 8), "cpu"), "mat1")
+        mat2 = _node_with_val(_FakeVal((8, 8), "cpu"), "mat2")
+        self.assertFalse(should_decompose_mm(mat1, mat2))
 
 
 if __name__ == "__main__":
