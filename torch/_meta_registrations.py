@@ -4759,8 +4759,6 @@ def meta_median(input):
 )
 @out_wrapper("values", "indices")
 def meta_median_mode_dim(input, dim=-1, keepdim=False):
-    if device_hint(input) == "cuda":
-        utils.alert_not_deterministic("median CUDA with indices output")
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
     return (
@@ -6081,6 +6079,24 @@ def full(size, fill_value, *args, **kwargs):
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
+
+    # Only check direct symbols. A compound expression may overflow before its
+    # generated C++ check.
+    if (
+        isinstance(fill_value, (torch.SymInt, torch.SymFloat))
+        and fill_value.node.expr.is_Symbol
+        and utils.is_integer_dtype(dtype)
+    ):
+        info = torch.iinfo(dtype)
+
+        def error_msg():
+            return f"value cannot be converted to type {dtype} without overflow"
+
+        is_int = isinstance(fill_value, torch.SymInt)
+        if not (is_int and dtype in (torch.int64, torch.uint64)):
+            lower = -info.max if is_int and not dtype.is_signed else info.min
+            torch._check(lower <= fill_value, error_msg)
+            torch._check(fill_value < info.max + 1, error_msg)
 
     return torch.empty(size, *args, **kwargs)
 

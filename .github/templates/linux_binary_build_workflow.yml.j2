@@ -216,20 +216,6 @@ jobs:
             else
               echo "docker.io/${repo}:${tag} not on Docker Hub; using ECR"
             fi
-{%- if rocm_preview_configs %}
-            # A representative image can exist after a partial image-build run
-            # while the independently built preview image is still missing.
-            if [[ -z "${registry_host}" ]]; then
-              repo="pytorch/!{{ rocm_preview_configs[0]['container_image'] }}"
-              tag="!{{ rocm_preview_configs[0]['container_image_tag_prefix'] }}${suffix}"
-              if curl -fsS --retry 3 -o /dev/null "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"; then
-                echo "docker.io/${repo}:${tag} exists; using Docker Hub"
-              else
-                echo "docker.io/${repo}:${tag} not on Docker Hub; using ECR"
-                registry_host="308535385114.dkr.ecr.us-east-1.amazonaws.com/"
-              fi
-            fi
-{%- endif %}
 {%- endif %}
           elif [[ "${REF_TYPE}" == "tag" && "${REF_NAME}" == v* ]]; then
             # Release candidate: pin the Docker Hub image.
@@ -275,28 +261,53 @@ jobs:
             sleep 300
           done
           echo "Found ${repo}:${tag}"
-{%- if rocm_preview_configs %}
-          # Matrix image builds complete independently, so the representative
-          # image above is not a readiness signal for the preview image.
-          repo="pytorch/!{{ rocm_preview_configs[0]['container_image'] }}"
-          tag="!{{ rocm_preview_configs[0]['container_image_tag_prefix'] }}-${tree_hash}"
-          echo "Waiting for ${repo}:${tag} to be pushed to ECR by build-manywheel-images..."
-          deadline=$(( SECONDS + 60 * 60 ))
-          until aws ecr describe-images \
-              --region us-east-1 \
-              --repository-name "${repo}" \
-              --image-ids imageTag="${tag}" >/dev/null 2>&1; do
-            if (( SECONDS > deadline )); then
-              echo "ERROR: timed out (60 min) waiting for ${repo}:${tag} in ECR." >&2
-              echo "Did the rocm-preview build-manywheel-images job fail?" >&2
-              exit 1
-            fi
-            echo "  preview image not in ECR yet; retrying in 5 min..."
-            sleep 300
-          done
-          echo "Found ${repo}:${tag}"
 {%- endif %}
 {%- endif %}
+
+{%- if rocm_preview_configs and pin_docker_image %}
+  # Preview is optional during bootstrap: its missing public image must not
+  # redirect or block the stable CPU/CUDA/ROCm/XPU lanes.
+  get-preview-docker-tag:
+    needs: get-label-type
+    if: ${{ github.repository_owner == 'pytorch' }}
+    name: get-preview-docker-tag
+    runs-on: ubuntu-24.04
+    outputs:
+      docker_image_suffix: ${{ steps.calc.outputs.docker_image_suffix }}
+      image_available: ${{ steps.calc.outputs.image_available }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          submodules: false
+          show-progress: false
+      - name: Check preview builder availability
+        id: calc
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix=""
+          if [[ "${REF_TYPE}" == "tag" ]]; then
+            suffix="-$(git rev-parse HEAD:.ci/docker)"
+          fi
+          tag="rocm-preview${suffix}"
+          repo="pytorch/manylinux2_28-builder"
+          if curl -fsS --retry 3 -o /dev/null \
+              "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"; then
+            echo "docker.io/${repo}:${tag} exists"
+            available=true
+          else
+            echo "::warning::Preview builder ${repo}:${tag} is not published; skipping preview jobs."
+            available=false
+          fi
+          echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
+          echo "image_available=${available}" >> "${GITHUB_OUTPUT}"
 {%- endif %}
 
 {#- One inline build job per (gpu_arch_type, desired_cuda) group. Each loops
@@ -400,9 +411,14 @@ jobs:
 
   !{{ lane['job_name'] }}:
     name: ${{ matrix.build_name }}-build
+{%- if lane['job_name'] == 'manywheel-build-rocm-preview' %}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    needs: [get-label-type, get-preview-docker-tag]
+{%- else %}
     if: !{{ owner_if }}
-    uses: ./.github/workflows/_binary-build-linux.yml
     needs: {% if pin_docker_image %}[get-label-type, get-docker-tag]{% else %}get-label-type{% endif %}
+{%- endif %}
+    uses: ./.github/workflows/_binary-build-linux.yml
     strategy:
       fail-fast: false
       matrix:
@@ -433,8 +449,13 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
+{%- if lane['job_name'] == 'manywheel-build-rocm-preview' %}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE_REGISTRY_HOST: ""
+{%- else %}
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ docker_image_suffix }}
       DOCKER_IMAGE_REGISTRY_HOST: "!{{ docker_registry_host }}"
+{%- endif %}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: "!{{ runner_prefix }}"
       runs_on: !{{ build_runs_on }}
@@ -532,8 +553,13 @@ jobs:
 
   !{{ lane['job_name'] }}:
     name: ${{ matrix.build_name }}-test
+{%- if lane['job_name'] == 'manywheel-test-rocm-preview' %}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    needs: [get-label-type, get-preview-docker-tag, !{{ lane['build_job'] }}]
+{%- else %}
     if: !{{ owner_if }}
     needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, !{{ lane['build_job'] }}]
+{%- endif %}
     uses: ./.github/workflows/_binary-test-rocm-linux.yml
     strategy:
       fail-fast: false
@@ -643,11 +669,19 @@ jobs:
 
   !{{ job['name'] }}:
     name: ${{ matrix.build_name }}-upload
+{%- if job['name'] == 'manywheel-rocm-preview-upload' %}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+{%- else %}
     if: !{{ owner_if }}
+{%- endif %}
     permissions:
       id-token: write
       contents: read
+{%- if job['name'] == 'manywheel-rocm-preview-upload' %}
+    needs: [get-preview-docker-tag, !{{ job['needs'] | join(', ') }}]
+{%- else %}
     needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}!{{ job['needs'] | join(', ') }}]
+{%- endif %}
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
@@ -696,8 +730,13 @@ jobs:
 
   libtorch-extract!{{ lane['suffix'] }}:
     name: ${{ matrix.build_name }}-extract
+{%- if lane['suffix'] == '-rocm-preview' %}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    needs: [get-preview-docker-tag, !{{ lane['build_job'] }}]
+{%- else %}
     if: !{{ owner_if }}
     needs: [!{{ lane['build_job'] }}]
+{%- endif %}
     runs-on: "mt-l-x86iavx512-16-128"
     container:
       image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}

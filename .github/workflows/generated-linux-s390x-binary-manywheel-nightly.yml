@@ -53,8 +53,8 @@ jobs:
   manywheel-build:
     name: ${{ matrix.build_name }}-build
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
+    uses: ./.github/workflows/_binary-build-linux.yml
     strategy:
       fail-fast: false
       matrix:
