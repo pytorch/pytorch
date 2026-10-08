@@ -39,27 +39,52 @@ auto cow::COWDeleterContext::is_unique() const -> bool {
   return refcount_ == 1;
 }
 
-auto cow::COWDeleterContext::set_stream(c10::Stream stream, bool captured)
+auto cow::COWDeleterContext::init_stream(c10::Stream stream, bool captured)
     -> void {
+  std::lock_guard lock(stream_mutex_);
   stream_ = stream;
   captured_ = captured;
-  std::lock_guard lock(copy_event_mutex_);
-  copy_event_.reset();
+}
+
+auto cow::COWDeleterContext::share(c10::Stream stream, bool captured) -> bool {
+  std::lock_guard lock(stream_mutex_);
+  // Under the lock, the refcount can't be incremented concurrently, and it
+  // can't drop to zero while the caller holds its reference.
+  if (refcount_ == 1) {
+    // Moving to another stream: that stream must wait for pending copies,
+    // and recording the event on it again (after the wait) keeps them
+    // ordered before later steals. During capture, we can't wait for eager
+    // work, and no copies happen (see materialize_cow), so the event is left
+    // for steals after the capture.
+    if (copy_event_.has_value() && !captured && copy_event_stream_ != stream) {
+      copy_event_->block(stream);
+      copy_event_->record(stream);
+      copy_event_stream_ = stream;
+    }
+    stream_ = stream;
+    captured_ = captured;
+  } else if (stream_ != stream || captured_ != captured) {
+    return false;
+  }
+  increment_refcount();
+  return true;
 }
 
 auto cow::COWDeleterContext::record_copy_event() -> void {
+  std::lock_guard lock(stream_mutex_);
   TORCH_INTERNAL_ASSERT(stream_.has_value());
-  std::lock_guard lock(copy_event_mutex_);
   if (!copy_event_.has_value()) {
     copy_event_.emplace(stream_->device_type());
   }
-  // Supersedes the previous event: copies are all enqueued on stream_.
+  // Supersedes the previous event: copies are all enqueued on stream_, which
+  // waited for the previous copies if it changed (see share()).
   copy_event_->record(*stream_);
+  copy_event_stream_ = stream_;
 }
 
 auto cow::COWDeleterContext::wait_for_copies(c10::Stream stream) -> void {
-  std::lock_guard lock(copy_event_mutex_);
-  if (copy_event_.has_value() && stream != stream_) {
+  std::lock_guard lock(stream_mutex_);
+  if (copy_event_.has_value() && copy_event_stream_ != stream) {
     copy_event_->block(stream);
   }
 }

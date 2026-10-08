@@ -175,29 +175,10 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
   // README-cow.md.
   const std::optional<c10::Stream> stream = current_stream(data_ptr.device());
   const bool capturing = stream.has_value() && stream->is_capturing();
-  if (stream.has_value()) {
-    bool eager = false;
-    if (!capturing && storage.allocator() != nullptr) {
-      const std::optional<bool> allocated_on_stream =
-          storage.allocator()->was_allocated_on_stream(data_ptr.get(), *stream);
-      eager = allocated_on_stream.has_value() && !*allocated_on_stream;
-    }
-    if (!eager && !simple) {
-      auto* ctx =
-          data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
-      TORCH_INTERNAL_ASSERT(ctx != nullptr);
-      if (ctx->is_unique()) {
-        // There are no other references, so we can move the data to the
-        // current stream and capture state, after any pending copies.
-        if (!capturing) {
-          ctx->wait_for_copies(*stream);
-        }
-        ctx->set_stream(*stream, capturing);
-      } else {
-        eager = ctx->stream() != stream || ctx->captured() != capturing;
-      }
-    }
-    if (eager) {
+  if (stream.has_value() && !capturing && storage.allocator() != nullptr) {
+    const std::optional<bool> allocated_on_stream =
+        storage.allocator()->was_allocated_on_stream(data_ptr.get(), *stream);
+    if (allocated_on_stream.has_value() && !*allocated_on_stream) {
       return eager_clone(storage);
     }
   }
@@ -206,23 +187,35 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     // Case 1) We have a simple data pointer: wrap it.
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
         storage._mutable_data_ptr_no_checks().move_context();
+    auto* ctx = new cow::COWDeleterContext(std::move(original_ctx));
+    if (stream.has_value()) {
+      ctx->init_stream(*stream, capturing);
+    }
 
     // Save this for the result.
-    new_data_ptr = make_data_ptr(
-        data_ptr, *new cow::COWDeleterContext(std::move(original_ctx)));
+    new_data_ptr = make_data_ptr(data_ptr, *ctx);
 
     // Update this storage to the new copy on write context.
     storage.set_data_ptr_noswap(copy_data_ptr(*new_data_ptr));
     storage.set_materializer(&materialize_cow);
-    if (stream.has_value()) {
-      new_data_ptr->cast_context<cow::COWDeleterContext>(cow::cow_deleter)
-          ->set_stream(*stream, capturing);
-    }
   } else {
     // Case 2): there is already a copy on write context. Just return a
     // new storage impl.
     TORCH_INTERNAL_ASSERT(storage.has_materializer());
-    new_data_ptr = copy_data_ptr(data_ptr);
+    if (stream.has_value()) {
+      // All references to the data must share the current stream and
+      // capture state; otherwise, we clone eagerly. (If this is the only
+      // reference, its context is moved to them instead.)
+      auto* ctx =
+          data_ptr.cast_context<cow::COWDeleterContext>(cow::cow_deleter);
+      TORCH_INTERNAL_ASSERT(ctx != nullptr);
+      if (!ctx->share(*stream, capturing)) {
+        return eager_clone(storage);
+      }
+      new_data_ptr = make_data_ptr(data_ptr, *ctx);
+    } else {
+      new_data_ptr = copy_data_ptr(data_ptr);
+    }
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());

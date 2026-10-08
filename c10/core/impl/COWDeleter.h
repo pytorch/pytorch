@@ -56,10 +56,24 @@ class C10_API COWDeleterContext {
 
   // On devices whose streams are tracked (see COW.cpp), all references to
   // the data share the stream they were made on, and whether that stream was
-  // being captured into a graph then. They are set when the first lazy clone
-  // is made, and may only be changed through the only remaining reference
-  // (after waiting for copies, see wait_for_copies()).
-  void set_stream(c10::Stream stream, bool captured);
+  // being captured into a graph then.
+
+  // Sets the stream and capture state of a new context, before any other
+  // reference to it is made.
+  void init_stream(c10::Stream stream, bool captured);
+
+  // Called through an existing reference when lazily cloning the data on
+  // `stream`. If this is the only reference, moves the context to `stream`
+  // and `captured` (keeping pending copies ordered before later steals);
+  // otherwise, they must match the context's. Then increments the refcount
+  // and returns true, or returns false (without changing anything) if the
+  // data must be cloned eagerly instead. Safe to call concurrently through
+  // the same reference, since lazy cloning is logically a read.
+  bool share(c10::Stream stream, bool captured);
+
+  // The stream and capture state, which can only change through share() on
+  // the only reference, so reading them through any reference is safe
+  // (concurrent lazy clones of that reference aside).
   std::optional<c10::Stream> stream() const {
     return stream_;
   }
@@ -72,8 +86,8 @@ class C10_API COWDeleterContext {
   void record_copy_event();
 
   // Makes `stream` wait (on the device) for the copies recorded with
-  // record_copy_event(), if it isn't stream(). Must be called through the
-  // only remaining reference.
+  // record_copy_event(), if they were enqueued on another stream. Must be
+  // called through the only remaining reference.
   void wait_for_copies(c10::Stream stream);
 
  private:
@@ -85,10 +99,14 @@ class C10_API COWDeleterContext {
   std::unique_ptr<void, DeleterFnPtr> data_;
   std::atomic<std::int64_t> refcount_ = 1;
 
+  // Guards the members below, and makes share() atomic.
+  std::mutex stream_mutex_;
   std::optional<c10::Stream> stream_;
   bool captured_ = false;
-  std::mutex copy_event_mutex_;
+  // An event recorded after the last copy of the data, and the stream it was
+  // recorded on.
   std::optional<c10::Event> copy_event_;
+  std::optional<c10::Stream> copy_event_stream_;
 };
 
 // `cow_deleter` is used as the `ctx_deleter` for DataPtr to implement a COW

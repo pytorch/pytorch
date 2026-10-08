@@ -3507,6 +3507,30 @@ torch.cuda.synchronize()
             self.assertTrue(torch._C._is_cow_tensor(y))
         torch.cuda.current_stream().wait_stream(s)
 
+    def test_lazy_clone_concurrent(self):
+        # Lazily cloning is logically a read, so it can happen concurrently on
+        # the same tensor, including while it is the only reference to its
+        # data (which moves the data to the current stream).
+        x = torch.randn(1024, device="cuda")
+        x._lazy_clone()
+        expected = x.clone()
+
+        def clone_repeatedly():
+            for _ in range(1000):
+                y = x._lazy_clone()
+                del y
+
+        threads = [threading.Thread(target=clone_repeatedly) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        # x is the only reference again, so it can be written in place.
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        x.add_(1)
+        self.assertFalse(torch._C._is_cow_tensor(x))
+        self.assertEqual(x, expected + 1)
+
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
     )
@@ -3548,6 +3572,10 @@ torch.cuda.synchronize()
         s.wait_stream(torch.cuda.current_stream())
         torch.cuda._sleep(int(100 * get_cycles_per_ms()))
         y.add_(1)
+        # Lazily cloning x again while it is the only reference (and dropping
+        # the clone) must not lose track of the pending copy.
+        tmp = x._lazy_clone()
+        del tmp
         with torch.cuda.stream(s):
             x.add_(1)
         torch.cuda.current_stream().wait_stream(s)
