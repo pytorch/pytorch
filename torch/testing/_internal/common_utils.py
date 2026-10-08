@@ -1632,8 +1632,8 @@ def run_tests(argv=None):
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
         if TEST_SAVE_TORCHCI_REPORTS:
-            report_dir = os.path.join(TEST_SAVE_TORCHCI_REPORTS, sanitize_test_filename(argv[0]))
-            pytest_args += ['-p', 'torch.testing._internal.torchci.plugin', f'--torchci-report-dir={report_dir}']
+            prefix = os.path.join(TEST_SAVE_TORCHCI_REPORTS, sanitize_test_filename(argv[0]))
+            pytest_args += ['-p', 'torch.testing._internal.torchci.plugin', f'--torchci-report-prefix={prefix}']
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 

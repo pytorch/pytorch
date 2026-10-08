@@ -1489,7 +1489,8 @@ def run_ci_sanity_check(test: ShardedTest, test_directory, options):
         shutil.rmtree(dirname)
     if options.save_torchci_reports:
         name = sanitize_test_filename(test.name)
-        shutil.rmtree(Path(options.save_torchci_reports) / name, ignore_errors=True)
+        for file in glob.glob(f"{options.save_torchci_reports}/{name}-*.report.jsonl"):
+            os.remove(file)
     return 0
 
 
