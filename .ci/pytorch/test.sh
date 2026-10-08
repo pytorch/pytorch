@@ -491,6 +491,7 @@ test_python_smoke_b200() {
   install_flash_attn_cute
   install_cutlass_operators
   (
+    local test_library_path="${LD_LIBRARY_PATH:-}"
     if [[ "$BUILD_ENVIRONMENT" == *cuda13.4* ]]; then
       pip install 'cuda-bindings>=13.4,<14'
       local driver_version
@@ -504,9 +505,9 @@ test_python_smoke_b200() {
         curl -fL --retry 3 "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/$compat_package" -o "$compat_dir/$compat_package"
         echo "$compat_sha256  $compat_dir/$compat_package" | sha256sum --check
         dpkg-deb --extract "$compat_dir/$compat_package" "$compat_dir"
-        export LD_LIBRARY_PATH="$compat_dir/usr/local/cuda-13.4/compat${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        test_library_path="$compat_dir/usr/local/cuda-13.4/compat${test_library_path:+:$test_library_path}"
       fi
-      (cd test && python - <<'PY'
+      (cd test && env LD_LIBRARY_PATH="$test_library_path" python - <<'PY'
 import torch
 from torch.cuda import green_contexts
 
@@ -518,7 +519,7 @@ if not green_contexts.is_localization_supported():
 PY
       )
     fi
-    time python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+    time env LD_LIBRARY_PATH="$test_library_path" python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   )
   time python test/run_test.py \
     --include \
