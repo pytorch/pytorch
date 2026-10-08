@@ -9,6 +9,7 @@ import pickle
 import sys
 import threading
 import warnings
+from collections.abc import Callable
 from inspect import signature
 from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import deprecated
@@ -1409,6 +1410,38 @@ class MemPool(_MemPool):
     ):
         # pyrefly: ignore [bad-argument-count]
         super().__init__(allocator, True, use_on_oom, no_split)
+
+    @classmethod
+    def from_py_allocator(
+        cls,
+        alloc_fn: Callable[[int], int | None],
+        free_fn: Callable[[int, int], None],
+        *,
+        use_on_oom: bool = False,
+        no_split: bool = False,
+    ) -> "MemPool":
+        r"""Create a MemPool backed by Python allocation callbacks.
+
+        ``alloc_fn(size)`` allocates a backing segment and returns its device
+        address as an integer. Return ``None`` or zero if the allocation cannot
+        be satisfied. ``free_fn(ptr, size)`` releases a segment, where ``size``
+        is the backing segment's size. PyTorch makes the segment's device and
+        allocation stream current while each callback runs.
+
+        Args:
+            alloc_fn: Callable that allocates a segment.
+            free_fn: Callable that frees a segment and receives its device
+                address and backing segment size.
+            use_on_oom: Whether allocations outside this pool may borrow its
+                cached blocks as a last resort. Defaults to ``False``.
+            no_split: Whether the caching allocator should avoid splitting this
+                pool's segments. Defaults to ``False``.
+
+        See :ref:`cuda-memory-python-allocators` for callback requirements and
+        examples.
+        """
+        allocator = torch._C._cuda_createPythonAllocator(alloc_fn, free_fn)
+        return cls(allocator, use_on_oom=use_on_oom, no_split=no_split)
 
     @property
     def id(self) -> tuple[int, int]:
