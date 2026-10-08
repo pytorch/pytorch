@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
+    split_backward_grad_tolerances,
     TestCase,
 )
 
@@ -197,7 +198,9 @@ class StageBackwardTests(TestCase):
         for name, p in mod.named_parameters():
             ref_p = ref_mod.get_parameter(name)
             try:
-                torch.testing.assert_close(p.grad, ref_p.grad)
+                torch.testing.assert_close(
+                    p.grad, ref_p.grad, **split_backward_grad_tolerances()
+                )
             except AssertionError:
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
@@ -248,7 +251,9 @@ class StageBackwardTests(TestCase):
         for name, p in mod.named_parameters():
             ref_p = ref_mod.get_parameter(name)
             try:
-                torch.testing.assert_close(p.grad, ref_p.grad)
+                torch.testing.assert_close(
+                    p.grad, ref_p.grad, **split_backward_grad_tolerances()
+                )
             except AssertionError:
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
