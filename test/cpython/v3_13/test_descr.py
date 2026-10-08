@@ -1005,7 +1005,8 @@ class ClassPropertiesAndMethods(CPythonTestCase, ExtraAssertions):
 
         def raises(exc, expected, callable, *args):
             try:
-                callable(*args)
+                with torch._dynamo.error_on_graph_break(False):
+                    callable(*args)
             except exc as msg:
                 # the exact msg is generally considered an impl detail
                 if support.check_impl_detail():

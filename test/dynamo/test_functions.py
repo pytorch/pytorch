@@ -7693,7 +7693,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             cls = type("Generated", (), {"value": 1})
             return x + 1, cls
 
-        @torch.compile(backend="eager", fullgraph=True)
         def invalid_fn(x):
             try:
                 type(comptime, (), {})
@@ -7701,7 +7700,15 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 return x + 1
 
         x = torch.ones(1)
-        self.assertEqual(invalid_fn(x), x + 1)
+        with self.assertRaisesRegex(Unsupported, "Dynamic class creation with type"):
+            torch.compile(invalid_fn, backend="eager", fullgraph=True)(x)
+
+        invalid_counter = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(
+            torch.compile(invalid_fn, backend=invalid_counter)(x),
+            x + 1,
+        )
+        self.assertEqual(invalid_counter.frame_count, 0)
 
         with self.assertRaisesRegex(Unsupported, "Dynamic class creation with type"):
             torch.compile(fullgraph_fn, backend="eager", fullgraph=True)(x)
