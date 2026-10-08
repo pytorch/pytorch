@@ -83,6 +83,7 @@ from .utils import (
     cmp,
     decompose_index,
     device_need_guard,
+    fx_node_crosses_devices,
     get_current_backend,
     get_device_tflops,
     get_dtype_size,
@@ -273,6 +274,25 @@ def _is_gpu_triton_backend(
     )
 
 
+def _is_loop_carried_compile_error(e: Exception) -> bool:
+    """Whether ``e`` is the Triton loop-carried-variable compile failure.
+
+    Benchmarking a fusion candidate that hits it tells us nothing, so callers allow
+    the fusion instead -- the workaround for
+    https://github.com/triton-lang/triton/issues/2151. A compile that ran in an
+    async-compile pool worker comes back wrapped in a SubprocException, so match on
+    both sides of that boundary or the workaround silently stops applying whenever
+    the pool is in use.
+    """
+    from triton.compiler.errors import CompilationError
+
+    from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+    return isinstance(e, (CompilationError, SubprocException)) and (
+        "Loop-carried variable" in str(e)
+    )
+
+
 class MixOrderReduction:
     """
     This class contains utility functions to decide if we should fuse reductions
@@ -287,6 +307,16 @@ class MixOrderReduction:
             if isinstance(subnode, SchedulerNode)
             and subnode.is_reduction()
             and isinstance(subnode.node, ComputedBuffer)
+        )
+
+    @staticmethod
+    def supports_noncontiguous_reductions(node: BaseSchedulerNode) -> bool:
+        return all(
+            subnode.node.get_reduction_type() in {"sum", "prod"}  # type: ignore[union-attr]
+            and subnode.node.get_dtype()  # type: ignore[union-attr]
+            in {torch.float16, torch.bfloat16, torch.float32}
+            for subnode in node.get_nodes()
+            if subnode.is_reduction()
         )
 
     @classmethod
@@ -527,18 +557,7 @@ class MixOrderReduction:
         if MixOrderReduction.is_split_reduction(contiguous_node):
             return False
 
-        # Other reduction types like max/min is not supported yet.
-        # There are no real use case as well.
-        out = all(
-            subnode.node.get_reduction_type()  # type: ignore[union-attr]
-            in {
-                "sum",
-                "prod",
-            }
-            for subnode in other_node.get_nodes()
-            if subnode.is_reduction()
-        )
-        return out
+        return cls.supports_noncontiguous_reductions(other_node)
 
     @classmethod
     def are_mix_order_reductions(
@@ -3532,8 +3551,10 @@ class BaseSchedulerNode:
     def get_prologue_template_epilogue(
         nodes: list[BaseSchedulerNode],
     ) -> tuple[list[BaseSchedulerNode], BaseSchedulerNode, list[BaseSchedulerNode]]:
-        """
-        For the list of nodes, get the prologue, template, and epilogue
+        """Split nodes by graph position around the template.
+
+        Prologue nodes are upstream of the template node. Their code may later be
+        emitted in either the template's load-input or store-output region.
         """
         template_index = next(i for i, n in enumerate(nodes) if n.is_template())
 
@@ -4530,9 +4551,10 @@ class FusedMixOrderReductions(FusedSchedulerNode):
 
         # Since node1 is from the current mix order reduction, if node1 is
         # contiguous, the fused node should also be contiguous.
-        if MixOrderReduction.is_contiguous_node(
-            node1
-        ) and not MixOrderReduction.is_contiguous_node(node2):
+        if MixOrderReduction.is_contiguous_node(node1):
+            if not MixOrderReduction.is_contiguous_node(node2):
+                return False
+        elif not MixOrderReduction.supports_noncontiguous_reductions(node2):
             return False
 
         def _get_ancestors(nodes: tuple[BaseSchedulerNode, ...]) -> OrderedSet[str]:
@@ -4835,7 +4857,19 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             foreach_match = len(producer.snodes) == len(consumer.snodes)
             if not foreach_match:
                 why("foreach do not have same length")
-            return foreach_match and all(
+                return False
+            # Each pair becomes one sub-kernel and the sub-kernels run in
+            # parallel, so a consumer may depend only on its own partner.
+            owner = {
+                name: i
+                for i, snode in enumerate(producer.snodes)
+                for name in snode.get_buffer_names()
+            }
+            for i, snode in enumerate(consumer.snodes):
+                if any(owner.get(dep.name, i) != i for dep in snode.unmet_dependencies):
+                    why("a consumer depends on another producer sub-node")
+                    return False
+            return all(
                 producer.scheduler.can_fuse(l, r)
                 for l, r in zip(producer.snodes, consumer.snodes)
             )
@@ -5688,6 +5722,50 @@ def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     return config.prologue_fusion
 
 
+def _producer_fusion_enabled_inputs(
+    template_node: BaseSchedulerNode,
+    choice: Any | None = None,
+) -> OrderedSet[str]:
+    """This function returns template inputs that a producer may fuse into.
+
+    Fusion support is advertised by two attributes:
+    - load_input_fusion_allowed_inputs: inputs whose producer can be generated
+      in load_input(), i.e. the template prologue. Enabled by
+      prologue_fusion/allow_prologue_fusion.
+    - store_output_fusion_allowed_inputs: inputs whose producer can be generated
+      in store_output(), e.g. the addmm bias. Enabled by
+      epilogue_fusion/allow_epilogue_fusion, which also controls downstream
+      consumer fusion from template outputs.
+
+    The attributes are computed when each Triton autotune choice is rendered and
+    stored on the choice (TritonTemplateCaller). Every template buffer also has
+    them: a template built from a single choice copies that choice's sets, and a
+    MultiTemplateBuffer stores the union over its choices.
+
+    If ``choice`` is given, that autotune choice's attributes are read; this is
+    used by the benchmark filter. Choices without them (e.g. aten, NVGEMM)
+    support no fusion. Otherwise the template's attributes are read. For a
+    MultiTemplateBuffer this means a producer may fuse if some choice supports
+    it; the benchmark filter then only selects a choice that supports every
+    fused input.
+    """
+    template = template_node.get_template_node()
+    if template is None:
+        return OrderedSet()
+
+    candidate = template if choice is None else choice
+    load_inputs = getattr(candidate, "load_input_fusion_allowed_inputs", OrderedSet())
+    store_inputs = getattr(
+        candidate, "store_output_fusion_allowed_inputs", OrderedSet()
+    )
+    enabled = load_inputs | store_inputs
+    if not _is_prologue_fusion_enabled(template_node):
+        enabled -= load_inputs
+    if not _is_epilogue_fusion_enabled(template_node):
+        enabled -= store_inputs
+    return enabled
+
+
 def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return (
         node1.is_template()
@@ -5696,16 +5774,16 @@ def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     )
 
 
-def is_prologue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
+def is_producer_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return (
         node2.is_template()
         and not node1.is_template()
-        and _is_prologue_fusion_enabled(node2)
+        and len(_producer_fusion_enabled_inputs(node2)) > 0
     )
 
 
 def is_template_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-    return is_epilogue_fusion(node1, node2) or is_prologue_fusion(node1, node2)
+    return is_epilogue_fusion(node1, node2) or is_producer_fusion(node1, node2)
 
 
 def template_fusion_pw_node(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
@@ -6324,7 +6402,10 @@ class Scheduler:
                 name
                 for name in names
                 if name in kept_node_names
-                and not isinstance(self.name_to_node[name], NopKernelSchedulerNode)
+                and not isinstance(
+                    self.name_to_node[name],
+                    (NopKernelSchedulerNode, ExternKernelSchedulerNode),
+                )
             ]
             if not names:
                 # All nodes eliminated
@@ -6333,18 +6414,32 @@ class Scheduler:
             removed_node_names.update(names)
             snodes = [self.name_to_node[name] for name in names]
 
+            # The nodes of a foreach kernel run in parallel, so a node that
+            # depends on an earlier one of the list starts a new kernel: in
+            # _foreach_add_([a, b], [b, a]) the value for b reads a after the
+            # first element has written it.
+            groups: list[list[tuple[str, BaseSchedulerNode]]] = [[]]
+            written: OrderedSet[str] = OrderedSet()
+            for name, snode in zip(names, snodes):
+                if any(dep.name in written for dep in snode.unmet_dependencies):
+                    groups.append([])
+                    written = OrderedSet()
+                groups[-1].append((name, snode))
+                written.update(snode.get_buffer_names())
+
             enable_autotune = config.combo_kernels_autotune > 1
-            fe_node = ForeachKernelSchedulerNode(
-                self,
-                snodes,
-                use_custom_partition_algo=False,
-                enable_autotune=enable_autotune,
-            )
+            for group in groups:
+                fe_node = ForeachKernelSchedulerNode(
+                    self,
+                    [snode for _, snode in group],
+                    use_custom_partition_algo=False,
+                    enable_autotune=enable_autotune,
+                )
 
-            fe_nodes.append(fe_node)
+                fe_nodes.append(fe_node)
 
-            for name in names:
-                self.name_to_fused_node[name] = fe_node
+                for name, _ in group:
+                    self.name_to_fused_node[name] = fe_node
 
         self.nodes = [
             node for node in self.nodes if node.get_name() not in removed_node_names
@@ -7251,7 +7346,10 @@ class Scheduler:
         )
 
     def compile_kernel(
-        self, nodes: Sequence[BaseSchedulerNode], hint_override: int | None = None
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        hint_override: int | None = None,
+        skip_if_perf_cached: bool = False,
     ) -> tuple[LambdaFuture | None, ModuleType]:
         src_code = self.generate_kernel_code_from_nodes(
             nodes, benchmark_kernel=True, hint_override=hint_override
@@ -7260,6 +7358,11 @@ class Scheduler:
 
         if not hasattr(mod, "triton_"):
             return (None, mod)
+
+        if skip_if_perf_cached and mod.__file__ is not None:
+            perf_path = os.path.splitext(mod.__file__)[0] + ".kernel_perf"
+            if os.path.exists(perf_path):
+                return (None, mod)
 
         async_compile = torch._inductor.async_compile.AsyncCompile()
         if not async_compile.use_process_pool():
@@ -7343,8 +7446,6 @@ class Scheduler:
         if has_atomic_add and not is_multi_template:
             return FusionResult.fuse(True)
 
-        from triton.compiler.errors import CompilationError
-
         why = WhyNoFuse(node1, node2)
 
         device = node_list_fused[0].get_device()
@@ -7377,19 +7478,46 @@ class Scheduler:
         if is_multi_template and any(
             n.get_template_node() is not None for n in (node1, node2)
         ):
-            epilogue_fusion = node1.get_template_node() is not None
+            consumer_fusion = node1.get_template_node() is not None
             multi_node = (
                 node1.get_template_node()
-                if epilogue_fusion
+                if consumer_fusion
                 else node2.get_template_node()
             )
             if not isinstance(multi_node, ir.MultiTemplateBuffer):
                 raise AssertionError(
                     "expected multi_node to be an ir.MultiTemplateBuffer"
                 )
+            template_scheduler_node = node1 if consumer_fusion else node2
+            # Computed for consumer fusion too: a producer may already have been
+            # fused into the template in an earlier fusion round.
+            template_input_names = OrderedSet(
+                typing.cast(ir.IRNode, input_node).get_name()
+                for input_node in multi_node.inputs
+            )
+            required_producer_inputs = OrderedSet(
+                name
+                for fused_node in node_list_fused
+                for name in fused_node.get_buffer_names()
+                if name in template_input_names
+            )
+
+            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
+                if not isinstance(
+                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
+                ):
+                    return False
+                # Choices can support different inputs, e.g. persistent+TMA
+                # templates cannot fuse producers into TMA-loaded inputs.
+                return required_producer_inputs <= _producer_fusion_enabled_inputs(
+                    template_scheduler_node, choice
+                )
+
             # Check for layout conflicts before committing to Triton template
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
+
+            from torch._inductor.codegen.simd import CantSplit
 
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
@@ -7399,21 +7527,25 @@ class Scheduler:
                     ] = []
                     choice_timings = multi_node.choice_timings(hint_override)
                     for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
-                        if not isinstance(
-                            choice,
-                            torch._inductor.select_algorithm.TritonTemplateCaller,
-                        ):
+                        if not choice_supports_fusion(choice):
                             continue
-                        with multi_node.swap_as_triton_caller(choice):
-                            future_choices.append(
-                                (
-                                    choice,
-                                    *self.compile_kernel(
-                                        node_list_fused,
-                                        hint_override=choice.hint_override,
-                                    ),
+                        triton_choice = typing.cast(
+                            torch._inductor.select_algorithm.TritonTemplateCaller,
+                            choice,
+                        )
+                        try:
+                            with multi_node.swap_as_triton_caller(triton_choice):
+                                future_choices.append(
+                                    (
+                                        triton_choice,
+                                        *self.compile_kernel(
+                                            node_list_fused,
+                                            hint_override=triton_choice.hint_override,
+                                        ),
+                                    )
                                 )
-                            )
+                        except CantSplit:
+                            continue
 
                     min_ms_fused = float("inf")
                     ms_fused_choice: TritonTemplateCallerBase | None = None
@@ -7426,7 +7558,7 @@ class Scheduler:
                             if fusion_log.isEnabledFor(logging.DEBUG):
                                 fusion_log.debug(
                                     "Exception in compiling %s: %s",
-                                    "prologue" if not epilogue_fusion else "epilogue",
+                                    "producer" if not consumer_fusion else "consumer",
                                     e,
                                 )
                             continue
@@ -7451,7 +7583,7 @@ class Scheduler:
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            bench_epilogue = config.benchmark_epilogue_fusion
+            benchmark_template_fusion = config.benchmark_template_fusion
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -7459,8 +7591,9 @@ class Scheduler:
             # Track if the choice timings can be retrieved async after compilation
             get_choice_timings_async = (
                 use_pipelined_autotuning()
-                and not bench_epilogue
-                and num_fusible_callers <= config.max_epilogue_benchmarked_choices
+                and not benchmark_template_fusion
+                and num_fusible_callers
+                <= config.max_template_fusion_benchmarked_choices
             )
 
             ms1, ms2 = float("inf"), float("inf")
@@ -7473,27 +7606,9 @@ class Scheduler:
                     choice_timings.items(), key=operator.itemgetter(1)
                 )
             else:
-                # Use 0 for unfused time, won't be used as bench_epilogue
+                # Use 0 for unfused time, won't be used as benchmark_template_fusion
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
-
-            from torch._inductor.codegen.simd import CantSplit
-
-            def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
-                if not isinstance(
-                    choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ):
-                    return False
-                # For prologue fusion we check if the underlying template of the choice
-                # supports all allowed prologue inputs. If not, we skip this choice in
-                # the fusion benchmark.
-                # TODO: Remove this check after all Triton templates support prologue fusion.
-                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
-                return not (
-                    not epilogue_fusion
-                    and hasattr(choice, "allowed_prologue_inps")
-                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
-                )
 
             def compile_without_benchmarking(
                 choice: torch._inductor.select_algorithm.TritonTemplateCaller,
@@ -7513,14 +7628,14 @@ class Scheduler:
                         if fusion_log.isEnabledFor(logging.DEBUG):
                             fusion_log.debug(
                                 "Exception in compiling %s: %s",
-                                "prologue" if not epilogue_fusion else "epilogue",
+                                "producer" if not consumer_fusion else "consumer",
                                 e,
                             )
                         return False
                 return True
 
             if has_atomic_add:
-                if not epilogue_fusion:
+                if not consumer_fusion:
                     return FusionResult.fuse(False)
 
                 for hint_override in [*config.multi_kernel_hints, None]:
@@ -7552,15 +7667,15 @@ class Scheduler:
                     multi_node.finalize_as_triton_caller(best)
                 return FusionResult.fuse(True)
 
-            if bench_epilogue:
+            if benchmark_template_fusion:
                 ms2, path2 = (
                     self.benchmark_fused_nodes(node_list_2)
-                    if epilogue_fusion
+                    if consumer_fusion
                     else self.benchmark_fused_nodes(node_list_1)
                 )
             else:
-                # By default, don't do prologue fusion. Generally slower
-                if not epilogue_fusion:
+                # By default, don't do producer fusion. Generally slower
+                if not consumer_fusion:
                     return FusionResult.fuse(False)
 
                 ms2 = node2._get_estimated_runtime()
@@ -7581,30 +7696,19 @@ class Scheduler:
                 if is_nvgemm and not choice.supports_epilogue_fusion:
                     continue
 
-                # NVGEMM doesn't support prologue fusion. Skip NVGEMM choices in
-                # the prologue direction (epilogue_fusion is False when node1 is
-                # the pointwise prologue, node2 is the template).
-                if is_nvgemm and not epilogue_fusion:
+                # NVGEMM doesn't support producer fusion. Skip NVGEMM choices in
+                # the producer direction (consumer_fusion is False when node1 is
+                # the pointwise producer, node2 is the template).
+                if is_nvgemm and not consumer_fusion:
                     continue
 
-                # For prologue fusion we check if the underlying template of the choice
-                # supports all allowed prologue inputs. If not, we skip this choice in
-                # the fusion benchmark.
-                # TODO: Remove this check after all Triton templates support prologue fusion.
-                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
-                if (
-                    is_triton
-                    and not epilogue_fusion
-                    and hasattr(choice, "allowed_prologue_inps")
-                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
-                ):
+                if is_triton and not choice_supports_fusion(choice):
                     continue
 
-                if bench_epilogue and unfused_time >= ms1 + ms2:
+                if benchmark_template_fusion and unfused_time >= ms1 + ms2:
                     break
 
-                template_choices += 1
-                if template_choices > config.max_epilogue_benchmarked_choices:
+                if template_choices >= config.max_template_fusion_benchmarked_choices:
                     break
 
                 try:
@@ -7630,6 +7734,7 @@ class Scheduler:
                             )
                 except CantSplit:
                     continue
+                template_choices += 1
 
             if len(future_choices) == 0:
                 return FusionResult.fuse(False)
@@ -7666,7 +7771,7 @@ class Scheduler:
                     try:
                         if future is not None:
                             res = future.result()
-                        elif not bench_epilogue:
+                        elif not benchmark_template_fusion:
                             if hasattr(mod_fused, "triton_"):
                                 res = mod_fused.triton_
                                 res.precompile()
@@ -7676,17 +7781,17 @@ class Scheduler:
                             res = None
 
                     # Ideally we would more narrowly catch Exceptions here but
-                    # triton  will unpredictably error with valid prologue fusions
+                    # Triton will unpredictably error with valid producer fusions.
                     except Exception as e:
                         if fusion_log.isEnabledFor(logging.DEBUG):
                             fusion_log.debug(
                                 "Exception in compiling %s: %s",
-                                "prologue" if not epilogue_fusion else "epilogue",
+                                "producer" if not consumer_fusion else "consumer",
                                 e,
                             )
                         continue
 
-                    if bench_epilogue:
+                    if benchmark_template_fusion:
                         is_nvgemm_choice = isinstance(choice, NVUniversalGemmCaller)
                         swap_ctx = (
                             # pyrefly: ignore [missing-attribute]
@@ -7743,11 +7848,11 @@ class Scheduler:
                                 ms_fused_choice = choice
                                 break
 
-                if bench_epilogue:
+                if benchmark_template_fusion:
                     log_fusion(min_ms_fused, ms1, ms2)
 
                 if (
-                    not bench_epilogue or min_ms_fused < (ms1 + ms2)
+                    not benchmark_template_fusion or min_ms_fused < (ms1 + ms2)
                 ) and ms_fused_choice is not None:
                     is_nvgemm = isinstance(ms_fused_choice, NVUniversalGemmCaller)
                     if is_nvgemm:
@@ -7763,7 +7868,7 @@ class Scheduler:
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_triton_caller(ms_fused_choice)
 
-                    if bench_epilogue:
+                    if benchmark_template_fusion:
                         # pyrefly: ignore [missing-attribute]
                         multi_node._choice_timings[None] = new_timings
                     return True
@@ -7851,10 +7956,10 @@ class Scheduler:
                 except NoTritonConfigsError:
                     return False
 
-                except CompilationError as e:
-                    if "Loop-carried variable" in str(e):
-                        return True
-                    raise
+                except Exception as e:
+                    if not _is_loop_carried_compile_error(e):
+                        raise
+                    return True
 
             return FusionResult.from_callable(
                 callable_fn=benchmark_when_ready, future=future_and_mod_l1_fused[0]
@@ -7990,9 +8095,9 @@ class Scheduler:
                 else:
                     if node1 != candidate:
                         raise AssertionError("expected node1 to equal candidate")
-                    if not is_prologue_fusion(node1, node2):
+                    if not is_producer_fusion(node1, node2):
                         raise AssertionError(
-                            "expected node1, node2 to be a prologue fusion"
+                            "expected node1, node2 to be a producer fusion"
                         )
                     template_node = node2
 
@@ -8175,7 +8280,7 @@ class Scheduler:
         )
         new_possible_fusions = []
         for n1, n2 in possible_fusions:
-            if is_prologue_fusion(n1, n2) and n2 in epilogue_template_nodes:
+            if is_producer_fusion(n1, n2) and n2 in epilogue_template_nodes:
                 deferred_prologue_fusions.append((n1, n2))
             else:
                 new_possible_fusions.append((n1, n2))
@@ -10524,33 +10629,32 @@ class Scheduler:
             return False
 
         if node2.is_template():
-            if not _is_prologue_fusion_enabled(node2):
-                why("prologue fusion turned off")
-                return False
-
             if node1.is_reduction() or node1.is_template():
-                why("prologue fusion only supported for pointwise nodes")
+                why("producer fusion only supported for pointwise nodes")
                 return False
 
             template = node2.get_template_node_or_throw()
-            allowed_prologue_inps = template.get_allowed_prologue_inps()
-            if not allowed_prologue_inps:
-                why("template has no allowed prologue inputs")
+            enabled_producer_inputs = _producer_fusion_enabled_inputs(node2)
+            if not enabled_producer_inputs:
+                why("template has no inputs enabled for producer fusion")
                 return False
 
-            unsupported_prologue_args = (
+            # Reject if the producer writes a buffer that the template reads at an
+            # input that can't take a fused producer: that buffer must stay
+            # materialized because the template still loads it from memory.
+            unsupported_producer_args = (
                 OrderedSet(inp.get_name() for inp in template.inputs)  # type: ignore[union-attr]
-                - allowed_prologue_inps
+                - enabled_producer_inputs
             )
 
-            if node1.get_buffer_names() & unsupported_prologue_args:
-                why("prologue fusion not implemented for kernel for these inputs")
+            if node1.get_buffer_names() & unsupported_producer_args:
+                why("producer fusion not enabled for these template inputs")
                 return False
 
             if node1.has_aliasing_or_mutation() or (
-                template.has_aliasing_or_mutation_for_prologue_fusion(node2)
+                template.has_aliasing_or_mutation_for_producer_fusion(node2)
             ):
-                why("template prologue can only fuse functional pointwise nodes")
+                why("template producer fusion can only fuse functional pointwise nodes")
                 return False
 
             prologue_nodes = node1.get_nodes()
@@ -10906,10 +11010,12 @@ class Scheduler:
             relevant_reading_nodes = node1.snodes
         num_concurrent_reads = 0
         for reading_node in relevant_reading_nodes:
+            # A read of an earlier mutation of the same buffer (the output of an
+            # index_put_ into it, say) reads the same memory under another name.
             relevant_reads = [
                 read
                 for read in reading_node.read_writes.reads
-                if read.name == real_name
+                if self.mutation_real_name.get(read.name, read.name) == real_name
             ]
             if not relevant_reads:
                 continue
@@ -11333,8 +11439,8 @@ class Scheduler:
           (resulting in 2 kernels instead of 1).
 
         We allow buffer overlap scoring when:
-        - The node outputs are not actually in the template's allowed_prologue_inps,
-          meaning they can't be prologue-fused anyway, so horizontal fusion doesn't
+        - The node outputs are not in the template's producer_fusion_allowed_inputs,
+          meaning they can't be producer-fused anyway, so horizontal fusion doesn't
           prevent any optimization opportunity.
         """
         if node1.is_reduction() or node2.is_reduction():
@@ -11363,16 +11469,16 @@ class Scheduler:
                     if (
                         isinstance(user.node, BaseSchedulerNode)
                         and user.node.is_template()
-                        and _is_prologue_fusion_enabled(user.node)
+                        and _producer_fusion_enabled_inputs(user.node)
                     ):
                         # Check if this output is actually in the template's
-                        # allowed_prologue_inps. If not, fusing horizontally
-                        # won't prevent any prologue fusion opportunity.
+                        # producer_fusion_allowed_inputs. If not, fusing horizontally
+                        # won't prevent any producer-fusion opportunity.
                         template_node = user.node.get_template_node()
                         if template_node is not None and isinstance(
                             template_node, ir.TritonTemplateBuffer
                         ):
-                            allowed_inps = template_node.get_allowed_prologue_inps()
+                            allowed_inps = _producer_fusion_enabled_inputs(user.node)
                             if node1_output_names & allowed_inps:
                                 node1_prologue_eligible_template_users.add(user.node)
                         else:
@@ -11394,7 +11500,9 @@ class Scheduler:
                             if template_node is not None and isinstance(
                                 template_node, ir.TritonTemplateBuffer
                             ):
-                                allowed_inps = template_node.get_allowed_prologue_inps()
+                                allowed_inps = _producer_fusion_enabled_inputs(
+                                    user.node
+                                )
                                 if node2_output_names & allowed_inps:
                                     return False
                             else:
@@ -11684,8 +11792,14 @@ class Scheduler:
         if not node.is_gpu():
             return f"{node.get_device()} ops"
 
-        if isinstance(node.node, ir.DeviceCopy):
-            return "DeviceCopy ops"
+        # Decided on the FX node so that MultiOutput children, which share their
+        # parent's fx_node, are split together with it.
+        if isinstance(ir_node, ir.DeviceCopy) or (
+            isinstance(ir_node, ir.ExternKernel)
+            and (fx_node := getattr(ir_node, "fx_node", None)) is not None
+            and fx_node_crosses_devices(fx_node)
+        ):
+            return "cross-device ops"
 
         if isinstance(node.node, ir.Switch):
             return "Switch ops"
@@ -12486,6 +12600,9 @@ class Scheduler:
         self.current_device = self.default_device_context
         if self.previous_node is not None:
             raise AssertionError("expected previous_node to be None")
+        previous_nodes_by_stream: dict[
+            tuple[torch.device | None, int], BaseSchedulerNode
+        ] = {}
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -12513,6 +12630,8 @@ class Scheduler:
                     V.graph.wrapper_code.mark_multistream_alignment(multi)
 
         for node in nodes:
+            stream_key = (node.get_device(), self.get_node_stream(node))
+            self.previous_node = previous_nodes_by_stream.get(stream_key)
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -12601,7 +12720,7 @@ class Scheduler:
             # on multiple streams get one copy per stream.
             V.graph.wrapper_code.codegen_deferred_alignment_copies(
                 (dep.name for dep in node.read_writes.reads),
-                self.node_to_stream.get(node, 0),
+                stream_key[1],
             )
 
             self.current_node = node
@@ -12673,9 +12792,9 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                self.previous_node = node
+                previous_nodes_by_stream[stream_key] = node
             else:
-                self.previous_node = None
+                previous_nodes_by_stream.pop(stream_key, None)
 
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen
@@ -12722,12 +12841,19 @@ class Scheduler:
 
         if not config.benchmark_combo_kernel:
             return True
-
-        from triton.compiler.errors import CompilationError
+        if device is None:
+            raise AssertionError("expected device to be set")
 
         ms1, path1_list = 0.0, []
         node_benchmark_results = {}
-        for i, snode in enumerate(subkernel_nodes):
+        # Submit cache misses to the compile pool before benchmarking any subkernel.
+        # Triton's frontend holds the GIL, so compiles only overlap across processes.
+        compiled = [
+            self.compile_kernel(snode.get_nodes(), skip_if_perf_cached=True)
+            for snode in subkernel_nodes
+        ]
+
+        for i, (snode, (future, mod)) in enumerate(zip(subkernel_nodes, compiled)):
             node_list = snode.get_nodes()
             # We can not accurately benchmark kernel using atomic_add
             # due to how we generate random integer inputs.
@@ -12736,8 +12862,20 @@ class Scheduler:
                     "ComboKernel: benchmarking may not accurate due to atomic_add"
                 )
 
+            if future is not None:
+                try:
+                    future.result()
+                except Exception:
+                    # The benchmark below recompiles in-process and scores a failure as
+                    # inf; deciding here would make the verdict depend on the pool.
+                    fusion_log.debug(
+                        "ComboKernel benchmark: %d-th subkernel failed in the pool",
+                        i,
+                        exc_info=True,
+                    )
+
             try:
-                ms, path = self.benchmark_fused_nodes(node_list)
+                ms, path = self.benchmark_codegened_module(mod, device)
                 node_benchmark_results[snode] = (ms, path)
                 if math.isinf(ms):
                     fusion_log.debug(
@@ -12745,15 +12883,13 @@ class Scheduler:
                         i,
                     )
                     return False
-            except CompilationError as e:
-                # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
-                if "Loop-carried variable" in str(e):
-                    fusion_log.debug(
-                        "ComboKernel benchmark: return True because of loop-carried variable"
-                    )
-                    return True  # allow fusion
-                else:
+            except Exception as e:
+                if not _is_loop_carried_compile_error(e):
                     raise
+                fusion_log.debug(
+                    "ComboKernel benchmark: return True because of loop-carried variable"
+                )
+                return True  # allow fusion
             ms1 += ms
             path1_list.append(path)
 
@@ -12761,15 +12897,13 @@ class Scheduler:
             ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(
                 subkernel_nodes, node_benchmark_results
             )
-        except CompilationError as e:
-            # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
-            if "Loop-carried variable" in str(e):
-                fusion_log.debug(
-                    "ComboKernel benchmark: return True because of loop-carried variable"
-                )
-                return True  # allow fusion
-            else:
+        except Exception as e:
+            if not _is_loop_carried_compile_error(e):
                 raise
+            fusion_log.debug(
+                "ComboKernel benchmark: return True because of loop-carried variable"
+            )
+            return True  # allow fusion
 
         # small kernels are very likely to have speedup but hard to benchmark. So we skip benchmarking.
         small_kernel = ms2 - ms2_clone < 0.3 or ms1 < 0.3
@@ -12784,7 +12918,7 @@ class Scheduler:
                     "cannot fuse (benchmark): fusing causes %sx slowdown",
                     red_text(f"{ms1 / ms2:.3f}"),
                 )
-        # ms1 returned by benchmark_fused_nodes discounted clone time
+        # ms1 returned by benchmark_codegened_module discounted clone time
         return ms2 - ms2_clone < ms1 or small_kernel
 
     def get_buffer_layout(self, buf_name: str) -> ir.Layout:
@@ -13001,6 +13135,9 @@ class BaseScheduling:  # noqa: docstring_linter
     ) -> str | None:
         """
         Given a template node, generate a kernel.
+
+        ``prologue_nodes`` are upstream of the template node. Their code may be
+        emitted in either the template's load-input or store-output region.
 
         This function is only available for triton now. If the third-party backend behaves as a sub-class
         of TritonScheduling, it can override it or reuse it.

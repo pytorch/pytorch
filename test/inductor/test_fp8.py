@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
+    rocm_mx_swizzle,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -2455,14 +2456,20 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(out_no_swizzle, out_explicit)
 
     @onlyCUDA
-    @skipIfRocm  # ROCm MX gemm requires NO_SWIZZLE; swizzle is NVIDIA-only
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     @parametrize("strided_scales", [False, True])
     def test_scaled_mm_v2_swizzle_compile(self, device, strided_scales):
-        """Swizzled scales (MX recipes on NVIDIA require SWIZZLE_32_4_4) are
-        not supported by any inductor template; the lowering must fall back
-        to the ATen kernel instead of failing compile."""
+        """Swizzled scales are not supported by any inductor template; the
+        lowering must fall back to the ATen kernel instead of failing compile.
+        NVIDIA packs them as SWIZZLE_32_4_4. gfx950 packs them as SWIZZLE_32_8
+        once ROCm has that layout (7.14 for MX FP8)."""
         from torch.nn.functional import SwizzleType
+
+        # SWIZZLE_32_4_4 has no ROCm scale mode. Older ROCm and non-gfx950 stay skipped.
+        use_32_8 = rocm_mx_swizzle(torch.float8_e4m3fn)
+        if torch.version.hip and not use_32_8:
+            raise unittest.SkipTest("SWIZZLE_32_8 MX FP8 requires gfx950 and ROCm 7.14")
+        swizzle = SwizzleType.SWIZZLE_32_8 if use_32_8 else SwizzleType.SWIZZLE_32_4_4
 
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 32
@@ -2477,8 +2484,8 @@ class TestFP8Lowering(TestCase):
         reference = (A.double() * A_scale.double().repeat_interleave(BLOCK_SIZE, 1)) @ (
             B.double() * B_scale.double().repeat_interleave(BLOCK_SIZE, 1)
         ).t()
-        A_scale = to_blocked(A_scale)
-        B_scale = to_blocked(B_scale)
+        A_scale = to_blocked(A_scale, swizzle_32_8=use_32_8)
+        B_scale = to_blocked(B_scale, swizzle_32_8=use_32_8)
 
         def fn(A, B, A_scale, B_scale):
             return scaled_mm(
@@ -2488,8 +2495,8 @@ class TestFP8Lowering(TestCase):
                 ScalingType.BlockWise1x32,
                 B_scale,
                 ScalingType.BlockWise1x32,
-                swizzle_a=SwizzleType.SWIZZLE_32_4_4,
-                swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                swizzle_a=swizzle,
+                swizzle_b=swizzle,
                 output_dtype=torch.bfloat16,
             )
 
