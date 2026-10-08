@@ -97,14 +97,15 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     return nullptr;
   }
 
-  // The lazy clone has the semantics of a clone() enqueued on the current
-  // stream, which is recorded so that materialization can be checked against
-  // it. Note that until it is materialized, the lazy clone keeps using the
-  // original allocation, which the allocator only orders with respect to the
-  // stream it was allocated on. So, if the current stream is a different one,
-  // uses of the lazy clone on it count as uses of the original allocation on
-  // a side stream: as usual, they must be synchronized with the allocation
-  // stream before the allocation is freed.
+  // The lazy clone has the semantics of a clone() enqueued now, i.e., on the
+  // stream that is current when the lazy clone is made (not when it is later
+  // materialized). We record that stream so that materialization can be
+  // checked against it. Note that until it is materialized, the lazy clone
+  // keeps using the original allocation, which the allocator only orders with
+  // respect to the stream it was allocated on. So, if the lazy clone is made
+  // on a different stream, its uses on that stream count as uses of the
+  // original allocation on a side stream: as usual, they must be synchronized
+  // with the allocation stream before the allocation is freed.
   void* data = data_ptr.get();
   const c10::Device device = data_ptr.device();
   const std::optional<c10::Stream> stream = current_stream(device);
@@ -159,7 +160,8 @@ void materialize_cow(StorageImpl* storage) {
   cow::COWDeleterContext* ctx = ref->context;
 
   // Materialization enqueues a copy of the data on the current stream, or
-  // steals the data if this is the last reference to it.
+  // steals the data if this is the last reference to it. See "Streams and
+  // CUDA graphs" in README-cow.md for why the checks below are needed.
   //
   // A copy is only allowed where it is ordered like the clone() that the lazy
   // clone stands for, so we raise an error rather than synchronizing when it
@@ -181,42 +183,56 @@ void materialize_cow(StorageImpl* storage) {
     // don't distinguish between captures, though.)
     TORCH_CHECK(
         ref->made_while_capturing == capturing,
-        "Materializing a lazily cloned tensor during graph capture is only "
-        "supported if the lazy clone was also made during the capture, and "
-        "vice versa. Clone it with clone() instead.");
-    // The copy must be enqueued on the stream the clone was made on, which is
-    // also the stream the new allocation belongs to. For the storage that was
-    // lazily cloned from, that is the stream its memory was allocated on.
-    bool ordered = true;
+        "Cannot materialize a lazily cloned tensor ",
+        capturing ? "during" : "outside of",
+        " graph capture because it was lazily cloned ",
+        capturing ? "outside of" : "during",
+        " graph capture. Materializing it copies its data, and a copy made "
+        "during capture is redone by every replay of the graph, while a copy "
+        "made outside of it is not. Use clone() instead of a lazy clone.");
     if (ref->clone_stream.has_value()) {
-      ordered = *ref->clone_stream == *stream;
+      // The copy must be enqueued on the stream the clone was made on, which
+      // is also the stream the new allocation belongs to.
+      TORCH_CHECK(
+          *ref->clone_stream == *stream,
+          "Cannot materialize a lazily cloned tensor on stream ",
+          *stream,
+          " because it was lazily cloned on stream ",
+          *ref->clone_stream,
+          ". Materializing it copies its data, and the copy is only ordered "
+          "after the writes it reads, and before writes to the new copy and "
+          "reuse of its memory, on the stream it was lazily cloned on. Write "
+          "to it on that stream, or use clone() instead of a lazy clone.");
     } else if (storage->allocator() != nullptr) {
+      // For the storage that was lazily cloned from, the copy must be
+      // enqueued on the stream its memory was allocated on.
       const std::optional<bool> allocated_on_stream =
           storage->allocator()->was_allocated_on_stream(
               data_ptr.get(), *stream);
       if (capturing) {
         // Memory allocated during capture comes from a private pool, for
         // which the allocation stream is unknown. Memory with a known
-        // allocation stream was allocated before the capture, and the graph
-        // must not move it to a new allocation: e.g., the user would keep
-        // writing the inputs of the graph to the old one.
+        // allocation stream was allocated before the capture.
         TORCH_CHECK(
             !allocated_on_stream.has_value(),
-            "Materializing a tensor that was lazily cloned from during graph "
-            "capture is not supported if its memory was allocated before the "
-            "capture. Clone it with clone() instead.");
+            "Cannot materialize the source of a lazy clone during graph "
+            "capture because its memory was allocated before the capture. "
+            "Materializing it would move it to a new allocation inside of the "
+            "graph, while code outside of the graph (e.g., writing the inputs "
+            "of the graph) keeps using its old memory. Use clone() instead of "
+            "a lazy clone.");
       } else {
-        ordered = allocated_on_stream.value_or(true);
+        TORCH_CHECK(
+            allocated_on_stream.value_or(true),
+            "Cannot materialize the source of a lazy clone on stream ",
+            *stream,
+            " because its memory was allocated on a different stream. "
+            "Materializing it copies its data, and the copy is only ordered "
+            "after the writes it reads, and before reuse of its memory, on the "
+            "stream its memory was allocated on. Write to it on that stream, "
+            "or use clone() instead of a lazy clone.");
       }
     }
-    TORCH_CHECK(
-        ordered,
-        "Materializing a lazily cloned tensor on stream ",
-        *stream,
-        ", which is not the stream it was lazily cloned on (or, for the "
-        "tensor that was lazily cloned from, the stream its memory was "
-        "allocated on), is not supported. Clone it with clone() instead, or "
-        "write to it on the stream it was lazily cloned on.");
   }
 
   auto result = ctx->decrement_refcount();

@@ -5,8 +5,9 @@
 namespace c10::impl {
 
 void cow::cow_deleter(void* ctx) {
-  std::unique_ptr<cow::COWReference> ref(static_cast<cow::COWReference*>(ctx));
+  auto* ref = static_cast<cow::COWReference*>(ctx);
   ref->context->decrement_refcount();
+  delete ref;
 }
 
 cow::COWDeleterContext::COWDeleterContext(

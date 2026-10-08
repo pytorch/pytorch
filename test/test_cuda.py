@@ -3429,14 +3429,14 @@ torch.cuda.synchronize()
             # capture, which can't be redone by every replay.
             y = x._lazy_clone()
             g = torch.cuda.CUDAGraph()
-            with self.assertRaisesRegex(RuntimeError, "graph capture is only"):
+            with self.assertRaisesRegex(RuntimeError, "because it was lazily cloned (outside of|during) graph"):
                 with torch.cuda.graph(g, stream=s):
                     y.add_(1)
             self.assertTrue(torch._C._is_cow_tensor(y))
 
             # Same for the tensor that was lazily cloned from.
             g = torch.cuda.CUDAGraph()
-            with self.assertRaisesRegex(RuntimeError, "graph capture is only"):
+            with self.assertRaisesRegex(RuntimeError, "because it was lazily cloned (outside of|during) graph"):
                 with torch.cuda.graph(g, stream=s):
                     x.add_(1)
             self.assertTrue(torch._C._is_cow_tensor(x))
@@ -3446,7 +3446,7 @@ torch.cuda.synchronize()
             # a new allocation, while the user keeps writing to the old one.
             z = torch.randn(1024, device="cuda")
             g = torch.cuda.CUDAGraph()
-            with self.assertRaisesRegex(RuntimeError, "allocated before the"):
+            with self.assertRaisesRegex(RuntimeError, "allocated before the capture"):
                 with torch.cuda.graph(g, stream=s):
                     w = z._lazy_clone()
                     z.add_(1)
@@ -3457,7 +3457,7 @@ torch.cuda.synchronize()
             g = torch.cuda.CUDAGraph()
             with torch.cuda.graph(g, stream=s):
                 y = x._lazy_clone()
-            with self.assertRaisesRegex(RuntimeError, "graph capture is only"):
+            with self.assertRaisesRegex(RuntimeError, "because it was lazily cloned (outside of|during) graph"):
                 y.add_(1)
             self.assertTrue(torch._C._is_cow_tensor(y))
         torch.cuda.current_stream().wait_stream(s)
@@ -3484,12 +3484,12 @@ torch.cuda.synchronize()
         x = torch.randn(1024, device="cuda")
         y = x._lazy_clone()
         with torch.cuda.stream(s):
-            with self.assertRaisesRegex(RuntimeError, "not the stream it was lazily"):
+            with self.assertRaisesRegex(RuntimeError, "because it was lazily cloned on"):
                 y.add_(1)
         self.assertTrue(torch._C._is_cow_tensor(y))
         # Same for the tensor that was lazily cloned from.
         with torch.cuda.stream(s):
-            with self.assertRaisesRegex(RuntimeError, "not the stream it was lazily"):
+            with self.assertRaisesRegex(RuntimeError, "allocated on a different stream"):
                 x.add_(1)
         self.assertTrue(torch._C._is_cow_tensor(x))
 

@@ -65,3 +65,52 @@ We implement this by taking a shared lock when copying the data and
 taking an exclusive lock when stealing the data. The exclusive lock
 acquisition ensures that all pending shared locks are finished before
 we steal the data.
+
+Streams and CUDA graphs
+-----------------------
+On devices with streams, a lazy clone has the semantics of a clone()
+enqueued on the stream that is current when the lazy clone is made. The
+user synchronizes as if that clone had happened then, so materialization
+has to keep the same ordering, even though it happens later, on whatever
+stream is current then:
+
+- The copy reads the shared data. It has to come after the writes that
+  produced it, and before the data's memory is reused by the allocator.
+- The copy writes the new allocation. It has to come before the uses of
+  the materialized tensor, and before reuse of the new memory.
+
+The CUDA caching allocator only reuses memory for allocations on the
+stream it was allocated on, so work enqueued on that stream is ordered
+before any reuse. Copying on the stream the lazy clone was made on (and,
+for the storage that was lazily cloned from, the stream its memory was
+allocated on) satisfies all of the above by stream order, and gives the new
+allocation the stream that the user expects it to have. Copying on another
+stream would need synchronization (`recordStream` or host blocking), which
+we avoid; such materializations raise an error instead. Therefore,
+`Allocator::copy_data` must enqueue the copy on the current stream.
+
+A lazy clone may be made on a stream other than the one the data was
+allocated on (e.g., when warming up for CUDA graph capture on a side
+stream). Until it is materialized, its uses on that stream count as uses
+of the original allocation on a side stream: as usual, they must be
+synchronized with the allocation stream before the allocation is freed.
+
+When the last reference steals the data instead of copying it, it writes
+to the data on the current stream, which has to come after copies of the
+data that may still be pending on other streams. Each eager copy records
+an event on its stream (one per stream suffices, since later events on the
+same stream supersede earlier ones), and the stealing stream waits for
+them on the device.
+
+Under CUDA graph capture, a materializing copy is captured and redone by
+every replay. That is what a lazy clone made during the capture stands for,
+but a lazy clone made before the capture stands for a copy of the data at
+that time, and an eager copy can't be redone by the replays of a graph that
+a lazy clone was made in. So copying is only allowed if the lazy clone was
+made during capture iff the copy is (we don't distinguish between
+captures). Moreover, materializing the storage that was lazily cloned from
+during capture would move it to a new allocation inside of the graph, which
+is wrong if its memory was allocated before the capture: e.g., the user
+keeps writing the inputs of the graph to the old memory. Captured copies
+don't need to be waited for by stealing, since they only run on replay,
+which the user orders with respect to other work.
