@@ -1668,4 +1668,43 @@ Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
   return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic, alpha);
 }
 
+// sub.Tensor meta kernel
+Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other) || alpha.isSymInt();
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  // Unlike refs.add, refs.sub rejects two bool tensors and checks alpha against a
+  // bool computation dtype too.
+  const auto compute_dtype = elementwise_dtypes(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT).first;
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      self.unsafeGetTensorImpl()->is_wrapped_number() || other.unsafeGetTensorImpl()->is_wrapped_number() ||
+          compute_dtype != kBool,
+      "Subtraction, the `-` operator, with two bool tensors is not supported. "
+      "Use the `^` or `logical_xor()` operator instead.");
+  // refs.sub applies alpha only when alpha != 1, which guards for a SymInt or
+  // SymFloat alpha. A SymBool alpha != 1 folds to True without a guard.
+  bool apply_alpha = true;
+  if (alpha.isSymInt()) {
+    apply_alpha = alpha.toSymInt().sym_ne(1).guard_bool(__FILE__, __LINE__);
+  } else if (alpha.isSymFloat()) {
+    apply_alpha = alpha.toSymFloat().sym_ne(1.0).guard_bool(__FILE__, __LINE__);
+  } else if (alpha.isComplex()) {
+    apply_alpha = alpha.toComplexDouble() != c10::complex<double>(1, 0);
+  } else if (!alpha.isSymBool()) {
+    apply_alpha = alpha.toDouble() != 1;
+  }
+  if (apply_alpha) {
+    check_alpha_type(alpha, compute_dtype);
+  }
+  return binary_ref_meta(
+      self,
+      other,
+      ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT,
+      symbolic,
+      apply_alpha ? std::optional<Scalar>(alpha) : std::nullopt);
+}
+
 } // namespace at::native
