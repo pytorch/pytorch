@@ -187,6 +187,50 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
   int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
   TORCH_CHECK(dim_ >= 0 && dim_ < grad.dim(), "Grad:dim must be non-negative and less than input dimensions");
 
+  // Keep the existing graph path for non-last dimensions and mixed dtypes.
+  const bool native_dtype = supportedFloatingType(output) && grad.scalar_type() == output.scalar_type() &&
+      grad_input.scalar_type() == output.scalar_type();
+  const bool last_dim = dim_ == output.dim() - 1;
+  // Keep wider strided rows on the graph route outside the row-kernel domain.
+  const bool wide_strided_last =
+      last_dim && output.size(dim_) > kSoftmaxMaxThreads * 4 && (!grad.is_contiguous() || !output.is_contiguous());
+  if (native_dtype && last_dim && !wide_strided_last) {
+    const auto grad_contiguous = grad.contiguous();
+    const auto output_contiguous = output.contiguous();
+    const auto result = grad_input.is_contiguous() ? grad_input : at::empty(grad_input.sizes(), grad_input.options());
+    const auto dim_size = static_cast<uint64_t>(output.size(dim_));
+    const auto num_rows = static_cast<uint64_t>(output.numel()) / dim_size;
+    const bool use_u32 = offsetsFitIn<int32_t>(grad_contiguous, output_contiguous, result);
+    SoftmaxParams<uint64_t> params{.dim_size = dim_size, .num_rows = num_rows};
+    const uint64_t values_per_thread = output.element_size() == 2 ? 8 : 4;
+    const bool single_row = dim_size <= kSoftmaxMaxThreads * 4;
+    const auto threads = single_row
+        ? std::max(uint64_t(c10::metal::simdgroup_size), std::bit_ceil(ceil_div(dim_size, values_per_thread)))
+        : uint64_t(kSoftmaxMaxThreads);
+    MPSStream* stream = getCurrentMPSStream();
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        run_softmax(stream,
+                    single_row ? (values_per_thread == 8 ? "softmax_backward_row8" : "softmax_backward_row")
+                               : "softmax_backward_looped",
+                    output,
+                    use_u32,
+                    MTLSizeMake(std::min(num_rows, uint64_t(kSoftmaxBackwardRowsPerGrid)),
+                                ceil_div(num_rows, uint64_t(kSoftmaxBackwardRowsPerGrid)),
+                                1),
+                    MTLSizeMake(threads, 1, 1),
+                    params,
+                    grad_contiguous,
+                    output_contiguous,
+                    result);
+      }
+    });
+    if (!grad_input.is_contiguous()) {
+      grad_input.copy_(result);
+    }
+    return;
+  }
+
   using namespace mps;
   using CachedGraph = MPSUnaryGradCachedGraph;
   MPSStream* stream = getCurrentMPSStream();

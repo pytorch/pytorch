@@ -389,3 +389,107 @@ softmax_strided_finalize(
 REGISTER_SOFTMAX(float);
 REGISTER_SOFTMAX(half);
 REGISTER_SOFTMAX(bfloat);
+
+template <typename T, typename idx_t, uint values_per_thread = 4>
+[[max_total_threads_per_threadgroup(kSoftmaxMaxThreads)]] [[kernel]] void
+softmax_backward_row(
+    device const T* grad,
+    device const T* output,
+    device T* grad_input,
+    constant SoftmaxParams<idx_t>& params,
+    uint3 group [[threadgroup_position_in_grid]],
+    uint3 thread_pos [[thread_position_in_threadgroup]],
+    uint3 group_size [[threads_per_threadgroup]]) {
+  const uint tid = thread_pos.x;
+  const uint tptg = group_size.x;
+  const idx_t row = idx_t(group.y) * kSoftmaxBackwardRowsPerGrid + group.x;
+  if (row >= params.num_rows) {
+    return;
+  }
+  const idx_t offset = row * params.dim_size;
+  const idx_t start = idx_t(tid) * values_per_thread;
+  float grad_values[values_per_thread] = {};
+  float output_values[values_per_thread] = {};
+  float dot = 0;
+  for (uint i = 0; i < values_per_thread; ++i) {
+    if (start + i < params.dim_size) {
+      grad_values[i] = float(grad[offset + start + i]);
+      output_values[i] = float(output[offset + start + i]);
+      dot += grad_values[i] * output_values[i];
+    }
+  }
+  threadgroup float shared[simdgroup_size];
+  dot = c10::metal::threadgroup_sum(shared, dot, tid, tptg);
+  for (uint i = 0; i < values_per_thread; ++i) {
+    if (start + i < params.dim_size) {
+      grad_input[offset + start + i] =
+          static_cast<T>(output_values[i] * (grad_values[i] - dot));
+    }
+  }
+}
+
+template <typename T, typename idx_t>
+[[max_total_threads_per_threadgroup(kSoftmaxMaxThreads)]] [[kernel]] void
+softmax_backward_looped(
+    device const T* grad,
+    device const T* output,
+    device T* grad_input,
+    constant SoftmaxParams<idx_t>& params,
+    uint3 group [[threadgroup_position_in_grid]],
+    uint3 thread_pos [[thread_position_in_threadgroup]],
+    uint3 group_size [[threads_per_threadgroup]]) {
+  const uint tid = thread_pos.x;
+  const uint tptg = group_size.x;
+  const idx_t row = idx_t(group.y) * kSoftmaxBackwardRowsPerGrid + group.x;
+  if (row >= params.num_rows) {
+    return;
+  }
+  const idx_t offset = row * params.dim_size;
+  float dot = 0;
+  for (idx_t col = tid; col < params.dim_size; col += tptg) {
+    dot += float(grad[offset + col]) * float(output[offset + col]);
+  }
+  threadgroup float shared[simdgroup_size];
+  dot = c10::metal::threadgroup_sum(shared, dot, tid, tptg);
+  for (idx_t col = tid; col < params.dim_size; col += tptg) {
+    grad_input[offset + col] = static_cast<T>(
+        float(output[offset + col]) * (float(grad[offset + col]) - dot));
+  }
+}
+
+#define REGISTER_SOFTMAX_BACKWARD(DTYPE, IDX_T, SUFFIX, NAME)          \
+  template [[host_name(#NAME "_" #DTYPE "_" #SUFFIX)]] [[kernel]] void \
+  NAME<DTYPE, IDX_T>(                                                  \
+      device const DTYPE* grad,                                        \
+      device const DTYPE* output,                                      \
+      device DTYPE* grad_input,                                        \
+      constant SoftmaxParams<IDX_T>& params,                           \
+      uint3 group [[threadgroup_position_in_grid]],                    \
+      uint3 thread_pos [[thread_position_in_threadgroup]],             \
+      uint3 group_size [[threads_per_threadgroup]]);
+
+#define REGISTER_SOFTMAX_BACKWARD_ROW8(DTYPE, IDX_T, SUFFIX) \
+  template [[host_name("softmax_backward_row8_" #DTYPE       \
+                       "_" #SUFFIX)]] [[kernel]] void        \
+  softmax_backward_row<DTYPE, IDX_T, 8>(                     \
+      device const DTYPE* grad,                              \
+      device const DTYPE* output,                            \
+      device DTYPE* grad_input,                              \
+      constant SoftmaxParams<IDX_T>& params,                 \
+      uint3 group [[threadgroup_position_in_grid]],          \
+      uint3 thread_pos [[thread_position_in_threadgroup]],   \
+      uint3 group_size [[threads_per_threadgroup]]);
+
+REGISTER_SOFTMAX_BACKWARD_ROW8(half, uint, u32);
+REGISTER_SOFTMAX_BACKWARD_ROW8(bfloat, uint, u32);
+REGISTER_SOFTMAX_BACKWARD_ROW8(half, ulong, u64);
+REGISTER_SOFTMAX_BACKWARD_ROW8(bfloat, ulong, u64);
+
+REGISTER_SOFTMAX_BACKWARD(float, uint, u32, softmax_backward_row);
+REGISTER_SOFTMAX_BACKWARD(float, ulong, u64, softmax_backward_row);
+REGISTER_SOFTMAX_BACKWARD(float, uint, u32, softmax_backward_looped);
+REGISTER_SOFTMAX_BACKWARD(half, uint, u32, softmax_backward_looped);
+REGISTER_SOFTMAX_BACKWARD(bfloat, uint, u32, softmax_backward_looped);
+REGISTER_SOFTMAX_BACKWARD(float, ulong, u64, softmax_backward_looped);
+REGISTER_SOFTMAX_BACKWARD(half, ulong, u64, softmax_backward_looped);
+REGISTER_SOFTMAX_BACKWARD(bfloat, ulong, u64, softmax_backward_looped);
