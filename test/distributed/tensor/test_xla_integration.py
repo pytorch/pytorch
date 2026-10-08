@@ -18,7 +18,11 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 # wrapper to check xla test requirements
@@ -46,6 +50,8 @@ def with_xla(func: Callable) -> Callable:
 
 
 class DTensorXLAIntegrationTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class SimpleLinear(nn.Module):
         def __init__(self) -> None:
             super(DTensorXLAIntegrationTest.SimpleLinear, self).__init__()

@@ -5,7 +5,8 @@
 import torch
 import torch.distributed as dist
 from torch.distributed.tensor import distribute_tensor, Replicate
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -18,13 +19,16 @@ LR = 0.001
 
 
 class DistOtherOpsTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         # hard code world size to 2
         return 2
 
     @with_comms
-    def test_slice(self):
+    def test_slice(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]
 
@@ -32,8 +36,8 @@ class DistOtherOpsTest(DTensorTestBase):
         grad_output_list = torch.rand(ITER_TIME, 1024, 5) * 1e-3
 
         for i in range(ITER_TIME):
-            inp = input_list[i].to(self.device_type).requires_grad_()
-            grad_output = grad_output_list[i].to(self.device_type)
+            inp = input_list[i].to(device_type).requires_grad_()
+            grad_output = grad_output_list[i].to(device_type)
 
             # droppath  with dtensor
             inp_dtensor = distribute_tensor(inp, device_mesh, shard_spec)
@@ -75,7 +79,8 @@ class DistOtherOpsTest(DTensorTestBase):
             )
 
     @with_comms
-    def test_bernoulli(self):
+    def test_bernoulli(self, device):
+        device_type = torch.device(device).type
         rank = dist.get_rank()
         device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]
@@ -84,8 +89,8 @@ class DistOtherOpsTest(DTensorTestBase):
         grad_output_list = torch.rand(ITER_TIME, 1024, 10) * 1e-3
 
         for i in range(ITER_TIME):
-            inp = input_list[i].to(self.device_type).requires_grad_()
-            grad_output = grad_output_list[i].to(self.device_type)
+            inp = input_list[i].to(device_type).requires_grad_()
+            grad_output = grad_output_list[i].to(device_type)
 
             # bernoulli  with dtensor
             inp_dtensor = distribute_tensor(inp, device_mesh, shard_spec)
@@ -138,7 +143,8 @@ class DistOtherOpsTest(DTensorTestBase):
             )
 
     @with_comms
-    def test_nll(self):
+    def test_nll(self, device):
+        device_type = torch.device(device).type
         device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]
 
@@ -148,8 +154,8 @@ class DistOtherOpsTest(DTensorTestBase):
         criterion = torch.nn.CrossEntropyLoss()
 
         for i in range(ITER_TIME):
-            pred = pred_list[i].to(self.device_type).requires_grad_()
-            target = target_list[i].to(self.device_type)
+            pred = pred_list[i].to(device_type).requires_grad_()
+            target = target_list[i].to(device_type)
 
             # nll with dtensor
             pred_dtensor = distribute_tensor(pred, device_mesh, shard_spec)
@@ -194,6 +200,16 @@ DistOtherOpsTestWithLocalTensor = create_local_tensor_test_class(
     # Send / recv ops are not supported
     skipped_tests=["test_bernoulli"],
 )
+instantiate_device_type_tests(
+    DistOtherOpsTest, globals(), except_for=["cpu"], allow_xpu=True
+)
+instantiate_device_type_tests(
+    DistOtherOpsTestWithLocalTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()
