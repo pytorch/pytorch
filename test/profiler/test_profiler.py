@@ -4436,7 +4436,7 @@ instantiate_device_type_tests(
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-class TestProfilerEventsParityCudaOnly(TestCase):
+class TestProfilerEventsParityCUDA(TestCase):
     """Structured-metadata parity tests keyed on CUPTI-specific trace
     categories/fields (cuda_runtime, cbid, cid, ...) that have no
     cross-backend equivalent."""
@@ -4655,12 +4655,12 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 
 
 instantiate_device_type_tests(
-    TestProfilerEventsParityCudaOnly, globals(), only_for=("cuda",)
+    TestProfilerEventsParityCUDA, globals(), only_for=("cuda",)
 )
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
-class TestPythonChromeTraceExport(TestCase):
+class TestPythonChromeTraceExportDevice(TestCase):
     """Verify that the Python streaming exporter produces traces equivalent
     to the C++ Kineto save() path."""
 
@@ -4793,13 +4793,13 @@ class TestPythonChromeTraceExport(TestCase):
 
 
 instantiate_device_type_tests(
-    TestPythonChromeTraceExport, globals(), except_for=("cpu",)
+    TestPythonChromeTraceExportDevice, globals(), except_for=("cpu",)
 )
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestPythonChromeTraceExportCudaOnly(TestCase):
+class TestPythonChromeTraceExportCUDA(TestCase):
     """Python streaming exporter checks keyed on CUDA-specific data (CUDA runtime/
     driver versions, CUDA graph annotations) that have no cross-backend equivalent."""
 
@@ -4966,7 +4966,7 @@ class _StubResults:
         return self._activities
 
 
-class TestChromeTraceInlineAnnotations(TestCase):
+class TestChromeTraceInlineAnnotationsCUDA(TestCase):
     """Inline CUDA-graph annotations, driven through stub activities so the branches
     are covered without a capture or a live profiler."""
 
@@ -5168,7 +5168,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestMetadataJsonFormat(TestCase):
+class TestMetadataJsonFormatCUDA(TestCase):
     """Guard the format of ITraceActivity.metadataJson() for kernel events.
 
     The Python-side chrome trace exporter splices metadataJson() verbatim

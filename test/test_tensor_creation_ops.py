@@ -109,7 +109,7 @@ def _float_to_int_conversion_helper(test_case, vals, device, dtype, refs=None):
 #
 # See https://pytorch.org/docs/main/torch.html#creation-ops
 
-class TestTensorCreation(TestCase):
+class TestTensorCreationDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
@@ -3289,7 +3289,7 @@ class TestTensorCreationGeneric(TestCase):
         n_astensor[0][1] = 250.8
         self.assertNotEqual(torch.tensor(n, dtype=torch.float64), n_astensor)
 
-class TestTensorCreationCudaOnly(TestCase):
+class TestTensorCreationCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
     exact_dtype = True
 
@@ -3371,7 +3371,7 @@ class TestTensorCreationCudaOnly(TestCase):
             self.assertIs(torch.float64, x.dtype)
             self.assertTrue(x.is_cuda)
 # Class for testing random tensor creation ops, like torch.randint
-class TestRandomTensorCreation(TestCase):
+class TestRandomTensorCreationDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
@@ -3763,7 +3763,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=device_gen))  # implicitly on CPU
 
 
-class TestRandomTensorCreationCpuOnly(TestCase):
+class TestRandomTensorCreationCPU(TestCase):
     hw_classification = HardwareClassification.CPU
 
     # TODO: this test should be updated
@@ -3830,7 +3830,7 @@ class TestRandomTensorCreationCpuOnly(TestCase):
 
 
 # Class for testing *like ops, like torch.ones_like
-class TestLikeTensorCreation(TestCase):
+class TestLikeTensorCreationDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
@@ -4043,7 +4043,7 @@ class _BufferAndSequence:
     def __getitem__(self, index):
         return self._array[index].item()
 
-class TestBufferProtocol(TestCase):
+class TestBufferProtocolCPU(TestCase):
     hw_classification = HardwareClassification.CPU
 
     def _run_test(self, shape, dtype, count=-1, first=0, offset=None, **kwargs):
@@ -4300,7 +4300,7 @@ class TestBufferProtocol(TestCase):
             arr = np.array(values, dtype=torch_to_numpy_dtype_dict[dtype])
             self.assertEqual(torch.tensor(_BufferAndSequence(arr)), torch.tensor(values))
 
-class TestFromBlob(TestCase):
+class TestFromBlobCPU(TestCase):
     hw_classification = HardwareClassification.CPU
 
     def _make_data(self, dtype, numel):
@@ -4487,7 +4487,7 @@ class _TestAsArrayBase(TestCase):
                     check(same_dtype=False, dtype=other)
                     check(same_dtype=False, dtype=other, copy=True)
 
-class TestAsArray(_TestAsArrayBase):
+class TestAsArrayDevice(_TestAsArrayBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     # Skipping 'meta' devices, since there's no point in comparing their
@@ -4633,7 +4633,7 @@ class TestAsArray(_TestAsArrayBase):
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 
 
-class TestAsArrayCpuOnly(_TestAsArrayBase):
+class TestAsArrayCPU(_TestAsArrayBase):
     hw_classification = HardwareClassification.CPU
 
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
@@ -4700,15 +4700,21 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
         self.assertEqual(tensor.dtype, torch.int32)
 
 
-instantiate_device_type_tests(TestTensorCreation, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestTensorCreationCudaOnly, globals(), only_for="cuda")
-instantiate_device_type_tests(TestRandomTensorCreation, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestRandomTensorCreationCpuOnly, globals(), only_for="cpu")
-instantiate_device_type_tests(TestLikeTensorCreation, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
-instantiate_device_type_tests(TestFromBlob, globals(), only_for="cpu")
-instantiate_device_type_tests(TestAsArray, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestAsArrayCpuOnly, globals(), only_for="cpu")
+instantiate_device_type_tests(TestTensorCreationDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestTensorCreationCUDA, globals(), only_for="cuda")
+
+instantiate_device_type_tests(TestRandomTensorCreationDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestRandomTensorCreationCPU, globals(), only_for="cpu")
+
+instantiate_device_type_tests(TestLikeTensorCreationDevice, globals(), allow_xpu=True)
+
+instantiate_device_type_tests(TestBufferProtocolCPU, globals(), only_for="cpu")
+
+instantiate_device_type_tests(TestFromBlobCPU, globals(), only_for="cpu")
+
+instantiate_device_type_tests(TestAsArrayDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestAsArrayCPU, globals(), only_for="cpu")
+
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

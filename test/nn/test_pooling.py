@@ -2406,7 +2406,7 @@ torch.{device_type}.synchronize()
         F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
 
-class TestPoolingNNCudaOnly(NNTestCase):
+class TestPoolingNNCUDA(NNTestCase):
     hw_classification = HardwareClassification.CUDA
 
     @largeTensorTest("18GB", device="cuda")
@@ -2486,7 +2486,7 @@ class TestPoolingNNCudaOnly(NNTestCase):
         self.assertEqual(xg.grad, ref.grad)
 
 
-class TestPoolingNNMpsOnly(NNTestCase):
+class TestPoolingNNMPS(NNTestCase):
     hw_classification = HardwareClassification.MPS
 
     # Max: verify against unfold+amax. (Avg int is implementation-defined.)
@@ -2504,9 +2504,9 @@ instantiate_device_type_tests(
     TestPoolingNNDevice, globals(), allow_mps=True, allow_xpu=True
 )
 instantiate_parametrized_tests(TestPoolingNN)
-instantiate_device_type_tests(TestPoolingNNCudaOnly, globals(), only_for="cuda")
+instantiate_device_type_tests(TestPoolingNNCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(
-    TestPoolingNNMpsOnly, globals(), only_for="mps", allow_mps=True
+    TestPoolingNNMPS, globals(), only_for="mps", allow_mps=True
 )
 
 if __name__ == "__main__":

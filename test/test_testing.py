@@ -3002,6 +3002,47 @@ instantiate_parametrized_tests(TestTestParametrization)
 instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
 
 
+class TestDeviceTypeTestsNaming(TestCase):
+    @staticmethod
+    def _make_template(name):
+        def test_x(self, device):
+            pass
+
+        return type(name, (TestCase,), {"test_x": test_x})
+
+    def test_device_suffix_is_appended(self, device):
+        template = self._make_template("TestFoo")
+        scope = {"TestFoo": template}
+        instantiate_device_type_tests(template, scope, only_for=self.device_type)
+        self.assertEqual(list(scope.keys()), [f"TestFoo{self.device_type.upper()}"])
+
+    def test_device_suffix_is_not_duplicated(self, device):
+        name = f"TestFoo{self.device_type.upper()}"
+        template = self._make_template(name)
+        scope = {name: template}
+        instantiate_device_type_tests(template, scope, only_for=self.device_type)
+        self.assertEqual(list(scope.keys()), [name])
+
+    def test_name_collision_is_reported(self, device):
+        # A generic ``TestFoo`` and a device-specific ``TestFoo<DEVICE>`` both map onto
+        # the same instantiated name, in either instantiation order.
+        name = f"TestFoo{self.device_type.upper()}"
+        generic = self._make_template("TestFoo")
+        device_specific = self._make_template(name)
+
+        scope = {"TestFoo": generic, name: device_specific}
+        instantiate_device_type_tests(device_specific, scope, only_for=self.device_type)
+        with self.assertRaisesRegex(RuntimeError, "already defined in the target scope"):
+            instantiate_device_type_tests(generic, scope, only_for=self.device_type)
+
+        scope = {"TestFoo": generic, name: device_specific}
+        with self.assertRaisesRegex(RuntimeError, "already defined in the target scope"):
+            instantiate_device_type_tests(generic, scope, only_for=self.device_type)
+
+
+instantiate_device_type_tests(TestDeviceTypeTestsNaming, globals())
+
+
 class TestImports(TestCase):
     @classmethod
     def _check_python_output(cls, program) -> str:
