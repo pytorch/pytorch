@@ -1146,7 +1146,11 @@ def validate_args_and_maybe_create_graph_inputs(
     set_subgraph_inputs: SetSubgraphInputs,
     description: str,
     sub_args_names: Sequence[str] | None = None,
+    sub_args_dtypes: Sequence[torch.dtype | None] | None = None,
 ) -> list[Any]:
+    """``sub_args_dtypes`` overrides the dtype of forced tensor inputs, e.g. the
+    gradients an autograd.Function declares via ``ctx.set_output_grad_dtype``.
+    """
     from . import AutogradFunctionContextVariable
     from .builder import SourcelessBuilder, wrap_fx_proxy_cls
 
@@ -1200,6 +1204,8 @@ def validate_args_and_maybe_create_graph_inputs(
                             "Expected TensorVariable to have an fx node"
                         )
                     example_value = node.meta["example_value"]
+                    if sub_args_dtypes is not None and sub_args_dtypes[idx] is not None:
+                        example_value = example_value.to(sub_args_dtypes[idx])
                     arg_name = (
                         a.as_proxy().node.name
                         if sub_args_names is None
@@ -1208,7 +1214,6 @@ def validate_args_and_maybe_create_graph_inputs(
                     new_proxy = tracer.create_graph_input(
                         arg_name, a.python_type(), example_value
                     )
-                    example_value = node.meta.get("example_value", None)
                     a = wrap_fx_proxy_cls(
                         target_cls=type(a),
                         tx=tx,
@@ -1616,6 +1621,7 @@ def get_hop_args(
     sub_kwargs: dict[str, VariableTracker],
     set_subgraph_inputs: SetSubgraphInputs,
     description: str,
+    sub_args_dtypes: Sequence[torch.dtype | None] | None = None,
 ) -> list[VariableTracker]:
     sub_args_names = maybe_positional_arg_names(f)
     # User mismatch in the number of args. Will eventually lead to an error.
@@ -1628,6 +1634,7 @@ def get_hop_args(
         set_subgraph_inputs,
         description,
         sub_args_names,
+        sub_args_dtypes,
     )
 
     validate_args_and_maybe_create_graph_inputs(
@@ -1719,6 +1726,9 @@ def speculate_subgraph_with_auto_output_flattening(
     # Pass in an originating tracer - this is needed for preserving context
     # across fwd-bwd for autograd.Function
     tracer: Optional["SubgraphTracer"] = None,
+    # Dtype overrides for forced tensor inputs; see
+    # validate_args_and_maybe_create_graph_inputs.
+    sub_args_dtypes: Sequence[torch.dtype | None] | None = None,
 ) -> tuple[
     VariableTracker,  # output: The VT that Dynamo continues tracing with
     torch.fx.Graph,  # graph: The FX graph representing the subgraph computation
@@ -1825,6 +1835,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 sub_kwargs,
                 set_subgraph_inputs,
                 description,
+                sub_args_dtypes,
             )
 
             # Special case - if users uses
@@ -5400,13 +5411,16 @@ class AutogradFunctionApplyVariable(VariableTracker):
             bwd_node,
             *list(fwd_freevars.keys()),
         )
-        kwargs_for_fn = {
+        kwargs_for_fn: dict[str, Any] = {
             "non_differentiable_idx": non_differentiable_idx,
             "saved_for_backward_idx": saved_for_backward_idx,
         }
         # Preserve the existing HOP call shape for the common no-mark_dirty case.
         if dirty_idx:
             kwargs_for_fn["dirty_idx"] = dirty_idx
+        # Likewise, only pass gradient dtypes declared via ctx.set_output_grad_dtype.
+        if ctx.output_grad_dtypes is not None:
+            kwargs_for_fn["output_grad_dtypes"] = ctx.output_grad_dtypes
 
         # Store the invocation as a call
         from torch._functorch.autograd_function import autograd_function_apply
@@ -5572,7 +5586,15 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 else:
                     bwd_args.append(ConstantVariable.create(None))
 
+        num_grad_args = len(bwd_args)
         bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
+        # Gradients declared via ctx.set_output_grad_dtype reach backward in
+        # the declared dtype, not the forward output's dtype.
+        bwd_args_dtypes = None
+        if ctx.output_grad_dtypes is not None:
+            bwd_args_dtypes = [None] * (len(bwd_args) - num_grad_args) + list(
+                ctx.output_grad_dtypes
+            )
 
         def is_strict_for(v: VariableTracker) -> bool:
             if v.is_tensor():
@@ -5603,6 +5625,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         supports_input_mutation=True,
                         supports_aliasing=True,
                         tracer=bwd_tracer,
+                        sub_args_dtypes=bwd_args_dtypes,
                     )
                 )
             except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace as e:
@@ -5658,6 +5681,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                             supports_input_mutation=True,
                             supports_aliasing=True,
                             tracer=bwd_tracer,
+                            sub_args_dtypes=bwd_args_dtypes,
                         )
                     )
 

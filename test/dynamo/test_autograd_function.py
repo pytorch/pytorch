@@ -1964,6 +1964,33 @@ class GraphModule(torch.nn.Module):
         self.assertFalse(ref2.requires_grad)
         self.assertFalse(res2.requires_grad)
 
+    def test_set_output_grad_dtype(self):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        class ToBFloat16(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_output_grad_dtype(torch.float32)
+                return x.to(torch.bfloat16)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        def fn(x, y):
+            # fp32 * bf16 sends an fp32 gradient into ToBFloat16's bf16 output.
+            return ToBFloat16.apply(x) * y
+
+        x = torch.ones(4, requires_grad=True)
+        # 1 + 2**-9 is exact in fp32 but rounds to 1 in bf16.
+        y = torch.full((4,), 1 + 2**-9)
+        fn(x, y).sum().backward()
+        self.assertEqual(x.grad, y, atol=0, rtol=0)
+        x.grad = None
+        torch.compile(fn, backend=cnt, fullgraph=True)(x, y).sum().backward()
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(x.grad, y, atol=0, rtol=0)
+
     def test_mark_non_differentiable(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         from torch.autograd import Function
