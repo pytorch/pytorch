@@ -91,7 +91,7 @@ runs:
     - name: Get workflow job id
       id: get-job-id
       if: ${{ always() && inputs.github-token != '' }}
-      uses: pytorch/pytorch/.github/actions/get-workflow-job-id@main
+      uses: pytorch/pytorch/.github/actions/get-workflow-job-id@gh/huydhn/71/head
       with:
         github-token: ${{ inputs.github-token }}
 

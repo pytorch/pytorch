@@ -187,7 +187,7 @@ jobs:
     steps:
       - name: Setup Linux
         id: setup-linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@main
+        uses: pytorch/pytorch/.github/actions/setup-linux@gh/huydhn/71/head
         with:
           use-arc: true
           python-version: ${{ inputs.python-version }}
