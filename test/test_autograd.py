@@ -2798,6 +2798,37 @@ class TestAutograd(TestCase):
         self.assertEqual(result["x"], 2 * x + y)
         self.assertEqual(result["y"], x + 4 * y)
 
+    def test_grad_mapping_items_snapshot(self):
+        class Inputs(collections.abc.Mapping):
+            def __init__(self, x, y):
+                self.data = {"x": x, "y": y}
+                self.calls = 0
+
+            def __iter__(self):
+                return iter(self.data)
+
+            def __len__(self):
+                return len(self.data)
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def values(self):
+                return reversed(self.data.values())
+
+            def items(self):
+                self.calls += 1
+                return self.data.items()
+
+        x = torch.tensor(2.0, requires_grad=True)
+        y = torch.tensor(7.0, requires_grad=True)
+        inputs = Inputs(x, y)
+        result = torch.autograd.grad(2 * x + 3 * y, inputs)
+        self.assertIs(type(result), dict)
+        self.assertEqual(list(result), ["x", "y"])
+        self.assertEqual(result, {"x": torch.tensor(2.0), "y": torch.tensor(3.0)})
+        self.assertEqual(inputs.calls, 1)
+
     def test_grad_dict_inputs_materialize_grads(self):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
