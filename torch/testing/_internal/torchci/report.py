@@ -9,7 +9,7 @@ from typing import Any, NamedTuple
 
 # Bumped on breaking changes.
 SCHEMA_VERSION = "0.1"
-REPORT_SUFFIX = ".jsonl"
+REPORT_SUFFIX = ".report.jsonl"
 
 
 class TestId(NamedTuple):
@@ -19,31 +19,17 @@ class TestId(NamedTuple):
     suite: str
     case_name: str
     language: str
+    declared_case_name: str
 
 
-def identity(nodeid: str) -> TestId:
-    """Launched file, innermost class and parametrized name of a node id. Classes
-    that test_jit.py imports from jit/ keep test_jit.py as their file."""
-    path, _, rest = nodeid.partition("::")
-    head, bracket, params = rest.partition("[")
-    parts = head.split("::")
-    suite = parts[-2] if len(parts) > 1 else ""
-    return TestId(path, suite, parts[-1] + bracket + params, "python")
-
-
-def fallback_declared_case_name(nodeid: str) -> str:
-    """The case name without pytest parameters."""
-    return identity(nodeid).case_name.partition("[")[0]
-
-
-def report_path(directory: str, report_uuid: str) -> str:
-    """``<directory>/<directory name>-<uuid>.jsonl``."""
-    name = os.path.basename(os.path.normpath(directory))
-    return os.path.join(directory, f"{name}-{report_uuid}{REPORT_SUFFIX}")
+def report_path(prefix: str, report_uuid: str) -> str:
+    """``<prefix>-<uuid>.report.jsonl``."""
+    return f"{prefix}-{report_uuid}{REPORT_SUFFIX}"
 
 
 def _job_id() -> int:
-    # The workflow's job-id lookup can fail.
+    # get_workflow_job_id.py leaves JOB_ID empty when its GitHub API call fails,
+    # and it's unset outside CI.
     job = os.environ.get("JOB_ID", "")
     return int(job) if job.isdigit() else 0
 
@@ -63,23 +49,17 @@ def report_record(report_uuid: str, environment: Any) -> dict[str, Any]:
 
 
 def run_record(
-    nodeid: str,
+    test: TestId,
     rerun_number: int,
     outcome: str,
     started: float,
     ended: float,
     outcome_summary: str = "",
-    declared_case_name: str | None = None,
 ) -> dict[str, Any]:
-    test = identity(nodeid)
     return {
         "type": "run",
         "schema_version": SCHEMA_VERSION,
-        "file": test.file,
-        "suite": test.suite,
-        "case_name": test.case_name,
-        "language": test.language,
-        "declared_case_name": declared_case_name or fallback_declared_case_name(nodeid),
+        **test._asdict(),
         "rerun_number": rerun_number,
         "outcome": outcome,
         "outcome_summary": outcome_summary,
@@ -89,16 +69,8 @@ def run_record(
     }
 
 
-def _json_safe(value: Any) -> Any:
-    # Escape lone surrogates, which UTF-8 can't encode.
-    if isinstance(value, str):
-        return value.encode("utf-8", "backslashreplace").decode()
-    if isinstance(value, dict):
-        return {_json_safe(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    return value
-
-
 def line(record: dict[str, Any]) -> str:
-    return json.dumps(_json_safe(record), separators=(",", ":")) + "\n"
+    # ensure_ascii would write a lone surrogate as a \ud800 escape, which ClickHouse
+    # rejects as invalid JSON, so write UTF-8 and replace lone surrogates with "?".
+    text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+    return text.encode("utf-8", "replace").decode() + "\n"

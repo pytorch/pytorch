@@ -123,11 +123,10 @@ def _compiler(config: str) -> tuple[str, str]:
 
 def _accelerator() -> tuple[str, str]:
     if torch.version.cuda:
-        return "cuda", ".".join(torch.version.cuda.split(".")[:2])
+        return "cuda", torch.version.cuda
     if torch.version.hip:
         # The ROCm release (10.1), not HIP's own version (7.16).
-        rocm = getattr(torch.version, "rocm", None) or torch.version.hip
-        return "rocm", ".".join(rocm.split(".")[:2])
+        return "rocm", ".".join(torch.version.rocm.split(".")[:2])
     xpu = str(getattr(torch.version, "xpu", "") or "")
     if xpu:
         # The SYCL version packed as major * 10000 + minor * 100 + patch.
@@ -141,19 +140,17 @@ def _accelerator() -> tuple[str, str]:
 
 
 def _device_count(accelerator: str) -> int:
-    # Not torch.accelerator: it latches MTIA's hooks before a test can register
-    # its own (test_cpp_extensions_mtia_backend) and counts PrivateUse1 backends
-    # that tests register at import.
+    if accelerator == "cpu":
+        return 0
+    # ROCm builds expose HIP devices as torch.cuda.
+    backend = "cuda" if accelerator == "rocm" else accelerator
     try:
-        if accelerator in ("cuda", "rocm"):
-            return torch.cuda.device_count()
-        if accelerator == "xpu":
-            return torch.xpu.device_count()
-        if accelerator == "mps":
-            return int(torch.backends.mps.is_available())
+        # An explicit backend, not torch.accelerator: that latches MTIA's hooks
+        # before a test can register its own (test_cpp_extensions_mtia_backend) and
+        # counts PrivateUse1 backends that tests register at import.
+        return torch.get_device_module(backend).device_count()
     except Exception:
-        pass
-    return 0
+        return 0
 
 
 def _device(accelerator: str) -> tuple[str, str, str]:
@@ -173,11 +170,6 @@ def _device(accelerator: str) -> tuple[str, str, str]:
     return "", "", ""
 
 
-def _first_visible_index() -> int:
-    visible = torch.cuda._parse_visible_devices()
-    return visible[0] if visible and isinstance(visible[0], int) else 0
-
-
 def _nvml_device() -> tuple[str, str, str]:
     import ctypes
 
@@ -189,7 +181,8 @@ def _nvml_device() -> tuple[str, str, str]:
         return "", "", ""
     try:
         handle = ctypes.c_void_p()
-        index = ctypes.c_uint(_first_visible_index())
+        # An int device, so CUDA_VISIBLE_DEVICES is resolved without initializing CUDA.
+        index = ctypes.c_uint(torch.cuda._get_nvml_device_index(0))
         if nvml.nvmlDeviceGetHandleByIndex_v2(index, ctypes.byref(handle)) != 0:
             return "", "", ""
         name = ctypes.create_string_buffer(96)
@@ -214,23 +207,19 @@ def _nvml_device() -> tuple[str, str, str]:
 
 
 def _amdsmi_device() -> tuple[str, str, str]:
-    import amdsmi  # type: ignore[import-not-found]
-
-    amdsmi.amdsmi_init()
+    # Maps HIP device 0 to its amdsmi index. Like torch.cuda's own amdsmi calls, it
+    # leaves amdsmi initialized.
+    handle = torch.cuda._get_amdsmi_handler(0)
+    amdsmi = torch.cuda.amdsmi
+    name = amdsmi.amdsmi_get_gpu_asic_info(handle)["market_name"]
+    memory = driver = ""
     try:
-        handle = amdsmi.amdsmi_get_processor_handles()[_first_visible_index()]
-        name = amdsmi.amdsmi_get_gpu_asic_info(handle)["market_name"]
-        memory = driver = ""
-        try:
-            vram_type = amdsmi.AmdSmiMemoryType.VRAM
-            vram = amdsmi.amdsmi_get_gpu_memory_total(handle, vram_type)
-            memory = str(int(vram) >> 20)
-            driver = amdsmi.amdsmi_get_gpu_driver_info(handle)["driver_version"]
-        except Exception:
-            pass
-        return name, memory, driver
-    finally:
-        amdsmi.amdsmi_shut_down()
+        vram = amdsmi.amdsmi_get_gpu_memory_total(handle, amdsmi.AmdSmiMemoryType.VRAM)
+        memory = str(int(vram) >> 20)
+        driver = amdsmi.amdsmi_get_gpu_driver_info(handle)["driver_version"]
+    except Exception:
+        pass
+    return name, memory, driver
 
 
 def _xpu_smi_device() -> tuple[str, str, str]:

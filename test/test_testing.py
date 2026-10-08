@@ -827,18 +827,18 @@ def _assert_run_line(test: TestCase, run: dict[str, Any], t0_ms: int, t1_ms: int
     test.assertTrue(t0_ms <= run["started_at"] <= run["ended_at"] <= t1_ms, run)
 
 
-def _report_files(directory: Path) -> list[Path]:
-    return sorted(directory.glob("*.jsonl"))
+def _report_files(prefix: Path) -> list[Path]:
+    return sorted(prefix.parent.glob(f"{prefix.name}-*{torchci_report.REPORT_SUFFIX}"))
 
 
 def _run_plugin(
-    cwd: str, args: list[str], report_dir: Path, env: dict[str, str] | None = None
+    cwd: str, args: list[str], prefix: Path, env: dict[str, str] | None = None
 ) -> tuple[subprocess.CompletedProcess, Path]:
     """Runs pytest with the report plugin; returns the process and its one report."""
     proc = subprocess.run(
         [
             sys.executable, "-m", "pytest", *args,
-            "-p", "torch.testing._internal.torchci.plugin", f"--torchci-report-dir={report_dir}",
+            "-p", "torch.testing._internal.torchci.plugin", f"--torchci-report-prefix={prefix}",
             "-p", "no:cacheprovider", "-q",
         ],
         cwd=cwd,
@@ -847,7 +847,7 @@ def _run_plugin(
         text=True,
         timeout=300,
     )
-    reports = _report_files(report_dir)
+    reports = _report_files(prefix)
     if len(reports) != 1:
         raise RuntimeError(f"pytest produced {len(reports)} reports\n{proc.stdout}\n{proc.stderr}")
     return proc, reports[0]
@@ -918,7 +918,7 @@ test_no_rerun_needed 0 passed""")
         self.assertEqual(report["repo"], "pytorch/pytorch")
         self.assertEqual(report["github_workflow_job_id"], 123456789)
         self.assertEqual(str(uuid.UUID(report["report_uuid"])), report["report_uuid"])
-        self.assertEqual(self.report_name, f"suite-{report['report_uuid']}.jsonl")
+        self.assertEqual(self.report_name, f"suite-{report['report_uuid']}.report.jsonl")
         env = report["environment"]
         self.assertEqual(
             list(env),
@@ -952,16 +952,46 @@ test_no_rerun_needed 0 passed""")
             _assert_run_line(self, run, self.t0_ms, self.t1_ms)
             self.assertEqual(run["language"], "python")
 
-    # One xdist worker, so the names travel from a worker to the controller.
-    XDIST_SOURCE = """
-import pytest
+    # Each kind of test name the writer reads from a pytest item. TestImported is
+    # defined in another module, like the jit/ classes test_jit.py imports.
+    IDENTITY_SOURCE = """
+import functools
+import unittest
 
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+import pytest
+from identity_helpers import TestImported  # noqa: F401
+
+import torch
+from torch.testing._internal.common_device_type import dtypes, instantiate_device_type_tests
 from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize, TestCase
+
+
+def test_module_function():
+    pass
+
+
+@pytest.mark.parametrize("value", [1, 2], ids=["a::b", "c[d]"])
+def test_pytest_ids(value):
+    pass
+
+
+class TestOuter:
+    class TestInner:
+        def test_nested(self):
+            pass
+
+
+class TestUnittest(unittest.TestCase):
+    def test_unittest(self):
+        pass
 
 
 class TestDevice(TestCase):
     def test_device(self, device):
+        pass
+
+    @dtypes(torch.float32, torch.float64)
+    def test_dtype(self, device, dtype):
         pass
 
 
@@ -975,9 +1005,17 @@ class TestParametrize(TestCase):
         pass
 
 
-class TestPytest:
-    @pytest.mark.parametrize("value", [1], ids=["one"])
-    def test_pytest(self, value):
+def wrapped(test):
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        return test(*args, **kwargs)
+
+    return wrapper
+
+
+class TestDecorated(TestCase):
+    @wrapped
+    def test_decorated(self):
         pass
 
 
@@ -1001,25 +1039,52 @@ class TestFactory(TestCase):
 
 instantiate_device_type_tests(TestFactory, globals(), only_for="cpu")
 """
+    IDENTITY_HELPERS = """
+from torch.testing._internal.common_utils import TestCase
 
-    def test_declared_case_names(self) -> None:
+
+class TestImported(TestCase):
+    def test_imported(self):
+        pass
+"""
+
+    def test_identities(self) -> None:
+        rendered = {}
         with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
-            (Path(tmp) / "xdist_report.py").write_text(textwrap.dedent(self.XDIST_SOURCE))
-            t0_ms = int(time.time() * 1000)
-            proc, report = _run_plugin(tmp, ["xdist_report.py", "-n", "1"], Path(tmp) / "xdist")
-            t1_ms = int(time.time() * 1000)
-            runs = _runs(report)
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        for run in runs:
-            _assert_run_line(self, run, t0_ms, t1_ms)
-        declared = {run["case_name"]: run["declared_case_name"] for run in runs}
-        self.assertEqual(declared["test_device_cpu"], "test_device")
-        self.assertEqual(declared["test_parametrize_value_1"], "test_parametrize")
-        self.assertEqual(declared["test_pytest[one]"], "test_pytest")
-        # Added with setattr, so the function is named <lambda>.
-        self.assertEqual(declared["test_added"], "test_added")
-        # Made by a factory, so the function is named test.
-        self.assertEqual(declared["test_made_cpu"], "test_made_cpu")
+            (Path(tmp) / "identity_report.py").write_text(textwrap.dedent(self.IDENTITY_SOURCE))
+            (Path(tmp) / "identity_helpers.py").write_text(textwrap.dedent(self.IDENTITY_HELPERS))
+            # The launched module's node id, relative to the repo root.
+            expected_file = (Path(tmp) / "identity_report.py").resolve().relative_to(_TEST_DIR.parent).as_posix()
+            # In process, identities come from collection; under xdist, from the
+            # worker's setup reports.
+            for mode, args in (("in_process", []), ("xdist", ["-n", "1"])):
+                t0_ms = int(time.time() * 1000)
+                proc, report = _run_plugin(tmp, ["identity_report.py", *args], Path(tmp) / mode)
+                t1_ms = int(time.time() * 1000)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                runs = _runs(report)
+                for run in runs:
+                    _assert_run_line(self, run, t0_ms, t1_ms)
+                    self.assertEqual(run["file"], expected_file)
+                lines = (f"{run['suite']}::{run['case_name']} -> {run['declared_case_name']}" for run in runs)
+                rendered[mode] = "\n".join(sorted(lines))
+        self.assertEqual(rendered["xdist"], rendered["in_process"])
+        # test_added is a lambda and test_made_cpu a factory's inner function named
+        # test, so both keep their collected name.
+        self.assertExpectedInline(rendered["in_process"], """\
+::test_module_function -> test_module_function
+::test_pytest_ids[a::b] -> test_pytest_ids
+::test_pytest_ids[c[d]] -> test_pytest_ids
+TestDecorated::test_decorated -> test_decorated
+TestDeviceCPU::test_device_cpu -> test_device
+TestDeviceCPU::test_dtype_cpu_float32 -> test_dtype
+TestDeviceCPU::test_dtype_cpu_float64 -> test_dtype
+TestFactoryCPU::test_made_cpu -> test_made_cpu
+TestImported::test_imported -> test_imported
+TestInner::test_nested -> test_nested
+TestParametrize::test_parametrize_value_1 -> test_parametrize
+TestSetattr::test_added -> test_added
+TestUnittest::test_unittest -> test_unittest""")
 
     SUBTESTS_SOURCE = """
 import unittest
@@ -1111,11 +1176,11 @@ def pytest_configure(config):
     elif mode == "write":
         plugin.open = lambda *args, **kwargs: FailingFile()
     elif mode == "name":
-        plugin._item_declared_case_name = boom
+        plugin.identity = boom
     elif mode == "finish":
         plugin.ReportWriter._finish = boom
     elif mode == "worker" and hasattr(config, "workerinput"):
-        plugin._item_declared_case_name = boom
+        plugin.identity = boom
 """
 
     @classmethod
@@ -1155,7 +1220,7 @@ def pytest_configure(config):
     )
     def test_writer_error_does_not_change_tests(self, mode) -> None:
         args = [
-            "-p", "torch.testing._internal.torchci.plugin", f"--torchci-report-dir={self.dir / mode}",
+            "-p", "torch.testing._internal.torchci.plugin", f"--torchci-report-prefix={self.dir / mode}",
             "-p", "no:cacheprovider",
         ]
         if mode == "worker":
@@ -1210,7 +1275,7 @@ if __name__ == "__main__":
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             reports = _report_files(report_dir / "one")
             self.assertEqual(len(reports), 1)
-            self.assertRegex(reports[0].name, r"^one-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.jsonl$")
+            self.assertRegex(reports[0].name, r"^one-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.report\.jsonl$")
             records = [json.loads(line) for line in reports[0].read_text().splitlines()]
         self.assertEqual([record["type"] for record in records], ["report", "run"])
         _assert_run_line(self, records[1], t0_ms, t1_ms)
@@ -1283,55 +1348,32 @@ print("RESULT=" + json.dumps(result))
 
 
 class TestReportHelpers(TestCase):
-    @parametrize(
-        "nodeid, expected",
-        [
-            subtest(
-                ("test/test_torch.py::TestTorch::test_add", ("test/test_torch.py", "TestTorch", "test_add", "python")),
-                name="python_method",
-            ),
-            subtest(
-                ("test/test_x.py::Outer::Inner::test_n", ("test/test_x.py", "Inner", "test_n", "python")),
-                name="nested_class",
-            ),
-            subtest(
-                ("test/test_x.py::test_fn", ("test/test_x.py", "", "test_fn", "python")),
-                name="python_function",
-            ),
-            subtest(
-                ("test/test_x.py::TestP::test_p[a::b-1]", ("test/test_x.py", "TestP", "test_p[a::b-1]", "python")),
-                name="pytest_parameter",
-            ),
-        ],
-    )
-    def test_identity(self, nodeid, expected):
-        self.assertEqual(torchci_report.identity(nodeid), expected)
+    def test_identity_survives_unwrap_errors(self):
+        import pytest
 
-    def test_declared_case_name_fallback(self):
-        record = torchci_report.run_record("test/test_x.py::TestX::test_case[param]", 0, "passed", 1.0, 2.0)
-        self.assertEqual(record["declared_case_name"], "test_case")
-
-    def test_declared_case_name_raising_item(self):
         plugin = importlib.import_module("torch.testing._internal.torchci.plugin")
 
-        class RaisingItem:
-            nodeid = "test/test_x.py::TestX::test_case[param]"
+        def test_case(self):
+            pass
 
-            @property
-            def obj(self):
-                raise RuntimeError("no object")
+        # inspect.unwrap raises on a wrapper loop.
+        test_case.__wrapped__ = test_case
+        module = unittest.mock.Mock(nodeid="test/test_x.py")
+        item = unittest.mock.Mock(spec=pytest.Function, obj=test_case, originalname="test_case_cpu")
+        item.name = "test_case_cpu"
+        item.getparent.side_effect = lambda cls: module if cls is pytest.Module else None
+        # The declared name stays pytest's originalname.
+        self.assertEqual(plugin.identity(item), ("test/test_x.py", "", "test_case_cpu", "python", "test_case_cpu"))
 
-        self.assertEqual(plugin._item_declared_case_name(RaisingItem()), "test_case")
-
-    def test_lone_surrogate_is_escaped(self) -> None:
+    def test_lone_surrogate_is_replaced(self) -> None:
         now = time.time()
-        line = torchci_report.line(
-            torchci_report.run_record("test/test_x.py::test_surrogate", 0, "failed", now, now, outcome_summary="\ud800")
-        )
+        test = torchci_report.TestId("test/test_x.py", "", "test_surrogate", "python", "test_surrogate")
+        line = torchci_report.line(torchci_report.run_record(test, 0, "failed", now, now, outcome_summary="\ud800"))
         line.encode("utf-8")
         run = json.loads(line)
         _assert_run_line(self, run, int(now * 1000), int(now * 1000))
-        self.assertEqual(run["outcome_summary"], r"\ud800")
+        # json.dumps escapes it as \ud800, which ClickHouse rejects.
+        self.assertEqual(run["outcome_summary"], "?")
 
     @skipIfTorchDynamo("Dynamo calls the patched torch._C function while tracing")
     def test_capture_skips_torch_accelerator(self) -> None:
@@ -1340,11 +1382,11 @@ class TestReportHelpers(TestCase):
             environment.capture()
         probe.assert_not_called()
 
-    @parametrize("rocm, expected", [subtest(("10.1.0", "10.1"), name="release"), subtest((None, "7.16"), name="hip")])
-    def test_rocm_version(self, rocm, expected):
+    def test_rocm_version(self):
         environment = importlib.import_module("torch.testing._internal.torchci.environment")
-        with unittest.mock.patch.multiple(torch.version, cuda=None, hip="7.16.26385", rocm=rocm):
-            self.assertEqual(environment._accelerator(), ("rocm", expected))
+        with unittest.mock.patch.multiple(torch.version, cuda=None, hip="7.16.26385", rocm="10.1.0"):
+            # The ROCm release, not HIP's version.
+            self.assertEqual(environment._accelerator(), ("rocm", "10.1"))
 
 
 instantiate_parametrized_tests(TestReportHelpers)

@@ -1,5 +1,5 @@
 """pytest plugin that writes the test run report (README.md). Enable it with
-``-p torch.testing._internal.torchci.plugin --torchci-report-dir=<dir>``. The
+``-p torch.testing._internal.torchci.plugin --torchci-report-prefix=<prefix>``. The
 first error turns the writer off, so it never changes a test's outcome."""
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 # Set where the test runs; xdist ships it to the controller with the report. Not
 # item.user_properties, which pytest also writes into the junit XML CI ingests.
-_DECLARED_CASE_NAME = "_torchci_declared_case_name"
+_TEST_ID = "_torchci_test_id"
 
 _disabled = False
 _writer: ReportWriter | None = None
@@ -58,22 +58,30 @@ def _guard() -> Iterator[None]:
         _disable(error)
 
 
-def _item_declared_case_name(item: Any) -> str:
-    """The test's name before parametrize or device-type suffixes."""
-    fallback = report.fallback_declared_case_name(item.nodeid)
-    try:
+def identity(item: pytest.Item) -> report.TestId | None:
+    """None for an item that isn't a Python test function."""
+    if not isinstance(item, pytest.Function):
+        return None
+    # originalname drops pytest parameters. Unwrapping the function recovers the
+    # source name of PyTorch's generated device, dtype and parametrize variants.
+    declared_case_name = item.originalname
+    with contextlib.suppress(Exception):
         function = inspect.unwrap(item.obj)
+        name = function.__name__
         # A function made by a factory, like create_test_func's inner test, is
         # named for the factory's code, not for the test.
-        if "<locals>" in getattr(function, "__qualname__", "<locals>"):
-            return fallback
-        name = function.__name__
-        case_name = report.identity(item.nodeid).case_name
-        if case_name == name or case_name.startswith((name + "_", name + "[")):
-            return name
-        return fallback
-    except Exception:
-        return fallback
+        if "<locals>" not in function.__qualname__ and (
+            item.name == name or item.name.startswith((name + "_", name + "["))
+        ):
+            declared_case_name = name
+    cls = item.getparent(pytest.Class)
+    return report.TestId(
+        file=item.getparent(pytest.Module).nodeid,
+        suite=cls.name if cls is not None else "",
+        case_name=item.name,
+        language="python",
+        declared_case_name=declared_case_name,
+    )
 
 
 def _failure_summary(test_report: TestReport) -> str:
@@ -84,7 +92,8 @@ def _failure_summary(test_report: TestReport) -> str:
 @dataclass
 class _Run:
     started: float
-    declared_case_name: str
+    # None on an xdist controller until the worker's setup report brings it.
+    test: report.TestId | None
     ended: float = 0.0
     failed_phase: str = ""
     skipped: bool = False
@@ -106,7 +115,7 @@ class ReportWriter:
         self.file: IO[str] | None = None
         self.runs: dict[str, _Run] = {}
         self.rerun_numbers: Counter[str] = Counter()
-        self.declared_case_names: dict[str, str] = {}
+        self.tests: dict[str, report.TestId | None] = {}
 
     def pytest_sessionstart(self, session: Session) -> None:
         if _disabled:
@@ -122,18 +131,14 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
-            # Empty on an xdist controller; workers send names via makereport.
-            self.declared_case_names = {
-                item.nodeid: _item_declared_case_name(item) for item in session.items
-            }
+            # Empty on an xdist controller; workers send identities via makereport.
+            self.tests = {item.nodeid: identity(item) for item in session.items}
 
     def pytest_runtest_logstart(self, nodeid: str, location: Any) -> None:
         if _disabled:
             return
         with _guard():
-            names = self.declared_case_names
-            declared = names.get(nodeid) or report.fallback_declared_case_name(nodeid)
-            self.runs[nodeid] = _Run(time.time(), declared)
+            self.runs[nodeid] = _Run(time.time(), self.tests.get(nodeid))
 
     # Before test/conftest.py's LogXMLReruns rewrites skip longreprs.
     @pytest.hookimpl(tryfirst=True)
@@ -149,9 +154,8 @@ class ReportWriter:
             return
         if test_report.when == "setup":
             run.started = test_report.start
-            declared_case_name = getattr(test_report, _DECLARED_CASE_NAME, None)
-            if declared_case_name:
-                run.declared_case_name = declared_case_name
+            if test_id := getattr(test_report, _TEST_ID, None):
+                run.test = report.TestId(**test_id)
         run.ended = test_report.stop
         # A failing pytest-subtests subtest fails the run.
         subtest = getattr(test_report, "context", None) is not None
@@ -173,15 +177,16 @@ class ReportWriter:
 
     def _finish(self, nodeid: str, run: _Run) -> None:
         del self.runs[nodeid]
-        if self.file is not None:
+        # No identity: the item isn't a Python test function, or, under xdist, the
+        # worker's writer turned itself off and its setup report came without one.
+        if self.file is not None and run.test is not None:
             record = report.run_record(
-                nodeid,
+                run.test,
                 self.rerun_numbers[nodeid],
                 run.outcome(),
                 run.started,
                 run.ended,
                 outcome_summary=run.outcome_summary,
-                declared_case_name=run.declared_case_name,
             )
             self.file.write(report.line(record))
             self.file.flush()
@@ -203,28 +208,29 @@ def pytest_runtest_makereport(item: Any, call: Any) -> Generator[None, Any, None
     if _disabled or call.when != "setup" or outcome.excinfo is not None:
         return
     with _guard():
-        name = _item_declared_case_name(item)
-        setattr(outcome.get_result(), _DECLARED_CASE_NAME, name)
+        if test := identity(item):
+            # A dict, which xdist can serialize.
+            setattr(outcome.get_result(), _TEST_ID, test._asdict())
 
 
 def pytest_addoption(parser: Parser) -> None:
     parser.addoption(
-        "--torchci-report-dir",
+        "--torchci-report-prefix",
         action="store",
         default=None,
-        metavar="dir",
-        help="write this process's test run report into this directory",
+        metavar="prefix",
+        help="write this process's test run report to <prefix>-<uuid>.report.jsonl",
     )
 
 
 def pytest_configure(config: Config) -> None:
     global _writer
     with _guard():
-        directory = config.getoption("torchci_report_dir")
+        prefix = config.getoption("torchci_report_prefix")
         # The xdist controller writes; collect-only sessions run nothing.
         worker = hasattr(config, "workerinput")
-        if directory and not worker and not config.getoption("collectonly"):
+        if prefix and not worker and not config.getoption("collectonly"):
             report_uuid = str(uuid.uuid4())
-            path = report.report_path(directory, report_uuid)
+            path = report.report_path(prefix, report_uuid)
             _writer = ReportWriter(path, report_uuid)
             config.pluginmanager.register(_writer, "torchci_report_writer")
