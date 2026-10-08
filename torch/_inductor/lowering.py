@@ -353,23 +353,49 @@ def in_namespace(
     return False
 
 
-def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
-    """
-    Copy cpu scalar if doesn't not match with given `device`
-    """
-    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
-        x.get_size()
+def realize_cpu_scalar(x: TensorBox) -> TensorBox:
+    if isinstance(x.data, ir.StorageBox):
+        inner = x.data.data
+    else:
+        inner = x.data
+
+    if isinstance(inner, (ir.Pointwise, ir.Reduction, ir.Scan, ir.Sort)):
+        x.realize()
+        return x
+    elif (
+        isinstance(inner, (ir.ComputedBuffer, ir.Buffer))
+        and len(inner.get_size()) == 0
     ):
         return x
-    size = V.graph.sizevars.guarding_hints_or_throw(x.get_size())
+    elif (
+        isinstance(inner, ir.InputBuffer)
+        and inner.get_name() in V.graph.graph_inputs
+        and len(V.graph.graph_inputs[inner.get_name()].get_size()) == 0
+    ):
+        return x
+    elif isinstance(inner, ir.BaseConstant):
+        return x
+    else:
+        cur_device = x.get_device()
+        return TensorBox(ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False)))
+
+
+def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """
+    Realize or copy 0-dim CPU scalar into a buffer so it is evaluated on host
+    and passed as a scalar value to kernels on non-CPU devices.
+    """
+    if not isinstance(x, TensorBox) or has_free_unbacked_symbols(x.get_size()):
+        return x
     cur_device = x.get_device()
     if (
         cur_device is not None
         and cur_device.type == "cpu"
-        and cur_device != device
-        and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
+        and device is not None
+        and device.type != "cpu"
+        and len(x.get_size()) == 0
     ):
-        return TensorBox(ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False)))
+        return realize_cpu_scalar(x)
     return x
 
 
@@ -390,6 +416,23 @@ def transform_args(
     if not args_indices and not kwargs_indices:
         return args, kwargs
 
+    device = None
+    for _i in args_indices:
+        _d = args[_i].get_device()
+        if _d is not None and _d.type != "cpu":
+            device = _d
+            break
+    if device is None:
+        for _k in kwargs_indices:
+            _d = kwargs[_k].get_device()
+            if _d is not None and _d.type != "cpu":
+                device = _d
+                break
+    if device is None:
+        device = (
+            args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
+        ).get_device()
+
     if type_promotion_kind or convert_input_to_bool:
         if convert_input_to_bool:
             dtype = torch.bool
@@ -407,16 +450,6 @@ def transform_args(
                 type_promotion_kind=type_promotion_kind,  # type: ignore[arg-type]
             )
 
-        device = (
-            args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
-        ).get_device()
-
-        for i in args_indices:
-            args[i] = maybe_copy_cpu_scalar(args[i], device)
-
-        for k in kwargs_indices:
-            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
-
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg: Any) -> Any:
             if isinstance(arg, TensorBox):
@@ -428,6 +461,13 @@ def transform_args(
 
         args = [promote(a) for a in args]
         kwargs = {k: promote(v) for k, v in kwargs.items()}
+
+    if device is not None and device.type != "cpu":
+        for i in args_indices:
+            args[i] = maybe_copy_cpu_scalar(args[i], device)
+
+        for k in kwargs_indices:
+            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
 
     if broadcast:
         broadcasted = broadcast_tensors(
