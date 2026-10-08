@@ -161,7 +161,7 @@ jobs:
   # redirect or block the stable CPU/CUDA/ROCm/XPU lanes.
   get-preview-docker-tag:
     needs: get-label-type
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') }}
     name: get-preview-docker-tag
     runs-on: ubuntu-24.04
     outputs:
@@ -179,7 +179,6 @@ jobs:
         id: calc
         env:
           REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
           GITHUB_REF: ${{ github.ref }}
         shell: bash
         run: |
@@ -190,13 +189,21 @@ jobs:
           fi
           tag="rocm-preview${suffix}"
           repo="pytorch/manylinux2_28-builder"
-          if curl -fsS --retry 3 -o /dev/null \
-              "https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"; then
+          url="https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"
+          if ! status=$(curl -sS --retry 3 --retry-all-errors \
+              -o /dev/null -w '%{http_code}' "${url}"); then
+            echo "::error::Failed to query preview builder ${repo}:${tag}."
+            exit 1
+          fi
+          if [[ "${status}" == "200" ]]; then
             echo "docker.io/${repo}:${tag} exists"
             available=true
-          else
+          elif [[ "${status}" == "404" && "${GITHUB_REF}" == refs/tags/ciflow/* ]]; then
             echo "::warning::Preview builder ${repo}:${tag} is not published; skipping preview jobs."
             available=false
+          else
+            echo "::error::Preview builder probe returned HTTP ${status} for ${repo}:${tag}."
+            exit 1
           fi
           echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
           echo "image_available=${available}" >> "${GITHUB_OUTPUT}"
@@ -623,8 +630,8 @@ jobs:
   manywheel-build:
     name: ${{ matrix.build_name }}-build
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
-    needs: [get-label-type, get-docker-tag]
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: [get-label-type, get-docker-tag]
     strategy:
       fail-fast: false
       matrix:
@@ -778,9 +785,9 @@ jobs:
 
   manywheel-build-rocm-preview:
     name: ${{ matrix.build_name }}-build
-    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
-    needs: [get-label-type, get-preview-docker-tag]
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
     uses: ./.github/workflows/_binary-build-linux.yml
+    needs: [get-label-type, get-preview-docker-tag]
     strategy:
       fail-fast: false
       matrix:
@@ -1327,7 +1334,7 @@ jobs:
 
   manywheel-test-rocm-preview:
     name: ${{ matrix.build_name }}-test
-    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
     needs: [get-label-type, get-preview-docker-tag, manywheel-build-rocm-preview]
     uses: ./.github/workflows/_binary-test-rocm-linux.yml
     strategy:
@@ -1393,7 +1400,7 @@ jobs:
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       # ROCm test runners have no ECR pull credentials, so ROCm stays on the
       # Docker Hub image (excluded from the content-addressed ECR path).
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
 
@@ -1896,7 +1903,7 @@ jobs:
 
   manywheel-rocm-preview-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
     permissions:
       id-token: write
       contents: read
@@ -1963,7 +1970,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
     secrets:
@@ -2222,11 +2229,11 @@ jobs:
 
   libtorch-extract-rocm-preview:
     name: ${{ matrix.build_name }}-extract
-    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
     needs: [get-preview-docker-tag, manywheel-build-rocm-preview]
     runs-on: "mt-l-x86iavx512-16-128"
     container:
-      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
+      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -2285,11 +2292,11 @@ jobs:
 
   libtorch-upload-rocm-preview:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-extract-rocm-preview
+    needs: [get-preview-docker-tag, libtorch-extract-rocm-preview]
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false

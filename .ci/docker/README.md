@@ -101,8 +101,10 @@ If your new Docker image needs a library installed from a specific pinned commit
 `rocm-preview.txt` tracks a moving AMD nightly and is not a permanent release pin.
 When it changes, regenerate the PyTorch binary matrix and re-dispatch the
 `update-s3-dependencies` workflow in pytorch/test-infra so the exact ROCm and
-Triton packages are mirrored under `whl/nightly/rocm-preview`. Then rerun the
-preview wheel, test, and libtorch jobs before merging the pin update.
+Triton packages are mirrored under `whl/nightly/rocm-preview`. The pin changes
+the content-addressed builder tag, which is not published to Docker Hub until
+the change lands on main; validate the preview wheel, test, and libtorch jobs
+on the first post-merge nightly.
 
 #### 2. Configure the Base Docker Image
 1. **Add new Base Docker image configuration** (if applicable):
