@@ -2798,7 +2798,6 @@ class LoweringTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
     def test_lowering_one_shot_all_reduce(self):
