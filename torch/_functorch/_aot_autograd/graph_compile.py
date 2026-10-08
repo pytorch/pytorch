@@ -2468,14 +2468,17 @@ def _aot_stage2b_bw_compile(
                 except Exception as e:
                     if aot_config.force_non_lazy_backward_lowering:
                         raise
-                    exc = e
                     trace_structured(
                         "artifact",
                         metadata_fn=lambda: {
                             "name": "eager_compile_backwards_failure",
                             "encoding": "string",
                         },
-                        payload_fn=lambda: "\n".join(
+                        # Bind the exception as a default, not a local: a local
+                        # would keep it, and through its traceback this frame
+                        # (e.g. bw_module_copy) and its callers, alive in a
+                        # reference cycle after this handler.
+                        payload_fn=lambda exc=e: "\n".join(
                             traceback.format_exception(
                                 type(exc), exc, exc.__traceback__
                             )

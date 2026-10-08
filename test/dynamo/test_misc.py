@@ -95,6 +95,7 @@ from torch.testing._internal.common_methods_invocations import (
     sample_inputs_take_along_dim,
 )
 from torch.testing._internal.common_utils import (
+    disable_gc,
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -16384,6 +16385,23 @@ fn
             return Mod(), (torch.randn(100, 100), param)
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.param)
+
+    def test_discarded_graph_module_freed_without_gc(self):
+        # The GraphModule handed to the backend and its Graph reference each
+        # other (graph.owning_module). Once the compiled code is discarded, the
+        # GraphModule (and any real tensors registered on it) should be freed by
+        # refcounting instead of waiting for the cyclic GC.
+        gm_refs = []
+
+        def backend(gm, example_inputs):
+            gm_refs.append(weakref.ref(gm))
+            return gm.forward
+
+        torch.compile(torch.nn.Linear(4, 4), backend=backend)(torch.randn(2, 4))
+        self.assertEqual(len(gm_refs), 1)
+        with disable_gc():
+            torch._dynamo.reset()
+            self.assertIsNone(gm_refs[0]())
 
     def test_conditional_list_comp_in_context(self):
         def fn(inp):
