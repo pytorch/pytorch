@@ -84,11 +84,6 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
     int64_t dim,
     bool keepdim,
     bool ignore_nan) {
-  // See note [Writing Nondeterministic Operations]
-  // If there are duplicate elements of a median value, the procedure for choosing which
-  // of the duplicates to use for the indices output is nondeterministic.
-  at::globalContext().alertNotDeterministic("median CUDA with indices output");
-
   dim = at::maybe_wrap_dim(dim, self.dim());
   Tensor in = self.dim() > 0 ? self.contiguous() : self.unsqueeze(0);
 

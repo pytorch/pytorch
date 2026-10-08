@@ -256,15 +256,17 @@ def skip_if_odd_worldsize(func):
 
 
 def require_n_gpus_for_nccl_backend(n, backend):
+    needs_accelerator = backend in ("nccl", "xccl")
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if backend == "nccl" and torch.cuda.device_count() < n:
+            if needs_accelerator and torch.accelerator.device_count() < n:
                 sys.exit(TEST_SKIPS[f"multi-device-{n}"].exit_code)
             else:
                 return func(*args, **kwargs)
 
-        if backend == "nccl":
+        if needs_accelerator:
             wrapper._min_gpus_required = n
         return wrapper
 

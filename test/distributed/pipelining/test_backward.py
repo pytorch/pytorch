@@ -125,6 +125,42 @@ class StageBackwardTests(TestCase):
         torch.testing.assert_close(x.grad, ref_x.grad)
         torch.testing.assert_close(dinputs[1], ref_x.grad)
 
+    def test_stage_backward_input_with_view_output(self, device):
+        # An identity autograd.Function returns a view of its input, as
+        # activation-checkpoint boundaries do. A non-last stage ending in one
+        # must still support the split input/weight backward of zero-bubble
+        # schedules.
+        class Identity(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.view_as(x)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        mod = MLPModule(d_hid).to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        output_grad = torch.randn(batch_size, d_hid, device=device)
+
+        ref_mod = copy.deepcopy(mod)
+        ref_x = x.detach().requires_grad_(True)
+
+        out = Identity.apply(mod(x))
+        self.assertTrue(out._is_view())
+        dinputs, param_groups = stage_backward_input(
+            stage_outputs_or_loss=(out,),
+            output_grads=[output_grad],
+            input_values=[x],
+            weights=mod.parameters(),
+        )
+        stage_backward_weight(mod.parameters(), param_groups)
+
+        ref_mod(ref_x).backward(output_grad)
+        torch.testing.assert_close(dinputs[0], ref_x.grad)
+        for name, p in mod.named_parameters():
+            torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
+
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight(self, device):
         # MLP as a stage module
