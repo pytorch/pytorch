@@ -5985,11 +5985,8 @@ def bytes_to_scalar(byte_list: list[int], dtype: torch.dtype, device: torch.devi
         )
     check_bytes(byte_list)
 
-    # Reinterpret the raw bytes as the target dtype to preserve exact bit
-    # patterns (e.g. NaN payloads, which are not preserved when round-tripping
-    # through Python float/complex, especially on architectures like RISC-V
-    # that canonicalize NaNs).
-    return torch.tensor(byte_list, dtype=torch.uint8, device=device).view(dtype=dtype).squeeze(0)
+    # Avoid Python float/complex conversions, which can change NaN payloads.
+    return torch.tensor(byte_list, dtype=torch.uint8, device=device).view(dtype).squeeze(0)
 
 
 def copy_func(f):

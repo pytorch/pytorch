@@ -133,6 +133,26 @@ class TestTorchDeviceType(TestCase):
             scalar = bytes_to_scalar(bytes_list, dtype, device)
             self.assertEqual(scalar.storage().untyped().tolist(), bytes_list)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @parametrize("pattern", ["quiet_nan", "signaling_nan", "negative_zero", "infinity"])
+    def test_bytes_to_scalar_bit_patterns(self, device, dtype, pattern):
+        size = torch._utils._element_size(dtype) // (2 if dtype.is_complex else 1)
+        bits = {
+            "quiet_nan": (0x7FC12345, 0x7FF8123456789ABC),
+            "signaling_nan": (0x7F812345, 0x7FF0123456789ABC),
+            "negative_zero": (0x80000000, 0x8000000000000000),
+            "infinity": (0x7F800000, 0x7FF0000000000000),
+        }[pattern][0 if size == 4 else 1]
+        raw = list(bits.to_bytes(size, sys.byteorder))
+        if dtype.is_complex:
+            raw *= 2
+        scalar = bytes_to_scalar(raw, dtype, device)
+        self.assertEqual(scalar.shape, torch.Size([]))
+        self.assertEqual(scalar.dtype, dtype)
+        self.assertEqual(scalar.device, torch.empty((), device=device).device)
+        self.assertEqual(scalar.untyped_storage().tolist(), raw)
+
     # For testing in64 support in upsample_nearest3d
     @skipIfRocmArch(MI200_ARCH)
     @onlyCUDA
