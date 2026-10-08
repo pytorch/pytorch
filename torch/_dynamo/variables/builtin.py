@@ -104,6 +104,7 @@ from .dicts import (
     DictViewVariable,
     pydict_checkexact,
 )
+from .hashable import HashableTracker
 from .lists import (
     BaseListVariable,
     ByteArrayVariable,
@@ -3647,12 +3648,7 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         if name == "fromkeys":
-            unimplemented(
-                gb_type="frozendict fromkeys",
-                context=name,
-                explanation="Dynamo does not yet support frozendict.fromkeys.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            return self.fromkeys(tx, args, kwargs)
         if name in self._fn.__dict__ and callable(self._fn.__dict__[name]):
             check_positional(tx, name, len(args), 1, sys.maxsize)
             if not isinstance(args[0], variables.FrozenDictVariable):
@@ -3663,6 +3659,32 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
                 )
             return args[0].call_method(tx, name, args[1:], kwargs)
         return super().call_method(tx, name, args, kwargs)
+
+    def fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        no_keywords(tx, "frozendict.fromkeys", kwargs)
+        check_positional(tx, "fromkeys", len(args), 1, 2)
+        value = args[1] if len(args) == 2 else ConstantVariable.create(None)
+        iterable = args[0]
+        if isinstance(iterable, ConstDictVariable):
+            iterable.install_dict_keys_match_guard()
+        if istype(
+            iterable,
+            (
+                ConstDictVariable,
+                variables.FrozenDictVariable,
+                SetVariable,
+                FrozensetVariable,
+            ),
+        ):
+            keys = iterable.items.keys()
+        else:
+            keys = [HashableTracker(key) for key in unpack_iterable(tx, iterable)]
+        return variables.FrozenDictVariable(dict.fromkeys(keys, value))
 
 
 class IterBuiltinVariable(BaseBuiltinVariable):

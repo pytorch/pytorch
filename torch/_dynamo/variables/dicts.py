@@ -36,7 +36,13 @@ from ..bytecode_transformation import (
     create_dup_top,
     create_instruction,
 )
-from ..exc import raise_observed_exception, raise_type_error, unimplemented
+from ..exc import (
+    handle_observed_exception,
+    ObservedTypeError,
+    raise_observed_exception,
+    raise_type_error,
+    unimplemented,
+)
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -52,6 +58,7 @@ from ..utils import (
     dict_keys,
     dict_values,
     istype,
+    specialize_symnode,
     tracked_repr,
     unpack_iterable,
 )
@@ -71,6 +78,7 @@ from .hashable import HashableTracker, is_hashable, raise_unhashable
 from .object_protocol import (
     _is_method_type,
     generic_getitem,
+    generic_is_true,
     generic_richcompare_bool,
     mro_lookup,
 )
@@ -1060,6 +1068,7 @@ class FrozenDictVariable(VariableTracker):
         | None = None,
         *,
         storage: ConstDictVariable | None = None,
+        cached_hash: tuple[int, bool] | None = None,
         reconstruction_unsafe: bool | None = None,
         **kwargs: Any,
     ) -> None:
@@ -1067,6 +1076,7 @@ class FrozenDictVariable(VariableTracker):
         self.storage = (
             storage if storage is not None else ConstDictVariable(items or {})
         )
+        self.cached_hash = cached_hash
         self.reconstruction_unsafe = (
             self._has_user_hash([key.vt for key in self.items])
             if reconstruction_unsafe is None
@@ -1175,15 +1185,34 @@ class FrozenDictVariable(VariableTracker):
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return ConstantVariable.create(len(self.items))
 
+    def _lookup_key(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> HashableTracker:
+        from .object_protocol import generic_str
+
+        try:
+            return HashableTracker(key)
+        except ObservedTypeError:
+            error = tx.exn_vt_stack.get_raised_exception()
+            message = generic_str(tx, error).as_python_constant()
+            handle_observed_exception(tx)
+            raise_type_error(
+                tx,
+                f"cannot use '{key.python_qualified_name()}' as a frozendict key ({message})",
+            )
+
     def mp_subscript_impl(
         self, tx: "InstructionTranslatorBase", key: VariableTracker
     ) -> VariableTracker:
-        return self.storage.mp_subscript_impl(tx, key)
+        hashed = self._lookup_key(tx, key)
+        if hashed not in self.items:
+            raise_observed_exception(KeyError, tx, args=[key])
+        return self.items[hashed]
 
     def sq_contains_impl(
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
-        return self.storage.sq_contains_impl(tx, item)
+        return ConstantVariable.create(self._lookup_key(tx, item) in self.items)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.storage.tp_iter_impl(tx)
@@ -1203,7 +1232,7 @@ class FrozenDictVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         check_positional(tx, "get", len(args), 1, 2)
-        key = HashableTracker(args[0])
+        key = self._lookup_key(tx, args[0])
         return self.items.get(
             key, args[1] if len(args) == 2 else ConstantVariable.create(None)
         )
@@ -1240,18 +1269,65 @@ class FrozenDictVariable(VariableTracker):
     ) -> VariableTracker:
         return self.storage.dict_reversed(tx, args, kwargs)
 
-    def frozen_deferred_operator(
-        self,
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        from .hashable import RawHash
+        from .object_protocol import generic_hash_impl
+
+        if self.cached_hash is not None:
+            return self.cached_hash
+        has_user_hash = self._has_user_hash(self.storage)
+        if self.source and has_user_hash:
+            unimplemented(
+                gb_type="Preexisting frozendict with user-defined hashes",
+                context=self.python_type_name(),
+                explanation="The builtin may have cached a hash before user-defined keys or values changed. Dynamo cannot inspect that cache.",
+                hints=["Construct the frozendict inside the compiled function."],
+            )
+        # CPython mixes saved key hashes with current value hashes, then caches
+        # the successful result. Preserve collisions instead of building a set.
+        mask = (1 << sys.hash_info.width) - 1
+        acc = 0
+        is_fake = False
+        for key, value in self.items.items():
+            value_hash, fake = generic_hash_impl(tx, value)
+            pair_hash = hash((RawHash(hash(key)), RawHash(value_hash))) & mask
+            acc ^= ((pair_hash ^ 89869747) ^ (pair_hash << 16)) * 3644798167 & mask
+            is_fake |= key._hash_is_identity or fake
+        acc ^= (len(self.items) + 1) * 1927868237 & mask
+        acc ^= (acc >> 11) ^ (acc >> 25)
+        acc = (acc * 69069 + 907133923) & mask
+        if acc == mask:
+            acc = 590923713
+        if acc > sys.maxsize:
+            acc -= mask + 1
+        self.cached_hash = (acc, is_fake)
+        self.reconstruction_unsafe |= has_user_hash
+        return self.cached_hash
+
+    def tp_richcompare_impl(
+        self: "ConstDictVariable | FrozenDictVariable",
         tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
+        other: VariableTracker,
+        op: str,
     ) -> VariableTracker:
-        unimplemented(
-            gb_type="frozendict operators",
-            context="copy/fromkeys/union",
-            explanation="Dynamo does not yet support these frozendict operators.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
+        if op not in ("__eq__", "__ne__") or not isinstance(
+            other, (ConstDictVariable, FrozenDictVariable)
+        ):
+            return ConstantVariable.create(NotImplemented)
+        for mapping in (self, other):
+            if isinstance(mapping, ConstDictVariable):
+                mapping.install_dict_keys_match_guard()
+        if len(self.items) != len(other.items):
+            return ConstantVariable.create(op == "__ne__")
+        for key, value in self.items.items():
+            # Native equality reuses each key's insertion-time hash.
+            other_value = other.items.get(key)
+            if other_value is None:
+                return ConstantVariable.create(op == "__ne__")
+            equal = generic_richcompare_bool(tx, value, other_value, "__eq__")
+            if not specialize_symnode(generic_is_true(tx, equal)).as_python_constant():
+                return ConstantVariable.create(op == "__ne__")
+        return ConstantVariable.create(op == "__eq__")
 
     def nb_or_impl(
         self,
@@ -1259,38 +1335,53 @@ class FrozenDictVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
-        return self.frozen_deferred_operator(tx, [], {})
+        if not isinstance(other, (ConstDictVariable, FrozenDictVariable)):
+            return ConstantVariable.create(NotImplemented)
+        left, right = (other, self) if reverse else (self, other)
+        for mapping in (left, right):
+            if isinstance(mapping, ConstDictVariable):
+                mapping.install_dict_keys_match_guard()
+        if type(left) is FrozenDictVariable:
+            if not left.items and type(right) is FrozenDictVariable:
+                return right
+            if not right.items and type(right) in (
+                ConstDictVariable,
+                FrozenDictVariable,
+            ):
+                return left
+        storage = ConstDictVariable(left.items.copy(), mutation_type=ValueMutationNew())
+        storage.dict_update(tx, [right], {})
+        if isinstance(left, FrozenDictVariable):
+            return FrozenDictVariable(storage.items)
+        return storage
+
+    def frozen_copy(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if type(self) is FrozenDictVariable:
+            return self
+        return FrozenDictVariable(self.items)
+
+    def frozen_fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return variables.FrozenDictBuiltinVariable().fromkeys(tx, args, kwargs)
 
     tp_methods = {
-        "copy": Method(frozen_deferred_operator),
-        "fromkeys": Method(frozen_deferred_operator),
+        "copy": Method(frozen_copy),
+        "fromkeys": Method(frozen_fromkeys),
         "get": Method(frozen_get),
         "keys": Method(frozen_keys),
         "values": Method(frozen_values),
         "items": Method(frozen_items),
         "__reversed__": Method(frozen_reversed),
     }
-
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
-        unimplemented(
-            gb_type="frozendict hashing",
-            context="hash(frozendict)",
-            explanation="Dynamo does not yet support frozendict hashing.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
-
-    def tp_richcompare_impl(
-        self: "FrozenDictVariable | ConstDictVariable",
-        tx: "InstructionTranslatorBase",
-        other: VariableTracker,
-        op: str,
-    ) -> VariableTracker:
-        unimplemented(
-            gb_type="frozendict comparison",
-            context=op,
-            explanation="Dynamo does not yet support frozendict comparisons.",
-            hints=[*graph_break_hints.SUPPORTABLE],
-        )
 
 
 class MappingProxyVariable(VariableTracker):
