@@ -95,7 +95,7 @@ runs:
 
         name = f"torchci-reports-{os.environ['FILE_SUFFIX']}.report.zip"
         with zipfile.ZipFile(name, "w", zipfile.ZIP_DEFLATED) as z:
-            for f in Path("test/torchci-reports").glob("**/*.jsonl"):
+            for f in Path("test/torchci-reports").glob("*.report.jsonl"):
                 z.write(f)
         EOF
         fi
@@ -128,7 +128,7 @@ runs:
       run: |
         # -ir => recursive include all files in pattern
         if (Test-Path test\torchci-reports) {
-          7z a "torchci-reports-$Env:FILE_SUFFIX.report.zip" -ir'!test\torchci-reports\*.jsonl'
+          7z a "torchci-reports-$Env:FILE_SUFFIX.report.zip" -ir'!test\torchci-reports\*.report.jsonl'
         }
 
     - name: Zip usage log for upload
@@ -293,7 +293,7 @@ runs:
         if-no-files-found: ignore
         # upload-artifact roots at the first wildcard, so a leading one keeps the
         # test/torchci-reports/ prefix the S3 zip has.
-        path: test*/torchci-reports/**/*.jsonl
+        path: test*/torchci-reports/*.report.jsonl
 
     - name: Store Usage Logs on Github (fallback)
       uses: actions/upload-artifact@v4

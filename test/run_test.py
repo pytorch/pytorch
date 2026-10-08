@@ -539,9 +539,9 @@ def _torchci_report_args(
     if not reports_dir:
         return []
     # C++ tests run under pytest-cpp, not run_tests, so register the plugin here.
-    report_dir = Path(reports_dir) / sanitize_test_filename(test_file)
+    prefix = Path(reports_dir) / sanitize_test_filename(test_file)
     plugin = "torch.testing._internal.torchci.plugin"
-    return ["-p", plugin, f"--torchci-report-dir={report_dir}"]
+    return ["-p", plugin, f"--torchci-report-prefix={prefix}"]
 
 
 def run_test(
@@ -1525,7 +1525,8 @@ def run_ci_sanity_check(test: ShardedTest, test_directory, options):
         shutil.rmtree(dirname)
     if options.save_torchci_reports:
         name = sanitize_test_filename(test.name)
-        shutil.rmtree(Path(options.save_torchci_reports) / name, ignore_errors=True)
+        for file in glob.glob(f"{options.save_torchci_reports}/{name}-*.report.jsonl"):
+            os.remove(file)
     return 0
 
 
