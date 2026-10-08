@@ -3902,7 +3902,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # prior to tracing, which is essential for creating right
         # guards. So save the shape now, and check later if it has
         # changed. If it has, graph break.
-        out_arg_names: list[str] = []
+        out_arg_names: list[str] = ["out"] if "out" in kwargs else []
         selected_overload: torch._ops.OpOverload | None = None
         if isinstance(self.value, torch._ops.OpOverload):
             selected_overload = self.value
@@ -3921,12 +3921,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 out_arg_names.extend(
                     name
                     for name in self._get_mutating_kwarg_names(selected_overload)
-                    if name in kwargs
+                    if name in kwargs and name != "out"
                 )
-        elif (
-            not isinstance(self.value, torch._ops.OpOverloadPacket) and "out" in kwargs
-        ):
-            out_arg_names.append("out")
 
         auto_functionalizes = False
         if out_arg_names and selected_overload is not None:
