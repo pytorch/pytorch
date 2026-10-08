@@ -4,15 +4,20 @@ from unittest import mock
 
 import torch
 from torch._inductor import config
-from torch._inductor.heuristics.registry import _HEURISTIC_CACHE
+from torch._inductor.heuristics.registry import _HEURISTIC_CACHE, get_template_heuristic
 from torch._inductor.heuristics.template.triton import (
+    BaseHeuristicSingleton,
     BlackwellGPUGemmConfig,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
+    TMATemplateConfigMixin,
 )
+from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
+from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
+from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -973,6 +978,223 @@ class TestBlackwellExhaustiveConfigs(TestCase):
             len(addmm_configs),
             "Scaled TMA should use the larger scaled_persistent list, not the small addmm list",
         )
+
+
+class TestBlackwellAutoWSConstraints(TestCase):
+    def test_two_ctas_allows_all_pipeline_depths(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "EPILOGUE_SUBTILE": 2,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+            "USE_META_WS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": True}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            for num_stages in range(2, 9):
+                kwargs["num_stages"] = num_stages
+                self.assertTrue(
+                    CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                        kwargs, element_size=2
+                    )
+                )
+
+    def test_two_ctas_swizzle_is_dtype_aware(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 64,
+            "EPILOGUE_SUBTILE": 1,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+            "USE_META_WS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": True}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            self.assertFalse(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=2
+                )
+            )
+            self.assertTrue(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=4
+                )
+            )
+
+            kwargs["BLOCK_N"] = 32
+            self.assertFalse(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=4
+                )
+            )
+
+    def test_two_ctas_requires_tma_store_for_metaws_template(self):
+        kwargs = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "EPILOGUE_SUBTILE": 1,
+            "DATA_PARTITION_FACTOR": 1,
+            "TWO_CTAS": True,
+            "USE_META_WS": True,
+        }
+        with (
+            config.patch({"triton.enable_template_tma_store": False}),
+            unittest.mock.patch(
+                "torch._inductor.heuristics.template.triton.has_two_ctas",
+                return_value=True,
+            ),
+        ):
+            self.assertFalse(
+                CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
+                    kwargs, element_size=2
+                )
+            )
+
+    def test_two_ctas_odd_num_sms_covers_every_tile(self):
+        with (
+            unittest.mock.patch("torch.xpu.is_available", return_value=False),
+            unittest.mock.patch(
+                "torch._inductor.utils.get_max_num_sms", return_value=149
+            ),
+            unittest.mock.patch.object(
+                torch._C, "_get_sm_carveout_experimental", return_value=None
+            ),
+        ):
+            self.assertEqual(get_num_sms(), 149)
+            num_sms = get_num_sms(two_ctas=True)
+        self.assertEqual(num_sms, 148)
+
+        block_m, block_n = 128, 128
+        m, n = 17 * block_m, 20 * block_n
+        meta = {
+            "BLOCK_M": block_m,
+            "BLOCK_N": block_n,
+            "NUM_SMS": num_sms,
+            "TWO_CTAS": True,
+        }
+        grid_size = blackwell_persistent_mm_grid(m, n, meta)[0]
+        grid_m = ((m + block_m - 1) // block_m + 1) // 2 * 2
+        num_tiles = grid_m * ((n + block_n - 1) // block_n)
+        visited = {
+            tile for pid in range(grid_size) for tile in range(pid, num_tiles, num_sms)
+        }
+        self.assertEqual(visited, set(range(num_tiles)))
+
+
+@unittest.skipIf(torch.version.hip is not None, "CUDA-specific template heuristics")
+@instantiate_parametrized_tests
+class TestBlackwellAutoWSConfigs(TestCase):
+    """autoWS config selection for the Blackwell persistent-TMA template."""
+
+    @parametrize(
+        "op_name,heuristic_cls",
+        (
+            ("mm", CUDABlackwellPersistentTMATemplateConfigHeuristic),
+            ("addmm", CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic),
+            ("scaled_mm", CUDAScaledBlackwellTMATemplateConfigHeuristic),
+        ),
+    )
+    @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
+    @parametrize("initial_autows", (False, True))
+    def test_autows_configs_follow_current_mode(
+        self, op_name, heuristic_cls, search_space, initial_autows
+    ):
+        with (
+            mock.patch.dict(_HEURISTIC_CACHE, clear=True),
+            mock.patch.dict(BaseHeuristicSingleton._instances, clear=True),
+            mock.patch("torch._inductor.heuristics.template.triton.USE_META_WS", True),
+        ):
+            first_heuristic = None
+            for enabled in (initial_autows, not initial_autows, initial_autows):
+                with config.patch(
+                    {
+                        "triton.enable_template_autows": enabled,
+                        "max_autotune_gemm_search_space": search_space,
+                    }
+                ):
+                    heuristic = heuristic_cls()
+                    if first_heuristic is None:
+                        first_heuristic = heuristic
+                    self.assertIs(heuristic, first_heuristic)
+                    self.assertIs(
+                        get_template_heuristic(
+                            blackwell_ws_persistent_tma_mm_template.uid,
+                            "cuda",
+                            op_name,
+                        ),
+                        heuristic,
+                    )
+                    configs = heuristic._get_config_generator().keywords["configs"]
+                    self.assertEqual(
+                        {getattr(cfg, "use_meta_ws", False) for cfg in configs},
+                        {enabled},
+                    )
+                    if enabled:
+                        expected = (
+                            heuristic._generate_autows_exhaustive_configs()
+                            if search_space == "EXHAUSTIVE"
+                            else heuristic._generate_autows_configs()
+                        )
+                        self.assertEqual(configs, expected)
+                    else:
+                        self.assertIs(
+                            configs,
+                            heuristic.exhaustive_configs
+                            if search_space == "EXHAUSTIVE"
+                            else heuristic.mm_configs,
+                        )
+                        if op_name == "addmm":
+                            self.assertEqual(
+                                heuristic.mm_configs,
+                                heuristic.blackwell_persistent_mm_configs
+                                + heuristic.blackwell_persistent_addmm_configs,
+                            )
+
+    @parametrize("global_meta_ws", (False, True))
+    def test_global_meta_ws_disables_flatten(self, global_meta_ws):
+        # Triton's Meta WS knob rewrites every WS kernel, so configs with
+        # use_meta_ws=False must not be flattened either.
+        mat1, mat2 = mock.Mock(), mock.Mock()
+        mat2.get_dtype.return_value = torch.bfloat16
+        kernel_inputs = MMKernelInputs([mat1, mat2], mat1_idx=0, mat2_idx=1)
+        base = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "num_stages": 3,
+            "num_warps": 4,
+            "WARP_SPECIALIZE": True,
+            "FLATTEN": True,
+            "USE_META_WS": False,
+        }
+        with (
+            mock.patch.dict(BaseHeuristicSingleton._instances, clear=True),
+            mock.patch(
+                "torch._inductor.heuristics.template.triton.USE_META_WS",
+                global_meta_ws,
+            ),
+            mock.patch.object(
+                TMATemplateConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter([base]),
+            ),
+        ):
+            heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
+            configs = list(heuristic._get_template_configs_impl(kernel_inputs, "mm"))
+        self.assertEqual(len(configs), 1)
+        self.assertTrue(configs[0]["WARP_SPECIALIZE"])
+        self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
 
 
 if __name__ == "__main__":
