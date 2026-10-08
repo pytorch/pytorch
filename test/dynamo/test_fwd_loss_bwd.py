@@ -1,9 +1,14 @@
 # Owner(s): ["module: dynamo"]
 
 import copy
+import functools
+import gc
 import re
 import sys
 import textwrap
+import weakref
+from collections import defaultdict, OrderedDict
+from types import MappingProxyType
 
 import torch
 import torch._dynamo
@@ -148,16 +153,25 @@ class <lambda>(torch.nn.Module):
         )
 
     @skipIfCrossRef
-    def test_autograd_grad_dict_inputs(self):
+    @parametrize(
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            functools.partial(defaultdict, None),
+            MappingProxyType,
+        ],
+    )
+    def test_autograd_grad_dict_inputs(self, mapping_cls):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
 
         def fn(x):
             res = mod(x)
             loss = res.sum()
-            params = dict(mod.named_parameters())
+            params = mapping_cls(OrderedDict(mod.named_parameters()))
             grads = torch.autograd.grad(loss, params)
-            return loss.detach(), grads["weight"], grads["bias"]
+            return loss.detach(), grads
 
         backend = EagerAndRecordGraphs()
         compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
@@ -165,8 +179,150 @@ class <lambda>(torch.nn.Module):
         eager_result = fn(x)
         compiled_result = compiled_fn(x)
 
+        # Result type is OrderedDict if input is an OrderedDict, otherwise (any other mapping type)
+        # the result type is always a dict.
+        result_type = OrderedDict if mapping_cls is OrderedDict else dict
+        self.assertIs(type(eager_result[1]), result_type)
+        self.assertIs(type(compiled_result[1]), result_type)
+        self.assertEqual(list(compiled_result[1]), ["weight", "bias"])
         for e, c in zip(eager_result, compiled_result):
             self.assertEqual(e, c)
+
+    @parametrize("proxy", [False, True])
+    def test_autograd_grad_mapping_items_override(self, proxy):
+        class Inputs(OrderedDict):
+            def items(self):
+                return [("x", self["y"]), ("y", self["x"])]
+
+        def fn(x, y):
+            inputs = Inputs(x=x, y=y)
+            if proxy:
+                inputs = MappingProxyType(inputs)
+            return torch.autograd.grad(2 * x + 3 * y, inputs)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        y = torch.tensor(7.0, requires_grad=True)
+        expected = fn(x, y)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, y)
+        self.assertIs(type(result), dict if proxy else OrderedDict)
+        self.assertEqual(result, expected)
+
+    @parametrize("override_keys", [False, True])
+    def test_autograd_grad_external_mapping_order(self, override_keys):
+        class Inputs(OrderedDict):
+            def keys(self):
+                return ["unrelated"]
+
+        def fn(x, y, inputs):
+            return torch.autograd.grad(2 * x + 3 * y, inputs)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        y = torch.tensor(7.0, requires_grad=True)
+        inputs = (Inputs if override_keys else OrderedDict)(x=x, y=y)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(list(compiled(x, y, inputs)), ["x", "y"])
+        inputs.move_to_end("x")
+        self.assertEqual(list(compiled(x, y, inputs)), ["y", "x"])
+
+    def test_autograd_grad_ordered_mapping_tensor_keys(self):
+        def fn(x, y, inputs):
+            return torch.autograd.grad(2 * x + 3 * y, inputs)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        y = torch.tensor(7.0, requires_grad=True)
+        first, second = torch.tensor([1, 2]), torch.tensor([3, 4])
+        inputs = OrderedDict([(first, x), (second, y)])
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        result = compiled(x, y, inputs)
+        self.assertIs(next(iter(result)), first)
+        self.assertEqual(result[first], torch.tensor(2.0))
+        inputs.move_to_end(first)
+        result = compiled(x, y, inputs)
+        self.assertIs(next(iter(result)), second)
+        self.assertEqual(result[second], torch.tensor(3.0))
+
+    def test_autograd_order_guard_does_not_retain_tensor_keys(self):
+        def fn(x, inputs):
+            return next(iter(torch.autograd.grad(x * x, inputs).values()))
+
+        x = torch.tensor(2.0, requires_grad=True)
+        key = torch.ones(2)
+        ref = weakref.ref(key)
+        inputs = OrderedDict([(key, x)])
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, inputs), 2 * x)
+        del inputs, key
+        gc.collect()
+        self.assertIsNone(ref())
+
+    @parametrize("backward", [False, True])
+    @parametrize("override", ["items", "values"])
+    def test_autograd_external_mapping_proxy_overrides(self, backward, override):
+        class Inputs(OrderedDict):
+            def items(self):
+                if override == "items":
+                    return [("x", self["y"]), ("y", self["x"])]
+                return super().items()
+
+            def values(self):
+                if override == "values":
+                    return [self["y"]]
+                return super().values()
+
+        def fn(x, y, inputs):
+            loss = 2 * x + 3 * y
+            if backward:
+                loss.backward(inputs=inputs)
+                return x.grad, y.grad
+            return torch.autograd.grad(loss, inputs)
+
+        def run(fn):
+            x = torch.tensor(2.0, requires_grad=True)
+            y = torch.tensor(7.0, requires_grad=True)
+            return fn(x, y, MappingProxyType(Inputs(x=x, y=y)))
+
+        self.assertEqual(run(torch.compile(fn, backend="eager")), run(fn))
+
+    @parametrize("backward", [False, True])
+    def test_autograd_mapping_proxy_mutation(self, backward):
+        def fn(x, y, data, inputs):
+            data["x"] = y
+            loss = x * x + 3 * y
+            if backward:
+                loss.backward(inputs=inputs)
+                return x.grad, y.grad
+            return torch.autograd.grad(loss, inputs)
+
+        def run(fn):
+            x = torch.tensor(2.0, requires_grad=True)
+            y = torch.tensor(7.0, requires_grad=True)
+            data = {"x": x}
+            return fn(x, y, data, MappingProxyType(data))
+
+        self.assertEqual(run(torch.compile(fn, backend="eager")), run(fn))
+
+    @parametrize("proxy", [False, True])
+    def test_backward_mapping_values_override(self, proxy):
+        class Inputs(OrderedDict):
+            def values(self):
+                return [self["y"]]
+
+        def fn(x, y):
+            inputs = Inputs(x=x, y=y)
+            if proxy:
+                inputs = MappingProxyType(inputs)
+            (2 * x + 3 * y).backward(inputs=inputs)
+            return x.grad, y.grad
+
+        def run(fn):
+            return fn(
+                torch.tensor(2.0, requires_grad=True),
+                torch.tensor(7.0, requires_grad=True),
+            )
+
+        self.assertEqual(
+            run(torch.compile(fn, backend="eager", fullgraph=True)), run(fn)
+        )
 
     @skipIfCrossRef
     def test_autograd_grad_dict_inputs_kwargs(self):
@@ -189,14 +345,23 @@ class <lambda>(torch.nn.Module):
             self.assertEqual(e, c)
 
     @skipIfCrossRef
-    def test_backward_dict_inputs(self):
+    @parametrize(
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            functools.partial(defaultdict, None),
+            MappingProxyType,
+        ],
+    )
+    def test_backward_dict_inputs(self, mapping_cls):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
 
         def fn(x):
             res = mod(x)
             loss = res.sum()
-            params = dict(mod.named_parameters())
+            params = mapping_cls(OrderedDict(mod.named_parameters()))
             loss.backward(inputs=params)
             return loss.detach(), mod.weight.grad.clone(), mod.bias.grad.clone()
 

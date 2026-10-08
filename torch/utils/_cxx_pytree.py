@@ -21,6 +21,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any, overload, TypeAlias, TypeVar
 from typing_extensions import deprecated, Self, TypeIs
 
+import torch
 import torch.utils._pytree as python_pytree
 from torch.torch_version import TorchVersion as _TorchVersion
 from torch.utils._pytree import (
@@ -267,6 +268,25 @@ def _private_register_pytree_node(
             cls,
             flatten_fn,
             _reverse_args(unflatten_fn),
+            namespace="torch",
+        )
+
+
+if torch._has_frozendict:
+    if optree.register_pytree_node.get(torch._frozendict, namespace="torch") is None:
+
+        def _frozendict_flatten(
+            d: torch._frozendict[Any, Any],
+        ) -> tuple[list[Any], Context, tuple[Any, ...]]:
+            values, keys = python_pytree._dict_flatten(d)
+            return values, keys, tuple(keys)
+
+        # Custom nodes require exact types and matching key order in flatten_up_to.
+        optree.register_pytree_node(
+            torch._frozendict,
+            _frozendict_flatten,
+            _reverse_args(python_pytree._frozendict_unflatten),
+            path_entry_type=optree.MappingEntry,
             namespace="torch",
         )
 

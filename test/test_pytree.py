@@ -1,5 +1,6 @@
 # Owner(s): ["module: pytree"]
 
+import builtins
 import copy
 import enum
 import inspect
@@ -17,6 +18,7 @@ from enum import auto
 from typing import Any, NamedTuple
 
 import torch
+import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as python_pytree
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.return_types import all_return_types
@@ -37,6 +39,7 @@ pytree_modules = {
 }
 if not IS_FBCODE:
     import torch.utils._cxx_pytree as cxx_pytree
+    from torch._dynamo.polyfills import pytree as dynamo_pytree
 
     pytree_modules["cxx"] = cxx_pytree
 else:
@@ -1694,6 +1697,18 @@ class TestCxxPytree(TestCase):
         roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
+    @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
+    def test_nested_custom_spec_polyfill(self):
+        tree = GlobalDummyType([1, 2], {"a": 3})
+        leaves, spec = cxx_pytree.tree_flatten(tree)
+        polyfill_flatten = dynamo_pytree.tree_flatten.__torch_dynamo_polyfill__
+        polyfill_leaves, polyfill_spec = polyfill_flatten(
+            tree, none_is_leaf=True, namespace="torch"
+        )
+        self.assertEqual(polyfill_leaves, leaves)
+        self.assertEqual(repr(polyfill_spec), repr(spec))
+        self.assertEqual(polyfill_spec.flatten_up_to(tree), leaves)
+
     def test_pytree_custom_type_serialize(self):
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)
@@ -1723,6 +1738,120 @@ class TestCxxPytree(TestCase):
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
         self.assertEqual(roundtrip_spec, spec)
+
+
+if torch._has_frozendict:
+
+    @instantiate_parametrized_tests
+    class TestFrozenDictPytree(TestCase):
+        @parametrize_pytree_module
+        @parametrize("items", [[], [("b", [1, 2]), (3, (None, 4))]])
+        def test_roundtrip(self, pytree, items):
+            tree = builtins.frozendict(items)
+            leaves, spec = pytree.tree_flatten(tree)
+            self.assertFalse(spec.is_leaf())
+            self.assertEqual(spec.type, builtins.frozendict)
+            result = pytree.tree_unflatten(leaves, spec)
+            self.assertIs(type(result), builtins.frozendict)
+            self.assertEqual(list(result.items()), items)
+            self.assertEqual(hash(spec), hash(pytree.tree_structure(result)))
+            self.assertEqual(pytree.treespec_loads(pytree.treespec_dumps(spec)), spec)
+
+        @parametrize_pytree_module
+        def test_map_and_flatten_up_to(self, pytree):
+            tree = builtins.frozendict(b=[1, 2], a=3)
+            result = pytree.tree_map(lambda x: x + 1, tree)
+            self.assertIs(type(result), builtins.frozendict)
+            self.assertEqual(list(result.items()), [("b", [2, 3]), ("a", 4)])
+            spec = pytree.tree_structure(tree)
+            self.assertEqual(
+                spec.flatten_up_to(builtins.frozendict(b=[4, 5], a=6)), [4, 5, 6]
+            )
+            if pytree is cxx_pytree and not IS_FBCODE:
+                handler = cxx_pytree.optree.register_pytree_node.get(
+                    builtins.frozendict
+                )
+                if (
+                    handler is None
+                    or handler.kind == cxx_pytree.optree.PyTreeKind.CUSTOM
+                ):
+                    with self.assertRaisesRegex(ValueError, "[Tt]ype mismatch"):
+                        spec.flatten_up_to({"a": 6, "b": [4, 5]})
+                    with self.assertRaisesRegex(
+                        ValueError, "Mismatch custom node data|Node context mismatch"
+                    ):
+                        spec.flatten_up_to(builtins.frozendict(a=6, b=[4, 5]))
+                    return
+            for other in ({"a": 6, "b": [4, 5]}, builtins.frozendict(a=6, b=[4, 5])):
+                self.assertEqual(spec.flatten_up_to(other), [4, 5, 6])
+            with self.assertRaisesRegex(ValueError, "[Kk]eys? mismatch"):
+                spec.flatten_up_to({"a": 6, "c": [4, 5]})
+
+        def test_key_paths_and_fx_spec(self):
+            tree = builtins.frozendict(b=[1, 2], a=3)
+            paths, spec = python_pytree.tree_flatten_with_path(tree)
+            self.assertEqual(
+                [python_pytree.keystr(path) for path, _ in paths],
+                ["['b'][0]", "['b'][1]", "['a']"],
+            )
+            self.assertEqual(
+                [python_pytree.key_get(tree, path) for path, _ in paths], [1, 2, 3]
+            )
+            self.assertEqual(
+                fx_pytree.tree_flatten_spec(builtins.frozendict(a=6, b=[4, 5]), spec),
+                [4, 5, 6],
+            )
+
+        @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
+        @parametrize("match_type", [dict, builtins.frozendict])
+        def test_optree_spec_polyfill(self, match_type):
+            tree = builtins.frozendict(b=[1, 2], a=3)
+            leaves, spec = cxx_pytree.tree_flatten(tree)
+            polyfill_flatten = dynamo_pytree.tree_flatten.__torch_dynamo_polyfill__
+            polyfill_leaves, polyfill_spec = polyfill_flatten(
+                tree, none_is_leaf=True, namespace="torch"
+            )
+            self.assertEqual(polyfill_leaves, leaves)
+            self.assertEqual(spec.paths(), [("b", 0), ("b", 1), ("a",)])
+            self.assertEqual(polyfill_spec.paths(), spec.paths())
+            self.assertEqual([accessor(tree) for accessor in spec.accessors()], leaves)
+            self.assertEqual(
+                [accessor(tree) for accessor in polyfill_spec.accessors()], leaves
+            )
+            self.assertEqual(polyfill_spec.unflatten(leaves), tree)
+            self.assertIs(type(polyfill_spec.unflatten(leaves)), builtins.frozendict)
+            self.assertEqual(repr(polyfill_spec), repr(spec))
+            self.assertEqual(polyfill_spec.flatten_up_to(tree), leaves)
+            other = match_type(a=6, b=[4, 5])
+            try:
+                expected = spec.flatten_up_to(other)
+            except ValueError:
+                with self.assertRaisesRegex(
+                    ValueError, "Type mismatch|Node context mismatch"
+                ):
+                    polyfill_spec.flatten_up_to(other)
+            else:
+                self.assertEqual(polyfill_spec.flatten_up_to(other), expected)
+
+        @parametrize_pytree_module
+        def test_tensor_leaves(self, pytree):
+            value = torch.randn(2)
+            tree = builtins.frozendict({("a", 1): value, None: value})
+            leaves, spec = pytree.tree_flatten(tree)
+            result = pytree.tree_unflatten(leaves, spec)
+            self.assertIs(result[("a", 1)], value)
+            self.assertIs(result[None], value)
+            self.assertEqual(list(result), [("a", 1), None])
+
+        @parametrize_pytree_module
+        def test_subclass_is_leaf(self, pytree):
+            class FrozenMapping(builtins.frozendict):
+                pass
+
+            tree = FrozenMapping(a=1)
+            leaves, spec = pytree.tree_flatten(tree)
+            self.assertTrue(spec.is_leaf())
+            self.assertIs(leaves[0], tree)
 
 
 instantiate_parametrized_tests(TestGenericPytree)
