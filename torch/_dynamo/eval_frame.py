@@ -121,7 +121,7 @@ from .exc import (
     UserErrorType,
 )
 from .hooks import Hooks
-from .mutation_guard import install_generation_tagging_init
+from .mutation_guard import GenerationTracker, install_generation_tagging_init
 from .utils import (
     _get_error_on_graph_break,
     _set_error_on_graph_break,
@@ -1412,8 +1412,10 @@ class OptimizeContext(_TorchDynamoContext):
         isolate_recompiles: bool = False,
         dynamic_shapes: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
     ) -> None:
+        install_generation_tagging_init()
+
         def on_enter() -> None:
-            install_generation_tagging_init()
+            GenerationTracker.generation += 1
 
         super().__init__(
             callback=callback,
@@ -1477,7 +1479,7 @@ class RunOnlyContext(_TorchDynamoContext):
     def __init__(self) -> None:
         # cudagraph trees relies on generation increment
         def on_enter() -> None:
-            torch._dynamo.mutation_guard.GenerationTracker.generation += 1
+            GenerationTracker.generation += 1
 
         super().__init__(callback=False, on_enter=on_enter)
 
