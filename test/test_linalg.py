@@ -196,7 +196,7 @@ def parse_tunable_log(log):
     return tuned
 
 
-class TestLinalg(TestCase):
+class TestLinalgDevice(TestCase):
     def setUp(self):
         super().setUp()
         # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
@@ -11984,7 +11984,7 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([1, 2], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
-instantiate_device_type_tests(TestLinalg, globals())
+instantiate_device_type_tests(TestLinalgDevice, globals())
 instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestLinalgCpu, globals(), only_for=("cpu"))
