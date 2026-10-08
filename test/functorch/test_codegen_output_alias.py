@@ -216,9 +216,9 @@ class TestCodegenOutputAlias(TestCase):
         """
         Training path with mixed differentiable and non-differentiable
         outputs. Exercises non-differentiable output collection in
-        _transform_raw_returns codegen and backward correctness.
+        forward finalize codegen and backward correctness.
         """
-        with self._capture_codegen_source("compiled_fn_wrapper") as xform_captured:
+        with self._capture_codegen_source("compiled_function_forward") as xform_captured:
 
             @torch.compile(backend="aot_eager")
             def f(x, y):
@@ -239,7 +239,7 @@ class TestCodegenOutputAlias(TestCase):
         self.assertEqual(
             len(xform_captured),
             1,
-            "Expected compiled_fn_wrapper codegen artifact to be emitted",
+            "Expected compiled_function_forward codegen artifact to be emitted",
         )
 
     def test_training_path_mutation_and_alias(self):
@@ -446,11 +446,11 @@ class TestCodegenOutputAlias(TestCase):
 
     def test_xform_unsafe_view_output(self):
         """
-        _transform_raw_returns codegen: when an output is a view of an
+        forward finalize codegen: when an output is a view of an
         intermediate and is the only output aliasing that intermediate
         (unsafe_view_alias), the codegen emits an _unsafe_view call.
         """
-        with self._capture_codegen_source("compiled_fn_wrapper") as captured:
+        with self._capture_codegen_source("compiled_function_forward") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
@@ -471,14 +471,14 @@ class TestCodegenOutputAlias(TestCase):
     @skipIfTorchDynamo("dynamo handles metadata mutations in-graph")
     def test_xform_metadata_only_mutation(self):
         """
-        _transform_raw_returns codegen: when an input has a metadata-only
+        forward finalize codegen: when an input has a metadata-only
         mutation (mutates_metadata=True, mutates_data=False), the codegen
         wraps the corresponding mutated input return in TensorAlias.
         Uses aot_function directly because dynamo handles metadata
-        mutations in-graph, so they never reach the _transform_raw_returns
+        mutations in-graph, so they never reach the forward finalize
         codegen path.
         """
-        with self._capture_codegen_source("compiled_fn_wrapper") as captured:
+        with self._capture_codegen_source("compiled_function_forward") as captured:
 
             def f(a, b):
                 a.transpose_(1, 0)
@@ -519,14 +519,14 @@ class TestCodegenOutputAlias(TestCase):
 
     def test_xform_aliased_output_tensoralias_wrapping(self):
         """
-        _transform_raw_returns codegen: aliased outputs get wrapped in
+        forward finalize codegen: aliased outputs get wrapped in
         TensorAlias so autograd.Function doesn't treat them as regular
         tensors. Verifies the TensorAlias wrapping path for aliased
         outputs (distinct from the metadata-only mutation wrapping).
         Needs a non-view computation (x * 2) to force the autograd
         factory path; a pure view like x.view(-1) alone bypasses it.
         """
-        with self._capture_codegen_source("compiled_fn_wrapper") as captured:
+        with self._capture_codegen_source("compiled_function_forward") as captured:
 
             @torch.compile(backend="aot_eager")
             def f(x):
