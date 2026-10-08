@@ -112,7 +112,6 @@ class TestVisibleDeviceParses(TestCase):
         # MIG ids are parsed
         self.assertEqual(_parse_visible_devices("MIG-89c850dc"), ["MIG-89c850dc"])
 
-    @unittest.skipIf(torch.version.hip is not None, "Skipped on ROCm")
     def test_partial_uuid_resolver(self):
         from torch.cuda import _transform_uuid_to_ordinals
 

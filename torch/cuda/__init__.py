@@ -1185,9 +1185,14 @@ def _transform_uuid_to_ordinals(candidates: list[str], uuids: list[str]) -> list
     r"""Given the set of partial uuids and list of known uuids builds a set of ordinals excluding ambiguous partials IDs."""
 
     def uuid_to_ordinal(candidate: str, uuids: list[str]) -> int:
+        # amdsmi asic serials omit the NVML "GPU-" prefix. Strip it from both
+        # sides so a GPU-prefixed candidate still matches either form.
+        if torch.version.hip:
+            candidate = candidate.removeprefix("GPU-")
         best_match = -1
         for idx, uuid in enumerate(uuids):
-            if not uuid.startswith(candidate):
+            haystack = uuid.removeprefix("GPU-") if torch.version.hip else uuid
+            if not haystack.startswith(candidate):
                 continue
             # Ambiguous candidate
             if best_match != -1:
@@ -1197,10 +1202,6 @@ def _transform_uuid_to_ordinals(candidates: list[str], uuids: list[str]) -> list
 
     rc: list[int] = []
     for candidate in candidates:
-        if torch.version.hip:
-            candidate = candidate.replace(
-                "GPU-", "", 1
-            )  # Remove GPU-prefix to match amdsmi asic serial
         idx = uuid_to_ordinal(candidate, uuids)
         # First invalid ordinal stops parsing
         if idx < 0:
