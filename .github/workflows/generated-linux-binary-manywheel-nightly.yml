@@ -180,31 +180,56 @@ jobs:
         env:
           REF_TYPE: ${{ github.ref_type }}
           GITHUB_REF: ${{ github.ref }}
+          PREVIEW_IMAGE_WAIT_SECONDS: 3600
+          PREVIEW_IMAGE_POLL_SECONDS: 300
         shell: bash
         run: |
           set -euo pipefail
           suffix=""
-          if [[ "${REF_TYPE}" == "tag" ]]; then
+          if [[ "${REF_TYPE}" == "tag" || "${GITHUB_REF}" == "refs/heads/nightly" ]]; then
             suffix="-$(git rev-parse HEAD:.ci/docker)"
           fi
           tag="rocm-preview${suffix}"
           repo="pytorch/manylinux2_28-builder"
           url="https://hub.docker.com/v2/repositories/${repo}/tags/${tag}"
-          if ! status=$(curl -sS --retry 3 --retry-all-errors \
-              -o /dev/null -w '%{http_code}' "${url}"); then
-            echo "::error::Failed to query preview builder ${repo}:${tag}."
-            exit 1
-          fi
-          if [[ "${status}" == "200" ]]; then
-            echo "docker.io/${repo}:${tag} exists"
-            available=true
-          elif [[ "${status}" == "404" && "${GITHUB_REF}" == refs/tags/ciflow/* ]]; then
-            echo "::warning::Preview builder ${repo}:${tag} is not published; skipping preview jobs."
-            available=false
-          else
+          deadline=$((SECONDS + PREVIEW_IMAGE_WAIT_SECONDS))
+          while true; do
+            request_timeout=60
+            if [[ "${GITHUB_REF}" == "refs/heads/nightly" ]]; then
+              remaining=$((deadline - SECONDS))
+              if ((remaining < request_timeout)); then
+                request_timeout=$((remaining > 0 ? remaining : 1))
+              fi
+            fi
+            if ! status=$(curl -sS --retry 3 --retry-all-errors \
+                --max-time "${request_timeout}" --retry-max-time "${request_timeout}" \
+                -o /dev/null -w '%{http_code}' "${url}"); then
+              echo "::error::Failed to query preview builder ${repo}:${tag}."
+              exit 1
+            fi
+            if [[ "${status}" == "200" ]]; then
+              echo "docker.io/${repo}:${tag} exists"
+              available=true
+              break
+            fi
+            if [[ "${status}" == "404" && "${GITHUB_REF}" == refs/tags/ciflow/* ]]; then
+              echo "::warning::Preview builder ${repo}:${tag} is not published; skipping preview jobs."
+              available=false
+              break
+            fi
+            remaining=$((deadline - SECONDS))
+            if [[ "${status}" == "404" && "${GITHUB_REF}" == "refs/heads/nightly" && "${remaining}" -gt 0 ]]; then
+              delay="${PREVIEW_IMAGE_POLL_SECONDS}"
+              if ((delay > remaining)); then
+                delay="${remaining}"
+              fi
+              echo "Preview builder ${repo}:${tag} is not published yet; retrying in ${delay}s..."
+              sleep "${delay}"
+              continue
+            fi
             echo "::error::Preview builder probe returned HTTP ${status} for ${repo}:${tag}."
             exit 1
-          fi
+          done
           echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
           echo "image_available=${available}" >> "${GITHUB_OUTPUT}"
 

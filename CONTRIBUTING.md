@@ -348,6 +348,9 @@ To install the nightly binaries built with ROCm, you can pass in the flag `--roc
 source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
+Pass `--rocm preview` to opt into the moving ROCm preview channel. Bare
+`--rocm` continues to select the latest supported numeric ROCm version.
+
 You can also use this tool to pull the nightly commits into the current branch:
 
 ```bash

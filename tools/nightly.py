@@ -30,6 +30,10 @@ To install the nightly binaries built with ROCm, you can pass in the flag --rocm
     $ ./tools/nightly.py checkout -b my-nightly-branch --rocm
     $ source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 
+The moving ROCm preview channel is opt-in::
+
+    $ ./tools/nightly.py checkout -b my-nightly-branch --rocm preview
+
 You can also use this tool to pull the nightly commits into the current branch as
 well. This can be done with::
 
@@ -1137,13 +1141,13 @@ def make_parser() -> argparse.ArgumentParser:
         subparser.add_argument(
             "--rocm",
             help=(
-                "ROCm version to install "
-                "(defaults to the latest version available on the platform)"
+                "ROCm version or named channel to install, such as preview "
+                "(defaults to the latest numeric version available on the platform)"
             ),
             dest="rocm",
             nargs="?",
             default=argparse.SUPPRESS,
-            metavar="VERSION",
+            metavar="VERSION|CHANNEL",
         )
     return parser
 
@@ -1155,6 +1159,41 @@ def parse_arguments() -> argparse.Namespace:
     if hasattr(args, "cuda") and hasattr(args, "rocm"):
         parser.error("Cannot specify both CUDA and ROCm versions.")
     return args
+
+
+def _select_accelerator_source(
+    toolkit: str,
+    requested: str | None,
+    *,
+    platform: str = PLATFORM,
+    sources: dict[str, PipSource] | None = None,
+) -> PipSource:
+    accel = toolkit.lower()
+    available = {
+        src.name[len(f"{accel}-") :]: src
+        for src in (PIP_SOURCES if sources is None else sources).values()
+        if src.name.startswith(f"{accel}-") and platform in src.supported_platforms
+    }
+    if not available:
+        raise ValueError(f"No {toolkit} versions available on platform {platform}.")
+    if requested is not None:
+        source = available.get(requested)
+        if source is not None:
+            return source
+        versioned = sorted((v for v in available if v[:1].isdigit()), key=Version)
+        named = sorted(v for v in available if not v[:1].isdigit())
+        raise ValueError(
+            f"{toolkit} {requested} is not available on platform {platform}. "
+            f"Available version(s): {', '.join(versioned + named)}"
+        )
+
+    # Named channels such as "preview" are opt-in only.
+    versions = [v for v in available if v[:1].isdigit()]
+    if not versions:
+        raise ValueError(
+            f"No numeric {toolkit} versions available on platform {platform}."
+        )
+    return available[max(versions, key=Version)]
 
 
 def main() -> None:
@@ -1171,33 +1210,11 @@ def main() -> None:
     for toolkit in ("CUDA", "ROCm"):
         accel = toolkit.lower()
         if hasattr(args, accel):
-            requested = getattr(args, accel)
-            available_sources = {
-                src.name[len(f"{accel}-") :]: src
-                for src in PIP_SOURCES.values()
-                if src.name.startswith(f"{accel}-")
-                and PLATFORM in src.supported_platforms
-            }
-            if not available_sources:
-                print(f"No {toolkit} versions available on platform {PLATFORM}.")
+            try:
+                pip_source = _select_accelerator_source(toolkit, getattr(args, accel))
+            except ValueError as error:
+                print(error)
                 sys.exit(1)
-            if requested is not None:
-                pip_source = available_sources.get(requested)
-                if pip_source is None:
-                    versioned = sorted(
-                        (v for v in available_sources if v[:1].isdigit()),
-                        key=Version,
-                    )
-                    named = sorted(v for v in available_sources if not v[:1].isdigit())
-                    print(
-                        f"{toolkit} {requested} is not available on platform {PLATFORM}. "
-                        f"Available version(s): {', '.join(versioned + named)}"
-                    )
-                    sys.exit(1)
-            else:
-                # Named channels such as "preview" are opt-in only.
-                versions = [v for v in available_sources if v[:1].isdigit()]
-                pip_source = available_sources[max(versions, key=Version)]
 
     if pip_source is None:
         pip_source = PIP_SOURCES["cpu"]  # always available
