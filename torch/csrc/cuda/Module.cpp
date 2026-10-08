@@ -5,8 +5,11 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/RNN.h>
 #include <c10/core/Device.h>
+#include <c10/core/SafePyObject.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -34,6 +37,7 @@
 
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/cuda/THCP.h>
@@ -46,7 +50,9 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <array>
+#include <cstdint>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -1335,6 +1341,81 @@ void addStorageDeleterFns(
   }
 }
 
+namespace {
+
+PyObject* getPythonAllocatorCallback(
+    const std::shared_ptr<c10::SafePyObject>& state,
+    Py_ssize_t index) {
+  auto* callbacks = state->ptr(getPyInterpreter());
+  TORCH_INTERNAL_ASSERT(PyTuple_CheckExact(callbacks));
+  return PyTuple_GET_ITEM(callbacks, index);
+}
+
+void* callPythonAllocator(
+    const std::shared_ptr<c10::SafePyObject>& state,
+    size_t size,
+    int device,
+    cudaStream_t stream) {
+  if (!Py_IsInitialized() || Py_IsFinalizing()) {
+    return nullptr;
+  }
+  c10::cuda::CUDAStreamGuard stream_guard(
+      c10::cuda::getStreamFromExternal(stream, device));
+  py::gil_scoped_acquire gil;
+  py::object result = py::reinterpret_borrow<py::object>(
+      getPythonAllocatorCallback(state, 0))(size);
+  if (result.is_none()) {
+    return nullptr;
+  }
+  auto address = result.cast<uintptr_t>();
+  return reinterpret_cast<void*>(address);
+}
+
+void callPythonDeallocator(
+    const std::shared_ptr<c10::SafePyObject>& state,
+    void* ptr,
+    size_t size,
+    int device,
+    cudaStream_t stream) noexcept {
+  if (!Py_IsInitialized() || Py_IsFinalizing()) {
+    // The allocation is intentionally leaked. It is unsafe to enter Python
+    // once interpreter finalization has begun.
+    return;
+  }
+  const auto warn_failure = [&](const char* message) {
+    TORCH_WARN(
+        "Python MemPool free callback failed for pointer ",
+        ptr,
+        " (size ",
+        size,
+        ", device ",
+        device,
+        "): ",
+        message);
+  };
+  try {
+    c10::cuda::CUDAStreamGuard stream_guard(
+        c10::cuda::getStreamFromExternal(stream, device));
+    py::gil_scoped_acquire gil;
+    try {
+      py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 1))(
+          reinterpret_cast<uintptr_t>(ptr), size);
+    } catch (const std::exception& e) {
+      // Report the Python error while the GIL is still held, but do not let a
+      // cleanup callback throw through allocator teardown.
+      warn_failure(e.what());
+    } catch (...) {
+      warn_failure("unknown exception");
+    }
+  } catch (const std::exception& e) {
+    warn_failure(e.what());
+  } catch (...) {
+    warn_failure("unknown exception");
+  }
+}
+
+} // namespace
+
 static void registerCudaPluggableAllocator(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -1452,6 +1533,26 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
         malloc_fn, free_fn);
   });
+  m.def(
+      "_cuda_createPythonAllocator",
+      [](py::object alloc_fn, py::object free_fn) {
+        TORCH_CHECK(
+            PyCallable_Check(alloc_fn.ptr()),
+            "alloc_fn must be a Python callable");
+        TORCH_CHECK(
+            PyCallable_Check(free_fn.ptr()),
+            "free_fn must be a Python callable");
+        auto callbacks = py::make_tuple(alloc_fn, free_fn);
+        auto state = std::make_shared<c10::SafePyObject>(
+            callbacks.release().ptr(), getPyInterpreter());
+        return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+            [state](size_t size, int device, cudaStream_t stream) {
+              return callPythonAllocator(state, size, device, stream);
+            },
+            [state](void* ptr, size_t size, int device, cudaStream_t stream) {
+              callPythonDeallocator(state, ptr, size, device, stream);
+            });
+      });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
