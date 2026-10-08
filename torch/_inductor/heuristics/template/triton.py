@@ -2374,6 +2374,21 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
+def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
+    """Whether a Triton GEMM template should use TF32, matching eager matmul."""
+    if device_type == "xpu":
+        # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
+        return torch.backends.mkldnn.allow_tf32
+    if device_type == "cuda":
+        # allow_tf32 alignment heuristics based on reverse engineering
+        # H100 CUDA 12.8 behavior
+        size_threshold = V.graph.sizevars.statically_known_true(
+            sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
+        )
+        return torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
+    return False
+
+
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
@@ -2416,24 +2431,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
-        device_type = kernel_inputs.device_type
-        if device_type == "xpu":
-            # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
-            allow_tf32 = torch.backends.mkldnn.allow_tf32
-        elif device_type == "cuda":
-            # allow_tf32 alignment heuristics based on reverse engineering
-            # H100 CUDA 12.8 behavior
-            size_threshold = V.graph.sizevars.statically_known_true(
-                sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
-            )
-            allow_tf32 = (
-                torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
-            )
-        else:
-            allow_tf32 = False
-
         extra_kwargs = {
-            "ALLOW_TF32": allow_tf32,
+            "ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type),
         }
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because

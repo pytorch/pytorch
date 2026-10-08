@@ -1,6 +1,6 @@
 
 @triton.jit
-def _compute_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr, NUM_SMS: tl.constexpr):
+def _compute_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr):
     group_id = tile_id // num_pid_in_group
     first_pid_m = group_id * GROUP_M
     GROUP_M = min(grid_m - first_pid_m, GROUP_M)

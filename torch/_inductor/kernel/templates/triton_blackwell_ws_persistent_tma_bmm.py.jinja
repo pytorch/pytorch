@@ -74,7 +74,7 @@
         batch = tile_id // num_tiles_per_batch
         batch_tile_id = tile_id % num_tiles_per_batch
         pid_m, pid_n = _compute_pid(
-            batch_tile_id, num_pid_in_group, grid_m, GROUP_M, NUM_SMS
+            batch_tile_id, num_pid_in_group, grid_m, GROUP_M
         )
         offs_am = (pid_m * BLOCK_M).to(tl.int32)
         offs_bn = (pid_n * BLOCK_N).to(tl.int32)
@@ -113,7 +113,7 @@
         batch = tile_id // num_tiles_per_batch
         batch_tile_id = tile_id % num_tiles_per_batch
         pid_m, pid_n = _compute_pid(
-            batch_tile_id, num_pid_in_group, grid_m, GROUP_M, NUM_SMS
+            batch_tile_id, num_pid_in_group, grid_m, GROUP_M
         )
         offs_cm = pid_m * BLOCK_M
         offs_cn = pid_n * BLOCK_N
