@@ -46,9 +46,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_distributed import (
+    captured_graph_kernels_and_edges,
     captured_signal_pad_order,
     core_dumps_disabled,
     gated_signal_pad_order,
+    graph_path_exists,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -79,57 +81,6 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 test_contexts = [nullcontext, _test_mode]
-
-
-def _captured_kernel_nodes_and_edges(graph):
-    """Kernel nodes and edges of a captured graph, read back through
-    cuda.bindings. Imported lazily so this module still imports without it."""
-    from cuda.bindings import runtime as cuda_runtime
-
-    from torch.cuda._utils import _check_cuda_bindings
-
-    raw = graph.raw_cuda_graph()
-    _, num_nodes = _check_cuda_bindings(cuda_runtime.cudaGraphGetNodes(raw, numNodes=0))
-    nodes, _ = _check_cuda_bindings(
-        cuda_runtime.cudaGraphGetNodes(raw, numNodes=num_nodes)
-    )
-    kernels = [
-        int(node)
-        for node in nodes
-        if _check_cuda_bindings(cuda_runtime.cudaGraphNodeGetType(node))
-        == cuda_runtime.cudaGraphNodeType.cudaGraphNodeTypeKernel
-    ]
-    # Four values: cudaGraphGetEdges carries an edge-data array from CUDA 13
-    # on. Same shape as torch/cuda/graphs.py.
-    edges = []
-    _, _, _, num_edges = _check_cuda_bindings(
-        cuda_runtime.cudaGraphGetEdges(raw, numEdges=0)
-    )
-    if num_edges > 0:
-        from_nodes, to_nodes, _edge_data, _ = _check_cuda_bindings(
-            cuda_runtime.cudaGraphGetEdges(raw, numEdges=num_edges)
-        )
-        edges = [(int(a), int(b)) for a, b in zip(from_nodes, to_nodes)]
-    return kernels, edges
-
-
-def _graph_path_exists(edges, src, dst):
-    """Whether dst is reachable from src. Reachability rather than a search
-    for event nodes: a captured dependency may be lowered to a plain edge."""
-    successors: dict[int, list[int]] = {}
-    for a, b in edges:
-        successors.setdefault(a, []).append(b)
-    seen: set[int] = set()
-    stack = [src]
-    while stack:
-        node = stack.pop()
-        if node == dst:
-            return True
-        if node in seen:
-            continue
-        seen.add(node)
-        stack.extend(successors.get(node, ()))
-    return False
 
 
 # Each op touches the signal pad through one guarded call site. The mixed pairs
@@ -1302,13 +1253,13 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
                 hdl_b.barrier(channel=0)
             main.wait_stream(side)
 
-        kernels, edges = _captured_kernel_nodes_and_edges(graph)
+        kernels, edges = captured_graph_kernels_and_edges(graph)
         self.assertEqual(
             len(kernels), 2, f"expected two barrier kernels, got {len(kernels)}"
         )
         first, second = kernels
         # Node order from cudaGraphGetNodes is unspecified, so look both ways.
-        ordered = _graph_path_exists(edges, first, second) or _graph_path_exists(
+        ordered = graph_path_exists(edges, first, second) or graph_path_exists(
             edges, second, first
         )
         if same_group:

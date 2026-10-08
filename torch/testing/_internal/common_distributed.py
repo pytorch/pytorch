@@ -612,6 +612,47 @@ def requires_multicast_support():
     )
 
 
+def captured_graph_kernels_and_edges(
+    graph: torch.cuda.CUDAGraph,
+) -> tuple[list[int], list[tuple[int, int]]]:
+    """Kernel nodes and edges of a graph captured with keep_graph=True, read
+    back through cuda.bindings. Requires cuda.bindings."""
+    from cuda.bindings import runtime as rt
+
+    from torch.cuda._utils import _check_cuda_bindings as check
+
+    raw = graph.raw_cuda_graph()
+    _, num_nodes = check(rt.cudaGraphGetNodes(raw, numNodes=0))
+    nodes, _ = check(rt.cudaGraphGetNodes(raw, numNodes=num_nodes))
+    kind = rt.cudaGraphNodeType.cudaGraphNodeTypeKernel
+    kernels = [int(n) for n in nodes if check(rt.cudaGraphNodeGetType(n)) == kind]
+    # cuda-bindings 13 returns edge data as a fourth value.
+    num_edges = check(rt.cudaGraphGetEdges(raw, numEdges=0))[3]
+    if num_edges == 0:
+        return kernels, []
+    srcs, dsts, _, _ = check(rt.cudaGraphGetEdges(raw, numEdges=num_edges))
+    return kernels, [(int(a), int(b)) for a, b in zip(srcs, dsts, strict=True)]
+
+
+def graph_path_exists(edges: list[tuple[int, int]], src: int, dst: int) -> bool:
+    """Whether dst is reachable from src. Reachability rather than a search
+    for event nodes: a captured dependency may be lowered to a plain edge."""
+    successors: dict[int, list[int]] = {}
+    for a, b in edges:
+        successors.setdefault(a, []).append(b)
+    seen: set[int] = set()
+    stack = [src]
+    while stack:
+        node = stack.pop()
+        if node == dst:
+            return True
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(successors.get(node, ()))
+    return False
+
+
 def captured_signal_pad_order(
     stream: torch.cuda.Stream,
     launches_a: list[Callable[[], object]],
@@ -656,23 +697,11 @@ def captured_signal_pad_order(
                 launch()
         stream.wait_stream(side)
 
-    raw = graph.raw_cuda_graph()
-    # cuda-bindings 13 returns edge data as a fourth value.
-    num_edges = check(rt.cudaGraphGetEdges(raw, numEdges=0))[3]
-    srcs, dsts, _, _ = check(rt.cudaGraphGetEdges(raw, numEdges=num_edges))
-    preds: dict[int, list[int]] = {}
-    for src, dst in zip(srcs, dsts, strict=True):
-        preds.setdefault(int(dst), []).append(int(src))
-    # Reachability rather than a search for event nodes: a captured
-    # dependency may be lowered to a plain edge.
-    ancestors: set[int] = set()
-    stack = [b_first]
-    while stack:
-        for node in preds.get(stack.pop(), ()):
-            if node not in ancestors:
-                ancestors.add(node)
-                stack.append(node)
-    return a_last in ancestors, marker_node in ancestors
+    _, edges = captured_graph_kernels_and_edges(graph)
+    return (
+        graph_path_exists(edges, a_last, b_first),
+        graph_path_exists(edges, marker_node, b_first),
+    )
 
 
 def gated_signal_pad_order(
