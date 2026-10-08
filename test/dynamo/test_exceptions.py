@@ -2102,6 +2102,45 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             gc.enable()
         self.assertEqual(leaked, 0)
 
+    def test_real_value_graph_break_no_reference_cycle(self):
+        # Same for a RuntimeError raised while computing a real value: neither
+        # get_real_value nor the helper that turns the graph break into a
+        # TorchRuntimeError may keep an exception bound in its frame.
+        from torch._dynamo.exc import TorchRuntimeError
+        from torch._dynamo.utils import get_real_value
+
+        graph = torch.fx.Graph()
+        a = graph.placeholder("a")
+        b = graph.placeholder("b")
+        mm = graph.call_function(torch.mm, (a, b))
+        graph.output(mm)
+        tracer = types.SimpleNamespace(
+            real_value_cache={a: torch.randn(2, 3), b: torch.randn(4, 5)}
+        )
+
+        gc.collect()
+        gc.disable()
+        gc.set_debug(gc.DEBUG_SAVEALL)
+        raised = False
+        try:
+            # Not assertRaises: it clears the traceback's frames, which would
+            # break the cycle this test is looking for.
+            try:
+                get_real_value(mm, tracer)
+            except TorchRuntimeError:
+                raised = True
+            gc.collect()
+            leaked = sum(
+                type(o) is types.FrameType and o.f_code.co_name == "get_real_value"
+                for o in gc.garbage
+            )
+        finally:
+            gc.set_debug(0)
+            gc.garbage.clear()
+            gc.enable()
+        self.assertTrue(raised)
+        self.assertEqual(leaked, 0)
+
     def test_exception_subclass_super_init_with_kwargs(self):
         class MyError(RuntimeError):
             def __init__(self, msg, *, context=None):
