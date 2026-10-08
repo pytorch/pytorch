@@ -42,6 +42,7 @@ from .utils import (
     has_free_symbols,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
+    sympy_product,
     sympy_subs,
     VarRanges,
 )
@@ -158,7 +159,11 @@ def stride_at(index: sympy.Expr, var: sympy.Symbol):
         return sympy.S.Zero
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
-    return sympy.simplify(new_index - index)
+    stride = new_index - index
+    # sympy.simplify differentiates relationals nested in Where and crashes.
+    if stride.has(sympy.Rel):
+        return stride
+    return sympy.simplify(stride)
 
 
 @functools.lru_cache
@@ -454,24 +459,29 @@ class SizeVarAllocator:
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
-        if expr.has(ModularIndexing):
-            expr = expr.replace(
-                ModularIndexing(
-                    sympy.Wild("base", integer=True),
-                    sympy.Wild("divisor", integer=True),
-                    sympy.Wild("modulus", integer=True),
-                ),
-                visit_modular_indexing,
-            )
+        try:
+            if expr.has(ModularIndexing):
+                expr = expr.replace(
+                    ModularIndexing(
+                        sympy.Wild("base", integer=True),
+                        sympy.Wild("divisor", integer=True),
+                        sympy.Wild("modulus", integer=True),
+                    ),
+                    visit_modular_indexing,
+                )
 
-        if expr.has(FloorDiv):
-            expr = expr.replace(
-                FloorDiv(
-                    sympy.Wild("base", integer=True),
-                    sympy.Wild("divisor", integer=True),
-                ),
-                visit_indexing_div,
-            )
+            if expr.has(FloorDiv):
+                expr = expr.replace(
+                    FloorDiv(
+                        sympy.Wild("base", integer=True),
+                        sympy.Wild("divisor", integer=True),
+                    ),
+                    visit_indexing_div,
+                )
+        except ZeroDivisionError:
+            # A divisor simplified to 0, e.g. the size of an empty slice with a
+            # symbolic start. The index is then only used by an empty loop.
+            return original_expr
 
         if expr != original_expr:
             return self._simplify_with_ranges(expr, var_ranges)
@@ -937,6 +947,16 @@ class SizeVarAllocator:
                 return static_val
             return False
         return self.evaluate_expr(left, fallback_value=False)
+
+    def guard_is_empty(self, sizes: Sequence[Expr]) -> bool:
+        """
+        Whether a tensor of these sizes is empty; guards only when the hint
+        says it is, so nonempty tensors do not pick up a guard.
+        """
+        numel = sympy_product(sizes)
+        return self.optimization_hint(numel, fallback=1) == 0 and self.guard_or_false(
+            sympy.Eq(numel, 0)
+        )
 
     def guard_or_true(self, left):
         import torch.fx.experimental._config as exp_config
