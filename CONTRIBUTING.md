@@ -137,7 +137,8 @@ flowchart TD
     auto -- changes needed --> dev
     dev -- "#quot;no automated review#quot;" --> rfr
     rfr --> review(Human review)
-    review -- needs significant changes --> dev
+    review -- "needs significant changes,<br/>automated review enabled" --> dev
+    review -- "needs significant changes,<br/>#quot;no automated review#quot;" --> rfr
     review -- any reviewer accepts --> accepted[Accepted]
     ready --> gl("GreenLight<br/>merge_rules.yaml authors only") --> accepted
     accepted -- "@pytorchbot merge" --> merged[Merged]
@@ -157,7 +158,7 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 | Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet pre-conditions (detailed below) are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
 | Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review, by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
 | In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. |
-| Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`. |
+| Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`, unless it has `no automated review`. Opted-out PRs stay `ready for review` while the author addresses the feedback. |
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
 
 The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
@@ -168,7 +169,9 @@ The `in progress` and `ready for review` labels are managed by bots: authors sho
 - All CI has finished and Dr. CI classified every failure as unrelated to your PR. Fix the failures it attributes to your PR. Workflows waiting for a maintainer to approve their run do not block this.
 - Every comment from a maintainer has been addressed, either with a code change that fixes the specific problem or with a reply explaining why no change is needed. If you reply without pushing, comment `@pytorchbot review` to run the automated review again.
 
-With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`.
+If a maintainer requests changes and your PR returns to `in progress`, please address their feedback before the PR returns to maintainer review. A fresh automated review checks that the feedback has been addressed, and the PR must meet all of the readiness criteria above again. The earlier passing review cannot move the PR back to `ready for review`. If you address comments without pushing, comment `@pytorchbot review` to run the automated review again.
+
+With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`. A maintainer requesting changes does not move it back to `in progress`; you still need to address the maintainer's feedback until the PR is accepted.
 
 **Pre-conditions**:
 
