@@ -1410,16 +1410,6 @@ Example:
       .def_readonly("matrix", &::c10d::DMAConnectivity::matrix);
 
   module.def("_detect_dma_connectivity", ::c10d::detect_dma_connectivity);
-  module.def("_is_nccl_symmem_available", []() {
-  // On ROCm this reports the device API; host-only symmetric memory is
-  // available whenever NCCL_HAS_SYMMEM_SUPPORT is.
-#if defined(USE_C10D_NCCL) && defined(NCCL_HAS_SYMMEM_SUPPORT) && \
-    (!defined(USE_ROCM) || defined(NCCL_HAS_SYMMEM_DEVICE_SUPPORT))
-    return true;
-#else
-    return false;
-#endif
-  });
 
   using SymmetricMemory = ::c10d::symmetric_memory::SymmetricMemory;
   py::class_<SymmetricMemory, c10::intrusive_ptr<SymmetricMemory>>(
@@ -1461,6 +1451,7 @@ Example:
           &::c10d::symmetric_memory::get_mempool_allocator)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
+      .def_property_readonly("group_name", &SymmetricMemory::get_group_name)
       .def_property_readonly(
           "buffer_ptrs",
           [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
@@ -2792,8 +2783,7 @@ Arguments:
                 std::optional<std::chrono::milliseconds> timeout) {
                 ::c10d::AllToAllOptions opts;
                 opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->all_to_all_single(
-                    output, input, outputSplitSizes, inputSplitSizes, opts);
+                return self->all_to_all_single(output, input, outputSplitSizes, inputSplitSizes, opts);
               },
               py::arg("output"),
               py::arg("input"),
@@ -2854,9 +2844,9 @@ Arguments:
             "barrier",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                 std::optional<std::chrono::milliseconds> timeout) {
-                ::c10d::BarrierOptions opts;
-                opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
-                return self->barrier(opts);
+                    ::c10d::BarrierOptions opts;
+                    opts.timeout = timeout.value_or(::c10d::kUnsetTimeout);
+                    return self->barrier(opts);
                 },
                 py::arg("timeout") = std::nullopt,
                 py::call_guard<py::gil_scoped_release>(),
@@ -2930,9 +2920,10 @@ This API is experimental and subject to change.)")
                 if (!backend_obj.is_none()) {
                   backend =
                       backend_obj.cast<c10::intrusive_ptr<::c10d::Backend>>();
-                  auto* pyobj = torch::utils::PyObjectPreservation::get_or_init(
-                      **backend,
-                      [&]() { return Py_NewRef(backend_obj.ptr()); });
+                  auto* pyobj =
+                      torch::utils::PyObjectPreservation::get_or_init(
+                          **backend,
+                          [&]() { return Py_NewRef(backend_obj.ptr()); });
                   Py_DECREF(pyobj);
                 }
                 py::gil_scoped_release nogil{};
@@ -2977,9 +2968,8 @@ experimental and subject to breakage without warning.)")
                 // backend implementations and the latter cannot depend on
                 // python-related libs.
                 self->registerOnCompletionHook(
-                    [hookWrapper =
-                         ::c10d::PythonOnCompletionHook(std::move(hook))](
-                        const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
+                    [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
+                         hook))](const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
                       hookWrapper(workInfo);
                     });
               },
@@ -3120,13 +3110,12 @@ Arguments:
               &::c10d::ProcessGroup::unregisterPostHook,
               py::arg("hook_id"))
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
-                return torch::jit::toPyObject(c10::IValue(std::move(self)));
+            return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
           .def_static("unbox", [](py::object obj) {
-                auto typePtr = torch::getCustomClass(
-                    "__torch__.torch.classes.c10d.ProcessGroup");
-                auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-                return ivalue.toCustomClass<::c10d::ProcessGroup>();
+              auto typePtr = torch::getCustomClass("__torch__.torch.classes.c10d.ProcessGroup");
+              auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+              return ivalue.toCustomClass<::c10d::ProcessGroup>();
           });
 
   // Thread local process group manipulation
@@ -4160,6 +4149,11 @@ Attributes:
             available parameters in the config. See
             https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
             for details.
+    lazy_init (bool): nccl2 only. Create the communicator on the first
+            operation instead of when the group is bound to a device, so a
+            group that never communicates allocates no NCCL resources. Such a
+            group can't be split from until its first operation. Default is
+            False.
 
 Example::
     >>> import torch.distributed as dist
@@ -4182,6 +4176,7 @@ Example::
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
+      .def_readwrite("lazy_init", &::c10d::ProcessGroupNCCL::Options::lazy_init)
       .def_readwrite(
           "use_pg_for_symm_mem_rendezvous",
           &::c10d::ProcessGroupNCCL::Options::use_pg_for_symm_mem_rendezvous)

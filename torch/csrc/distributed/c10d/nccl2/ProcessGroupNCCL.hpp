@@ -243,7 +243,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 #endif
   }
   bool supportsSplitting() const override {
-    return true;
+    // A lazy_init communicator is created by every member on the first
+    // operation, so ranks agree once it has started.
+    return !options_c10d_->lazy_init ||
+        init_state_ != InitializationState::UNINITIALIZED;
   }
   bool isInitialized() override;
   bool supportsShrinking() const override {
@@ -612,7 +615,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       ncclComm_t comm,
       const at::Tensor& tensor);
   void timeoutWatchdog() noexcept;
-  void checkInitialized() const;
+  // Creates a lazy_init communicator and checks that it is ready.
+  void checkInitialized();
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
   void failPendingGeneration(int64_t reconfigure_uuid);

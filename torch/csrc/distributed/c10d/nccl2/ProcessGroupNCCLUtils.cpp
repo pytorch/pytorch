@@ -357,10 +357,16 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread exiting for rank: " << rank_;
 }
 
-void ProcessGroupNCCL::checkInitialized() const {
+void ProcessGroupNCCL::checkInitialized() {
   if (admissionProcessGroup == this) {
     admissionProcessGroup = nullptr;
     admissionEpoch = 0;
+  }
+  const auto boundDeviceId = getBoundDeviceId();
+  if (options_c10d_->lazy_init &&
+      init_state_ == InitializationState::UNINITIALIZED &&
+      boundDeviceId.has_value()) {
+    ensureInitialized(*boundDeviceId);
   }
   TORCH_CHECK(
       init_state_ == InitializationState::INITIALIZED,

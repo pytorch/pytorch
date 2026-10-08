@@ -462,6 +462,59 @@ class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
         return "nccl-legacy"
 
 
+class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
+    """With lazy_init, communicators are created on first use."""
+
+    @staticmethod
+    def _lazy_opts() -> "dist.ProcessGroupNCCL.Options":
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.lazy_init = True
+        return opts
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_new_group_defers_comm(self) -> None:
+        group = dist.new_group(pg_options=self._lazy_opts(), device_id=self.device)
+        backend = group._get_backend(self.device)
+        self.assertFalse(backend.supports_splitting)
+        self.assertEqual(backend.comm_ptr, 0)
+
+        t = torch.ones(1, device=self.device)
+        dist.all_reduce(t, group=group)
+        self.assertNotEqual(backend.comm_ptr, 0)
+        self.assertEqual(t, torch.full_like(t, self.world_size))
+
+        # Every member initialized it on the all_reduce, so it can be split.
+        self.assertTrue(backend.supports_splitting)
+        child = group.split_group([self.rank], group_name=f"lazy_child{self.rank}")
+        t = torch.ones(1, device=self.device)
+        dist.all_reduce(t, group=child)
+        self.assertEqual(t, torch.ones_like(t))
+        dist.destroy_process_group(group)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_new_group_with_nonmembers(self) -> None:
+        # Only members bootstrap the communicator; non-members don't split.
+        group = dist.new_group(
+            ranks=[0], pg_options=self._lazy_opts(), device_id=self.device
+        )
+        if self.rank == 0:
+            t = torch.ones(1, device=self.device)
+            dist.all_reduce(t, group=group)
+            self.assertEqual(t, torch.ones_like(t))
+            dist.destroy_process_group(group)
+        else:
+            self.assertEqual(group, dist.GroupMember.NON_GROUP_MEMBER)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCLLazyLazyInitTest(ProcessGroupNCCL2LazyInitTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
