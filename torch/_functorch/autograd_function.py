@@ -821,6 +821,7 @@ class AutogradFunctionApply(HigherOrderOperator):
         dirty_idx_set = set(dirty_idx)
         non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
         saved_for_backward_idx = fwd_kwargs["saved_for_backward_idx"]
+        output_grad_dtypes = fwd_kwargs.get("output_grad_dtypes")
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
@@ -862,6 +863,10 @@ class AutogradFunctionApply(HigherOrderOperator):
                     ctx.mark_non_differentiable(
                         *selected_outputs(non_differentiable_idx)
                     )
+
+                # If users call ctx.set_output_grad_dtype() in the original fwd function.
+                if output_grad_dtypes is not None:
+                    ctx.set_output_grad_dtype(*output_grad_dtypes)
 
             @staticmethod
             def backward(ctx: Any, *grad: Any) -> Any:
