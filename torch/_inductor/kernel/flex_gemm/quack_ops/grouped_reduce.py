@@ -197,6 +197,9 @@ def grouped_reduce_supports_config(config, axis: int, group: int) -> bool:
         if axis == 0 or getattr(config, "device_capacity", None) != 10:
             return False
         axis = 1 - axis
+    # SM120 warp-MMA epilogue warps interleave in 16-row blocks.
+    if axis == 0 and group > 16 and getattr(config, "device_capacity", None) == 12:
+        return False
     tile = config.tile_m if axis == 0 else config.tile_n
     if config.tile_m < 128 or config.tile_n % GROUPED_FRAGMENT_WIDTH or tile % group:
         return False
@@ -471,6 +474,14 @@ def _fragment_geometry(gemm, epi_tile, tiled_copy, tidx, reference_src, axis, gr
                     f"grouped M reduce across warps needs the {warps_m} M warps to tile the "
                     f"{tile_M} CTA rows in {rows_per_warp}-row blocks"
                 )
+        # A thread may own non-adjacent rows (SM120 warp MMA: rows {0, 8, 32, 40}
+        # of a 64-row subtile), so check fold x butterfly x stitch covers a group.
+        reduce_lanes = min(group, lanes_m)
+        if any(len(c) * reduce_lanes * group_warps != group for c in row_chunks):
+            raise NotImplementedError(
+                f"grouped M reduce: group {group} is not covered by one row run per "
+                f"thread across {reduce_lanes} lanes and {group_warps} warps"
+            )
     return _GroupGeometry(
         axis=axis,
         cols=cols,
@@ -1278,6 +1289,33 @@ class GroupedLocalReduceFeed(GroupedReduceBase):
         super().__init__(
             name, axis=axis, group=group, combine=combine, finalize=finalize
         )
+
+    def supports_config(self, config) -> bool:
+        """SM120 warp MMA has 8 M lanes, the widest group one butterfly covers."""
+        if self.group > 8 and getattr(config, "device_capacity", None) == 12:
+            return False
+        return super().supports_config(config)
+
+    def config_support_error(self, configs) -> str:
+        if self.group > 8 and any(
+            getattr(config, "device_capacity", None) == 12 for config in configs
+        ):
+            return f"requested group={self.group}, max supported feed-main group=8 for axis=0"
+        return super().config_support_error(configs)
+
+    @cute.jit
+    def begin(self, gemm, param, smem_tensor, ctx):
+        """Require one row per thread per group inside one warp's M lanes."""
+        state = super().begin(gemm, param, smem_tensor, ctx)
+        geom = state.geom
+        if const_expr(
+            self.group > geom.lanes_m or any(len(c) > 1 for c in geom.row_chunks)
+        ):
+            raise NotImplementedError(
+                f"grouped feed-main: group {self.group} needs one row per thread "
+                f"across at most {geom.lanes_m} M lanes"
+            )
+        return state
 
     @cute.jit
     def reduce_broadcast(self, value, geom):
