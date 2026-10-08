@@ -86,6 +86,13 @@ class PyBackend : public Backend {
     WORK_OVERRIDE(Backend, gather, outputTensors, inputTensors, opts);
   }
 
+  c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) override {
+    WORK_OVERRIDE(Backend, gather_single, outputBuffer, inputBuffer, opts);
+  }
+
   c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
@@ -338,7 +345,18 @@ class PyBackend : public Backend {
 
   at::Tensor allocateTensor(long size, at::TensorOptions options = {})
       override {
-    PYBIND11_OVERRIDE(at::Tensor, Backend, allocateTensor, size, options);
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function override = pybind11::get_override(
+        static_cast<const Backend*>(this), "allocate_tensor");
+    if (override) {
+      return override(
+                 size,
+                 pybind11::arg("dtype") =
+                     c10::typeMetaToScalarType(options.dtype()),
+                 pybind11::arg("device") = options.device())
+          .cast<at::Tensor>();
+    }
+    return Backend::allocateTensor(size, options);
   }
 
   std::unordered_map<std::string, uint64_t> getMemoryStats() override {
@@ -383,6 +401,11 @@ class PyBackend : public Backend {
     return getPropertyOverride("supports_window", Backend::supportsWindow());
   }
 
+  bool supportsAbortHooks() const override {
+    return getPropertyOverride(
+        "supports_abort_hooks", Backend::supportsAbortHooks());
+  }
+
   bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override {
     pybind11::gil_scoped_acquire gil;
     pybind11::function override = pybind11::get_override(
@@ -404,6 +427,17 @@ class PyBackend : public Backend {
       return;
     }
     return Backend::setTimeout(timeout);
+  }
+
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function override = pybind11::get_override(
+        static_cast<const Backend*>(this), "_add_ephemeral_timeout");
+    if (override) {
+      override(timeout);
+      return;
+    }
+    return Backend::addEphemeralTimeout(timeout);
   }
 
   void abort() override {
@@ -490,11 +524,13 @@ class PyBackend : public Backend {
   }
 
   void registerAbortHook(int64_t hook_id, AbortHook hook) override {
-    PYBIND11_OVERRIDE(void, Backend, registerAbortHook, hook_id, hook);
+    PYBIND11_OVERRIDE_NAME(
+        void, Backend, "register_abort_hook", registerAbortHook, hook_id, hook);
   }
 
   void unregisterAbortHook(int64_t hook_id) override {
-    PYBIND11_OVERRIDE(void, Backend, unregisterAbortHook, hook_id);
+    PYBIND11_OVERRIDE_NAME(
+        void, Backend, "unregister_abort_hook", unregisterAbortHook, hook_id);
   }
 
  private:
