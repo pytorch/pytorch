@@ -1019,6 +1019,26 @@
       ]
     }
   ],
+  "GB4858": [
+    {
+      "Gb_type": "frozendict hashing",
+      "Context": "hash(frozendict)",
+      "Explanation": "Dynamo does not yet support frozendict hashing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9945": [
+    {
+      "Gb_type": "frozendict comparison",
+      "Context": "op",
+      "Explanation": "Dynamo does not yet support frozendict comparisons.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0064": [
     {
       "Gb_type": "Fake tensor propagation exception",
@@ -1189,6 +1209,16 @@
       "Context": "store_targets={store_targets}, iterator_vars={iterator_vars}",
       "Explanation": "Expected exactly one comprehension result assignment.",
       "Hints": []
+    }
+  ],
+  "GB2102": [
+    {
+      "Gb_type": "frozendict fromkeys",
+      "Context": "name",
+      "Explanation": "Dynamo does not yet support frozendict.fromkeys.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB6012": [
@@ -1623,6 +1653,16 @@
       "Context": "var_getattr {self} grad_fn",
       "Explanation": "Dynamo does not support tracing tensors with a grad_fn directly.",
       "Hints": []
+    }
+  ],
+  "GB9539": [
+    {
+      "Gb_type": "frozendict subclass allocation",
+      "Context": "frozendict.__new__",
+      "Explanation": "Dynamo does not yet support allocating frozendict subclasses.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0105": [
@@ -2361,6 +2401,16 @@
       "Hints": [
         "Avoid calling `{self.debug_repr()}` in your code.",
         "Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB9100": [
+    {
+      "Gb_type": "frozendict operators",
+      "Context": "copy/fromkeys/union",
+      "Explanation": "Dynamo does not yet support these frozendict operators.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -6803,6 +6853,26 @@
       "Hints": [
         "Clone one of the aliased inputs before the call, or stop mutating it.",
         "Please open an issue."
+      ]
+    }
+  ],
+  "GB7038": [
+    {
+      "Gb_type": "Preexisting frozendict key with user-defined hash",
+      "Context": "type(key).__name__",
+      "Explanation": "Dynamo cannot recover the stored key hash without calling a potentially changed or side-effecting hash function.",
+      "Hints": [
+        "Construct the frozendict inside the compiled function."
+      ]
+    }
+  ],
+  "GB4292": [
+    {
+      "Gb_type": "Reconstructing frozendict with user-defined hashes",
+      "Context": "self.python_type_name()",
+      "Explanation": "Reconstruction cannot preserve stored key hashes or a cached container hash involving user-defined hash functions.",
+      "Hints": [
+        "Keep this frozendict inside the compiled region."
       ]
     }
   ]

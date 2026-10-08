@@ -146,6 +146,7 @@ from .source import (
     DynamicScalarSource,
     FlattenScriptObjectSource,
     FloatTensorSource,
+    FrozenDictItemsSource,
     FSDPNNModuleSource,
     GenericAttrSource,
     GetItemSource,
@@ -191,6 +192,7 @@ from .utils import (
     constants_identical,
     dataclass_fields,
     dict_keys,
+    frozendict_items,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -911,6 +913,7 @@ def _get_closure_vars() -> dict[str, object]:
             "utils_device": torch.utils._device,
             "device": torch.device,
             "___from_numpy": from_numpy,
+            "___frozendict_items": frozendict_items,
             "___unwrap_async_collective_tensor": unwrap_async_collective_tensor,
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
@@ -2102,6 +2105,15 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
+        elif istype(source, FrozenDictItemsSource):
+            if base_guard_manager is None:
+                raise AssertionError("base_guard_manager must not be None")
+            out = base_guard_manager.lambda_manager(
+                python_lambda=frozendict_items,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, NumpyTensorSource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
