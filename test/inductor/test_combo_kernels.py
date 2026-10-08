@@ -1098,7 +1098,11 @@ class ComboKernelTests(TestCase):
         out_eager = fn(*inps)
         fn_c = torch.compile(fn)
         out_compiled, code = run_and_get_code(fn_c, *inps)
-        self.assertEqual(out_eager, out_compiled)
+        # Each output sums 2048 float32 values, so the tiled (r0_, r1_)
+        # reduction order differs from eager by float32 rounding noise
+        # (~1e-5 absolute, and unbounded relatively where the sum cancels).
+        # Same tolerances as the sibling _per / _red reduction tests above.
+        self.assertEqual(out_eager, out_compiled, atol=1e-4, rtol=1e-4)
         # 2D reduction kernels (r0_, r1_) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
