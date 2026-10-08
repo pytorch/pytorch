@@ -2567,7 +2567,7 @@ class TestReductionsDevice(TestCase):
         subtest((lambda x: x.min(), 0), name="min"),
         subtest((lambda x: x.argmin(), 0), name="argmin"),
         # sum promotes int8 to int64, materializing a 32GB cast of the input on CUDA
-        subtest((lambda x: x.sum(), 1), name="sum", decorators=[largeTensorTest("36GB", device="cuda")]),
+        subtest((lambda x: x.sum(), 1), name="sum", decorators=[largeTensorTest("36GB", device="cuda"), largeTensorTest("36GB", device="xpu")]),
         subtest((lambda x: x.any(), True), name="any"),
         subtest((lambda x: x.all(), False), name="all"),
         subtest((lambda x: x.view(-1, 4096).max(0).indices[4095], 1 << 20), name="max_dim"),
