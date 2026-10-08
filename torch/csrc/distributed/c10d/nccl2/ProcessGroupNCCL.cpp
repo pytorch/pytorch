@@ -715,7 +715,10 @@ void ProcessGroupNCCL::revokeNcclComm() {
           options_c10d_->timeout,
           "NCCL Revoke failed");
     } catch (const std::exception& e) {
-      LOG(ERROR) << e.what();
+      TC_LOG(ERROR, this) << "commRevoke failed or did not complete within "
+                          << options_c10d_->timeout.count() << "ms on rank "
+                          << rank_ << "; continuing teardown (best-effort): "
+                          << e.what();
     }
   }
 }
