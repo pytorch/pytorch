@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import \
      MI200_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
+    (instantiate_device_type_tests, dtypes, has_cusolver, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
      skipCUDAIfNoCusolver, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, onlyAccelerator, onlyOn, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
@@ -816,7 +816,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
             if driver == 'gels' and rcond is None:
                 check_solution_correctness(a, b, sol)
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_linalg_lstsq_gelsy_jpvt_is_reset(self, device, dtype):
@@ -2196,7 +2195,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
                     self.assertEqual(result.dtype, torch.float32)
                     self.assertEqual(result, expected)
 
-    @onlyCPU
     def test_powsum_dtype_kwarg_1d_reduction(self, device):
         # Test dtype kwarg on CPU with bfloat16 input and float32 computation
         # Tests both the 1D reduction path (explicit conversion) and larger reductions (kernel handles it)
@@ -5200,7 +5198,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
             self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
 
-    @onlyCPU
     @dtypes(torch.float)
     @parametrize(
         "shape, stride",
@@ -5650,7 +5647,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
         bnp_out = torch.full((b, n, p), float('nan'), device=device)
         self.assertEqual(torch.bmm(bnm, bmp), torch.bmm(bnm, bmp, out=bnp_out))
 
-    @onlyCPU  # not supported by CUBLAS
     def test_blas_mv_large_input(self, device):
         # This would previously fail if the allocated output had NaNs, see:
         # https://github.com/pytorch/pytorch/issues/31663 and [NOTE: cpu_zero]
@@ -5663,7 +5659,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
 
         self.assertEqual(torch.mv(nm, _m), torch.mv(nm, _m, out=_m_out))
 
-    @onlyCPU
     def test_renorm_ps(self, device):
         # full reduction
         x = torch.randn(5, 5)
@@ -6127,7 +6122,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
                              atol=prec, rtol=0)
 
     @skipCPUIfNoLapack
-    @onlyCPU
     @dtypes(torch.double)
     def test_lobpcg_torchscript(self, device, dtype):
         from torch.testing._internal.common_utils import random_sparse_pd_matrix
@@ -6790,7 +6784,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
-    @onlyCPU
     @parametrize("m", [32, 35, 36, 40, 64])
     @parametrize("k", [32, 35, 36, 40, 64])
     # NOTE: This is intended to cover fp16_gemv_trans in
@@ -7291,7 +7284,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
             coeffs = torch.rand([2, 2], device=device, dtype=dtype)
             res = torch._compute_linear_combination(x, coeffs)
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.complex64)
     def test_linalg_matrix_exp_no_warnings(self, device, dtype):
@@ -8674,7 +8666,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
         for shape, batch, nrhs, hermitian in itertools.product(shapes, batches, nrhss, hermitians):
             run_test(shape, batch, nrhs, hermitian)
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_ldl_solve_cpu_errors(self, device, dtype):
@@ -11375,7 +11366,6 @@ class TestLinalgCudaOnly(TestCase, _TestLinalgMixin):
 class TestLinalgCpu(TestCase):
     """CPU-specific linear algebra tests."""
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_eigh_lwork_lapack(self, device, dtype):
@@ -11385,7 +11375,6 @@ class TestLinalgCpu(TestCase):
         self.assertEqual(y.eigenvalues.shape, (3000,))
 
 
-    @onlyCPU
     def test_norm_complexhalf(self, device):
         def gen_error_message(input_size, ord, keepdim, dim=None):
             return f"complex norm failed for input size {input_size}, ord={ord}, keepdim={keepdim}, dim={dim}"
@@ -11414,7 +11403,6 @@ class TestLinalgCpu(TestCase):
     # Test that linal.vector_norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
 
-    @onlyCPU
     @dtypes(*floating_and_complex_types())
     def test_linalg_lu_cpu_errors(self, device, dtype):
         # Square tests
@@ -11473,7 +11461,6 @@ class TestLinalgCpu(TestCase):
 
     @skipCPUIfNoLapack
     @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
-    @onlyCPU
     @dtypes(torch.double)
     def test_lobpcg_scipy(self, device, dtype):
         """Compare torch and scipy.sparse.linalg implementations of lobpcg
@@ -11638,7 +11625,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 ''')
 
 
-    @onlyCPU
     @parametrize("m", [0, 8, 17])
     @parametrize("k", [0, 16, 32])
     @parametrize("n", [16, 32])
@@ -11684,7 +11670,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
 
-    @onlyCPU
     @parametrize("k", [16, 32])
     @parametrize("n", [16, 32])
     @parametrize("x_dtype", [torch.int8, torch.uint8])
@@ -11709,7 +11694,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # with a size-1 contraction dim it is the other stride that is arbitrary
         check(genf(n, 1, x_dtype).as_strided((n, 1), (1, 0)), genf(1, n, torch.int8))
 
-    @onlyCPU
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_mm_cpu_unaligned(self, device, dtype):
         m, n, k, n_groups = 16, 32, 64, 4
@@ -11737,7 +11721,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
 
     @slowTest
-    @onlyCPU
     @largeTensorTest('12GB', device='cpu')
     def test__int8_mm_large_shape(self, device):
         torch.manual_seed(1)
@@ -11763,7 +11746,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         weight_int8pack_mm(a, b_int8pack, b_scales)
 
 
-    @onlyCPU
     @parametrize("m", [32, 35, 36, 40, 64])
     @parametrize("k", [32, 35, 36, 40, 64])
     # NOTE: This is intended to cover fp16_gemv_trans in
