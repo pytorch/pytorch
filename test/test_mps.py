@@ -6,6 +6,7 @@ import sys
 import math
 import random
 import unittest
+from unittest import mock
 import warnings
 import shutil
 import subprocess
@@ -11210,6 +11211,105 @@ class TestBinaryDispatchRouting(TestCaseMPS):
             "probe_dense_bool_float")
 
 
+class TestStridedBufferAlignment(TestCaseMPS):
+    @dtypes(torch.float32, torch.float16, torch.bfloat16, torch.int8, torch.uint8, torch.bool)
+    @parametrize("inner", [1, 17])
+    @parametrize("step", [1, 2])
+    @parametrize("offset", [0, 1, 2, 3, 4])
+    def test_same_dtype_copy_offset(self, device, dtype, inner, step, offset):
+        row_stride = step * inner + 2
+        cpu_storage = torch.arange(offset + 3 * row_stride + 1).remainder(11).to(dtype)
+        expected = cpu_storage.as_strided((3, inner), (row_stride, step), offset)
+        view = cpu_storage.to(device).as_strided((3, inner), (row_stride, step), offset)
+        self.assertFalse(view.is_contiguous())
+        self.assertEqual(view.storage_offset(), offset)
+        self.assertEqual(view.contiguous().cpu(), expected, atol=0, rtol=0)
+        self.assertEqual(view.clone().cpu(), expected, atol=0, rtol=0)
+        storage = torch.full((3, inner + 2), 99, device=device, dtype=dtype)
+        storage[:, 1:-1].copy_(view)
+        expected_storage = torch.full((3, inner + 2), 99, dtype=dtype)
+        expected_storage[:, 1:-1] = expected
+        self.assertEqual(storage.cpu(), expected_storage, atol=0, rtol=0)
+        if dtype.is_floating_point:
+            self.assertEqual(torch._neg_view(view).clone().cpu(), -expected, atol=0, rtol=0)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.int8, torch.uint8)
+    @parametrize("op", [torch.minimum, torch.clamp, torch.where])
+    @parametrize("inner", [7, 17])
+    @parametrize("offset", [0, 1, 2, 3, 4])
+    def test_strided_buffer_alignment(self, device, dtype, op, inner, offset):
+        width = inner + offset + 1
+        values = torch.arange(3 * width).reshape(3, width).remainder(17).to(dtype)
+        if op is torch.minimum:
+            tensors = (values, torch.full_like(values, 9))
+        elif op is torch.clamp:
+            tensors = (values, torch.full_like(values, 3), torch.full_like(values, 12))
+        else:
+            condition = torch.arange(3 * width).reshape(3, width).remainder(2) == 0
+            tensors = (condition, values, values + 2)
+        for operand in range(len(tensors)):
+            with self.subTest(operand=operand):
+                cpu_args, args = [], []
+                for index, tensor in enumerate(tensors):
+                    if index == operand:
+                        cpu_args.append(tensor[:, offset:offset + inner])
+                        args.append(tensor.to(device)[:, offset:offset + inner])
+                    else:
+                        cpu_args.append(tensor[:, :inner].contiguous())
+                        args.append(cpu_args[-1].to(device))
+                expected = op(*cpu_args)
+                self.assertEqual(op(*args).cpu(), expected)
+                storage = torch.full((3, width), 99, dtype=dtype, device=device)
+                op(*args, out=storage[:, offset:offset + inner])
+                expected_storage = torch.full((3, width), 99, dtype=dtype)
+                expected_storage[:, offset:offset + inner] = expected
+                self.assertEqual(storage.cpu(), expected_storage)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("op", [torch.minimum, torch.clamp])
+    @parametrize("inner", [7, 17])
+    @parametrize("offset", [0, 1, 2, 3, 4])
+    def test_strided_buffer_alignment_cast(self, device, dtype, op, inner, offset):
+        width = inner + offset + 1
+        values = torch.arange(3 * width).reshape(3, width).remainder(17).to(dtype)
+        bound = torch.full((3, width), 9.0, dtype=torch.float32)
+        tensors = (values, bound) if op is torch.minimum else (values, bound, torch.full_like(values, 12))
+        for operand in range(len(tensors)):
+            with self.subTest(operand=operand):
+                cpu_args, args = [], []
+                for index, tensor in enumerate(tensors):
+                    if index == operand:
+                        cpu_args.append(tensor[:, offset:offset + inner])
+                        args.append(tensor.to(device)[:, offset:offset + inner])
+                    else:
+                        cpu_args.append(tensor[:, :inner].contiguous())
+                        args.append(cpu_args[-1].to(device))
+                storage = torch.full((3, width), 99, dtype=dtype, device=device)
+                op(*args, out=storage[:, offset:offset + inner])
+                expected_storage = torch.full((3, width), 99, dtype=dtype)
+                expected_storage[:, offset:offset + inner] = op(*cpu_args).to(dtype)
+                self.assertEqual(storage.cpu(), expected_storage)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.int8)
+    @parametrize("inner", [7, 17])
+    @parametrize("mixed", [False, True])
+    @parametrize("scalar_first", [False, True])
+    def test_cpu_scalar_binding(self, device, dtype, inner, mixed, scalar_first):
+        full = torch.arange(3 * (inner + 2)).reshape(3, inner + 2).to(dtype)
+        cpu = full[:, 1:-1]
+        tensor = full.to(device)[:, 1:-1]
+        scalar = torch.tensor(2, dtype=torch.float32 if mixed else dtype, device="cpu")
+        cpu_args = (scalar, cpu) if scalar_first else (cpu, scalar)
+        args = (scalar, tensor) if scalar_first else (tensor, scalar)
+        expected = torch.mul(*cpu_args)
+        self.assertEqual(torch.mul(*args).cpu(), expected)
+        storage = torch.full((3, inner + 2), 99, dtype=expected.dtype, device=device)
+        torch.mul(*args, out=storage[:, 1:-1])
+        expected_storage = torch.full((3, inner + 2), 99, dtype=expected.dtype)
+        expected_storage[:, 1:-1] = expected
+        self.assertEqual(storage.cpu(), expected_storage)
+
+
 # Sliced/narrowed views route through the inner_contiguous kernels once
 # shape()[0] >= 16. Locks in the two paths op tests miss: castout (out dtype !=
 # compute dtype) and the byte-erased same-dtype copy (tail + alignment ladder).
@@ -11272,6 +11372,92 @@ class TestInnerContiguous(TestCaseMPS):
                 full = torch.randint(-100, 100, (offset + n,), dtype=dtype)
             dev = full.to(device)
             self.assertEqual(dev[offset:].clone().cpu(), full[offset:])
+
+
+
+class TestBinaryInnerStrided(TestCaseMPS):
+    FLAVORS = ("default", "strided", "inner_contiguous", "inner_strided")
+
+    @contextlib.contextmanager
+    def _force_flavor(self, flavor):
+        # "default" leaves the override unset, so production dispatch picks the kernel.
+        with mock.patch.dict(os.environ):
+            os.environ.pop("PYTORCH_BINARY_FORCE_FLAVOR", None)
+            if flavor != "default":
+                os.environ["PYTORCH_BINARY_FORCE_FLAVOR"] = flavor
+            yield
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16, torch.int32)
+    @parametrize("inner", [1, 3, 4, 7, 8, 15, 16, 17])
+    @parametrize("layout", ["unit_inner", "broadcast", "gather"])
+    @parametrize("op", [torch.add, torch.sub, torch.mul, torch.div])
+    def test_flavors(self, device, dtype, inner, layout, op):
+        x = torch.arange(3 * (inner + 2), dtype=torch.float32).reshape(3, inner + 2).remainder(9).add(1).to(dtype)
+        x_dev = x.to(device)[:, 1:-1]
+        x = x[:, 1:-1]
+        if layout == "broadcast":
+            y = torch.tensor([[1], [2], [4]], dtype=dtype)
+        elif layout == "gather":
+            y = torch.arange(3 * inner, dtype=torch.float32).reshape(inner, 3).remainder(4).add(1).to(dtype).t()
+        else:
+            y = torch.full((3, inner + 2), 2, dtype=dtype)[:, 1:-1]
+        y_dev = y.to(device)
+        expected = op(x.float(), y.float()).to(op(x, y).dtype)
+        for flavor in self.FLAVORS:
+            with self.subTest(flavor=flavor), self._force_flavor(flavor):
+                self.assertEqual(op(x_dev, y_dev).cpu(), expected)
+                storage = torch.full((3, inner + 2), 99, dtype=expected.dtype, device=device)
+                op(x_dev, y_dev, out=storage[:, 1:-1])
+                expected_storage = torch.full((3, inner + 2), 99, dtype=expected.dtype)
+                expected_storage[:, 1:-1] = expected
+                self.assertEqual(storage.cpu(), expected_storage)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16, torch.int32)
+    @parametrize("rows", [8191, 8192, 8193])
+    @parametrize("mixed", [False, True])
+    @parametrize("op", [torch.add, torch.sub, torch.mul, torch.div])
+    def test_default_size_boundary(self, device, dtype, rows, mixed, op):
+        # Exercise production dispatch below, at and above the 64K-element gate.
+        # Offset inputs and an offset output also cover the shared buffer binding.
+        inner = 8
+        x = torch.arange(rows * (inner + 2), dtype=torch.float32).reshape(rows, inner + 2).remainder(9).add(1).to(dtype)
+        x_dev = x.to(device)[:, 1:-1]
+        x = x[:, 1:-1]
+        y = torch.tensor([1, 2, 4], dtype=torch.float32 if mixed else dtype).repeat((rows + 2) // 3)[:rows, None]
+        y_dev = y.to(device)
+        expected = op(x.float(), y.float()).to(op(x, y).dtype)
+        with self._force_flavor("default"):
+            self.assertEqual(op(x_dev, y_dev).cpu(), expected)
+            storage = torch.full((rows, inner + 2), 99, dtype=expected.dtype, device=device)
+            op(x_dev, y_dev, out=storage[:, 1:-1])
+            expected_storage = torch.full((rows, inner + 2), 99, dtype=expected.dtype)
+            expected_storage[:, 1:-1] = expected
+            self.assertEqual(storage.cpu(), expected_storage)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("reverse", [False, True])
+    @parametrize("inner", [3, 8, 17])
+    def test_mixed_inputs(self, device, dtype, reverse, inner):
+        x = torch.linspace(-1, 1, 3 * inner).reshape(3, inner).to(dtype)
+        y = torch.tensor([[0.12345], [0.23456], [0.34567]])
+        a, b = (y, x) if reverse else (x, y)
+        for flavor in self.FLAVORS:
+            with self.subTest(flavor=flavor), self._force_flavor(flavor):
+                self.assertEqual(torch.sub(a.to(device), b.to(device)).cpu(), a.float() - b.float())
+
+    @parametrize("flavor", ["default", "strided", "inner_contiguous", "inner_strided"])
+    def test_dispatch_fallbacks(self, device, flavor):
+        x = torch.arange(1, 52, dtype=torch.float32).reshape(3, 17)
+        y = torch.tensor([[1.0], [2.0], [3.0]])
+        with self._force_flavor(flavor):
+            # pow has no inner_strided registration; alpha and fixed-output
+            # comparisons must keep their existing buffer/dtype contracts.
+            for op in (torch.pow, lambda a, b: torch.add(a, b, alpha=2)):
+                self.assertEqual(op(x.to(device), y.to(device)).cpu(), op(x, y))
+            out = torch.empty_like(x, device=device)
+            torch.gt(x.to(device), y.to(device), out=out)
+            self.assertEqual(out.cpu(), torch.gt(x, y).float())
+            self.assertEqual(torch.add(x.to(device), 2).cpu(), x + 2)
 
 
 @serialTest()
@@ -18184,11 +18370,13 @@ class TestMetalLibrary(TestCaseMPS):
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
 # to achieve this.
+instantiate_device_type_tests(TestBinaryInnerStrided, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestInnerContiguous, globals(), allow_mps=True, only_for="mps")
+instantiate_device_type_tests(TestStridedBufferAlignment, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestNondeterministic)
 instantiate_parametrized_tests(TestAutocastMPS)

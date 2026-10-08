@@ -1001,6 +1001,17 @@ static unsigned bindInnerContiguousOuter(id<MTLComputeCommandEncoder> encoder,
   return idx;
 }
 
+// CPU scalars use setBytes at offset zero. Only GPU buffer bindings can
+// violate Metal's four-byte alignment for constant-address arguments.
+static bool hasUnalignedBufferInput(TensorIteratorBase& iter) {
+  for (const auto i : c10::irange(iter.noutputs(), iter.ntensors())) {
+    if (iter.tensor_base(i).device().type() != kCPU && iter_tensor_offset(iter, i) % 4 != 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<c10::Scalar> alpha,
@@ -1105,6 +1116,14 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     }
     dense_ilp = false;
     kernel_name = fmt::format("{}_{}_{}", name, dense_suffix, scalarToMetalTypeString(inputTensor));
+  }
+  if (!cast_needed && !is_contiguous && !alpha.has_value() && !byte_copy &&
+      (name == "copy_identity" || name == "copy_conj" || name == "copy_neg") && hasUnalignedBufferInput(iter)) {
+    kernel_name = fmt::format("{}_{}_offset_{}_{}",
+                              name,
+                              dense_suffix,
+                              scalarToMetalTypeString(outputTensor),
+                              scalarToMetalTypeString(inputTensor));
   }
   // The byte-erased copy kernel is type-agnostic (one kernel, not per-dtype).
   if (byte_copy) {
@@ -1375,14 +1394,6 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   const uint32_t threshold = ilp_threshold.value_or(
       c10::isFloatingType(out.scalar_type()) ? (1u << 18) : std::numeric_limits<uint32_t>::max());
   bool dense_ilp = ilp_applicable && static_cast<uint32_t>(iter.numel()) >= threshold;
-  if (ilp_applicable) {
-    if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
-      if (force.value() == "ilp")
-        dense_ilp = true;
-      else if (force.value() == "scalar")
-        dense_ilp = false;
-    }
-  }
 
   // Inner-contiguous: a strided iterator whose innermost (coalesced) dim is unit
   // stride for every operand, with no cast/scalar/broadcast/alpha. Prefer the
@@ -1390,12 +1401,33 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   const bool ic_applicable = !use_scalar_kernel && !use_broadcast_kernel && !cast_needed && !alpha.has_value() &&
       !output_cast_needed && !iter.is_contiguous() && isInnerContiguous(iter);
   bool inner_contiguous = ic_applicable && iter.shape()[0] >= INNER_CONTIGUOUS_MIN_EXTENT;
-  if (ic_applicable) {
+
+  // Inner-strided shares generic stride/type bindings, but decodes the outer
+  // coordinate once per ILP tile. Scalar, broadcast, alpha and castout paths
+  // retain their existing dispatch and buffer contracts.
+  const bool is_applicable = !use_scalar_kernel && !use_broadcast_kernel && !alpha.has_value() && !output_cast_needed &&
+      !iter.is_contiguous() && iter.strides(0)[0] != 0;
+  // Keep the generic path for small tensors, where the extra dispatch and
+  // per-row tile setup cost more than the saved outer-coordinate work.
+  const bool inner_strided_size = iter.numel() >= (1 << 16);
+  bool inner_local = is_applicable && inner_strided_size;
+  if (inner_local) {
+    for (const auto i : c10::irange(iter.ntensors())) {
+      const auto stride = iter.strides(i)[0];
+      inner_local &= stride == 0 || stride == static_cast<int64_t>(iter.element_size(i));
+    }
+  }
+  bool inner_strided =
+      is_applicable && inner_strided_size && !inner_contiguous && (cast_needed || inner_local) && iter.shape()[0] >= 8;
+  if (ilp_applicable || ic_applicable || is_applicable) {
     if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
-      if (force.value() == "strided")
-        inner_contiguous = false;
-      else if (force.value() == "inner_contiguous")
-        inner_contiguous = true;
+      const auto& flavor = *force;
+      if (flavor == "scalar" || flavor == "strided" || flavor == "ilp" || flavor == "inner_contiguous" ||
+          flavor == "inner_strided") {
+        dense_ilp = flavor == "ilp" && ilp_applicable;
+        inner_contiguous = flavor == "inner_contiguous" && ic_applicable;
+        inner_strided = flavor == "inner_strided" && is_applicable;
+      }
     }
   }
 
@@ -1410,6 +1442,13 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       fmt::format("{}_{}",
                   scalarToMetalTypeString(out),
                   scalarToMetalTypeString(out.scalar_type() == kBool ? iter.common_dtype() : out.scalar_type()));
+  if (inner_strided) {
+    const auto candidate = cast_needed
+        ? fmt::format("{}_inner_strided_cast_{}", name, cast_suffix_type)
+        : fmt::format("{}_inner_strided_{}_{}", name, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+    // A forced but unregistered flavor deterministically uses generic strided.
+    inner_strided = hasFunction(candidate);
+  }
   std::string kernel_name;
   if (output_cast_needed) {
     // Force the strided castout path regardless of contiguity / scalar /
@@ -1452,8 +1491,11 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     // TODO: Implicitly pass both input and output types to non-cast kernels
     // The ILP suffix carries the unroll width (e.g. dense_ilp4) so future
     // variants (ilp8, ...) can coexist; see C10_METAL_ILP_PER_THREAD_STR.
+    const bool offset_inputs = !iter.is_contiguous() && !alpha.has_value() && hasUnalignedBufferInput(iter);
     const auto suffix = iter.is_contiguous() ? (dense_ilp ? "dense_ilp" C10_METAL_ILP_PER_THREAD_STR : "dense")
-                                             : (inner_contiguous ? "inner_contiguous" : "strided");
+        : inner_contiguous                   ? (offset_inputs ? "inner_contiguous_offset" : "inner_contiguous")
+        : inner_strided                      ? "inner_strided"
+                                             : (offset_inputs ? "strided_offset" : "strided");
     kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, cast_suffix_type, alpha_suffix)
                               : fmt::format("{}_{}_{}_{}{}",
                                             name,
@@ -1552,7 +1594,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
           }
         }
       }
-      if (inner_contiguous) {
+      if (inner_contiguous || inner_strided) {
         const auto inner = static_cast<uint32_t>(iter.shape()[0]);
         const auto inner_tiles =
             (static_cast<NSUInteger>(inner) + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD;
@@ -1617,7 +1659,8 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   // promote_inputs_to_common_dtype/cast_common_dtype_to_outputs pair means on
   // a backend that does not materialize the temporaries.
   const auto compute_dtype = iter.maybe_common_dtype().value_or(out.scalar_type());
-  const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  const bool offset_inputs = !iter.is_contiguous() && !alpha.has_value() && hasUnalignedBufferInput(iter);
+  const auto suffix = iter.is_contiguous() ? "dense" : (offset_inputs ? "strided_offset" : "strided");
   const auto alpha_type = scalar_arg_type.value_or(compute_dtype);
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
