@@ -11476,6 +11476,19 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(y1, y1_expect.tolist())
         self.assertEqual(y2, y1_expect.imag.tolist())
 
+    @unittest.skipIf(torch.backends.cuda.is_built(), "Skipped for cuda-enabled build")
+    def test_no_cuda_monkeypatch(self):
+        # Note that this is not in test_cuda.py as this whole file is skipped when cuda
+        # is not available.
+        with self.assertRaisesRegex(RuntimeError, "torch.cuda.Stream requires CUDA support"):
+            torch.cuda.Stream()
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):
+            torch.cuda.Event()
+
+        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class CUDAGraph"):
+            torch.cuda.graphs.CUDAGraph()
+
     def test_tensor_where_scalar(self):
 
         a = torch.arange(4.0)
@@ -11745,19 +11758,6 @@ class TestTorchCPU(TestCase):
         src_bf16 = src.bfloat16()
         self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
         self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
-
-    @unittest.skipIf(torch.backends.cuda.is_built(), "Skipped for cuda-enabled build")
-    def test_no_cuda_monkeypatch(self):
-        # Note that this is not in test_cuda.py as this whole file is skipped when cuda
-        # is not available.
-        with self.assertRaisesRegex(RuntimeError, "torch.cuda.Stream requires CUDA support"):
-            torch.cuda.Stream()
-
-        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):
-            torch.cuda.Event()
-
-        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class CUDAGraph"):
-            torch.cuda.graphs.CUDAGraph()
 
     @unittest.skipIf(torch.cuda.is_available(), "Test specific for CPU")
     def test_bf16_supported_on_cpu(self):
