@@ -2725,6 +2725,52 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             explicit_overload, dynamic, changed_output
         )
 
+    @parametrize("explicit_overload", [False, True])
+    def test_untagged_out_shape_change(self, explicit_overload):
+        namespace = "test_dynamo_untagged_out"
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            lib.define("fill_out(Tensor x, *, Tensor(a!) out) -> ()")
+
+            def fill_impl(x, *, out):
+                out.resize_(x.shape)
+                out.copy_(x * 2)
+
+            def fill_fake(x, *, out):
+                out.resize_(x.shape)
+
+            lib.impl("fill_out", fill_impl, "CompositeExplicitAutograd")
+            torch.library.register_fake(f"{namespace}::fill_out", fill_fake, lib=lib)
+            packet = getattr(torch.ops, namespace).fill_out
+            op = packet.default if explicit_overload else packet
+            self.assertNotIn(torch.Tag.out, packet.default.tags)
+
+            def fn(x, out):
+                op(x, out=out)
+                return out + 1
+
+            counter = CompileCounter()
+            compiled = torch.compile(fn, backend=counter)
+            frame_count = 0
+            for n in (3, 5, 7, 4, 9):
+                x = torch.arange(n)
+                expected_out = torch.empty(0)
+                expected = fn(x, expected_out)
+                out = torch.empty(0)
+                self.assertEqual(compiled(x, out), expected)
+                self.assertEqual(out, expected_out)
+                if n == 5:
+                    frame_count = counter.frame_count
+            self.assertEqual(counter.frame_count, frame_count)
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Shape mismatch when calling .* with `out=`",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    torch.arange(3), torch.empty(0)
+                )
+
     def test_packet_overload_mutating_kwarg_resolution(self):
         namespace = "test_dynamo_mutating_kwarg_resolution"
         with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
