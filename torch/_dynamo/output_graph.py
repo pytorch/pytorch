@@ -704,6 +704,17 @@ def noop_graph_call(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
     return ()
 
 
+def _detach_graph_module(gm_ref: weakref.ref[fx.GraphModule]) -> None:
+    # A GraphModule and its Graph reference each other (gm.graph and
+    # graph.owning_module), so once the compiled code that uses gm is discarded,
+    # gm -- including real tensors registered on it, e.g. parameters under
+    # freezing or compiled optimizer state -- would otherwise stay alive until
+    # the cyclic GC runs. Breaking the back-edge lets refcounting free it.
+    gm = gm_ref()
+    if gm is not None:
+        gm.graph.owning_module = None
+
+
 class OutputGraph(OutputGraphCommon):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -924,7 +935,7 @@ class OutputGraph(OutputGraphCommon):
         self.source_to_user_stacks: dict[Source, list[traceback.StackSummary]] = {}
 
         self._current_tx: list[InstructionTranslatorBase] = []
-        self.cleanups: list[CleanupHook] = []
+        self.cleanups: list[Callable[[], None]] = []
         self.should_exit = False
         self.unspec_variable_map: dict[str, UnspecializedPythonVariable] = {}
 
@@ -3177,6 +3188,9 @@ class OutputGraph(OutputGraphCommon):
             else:
                 # This is safe because we pre-process name to be unique
                 self.install_global_unsafe(name, compiled_fn)
+            self.cleanups.append(
+                functools.partial(_detach_graph_module, weakref.ref(gm))
+            )
 
             if self.root_tx is None:
                 raise AssertionError("root_tx must not be None")
