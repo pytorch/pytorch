@@ -46,11 +46,12 @@ _LDD_NOT_FOUND = re.compile(r"^\s*(\S+)\s+=>\s+not found\s*$")
 
 
 class _FlyDSLAOTAdapter:
-    """Temporary compatibility adapter for FlyDSL >=0.3.2 private APIs.
+    """Temporary adapter for FlyDSL >=0.3.2,<0.4 private APIs.
 
-    PyTorch CI validates this adapter against FlyDSL 0.3.2. The attribute
-    checks below fail clearly if a later release changes a private API. Remove
-    this adapter once FlyDSL provides a public AOT compilation and export API.
+    FlyDSL 0.3.2 is the compatibility baseline, and PyTorch CI currently
+    validates this adapter against FlyDSL 0.3.4.1. The attribute checks below
+    fail clearly if a later release changes a private API. Remove this adapter
+    once FlyDSL provides a public AOT compilation and export API.
     """
 
     @staticmethod
@@ -58,9 +59,10 @@ class _FlyDSLAOTAdapter:
         value = getattr(owner, name, None)
         if value is None:
             raise RuntimeError(
-                "PyTorch's temporary FlyDSL AOT adapter was validated with "
-                f"FlyDSL 0.3.2 but requires private API {name!r}; migrate the "
-                "adapter when FlyDSL provides its public AOT API"
+                "PyTorch's temporary FlyDSL AOT adapter supports FlyDSL "
+                f">=0.3.2,<0.4 but requires private API {name!r}; PyTorch CI "
+                "currently validates FlyDSL 0.3.4.1. Migrate the adapter when "
+                "FlyDSL provides its public AOT API"
             )
         return value
 
