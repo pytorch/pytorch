@@ -23,6 +23,8 @@ covering every arch the op shipped for, containing:
 The kernel signature is the op's structured impl signature: meta() has allocated the
 outputs before the stub runs, so a body writes into them and returns true, or returns
 false to fall through to op.impl.
+For unstructured functions, the signature instead includes an aot_result output
+parameter; the declaration validates inputs and assigns the allocated result.
 
 Requires torchgen for the impl signature, but not a built torch.
 
@@ -37,6 +39,11 @@ import os
 import re
 import sys
 import textwrap
+from typing import Any, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from torchgen.model import NativeFunction, NativeFunctionsGroup
 
 
 REPO = os.path.normpath(
@@ -289,6 +296,8 @@ def _int32_size_gate(params: str) -> str:
     optional: list[str] = []
     for p in _split_params(params):
         ctype, name = _param_type_and_name(p)
+        if name == "aot_result":
+            continue
         if ctype in ("std::optional<at::Tensor>", "::std::optional<at::Tensor>"):
             optional.append(name)
         elif ctype == "at::Tensor":
@@ -325,7 +334,7 @@ def _int32_size_gate(params: str) -> str:
 def gen_op(
     op: str,
     key: str,
-    d,
+    d: Any,
     sidecars: list[dict],
     impl_params: str,
     covers: tuple[str, str, str] | None = None,
@@ -487,7 +496,9 @@ def gen_op(
     )
 
 
-def _structured_group(op: str):
+def _native_function(
+    op: str, *, structured: bool
+) -> NativeFunction | NativeFunctionsGroup:
     from torchgen.gen import get_grouped_native_functions, parse_native_yaml
     from torchgen.model import NativeFunctionsGroup
 
@@ -496,36 +507,48 @@ def _structured_group(op: str):
         os.path.join(aten, "native", "native_functions.yaml"),
         os.path.join(aten, "native", "tags.yaml"),
     )
-    for g in get_grouped_native_functions(parsed.native_functions):
-        # Base names repeat across groups (bmm vs bmm.dtype), so the signature
-        # must come from the STRUCTURED one; a qualified op matches exactly.
+    groups = get_grouped_native_functions(parsed.native_functions)
+    for g in groups:
         if isinstance(g, NativeFunctionsGroup) and g.structured:
-            fname = g.functional.func.name
-            if (str(fname) if "." in op else fname.name.base) == op:
-                return g
-    raise RuntimeError(f"no structured group for {op}")
+            if structured:
+                fname = g.functional.func.name
+                if (str(fname) if "." in op else fname.name.base) == op:
+                    return g
+        elif not structured:
+            f = g.functional if isinstance(g, NativeFunctionsGroup) else g
+            if str(f.func.name) == op:
+                return f
+    raise RuntimeError(f"no native function for {op}")
 
 
-def impl_signature_params(op: str) -> str:
-    from torchgen.api import structured
+def impl_signature_params(op: str, *, structured: bool = True) -> str:
+    from torchgen.api import structured as structured_api
     from torchgen.context import native_function_manager
+    from torchgen.model import NativeFunction
+    from torchgen.native_aot import functional_stub_params
 
-    g = _structured_group(op)
+    g = _native_function(op, structured=structured)
+    if isinstance(g, NativeFunction):
+        return functional_stub_params(g)
     with native_function_manager(g):
-        return ", ".join(b.decl() for b in structured.impl_arguments(g))
+        return ", ".join(b.decl() for b in structured_api.impl_arguments(g))
 
 
-def precomputed_args(op: str) -> list[str]:
+def precomputed_args(op: str, *, structured: bool = True) -> list[str]:
     """Schema argument names the structured META precomputes before the impl runs
     -- index_add's dim arrives maybe_wrap_dim'ed, sum.dim_IntList's arrives RAW.
     Declarations must know which they get, so the generated .cpp states it per
     op."""
-    g = _structured_group(op)
+    from torchgen.model import NativeFunction
+
+    g = _native_function(op, structured=structured)
+    if isinstance(g, NativeFunction):
+        return []
     pre = g.out.precomputed
     return sorted(pre.replace.keys()) if pre is not None else []
 
 
-def covers_signature(op: str) -> tuple[str, str]:
+def covers_signature(op: str, *, structured: bool = True) -> tuple[str, str]:
     """(C++ params, torch.library schema) for the fast coverage
     predicate: the FUNCTIONAL schema arguments (SymInt degraded to int
     -- symbolic sizes can't be covered anyway; a failed bind falls back
@@ -534,22 +557,24 @@ def covers_signature(op: str) -> tuple[str, str]:
     """
     from torchgen.api.types import DispatcherSignature
     from torchgen.context import native_function_manager
+    from torchgen.model import NativeFunctionsGroup
 
-    g = _structured_group(op)
-    with native_function_manager(g):
-        sig = DispatcherSignature.from_schema(g.functional.func, symint=False)
+    g = _native_function(op, structured=structured)
+    f = g.functional if isinstance(g, NativeFunctionsGroup) else g
+    with native_function_manager(f):
+        sig = DispatcherSignature.from_schema(f.func, symint=False)
         params = [a.decl() for a in sig.arguments()]
     # Render per-argument from the model (not string surgery on the
     # whole schema): SymInt -> int argument-by-argument, and the
     # kwarg-only marker reconstructed from the model's split.
-    args = g.functional.func.arguments
+    args = f.func.arguments
     pos = [str(a).replace("SymInt", "int") for a in args.flat_positional]
     kw = [str(a).replace("SymInt", "int") for a in args.flat_kwarg_only]
     pieces = pos + (["*", *kw] if kw else [])
     # Trailing out-variant outputs bind the .out overload's kwargs;
     # appended last, so kwarg-only exactly when the schema already has
     # a kwarg section (matching the C++ params' positional binding).
-    for a in g.out.func.arguments.out:
+    for a in g.out.func.arguments.out if isinstance(g, NativeFunctionsGroup) else ():
         params.append(f"const std::optional<at::Tensor>& {a.name}")
         pieces.append(f"Tensor? {a.name}=None")
     schema_args = ", ".join(pieces)
@@ -1177,11 +1202,12 @@ def main(argv: list[str] | None = None) -> None:
             _delete_generated(args.artifacts_dir, entry, "no sidecars remain")
             continue
         did, key = decl.decl_id(d), d.DISPATCH_KEY
+        structured = getattr(d, "STRUCTURED", True)
         covers = None
         covers_fn = getattr(d, "cpp_covers", None)
         covers_body = (covers_fn() or "") if covers_fn else ""
         if covers_body:
-            params, schema = covers_signature(d.ATEN_OP)
+            params, schema = covers_signature(d.ATEN_OP, structured=structured)
             covers = (params, schema, covers_body)
         # Every refusal runs before anything is written, and sources are buffered to
         # the end of the loop: a refusal partway through must not leave earlier
@@ -1214,9 +1240,9 @@ def main(argv: list[str] | None = None) -> None:
             key,
             d,
             sidecars,
-            impl_signature_params(d.ATEN_OP),
+            impl_signature_params(d.ATEN_OP, structured=structured),
             covers,
-            precomputed_args(d.ATEN_OP),
+            precomputed_args(d.ATEN_OP, structured=structured),
             decl_path,
         )
         # The source covers every arch this declaration shipped, so it belongs to

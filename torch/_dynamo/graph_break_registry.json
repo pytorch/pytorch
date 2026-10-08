@@ -3154,6 +3154,17 @@
       ]
     }
   ],
+  "GB4013": [
+    {
+      "Gb_type": "autograd.Function without a generated vmap rule under vmap",
+      "Context": "call_apply {self}",
+      "Explanation": "vmap over {self.fn_cls.__name__} runs custom_function_call_vmap, which Dynamo only models for generate_vmap_rule=True without a vmap staticmethod.",
+      "Hints": [
+        "Use generate_vmap_rule=True if the generated rule is enough.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB1319": [
     {
       "Gb_type": "Reconstruct user defined class without a source",
@@ -6771,6 +6782,17 @@
       "Explanation": "Dynamo does not support accessing `{name}` on `{vt.python_type_name()}` objects.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8504": [
+    {
+      "Gb_type": "Encountered mutation of an aliased input during higher order op tracing",
+      "Context": "context",
+      "Explanation": "Higher order ops do not support mutating an input that shares storage with another input. Found in {name}",
+      "Hints": [
+        "Clone one of the aliased inputs before the call, or stop mutating it.",
+        "Please open an issue."
       ]
     }
   ]
