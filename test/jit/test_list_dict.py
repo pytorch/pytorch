@@ -1203,6 +1203,7 @@ class TestList(JitTestCase):
 
         self.checkScript(test_list_remove2, ())
 
+    @skipIfTorchDynamo("Dynamo does not model TorchScript list copying")
     def test_extend_list_mutable(self):
         @torch.jit.script
         def extend_list(a: List[Tensor], b: List[Tensor]) -> List[Tensor]:
