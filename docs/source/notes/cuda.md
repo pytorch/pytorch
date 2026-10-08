@@ -1427,13 +1427,6 @@ directly, so do not assume every pageable transfer requires a staging buffer.
 See NVIDIA's [Unified Memory performance tuning guidance](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#performance-tuning)
 for details on populated buffers and memory placement.
 
-On systems with multiple CPU NUMA nodes, place CPU buffers on the node local
-to the GPU to avoid traffic through a remote CPU node. Check both process
-affinity and memory placement before allocating buffers. `torchrun` provides
-`--numa-binding=node` to bind workers to CPUs near their assigned GPUs;
-this is not enabled by default. See {ref}`numa-api` and NVIDIA's
-[Grace Performance Tuning Guide](https://docs.nvidia.com/dccpu/grace-perf-tuning-guide/).
-
 (cuda-nn-ddp-instead)=
 
 ### Use nn.parallel.DistributedDataParallel instead of multiprocessing or nn.DataParallel
