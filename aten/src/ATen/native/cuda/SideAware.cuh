@@ -5,9 +5,10 @@
 // Side-aware schedule for contiguous elementwise kernels on GPUs with two
 // memory sides (locality domains).
 //
-// Tensors from c10::cuda::LocalityAllocator satisfy side(addr) = (addr >> 21) & 1
-// and start 4 MiB aligned, so element i of same-dtype operands lies on one
-// side. The work unit is a 64 KiB chunk of the PRIMARY operand (the widest
+// Tensors from torch.cuda.memory.LocalityInterleavedAllocator lie in a
+// registered side-striped range (SideAwareState.h), where
+// side(addr) = (addr >> 21) & 1, and start 4 MiB aligned, so element i of
+// same-dtype operands lies on one side. The work unit is a 64 KiB chunk of the PRIMARY operand (the widest
 // element type, ties to the output), i.e. one element range in every operand.
 // Persistent CTAs (2 x 512 threads per SM) claim chunks from the queue of their
 // SM's side and steal from the other queue when theirs is empty. Output
@@ -16,7 +17,7 @@
 //
 // try_launch_side_aware() is called from launch_vectorized_kernel (contiguous,
 // no dynamic casting, 32-bit indexing) and returns false, launching nothing,
-// unless the schedule is enabled, every operand lies in the device's arena,
+// unless the schedule is enabled, every operand lies in a registered range,
 // the primary operand is 64 KiB aligned and at least 64 MiB, the device has an
 // SM side map, and this functor's calibration (SideAwareState.h) found the
 // side kernel faster than the default one.
@@ -24,7 +25,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cuda/SideAwareState.h>
-#include <c10/cuda/CUDALocalityAllocator.h>
 
 #include <algorithm>
 #include <array>
@@ -36,7 +36,6 @@
 namespace at::native::side_aware {
 
 constexpr size_t kChunkBytes = size_t(64) << 10; // work unit, bytes of the primary
-constexpr size_t kPageBytes = c10::cuda::LocalityAllocator::kPageBytes;
 constexpr uint64_t kChunksPerPage = kPageBytes / kChunkBytes;
 constexpr unsigned kThreads = 512, kCtasPerSm = 2;
 constexpr int kMaxSms = 256; // size of the SM side map
@@ -224,8 +223,8 @@ bool try_launch_impl(
   const c10::DeviceIndex device = stream.device_index();
   uint64_t primary = 0;
   for (size_t i = 0; i < sizeof...(In) + 1; ++i) {
-    // Every operand must be in the arena and vector aligned (16 B of the widest type).
-    if (!c10::cuda::LocalityAllocator::contains(device, data[i], n * sizes[i])) return reject("not in arena", i);
+    // Every operand must be in a registered range and vector aligned (16 B of the widest type).
+    if (!contains(device, data[i], n * sizes[i])) return reject("not in a registered range", i);
     if (reinterpret_cast<uintptr_t>(data[i]) % (16 / kWidest * sizes[i]) != 0) return reject("misaligned", i);
     if (primary == 0 && sizes[i] == kWidest) {
       primary = reinterpret_cast<uintptr_t>(data[i]);

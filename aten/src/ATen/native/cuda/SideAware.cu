@@ -1,5 +1,6 @@
 // Host state for the side-aware elementwise schedule: the runtime toggle, the
-// per-device SM side map, and the per-(device, stream) claim queues.
+// registry of side-striped ranges, the per-device SM side map, and the
+// per-(device, stream) claim queues.
 #include <ATen/native/cuda/SideAware.cuh>
 
 #include <c10/cuda/CUDAException.h>
@@ -38,6 +39,41 @@ bool calibrate_enabled() {
     return env == nullptr || std::strcmp(env, "0") != 0;
   }();
   return value;
+}
+
+// One slot per registered range, guarded by a sequence lock: writers (under
+// Ranges::mutex) make `seq` odd, update the slot, and make it even again;
+// readers retry until they see the same even `seq` before and after reading.
+// end == 0 marks a free slot.
+constexpr int kMaxRanges = 8;
+
+struct RangeSlot {
+  std::atomic<uint32_t> seq{0};
+  std::atomic<uintptr_t> base{0}, end{0};
+};
+
+struct Ranges {
+  std::mutex mutex;
+  std::array<RangeSlot, kMaxRanges> slots;
+  std::atomic<uintptr_t> probe{0}; // base of the first registered range
+};
+
+Ranges& ranges(c10::DeviceIndex device) {
+  static std::array<Ranges, C10_COMPILE_TIME_MAX_GPUS> instance;
+  return instance[device];
+}
+
+void write_slot(RangeSlot& slot, uintptr_t base, uintptr_t end) {
+  const uint32_t seq = slot.seq.load(std::memory_order_relaxed);
+  slot.seq.store(seq + 1, std::memory_order_relaxed);
+  std::atomic_thread_fence(std::memory_order_release);
+  slot.base.store(base, std::memory_order_relaxed);
+  slot.end.store(end, std::memory_order_relaxed);
+  slot.seq.store(seq + 2, std::memory_order_release);
+}
+
+void check_device(c10::DeviceIndex device) {
+  TORCH_CHECK(device >= 0 && device < C10_COMPILE_TIME_MAX_GPUS, "invalid device ", int(device));
 }
 
 struct DeviceState {
@@ -93,10 +129,11 @@ __global__ void probe_sm_sides(const char* page0, const char* page1, unsigned* c
   sm_side[sm] = samples[1][kSamples / 2] < samples[0][kSamples / 2] ? 1 : 0;
 }
 
-// Builds the SM side map of `device` from its arena's probe pages.
+// Builds the SM side map of `device` from the probe pages of its first
+// registered range.
 void init_device(c10::DeviceIndex device, DeviceState& st) {
   c10::cuda::CUDAGuard guard(device);
-  const char* page0 = static_cast<const char*>(c10::cuda::LocalityAllocator::arena_base(device));
+  const char* page0 = reinterpret_cast<const char*>(ranges(device).probe.load(std::memory_order_acquire));
   const cudaDeviceProp* prop = at::cuda::getDeviceProperties(device);
   // The kernel body is compiled for sm_107 only.
   if (page0 == nullptr || prop->major != 10 || prop->minor != 7 ||
@@ -144,6 +181,72 @@ void init_device(c10::DeviceIndex device, DeviceState& st) {
 }
 
 } // namespace
+
+void register_striped_range(c10::DeviceIndex device, uintptr_t base, size_t size) {
+  check_device(device);
+  TORCH_CHECK(
+      base != 0 && base % kBlockAlign == 0 && size >= kBlockAlign && size % kBlockAlign == 0 &&
+          base + size > base,
+      "side-striped range must be 4 MiB aligned and a nonzero multiple of 4 MiB");
+  Ranges& r = ranges(device);
+  std::lock_guard<std::mutex> lock(r.mutex);
+  RangeSlot* free_slot = nullptr;
+  for (auto& slot : r.slots) {
+    const uintptr_t b = slot.base.load(std::memory_order_relaxed);
+    const uintptr_t e = slot.end.load(std::memory_order_relaxed);
+    TORCH_CHECK(e == 0 || base + size <= b || base >= e, "side-striped range overlaps a registered one");
+    if (e == 0 && free_slot == nullptr) {
+      free_slot = &slot;
+    }
+  }
+  TORCH_CHECK(free_slot != nullptr, "at most ", kMaxRanges, " side-striped ranges per device");
+  write_slot(*free_slot, base, base + size);
+  uintptr_t no_probe = 0;
+  r.probe.compare_exchange_strong(no_probe, base);
+}
+
+void unregister_striped_range(c10::DeviceIndex device, uintptr_t base) {
+  check_device(device);
+  Ranges& r = ranges(device);
+  std::lock_guard<std::mutex> lock(r.mutex);
+  for (auto& slot : r.slots) {
+    if (slot.end.load(std::memory_order_relaxed) != 0 && slot.base.load(std::memory_order_relaxed) == base) {
+      write_slot(slot, 0, 0);
+      if (r.probe.load(std::memory_order_relaxed) == base) { // probe another live range, if any
+        uintptr_t next = 0;
+        for (const auto& other : r.slots) {
+          if (next == 0 && other.end.load(std::memory_order_relaxed) != 0) {
+            next = other.base.load(std::memory_order_relaxed);
+          }
+        }
+        r.probe.store(next, std::memory_order_release);
+      }
+      return;
+    }
+  }
+  TORCH_CHECK(false, "no side-striped range registered at this base");
+}
+
+bool contains(c10::DeviceIndex device, const void* ptr, size_t bytes) {
+  if (device < 0 || device >= C10_COMPILE_TIME_MAX_GPUS) {
+    return false;
+  }
+  const auto addr = reinterpret_cast<uintptr_t>(ptr);
+  for (const auto& slot : ranges(device).slots) {
+    uintptr_t base = 0, end = 0;
+    uint32_t seq = 0;
+    do {
+      seq = slot.seq.load(std::memory_order_acquire);
+      base = slot.base.load(std::memory_order_relaxed);
+      end = slot.end.load(std::memory_order_relaxed);
+      std::atomic_thread_fence(std::memory_order_acquire);
+    } while ((seq & 1) != 0 || slot.seq.load(std::memory_order_relaxed) != seq);
+    if (end != 0 && addr >= base && addr < end && bytes <= end - addr) {
+      return true;
+    }
+  }
+  return false;
+}
 
 bool enabled() {
   return enabled_flag().load(std::memory_order_relaxed);
