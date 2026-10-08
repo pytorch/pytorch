@@ -23,7 +23,7 @@
 #include <ATen/native/cuda/GroupMM.h>
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_group_gemm.h>
-#include <ATen/native/hip/ck_tile_group_gemm.hip>
+#include <ATen/native/hip/ck_tile_group_gemm.h>
 #endif
 #include <ATen/ceil_div.h>
 
