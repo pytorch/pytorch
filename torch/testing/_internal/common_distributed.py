@@ -25,7 +25,6 @@ from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
 from typing import Any, NamedTuple
-from unittest.mock import patch
 
 import torch
 import torch._dynamo.test_case
@@ -72,6 +71,7 @@ if _TORCHCOMM_AVAILABLE:
         ("gloo", "TORCHCOMM_HAS_GLOO"),
         ("xccl", "TORCHCOMM_HAS_XCCL"),
         ("nccl", "TORCHCOMM_HAS_NCCL"),
+        ("rccl", "TORCHCOMM_HAS_RCCL"),
         ("rcclx", "TORCHCOMM_HAS_RCCLX"),
         ("ncclx", "TORCHCOMM_HAS_NCCLX"),
     ]:
@@ -256,14 +256,18 @@ def skip_if_odd_worldsize(func):
 
 
 def require_n_gpus_for_nccl_backend(n, backend):
+    needs_accelerator = backend in ("nccl", "xccl")
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if backend == "nccl" and torch.cuda.device_count() < n:
+            if needs_accelerator and torch.accelerator.device_count() < n:
                 sys.exit(TEST_SKIPS[f"multi-device-{n}"].exit_code)
             else:
                 return func(*args, **kwargs)
 
+        if needs_accelerator:
+            wrapper._min_gpus_required = n
         return wrapper
 
     return decorator
@@ -319,6 +323,9 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
+        # Record the accelerator requirement so the collection-time GPU-count
+        # resolver (test/conftest.py) can read it without running the test.
+        wrapper._min_gpus_required = x
         return wrapper
 
     return decorator
@@ -328,7 +335,11 @@ def requires_world_size(n: int):
     """
     Decorator to request a specific world size for a test. The test harness can
     read this attribute to set the number of ranks to spawn. If there are fewer
-    than `n` CUDA devices available, the test should be skipped by the harness.
+    than ``n`` accelerators available, the test is skipped.
+
+    NOTE: The skip logic is hardware-agnostic and works for any accelerator
+    supported by ``torch.accelerator`` (e.g. CUDA, XPU, HPU, and
+    PrivateUse1-based backends).
 
     Usage:
         @require_world_size(3)
@@ -338,9 +349,9 @@ def requires_world_size(n: int):
 
     def decorator(func):
         func._required_world_size = n
-        available = torch.cuda.device_count()
+        available = torch.accelerator.device_count()
         return unittest.skipUnless(
-            available >= n, f"requires {n} GPUs, found {available}"
+            available >= n, f"requires {n} accelerators, found {available}"
         )(func)
 
     return decorator
@@ -378,6 +389,8 @@ def nccl_skip_if_lt_x_gpu(backend, x):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
+        if backend == "nccl":
+            wrapper._min_gpus_required = x
         return wrapper
 
     return decorator
@@ -403,6 +416,34 @@ def verify_ddp_error_logged(model_DDP, err_substr):
         raise AssertionError(
             f"Did not find expected {actual} in ddp logging data error: {logging_err}"
         )
+
+
+@contextmanager
+def core_dumps_disabled():
+    """Make a device-side assert raise instead of killing the caller.
+
+    The HIP runtime aborts the process on a GPU exception whenever core dumps
+    are enabled, so that it can write a GPU core file; with RLIMIT_CORE at 0 it
+    instead keeps a sticky error that surfaces as an exception at the next
+    sync, which is what CUDA does either way. The limit is read when the fault
+    happens, so this works after the GPU context already exists. CI runs with
+    core dumps off already; this lets the same tests pass on a dev box.
+
+    The fault is processed asynchronously, so keep the block open through the
+    sync that surfaces the error. The previous soft limit is restored on exit.
+    No-op on Windows, which has no RLIMIT_CORE.
+    """
+    if sys.platform == "win32":
+        yield
+        return
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
+    resource.setrlimit(resource.RLIMIT_CORE, (0, hard))
+    try:
+        yield
+    finally:
+        resource.setrlimit(resource.RLIMIT_CORE, (soft, hard))
 
 
 def with_nccl_blocking_wait(func):
@@ -1731,7 +1772,7 @@ class SaveForwardInputsModel(nn.Module):
 
 @contextmanager
 def _dynamo_dist_per_rank_init(
-    rank, world_size, backend=None, init_pg=True, fake_pg=False
+    rank, world_size, backend=None, init_pg=True, fake_pg=False, *, rdvz_file=None
 ):
     # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
@@ -1744,8 +1785,6 @@ def _dynamo_dist_per_rank_init(
     if backend is None:
         backend = c10d.get_default_backend_for_device(device_type)
 
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "6789"
     if init_pg:
         if fake_pg:
             store = torch.testing._internal.distributed.fake_pg.FakeStore()
@@ -1756,7 +1795,21 @@ def _dynamo_dist_per_rank_init(
                 store=store,
             )
         else:
-            c10d.init_process_group(backend=backend, rank=rank, world_size=world_size)
+            if rdvz_file is None:
+                # Legacy env:// rendezvous. Every rank must derive the same
+                # port here, so it cannot be allocated dynamically; pass
+                # rdvz_file instead to avoid colliding with concurrent runs.
+                os.environ["MASTER_ADDR"] = "localhost"
+                os.environ["MASTER_PORT"] = "6789"
+                store = None
+            else:
+                store = c10d.FileStore(rdvz_file, world_size)
+            c10d.init_process_group(
+                backend=backend,
+                store=store,
+                rank=rank,
+                world_size=world_size,
+            )
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
     try:
@@ -1779,27 +1832,26 @@ class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        # _exit_stack is set up in TestCase
-        cls._exit_stack.enter_context(
-            patch.dict(
-                os.environ,
-                {
-                    "MASTER_ADDR": "localhost",
-                    "MASTER_PORT": "12355",
-                },
-            )
-        )
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            cls.rdvz_file = f.name
         cls.rank = 0
         device = torch.accelerator.current_accelerator().type
         cls.device = f"{device}:{cls.rank}"
         cls.device_ids = None if device in cls.device else [cls.rank]
         c10d.init_process_group(
-            c10d.get_default_backend_for_device(device), rank=cls.rank, world_size=1
+            c10d.get_default_backend_for_device(device),
+            store=c10d.FileStore(cls.rdvz_file, 1),
+            rank=cls.rank,
+            world_size=1,
         )
 
     @classmethod
     def tearDownClass(cls):
         c10d.destroy_process_group()
+        try:
+            os.remove(cls.rdvz_file)
+        except OSError:
+            pass
         super().tearDownClass()
 
 
@@ -1906,8 +1958,11 @@ class MultiProcContinuousTest(TestCase):
         # Ensure all the ranks use the same seed.
         common_utils.set_rng_seed()
 
-        # Run the test function
-        test_fn(**kwargs)
+        # Workers call the test directly, so unittest won't run cleanups.
+        try:
+            test_fn(**kwargs)
+        finally:
+            self.doCleanups()
 
     @classmethod
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
@@ -2262,6 +2317,8 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
             "rcclx": TORCHCOMM_HAS_RCCLX,
         }
         backend_name = self.backend(device)
+        if TEST_WITH_ROCM and backend_name == "nccl":
+            backend_name = "rccl"
         if backend_name in backend_flags and not backend_flags[backend_name]:
             self.skipTest(f"torchcomms {backend_name} backend is not available")
 

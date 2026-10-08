@@ -522,7 +522,6 @@ EAGER_EQUIV_XFAILS = {
     "inductor_default": {
         "remainder": {ALL},
         "sigmoid": {fp32},
-        "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
         "nn.functional.silu": {fp32},
         "softmax": {fp32},
@@ -594,11 +593,9 @@ ROCM_EAGER_EQUIV_XFAILS = {
         "log_softmax": {fp32},
     },
     "inductor_default": {
-        "exp": {fp32},
         "sigmoid": {fp32},
         "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
-        "nn.functional.silu": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
     },
@@ -628,7 +625,6 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
 
 ROCM_UNARY_NUMERICAL_XFAILS = {
     "inductor_default": {
-        "exp": {fp32},
         "sigmoid": {fp32},
         "sin": {fp32},
         "tan": {fp32},

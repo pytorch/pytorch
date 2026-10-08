@@ -49,6 +49,7 @@ def gen_registration_headers(
     backend_index: BackendIndex,
     per_operator_headers: bool,
     rocm: bool,
+    has_native_aot: bool = False,
 ) -> list[str]:
     if per_operator_headers:
         headers = ["#include <ATen/ops/as_strided_native.h>"]
@@ -62,7 +63,11 @@ def gen_registration_headers(
             headers.append("#include <ATen/hip/EmptyTensor.h>")
         else:
             headers.append("#include <ATen/cuda/EmptyTensor.h>")
-        headers.append("#include <ATen/NativeAotStubs.h>")
+        # Only when a declaration targets this key: a tree (or a build that
+        # opts out with --native-aot-ops-dir=) that declares nothing produces
+        # the same registration TU it did before native-AOT existed.
+        if has_native_aot:
+            headers.append("#include <ATen/NativeAotStubs.h>")
     elif backend_index.dispatch_key == DispatchKey.MPS:
         headers.append("#include <ATen/mps/EmptyTensor.h>")
     elif backend_index.dispatch_key == DispatchKey.XPU:
@@ -563,6 +568,16 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                         if device_of is not None:
                             device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
 
+                aot_consultation = ""
+                aot_manifest = self.native_aot_manifests.get(str(f.func.name))
+                if aot_manifest is not None and not aot_manifest.structured:
+                    from torchgen.native_aot import gen_stub_consultation
+
+                    aot_consultation = gen_stub_consultation(
+                        aot_manifest,
+                        ", ".join(a.name for a in sig.arguments()),
+                        returns_type=returns_type,
+                    )
                 return f"""\
 namespace {{
 
@@ -570,6 +585,7 @@ namespace {{
   {device_check}
 
   {device_guard}
+  {aot_consultation}
   return {impl_name}({args_exprs_str});
 }}
 
@@ -984,7 +1000,7 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 ) or self.native_aot_manifests.get(
                     self.g.functional.func.name.name.base
                 )
-                if aot_manifest is not None:
+                if aot_manifest is not None and aot_manifest.matches_group(self.g):
                     from torchgen.native_aot import gen_stub_consultation
 
                     sig_body.append(gen_stub_consultation(aot_manifest, impl_exprs))

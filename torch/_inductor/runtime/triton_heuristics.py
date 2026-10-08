@@ -47,6 +47,7 @@ from ..utils import (
     GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
+    tlx_only_hip_options,
     TMA_ALIGNMENT,
     triton_version_uses_attrs_dict,
     XPU_KERNEL_FORMAT,
@@ -60,6 +61,7 @@ from .hints import (
     DeviceProperties,
     HeuristicType,
     InductorMeta,
+    is_valid_mix_order_reduction_config,
     native_matmul_block_numel,
     ReductionHint,
     TileHint,
@@ -175,19 +177,35 @@ def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str)
     return fn_hash
 
 
-def lookup_autotune_config(size_hints, fn) -> Config | None:
+def lookup_autotune_config(
+    size_hints,
+    fn,
+    inductor_meta: InductorMeta,
+    heuristic_type: HeuristicType | None = None,
+) -> Config | None:
+    if heuristic_type == HeuristicType.FIXED:
+        return None
+
     lookup_table = torch._inductor.config.autotune_lookup_table
     cached_config = None
     if len(lookup_table) > 0 and "_fused_" in fn.src:
         fn_hash = generate_lookup_hash_from_source_code(str(size_hints), fn.src)
         if fn_hash in lookup_table:
             config_dict = lookup_table[fn_hash]
-            block_configs = {k: v for k, v in config_dict.items() if "BLOCK" in k}
-            cached_config = Config(
-                block_configs,
-                num_warps=config_dict["num_warps"],
-                num_stages=config_dict["num_stages"],
-            )
+            rsplit_size = inductor_meta.get("RSPLIT_SIZE")
+            if rsplit_size is not None:
+                cached_rsplit_size = config_dict.get("RSPLIT_SIZE")
+                rnumel_hint = (
+                    size_hints.get("r0_") if isinstance(size_hints, dict) else None
+                )
+                if (
+                    cached_rsplit_size != rsplit_size
+                    or not is_valid_mix_order_reduction_config(
+                        config_dict, rsplit_size, rnumel_hint, inductor_meta
+                    )
+                ):
+                    return None
+            cached_config = config_from_dict(config_dict)
 
     return cached_config
 
@@ -609,7 +627,9 @@ class CachingAutotuner(KernelInterface):
             [] if reset_to_zero_arg_names is None else reset_to_zero_arg_names
         )
         self.optimize_mem = optimize_mem
-        cached_config = lookup_autotune_config(size_hints, fn)
+        cached_config = lookup_autotune_config(
+            size_hints, fn, self.inductor_meta, heuristic_type
+        )
         self.configs = [cached_config] if cached_config else configs
 
         self.heuristic_type = heuristic_type
@@ -1074,7 +1094,7 @@ class CachingAutotuner(KernelInterface):
         exc = None
         try:
             load_device = _resolve_load_device(
-                self.triton_meta["device"], self.device_props.type
+                self.device_props.index, self.device_props.type
             )
             # DeviceGuard ensures each launcher's binary loads onto the right device.
             with DeviceGuard(device_interface, cast(int, load_device)):
@@ -1093,6 +1113,7 @@ class CachingAutotuner(KernelInterface):
                         )
                         and self.inductor_meta.get("dynamic_disable_pipelining", True)
                     ):
+                        log.debug("Retrying with num_stages=1 after: %s", exc)
                         self.launchers = [self.compile_by_disabling_pipelining(config)]
                         return
                     raise RuntimeError(
@@ -2589,6 +2610,10 @@ class CachingAutotuner(KernelInterface):
             and not debug_mode
             and not autograd_profiler._is_profiler_enabled
             and len(self.launchers) == 1
+            # The fast path skips save_gpu_kernel. A later AOTI compile that reuses
+            # this kernel must save its params again, because CudaKernelParamCache
+            # is keyed by kernel name and shared by every compile in the process.
+            and not launcher.store_cubin
         ):
             self._cached_launcher = self._build_fast_launcher(launcher) or launcher
         return result
@@ -3032,6 +3057,11 @@ class StaticTritonCompileResult(CompileResult[_T]):
         triton_meta: TritonMeta,
         heuristic_type: HeuristicType,
     ) -> _KernelType | None:
+        """The statically launchable kernel for this compile, or None to fall back.
+
+        None sends the caller to TritonCompileResult instead; the bypass reason is
+        logged, and strict_static_triton_launcher turns it into an error.
+        """
         if not torch._inductor.config.use_static_triton_launcher:
             return None
 
@@ -3053,8 +3083,13 @@ class StaticTritonCompileResult(CompileResult[_T]):
             if (
                 heuristic_type == HeuristicType.USER_AUTOTUNE
                 and not torch._inductor.config.static_launch_user_defined_triton_kernels
+                and triton_meta.get("device") is not None
             ):
-                # Don't support user defined triton kernels yet
+                # Don't support user defined triton kernels yet -- unless the device index
+                # was dropped (compile-on-one-rank), where one artifact serves every
+                # device and only the static launcher keeps its handles per device. The
+                # TritonCompileResult fallback bakes a single CUfunction, so it raises
+                # `invalid resource handle` on the second device.
                 raise CannotStaticallyLaunchKernel("User defined triton kernel")
 
             if inductor_meta.get("store_cubin"):
@@ -3817,9 +3852,10 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK")) & cfg.kwargs.keys():
+        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK", "R2_BLOCK")) & cfg.kwargs.keys():
             raise AssertionError(
-                f"min_xblock/min_rblock only support 2D X/R0 configs: {cfg}"
+                "min_xblock/min_rblock do not support YBLOCK, ZBLOCK, "
+                f"R1_BLOCK, or R2_BLOCK configs: {cfg}"
             )
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
@@ -5100,6 +5136,7 @@ def template(
         "num_stages": num_stages,
         "num_warps": num_warps,
     }
+    config_kwargs = {}
 
     # Conditionally add arguments based on HAS_WARP_SPEC
     if HAS_WARP_SPEC:
@@ -5110,13 +5147,18 @@ def template(
             }
         )
 
+    if torch.version.hip:
+        for k in tlx_only_hip_options():
+            if k in triton_meta:
+                config_kwargs[k] = triton_meta[k]
+
     for k in tlx_only_cuda_options():
         if v := triton_meta.get(k, None):
             config_args[k] = v
 
     return cached_autotune(
         None,
-        [triton.Config({}, **config_args)],
+        [triton.Config(config_kwargs, **config_args)],
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
