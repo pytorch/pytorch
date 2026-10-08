@@ -33,6 +33,7 @@ from torch._dynamo import config
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.backends.debugging import boxed_nop
 from torch._inductor.cudagraph_utils import (
+    _CUDAGRAPH_SUPPORTED_DEVICE_TYPES,
     BoxedDeviceIndex,
     check_multiple_devices_or_any_cpu_nodes,
     format_default_skip_message,
@@ -136,8 +137,8 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
 
 def get_cudagraph_device(gm: torch.fx.GraphModule) -> torch.device:
     device = next(iter(get_device_node_mapping(gm)))
-    if device.type != "cuda":
-        raise AssertionError(f"Expected CUDA device, got {device.type}")
+    if device.type not in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES:
+        raise AssertionError(f"Expected a cudagraph-capable device, got {device.type}")
     return device
 
 

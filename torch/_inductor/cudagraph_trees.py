@@ -75,6 +75,7 @@ from torch._inductor.compile_fx import (
     static_input,
 )
 from torch._inductor.cudagraph_utils import (
+    _CUDAGRAPH_SUPPORTED_DEVICE_TYPES,
     check_for_mutation,
     CheckInvariantStatus,
     collect_device_data_ptrs,
@@ -354,13 +355,28 @@ def get_container(device: torch.device) -> TreeManagerContainer:
         return container_dict[device]
 
 
+def _default_graph_device() -> torch.device | None:
+    """Device a manager lookup without an explicit device refers to.
+
+    Scans the supported types directly instead of asking for the current
+    accelerator: at::getAccelerator short-circuits on PrivateUse1, so merely
+    importing an out-of-tree backend would hide an initialized CUDA runtime
+    here. Returns None rather than initializing a runtime that is not up.
+    """
+    for device_type in sorted(_CUDAGRAPH_SUPPORTED_DEVICE_TYPES):
+        device_module = torch.get_device_module(device_type)
+        if device_module.is_initialized():
+            return torch.device(device_type, device_module.current_device())
+    return None
+
+
 def get_manager(
     device: torch.device | None = None, create_if_none_exists: bool = True
 ) -> CUDAGraphTreeManager | None:
     if device is None:
-        if not torch.cuda.is_initialized():
+        device = _default_graph_device()
+        if device is None:
             return None
-        device = torch.device("cuda", torch.cuda.current_device())
 
     if create_if_none_exists:
         return get_container(device).get_tree_manager()
