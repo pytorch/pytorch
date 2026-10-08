@@ -9301,6 +9301,31 @@ for dtype in (torch.int32, torch.int64):
         x = torch.rand([4, 8], dtype=torch.float32, device=self.device)
         self.common(fn, (x,))
 
+    def test_scatter_empty_index_scalar(self):
+        def fn(x, idx, src, x_int, idx_int, src_int):
+            return (
+                x.scatter(0, idx, src),
+                x.scatter(0, idx, 3.14),
+                x.scatter(0, idx, src, reduce="add"),
+                x.scatter(0, idx, src, reduce="multiply"),
+                x.scatter_add(0, idx, src),
+                x.scatter_reduce(0, idx, src, "sum"),
+                x.scatter_reduce(0, idx, src, "prod"),
+                x.scatter_reduce(0, idx, src, "mean"),
+                x.scatter_reduce(0, idx, src, "amax"),
+                x.scatter_reduce(0, idx, src, "amin"),
+                x.scatter_reduce(0, idx, src, "sum", include_self=False),
+                x_int.scatter(0, idx_int, src_int),
+            )
+
+        x = torch.tensor(1.0, device=self.device)
+        idx = torch.tensor([], dtype=torch.int64, device=self.device)
+        src = torch.tensor([], device=self.device)
+        x_int = torch.tensor(1, dtype=torch.int64, device=self.device)
+        idx_int = torch.tensor([], dtype=torch.int64, device=self.device)
+        src_int = torch.tensor([], dtype=torch.int64, device=self.device)
+        self.common(fn, (x, idx, src, x_int, idx_int, src_int))
+
     def test_fill1(self):
         def fn(x):
             tmp = torch.ones_like(x)
