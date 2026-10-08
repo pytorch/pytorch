@@ -11,6 +11,7 @@ import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch._inductor.pattern_matcher as pattern_matcher
 import torch.nn.functional as F
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
@@ -41,7 +42,9 @@ from torch._library.opaque_object import (
     get_opaque_type_name,
     register_custom_class,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import skipCUDAIf
@@ -3288,6 +3291,43 @@ class TestPatternMatcher(TestCase):
                 dtype,
                 msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
+
+    def test_meta_matches_specializes_backed_not_unbacked(self):
+        def meta_matches(shape_env, actual, expected):
+            with FakeTensorMode(shape_env=shape_env):
+                val = torch.empty(actual, 8)
+            node = torch.fx.Graph().placeholder("x")
+            node.meta["val"] = val
+            pattern = CallFunction(torch.ops.aten.mm.default, Arg(), Arg())
+            pattern.expected_meta = ((expected, 8), val.dtype, val.device)
+            num_guards = len(shape_env.guards)
+            matched = pattern._meta_matches(node)
+            return matched, shape_env.guards[num_guards:]
+
+        def backed(shape_env, hint, name):
+            return shape_env.create_unspecified_symint_and_symbol(
+                hint, ConstantSource(name), DimDynamic.DYNAMIC
+            )
+
+        # backed, equal at the hint: matches by guarding s0 == s1 + 1
+        shape_env = ShapeEnv()
+        s0, s1 = backed(shape_env, 5, "s0"), backed(shape_env, 4, "s1")
+        matched, guards = meta_matches(shape_env, s0, s1 + 1)
+        self.assertTrue(matched)
+        self.assertEqual(len(guards), 1)
+
+        # backed, not equal at the hint: rejected
+        shape_env = ShapeEnv()
+        s0, s1 = backed(shape_env, 5, "s0"), backed(shape_env, 5, "s1")
+        matched, _ = meta_matches(shape_env, s0, s1 + 1)
+        self.assertFalse(matched)
+
+        # unbacked: rejected without installing a guard
+        shape_env = ShapeEnv()
+        u0, u1 = shape_env.create_unbacked_symint(), shape_env.create_unbacked_symint()
+        matched, guards = meta_matches(shape_env, u0, u1 + 1)
+        self.assertFalse(matched)
+        self.assertEqual(guards, [])
 
     def test_metadata_propagation_register_replacement(self):
         """Verify metadata from matched nodes transfers to replacement nodes."""
