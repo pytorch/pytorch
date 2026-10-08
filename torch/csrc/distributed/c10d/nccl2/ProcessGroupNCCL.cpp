@@ -394,9 +394,6 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
         "NCCL split failed");
   } catch (...) {
     comm_state_ = CommState::ERROR;
-    // The failed call may have aborted the parent; drop its symmetric-memory
-    // registration while nccl_comm_ still names it.
-    retireComm();
     nccl_comm_ = nullptr;
     throw;
   }
@@ -707,10 +704,19 @@ void ProcessGroupNCCL::revokeNcclComm() {
   detachMemoryHook();
   retireComm();
   if (nccl_comm_) {
-    // Best-effort: this may run on the timeout watchdog thread, so log instead
-    // of throwing on failure (the communicator is already being torn down).
-    NCCL_CHECK_IGNORE(
-        nccl_api_, nccl_api_->commRevoke(nccl_comm_), "NCCL Revoke failed");
+    try {
+      waitForNcclCompletion(
+          *nccl_api_,
+          nccl_comm_,
+          nccl_api_->commRevoke(nccl_comm_),
+          options_c10d_->timeout,
+          "NCCL Revoke failed");
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << "commRevoke failed or did not complete within "
+                          << options_c10d_->timeout.count() << "ms on rank "
+                          << rank_ << "; continuing teardown (best-effort): "
+                          << e.what();
+    }
   }
 }
 

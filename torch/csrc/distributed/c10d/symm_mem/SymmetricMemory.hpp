@@ -99,6 +99,10 @@ class TORCH_API SymmetricMemory : public torch::CustomClassHolder {
   virtual int get_rank() = 0;
   virtual int get_world_size() = 0;
   virtual c10::Device get_device() = 0;
+  // The name of the process group this handle was rendezvoused on.
+  virtual std::string get_group_name() {
+    TORCH_CHECK(false, "NYI");
+  }
 
   virtual const std::vector<int>& get_rank_to_global_rank() {
     TORCH_CHECK(false, "NYI");
