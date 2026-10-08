@@ -656,7 +656,8 @@ test_python_smoke_b200() {
   install_cutlass_operators
   (
     setup_cuda_smoke_compat
-    time env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+    time env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator or memset_pass or small_memset_nodes" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+    time env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python test/run_test.py --include test_cuda_graph_utils -k "rewritten_memset" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   )
   time python test/run_test.py \
     --include \
