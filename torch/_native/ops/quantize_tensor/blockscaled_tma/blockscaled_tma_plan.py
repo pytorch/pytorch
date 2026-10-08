@@ -35,6 +35,7 @@ def select_blockscaled_tma_plan(
     input_dtype: torch.dtype,
     quant_orientation: str,
     is_square_scaling: bool,
+    is_stochastic_qdata_rounding: bool = False,
 ) -> BlockscaledTmaPlan:
     """Select the existing B200-tuned tile, cluster, masking, and grid policy."""
     if quant_orientation not in ("dim_k", "dim_m", "dim_km"):
@@ -88,6 +89,7 @@ def select_blockscaled_tma_plan(
             # FP32's larger shared-memory tiles reduce residency enough that clustering loses.
             1
             if input_dtype == torch.float32
+            or is_stochastic_qdata_rounding
             or (is_square_scaling and M * K <= 4096 * 4096)
             else next(
                 c for c in (16, 8, 4, 2, 1) if c <= s_num_col_blk_k and grid_k % c == 0

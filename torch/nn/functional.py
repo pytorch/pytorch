@@ -54,6 +54,13 @@ class ScalingAlgorithm(enum.IntEnum):
     """
 
 
+class RoundingMode(enum.IntEnum):
+    r"""Rounding mode for quantized data produced by :func:`quantize_tensor`."""
+
+    RTNE = 0
+    STOCHASTIC = 1
+
+
 if TYPE_CHECKING:
     from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
     from torch.types import _dtype as DType
@@ -7263,9 +7270,11 @@ def quantize_tensor(
     qdata_dtype: torch.dtype,
     scaling_algorithm: ScalingAlgorithm,
     swizzle_type: SwizzleType,
+    qdata_rounding_mode: RoundingMode = RoundingMode.RTNE,
+    random_key: Tensor | None = None,
     scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor]:
-    r"""quantize_tensor(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
+    r"""quantize_tensor(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, qdata_rounding_mode=RoundingMode.RTNE, random_key=None, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor]
 
     Quantize a 2D tensor. Returns ``(qdata, scale)`` for use with
     :func:`scaled_mm`.  Currently supported formats: ``mxfp8``.
@@ -7302,6 +7311,15 @@ def quantize_tensor(
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
           Currently supported values: ``SwizzleType.NO_SWIZZLE`` and
           ``SwizzleType.SWIZZLE_32_4_4``.
+        qdata_rounding_mode (RoundingMode, optional): Round qdata to nearest,
+          ties to even (``RTNE``), or use NVIDIA stochastic FP8 rounding
+          (``STOCHASTIC``). Stochastic rounding requires swizzled 1x32 scales
+          and does not change scale calculation. Default: ``RoundingMode.RTNE``.
+        random_key (Tensor, optional): A two-element ``uint64`` Philox key on
+          the input device, such as a key from ``torch.func._random.key``.
+          With ``STOCHASTIC``, a key produces reproducible stateless rounding;
+          ``None`` uses the device's default CUDA generator. A key cannot be
+          passed with ``RTNE``. Default: ``None``.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
           value to be a square (for example, modify ``1x32`` to be ``32x32``).
@@ -7339,6 +7357,12 @@ def quantize_tensor(
         >>> # mxfp8 dim-k with compact, unswizzled scales
         >>> plain_kwargs = {**mxfp8_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
         >>> qdata_plain, scale_plain = F.quantize_tensor(x, **plain_kwargs)
+        >>> # stochastic rounding with an explicit Philox key
+        >>> key = torch.func._random.key(42, device=x.device)
+        >>> qdata_sr, scale_sr = F.quantize_tensor(
+        ...     x, **mxfp8_kwargs, qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+        ...     random_key=key,
+        ... )
     """
     # TODO(future PR): add torch.export support for the native quantization op.
     outputs = torch.ops.aten._quantize_tensor.default(
@@ -7348,6 +7372,8 @@ def quantize_tensor(
         scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
         swizzle_type=swizzle_type.value,
         scaling_type_use_square_block_size=scaling_type_use_square_block_size,
+        qdata_rounding_mode=getattr(qdata_rounding_mode, "value", qdata_rounding_mode),
+        random_key=random_key,
     )
     return outputs[0], outputs[1]
 
@@ -7359,9 +7385,11 @@ def quantize_tensor_dual(
     qdata_dtype: torch.dtype,
     scaling_algorithm: ScalingAlgorithm,
     swizzle_type: SwizzleType,
+    qdata_rounding_mode: RoundingMode = RoundingMode.RTNE,
+    random_key: Tensor | None = None,
     scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    r"""quantize_tensor_dual(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
+    r"""quantize_tensor_dual(input, *, scaling_type, qdata_dtype, scaling_algorithm, swizzle_type, qdata_rounding_mode=RoundingMode.RTNE, random_key=None, scaling_type_use_square_block_size=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
     Quantize a contiguous 2D tensor along both dim-k and dim-m dimensions in one
     pass. See :func:`quantize_tensor` to quantize along one dimension.
@@ -7391,6 +7419,14 @@ def quantize_tensor_dual(
           Currently supported values: ``ScalingAlgorithm.MXFP_E8M0_RU``.
         swizzle_type (SwizzleType): The swizzle to apply to output inner scale.
           Currently supported values: ``SwizzleType.SWIZZLE_32_4_4``.
+        qdata_rounding_mode (RoundingMode, optional): Round qdata to nearest,
+          ties to even (``RTNE``), or use NVIDIA stochastic FP8 rounding
+          (``STOCHASTIC``). Stochastic rounding does not change either scale.
+          Default: ``RoundingMode.RTNE``.
+        random_key (Tensor, optional): A two-element ``uint64`` Philox key on
+          the input device. With ``STOCHASTIC``, a key produces reproducible
+          stateless rounding; ``None`` uses the device's default CUDA generator.
+          A key cannot be passed with ``RTNE``. Default: ``None``.
         scaling_type_use_square_block_size (bool, optional): When ``True``,
           modify the size of the local region corresponding to a single scale
           value to be a square (for example, modify ``1x32`` to be ``32x32``).
@@ -7428,6 +7464,8 @@ def quantize_tensor_dual(
         scaling_algorithm=getattr(scaling_algorithm, "value", scaling_algorithm),
         swizzle_type=swizzle_type.value,
         scaling_type_use_square_block_size=scaling_type_use_square_block_size,
+        qdata_rounding_mode=getattr(qdata_rounding_mode, "value", qdata_rounding_mode),
+        random_key=random_key,
     )
     return outputs[0], outputs[1], outputs[2], outputs[3]
 

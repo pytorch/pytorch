@@ -714,6 +714,8 @@ def quantize_tensor(
     qdata_dtype: _dtype,
     scaling_algorithm: ScalingAlgorithm,
     swizzle_type: SwizzleType,
+    qdata_rounding_mode: RoundingMode = RoundingMode.RTNE,
+    random_key: Tensor | None = None,
     scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor]: ...
 
@@ -726,6 +728,8 @@ def quantize_tensor_dual(
     qdata_dtype: _dtype,
     scaling_algorithm: ScalingAlgorithm,
     swizzle_type: SwizzleType,
+    qdata_rounding_mode: RoundingMode = RoundingMode.RTNE,
+    random_key: Tensor | None = None,
     scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]: ...
 
@@ -845,6 +849,12 @@ class ScalingAlgorithm(IntEnum):
     MXFP_E8M0_RU = 0
 
 __all__ += ["ScalingAlgorithm"]
+
+class RoundingMode(IntEnum):
+    RTNE = 0
+    STOCHASTIC = 1
+
+__all__ += ["RoundingMode"]
 
 def selu(input: Tensor, inplace: bool = ...) -> Tensor: ...
 

@@ -5,6 +5,7 @@ from typing import NamedTuple, TypeAlias
 import torch
 
 from ..utils import _device_capability
+from .blockscaled_tma_config import RoundingVariant
 from .blockscaled_tma_kernels import (
     _compile_blockscaled_tma,
     _QUANT_ORIENTATION_DIM_K,
@@ -39,6 +40,7 @@ class _BlockscaledTmaSpec(NamedTuple):
     quant_orientation_id: int
     do_dim_k: bool
     do_dim_m: bool
+    rounding_variant: RoundingVariant
     is_square_scaling: bool
     is_scale_swizzled: bool
     s_num_row_blk_k: int | None
@@ -57,12 +59,54 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
     scale_m: torch.Tensor | None
 
 
+class _PhiloxLaunch(NamedTuple):
+    seed: torch.Tensor | None = None
+    offset: torch.Tensor | None = None
+    seed_scalar: int | None = None
+    offset_words_scalar: int | None = None
+    intragraph_offset_words: int | None = None
+
+
+def _prepare_philox_launch(
+    rounding_variant: RoundingVariant,
+    random_key: torch.Tensor | None,
+    device: int,
+) -> _PhiloxLaunch:
+    if rounding_variant == RoundingVariant.RTNE:
+        return _PhiloxLaunch()
+    if rounding_variant == RoundingVariant.STATELESS_SR:
+        if random_key is None:
+            raise AssertionError("stateless rounding requires random_key")
+        return _PhiloxLaunch(seed=random_key.reshape(-1).view(torch.int64))
+
+    generator = torch.cuda.default_generators[device]
+    seed, offset, intragraph_offset = generator.philox_state(4)
+    if rounding_variant == RoundingVariant.STATEFUL_SR_CAPTURE:
+        if not seed.is_cuda or not offset.is_cuda:
+            raise RuntimeError(
+                "CUDA graph capture requires device-resident Philox state"
+            )
+        return _PhiloxLaunch(
+            seed=seed,
+            offset=offset,
+            intragraph_offset_words=int(intragraph_offset.item()),
+        )
+    if seed.is_cuda or offset.is_cuda:
+        raise RuntimeError("eager execution requires host-resident Philox state")
+    return _PhiloxLaunch(
+        seed_scalar=int(seed.item()),
+        offset_words_scalar=int(offset.item()),
+    )
+
+
 def _validate_and_normalize_blockscaled_tma(
     input: torch.Tensor,
     *,
     quant_orientation: str,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    stochastic_rounding: bool,
+    random_key: torch.Tensor | None,
 ) -> _BlockscaledTmaSpec:
     """Validate public arguments and return their canonical host-side form."""
 
@@ -76,6 +120,26 @@ def _validate_and_normalize_blockscaled_tma(
             raise ValueError("compact scales currently support only dim-k output")
         if is_square_scaling:
             raise ValueError("compact scales do not support square scaling")
+
+    if not stochastic_rounding:
+        if random_key is not None:
+            raise ValueError("RTNE does not use random_key")
+        rounding_variant = RoundingVariant.RTNE
+    else:
+        if not is_scale_swizzled or is_square_scaling:
+            raise ValueError("stochastic rounding requires swizzled 1x32 scales")
+        if random_key is not None:
+            if random_key.dtype != torch.uint64 or random_key.numel() != 2:
+                raise ValueError("random_key must be a two-element uint64 tensor")
+            if random_key.device != input.device:
+                raise ValueError("random_key and input must be on the same device")
+            rounding_variant = RoundingVariant.STATELESS_SR
+        else:
+            rounding_variant = (
+                RoundingVariant.STATEFUL_SR_CAPTURE
+                if torch.cuda.is_current_stream_capturing()
+                else RoundingVariant.STATEFUL_SR_EAGER
+            )
 
     if input.dim() != 2:
         raise ValueError(
@@ -127,6 +191,7 @@ def _validate_and_normalize_blockscaled_tma(
         quant_orientation_id=quant_orientation_id,
         do_dim_k=do_dim_k,
         do_dim_m=do_dim_m,
+        rounding_variant=rounding_variant,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
         s_num_row_blk_k=s_num_row_blk_k,
@@ -155,6 +220,7 @@ def _prepare_blockscaled_tma_launch(
             input_dtype=input.dtype,
             quant_orientation=spec.quant_orientation,
             is_square_scaling=spec.is_square_scaling,
+            is_stochastic_qdata_rounding=spec.rounding_variant != RoundingVariant.RTNE,
         )
     if plan is not None and (
         # K <= 2**32 and tile_k_size >= 32 keep grid_k below the X limit.
@@ -301,12 +367,16 @@ def _blockscaled_tma_impl_on_current_device(
     quant_orientation: str,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    stochastic_rounding: bool,
+    random_key: torch.Tensor | None,
 ) -> _BlockscaledTmaOutput:
     spec = _validate_and_normalize_blockscaled_tma(
         input,
         quant_orientation=quant_orientation,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
+        stochastic_rounding=stochastic_rounding,
+        random_key=random_key,
     )
     launch = _prepare_blockscaled_tma_launch(input, spec)
 
@@ -322,8 +392,12 @@ def _blockscaled_tma_impl_on_current_device(
         launch.plan.cluster_k,
         launch.plan.needs_boundary_masking,
         spec.quant_orientation_id,
+        spec.rounding_variant,
         spec.is_square_scaling,
         spec.is_scale_swizzled,
+    )
+    philox = _prepare_philox_launch(
+        spec.rounding_variant, random_key, input.get_device()
     )
     fn(
         input,
@@ -331,6 +405,11 @@ def _blockscaled_tma_impl_on_current_device(
         launch.scale_k,
         launch.output_m,
         launch.scale_m,
+        philox.seed,
+        philox.offset,
+        philox.seed_scalar,
+        philox.offset_words_scalar,
+        philox.intragraph_offset_words,
         spec.M,
         spec.K,
         launch.plan.grid_m,
@@ -344,6 +423,8 @@ def _blockscaled_tma_impl(
     quant_orientation: str,
     is_square_scaling: bool,
     is_scale_swizzled: bool,
+    stochastic_rounding: bool = False,
+    random_key: torch.Tensor | None = None,
     **kwargs: object,
 ) -> _BlockscaledTmaOutput:
     if kwargs:
@@ -368,6 +449,8 @@ def _blockscaled_tma_impl(
             quant_orientation=quant_orientation,
             is_square_scaling=is_square_scaling,
             is_scale_swizzled=is_scale_swizzled,
+            stochastic_rounding=stochastic_rounding,
+            random_key=random_key,
         )
 
     if device == torch.cuda.current_device():

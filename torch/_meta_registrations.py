@@ -7544,6 +7544,39 @@ def _check_quantize_tensor_recipe(
     )
 
 
+def _check_quantize_tensor_rounding(
+    input: torch.Tensor,
+    qdata_rounding_mode: int,
+    random_key: torch.Tensor | None,
+    swizzle_type: int,
+    scaling_type_use_square_block_size: bool,
+    op_name: str,
+) -> None:
+    from torch.nn.functional import RoundingMode, SwizzleType
+
+    torch._check_value(
+        qdata_rounding_mode in (RoundingMode.RTNE.value, RoundingMode.STOCHASTIC.value),
+        lambda: f"{op_name} has an unsupported qdata_rounding_mode",
+    )
+    if qdata_rounding_mode == RoundingMode.RTNE.value:
+        torch._check_value(random_key is None, lambda: "RTNE does not use random_key")
+        return
+    torch._check_value(
+        swizzle_type == SwizzleType.SWIZZLE_32_4_4.value
+        and not scaling_type_use_square_block_size,
+        lambda: f"{op_name} stochastic rounding requires swizzled 1x32 scales",
+    )
+    if random_key is not None:
+        torch._check_value(
+            random_key.dtype == torch.uint64 and random_key.numel() == 2,
+            lambda: "random_key must be a two-element uint64 tensor",
+        )
+        torch._check_value(
+            random_key.device == input.device,
+            lambda: "random_key and input must be on the same device",
+        )
+
+
 @register_meta([aten._quantize_tensor.default])
 def meta_quantize_tensor(
     input: torch.Tensor,
@@ -7552,6 +7585,8 @@ def meta_quantize_tensor(
     scaling_algorithm: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool = False,
+    qdata_rounding_mode: int = 0,
+    random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
     from torch.nn.functional import SwizzleType
 
@@ -7568,6 +7603,14 @@ def meta_quantize_tensor(
         )
     _check_quantize_tensor_recipe(
         input, qdata_dtype, scaling_algorithm, scaling_type, "quantize_tensor"
+    )
+    _check_quantize_tensor_rounding(
+        input,
+        qdata_rounding_mode,
+        random_key,
+        swizzle_type,
+        scaling_type_use_square_block_size,
+        "quantize_tensor",
     )
     swizzled_value = SwizzleType.SWIZZLE_32_4_4.value
     torch._check_value(
@@ -7611,6 +7654,8 @@ def meta_quantize_tensor_dual(
     scaling_algorithm: int,
     swizzle_type: int,
     scaling_type_use_square_block_size: bool = False,
+    qdata_rounding_mode: int = 0,
+    random_key: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
     from torch.nn.functional import SwizzleType
 
@@ -7631,6 +7676,14 @@ def meta_quantize_tensor_dual(
     )
     _check_quantize_tensor_recipe(
         input, qdata_dtype, scaling_algorithm, scaling_type, "quantize_tensor_dual"
+    )
+    _check_quantize_tensor_rounding(
+        input,
+        qdata_rounding_mode,
+        random_key,
+        swizzle_type,
+        scaling_type_use_square_block_size,
+        "quantize_tensor_dual",
     )
     torch._check_value(
         swizzle_type == SwizzleType.SWIZZLE_32_4_4.value,

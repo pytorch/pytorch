@@ -67,6 +67,10 @@ _MXFP8_NO_SWIZZLE_KWARGS = {
     **_MXFP8_KWARGS,
     "swizzle_type": SwizzleType.NO_SWIZZLE,
 }
+_MXFP8_SWIZZLED_KWARGS = {
+    **_MXFP8_KWARGS,
+    "swizzle_type": SwizzleType.SWIZZLE_32_4_4,
+}
 
 
 class TestMXFP8ReferenceNumerics(TestCase):
@@ -444,8 +448,45 @@ class TestQuantizeTensorMeta(TestCase):
         outputs = quantize_fn(input, **kwargs)
         self.assertTrue(all(output.requires_grad for output in outputs))
 
+    @parametrize("quantize_fn", (F.quantize_tensor, F.quantize_tensor_dual))
+    def test_meta_stochastic_rounding(self, quantize_fn):
+        input = torch.empty((32, 32), dtype=torch.bfloat16, device="meta")
+        key = torch.empty((2,), dtype=torch.uint64, device="meta")
+        kwargs = _MXFP8_SWIZZLED_KWARGS
+        with self.assertRaisesRegex(ValueError, "RTNE does not use random_key"):
+            quantize_fn(input, **kwargs, random_key=key)
+        with self.assertRaisesRegex(ValueError, "unsupported qdata_rounding_mode"):
+            quantize_fn(input, **kwargs, qdata_rounding_mode=7)
+        with self.assertRaisesRegex(ValueError, "two-element uint64"):
+            quantize_fn(
+                input,
+                **kwargs,
+                qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+                random_key=key.to(torch.int64),
+            )
+        with self.assertRaisesRegex(ValueError, "same device"):
+            quantize_fn(
+                input,
+                **kwargs,
+                qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+                random_key=torch.zeros(2, dtype=torch.uint64),
+            )
+        outputs = quantize_fn(
+            input,
+            **kwargs,
+            qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+            random_key=key,
+        )
+        self.assertEqual(len(outputs), 2 if quantize_fn is F.quantize_tensor else 4)
+        outputs_stateful = quantize_fn(
+            input, **kwargs, qdata_rounding_mode=F.RoundingMode.STOCHASTIC
+        )
+        self.assertEqual(len(outputs_stateful), len(outputs))
+
     def test_quantize_tensor_argument_names(self):
         self.assertEqual(F.ScalingAlgorithm.MXFP_E8M0_RU.value, 0)
+        self.assertEqual(F.RoundingMode.RTNE.value, 0)
+        self.assertEqual(F.RoundingMode.STOCHASTIC.value, 1)
         public_names = tuple(inspect.signature(F.quantize_tensor).parameters)
         dual_names = tuple(inspect.signature(F.quantize_tensor_dual).parameters)
         native = torch.ops.aten._quantize_tensor.default._schema.arguments
@@ -458,25 +499,32 @@ class TestQuantizeTensorMeta(TestCase):
                 "qdata_dtype",
                 "scaling_algorithm",
                 "swizzle_type",
+                "qdata_rounding_mode",
+                "random_key",
                 "scaling_type_use_square_block_size",
             ),
         )
         self.assertEqual(public_names, dual_names)
         native_names = tuple(arg.name for arg in native)
         self.assertEqual(native_names, tuple(arg.name for arg in native_dual))
-        self.assertEqual(public_names, native_names)
+        self.assertEqual(sorted(public_names), sorted(native_names))
         for fn in (F.quantize_tensor, F.quantize_tensor_dual):
             params = tuple(inspect.signature(fn).parameters.values())
             self.assertEqual(params[0].kind, inspect.Parameter.POSITIONAL_OR_KEYWORD)
             for param in params[1:]:
                 self.assertEqual(param.kind, inspect.Parameter.KEYWORD_ONLY)
             self.assertEqual(params[4].default, inspect.Parameter.empty)
+            self.assertEqual(params[5].default, F.RoundingMode.RTNE)
+            self.assertIsNone(params[6].default)
+            self.assertFalse(params[7].default)
         for schema_args in (native, native_dual):
             self.assertEqual(str(schema_args[3].type), "int")
             self.assertFalse(schema_args[0].kwarg_only)
             for arg in schema_args[1:]:
                 self.assertTrue(arg.kwarg_only)
             self.assertFalse(schema_args[4].has_default_value())
+            self.assertEqual(schema_args[6].default_value, F.RoundingMode.RTNE.value)
+            self.assertIsNone(schema_args[7].default_value)
 
     @parametrize(
         "shape,transposed,square,swizzle",
