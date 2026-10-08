@@ -1665,14 +1665,7 @@ Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
       return out;
     }
   }
-  // A default alpha is dropped before reaching Python, so the ref sees None.
-  const bool default_alpha = !alpha.isSymbolic() && alpha.type() == kLong && alpha.toLong() == 1;
-  return binary_ref_meta(
-      self,
-      other,
-      ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT,
-      symbolic,
-      default_alpha ? std::nullopt : std::optional<Scalar>(alpha));
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic, alpha);
 }
 
 // sub.Tensor meta kernel
