@@ -28,6 +28,7 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
+from torch._higher_order_ops.flydsl_kernel_wrap import _is_flydsl_kernel_wrapper
 from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx._symbolic_trace import _ConstantAttributeType
@@ -113,12 +114,6 @@ log = logging.getLogger(__name__)
 
 class SerializeError(RuntimeError):
     pass
-
-
-def _is_flydsl_kernel_wrapper(target: Any) -> bool:
-    return target is torch._higher_order_ops.flydsl_kernel_wrapper_mutation or (
-        target is torch._higher_order_ops.flydsl_kernel_wrapper_functional
-    )
 
 
 def _reverse_map(d: dict[Any, Enum]):
@@ -4256,7 +4251,11 @@ def canonicalize(
     sorted_outs = sorted(
         enumerate(zip(graph.outputs, signature.output_specs)), key=rank_output
     )
-    sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
+    if len(sorted_outs) > 0:
+        sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
+    else:
+        sorted_outputs = ()
+        output_specs = ()
 
     sorted_graph, replace_table = _canonicalize_graph(
         sorted_inputs, sorted_outputs, graph, constants

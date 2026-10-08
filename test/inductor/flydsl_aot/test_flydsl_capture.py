@@ -4,6 +4,8 @@
 
 import inspect
 import io
+import os
+import tempfile
 import unittest
 from collections.abc import Callable
 from dataclasses import replace
@@ -712,6 +714,36 @@ class FlyDSLCaptureTest(TestCase):
                 legacy_artifact.seek(0)
                 with self.assertRaisesRegex(RuntimeError, "error when deserializing"):
                     torch.export.load(legacy_artifact)
+
+    def test_graph_pickler_rejects_process_local_indices(self):
+        captured = TraceableFlyDSLLauncher(_EagerLauncher(), (0, 1))
+        call_spec_idx = flydsl_launcher_side_table.add_call_spec({})
+        torch._dynamo.allow_in_graph(flydsl_kernel_wrapper_mutation)
+
+        def fn(inp):
+            out = torch.empty_like(inp)
+            workspace = torch.empty_like(inp)
+            flydsl_kernel_wrapper_mutation(
+                captured.launcher_idx,
+                call_spec_idx,
+                (out, workspace, inp),
+                (0, 1),
+            )
+            return out + workspace
+
+        inp = torch.arange(4, dtype=torch.float32)
+        with self.assertRaisesRegex(NotImplementedError, "process-local"):
+            torch.compile(fn, backend="aot_eager", fullgraph=True).aot_compile(
+                ((inp,), {})
+            )
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True).aot_compile(
+            ((inp,), {})
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with self.assertRaisesRegex(NotImplementedError, "process-local"):
+                compiled.save_compiled_function(os.path.join(tmp_dir, "model.pt"))
 
     def test_hop_reports_tensor_subclass_once(self):
         class TensorSubclass(torch.Tensor):

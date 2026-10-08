@@ -52,6 +52,7 @@ from torch._C._distributed_c10d import (
     FlightRecorderHook,
     GatherOptions,
     get_debug_level,
+    HealthCheckHook,
     NanCheckHook,
     PrefixStore,
     ProcessGroup,
@@ -230,7 +231,22 @@ def _use_torchcomms_enabled() -> bool:
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
 
 
+def _resolve_torchcomms_backend(backend: str) -> str:
+    backend = backend.lower()
+    if (
+        backend == "nccl"
+        and torch.version.hip is not None
+        and (
+            _torchcomms_is_backend_registered("rccl")
+            or _torchcomms_is_backend_built("rccl")
+        )
+    ):
+        return "rccl"
+    return backend
+
+
 def _is_torchcomms_backend(backend: str) -> bool:
+    backend = _resolve_torchcomms_backend(backend)
     return _use_torchcomms_enabled() and (
         _torchcomms_is_backend_registered(backend)
         or _torchcomms_is_backend_built(backend)
@@ -262,6 +278,7 @@ def _torchcomms_handles_backend(backend) -> bool:
         name = part.split(":", 1)[1] if ":" in part else part
         if not name:
             continue
+        name = _resolve_torchcomms_backend(name)
         if not (
             _torchcomms_is_backend_registered(name)
             or _torchcomms_is_backend_built(name)
@@ -342,6 +359,8 @@ def _create_torchcomms_backend(
     store: Store,
     device_id: torch.device | None,
     backend_options: object | None,
+    timeout: timedelta | None = None,
+    enable_reconfigure: bool = False,
 ) -> C10DBackend:
     """Create a c10d BackendWrapper for one TorchComms backend instance."""
     if not _TORCHCOMM_AVAILABLE:
@@ -364,12 +383,18 @@ def _create_torchcomms_backend(
     os.environ["TORCHCOMM_RANK"] = str(group_rank)
     os.environ["TORCHCOMM_SIZE"] = str(group_size)
     try:
+        dynamic_options: dict[str, object] = {}
+        if enable_reconfigure:
+            dynamic_options["enable_reconfigure"] = True
+            if timeout is not None:
+                dynamic_options["timeout"] = timeout
         comm = new_comm(
-            backend,
+            _resolve_torchcomms_backend(backend),
             torch_device,
             name=group_name,
             store=store,
             hints=hints,
+            **dynamic_options,
         )
     finally:
         for key, value in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), saved_rank_size):
@@ -378,14 +403,20 @@ def _create_torchcomms_backend(
             else:
                 os.environ[key] = value
 
+    # Local references retain ownership until publication, so setup failures
+    # release the communicator through C++ RAII.
+    backend_wrapper = _BackendWrapper(comm)
+
     buffer_size = os.environ.get(
         "TORCH_FR_BUFFER_SIZE",
         os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
     )
     recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
     recorder.register_with_comm(comm)
+
+    # Publish only after hook registration and wrapper setup succeed.
     _world.comms.append(comm)
-    return _BackendWrapper(comm)
+    return backend_wrapper
 
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
@@ -2514,7 +2545,10 @@ def init_process_group(
             See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
         device_id (torch.device | int, optional): a single, specific device
             this process will work on, allowing for backend-specific
-            optimizations.  Currently this has two effects, only under
+            optimizations. Both accelerator devices (e.g. ``cuda:0``) and
+            CPU devices (e.g. ``cpu:0``) are accepted; on CPU, this currently
+            only validates and records the device, without any of the NCCL-specific
+            optimizations described below. Currently this has two effects, only under
             NCCL: the communicator is immediately formed (calling
             ``ncclCommInit*`` immediately rather than the normal lazy
             call) and sub-groups will use ``ncclCommSplit`` when
@@ -2943,9 +2977,10 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
+    if device_id is not None and device_id.index is None:
         raise ValueError(
-            "init_process_group device_id parameter must be an accelerator with an index"
+            "init_process_group device_id parameter must be a device with a "
+            "valid index, e.g. cpu:0 or cuda:0"
         )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
@@ -3043,7 +3078,7 @@ def _new_process_group_helper(
                 if os.environ.get("TORCH_DISTRIBUTED_USE_TORCHCOMMS")
                 else "dist_config.use_torchcomms",
                 _resolve_torchcomms_device(device, device_id),
-                backend_str,
+                _resolve_torchcomms_backend(backend_str),
             )
             backend_class = _create_torchcomms_backend(
                 backend_str,
@@ -3054,6 +3089,8 @@ def _new_process_group_helper(
                 store=backend_prefix_store,
                 device_id=device_id,
                 backend_options=backend_options,
+                timeout=timeout,
+                enable_reconfigure=enable_reconfigure,
             )
             # Use the underlying backend's BackendType so distinct torchcomms
             # backends (e.g. gloo vs nccl in a "cpu:gloo,cuda:nccl" PG) don't
@@ -3160,6 +3197,8 @@ def _new_process_group_helper(
     if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
         NanCheckHook.attach(pg)
 
+    HealthCheckHook.attach(pg)
+
     # Backend-agnostic FlightRecorder recording, for backends with no native
     # integration. Attached here (rather than lazily) so a group is recorded
     # from its very first collective, and after _set_group_name/_set_group_desc
@@ -3197,6 +3236,13 @@ def _new_process_group_helper(
             pg_tag=f"user:{pg_tag}",
         )
     return pg, prefix_store
+
+
+def _release_nvshmem_team_pool(group_name: str) -> None:
+    # NVSHMEM is optional, so this binding is present only in NVSHMEM builds.
+    release = getattr(torch._C._distributed_c10d, "_release_nvshmem_team_pool", None)
+    if release is not None:
+        release(group_name)
 
 
 def destroy_process_group(
@@ -3247,6 +3293,7 @@ def destroy_process_group(
         for pg_to_shutdown in sorted(
             _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
         ):
+            _release_nvshmem_team_pool(_world.pg_names[pg_to_shutdown])
             pg_to_shutdown.shutdown()
 
         _update_default_pg(None)
@@ -3288,6 +3335,7 @@ def destroy_process_group(
                 _world.comms[:] = [
                     comm for comm in _world.comms if id(comm) not in finalized_comm_ids
                 ]
+        _release_nvshmem_team_pool(_world.pg_names[pg])
         pg.shutdown()
         del _world.pg_map[pg]
         del _world.pg_names[pg]
@@ -4439,27 +4487,19 @@ def all_gather_object(
     object_sizes_tensor = torch.zeros(
         group_size, dtype=torch.long, device=current_device
     )
-    object_size_list = [
-        object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
-    ]
     # Allgather tensor sizes
-    all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
+    all_gather_single(object_sizes_tensor, local_size, group=group)
+    max_object_size = int(object_sizes_tensor.max().item())
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
         max_object_size * group_size, dtype=torch.uint8, device=current_device
     )
-    # Output tensors are nonoverlapping views of coalesced_output_tensor
-    output_tensors = [
-        coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
-        for i in range(group_size)
-    ]
-    all_gather(output_tensors, input_tensor, group=group)
+    # Allgather the object data into a single coalesced output tensor.
+    all_gather_single(coalesced_output_tensor, input_tensor, group=group)
     # Deserialize outputs back to object.
-    for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.uint8)
-        tensor_size = object_size_list[i]
+    for i, tensor in enumerate(coalesced_output_tensor.chunk(group_size)):
+        tensor_size = object_sizes_tensor[i]
         object_list[i] = cast(
             _T, _tensor_to_object(tensor, tensor_size, group, weights_only)
         )
@@ -6998,6 +7038,7 @@ def split_group(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
         )
 
+    HealthCheckHook.attach(split_pg)
     _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
 
     # update global state
