@@ -847,16 +847,14 @@ class CachingAutotuner(KernelInterface):
             raise NoTritonConfigsError("No triton configs are available")
 
         compile_results = []
-        exc = None
+        exc_msg = ""
         for c in self.configs:
             try:
                 compile_results.append(self._precompile_config(c))
             except (OutOfResources, PTXASError, IntelGPUError) as e:
-                exc = e
+                exc_msg = f"{type(e).__name__}: {e}"
         if len(compile_results) == 0:
-            raise NoTritonConfigsError(
-                f"No valid triton configs. {type(exc).__name__}: {exc}"
-            )
+            raise NoTritonConfigsError(f"No valid triton configs. {exc_msg}")
         self.compile_results = compile_results
         self.configs = None
 
