@@ -788,7 +788,8 @@ class FSDPModule:
         """
         Overrides the default ``reduce_scatter`` communication behavior,
         to have better control over the communication and memory usage.
-        See `Comm` and `ReduceScatter` for details.
+        See `Comm` and `ReduceScatter` for details. The comm is not used when
+        the reduce-scatter group has size 1 since no reduce-scatter runs.
 
         Args:
             comm (ReduceScatter): Custom reduce_scatter communication.
@@ -967,14 +968,16 @@ class FSDPModule:
         once -- the copy-in (``chunk_cat``) buffer cap-K (experimental).
 
         FSDP keeps **1** such buffer in flight by default, so the compute stream
-        must wait on the previous reduce-scatter before the next copy-in can
-        reuse that buffer. When the reduce-scatter is exposed (communication
+        must wait until the previous buffer is no longer in use before the next
+        copy-in can reuse it. When the reduce-scatter is exposed (communication
         slower than the backward compute meant to hide it), that recycle wait
         stalls the compute stream. Raising the cap lets the next copy-in write a
         **fresh** buffer instead of waiting -- removing the stall -- at the cost
         of extra peak memory for the retained buffers. The copy-in stays on the
         compute stream; there is no extra stream and no ``record_stream``. This
-        helps only when the reduce-scatter is exposed.
+        helps only when the reduce-scatter is exposed. For a reduce-scatter group
+        of size 1, the buffer is used until the post-reduce ops finish and, when
+        it backs the sharded gradients, retaining it costs no extra memory.
 
         Args:
             max_input_buffers (int): Max reduce-scatter input buffers retained in
