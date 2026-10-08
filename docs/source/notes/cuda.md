@@ -1366,9 +1366,11 @@ pages to be allocated and mapped on first access, so the first copy can be
 limited by memory allocation and page faults rather than link bandwidth.
 CUDA may stage a copy into fresh pageable memory through an intermediate
 pinned buffer, adding a CPU copy into the destination.
-Pinned memory also has allocation and registration costs; allocating a new
-pinned buffer for every transfer can move these costs outside the copy
-without eliminating them.
+Pinned memory also has allocation and registration costs, but
+they are paid upfront during allocation. For benchmarking,
+this must be taken into account, see further below. However,
+pinned memory always avoids the CPU-based staging buffer
+and copy that may be used for pageable memory.
 
 Reusing a pageable buffer can also amortize
 these costs as long as its pages remain mapped and physically allocated.
