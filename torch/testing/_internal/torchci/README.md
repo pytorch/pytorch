@@ -102,7 +102,7 @@ change bumps the minor version (`"0.1"` to `"0.2"`); additive changes keep it.
 ## Enablement
 
 On by default in CI, like `--save-xml`. `test/run_test.py` and tests using
-`common_utils.run_tests` accept `--save-test-run-reports [DIR]` and `--no-save-test-run-reports`. Each
+`common_utils.run_tests` accept `--save-torchci-reports [DIR]` and `--no-save-torchci-reports`. Each
 test file gets its own folder, `<DIR>/<file>/`, with path separators replaced by
 dots (`distributed.test_c10d_nccl`). `run_test.py` defaults to
 `test/torchci-reports` and resolves a relative `DIR` under `test/`; `run_tests`
@@ -124,6 +124,6 @@ uploads the GitHub artifact
 With PyTorch built from this branch, from the repo root:
 
 ```bash
-python test/run_test.py -i test_type_info --save-test-run-reports
+python test/run_test.py -i test_type_info --save-torchci-reports
 cat test/torchci-reports/test_type_info/*.jsonl | python -m json.tool --json-lines
 ```

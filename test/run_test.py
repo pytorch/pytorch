@@ -100,7 +100,7 @@ except ImportError:
 
 
 # The installed torch (sometimes a nightly) may predate the test run report writer.
-HAS_TEST_RUN_REPORTS = bool(importlib.util.find_spec("torch.testing._internal.torchci"))
+HAS_TORCHCI_REPORTS = bool(importlib.util.find_spec("torch.testing._internal.torchci"))
 
 
 from torch.testing._internal.common_utils import HardwareClassification
@@ -526,16 +526,16 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     return executable
 
 
-def _test_run_report_args(
+def _torchci_report_args(
     test_file: str, is_cpp_test: bool, reports_dir: str | None
 ) -> list[str]:
-    if not HAS_TEST_RUN_REPORTS:
+    if not HAS_TORCHCI_REPORTS:
         return []
     if not is_cpp_test:
         # Explicit either way, since run_tests defaults to on in CI.
         if reports_dir:
-            return [f"--save-test-run-reports={reports_dir}"]
-        return ["--no-save-test-run-reports"]
+            return [f"--save-torchci-reports={reports_dir}"]
+        return ["--no-save-torchci-reports"]
     if not reports_dir:
         return []
     # C++ tests run under pytest-cpp, not run_tests, so register the plugin here.
@@ -621,8 +621,8 @@ def run_test(
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
-    reports_dir = options.save_test_run_reports
-    unittest_args += _test_run_report_args(test_file, is_cpp_test, reports_dir)
+    reports_dir = options.save_torchci_reports
+    unittest_args += _torchci_report_args(test_file, is_cpp_test, reports_dir)
 
     if options.hw_classification:
         # forward hw classification filter to test subprocess
@@ -857,10 +857,10 @@ def run_test_retries(
         except FileNotFoundError:
             return None
 
-    def finish_test_run_report(ret_code: int, elapsed: float) -> None:
+    def finish_torchci_report(ret_code: int, elapsed: float) -> None:
         # The report writer publishes its path and in-flight run here; a process
         # that died left that run unrecorded.
-        if not HAS_TEST_RUN_REPORTS:
+        if not HAS_TORCHCI_REPORTS:
             return
         try:
             from torch.testing._internal.torchci import recovery
@@ -900,7 +900,7 @@ def run_test_retries(
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
         if ret_code != 0:
-            finish_test_run_report(ret_code, elapsed)
+            finish_torchci_report(ret_code, elapsed)
 
         # Read what just failed/ran
         try:
@@ -1523,9 +1523,9 @@ def run_ci_sanity_check(test: ShardedTest, test_directory, options):
         os.remove(file)
     for dirname in glob.glob(f"{test_reports_dir}/**/{test.name}"):
         shutil.rmtree(dirname)
-    if options.save_test_run_reports:
+    if options.save_torchci_reports:
         name = sanitize_test_filename(test.name)
-        shutil.rmtree(Path(options.save_test_run_reports) / name, ignore_errors=True)
+        shutil.rmtree(Path(options.save_torchci_reports) / name, ignore_errors=True)
     return 0
 
 
@@ -1707,7 +1707,7 @@ def parse_args():
     )
     reports_dir = str(REPO_ROOT / "test/torchci-reports")
     parser.add_argument(
-        "--save-test-run-reports",
+        "--save-torchci-reports",
         nargs="?",
         const=reports_dir,
         default=reports_dir if IS_CI else None,
@@ -1715,8 +1715,8 @@ def parse_args():
         help="write test run reports (default: test/torchci-reports)",
     )
     parser.add_argument(
-        "--no-save-test-run-reports",
-        dest="save_test_run_reports",
+        "--no-save-torchci-reports",
+        dest="save_torchci_reports",
         action="store_const",
         const=None,
         default=argparse.SUPPRESS,
@@ -1882,9 +1882,9 @@ def parse_args():
     if "--" in extra:
         extra.remove("--")
     # Tests run from test/, so a relative DIR means test/DIR.
-    reports_dir = args.save_test_run_reports
+    reports_dir = args.save_torchci_reports
     if reports_dir and not os.path.isabs(reports_dir):
-        args.save_test_run_reports = str(REPO_ROOT / "test" / reports_dir)
+        args.save_torchci_reports = str(REPO_ROOT / "test" / reports_dir)
     args.additional_args = extra
     return args
 
