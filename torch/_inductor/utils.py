@@ -2964,6 +2964,33 @@ def use_triton_blackwell_tma_template(
     return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
 
 
+def use_triton_blackwell_bmm_template(
+    mat1: IRNode, mat2: IRNode, output_layout: Layout
+) -> bool:
+    """Whether tuned_bmm/tuned_baddbmm may offer the Blackwell persistent TMA BMM template.
+
+    These are the gates shared with the Blackwell mm template. The template's
+    config heuristic rejects the remaining inputs (symbolic sizes or strides,
+    layouts TMA cannot describe) itself, so this does not repeat those checks.
+    """
+    if (
+        not config.triton.enable_persistent_tma_matmul
+        or torch.version.hip
+        or output_layout.device.type != "cuda"
+    ):
+        return False
+    if not _descriptor_shapes_fit_in_int32(
+        [mat1.get_size(), mat2.get_size(), output_layout.size]
+    ):
+        return False
+
+    from torch.utils._triton import has_triton_tensor_descriptor_host_tma
+
+    from .codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+
+    return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
+
+
 def use_triton_scaling_template(
     scale_option_a: ScalingType,
     scale_option_b: ScalingType,
