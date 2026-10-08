@@ -28,6 +28,7 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
+from torch._higher_order_ops.flydsl_kernel_wrap import _is_flydsl_kernel_wrapper
 from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx._symbolic_trace import _ConstantAttributeType
@@ -820,6 +821,11 @@ class GraphModuleSerializer(metaclass=Final):
                 outputs=self.serialize_outputs(node),
                 # TODO: create a new tensor_values here, meta might have faketensor info
                 metadata=self.serialize_metadata(node),
+            )
+        elif _is_flydsl_kernel_wrapper(node.target):
+            raise SerializeError(
+                "torch.export serialization of FlyDSL kernel wrappers is unsupported "
+                "because launcher and call-spec indices are process-local"
             )
         elif isinstance(node.target, torch._ops.HigherOrderOperator):
 
@@ -2692,6 +2698,11 @@ class GraphModuleDeserializer(metaclass=Final):
         ):
             raise SerializeError(
                 "deserialize nyi for torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional"
+            )
+        elif _is_flydsl_kernel_wrapper(target):
+            raise SerializeError(
+                "torch.export deserialization of FlyDSL kernel wrappers is unsupported "
+                "because launcher and call-spec indices are process-local"
             )
         elif isinstance(target, torch._ops.HigherOrderOperator):
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
