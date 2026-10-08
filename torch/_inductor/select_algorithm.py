@@ -2087,7 +2087,11 @@ class TritonTemplateKernel(TritonKernel):
             and sig.outer_name == self.workspace_arg.outer_name
         )
         for reduction in self.partial_reductions:
-            result.writeline(_partials_finish(f"args[{idx}]", reduction))
+            finish = _partials_finish(f"args[{idx}]", reduction)
+            # Like the wrapper, cast the fp32 partials to the output dtype.
+            if (dtype := V.graph.get_dtype(reduction.buffer)) != torch.float:
+                finish += f".to({dtype})"
+            result.writeline(finish)
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         # Grid args are only used for benchmarking, not correctness
