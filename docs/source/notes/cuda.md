@@ -1370,7 +1370,7 @@ Pinned memory also has allocation and registration costs; allocating a new
 pinned buffer for every transfer can move these costs outside the copy
 without eliminating them.
 
-On hardware-coherent systems, reusing a pageable buffer can also amortize
+Reusing a pageable buffer can also amortize
 these costs as long as its pages remain mapped and physically allocated.
 Once populated, pageable and pinned buffers can have similar transfer
 performance. Reuse does not pin pageable memory: it remains eligible for
