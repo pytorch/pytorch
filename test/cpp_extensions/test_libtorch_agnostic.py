@@ -4,6 +4,7 @@ import gc
 import math
 import sysconfig
 import unittest
+import weakref
 from pathlib import Path
 
 import torch
@@ -2578,6 +2579,44 @@ instantiate_device_type_tests(
 )
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
+
+
+@skipIfTorchVersionLessThan(2, 16)
+@unittest.skipUnless(torch.distributed.is_available(), "requires distributed support")
+@unittest.skipIf(
+    sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
+    "requires CPython limited API",
+)
+class TestStableC10dExtension(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        try:
+            from libtorch_agn_2_16 import _c10d  # noqa: F401
+        except ImportError:
+            install_cpp_extension(Path(__file__).parent / "libtorch_agn_2_16_extension")
+
+    def test_process_group_copy(self):
+        from libtorch_agn_2_16 import _c10d as api
+
+        group = torch.distributed.ProcessGroup(0, 1)
+        reference = weakref.ref(group)
+        original = api.process_group(group)
+        copied = api.copy_group(original)
+        del group, original
+        gc.collect()
+        self.assertIsNotNone(reference())
+        self.assertEqual(api.group_info(copied)[:2], (0, 1))
+        del copied
+        gc.collect()
+        self.assertIsNone(reference())
+
+    def test_invalid_process_group(self):
+        from libtorch_agn_2_16 import _c10d as api
+
+        with self.assertRaisesRegex(RuntimeError, "expected ProcessGroup"):
+            api.process_group(None)
+
 
 if __name__ == "__main__":
     run_tests()

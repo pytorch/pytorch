@@ -177,3 +177,34 @@ auto tensor = torch::stable::empty(
 
 ```{doxygenfunction} torch::stable::sort(const torch::stable::Tensor &self, std::optional<bool> stable, int64_t dim, bool descending)
 ```
+
+## Process Groups and Collective Work
+
+Minimum compatible version: PyTorch 2.16.
+
+```{doxygenclass} torch::stable::c10d::ProcessGroup
+:members:
+:undoc-members:
+```
+
+```{doxygenclass} torch::stable::c10d::Work
+:members:
+:undoc-members:
+```
+
+```{doxygenenum} torch::stable::c10d::ReduceOp
+```
+
+**Example:**
+
+Given a Python ProcessGroup pointer `py_group` and a `torch::stable::Tensor`
+named `tensor`, sum the tensor in place across the group. Hold the GIL for
+`from_pyobject()` and retain `work` until the operation completes.
+
+```cpp
+#include <torch/csrc/stable/c10d.h>
+
+auto group = torch::stable::c10d::ProcessGroup::from_pyobject(py_group);
+auto work = group.allreduce({tensor}, torch::stable::c10d::ReduceOp::SUM);
+work.wait();
+```
