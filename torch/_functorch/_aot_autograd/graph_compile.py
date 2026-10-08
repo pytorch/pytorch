@@ -2465,21 +2465,16 @@ def _aot_stage2b_bw_compile(
                         bw_module_copy = copy.deepcopy(bw_module)
                     compiled_bw_func = bw_compiler(bw_module_copy, placeholder_list)
                     del bw_module_copy
-                except Exception as e:
+                except Exception:
                     if aot_config.force_non_lazy_backward_lowering:
                         raise
-                    exc = e
                     trace_structured(
                         "artifact",
                         metadata_fn=lambda: {
                             "name": "eager_compile_backwards_failure",
                             "encoding": "string",
                         },
-                        payload_fn=lambda: "\n".join(
-                            traceback.format_exception(
-                                type(exc), exc, exc.__traceback__
-                            )
-                        ),
+                        payload_fn=traceback.format_exc,
                     )
                     log.warning(
                         "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
