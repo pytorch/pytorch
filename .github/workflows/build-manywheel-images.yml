@@ -43,6 +43,9 @@ jobs:
     container:
       image: ghcr.io/actions/actions-runner:latest
     timeout-minutes: 240
+    # Preview publication is validated by its nightly lane and must not block
+    # supported builder images during bootstrap.
+    continue-on-error: ${{ matrix.tag == 'rocm-preview' }}
     strategy:
       fail-fast: false
       matrix:
