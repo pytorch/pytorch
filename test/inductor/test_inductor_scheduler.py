@@ -2872,6 +2872,68 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
         self.assertEqual(metrics.generated_kernel_count, 2)
 
+    # Pinned so the window below is the same on every device (CPU defaults to 50).
+    @inductor_config.patch(realize_opcount_threshold=30)
+    def test_broadcast_realizes_small_input_not_product(self, device):
+        # Large enough that the GPU splits the reduction. A smaller product
+        # fuses into an unsplit reduction and is never allocated either way.
+        K, N = 256, 128
+
+        def fn(x, w):
+            # x alone is under the opcount threshold (29), so expand() does not
+            # realize it, but x * w is over it (31). The (1, K, N) product must
+            # not be realized just to be read back by the sum: x is realized
+            # instead.
+            for _ in range(13):
+                x = x * 1.25 + 0.5
+            return (x[None, :, None] * w[None]).sum(1)
+
+        torch.manual_seed(0)
+        x = torch.randn(K, device=device)
+        w = torch.randn(K, N, device=device) / K**0.5
+        expected = fn(x, w)
+
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), x, w
+            )
+
+        self.assertEqual(expected, actual, atol=1e-4, rtol=1e-4)
+        self.assertNotIn(f"(1, {K}, {N})", code)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    @inductor_config.patch(coordinate_descent_tuning=True)
+    def test_m1_mm_decomposition_does_not_realize_product(self, device):
+        # With coordinate_descent_tuning, an M=1 mm is decomposed into
+        # (x.unsqueeze(2) * w.unsqueeze(0)).sum(1) in fp32. When x's producer
+        # and w's together cross realize_opcount_threshold, the (1, K, N)
+        # product must not be written to memory.
+        K, N = 256, 128
+
+        def fn(x, w):
+            for i in range(24):
+                x = x * 1.0009765625 if i % 2 == 0 else x + 0.0009765625
+            return x @ w
+
+        torch.manual_seed(0)
+        x = torch.randn(1, K, device=device, dtype=torch.bfloat16)
+        w = (torch.randn(K, N, device=device) / K**0.5).to(torch.bfloat16)
+        # Eager rounds x to bf16 after every op and inductor doesn't, so
+        # compare against fp32.
+        expected = fn(x.float(), w.float())
+
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), x, w
+            )
+
+        self.assertEqual(expected, actual.float(), atol=2e-2, rtol=2e-2)
+        self.assertNotIn("extern_kernels.mm", code)
+        self.assertNotIn(f"(1, {K}, {N})", code)
+
 
 class TestScoreFusionMemory(TestCase):
     """
