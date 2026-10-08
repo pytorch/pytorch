@@ -696,8 +696,13 @@ class DTensorTestMixin:
 
 class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
     @classmethod
+    def _selected_device_type(cls) -> str:
+        device_type = cls.device_type
+        return device_type if isinstance(device_type, str) else DEVICE_TYPE
+
+    @classmethod
     def backend_str(cls) -> str:
-        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        backend = dist.get_default_backend_for_device(cls._selected_device_type())
         return backend
 
     @classmethod
