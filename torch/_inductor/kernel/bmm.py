@@ -147,7 +147,7 @@ def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
 blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
     name="blackwell_bmm",
     grid=blackwell_bmm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_bmm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_bmm"),
     cache_codegen_enabled_for_template=True,
 )
 
