@@ -59,7 +59,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI200_ARCH,
-    MI350_ARCH,
     parametrize,
     skipIfTorchDynamo,
     TEST_WITH_ASAN,
@@ -594,11 +593,9 @@ ROCM_EAGER_EQUIV_XFAILS = {
         "log_softmax": {fp32},
     },
     "inductor_default": {
-        "exp": {fp32},
         "sigmoid": {fp32},
         "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
-        "nn.functional.silu": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
     },
@@ -628,7 +625,6 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
 
 ROCM_UNARY_NUMERICAL_XFAILS = {
     "inductor_default": {
-        "exp": {fp32},
         "sigmoid": {fp32},
         "sin": {fp32},
         "tan": {fp32},
@@ -721,19 +717,6 @@ def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
         # MI300/MI350, which stay xfailed (#191552). Checked at runtime, not
         # in ROCM_BATCH_INVARIANCE_XFAILS, because the arch query would force
         # import-time HIP init that this module otherwise avoids.
-        xfails.discard(fp32)
-    if (
-        backend == "inductor_default"
-        and (
-            (
-                test_type == "eager_equivalence"
-                and op_name in ("exp", "nn.functional.silu")
-            )
-            or (test_type == "unary_numerical" and op_name == "exp")
-        )
-        and isRocmArchAnyOf(MI350_ARCH)
-    ):
-        # Triton 3.9 fixes these exp/silu cases on MI350.
         xfails.discard(fp32)
     return dtype in xfails or ALL in xfails
 
