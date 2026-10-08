@@ -225,6 +225,77 @@ class ForeachTests(TestCase):
         super().tearDown()
         torch._inductor.metrics.reset()
 
+    @parametrize("device", ("cpu", GPU_TYPE))
+    def test_foreach_copy_cross_aliasing(self, device):
+        if device == GPU_TYPE and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        def fn(x, y):
+            torch._foreach_copy_([x, y], [y, x])
+            return x, y
+
+        x = torch.tensor([1.0], device=device)
+        y = torch.tensor([2.0], device=device)
+
+        expected = fn(x.clone(), y.clone())
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), y.clone())
+        self.assertEqual(actual, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    def test_foreach_copy_cross_aliasing_with_view_source(self):
+        def fn(x, y, z):
+            torch._foreach_copy_([x, y], [z, x.T])
+            return x, y
+
+        x = torch.arange(9.0).reshape(3, 3)
+        y = torch.arange(9.0, 18.0).reshape(3, 3)
+        z = torch.arange(18.0, 27.0).reshape(3, 3)
+        expected = fn(x.clone(), y.clone(), z)
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), y.clone(), z)
+        self.assertEqual(actual, expected)
+
+    @parametrize("device", ("cpu", GPU_TYPE))
+    @parametrize("source_order", ("self_first", "self_last", "cross_first"))
+    def test_foreach_copy_cross_aliasing_with_self_source(self, device, source_order):
+        if device == GPU_TYPE and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        def fn(x, y):
+            if source_order == "self_first":
+                sources = [x.T * 1.0, y + x]
+            elif source_order == "self_last":
+                sources = [x + 1.0, x.T * 1.0]
+            else:
+                sources = [y + x, x.T * 1.0]
+            torch._foreach_copy_([x, y], sources)
+            return x, y
+
+        x = torch.arange(9.0, device=device).reshape(3, 3)
+        y = torch.arange(9.0, 18.0, device=device).reshape(3, 3)
+
+        expected = fn(x.clone(), y.clone())
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), y.clone())
+        self.assertEqual(actual, expected)
+
+    @parametrize("device", ("cpu", GPU_TYPE))
+    @parametrize("destination_kind", ("direct", "view"))
+    def test_foreach_copy_preserves_allocating_noop_sources(
+        self, device, destination_kind
+    ):
+        if device == GPU_TYPE and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        def fn(x, y):
+            destination = x if destination_kind == "direct" else x.view_as(x)
+            torch._foreach_copy_([destination, y], [y + x, x * 1.0])
+            return x, y
+
+        x = torch.tensor([1.0], device=device)
+        y = torch.tensor([2.0], device=device)
+        expected = fn(x.clone(), y.clone())
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), y.clone())
+        self.assertEqual(actual, expected)
+
     def _test_single_list(self, op):
         if op in un_ops_under_test:
 

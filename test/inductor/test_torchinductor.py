@@ -140,6 +140,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -152,6 +153,7 @@ importlib.import_module("filelock")
 
 from torch._inductor import config, cpu_vec_isa, test_operators
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner, FxCompileMode
+from torch._inductor.fx_passes.joint_graph import remove_no_ops
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (  # noqa: F401
@@ -23299,6 +23301,84 @@ def _run_and_get_stripped_kernels(
 ) -> tuple[_T, list[str]]:
     result, codes = run_and_get_kernels(fn, *args, **kwargs)
     return result, [_strip_tmp_path(code) for code in codes]
+
+
+@instantiate_parametrized_tests
+class NoOpFoldingTests(InductorTestCase):
+    def test_identity_before_mm_is_folded(self):
+        def fn(x, y):
+            return torch.mm(x + 0, y)
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+        gm = make_fx(fn, tracing_mode="real")(x, y)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 1
+        )
+        remove_no_ops(gm, OrderedSet(), OrderedSet())
+        gm.recompile()
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 0
+        )
+        self.assertEqual(gm(x, y), fn(x, y))
+
+    @parametrize("mutation", ["direct", "view", "unbind"])
+    def test_identity_before_mm_preserves_mutated_replacement(self, mutation):
+        def fn(x, y):
+            value = x + 0
+            if mutation == "view":
+                x.view(-1).add_(10)
+            elif mutation == "unbind":
+                torch.unbind(x)[0].add_(10)
+            else:
+                x.add_(10)
+            return torch.mm(value, y)
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+        gm = make_fx(fn, tracing_mode="real")(x, y)
+        remove_no_ops(gm, OrderedSet(), OrderedSet())
+        gm.recompile()
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 1
+        )
+        self.assertEqual(gm(x.clone(), y), fn(x.clone(), y))
+
+    def test_identity_of_view_before_mm_preserves_base_mutation(self):
+        def fn(x, y):
+            view = x.view(2, 2)
+            value = view + 0
+            x.add_(10)
+            return torch.mm(value, y)
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+        gm = make_fx(fn, tracing_mode="real")(x, y)
+        remove_no_ops(gm, OrderedSet(), OrderedSet())
+        gm.recompile()
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 1
+        )
+        self.assertEqual(gm(x.clone(), y), fn(x.clone(), y))
+
+    @parametrize(
+        "op_name",
+        ["add", "sub", "mul", "div"],
+    )
+    @parametrize("consumer", ["sin", "sum"])
+    def test_identity_before_value_consumer_is_folded(self, op_name, consumer):
+        op = getattr(aten, op_name).Tensor
+        identity = 0 if op_name in ("add", "sub") else 1
+
+        def fn(x):
+            return getattr(torch, consumer)(op(x, identity))
+
+        x = torch.ones(2)
+        gm = make_fx(fn, tracing_mode="real")(x)
+        remove_no_ops(gm, OrderedSet(), OrderedSet())
+        gm.recompile()
+        self.assertEqual(len(gm.graph.find_nodes(op="call_function", target=op)), 0)
+        self.assertEqual(gm(x), fn(x))
 
 
 if __name__ == "__main__":
