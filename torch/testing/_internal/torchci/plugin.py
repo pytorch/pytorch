@@ -28,7 +28,8 @@ if TYPE_CHECKING:
     from _pytest.main import Session
     from _pytest.reports import TestReport
 
-# Set where the test runs; xdist ships it to the controller with the report.
+# Set where the test runs; xdist ships it to the controller with the report. Not
+# item.user_properties, which pytest also writes into the junit XML CI ingests.
 _DECLARED_CASE_NAME = "_torchci_declared_case_name"
 # Where run_test.py reads test/conftest.py's stepcurrent files; the report's path
 # and in-flight run (recovery.finish) are published next to them.
@@ -64,10 +65,12 @@ def _item_declared_case_name(item: Any) -> str:
     """The test's name before parametrize or device-type suffixes."""
     fallback = report.fallback_declared_case_name(item.nodeid)
     try:
-        function = item.obj
-        if function is None:
+        function = inspect.unwrap(item.obj)
+        # A function made by a factory, like create_test_func's inner test, is
+        # named for the factory's code, not for the test.
+        if "<locals>" in getattr(function, "__qualname__", "<locals>"):
             return fallback
-        name = getattr(inspect.unwrap(function), "__name__", fallback)
+        name = function.__name__
         case_name = report.identity(item.nodeid).case_name
         if case_name == name or case_name.startswith((name + "_", name + "[")):
             return name
@@ -197,7 +200,7 @@ class ReportWriter:
             if not run.failed_phase:
                 run.failed_phase = test_report.when
                 run.outcome_summary = _failure_summary(test_report)
-        elif test_report.skipped and not subtest and not run.skipped:
+        elif test_report.skipped and not (subtest or run.skipped or run.failed_phase):
             from _pytest.terminal import _get_raw_skip_reason
 
             run.skipped = True
