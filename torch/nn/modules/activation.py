@@ -1131,6 +1131,11 @@ class MultiheadAttention(Module):
     will be returned, and an additional speedup proportional to the fraction of the input
     that is padding can be expected.
 
+    ``query``/``key``/``value`` can also be NestedTensors with the ``torch.jagged``
+    layout, in which case a jagged NestedTensor is returned. This requires
+    ``batch_first=True`` and ``need_weights=False``; masks, ``is_causal``,
+    ``add_bias_kv`` and ``add_zero_attn`` are not supported for jagged inputs.
+
     Args:
         embed_dim: Total dimension of the model.
         num_heads: Number of parallel attention heads. Note that ``embed_dim`` will be split
@@ -1449,6 +1454,20 @@ class MultiheadAttention(Module):
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         if any_nested:
+            if (
+                not torch.jit.is_scripting()
+                and query.layout == key.layout == value.layout == torch.jagged
+            ):
+                attn_output = self._jagged_forward(
+                    query,
+                    key,
+                    value,
+                    key_padding_mask,
+                    need_weights,
+                    attn_mask,
+                    is_causal,
+                )
+                return attn_output, None
             raise AssertionError(
                 "MultiheadAttention does not support NestedTensor outside of its fast path. "
                 + f"The fast path was not hit because {why_not_fast_path}"
@@ -1521,6 +1540,72 @@ class MultiheadAttention(Module):
             return attn_output, attn_output_weights
         else:
             return attn_output, attn_output_weights
+
+    def _jagged_forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        key_padding_mask: Tensor | None,
+        need_weights: bool,
+        attn_mask: Tensor | None,
+        is_causal: bool,
+    ) -> Tensor:
+        # F.multi_head_attention_forward works on (L, N, E) inputs, which a jagged
+        # NestedTensor can't be transposed to, so this path calls SDPA directly.
+        if not self.batch_first:
+            raise ValueError(
+                "MultiheadAttention requires batch_first=True for jagged NestedTensor inputs"
+            )
+        if need_weights:
+            raise ValueError(
+                "MultiheadAttention does not support need_weights=True for jagged "
+                "NestedTensor inputs; pass need_weights=False"
+            )
+        if key_padding_mask is not None or attn_mask is not None or is_causal:
+            raise ValueError(
+                "MultiheadAttention does not support key_padding_mask, attn_mask or "
+                "is_causal for jagged NestedTensor inputs"
+            )
+        if self.bias_k is not None or self.add_zero_attn:
+            raise ValueError(
+                "MultiheadAttention does not support add_bias_kv or add_zero_attn for "
+                "jagged NestedTensor inputs"
+            )
+
+        if self._qkv_same_embed_dim:
+            q, k, v = F._in_projection_packed(
+                query, key, value, self.in_proj_weight, self.in_proj_bias
+            )
+        else:
+            if self.in_proj_bias is None:
+                b_q = b_k = b_v = None
+            else:
+                b_q, b_k, b_v = self.in_proj_bias.chunk(3)
+            q, k, v = F._in_projection(
+                query,
+                key,
+                value,
+                self.q_proj_weight,
+                self.k_proj_weight,
+                self.v_proj_weight,
+                b_q,
+                b_k,
+                b_v,
+            )
+
+        # (N, L, E) -> (N, num_heads, L, head_dim)
+        q, k, v = (
+            x.unflatten(-1, (self.num_heads, self.head_dim)).transpose(1, 2)
+            for x in (q, k, v)
+        )
+        dropout_p = self.dropout if self.training else 0.0
+        attn_output = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
+        return F.linear(
+            attn_output.transpose(1, 2).flatten(-2),
+            self.out_proj.weight,
+            self.out_proj.bias,
+        )
 
     def merge_masks(
         self,

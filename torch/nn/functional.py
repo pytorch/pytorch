@@ -6326,7 +6326,9 @@ def _in_projection_packed(
             same shape as the corresponding input tensor.
     """
     E = q.size(-1)
-    if k is v:
+    # A jagged NestedTensor can't unsqueeze or transpose its batch dim, so it
+    # skips the fused projections and takes the per-input path below.
+    if k is v and not k.is_nested:
         if q is k:
             # self-attention
             proj = linear(q, w, b)

@@ -735,6 +735,26 @@ class TestMultiheadAttentionNN(NNTestCase):
         mha.out_proj.bias.requires_grad = False
         mha(nt, nt, nt)
 
+    def test_multihead_attn_jagged_nested_tensor_unsupported_args(self):
+        nt = torch.nested.nested_tensor(
+            [torch.randn(3, 8), torch.randn(5, 8)], layout=torch.jagged
+        )
+
+        def check(mha, msg, **kwargs):
+            with self.assertRaisesRegex(ValueError, msg):
+                mha(nt, nt, nt, **kwargs)
+
+        mha = torch.nn.MultiheadAttention(8, 2, batch_first=True)
+        check(mha, "need_weights=True")
+        bool_mask = torch.zeros(5, 5, dtype=torch.bool)
+        check(mha, "attn_mask", need_weights=False, attn_mask=bool_mask)
+        check(mha, "key_padding_mask", need_weights=False, key_padding_mask=bool_mask)
+        check(mha, "is_causal", need_weights=False, is_causal=True)
+        check(torch.nn.MultiheadAttention(8, 2), "batch_first=True", need_weights=False)
+        for kwarg in ("add_bias_kv", "add_zero_attn"):
+            mha = torch.nn.MultiheadAttention(8, 2, batch_first=True, **{kwarg: True})
+            check(mha, kwarg, need_weights=False)
+
 
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -970,6 +990,73 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         query = torch.rand(4, 4, 4, dtype=dtype, device=device)
         key = torch.rand(4, 4, 2, dtype=dtype, device=device)
         mha(query, key, key)
+
+    @dtypes(torch.double)
+    @parametrize_test("qkv", ["self", "shared_kv", "separate", "separate_proj_weight"])
+    @parametrize_test("bias", [True, False])
+    def test_multihead_attn_jagged_nested_tensor(self, device, dtype, qkv, bias):
+        # A batch of jagged sequences should match running MHA on each sequence alone.
+        embed_dim, num_heads = 8, 2
+        kdim, vdim = (6, 4) if qkv == "separate_proj_weight" else (embed_dim, embed_dim)
+        mha = torch.nn.MultiheadAttention(
+            embed_dim,
+            num_heads,
+            bias=bias,
+            kdim=kdim,
+            vdim=vdim,
+            batch_first=True,
+            device=device,
+            dtype=dtype,
+        )
+        # Biases are zero-initialized, so randomize everything to cover them too.
+        for p in mha.parameters():
+            torch.nn.init.uniform_(p, -1, 1)
+
+        def make(lengths, dim):
+            return [torch.randn(n, dim, device=device, dtype=dtype) for n in lengths]
+
+        def jagged(ts):
+            return torch.nested.nested_tensor(
+                ts, layout=torch.jagged, requires_grad=True
+            )
+
+        queries = make([3, 5], embed_dim)
+        keys = queries if qkv == "self" else make([4, 2], kdim)
+        values = keys if qkv in ("self", "shared_kv") else make([4, 2], vdim)
+        # MHA picks its in-projection by whether query, key and value are the same tensor
+        query = jagged(queries)
+        key = query if keys is queries else jagged(keys)
+        value = key if values is keys else jagged(values)
+        out, weights = mha(query, key, value, need_weights=False)
+        self.assertIsNone(weights)
+
+        expected, dense_queries = [], []
+        for i in range(len(queries)):
+            q = queries[i].unsqueeze(0).requires_grad_()
+            k = q if keys is queries else keys[i].unsqueeze(0).requires_grad_()
+            v = k if values is keys else values[i].unsqueeze(0).requires_grad_()
+            expected.append(mha(q, k, v, need_weights=False)[0].squeeze(0))
+            dense_queries.append(q)
+        self.assertEqual(list(out.unbind()), expected)
+
+        params = list(mha.parameters())
+        grad_out = torch.randn_like(out.values())
+        grads = torch.autograd.grad(out.values(), [*params, query], grad_out)
+        expected_grads = torch.autograd.grad(
+            torch.cat(expected), [*params, *dense_queries], grad_out
+        )
+        self.assertEqual(grads[:-1], expected_grads[: len(params)])
+        self.assertEqual(
+            list(grads[-1].unbind()),
+            [g.squeeze(0) for g in expected_grads[len(params) :]],
+        )
+
+        # Inference must not apply dropout.
+        mha.eval()
+        mha.dropout = 0.5
+        with torch.no_grad():
+            out, _ = mha(query, key, value, need_weights=False)
+        self.assertEqual(list(out.unbind()), expected)
 
 
 instantiate_device_type_tests(
