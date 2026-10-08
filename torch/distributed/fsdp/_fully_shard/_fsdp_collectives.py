@@ -499,6 +499,16 @@ def _default_all_gather_output_fn(
     _reassemble_all_gather_outputs(shard_i_copy_infos, world_size)
 
 
+def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
+    all_gather_work = all_gather_result.all_gather_work
+    device = all_gather_result.all_gather_output.device
+    device_handle = _get_device_handle(device.type)
+    if (all_gather_event := all_gather_result.all_gather_event) is not None:
+        device_handle.current_stream().wait_event(all_gather_event)
+    if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
+        all_gather_work.wait()
+
+
 @torch.no_grad()
 def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
@@ -912,8 +922,8 @@ def foreach_reduce_scatter_copy_in(
     # parameter's grad_dtype policy (default: the parameter's dtype), so a group
     # can mix dtypes, e.g. bf16 weights with fp32 norms. Uniform groups run the
     # same _chunk_cat kernels as fsdp.chunk_cat, at the same cost. On CUDA, mixed
-    # bf16/fp32 groups run that kernel once per input dtype, casting during the
-    # copy-in; other mixes cast each gradient first.
+    # bf16/fp32 and fp16/fp32 groups run that kernel once per input dtype, casting
+    # during the copy-in; other mixes cast each gradient first.
     torch.ops.fsdp.chunk_cat_mixed_dtype(
         unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
     )

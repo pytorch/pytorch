@@ -754,6 +754,15 @@ jobs:
           # reviewer's early draft verdict was published instead (seen in CI:
           # "Draft; review in progress." marked ready, 6 of 6 fan-out runs).
           CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+          # `allowed_non_write_users` (below) turns on the action's subprocess
+          # secret scrub, and Claude Code then refuses to install without
+          # bubblewrap, which this job cannot install: harden-runner disables
+          # sudo and blocks the apt mirrors. Seen on ciforge 2026-10-07: "Failed
+          # to install Claude Code after 3 attempts". Opting out keeps what ran
+          # before this change: the model has no Bash, and the subprocesses
+          # Claude Code starts are our trusted hooks and the tools they call,
+          # which inherit this step's environment as they always have.
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
@@ -762,6 +771,19 @@ jobs:
           # every assigned reviewer has accepted, and the action rejects bot
           # actors unless listed here. Name it exactly; never "*".
           allowed_bots: "pytorch-bot[bot]"
+          # On a push, the actor is the pusher, usually the PR author, and most
+          # contributors lack write access. Without `github_token` the action
+          # trades this job's OIDC token for a Claude App token, and that
+          # exchange refuses them, so their re-review failed as `model_error`
+          # before the model ran (pytorch/pytorch#196943). This job's own token
+          # skips the exchange and is `contents: read`, so the job that reads PR
+          # code holds no repository write permission. `allowed_non_write_users`
+          # works only with `github_token` and skips the action's actor check;
+          # the gate is the `in progress` label, which `prepare` re-reads from
+          # the API. It also turns on a subprocess secret scrub that this job
+          # opts out of; see CLAUDE_CODE_SUBPROCESS_ENV_SCRUB above.
+          github_token: ${{ github.token }}
+          allowed_non_write_users: "*"
           settings: |
             {
               "hooks": {
