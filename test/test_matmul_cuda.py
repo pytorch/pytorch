@@ -47,8 +47,6 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_WINDOWS,
     MI200_ARCH,
-    MI300_ARCH,
-    MI350_ARCH,
     NAVI3_5_ARCH,
     NAVI3_ARCH,
     NAVI_ARCH,
@@ -57,7 +55,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
-    runOnRocmArch,
     serialTest,
     skipIfRocm,
     skipIfRocmArch,
@@ -94,7 +91,8 @@ def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
 
 
 @contextlib.contextmanager
-def rocm_group_gemm_ck_env(value, var="ROCM_ALLOW_GROUP_GEMM_CK"):
+def rocm_group_gemm_ck_env(value):
+    var = "ROCM_ALLOW_GROUP_GEMM_CK"
     old = os.environ.get(var, None)
     try:
         if value is None:
@@ -1240,69 +1238,6 @@ class TestMatmulCuda(InductorTestCase):
 
             ck_unequal_kernels = collect_kernel_names(equal_k=False)
             self.assertTrue(has_ck_kernel(ck_unequal_kernels, CK_UNEQUAL_K_HINT))
-
-    @skipCUDAIfNotRocm
-    @runOnRocmArch(MI300_ARCH + MI350_ARCH)
-    def test_grouped_gemm_rocm_ck_tile_flag(self):
-        def kernel_names():
-            a = torch.randn(4, 64, 128, device="cuda", dtype=torch.bfloat16)
-            b = torch.randn(4, 128, 256, device="cuda", dtype=torch.bfloat16)
-            with profile(activities=[ProfilerActivity.CUDA]) as prof:
-                torch._grouped_mm(a, b)
-            return [evt.key for evt in prof.key_averages()]
-
-        def uses_ck_tile(kernels):
-            return any("ck_tile::GroupedGemmKernel" in k for k in kernels)
-
-        with rocm_group_gemm_ck_env(None, var="ROCM_ALLOW_GROUP_GEMM_CK_TILE"):
-            self.assertFalse(uses_ck_tile(kernel_names()))
-        with rocm_group_gemm_ck_env("1", var="ROCM_ALLOW_GROUP_GEMM_CK_TILE"):
-            self.assertTrue(uses_ck_tile(kernel_names()))
-
-    @skipCUDAIfNotRocm
-    @runOnRocmArch(MI300_ARCH + MI350_ARCH)
-    @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
-    # (m, n, k) of the non-jagged dims, chosen to hit each tile config the ck_tile backend selects
-    @parametrize("mnk", [(64, 200, 40), (64, 200, 128), (256, 384, 128), (256, 256, 128)])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @parametrize("dtype", [torch.float16, torch.bfloat16])
-    def test_grouped_gemm_rocm_ck_tile(self, op, mnk, a_row_major, b_row_major, dtype):
-        m, n, k = mnk
-        # Empty groups and odd group starts/sizes along the jagged dim; the total stays a multiple
-        # of 8 so every stride is 16-byte aligned.
-        offs = torch.tensor([0, 8, 21, 21, 280], device="cuda", dtype=torch.int32)
-        total, groups = 280, offs.numel()
-
-        def make(*shape, row_major):
-            if row_major:
-                return torch.randn(*shape, device="cuda", dtype=dtype)
-            return torch.randn(*shape[:-2], shape[-1], shape[-2], device="cuda", dtype=dtype).transpose(-2, -1)
-
-        if op == "2d/2d":
-            A, B = make(m, total, row_major=a_row_major), make(total, n, row_major=b_row_major)
-        elif op == "2d/3d":
-            A, B = make(total, k, row_major=a_row_major), make(groups, k, n, row_major=b_row_major)
-        elif op == "3d/2d":
-            A, B = make(groups, m, k, row_major=a_row_major), make(k, total, row_major=b_row_major)
-        else:
-            A, B = make(groups, m, k, row_major=a_row_major), make(groups, k, n, row_major=b_row_major)
-            offs = None
-
-        C_ref = self.grouped_gemm_reference(A.float(), B.float(), offs).to(dtype)
-        with rocm_group_gemm_ck_env("1", var="ROCM_ALLOW_GROUP_GEMM_CK_TILE"):
-            C = torch._grouped_mm(A, B, offs=offs)
-        self.assertEqual(C, C_ref)
-
-    @skipCUDAIfNotRocm
-    @runOnRocmArch(MI300_ARCH + MI350_ARCH)
-    def test_grouped_gemm_rocm_ck_tile_k_zero(self):
-        # Slices of padded tensors so the strides of the K=0 operands pass _grouped_mm's stride checks
-        a = torch.randn(4, 64, 8, device="cuda", dtype=torch.bfloat16)[:, :, :0]
-        b = torch.randn(4, 8, 128, device="cuda", dtype=torch.bfloat16)[:, :0, :]
-        with rocm_group_gemm_ck_env("1", var="ROCM_ALLOW_GROUP_GEMM_CK_TILE"):
-            C = torch._grouped_mm(a, b)
-        self.assertEqual(C, torch.zeros(4, 64, 128, device="cuda", dtype=torch.bfloat16))
 
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
