@@ -828,15 +828,7 @@ def associative_scan_autograd(combine_fn, xs, additional_inputs):
     # Note, the current AssociativeScanAutogradOp implementation silently returns wrong
     # gradients for combine_fn with interacting input leaves.
     # Thus we use the dense, generic_associative_scan, implementation for the moment.
-    # additional_inputs may also contain SymInts that dynamo lifts for dynamic shapes,
-    # hence the isinstance check, as only Tensors may require gradients
-    if torch.is_grad_enabled() and any(
-        isinstance(t, torch.Tensor) and t.requires_grad
-        for t in itertools.chain(xs, additional_inputs)
-    ):
-        return tuple(associative_scan_op_dense(combine_fn, xs, additional_inputs))
-    with torch._C._AutoDispatchBelowAutograd():
-        return associative_scan_op(combine_fn, xs, additional_inputs)
+    return tuple(associative_scan_op_dense(combine_fn, xs, additional_inputs))
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
