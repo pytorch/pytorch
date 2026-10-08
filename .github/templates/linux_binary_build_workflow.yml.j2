@@ -99,8 +99,6 @@ name: !{{ build_environment }}
   {%- set docker_registry_host = "" %}
   {%- set owner_if = "${{ github.repository_owner == 'pytorch' }}" %}
 {%- endif %}
-{%- set preview_docker_image_suffix = "${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}" %}
-{%- set preview_if = "${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}" %}
 
 on:
   push:
@@ -403,31 +401,23 @@ jobs:
 {%- endfor %}
 
 {%- set build_lanes = [] %}
-{%- set build_needs = "[get-label-type, get-docker-tag]" if pin_docker_image else "get-label-type" %}
 {%- if matrix_build_configs %}
-  {%- set _ = build_lanes.append({
-        'job_name': 'manywheel-build',
-        'configs': matrix_build_configs,
-        'if': owner_if,
-        'needs': build_needs,
-        'image_suffix': docker_image_suffix,
-        'image_registry_host': docker_registry_host}) %}
+  {%- set _ = build_lanes.append({'job_name': 'manywheel-build', 'configs': matrix_build_configs}) %}
 {%- endif %}
 {%- if rocm_preview_configs %}
-  {%- set _ = build_lanes.append({
-        'job_name': 'manywheel-build-rocm-preview',
-        'configs': rocm_preview_configs,
-        'if': preview_if,
-        'needs': '[get-label-type, get-preview-docker-tag]',
-        'image_suffix': preview_docker_image_suffix,
-        'image_registry_host': ''}) %}
+  {%- set _ = build_lanes.append({'job_name': 'manywheel-build-rocm-preview', 'configs': rocm_preview_configs}) %}
 {%- endif %}
 {%- for lane in build_lanes %}
 
   !{{ lane['job_name'] }}:
     name: ${{ matrix.build_name }}-build
-    if: !{{ lane['if'] }}
-    needs: !{{ lane['needs'] }}
+{%- if lane['job_name'] == 'manywheel-build-rocm-preview' %}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    needs: [get-label-type, get-preview-docker-tag]
+{%- else %}
+    if: !{{ owner_if }}
+    needs: {% if pin_docker_image %}[get-label-type, get-docker-tag]{% else %}get-label-type{% endif %}
+{%- endif %}
     uses: ./.github/workflows/_binary-build-linux.yml
     strategy:
       fail-fast: false
@@ -459,8 +449,13 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ lane['image_suffix'] }}
-      DOCKER_IMAGE_REGISTRY_HOST: "!{{ lane['image_registry_host'] }}"
+{%- if lane['job_name'] == 'manywheel-build-rocm-preview' %}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE_REGISTRY_HOST: ""
+{%- else %}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ docker_image_suffix }}
+      DOCKER_IMAGE_REGISTRY_HOST: "!{{ docker_registry_host }}"
+{%- endif %}
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: "!{{ runner_prefix }}"
       runs_on: !{{ build_runs_on }}
@@ -549,27 +544,22 @@ jobs:
 
 {%- set rocm_test_lanes = [] %}
 {%- if rocm_configs %}
-  {%- set _ = rocm_test_lanes.append({
-        'job_name': 'manywheel-test-rocm',
-        'build_job': 'manywheel-build',
-        'configs': rocm_configs,
-        'if': owner_if,
-        'needs': '[get-label-type' ~ (', get-docker-tag' if pin_docker_image else '') ~ ', manywheel-build]'}) %}
+  {%- set _ = rocm_test_lanes.append({'job_name': 'manywheel-test-rocm', 'build_job': 'manywheel-build', 'configs': rocm_configs}) %}
 {%- endif %}
 {%- if rocm_preview_configs %}
-  {%- set _ = rocm_test_lanes.append({
-        'job_name': 'manywheel-test-rocm-preview',
-        'build_job': 'manywheel-build-rocm-preview',
-        'configs': rocm_preview_configs,
-        'if': preview_if,
-        'needs': '[get-label-type, get-preview-docker-tag, manywheel-build-rocm-preview]'}) %}
+  {%- set _ = rocm_test_lanes.append({'job_name': 'manywheel-test-rocm-preview', 'build_job': 'manywheel-build-rocm-preview', 'configs': rocm_preview_configs}) %}
 {%- endif %}
 {%- for lane in rocm_test_lanes %}
 
   !{{ lane['job_name'] }}:
     name: ${{ matrix.build_name }}-test
-    if: !{{ lane['if'] }}
-    needs: !{{ lane['needs'] }}
+{%- if lane['job_name'] == 'manywheel-test-rocm-preview' %}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    needs: [get-label-type, get-preview-docker-tag, !{{ lane['build_job'] }}]
+{%- else %}
+    if: !{{ owner_if }}
+    needs: [get-label-type{%- if pin_docker_image %}, get-docker-tag{%- endif %}, !{{ lane['build_job'] }}]
+{%- endif %}
     uses: ./.github/workflows/_binary-test-rocm-linux.yml
     strategy:
       fail-fast: false
@@ -648,51 +638,50 @@ jobs:
 {%- for u in unified_upload_groups %}
   {%- set _ = upload_jobs.append({
         'name': u['job_name'] | replace('-build', '-upload'),
-        'if': owner_if,
-        'needs': '[' ~ ('get-docker-tag, ' if pin_docker_image else '') ~
-          (([u['job_name']] + ([u['test_name']] if test_standard_configs else [])) | join(', ')) ~ ']',
+        'needs': [u['job_name']] + ([u['test_name']] if test_standard_configs else []),
         'configs': u['configs']}) %}
 {%- endfor %}
 {%- if matrix_standard_configs %}
   {%- set _ = upload_jobs.append({
         'name': 'manywheel-upload',
-        'if': owner_if,
-        'needs': '[' ~ ('get-docker-tag, ' if pin_docker_image else '') ~
-          ((['manywheel-build'] + (['manywheel-test'] if test_standard_configs else [])) | join(', ')) ~ ']',
+        'needs': ['manywheel-build'] + (['manywheel-test'] if test_standard_configs else []),
         'configs': matrix_standard_configs}) %}
 {%- endif %}
 {%- if rocm_configs %}
   {%- set _ = upload_jobs.append({
         'name': 'manywheel-rocm-upload',
-        'if': owner_if,
-        'needs': '[' ~ ('get-docker-tag, ' if pin_docker_image else '') ~
-          ('manywheel-build, manywheel-test-rocm') ~ ']',
+        'needs': ['manywheel-build', 'manywheel-test-rocm'],
         'configs': rocm_configs}) %}
 {%- endif %}
 {%- if rocm_preview_configs %}
   {%- set _ = upload_jobs.append({
         'name': 'manywheel-rocm-preview-upload',
-        'if': preview_if,
-        'needs': '[get-preview-docker-tag, manywheel-build-rocm-preview, manywheel-test-rocm-preview]',
+        'needs': ['manywheel-build-rocm-preview', 'manywheel-test-rocm-preview'],
         'configs': rocm_preview_configs}) %}
 {%- endif %}
 {%- if xpu_configs %}
   {%- set _ = upload_jobs.append({
         'name': 'manywheel-xpu-upload',
-        'if': owner_if,
-        'needs': '[' ~ ('get-docker-tag, ' if pin_docker_image else '') ~
-          ('manywheel-xpu-build, manywheel-test-xpu') ~ ']',
+        'needs': ['manywheel-xpu-build', 'manywheel-test-xpu'],
         'configs': xpu_configs}) %}
 {%- endif %}
 {%- for job in upload_jobs %}
 
   !{{ job['name'] }}:
     name: ${{ matrix.build_name }}-upload
-    if: !{{ job['if'] }}
+{%- if job['name'] == 'manywheel-rocm-preview-upload' %}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+{%- else %}
+    if: !{{ owner_if }}
+{%- endif %}
     permissions:
       id-token: write
       contents: read
-    needs: !{{ job['needs'] }}
+{%- if job['name'] == 'manywheel-rocm-preview-upload' %}
+    needs: [get-preview-docker-tag, !{{ job['needs'] | join(', ') }}]
+{%- else %}
+    needs: [{%- if pin_docker_image %}get-docker-tag, {% endif %}!{{ job['needs'] | join(', ') }}]
+{%- endif %}
     uses: ./.github/workflows/_binary-upload.yml
     strategy:
       fail-fast: false
@@ -732,27 +721,22 @@ jobs:
 {%- set lt_main_configs = libtorch_extraction_configs | rejectattr('gpu_arch_version', 'equalto', 'preview') | list %}
 {%- set lt_preview_configs = libtorch_extraction_configs | selectattr('gpu_arch_version', 'equalto', 'preview') | list %}
 {%- if lt_main_configs %}
-  {%- set _ = libtorch_lanes.append({
-        'suffix': '',
-        'build_job': 'manywheel-build',
-        'configs': lt_main_configs,
-        'if': owner_if,
-        'needs': '[manywheel-build]'}) %}
+  {%- set _ = libtorch_lanes.append({'suffix': '', 'build_job': 'manywheel-build', 'configs': lt_main_configs}) %}
 {%- endif %}
 {%- if lt_preview_configs %}
-  {%- set _ = libtorch_lanes.append({
-        'suffix': '-rocm-preview',
-        'build_job': 'manywheel-build-rocm-preview',
-        'configs': lt_preview_configs,
-        'if': preview_if,
-        'needs': '[get-preview-docker-tag, manywheel-build-rocm-preview]'}) %}
+  {%- set _ = libtorch_lanes.append({'suffix': '-rocm-preview', 'build_job': 'manywheel-build-rocm-preview', 'configs': lt_preview_configs}) %}
 {%- endif %}
 {%- for lane in libtorch_lanes %}
 
   libtorch-extract!{{ lane['suffix'] }}:
     name: ${{ matrix.build_name }}-extract
-    if: !{{ lane['if'] }}
-    needs: !{{ lane['needs'] }}
+{%- if lane['suffix'] == '-rocm-preview' %}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    needs: [get-preview-docker-tag, !{{ lane['build_job'] }}]
+{%- else %}
+    if: !{{ owner_if }}
+    needs: [!{{ lane['build_job'] }}]
+{%- endif %}
     runs-on: "mt-l-x86iavx512-16-128"
     container:
       image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
@@ -820,7 +804,7 @@ jobs:
 
   libtorch-upload!{{ lane['suffix'] }}:
     name: ${{ matrix.build_name }}-upload
-    if: !{{ lane['if'] }}
+    if: !{{ owner_if }}
     permissions:
       id-token: write
       contents: read
