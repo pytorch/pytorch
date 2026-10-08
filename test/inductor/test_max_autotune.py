@@ -3321,6 +3321,29 @@ class TestMaxAutotune(TestCase):
             # should force fallback to extern_kernels.bmm
             FileCheck().check_not("triton_tem").run(code[0])
 
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "benchmark_template_fusion": True,
+        }
+    )
+    def test_identical_template_epilogue_fusions(self):
+        # The mm + relu pairs all render the same fused kernel, so they share
+        # one async compile future. Each pair must still be benchmarked and
+        # fused, leaving one template launch per pair.
+        def fn(*xs):
+            return tuple(torch.relu(x @ y) for x, y in zip(xs[::2], xs[1::2]))
+
+        args = [
+            torch.randn(256, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+            for _ in range(16)
+        ]
+        with fresh_cache():
+            out, (code,) = run_and_get_code(torch.compile(fn), *args)
+        FileCheck().check_count(".run(", 8, exactly=True).run(code)
+        self.assertEqual(out, fn(*args), atol=1e-1, rtol=1e-2)
+
     @parametrize("always_freeze", [True, False])
     def test_mm_layout_freezing_behavior(self, always_freeze):
         """Test that mm layout freezing behavior depends on always_freeze_layout.

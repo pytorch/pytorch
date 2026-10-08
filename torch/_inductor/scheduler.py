@@ -8099,8 +8099,9 @@ class Scheduler:
 
         while template_fusion_candidates:
             template_futures: list[Future] = []
-            future_to_pending_fusion: dict[
-                Future, tuple[PendingFusion, BaseSchedulerNode]
+            # Fusions that render identical kernel source share one compile future.
+            future_to_pending_fusions: dict[
+                Future, list[tuple[PendingFusion, BaseSchedulerNode]]
             ] = {}
             fusions_to_remove: OrderedSet[BaseSchedulerNode] = OrderedSet()
             for candidate in template_fusion_candidates:
@@ -8144,8 +8145,11 @@ class Scheduler:
                     f = pending_fusion.future.future
                     if f is None:
                         raise AssertionError("expected f to be set")
-                    template_futures.append(f)
-                    future_to_pending_fusion[f] = (pending_fusion, candidate)
+                    if f not in future_to_pending_fusions:
+                        template_futures.append(f)
+                    future_to_pending_fusions.setdefault(f, []).append(
+                        (pending_fusion, candidate)
+                    )
                 else:
                     # Non AsyncCompile path, perform fusion
                     if self._fusion_memory_state is not None:
@@ -8158,14 +8162,14 @@ class Scheduler:
 
             # Evaluate fusion candidates as async_compile completes
             for f in as_completed(template_futures):
-                pending_fusion, cand = future_to_pending_fusion[f]
-                if self.fuse_if_speedup(
-                    self.get_fused_node(pending_fusion.node1),
-                    self.get_fused_node(pending_fusion.node2),
-                    pending_fusion.callable_fn,
-                    fused_nodes,
-                ):
-                    fusions_to_remove.add(cand)
+                for pending_fusion, cand in future_to_pending_fusions[f]:
+                    if self.fuse_if_speedup(
+                        self.get_fused_node(pending_fusion.node1),
+                        self.get_fused_node(pending_fusion.node2),
+                        pending_fusion.callable_fn,
+                        fused_nodes,
+                    ):
+                        fusions_to_remove.add(cand)
 
             for f in fusions_to_remove:
                 template_fusion_candidates.pop(f)
