@@ -1423,13 +1423,14 @@ class MemPool(_MemPool):
 
         ``alloc_fn(size)`` allocates a backing segment and returns its device
         address as an integer. Return ``None`` or zero if the allocation cannot
-        be satisfied. ``free_fn(ptr, size)`` releases a segment. PyTorch makes
-        the segment's device and allocation stream current while each callback
-        runs.
+        be satisfied. ``free_fn(ptr, size)`` releases a segment, where ``size``
+        is the backing segment's size. PyTorch makes the segment's device and
+        allocation stream current while each callback runs.
 
         Args:
             alloc_fn: Callable that allocates a segment.
-            free_fn: Callable that frees a segment.
+            free_fn: Callable that frees a segment and receives its device
+                address and backing segment size.
             use_on_oom: Whether allocations outside this pool may borrow its
                 cached blocks as a last resort. Defaults to ``False``.
             no_split: Whether the caching allocator should avoid splitting this

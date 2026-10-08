@@ -1009,7 +1009,7 @@ with torch.cuda.use_mem_pool(pool):
 ## Python-defined CUDA allocators
 
 Use {meth}`torch.cuda.MemPool.from_py_allocator` to implement a pool's segment
-allocator with Python callables instead of compiled `ctypes` callbacks:
+allocator with Python callables:
 
 ```python
 from cuda.bindings import runtime
@@ -1020,7 +1020,7 @@ def alloc(size: int) -> int | None:
     return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
 
 
-def free(ptr: int, size: int) -> None:
+def free(ptr: int, _size: int) -> None:
     (err,) = runtime.cudaFree(ptr)
     if err != runtime.cudaError_t.cudaSuccess:
         raise RuntimeError(f"cudaFree failed with error {err}")
@@ -1028,6 +1028,10 @@ def free(ptr: int, size: int) -> None:
 
 pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
 ```
+
+The size passed to the free callback is the size of the backing segment.
+An allocator may use it when releasing the segment, as needed, or ignore it
+when the pointer alone is sufficient.
 
 Return `None` or zero when an allocation cannot be satisfied. This lets the
 caching allocator release cached blocks, retry the allocation, notify OOM
@@ -1040,9 +1044,7 @@ either function. A callback that needs them can use
 {func}`torch.cuda.current_device` and {func}`torch.cuda.current_stream`.
 
 Callbacks can be invoked concurrently from multiple threads, so their Python
-and native state must be thread-safe, including in a no-GIL Python build. An
-allocation callback may allocate from a different Python-backed pool, but
-recursively allocating through the same allocator raises an error.
+and native state must be thread-safe, including in a no-GIL Python build.
 
 During CUDA graph capture, the allocation callback runs in relaxed capture
 mode. It may call allocation APIs such as `cudaMalloc` or CUDA virtual-memory
