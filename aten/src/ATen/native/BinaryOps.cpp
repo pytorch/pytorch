@@ -1753,4 +1753,10 @@ Tensor bitwise_and_Tensor_meta(const Tensor& self, const Tensor& other) {
   return elementwise_binary_ref_meta("bitwise_and", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
 }
 
+Tensor le_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  return elementwise_binary_ref_meta(
+      "le", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
 } // namespace at::native
