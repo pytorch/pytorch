@@ -1151,30 +1151,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif self.value is collections.defaultdict and name == "fromkeys":
+        elif name == "fromkeys" and issubclass(self.value, dict):
+            if not issubclass(self.value, collections.OrderedDict):
+                no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
+                check_positional(tx, "fromkeys", len(args), 1, 2)
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
-            )
-        elif (
-            name == "fromkeys"
-            and issubclass(self.value, collections.OrderedDict)
-            and inspect.getattr_static(self.value, "fromkeys")
-            is collections.OrderedDict.__dict__["fromkeys"]
-        ):
-            # The polyfill builds the result with cls(), and calling a class
-            # skips a metaclass __call__ under Dynamo (plain Sub() has the same
-            # problem in call_function), so the result would miss its effects.
-            if type(self.value).__call__ is not type.__call__:
-                unimplemented(
-                    gb_type="OrderedDict subclass fromkeys with metaclass __call__",
-                    context=self.value.__name__,
-                    explanation="Cannot trace fromkeys through a metaclass __call__",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.dict_fromkeys),
-                [self, *args],
-                kwargs,
+                tx, self, *args, **kwargs
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
@@ -3293,7 +3275,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         res = self._vectorcall_method(tx, "__init__", args, kwargs)
         if not res.is_constant_none():
             raise_type_error(
-                tx, f"__init__() should return None, got {res.python_type_name()}"
+                tx, f"__init__() should return None, not {res.python_type_name()!r}"
             )
         return res
 

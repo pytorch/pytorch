@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     make_dynamo_test,
     munge_exc,
     parametrize,
+    subtest,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
@@ -63,10 +64,6 @@ class FakeMapping:
 
     def __getitem__(self, key: str) -> Any:
         return self._value
-
-
-class _OrderedDictSubclass(OrderedDict):
-    pass
 
 
 class _DictSubclass(dict):
@@ -251,6 +248,212 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(type(ref), type(res))
         self.assertEqual(ref["x"], res["x"])
         self.assertEqual(ref["y"], res["y"])
+
+    @parametrize(
+        "variant",
+        [
+            subtest("plain", name="plain"),
+            subtest("bound", name="bound"),
+            subtest("setitem", name="setitem"),
+            subtest("repeated", name="repeated"),
+            subtest("init", name="init"),
+            subtest("new", name="new"),
+            subtest("super", name="super"),
+            subtest("defaultdict", name="defaultdict"),
+        ],
+    )
+    def test_dict_subclass_fromkeys(self, variant):
+        class PrefixDict(dict):
+            def __setitem__(self, key, value):
+                dict.__setitem__(self, f"key_{key}", value)
+
+        class RecordingDict(dict):
+            def __init__(self):
+                self.calls = []
+
+            def __setitem__(self, key, value):
+                self.calls.append(key)
+                dict.__setitem__(self, key, value)
+
+        class InitDict(dict):
+            def __init__(self):
+                dict.__init__(self, initial=1)
+
+        class NewDict(dict):
+            def __new__(cls):
+                result = dict.__new__(cls)
+                result.created = True
+                return result
+
+        class SuperDict(dict):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.inited = True
+
+            def __setitem__(self, key, value):
+                super().__setitem__(key.upper(), value)
+
+        class MyDefaultDict(defaultdict):
+            pass
+
+        cases = {
+            "plain": (SimpleDict, ("a", "b"), False),
+            "bound": (SimpleDict, ("a", "b"), True),
+            "setitem": (PrefixDict, ("a", "b"), False),
+            "repeated": (RecordingDict, ("a", "a", "b"), False),
+            "init": (InitDict, ("a", "b"), False),
+            "new": (NewDict, ("a",), False),
+            "super": (SuperDict, "ab", False),
+            "defaultdict": (MyDefaultDict, "ab", False),
+        }
+        dict_cls, keys, bound = cases[variant]
+
+        def fn(x):
+            target = dict_cls() if bound else dict_cls
+            return target.fromkeys(keys, x + 1)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), dict_cls)
+        self.assertEqual(actual, expected)
+        self.assertEqual(vars(actual), vars(expected))
+        if isinstance(expected, defaultdict):
+            self.assertIs(actual.default_factory, expected.default_factory)
+
+    def test_dict_subclass_fromkeys_setitem_raises(self):
+        class ErrorDict(dict):
+            def __setitem__(self, key, value):
+                raise ValueError("rejected")
+
+        def fn(x):
+            try:
+                ErrorDict.fromkeys(("a",), x + 1)
+            except ValueError:
+                return x + 2
+            return x + 3
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_dict_subclass_fromkeys_input(self):
+        class OtherDict(dict):
+            pass
+
+        def fn(cls, d, x):
+            y = x + 1
+            return cls.fromkeys("a", y), d.fromkeys("b", y), type(d).fromkeys("c", y)
+
+        x = torch.randn(2)
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnts, fullgraph=True)
+        for cls in (SimpleDict, OtherDict):
+            expected = fn(cls, cls(), x)
+            actual = compiled(cls, cls(), x)
+            self.assertEqual([type(d) for d in actual], [cls] * 3)
+            self.assertEqual(actual, expected)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_ordered_dict_subclass_fromkeys(self):
+        class MyOrderedDict(OrderedDict):
+            pass
+
+        def fn(x):
+            return (
+                MyOrderedDict.fromkeys("ab", x + 1),
+                MyOrderedDict.fromkeys("cd", value=x + 2),
+                MyOrderedDict.fromkeys(iterable="ef", value=x + 3),
+                OrderedDict.fromkeys(iterable="gh", value=x + 4),
+            )
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual([type(d) for d in actual], [MyOrderedDict] * 3 + [OrderedDict])
+        self.assertEqual(actual, expected)
+
+    @parametrize("cls", [dict, SimpleDict, defaultdict])
+    def test_dict_fromkeys_bad_args(self, cls):
+        def fn(x):
+            msgs = []
+            for args, kwargs in (((), {}), (([1], x, x), {}), (([1],), {"value": x})):
+                try:
+                    cls.fromkeys(*args, **kwargs)
+                except TypeError as e:
+                    msgs.append(str(e))
+            return msgs
+
+        x = torch.randn(2)
+        expected = fn(x)
+        self.assertEqual(len(expected), 3)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+    def test_dict_fromkeys_iterable_subclass_iter(self):
+        class ReversedSet(set):
+            def __iter__(self):
+                return iter(sorted(super().__iter__(), reverse=True))
+
+        class KeysDict(dict):
+            def __iter__(self):
+                return iter(["z"])
+
+        def fn(x):
+            return (
+                dict.fromkeys(ReversedSet({1, 2, 3}), x),
+                dict.fromkeys(KeysDict(a=1, b=2), x),
+            )
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual([list(d) for d in actual], [list(d) for d in expected])
+        self.assertEqual(actual, expected)
+
+    def test_defaultdict_subclass_construct(self):
+        class MyDefaultDict(defaultdict):
+            pass
+
+        def fn(x):
+            d = MyDefaultDict(list)
+            d["a"].append(x + 1)
+            d["b"]
+            d.tag = "t"
+            return d
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), MyDefaultDict)
+        self.assertIs(actual.default_factory, list)
+        self.assertEqual(actual, expected)
+        self.assertEqual(vars(actual), vars(expected))
+
+    def test_defaultdict_subclass_construct_custom_init_missing(self):
+        class CountingDefaultDict(defaultdict):
+            def __init__(self, scale):
+                super().__init__(int)
+                self.scale = scale
+                self.misses = 0
+
+            def __missing__(self, key):
+                self.misses += 1
+                return super().__missing__(key) + self.scale
+
+        def fn(x):
+            d = CountingDefaultDict(3)
+            d["a"] += 1
+            d["b"]
+            return d, x + d["a"]
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual[0]), CountingDefaultDict)
+        self.assertIs(actual[0].default_factory, int)
+        self.assertEqual(actual, expected)
+        self.assertEqual(vars(actual[0]), vars(expected[0]))
 
     def test_dict_subclass_methods_fallback_mutation(self):
         def fn(sd, x):
@@ -1330,74 +1533,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), expected)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
 
-    def test_ordered_dict_subclass_fromkeys(self):
-        def fn():
-            d = _OrderedDictSubclass.fromkeys("abc", 0)
-            d.move_to_end("a")
-            return d
-
-        res = torch.compile(fn, backend="eager", fullgraph=True)()
-        self.assertIs(type(res), _OrderedDictSubclass)
-        self.assertEqual(list(res.items()), [("b", 0), ("c", 0), ("a", 0)])
-
-    def test_ordered_dict_subclass_fromkeys_graph_break(self):
-        def fn(x):
-            d = _OrderedDictSubclass.fromkeys("abc", 0)
-            x = x + 1
-            torch._dynamo.graph_break()
-            d["d"] = 1
-            return d, x + 1
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        res, _ = torch.compile(fn, backend=cnt)(torch.ones(1))
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertIs(type(res), _OrderedDictSubclass)
-        self.assertEqual(list(res.items()), [("a", 0), ("b", 0), ("c", 0), ("d", 1)])
-
-    @parametrize("override", ["__new__", "__init__", "__setitem__", "metaclass"])
-    def test_ordered_dict_subclass_fromkeys_override(self, override):
-        # Each override leaves a mark on the result, so the compiled result
-        # only matches eager if fromkeys ran the override.
-        class Meta(type):
-            def __call__(cls, *args, **kwargs):
-                obj = super().__call__(*args, **kwargs)
-                obj.tag = "metaclass"
-                return obj
-
-        class OD(OrderedDict, metaclass=Meta if override == "metaclass" else type):
-            if override == "__new__":
-
-                def __new__(cls, *args, **kwargs):
-                    obj = OrderedDict.__new__(cls)
-                    obj.tag = "__new__"
-                    return obj
-
-            elif override == "__init__":
-
-                def __init__(self, *args, **kwargs):
-                    super().__init__(*args, **kwargs)
-                    self.tag = "__init__"
-
-            elif override == "__setitem__":
-
-                def __setitem__(self, key, value):
-                    super().__setitem__(key, "__setitem__")
-
-        def fn():
-            d = OD.fromkeys("ab")
-            return type(d).__name__, list(d.items()), getattr(d, "tag", None)
-
-        expected = fn()
-        self.assertEqual(expected[0], "OD")
-        self.assertIn(override, (expected[2], expected[1][0][1]))
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        if override == "metaclass":
-            # cls() in the polyfill would skip the metaclass __call__.
-            with self.assertRaisesRegex(Unsupported, "metaclass __call__"):
-                compiled()
-        else:
-            self.assertEqual(compiled(), expected)
-
     def test_ordered_dict_new_subclass(self):
         class OD(OrderedDict):
             def __new__(cls, *args, **kwargs):
@@ -1410,14 +1545,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
-    def test_ordered_dict_fromkeys_keywords(self):
-        def fn(x):
-            d = OrderedDict.fromkeys(iterable="ab", value=x)
-            return type(d), list(d.items())
-
-        x = torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
     def test_ordered_dict_new_exact(self):
         def fn(x):
             d = OrderedDict.__new__(OrderedDict)
@@ -1428,25 +1555,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    def test_ordered_dict_subclass_fromkeys_keywords(self):
-        def fn(x):
-            d = _OrderedDictSubclass.fromkeys(iterable="ab", value=x)
-            return type(d), list(d.items())
-
-        x = torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    def test_ordered_dict_subclass_fromkeys_classmethod_override(self):
-        class OD(OrderedDict):
-            @classmethod
-            def fromkeys(cls, iterable, value=None):
-                return cls((k, value * 2) for k in iterable)
-
-        def fn():
-            return list(OD.fromkeys("ab", 1).items())
-
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
     def test_mapping_proxy_ban_muation_on_dict_realization(self):
         def fn(x):

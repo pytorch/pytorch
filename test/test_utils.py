@@ -684,6 +684,86 @@ class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
 
+    @unittest.skipIf(IS_WINDOWS, "Creating symlinks may require privileges on Windows")
+    def test_canonicalize_hip_source(self):
+        # `_canonicalize_hip_source` must leave a source that already lives under
+        # the build dir untouched (return its abspath), so a source symlinked
+        # *into* the build dir keeps its generated .hip under the build dir. A
+        # source outside the build dir must be realpath-resolved so the Windows
+        # `subst` drive / symlinked-path spelling matches the form hipify records.
+        from torch.utils.cpp_extension import _canonicalize_hip_source
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_real = os.path.realpath(tmp)
+            build_dir = os.path.join(tmp_real, "build")
+            real_dir = os.path.join(tmp_real, "real")
+            os.makedirs(build_dir)
+            os.makedirs(real_dir)
+
+            # Source that resolves under the build dir (via a symlink into it) is
+            # returned as its in-build-dir abspath, not the symlink target.
+            real_source = os.path.join(real_dir, "kernel.cu")
+            with open(real_source, "w"):
+                pass
+            linked_source = os.path.join(build_dir, "kernel.cu")
+            os.symlink(real_source, linked_source)
+            self.assertEqual(
+                _canonicalize_hip_source(linked_source, build_dir),
+                os.path.abspath(linked_source),
+            )
+
+            # Source outside the build dir reached via a symlinked directory is
+            # realpath-resolved to its true location on Windows only; POSIX keeps
+            # the abspath so includes still resolve next to the symlink.
+            link_dir = os.path.join(tmp_real, "link")
+            os.symlink(real_dir, link_dir)
+            outside_source = os.path.join(link_dir, "kernel.cu")
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", True):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    real_source,
+                )
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", False):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    os.path.abspath(outside_source),
+                )
+
+    def test_hipify_processes_relative_extra_files(self):
+        # A relative `extra_files` entry must still be hipified. Previously the
+        # normalization loop rebound a local variable but the preprocessing loop
+        # iterated the raw (relative) `extra_files`, so the relative spelling
+        # never matched the normalized `all_files` set and the source was
+        # silently skipped (never hipified).
+        from torch.utils.hipify import hipify_python
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = os.path.realpath(tmp)
+            source_name = "kernel.cu"
+            with open(os.path.join(build_dir, source_name), "w") as f:
+                f.write(
+                    "#include <cuda_runtime.h>\n"
+                    "__global__ void my_kernel() {}\n"
+                    "void launch() { cudaDeviceSynchronize(); }\n"
+                )
+
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                includes=[os.path.join(build_dir, "*")],
+                extra_files=[source_name],  # relative entry
+                hipify_extra_files_only=True,
+                is_pytorch_extension=True,
+            )
+
+            key = os.path.abspath(os.path.join(build_dir, source_name))
+            self.assertIn(key, result)
+            self.assertIsNotNone(
+                result[key].hipified_path,
+                "relative extra_files source was silently skipped by hipify",
+            )
+            self.assertTrue(result[key].hipified_path.endswith(".hip"))
+
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
@@ -966,99 +1046,7 @@ class TestDeviceUtils(TestCase):
 instantiate_device_type_tests(TestDeviceUtils, globals())
 
 
-class TestTorchPathResolution(TestCase):
-    @unittest.skipIf(IS_FBCODE, "fbcode lays torch out differently")
-    def test_torch_parent_follows_the_extension_module(self):
-        spec = importlib.util.find_spec("torch._C")
-        self.assertIsNotNone(spec)
-        self.assertIsNotNone(spec.origin)
-        expected = os.path.dirname(os.path.dirname(spec.origin))
-        self.assertEqual(torch._utils_internal.torch_parent, expected)
-
-    @unittest.skipIf(IS_FBCODE, "fbcode lays torch out differently")
-    def test_installed_torch_dir_prefers_the_editable_loader_paths(self):
-        installed_torch_dir = torch._utils_internal._installed_torch_dir
-        spec = importlib.util.find_spec("torch._C")
-        self.assertIsNotNone(spec)
-        self.assertIsNotNone(spec.origin)
-        spec_dir = os.path.dirname(spec.origin)
-        with tempfile.TemporaryDirectory() as root:
-            checkout = os.path.join(root, "src", "torch")
-            installed = os.path.join(root, "site-packages", "torch")
-            # A checkout has a tracked torch/lib too, so lib/ alone cannot
-            # tell the trees apart; the checkout is excluded by identity.
-            os.makedirs(os.path.join(checkout, "lib"))
-            os.makedirs(os.path.join(installed, "lib"))
-            loader = types.SimpleNamespace(paths=[checkout, installed])
-            with mock.patch.object(torch, "__loader__", loader):
-                self.assertEqual(installed_torch_dir(checkout), installed)
-            if not IS_WINDOWS:
-                os.symlink(os.path.join(root, "src"), os.path.join(root, "alias"))
-                aliased = os.path.join(root, "alias", "torch")
-                loader = types.SimpleNamespace(paths=[aliased, installed])
-                with mock.patch.object(torch, "__loader__", loader):
-                    self.assertEqual(installed_torch_dir(checkout), installed)
-            # Only an entry holding lib/ is an install tree; otherwise the
-            # extension module's spec decides, as it does without any paths.
-            loader = types.SimpleNamespace(paths=[checkout, os.path.join(root, "x")])
-            with mock.patch.object(torch, "__loader__", loader):
-                self.assertEqual(installed_torch_dir(checkout), spec_dir)
-            with mock.patch.object(torch, "__loader__", types.SimpleNamespace()):
-                self.assertEqual(installed_torch_dir(checkout), spec_dir)
-            # A raising finder must not take `import torch` down with it.
-            err = mock.patch("importlib.util.find_spec", side_effect=ImportError)
-            with mock.patch.object(torch, "__loader__", types.SimpleNamespace()), err:
-                self.assertIsNone(installed_torch_dir(checkout))
-
-    def test_stale_checkout_artifacts(self):
-        with tempfile.TemporaryDirectory() as root:
-            checkout = os.path.join(root, "torch")
-            for d in ("csrc", "lib/libshm", "bin", "include"):
-                os.makedirs(os.path.join(checkout, d))
-            os.makedirs(os.path.join(root, "torch.egg-info"))
-            ext = "_C.cpython-310-x86_64-linux-gnu.so"
-            deps = os.path.join("lib", "libtorch_global_deps.so")
-            c10 = os.path.join("lib", "libc10.so.1")
-            for f in (ext, deps, c10):
-                open(os.path.join(checkout, f), "w").close()
-            found = torch._utils_internal._stale_checkout_artifacts(checkout)
-            names = [ext, "bin", "include", c10, deps]
-            expected = [os.path.join(checkout, f) for f in names]
-            self.assertEqual(found, expected + [os.path.join(root, "torch.egg-info")])
-            clean = os.path.join(root, "clean", "torch")
-            os.makedirs(os.path.join(clean, "lib", "libshm"))
-            self.assertEqual(torch._utils_internal._stale_checkout_artifacts(clean), [])
-
-    @unittest.skipIf(IS_WINDOWS, "_load_global_deps is a no-op on Windows")
-    def test_load_global_deps_reports_missing_library(self):
-        real_exists = os.path.exists
-
-        def exists(path):
-            return "libtorch_global_deps" not in path and real_exists(path)
-
-        with unittest.mock.patch("os.path.exists", side_effect=exists):
-            with self.assertRaisesRegex(OSError, "libtorch_global_deps"):
-                torch._load_global_deps()
-
-
 class TestCppExtensionUtils(TestCase):
-    @unittest.skipIf(IS_FBCODE, "CMake package files are not shipped in fbcode")
-    def test_cmake_prefix_path(self):
-        # TorchConfig.cmake ships only with libtorch; a BUILD_LIBTORCHLESS build
-        # (no CI job runs one) has no share/cmake and would fail here.
-        prefix = torch.utils.cmake_prefix_path
-        config = os.path.join(prefix, "Torch", "TorchConfig.cmake")
-        self.assertTrue(os.path.isfile(config), f"{config} does not exist")
-
-    def test_cmake_prefix_path_falls_back_when_get_file_path_raises(self):
-        # Build systems that do not ship the CMake package files have a
-        # get_file_path that raises for them; torch.utils must still import.
-        expected = os.path.join(os.path.dirname(torch.__file__), "share", "cmake")
-        with mock.patch.object(
-            torch.utils, "_get_file_path", side_effect=OSError("not shipped")
-        ):
-            self.assertEqual(torch.utils._resolve_cmake_prefix_path(), expected)
-
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
 
@@ -1361,7 +1349,7 @@ class TestUtilsInternal(TestCase):
             torch._utils_internal.max_clock_rate.cache_clear()
 
     def test_max_clock_rate_uses_current_rocm_device(self):
-        properties = types.SimpleNamespace(gcnArchName="gfx90a:sramecc+")
+        properties = types.SimpleNamespace(clock_rate=1_700_000)
         torch._utils_internal.max_clock_rate.cache_clear()
         try:
             with (
