@@ -6,6 +6,7 @@ import importlib
 import inspect
 import itertools
 import math
+import os
 import struct
 import subprocess
 import sys
@@ -296,6 +297,22 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         with self.assertRaisesRegex(NotImplementedError, r"fp32_precision is 'ieee'"):
             lowering.check_quack_fp32_operand(fp32)
 
+    def test_quack_cache_dir_follows_inductor_cache_dir(self):
+        from torch._inductor.kernel.flex_gemm.runtime import inductor_quack_cache_dir
+        from torch._inductor.utils import fresh_cache
+
+        # Memoization must respect fresh_cache() changes to TORCHINDUCTOR_CACHE_DIR.
+        seen = set()
+        for _ in range(2):
+            with fresh_cache():
+                root = os.environ["TORCHINDUCTOR_CACHE_DIR"]
+                self.assertEqual(
+                    inductor_quack_cache_dir(),
+                    os.path.join(os.path.abspath(root), "quack"),
+                )
+                seen.add(root)
+        self.assertEqual(len(seen), 2)
+
     def test_clamp_codegen_uses_public_cutlass_api(self):
         from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
             FlexGemmCuteDSLOpOverrides,
@@ -429,6 +446,31 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             for tile_n in range(16, 256 + 1, 16)
         )
         self.assertEqual(flex_gemm_search_space(sm120), sm120[:12])
+
+    @parametrize(
+        "m,varlen,include_skinny",
+        (
+            (32, False, True),
+            (128, False, True),
+            (129, False, False),
+            (2048, False, False),
+            (32, True, False),
+        ),
+    )
+    def test_flex_gemm_skinny_search_space(self, m, varlen, include_skinny):
+        key = self.searchSpaceKey
+        default = key(128, 128, 2, 1, True)
+        skinny = (
+            key(128, 32, 2, 1, True, swap_ab=True),
+            key(128, 32, 2, 2, False, swap_ab=True),
+        )
+        m64 = key(64, 64, 1, 1, True)
+        legal = (default, skinny[1], key(128, 64, 1, 1, True), m64, skinny[0])
+        expected = (default, *skinny, m64) if include_skinny else (default,)
+        self.assertEqual(
+            flex_gemm_search_space(legal, varlen=varlen, dense_shape=(m, 2048)),
+            expected,
+        )
 
     def test_flex_gemm_dense_default_config_by_shape(self):
         key = self.searchSpaceKey
@@ -846,7 +888,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
     def test_grouped_layout_rejects_inexact_inferred_preserved_dimension(self):
-        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
+        from torch._inductor.kernel.gemm_epilogue_layout import grouped_tensor_layout
 
         with self.assertRaisesRegex(
             NotImplementedError, "grouped reshape must split exactly"
@@ -855,7 +897,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     @parametrize("unbacked_dim", (1, 2))
     def test_grouped_layout_rejects_unbacked_structural_dimensions(self, unbacked_dim):
-        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
+        from torch._inductor.kernel.gemm_epilogue_layout import grouped_tensor_layout
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape = [4, -1, 2]
@@ -864,7 +906,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
     def test_grouped_layout_rejected_backed_group_does_not_guard(self):
         from torch._dynamo.source import ConstantSource
-        from torch._inductor.kernel.gemm_epilogue_analysis import grouped_tensor_layout
+        from torch._inductor.kernel.gemm_epilogue_layout import grouped_tensor_layout
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape_env = ShapeEnv()
@@ -2715,11 +2757,30 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("interleaved_group2_tuned", 2, False, True, 256, None),
             ("interleaved_group2_partial_n", 2, False, False, 192, {"tile_n": 128}),
             ("chunked_group2_partial_n", 2, True, False, 192, {"tile_n": 128}),
+            # 1-CTA M64 reads TMEM through 16-datapath atoms (two rows per thread).
+            (
+                "interleaved_group2_m64",
+                2,
+                False,
+                False,
+                256,
+                {"tile_m": 64, "tile_n": 64},
+            ),
+            ("chunked_group2_m64", 2, True, False, 256, {"tile_m": 64, "tile_n": 64}),
+            (
+                "interleaved_group2_m64_cluster_n2",
+                2,
+                False,
+                False,
+                256,
+                {"tile_m": 64, "tile_n": 32, "cluster_n": 2},
+            ),
+            ("swiglu_group2_m64", 2, False, False, 256, {"tile_m": 64, "tile_n": 32}),
         ),
         name_fn=lambda case: case[0],
     )
     def test_mm_output_contraction_matches_reference(self, case):
-        _, group, chunked, tuned, n, config = case
+        name, group, chunked, tuned, n, config = case
         if group == 4 and torch.cuda.get_device_capability()[0] != 10:
             self.skipTest("group-4 grouped main outputs are currently SM100-only")
         m, k = 128, 64
@@ -2736,6 +2797,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             else:
                 grouped = acc.view(acc.shape[0], acc.shape[1] // group, group)
                 lanes = tuple(grouped.select(-1, index) for index in range(group))
+            if name == "swiglu_group2_m64":
+                return F.silu(lanes[0]) * lanes[1]
             return sum(lanes[1:], lanes[0])
 
         def fn(lhs, rhs):
@@ -2764,6 +2827,26 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self.assertIn("'main':", code)
         self.assertIn("FlexGemmOutputContraction(", code)
         self.assertIn(f"group={group}", code)
+        for field, value in (config or {}).items():
+            self.assertIn(f"('{field}', {value})", code)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    def test_mm_output_contraction_group4_rejects_m64(self):
+        a = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device="cuda", dtype=torch.bfloat16)
+
+        def fn(lhs, rhs):
+            return flex_gemm(
+                torch.mm,
+                (lhs, rhs),
+                lambda acc: sum(acc.view(64, 64, 4).select(-1, i) for i in range(4)),
+                kernel_options={"backend": "QUACK", "config": {"tile_m": 64}},
+            )
+
+        with self.assertRaisesRegex(Exception, "no supported GemmConfig"):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -8962,6 +9045,50 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertIn(" ===== ANALYSIS DETAILS =====", verbose)
         self.assertIn(" ===== GENERATED EPILOGUE =====", verbose)
         self.assertIn("@cute.jit", verbose)
+
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    @parametrize("cluster_n,dynamic", ((1, True), (2, False)))
+    def test_mm_tuned_skinny_candidates(self, device, dtype, cluster_n, dynamic):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("SM100-family search configurations")
+
+        def skinny_candidate(legal, **kwargs):
+            choices = flex_gemm_search_space(legal, **kwargs)
+            wanted = dict(
+                tile_m=128,
+                tile_n=32,
+                cluster_m=2,
+                cluster_n=cluster_n,
+                swap_ab=True,
+                is_dynamic_persistent=dynamic,
+            )
+            choices = tuple(
+                c
+                for c in choices
+                if all(dict(c)[name] == value for name, value in wanted.items())
+            )
+            self.assertTrue(choices, "skinny candidate missing from production search")
+            return choices
+
+        def epilogue(acc):
+            return F.silu(acc.float()).to(acc.dtype)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = self.makeTensor(32, 128, device=device, dtype=dtype)
+        b = self.makeTensor(512, 128, device=device, dtype=dtype).t()
+        # Exercise each new candidate without bypassing production search/legality.
+        with mock.patch.object(lowering, "flex_gemm_search_space", skinny_candidate):
+            actual = torch.compile(fn, fullgraph=True)(a, b)
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue(a @ b), epilogue(a.double() @ b.double()), a.shape[1]
+        )
 
     def test_addmm_swap_ab_matches_non_swap_and_reference(self, device):
         m, n, k = 128, 192, 64

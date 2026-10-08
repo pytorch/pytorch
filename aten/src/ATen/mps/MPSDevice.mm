@@ -19,15 +19,6 @@ MPSDevice::~MPSDevice() {
 }
 
 MPSDevice::MPSDevice() : _mtl_device(nil) {
-  // Check that MacOS 13.0+ version of MPS framework is available
-  // Create the MPSGraph and check method introduced in 14.0
-  // which is used by MPS backend.
-  id mpsCD = NSClassFromString(@"MPSGraph");
-
-  if ([mpsCD instancesRespondToSelector:@selector(HermiteanToRealFFTWithTensor:axes:descriptor:name:)] == NO) {
-    return;
-  }
-
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0; i < [devices count]; i++) {
     id<MTLDevice> device = devices[i];
@@ -51,7 +42,6 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
           isOperatingSystemAtLeastVersion:{.majorVersion = major, .minorVersion = minor, .patchVersion = 0}];
     }
   };
-  static bool _macos_14_4_plus = is_os_version_at_least(14, 4);
   static bool _macos_15_0_plus = is_os_version_at_least(15, 0);
   static bool _macos_15_1_plus = is_os_version_at_least(15, 1);
   static bool _macos_15_2_plus = is_os_version_at_least(15, 2);
@@ -61,8 +51,6 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_27_0_plus = is_os_version_at_least(27, 0);
 
   switch (version) {
-    case MacOSVersion::MACOS_14_4:
-      return _macos_14_4_plus;
     case MacOSVersion::MACOS_15_0:
       return _macos_15_0_plus;
     case MacOSVersion::MACOS_15_1:

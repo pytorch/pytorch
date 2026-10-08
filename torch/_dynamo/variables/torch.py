@@ -950,6 +950,11 @@ class AllowInGraphKind(enum.Enum):
     LEAF_FUNCTION = "leaf_function"
 
 
+_CONSTANT_FN_METADATA_ATTRS = frozenset(
+    {"__name__", "__qualname__", "__module__", "__doc__"}
+)
+
+
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
@@ -1272,6 +1277,30 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     VariableTracker.build(tx, polyfills.radians),
                     list(args),
                     kwargs,
+                )
+
+        if hasattr(math, "sumprod"):  # Python 3.12+
+
+            @register(math.sumprod)
+            def handle_sumprod(
+                self,
+                tx: "InstructionTranslatorBase",
+                *args: VariableTracker,
+                **kwargs: VariableTracker,
+            ) -> VariableTracker | None:
+                no_keywords(tx, "math.sumprod", kwargs)
+                check_positional(tx, "sumprod", len(args), 2, 2)
+                if check_unspec_or_constant_args(args, kwargs):
+                    return None
+                # Lists/tuples with any non-constant element use plain accumulation
+                # for the whole call. Other iterables are materialized first so
+                # lists of constants still fold with CPython's float path.
+                if all(isinstance(a, (ListVariable, TupleVariable)) for a in args):
+                    fn = polyfills.sumprod_generic
+                else:
+                    fn = polyfills.sumprod
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, fn), list(args), {}
                 )
 
         if hasattr(math, "fma"):  # Python 3.13+
@@ -1830,12 +1859,38 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if tf_state.skip_next:
                 tf_state.skip_next = False
                 return VariableTracker.build(tx, False)
+            # Mirrors check_has_torch_function in C++: an active torch
+            # function mode makes every argument "have" a torch function.
+            if (
+                tf_state.torch_function_mode_enabled
+                and tf_state.in_torch_function_mode()
+            ):
+                return VariableTracker.build(tx, True)
             elems = (
                 unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
                 else args
             )
             return VariableTracker.build(tx, any(has_torch_function(x) for x in elems))
+
+        @register(torch.overrides.handle_torch_function)
+        def handle_handle_torch_function(
+            self,
+            tx: "InstructionTranslatorBase",
+            public_api: VariableTracker,
+            relevant_args: VariableTracker,
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .torch_function import dispatch_torch_function
+
+            return dispatch_torch_function(
+                tx,
+                public_api,
+                list(args),
+                kwargs,
+                relevant_args=unpack_iterable(tx, relevant_args),
+            )
 
         @register(torch._C._skip_one_hop_torch_function)
         def handle_skip_one_hop_torch_function(
@@ -2917,6 +2972,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         stream_var.proxy,
                         stream_var.value,
                         stream_var.user_object_index,
+                        current_device=stream_var.current_device,
                         source=stream_var.source,
                     )
                 return stream_var
@@ -3653,13 +3709,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         f"Expected BaseListVariable from autograd.grad with dict inputs, "
                         f"got {type(result)}"
                     )
-                items: dict[VariableTracker, VariableTracker] = dict(
-                    zip(
-                        inputs_var.items.keys(),
-                        result.items,
-                        strict=True,
-                    )
-                )
+                keys: list[VariableTracker] = [k.vt for k in inputs_var.items]
+                items = dict(zip(keys, result.items, strict=True))
                 return ConstDictVariable(items)
             return result
 
@@ -3761,6 +3812,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
             return TorchInGraphFunctionVariable(member, source=source)
+        # Function metadata (__name__, __module__, __qualname__, ...) is
+        # immutable on builtins and descriptors, so it can be constant folded.
+        if name in _CONSTANT_FN_METADATA_ATTRS and ConstantVariable.is_literal(member):
+            return ConstantVariable.create(member)
         return variables.GetAttrVariable(self, name, source=source)
 
     def call_function(
