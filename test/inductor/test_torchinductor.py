@@ -8831,6 +8831,21 @@ for dtype in (torch.int32, torch.int64):
         x = torch.rand([4, 8], dtype=torch.float32, device=self.device)
         self.common(fn, (x,))
 
+    def test_scatter_empty_index_scalar(self):
+        def fn(x, idx, src):
+            return (
+                x.scatter(0, idx, src),
+                x.clone().scatter_(0, idx, src),
+                x.scatter(0, idx, 3.14),
+                x.scatter_add(0, idx, src),
+                x.scatter_reduce(0, idx, src, "sum"),
+            )
+
+        x = torch.tensor(1.0, device=self.device)
+        idx = torch.tensor([], dtype=torch.int64, device=self.device)
+        src = torch.tensor([], device=self.device)
+        self.common(fn, (x, idx, src))
+
     def test_fill1(self):
         def fn(x):
             tmp = torch.ones_like(x)
