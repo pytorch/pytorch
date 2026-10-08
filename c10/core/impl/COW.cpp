@@ -282,6 +282,9 @@ void materialize_cow(StorageImpl* storage) {
   }
 
   auto result = ctx->decrement_refcount();
+  // This reference's count on the shared context is now accounted for (and
+  // the context may be gone), so the deleter must not decrement it again.
+  ref->context = nullptr;
 
   // This must be set by each branch below.
   std::optional<DataPtr> new_data_ptr;
@@ -320,12 +323,8 @@ void materialize_cow(StorageImpl* storage) {
   }
 
   TORCH_INTERNAL_ASSERT(new_data_ptr.has_value());
-  DataPtr old_data_ptr =
-      storage->set_data_ptr_no_materialize(*std::move(new_data_ptr));
-  // The refcount of the context was already decremented above. Release the
-  // reference to the context so the refcount doesn't get decremented again,
-  // but free the reference itself.
-  delete static_cast<cow::COWReference*>(old_data_ptr.release_context());
+  // The old DataPtr's deleter frees `ref` when it goes out of scope.
+  storage->set_data_ptr_no_materialize(*std::move(new_data_ptr));
 }
 
 } // namespace c10::impl::cow

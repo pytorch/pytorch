@@ -105,15 +105,45 @@ an event on its stream (one per stream suffices, since later events on the
 same stream supersede earlier ones), and the stealing stream waits for
 them on the device.
 
-Under CUDA graph capture, a materializing copy is captured and redone by
-every replay. That is what a lazy clone made during the capture stands for,
-but a lazy clone made before the capture stands for a copy of the data at
-that time, and an eager copy can't be redone by the replays of a graph that
-a lazy clone was made in. So copying is only allowed if the lazy clone was
-made during capture iff the copy is (we don't distinguish between
-captures). Moreover, materializing the storage that was lazily cloned from
-during capture would move it to a new allocation inside of the graph, which
-is wrong if its memory was allocated before the capture: e.g., the user
-keeps writing the inputs of the graph to the old memory. Captured copies
-don't need to be waited for by stealing, since they only run on replay,
-which the user orders with respect to other work.
+CUDA graph capture relaxes the invariant above for one pattern: a graph
+input (or a parameter), whose memory was allocated before the capture on
+its own stream, lazily cloned during the capture on the capture stream.
+Cloning eagerly would add a copy to every replay, even if the lazy clone is
+never written, so it stays lazy. Its lifetime is not a concern: memory that
+a graph accesses must stay alive for as long as the graph can be replayed.
+But a graph is a recording that is replayed at baked-in addresses, which
+brings two other hazards:
+
+- Once vs. every replay: a copy made during capture is captured and redone
+  by every replay. That is what a lazy clone made during the capture stands
+  for, but a lazy clone made before the capture stands for a single copy at
+  that time (and vice versa, a copy made after the capture can't be redone
+  by the replays of the graph a lazy clone was made in). So each reference
+  records whether it was made during capture, and copying is only allowed
+  if that matches whether we are capturing (we don't distinguish between
+  captures).
+- Baked-in addresses: copying moves the materialized storage to a new
+  allocation. Moving the storage that was lazily cloned from during capture
+  is wrong if its memory was allocated before the capture (e.g., a graph
+  input, which the user keeps writing to the old memory). Memory allocated
+  during capture comes from the graph's private pool, for which
+  `Allocator::was_allocated_on_stream` returns unknown, so copying a storage
+  whose allocation stream is known raises an error during capture.
+
+Stealing doesn't move the data, so it is allowed during and after capture
+(e.g., when the user refills a graph input). Copies made during capture
+aren't waited for by stealing, since they only run on replay, which the
+user orders with respect to writing the inputs of the graph.
+
+Two hazards are not checked, and are the user's responsibility:
+
+- During capture, a lazy clone counts as a use of its source's memory for
+  as long as it is alive and not yet materialized (the deferred copy reads
+  it too). Anything that releases that memory, e.g., an external event
+  recorded mid-graph that lets another stream overwrite a graph input, must
+  come after the worst-case point where the lazy clone may still be
+  unmaterialized.
+- Materialization moves a storage to a new allocation. If a CUDA graph (or
+  anything else that caches raw pointers) already captured its address, it
+  keeps using the old memory: e.g., writing a lazily cloned tensor after a
+  graph that reads it was captured is silently not seen by the graph.

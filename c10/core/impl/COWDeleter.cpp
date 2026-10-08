@@ -6,7 +6,11 @@ namespace c10::impl {
 
 void cow::cow_deleter(void* ctx) {
   auto* ref = static_cast<cow::COWReference*>(ctx);
-  ref->context->decrement_refcount();
+  // A materialized reference has already given up its count on the shared
+  // context (see materialize_cow), and only needs to be freed.
+  if (ref->context != nullptr) {
+    ref->context->decrement_refcount();
+  }
   delete ref;
 }
 
