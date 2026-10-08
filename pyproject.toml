@@ -337,7 +337,7 @@ dev = [
     "jinja2",
     "lintrunner ; platform_machine != \"s390x\"",
     "networkx>=2.5.1",
-    "optree>=0.13.0",
+    "optree>=0.13.1",
     "psutil",
     "spin",
     "sympy>=1.13.3",
@@ -468,7 +468,7 @@ Documentation = "https://pytorch.org/docs"
 Forum = "https://discuss.pytorch.org"
 
 [project.optional-dependencies]
-optree = ["optree>=0.13.0"]
+optree = ["optree>=0.13.1"]
 opt-einsum = ["opt-einsum>=3.3"]
 pyyaml = ["pyyaml"]
 
