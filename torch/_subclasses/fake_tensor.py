@@ -823,7 +823,10 @@ def init_gpu_context(device: torch.device) -> None:
         )
 
 
-# Restore explicitly because mock.patch.object cannot delete C++-backed properties.
+# Replaces mock.patch.object(mode, "allow_non_fake_inputs", True). On exit,
+# mock.patch.object restores an attribute missing from the instance __dict__ by
+# deleting it, which raises for CppFakeTensorMode's allow_non_fake_inputs
+# property (it has no deleter). Save and restore the value instead.
 @contextlib.contextmanager
 def allow_non_fake_inputs_temporarily(
     fake_mode: FakeTensorMode | None,
