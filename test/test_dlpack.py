@@ -14,10 +14,12 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyCUDA,
     onlyNativeDeviceTypes,
+    onlyOn,
     skipCUDAIf,
     skipCUDAIfNotRocm,
     skipMeta,
     skipMPS,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -332,7 +334,8 @@ class TestTorchDlPackDevice(TestCase):
         self.assertEqual(y5, y5_dl)
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
         stream_a = torch.cuda.Stream()
@@ -349,7 +352,8 @@ class TestTorchDlPackDevice(TestCase):
         self.assertEqual(z, x)
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @dtypes(
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,
@@ -389,7 +393,8 @@ class TestTorchDlPackDevice(TestCase):
             raise AssertionError(f"dtype mismatch: {x.dtype} != {y.dtype}")
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     def test_dlpack_default_stream(self, device):
         class DLPackTensor:
             def __init__(self, tensor):
@@ -414,7 +419,8 @@ class TestTorchDlPackDevice(TestCase):
             from_dlpack(x)
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     def test_dlpack_convert_default_stream(self, device):
         # tests run on non-default stream, so _sleep call
         # below will run on a non-default stream, causing
@@ -442,7 +448,8 @@ class TestTorchDlPackDevice(TestCase):
             x.__dlpack__(stream=object())
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     def test_dlpack_cuda_per_thread_stream(self, device):
         # Test whether we raise an error if we are trying to use per-thread default
         # stream, which is currently not supported by PyTorch.
@@ -461,7 +468,8 @@ class TestTorchDlPackDevice(TestCase):
             x.__dlpack__(stream=2)
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     @skipCUDAIfNotRocm
     def test_dlpack_invalid_rocm_streams(self, device):
         # Test that we correctly raise errors on unsupported ROCm streams.
@@ -476,7 +484,8 @@ class TestTorchDlPackDevice(TestCase):
         test(x, stream=2)
 
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["xpu", "cuda"])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5641")
     def test_dlpack_invalid_cuda_streams(self, device):
         x = make_tensor((5,), dtype=torch.float32, device=device)
 
