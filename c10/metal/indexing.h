@@ -395,6 +395,54 @@ kernel void unary_alpha_strided(
       f(val_at_offs<T>(input, input_offs), alpha);
 }
 
+// unary_inner_contiguous with a scalar argument (relu/clamp_min, ...): one
+// outer-offset calc per inner run, then an ILP tile over the unit-stride run.
+template <typename T, typename T2, typename F>
+kernel void unary_alpha_inner_contiguous(
+    device void* output [[buffer(0)]],
+    constant void* input [[buffer(1)]],
+    constant long* outer_sizes [[buffer(2)]],
+    constant long* input_outer_strides [[buffer(3)]],
+    constant long* output_outer_strides [[buffer(4)]],
+    constant uint2& ndim_outer_inner [[buffer(5)]],
+    constant T2& alpha [[buffer(6)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T2>;
+  const uint ndim_outer = ndim_outer_inner.x;
+  const uint inner = ndim_outer_inner.y;
+  int pos[max_ndim];
+  pos_from_thread_index(int(thread_pos.y), pos, outer_sizes, ndim_outer);
+  const auto in_base = offset_from_coord(pos, input_outer_strides, ndim_outer);
+  const auto out_base =
+      offset_from_coord(pos, output_outer_strides, ndim_outer);
+  constant T* in = reinterpret_cast<constant T*>(
+      static_cast<constant char*>(input) + in_base);
+  device res_t* out = reinterpret_cast<device res_t*>(
+      static_cast<device char*>(output) + out_base);
+  uint base = thread_pos.x * ILP_PER_THREAD;
+  if (base + ILP_PER_THREAD <= inner) {
+    array<T, ILP_PER_THREAD> tmp_in;
+    array<res_t, ILP_PER_THREAD> tmp_out;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_in[j] = in[base + j];
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      tmp_out[j] = f(tmp_in[j], alpha);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      out[base + j] = tmp_out[j];
+    }
+  } else {
+    for (uint j = base; j < inner; ++j) {
+      out[j] = f(in[j], alpha);
+    }
+  }
+}
+
 #define REGISTER_UNARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)              \
   static_assert(                                                           \
       ::metal::is_same_v<                                                  \
@@ -427,6 +475,17 @@ kernel void unary_alpha_strided(
           constant long* input_strides,                                    \
           constant long* output_strides,                                   \
           constant uint& ndim,                                             \
+          constant DTYPEA& alpha,                                          \
+          uint2 thread_pos);                                               \
+  template [[host_name(#NAME "_inner_contiguous_" #DTYPEO "_" #DTYPEI      \
+                             "_" #DTYPEA)]] kernel void ::c10::metal::     \
+      unary_alpha_inner_contiguous<DTYPEI, DTYPEA, NAME##_functor>(        \
+          device void* output,                                             \
+          constant void* input,                                            \
+          constant long* outer_sizes,                                      \
+          constant long* input_outer_strides,                              \
+          constant long* output_outer_strides,                             \
+          constant uint2& ndim_outer_inner,                                \
           constant DTYPEA& alpha,                                          \
           uint2 thread_pos)
 
