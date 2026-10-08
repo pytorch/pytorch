@@ -166,6 +166,7 @@ from .utils import (
     nn_module_proxy,
     same,
     set_example_value,
+    temporarily_clear_torch_function_mode_stack,
 )
 from .variables.builder import (
     BackwardStateGraphArg,
@@ -184,7 +185,7 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
-from .variables.user_defined import UserDefinedDictVariable
+from .variables.user_defined import RandomCallOnSource, UserDefinedDictVariable
 
 
 if TYPE_CHECKING:
@@ -344,9 +345,17 @@ class GraphCompileReason:
             graph_break_reasons.append(self)
 
 
-def _get_gen_rand_values_fn(random_calls: Any) -> Callable[[], list[Any]]:
-    def _gen_rand_values() -> list[Any]:
-        return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
+def _get_gen_rand_values_fn(random_calls: Any) -> Callable[..., list[Any]]:
+    # replay_objs holds the runtime random.Random objects for the
+    # RandomCallOnSource entries, in random_calls order.
+    def _gen_rand_values(*replay_objs: Any) -> list[Any]:
+        objs = iter(replay_objs)
+        values = []
+        for fn, args, kwargs in random_calls:
+            if isinstance(fn, RandomCallOnSource):
+                fn = getattr(next(objs), fn.method_name)
+            values.append(fn(*args, **kwargs))
+        return values
 
     return _gen_rand_values
 
@@ -466,6 +475,12 @@ class OutputGraphGuardsState:
     skip_guards_check: bool = False
     export_constraints: bool = False
     name_of_builtins_dict_key_in_fglobals: str | None = None
+    # [device-as-parameter] whether compile_on_one_rank was on while tracing.
+    # Recorded rather than re-read at guard-build time: a guard built under CooR
+    # checks the device index against the runtime current device, and one built
+    # without it pins the index. Deserializing has to rebuild whichever kind was
+    # saved, not whichever the loading process happens to be configured for.
+    compile_on_one_rank: bool = False
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -497,6 +512,7 @@ class OutputGraphGuardsState:
             _guards=self.guards,
             _aotautograd_guards=self.aotautograd_guards,
             skip_guards_check=self.skip_guards_check,
+            compile_on_one_rank=self.compile_on_one_rank,
         )
 
 
@@ -643,6 +659,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.skip_guards_check,
             output_graph_guards_state.export_constraints,
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
+            output_graph_guards_state.compile_on_one_rank,
         )
 
         self.import_sources = import_sources or {}
@@ -731,6 +748,7 @@ class OutputGraph(OutputGraphCommon):
             # These are set by @property instead, just initialize them as blank
             _guards=torch._guards.GuardsSet(),
             _aotautograd_guards=[],
+            compile_on_one_rank=torch.fx.experimental.proxy_tensor._coor_enabled(),
         )
         self.tracers = [SubgraphTracer(self, is_export=export)]
         # Map from graph input's `Source` to its `VariableTracker` to
@@ -845,15 +863,19 @@ class OutputGraph(OutputGraphCommon):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache: dict[Source, VariableTracker] = {}
-        # Cache for sources resolved via MRO walk, keyed by id(obj).
-        # When the same descriptor (e.g. property) is reached from multiple
-        # subclasses, we reuse the first source to avoid redundant guards.
+        # Cache for sources resolved via MRO walk, keyed by (id(owning class),
+        # name). When the same descriptor (e.g. property) is reached from
+        # multiple instances or subclasses, we reuse the first source to avoid
+        # redundant guards.
         # We thought of rolling this in variable_tracker_cache but here
         # different sources point to the same object, we also don't want it to
         # go through the side effects cache because even though these objects
         # are same, we don't want OBJECT_ALIASING guards on them. For these
         # objects, we have DICT_CONTAINS absent guards on the mro walk, so there
         # is no need of the OBJECT_ALIASING guards.
+        # Keyed on the owner rather than the descriptor: one descriptor object
+        # can sit in several unrelated classes, and a source through one of
+        # them does not notice the attribute being reassigned on another.
         self.mro_source_cache: dict[tuple[int, str], DictGetItemSource] = {}
         # Tracks (id(klass), attr_name) pairs that already have a
         # DICT_CONTAINS absent guard installed during MRO walks.  When
@@ -909,8 +931,8 @@ class OutputGraph(OutputGraphCommon):
         # This returns false if TF Overall (both mode and subclass) is disabled OR that TF Mode stack is empty
         self.torch_function_mode_enabled = torch._C._is_torch_function_mode_enabled()
 
-        # Used to wrap the compiled graph at runtime with
-        # DisableTorchFunctionSubclass to prevent double dispatch.
+        # Used to prevent inlined subclass __torch_function__ dispatch from
+        # running again when the compiled graph executes.
         self.torch_function_subclass_inlined = False
 
         # Tracks if the output graph has a user defined allowed function in the
@@ -951,7 +973,11 @@ class OutputGraph(OutputGraphCommon):
         # random_calls tracks calls to random() and random_values_var stores the name of
         # the variable that stores __gen_rand_values results.
         self.random_calls: list[
-            tuple[Callable[..., object], tuple[object, ...], dict[str, object]]
+            tuple[
+                Callable[..., object] | RandomCallOnSource,
+                tuple[object, ...],
+                dict[str, object],
+            ]
         ] = []
         self.random_values_var: Any = None
 
@@ -1039,13 +1065,11 @@ class OutputGraph(OutputGraphCommon):
                         var.value, _ExportModuleSpecTrackerDict
                     ):
                         if populate_export_metadata:
-                            if var._base_vt is None:
-                                raise AssertionError("var._base_vt must not be None")
                             for (
                                 k,
                                 v,
                             ) in (
-                                var._base_vt.items.items()  # pyrefly: ignore[missing-attribute]
+                                var.items.items()  # pyrefly: ignore[missing-attribute]
                             ):
                                 # pyrefly: ignore [implicit-any]
                                 specs = {}
@@ -2148,7 +2172,17 @@ class OutputGraph(OutputGraphCommon):
             random_calls_instructions.extend(
                 codegen.load_function_name(rand_fn_name, True)
             )
-            random_calls_instructions.extend(create_call_function(0, False))
+            replay_sources = [
+                fn.source
+                for fn, _, _ in self.random_calls
+                if isinstance(fn, RandomCallOnSource)
+            ]
+            for source in replay_sources:
+                codegen(source)
+            random_calls_instructions.extend(codegen.get_instructions())
+            random_calls_instructions.extend(
+                create_call_function(len(replay_sources), False)
+            )
             random_calls_instructions.append(
                 codegen.create_store(self.random_values_var),
             )
@@ -3052,19 +3086,28 @@ class OutputGraph(OutputGraphCommon):
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 
-            # If __torch_function__ subclass dispatch was inlined during
-            # tracing, wrap the compiled graph to disable __torch_function__
-            # at runtime, preventing double dispatch (the C++ dispatcher
-            # would otherwise re-trigger __torch_function__ on subclass
-            # inputs that the graph already handles).
+            # Clear the compile-time mode stack while running the graph so its
+            # effects are not applied twice. Keep mode dispatch enabled because
+            # the backend may install its own modes while the graph runs.
+            if self.torch_function_mode_stack:
+                mode_compiled_fn = compiled_fn
+
+                def _clear_modes_wrapper(*args, **kwargs):
+                    with temporarily_clear_torch_function_mode_stack():
+                        return mode_compiled_fn(*args, **kwargs)
+
+                compiled_fn = _clear_modes_wrapper
+
             if self.torch_function_subclass_inlined:
-                real_compiled_fn = compiled_fn
+                # Subclass inputs would otherwise re-trigger the override that
+                # the graph already handles.
+                subclass_compiled_fn = compiled_fn
 
-                def _tf_disabled_wrapper(*args, **kwargs):
+                def _tf_subclass_disabled_wrapper(*args, **kwargs):
                     with torch._C.DisableTorchFunctionSubclass():
-                        return real_compiled_fn(*args, **kwargs)
+                        return subclass_compiled_fn(*args, **kwargs)
 
-                compiled_fn = _tf_disabled_wrapper
+                compiled_fn = _tf_subclass_disabled_wrapper
 
             compiled_fn = disable(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
@@ -3153,7 +3196,7 @@ class OutputGraph(OutputGraphCommon):
                 )
 
                 tmp_vars = []
-                for constructor in index_to_bytecode_constructor.values():
+                for constructor in index_to_bytecode_constructor:
                     constructor(cg)
                     var_name = (
                         self.new_var()
@@ -3892,6 +3935,11 @@ class SubgraphTracer(fx.Tracer):
         self.input_name_to_proxy: dict[str, fx.Proxy] = {}
         # Node => computed real value (see utils.get_real_value)
         self.real_value_cache: dict[fx.Node, torch.Tensor] = {}
+        # [device-as-parameter] the single coor::current_device_index observation
+        # for this tracer, mirroring _current_device_edge's node cache. Per-tracer
+        # rather than per-graph: a HOP gives each subgraph its own tracer, and a
+        # proxy belonging to a sibling cannot be lifted into this one.
+        self.coor_current_device_index_var: VariableTracker | None = None
 
         # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
         self.parent = parent
@@ -4819,7 +4867,7 @@ class SubgraphTracer(fx.Tracer):
 
         return MutationInfo(False, "", ())
 
-    def has_aliasing(self) -> AliasingInfo:
+    def has_aliasing(self, *, allow_input_input_aliasing: bool = False) -> AliasingInfo:
         from torch._dynamo.variables.higher_order_ops import get_tensor_storages
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
@@ -4832,9 +4880,11 @@ class SubgraphTracer(fx.Tracer):
                     for storage in get_tensor_storages(example_value):
                         if storage in input_storages:
                             # input-input aliasing
-                            msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
-                            return AliasingInfo(True, msg)
-                        input_storages[storage] = node
+                            if not allow_input_input_aliasing:
+                                msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
+                                return AliasingInfo(True, msg)
+                        else:
+                            input_storages[storage] = node
             else:
                 break
 

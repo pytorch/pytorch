@@ -976,6 +976,29 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
                 )
             )
 
+    @unittest.skipIf(IS_FBCODE, "optree is not enabled in fbcode")
+    def test_deregister_before_cxx_pytree_import(self):
+        script = """
+import torch.utils._pytree as pytree
+
+class Foo:
+    pass
+
+pytree.register_pytree_node(Foo, lambda f: ([1], None), lambda v, c: Foo())
+pytree._deregister_pytree_node(Foo)
+
+import torch.utils._cxx_pytree as cxx_pytree
+
+foo = Foo()
+if cxx_pytree.tree_leaves(foo) != [foo]:
+    raise RuntimeError("deregistered node was registered in optree on import")
+"""
+        subprocess.check_output(
+            [sys.executable, "-c", script],
+            stderr=subprocess.STDOUT,
+            cwd=os.path.dirname(os.path.realpath(__file__)),
+        )
+
     def test_treespec_equality(self):
         self.assertEqual(
             python_pytree.treespec_leaf(),
@@ -1411,6 +1434,22 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
             self.assertEqual(mapped.y, torch.tensor(2))
         finally:
             python_pytree._deregister_pytree_node(CustomClass)
+
+    def test_deregister_then_reregister_pytree_node(self):
+        class MyDict(UserDict):
+            pass
+
+        def register():
+            python_pytree.register_pytree_node(
+                MyDict,
+                lambda d: (list(d.values()), list(d.keys())),
+                lambda values, keys: MyDict(zip(keys, values)),
+            )
+
+        register()
+        python_pytree._deregister_pytree_node(MyDict)
+        register()
+        python_pytree._deregister_pytree_node(MyDict)
 
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182645")
     def test_constant(self):
