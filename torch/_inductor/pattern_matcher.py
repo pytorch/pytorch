@@ -1127,7 +1127,13 @@ class _TargetArgsExpr(_TargetExpr):
             return False
         if val.dtype != dtype or val.device != device or val.dim() != len(sizes):
             return False
-        return all(statically_known_true(a == b) for a, b in zip(val.shape, sizes))
+        # guard_or_false rather than statically_known_true: a rewrite can leave
+        # equal-at-runtime sizes that are not provably equal (e.g. s vs
+        # 2 * (s // 2) when the caller pads s to even outside the graph).
+        # Specializing (guarding) on backed symbols is allowed here; the only
+        # contract is to not specialize unbacked symbols, and guard_or_false
+        # returns False for those without installing a guard.
+        return all(guard_or_false(a == b) for a, b in zip(val.shape, sizes))
 
     def find_anchor_nodes(
         self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
