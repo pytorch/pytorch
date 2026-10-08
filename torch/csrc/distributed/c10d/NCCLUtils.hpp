@@ -71,6 +71,10 @@ static_assert(
 #define NCCL_HAS_HOST_CFT_MODE
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 32, 3)
+#define NCCL_HAS_NVLS_HOST_MODE
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \
