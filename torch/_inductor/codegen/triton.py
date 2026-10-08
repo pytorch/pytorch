@@ -3506,6 +3506,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._host_tma_descriptor_buffers: dict[str, OrderedSet[str]] = {}
         self._device_tma_buffers: OrderedSet[str] = OrderedSet()
         self.hint_override = hint_override
+        # Set on mix-order split-size candidates: the benchmark module then also
+        # times the wrapper's finish of the partials (see
+        # codegen_benchmark_post_call). Maps split-reduction intermediates to
+        # the final outputs.
+        self.mix_order_benchmark_rename: dict[str, str] | None = None
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._pdl_load_index = 0
         self._pdl_has_wait = False
@@ -7636,23 +7641,33 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self, result: IndentedBuffer, call_args: list[str], signature: list[Any]
     ) -> None:
         """Hook to emit code the benchmark times along with the kernel launch."""
-        if not (self.mix_order_reduction and self.saved_partial_accumulate):
+        if self.mix_order_benchmark_rename is None:
             return
         # Also time the wrapper's finish of the mix-order partials.
         idx = next(
             i for i, sig in enumerate(signature) if isinstance(sig, WorkspaceArg)
         )
-        numel, rnumel = (
-            V.graph.sizevars.optimization_hint(self.numels[prefix])
-            for prefix in ("x", "r0_")
-        )
-        nsplit = (numel + self.rsplit_size - 1) // self.rsplit_size
-        for i, partial_accum in enumerate(self.saved_partial_accumulate):
-            start, end = i * nsplit * rnumel, (i + 1) * nsplit * rnumel
-            result.writeline(
-                f"args[{idx}][{start}:{end}].view({nsplit}, {rnumel})"
-                f".{partial_accum.reduction_type}(dim=0)"
+
+        def hint(expr: sympy.Expr) -> str:
+            # Same hints as get_args, so the slices match the workspace.
+            return str(
+                V.graph.sizevars.optimization_hint_with_override(
+                    expr, hint_override=self.hint_override
+                )
             )
+
+        nsplit = hint((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size)
+        for buffer_name, reduced in self.mix_order_partial_finishes(
+            f"args[{idx}]",
+            nsplit,
+            hint(self.numels["r0_"]),
+            self.mix_order_benchmark_rename,
+        ):
+            # Like the wrapper, cast the fp32 workspace to the output dtype
+            # (its trailing .view() to the output shape is free).
+            if (dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+                reduced += f".to({dtype})"
+            result.writeline(reduced)
 
     def imports_for_benchmark_kernel(self):
         # Dedent BEFORE substituting get_raw_stream: a multi-line override would
