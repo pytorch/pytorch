@@ -1228,13 +1228,16 @@ class FSDPParam:
         # A larger floating-point dtype holds a smaller one exactly (e.g. fp32
         # and bf16). Compare sizes since torch.promote_types rejects float8.
         # Gradients reduced outside DP keep autograd's upcast so that reduction
-        # runs in the wider dtype too.
+        # runs in the wider dtype too. All-gather extensions run their own
+        # compute, which may read grad_dtype to pick the dtype its backward
+        # produces, so it stays fixed for them.
         return (
             grad_dtype is not None
             and compute_dtype.is_floating_point
             and grad_dtype.is_floating_point
             and grad_dtype.itemsize > compute_dtype.itemsize
             and not self.may_reduce_grad_outside_dp
+            and not hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather")
         )
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:

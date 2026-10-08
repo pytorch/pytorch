@@ -69,6 +69,26 @@ def record_copy_in_dtypes(grad_dtypes: list[tuple[torch.dtype, ...]]):
     )
 
 
+def add_all_gather_extension(param: nn.Parameter) -> None:
+    # A plain all-gather through FSDP's extension hooks, attached to the shard
+    def fsdp_pre_all_gather(
+        local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+    ):
+        return (local_tensor.to(mp_policy.param_dtype),), None
+
+    @torch.no_grad()
+    def fsdp_post_all_gather(
+        local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+    ):
+        (tensor,) = all_gather_outputs
+        if out is None:
+            return tensor, (tensor,)
+
+    local_tensor = param._local_tensor
+    local_tensor.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_tensor)
+    local_tensor.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_tensor)
+
+
 class TestMixedPrecisionPolicy(TestCase):
     def test_param_dtype_override_fn(self):
         default_param = nn.Parameter(torch.ones(1))
@@ -854,6 +874,74 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         model.set_requires_gradient_sync(True)
         model.set_reshard_after_backward(True)
         model.finalize_backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_fixed_for_all_gather_extensions(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.ones(8, device=device_type))
+
+            def forward(self, inp):
+                return (self.weight * inp).sum()
+
+        model = Model()
+        fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
+        add_all_gather_extension(model.weight)
+        model.unshard()
+        weight = model.weight
+        model.reshard()
+        fwd_dtypes, grad_dtypes = [], []
+        model.register_forward_hook(lambda *_: fwd_dtypes.append(weight.grad_dtype))
+        weight.register_hook(lambda grad: grad_dtypes.append(grad.dtype))
+        # 256 + 1 is 256 in bf16
+        for value, sync in ((256.0, False), (1.0, False), (-256.0, True)):
+            model.set_requires_gradient_sync(sync)
+            model(torch.full((8,), value, device=device_type)).backward()
+        # Not deferred, so autograd upcasts every gradient
+        self.assertEqual(fwd_dtypes, [torch.float32] * 3)
+        self.assertEqual(grad_dtypes, [torch.float32] * 3)
+        grad = model.weight.grad.full_tensor()
+        self.assertEqual(grad, torch.ones(8, device=device_type))
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_seen_by_all_gather_extension_compute(self):
+        seen = []
+
+        class GradDtypeMul(torch.autograd.Function):
+            # Picks its weight gradient's dtype in forward, like torchtitan's
+            # MXFP8 linear
+            @staticmethod
+            def forward(ctx, inp, weight):
+                ctx.save_for_backward(inp)
+                ctx.grad_dtype = weight.grad_dtype or weight.dtype
+                seen.append(weight.grad_dtype)
+                return (weight * inp).sum()
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                (inp,) = ctx.saved_tensors
+                return None, (grad_out.float() * inp.float()).to(ctx.grad_dtype)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.ones(8, device=device_type))
+
+            def forward(self, inp):
+                return GradDtypeMul.apply(inp, self.weight)
+
+        model = Model()
+        fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
+        add_all_gather_extension(model.weight)
+        # (1 + 2^-7)^2 is not representable in bf16
+        value = 1 + 2**-7
+        inp = torch.full((8,), value, device=device_type)
+        out = model(inp)
+        out.backward(torch.full_like(out, value))
+        self.assertEqual(seen, [torch.float32])
+        grad = model.weight.grad.full_tensor()
+        self.assertEqual(grad, inp.square(), atol=0, rtol=0)
 
     @skip_if_lt_x_gpu(2)
     def test_grad_pending_all_reduce_buffer(self):
