@@ -2506,6 +2506,14 @@ class triton:
         )
     )
 
+    # Backends for the partial BMM nested inside a decompose-K subgraph. This
+    # is independent of max_autotune_gemm_backends, which gates the outer MM.
+    # TRITON adds the Blackwell persistent TMA partial BMM on datacenter
+    # Blackwell when enable_persistent_tma_matmul is also set.
+    decompose_k_bmm_backends = os.environ.get(
+        "TORCHINDUCTOR_DECOMPOSE_K_BMM_BACKENDS", "ATEN"
+    )
+
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
     # it as an autotuning choice for all matmuls
     decompose_k_threshold = int(
