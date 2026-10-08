@@ -9133,6 +9133,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: le_quantized_cpu
+    Meta: le_Tensor_meta
   tags: [core, pointwise]
 
 - func: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
