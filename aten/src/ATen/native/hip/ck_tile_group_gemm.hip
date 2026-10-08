@@ -102,13 +102,17 @@ namespace at::hip::detail {
 
 		// bf16/fp16 configs from AMD Primus-Turbo (MIT), used on gfx942 and gfx950.
 		// Selected by N: N % 256 == 0, N % 128 == 0, otherwise the N-padded config.
-		using Cfg16_256x256x64      = CkTileGroupGemmConfig<256, 256, 64, 32, 32, 16, 2, 2, false, false, false>;
-		using Cfg16_256x128x64      = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, false, false>;
-		using Cfg16_256x128x64_PadN = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>;
+		using Cfg16_256x256x64      = CkTileGroupGemmConfig<256, 256, 64, 16, 16, 32, 2, 2, false, false, false>;
+		using Cfg16_256x128x64      = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>;
+		using Cfg16_256x128x64_PadN = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>;
+
+		// for backwards/2D x 2D
+		using Cfg16_2D2D_256x256x32 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, false, false, true>;
+
 		// Not from Primus: fallback for everything the configs above reject (K not a multiple of 64,
 		// jagged K or N, column-major A). C is stored 2 elements at a time (the narrowest ck_tile allows
 		// for 16-bit outputs) because in 3D x 2D a group's output columns can start at any even offset.
-		using Cfg16_256x128x64_Pad  = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, true, true, true, false, 0, 2>;
+		using Cfg16_256x128x64_Pad  = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>;
 
 		// fp8/bf8 configs from Primus-Turbo. Primus runs these through its quantized runner
 		// (row/col, tensor and blockwise scales), not the bf16/fp16 runner above.
@@ -305,7 +309,10 @@ namespace at::hip::detail {
 				// Primus's configs need K % K_Tile == 0 (no K padding) and row-major A (no M padding).
 				// K < 0 or N < 0 means that dimension is jagged and unknown here.
 				const bool primus_ok = a_row_major && K > 0 && K % 64 == 0 && N > 0 && N % 8 == 0;
-				if (primus_ok && N % 256 == 0) {
+				if (K < 0 && M % 256 == 0 && N % 256 == 0) {
+					// 2D x 2D (e.g. dW): K is jagged, M and N are fixed per group
+					run_with_config(Cfg16_2D2D_256x256x32{});
+				} else if (primus_ok && N % 256 == 0) {
 					run_with_config(Cfg16_256x256x64{});
 				} else if (primus_ok && N % 128 == 0) {
 					run_with_config(Cfg16_256x128x64{});
