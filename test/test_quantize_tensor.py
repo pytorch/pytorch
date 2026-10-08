@@ -758,23 +758,110 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             torch.full((3, 1), 0xFF, device=device, dtype=torch.uint8),
         )
 
-    def test_stateful_cuda_graph(self, device):
-        if device != "cuda" or torch.version.rocm is not None:
+    @parametrize("num_ops", (1, 2))
+    def test_stateful_cuda_graph(self, num_ops, device):
+        # verifies that:
+        # * cuda graph capture + replay matches eager
+        # * ^ holds for chains of 1 to 2 to_mxfp8_reference ops
+        if torch.device(device).type != "cuda" or torch.version.rocm is not None:
             self.skipTest("stateful NVIDIA Philox rounding requires CUDA")
-        input = torch.randn((32, 64), device=device, dtype=torch.bfloat16)
+        input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
+        generator = torch.cuda.default_generators[input.get_device()]
         with torch.random.fork_rng(devices=[input.get_device()]):
             torch.manual_seed(123)
-            _, expected = to_mxfp8_reference(input, rounding_mode="stochastic")
-            torch.manual_seed(123)
+            expected = [
+                to_mxfp8_reference(input, rounding_mode="stochastic")
+                for _ in range(2 * num_ops)
+            ]
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
-                _, captured = to_mxfp8_reference(input, rounding_mode="stochastic")
+                captured = [
+                    to_mxfp8_reference(input, rounding_mode="stochastic")
+                    for _ in range(num_ops)
+                ]
+
+            torch.manual_seed(123)
+            replays = []
+            for replay in range(2):
+                offset = generator.get_offset()
+                graph.replay()
+                # verify offset advanced correctly
+                self.assertEqual(generator.get_offset(), offset + 4 * num_ops)
+                outputs = []
+                for op, (scales, qdata) in enumerate(captured):
+                    # verify results from cuda graph match eager
+                    scale_bytes = scales.view(torch.uint8).clone()
+                    qdata_bytes = qdata.view(torch.uint8).clone()
+                    expected_scales, expected_qdata = expected[replay * num_ops + op]
+                    self.assertEqual(scale_bytes, expected_scales.view(torch.uint8))
+                    self.assertEqual(qdata_bytes, expected_qdata.view(torch.uint8))
+                    reconstructed = from_blocked_format(qdata, scales)
+                    self.assertGreater(
+                        compute_error(input.float(), reconstructed.float()).item(), 15.0
+                    )
+                    outputs.append((scale_bytes, qdata_bytes))
+                replays.append(outputs)
+
+            for op in range(num_ops):
+                self.assertEqual(replays[0][op][0], replays[1][op][0])
+                self.assertFalse(torch.equal(replays[0][op][1], replays[1][op][1]))
+            if num_ops == 2:
+                self.assertFalse(torch.equal(replays[0][0][1], replays[0][1][1]))
+
+    def test_stateless_cuda_graph(self, device):
+        # verifies that:
+        # * cuda graph replay of to_mxfp8_reference with unchanged random_key
+        #   leads to results bitwise equivalent to original
+        # * cuda graph replay of to_mxfp8_reference with changed random_key
+        #   leads to a fresh random draw + different (and still valid) results
+
+        if torch.device(device).type != "cuda" or torch.version.rocm is not None:
+            self.skipTest("NVIDIA Philox rounding requires CUDA")
+        input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
+        original_key = prng.key(7, device=device)
+        changed_key = prng.fold_in(original_key, 1)
+        expected = [
+            to_mxfp8_reference(input, rounding_mode="stochastic", random_key=trial_key)
+            for trial_key in (original_key, changed_key)
+        ]
+
+        # record the CUDA graph
+        key_for_cuda_graph = original_key.clone()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            scales, qdata = to_mxfp8_reference(
+                input, rounding_mode="stochastic", random_key=key_for_cuda_graph
+            )
+
+        # fetch global RNG (to make sure later that it does not change)
+        generator = torch.cuda.default_generators[input.get_device()]
+        offset = generator.get_offset()
+
+        replays = []
+        for trial_key, (expected_scales, expected_qdata) in (
+            (original_key, expected[0]),
+            (original_key, expected[0]),
+            (changed_key, expected[1]),
+            (original_key, expected[0]),
+        ):
+            key_for_cuda_graph.copy_(trial_key)
             graph.replay()
-            first = captured.clone()
-            graph.replay()
-            second = captured.clone()
-        self.assertEqual(first.view(torch.uint8), expected.view(torch.uint8))
-        self.assertFalse(torch.equal(first.view(torch.uint8), second.view(torch.uint8)))
+            # verify RNG state did not change
+            self.assertEqual(generator.get_offset(), offset)
+            # verify results from cuda graph match expected result from eager mode
+            scale_bytes = scales.view(torch.uint8).clone()
+            qdata_bytes = qdata.view(torch.uint8).clone()
+            self.assertEqual(scale_bytes, expected_scales.view(torch.uint8))
+            self.assertEqual(qdata_bytes, expected_qdata.view(torch.uint8))
+            reconstructed = from_blocked_format(qdata, scales)
+            self.assertGreater(
+                compute_error(input.float(), reconstructed.float()).item(), 15.0
+            )
+            replays.append((scale_bytes, qdata_bytes))
+
+        self.assertEqual(replays[0], replays[1])
+        self.assertFalse(torch.equal(replays[0][1], replays[2][1]))
+        self.assertEqual(replays[0], replays[3])
 
 
 class TestFP8StochasticRounding(TestCase):
@@ -864,13 +951,14 @@ class TestFP8StochasticRounding(TestCase):
     @parametrize(
         "lower,upper",
         (
-            # hand chosen pairs of neighboring values exactly representable in 
+            # hand chosen pairs of neighboring values exactly representable in
             # float8_e4m3fn
             (1.0, 1.125),
             (-1.125, -1.0),
             (1.875, 2.0),
             (416.0, 448.0),
             (0.0, 2**-9),
+            (-(2**-9), -0.0),
             (7 * 2**-9, 2**-6),
         ),
     )
@@ -905,9 +993,15 @@ class TestFP8StochasticRounding(TestCase):
         key = prng.fold_in(prng.key(7, device=device), 12345)
         rounded_trials = []
         for trial in range(256):
-            words = prng.bits(prng.fold_in(key, trial), values.numel() // 4, dtype=torch.uint32)
-            rounded_trials.append(_f32_to_fp8_nvidia_sr_with_words(values, words).float())
-        self.assertEqual(torch.stack(rounded_trials).mean(dim=0), values, rtol=0.03, atol=0.001)
+            words = prng.bits(
+                prng.fold_in(key, trial), values.numel() // 4, dtype=torch.uint32
+            )
+            rounded_trials.append(
+                _f32_to_fp8_nvidia_sr_with_words(values, words).float()
+            )
+        self.assertEqual(
+            torch.stack(rounded_trials).mean(dim=0), values, rtol=0.03, atol=0.001
+        )
 
 
 instantiate_device_type_tests(TestMXFP8ReferenceNumerics, globals(), only_for="cuda")
