@@ -11,24 +11,25 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _supported():
-    if not torch.cuda.is_available() or not hasattr(torch._C, "_cuda_side_aware_register_range"):
-        return False
-    if torch.cuda.get_device_capability() != (10, 7):
-        return False
-    try:
-        torch.cuda.memory.LocalityInterleavedAllocator()
-        return True
-    except RuntimeError:  # no locality domains (driver or cuda.bindings < 13.4), or not two
-        return False
+    return (
+        torch.cuda.is_available()
+        and hasattr(torch._C, "_cuda_side_aware_register_range")
+        and torch.cuda.get_device_capability() == (10, 7)
+    )
 
 
-@unittest.skipUnless(_supported(), "needs an sm_107 device with two locality domains and cuda.bindings 13.4+")
+@unittest.skipUnless(_supported(), "needs an sm_107 device")
 class TestSideAware(TestCase):
     N = (64 << 20) // 2 + 12345  # >= 64 MiB of fp32, odd length so the last chunk is partial
 
     @classmethod
     def setUpClass(cls):
-        cls.pool = torch.cuda.MemPool(torch.cuda.memory.LocalityInterleavedAllocator().allocator(), no_split=True)
+        super().setUpClass()
+        try:
+            allocator = torch.cuda.memory.LocalityInterleavedAllocator()
+        except RuntimeError as e:  # no locality domains (driver or cuda.bindings < 13.4), or not two
+            raise unittest.SkipTest(str(e)) from e
+        cls.pool = torch.cuda.MemPool(allocator.allocator(), no_split=True)
 
     def setUp(self):
         self.prev = torch._C._cuda_get_side_aware()
@@ -42,7 +43,7 @@ class TestSideAware(TestCase):
         torch.cuda.synchronize()
         return out, torch._C._cuda_side_aware_launch_count() - before
 
-    def _check(self, fn, dtype, expect_side):
+    def _check(self, fn, dtype):
         gen = torch.Generator(device="cuda").manual_seed(0)
         with torch.cuda.use_mem_pool(self.pool):
             a = torch.randn(self.N, device="cuda", dtype=dtype, generator=gen)
@@ -54,7 +55,7 @@ class TestSideAware(TestCase):
             # every result: each call must be bitwise identical whichever kernel ran.
             gots, n_on = self._launches(lambda: [fn(a, b) for _ in range(4)])
         self.assertEqual(n_off, 0)
-        self.assertEqual(n_on > 0, expect_side)
+        self.assertGreater(n_on, 0)
         bits = {torch.float32: torch.int32, torch.bfloat16: torch.int16}[dtype]
         for got in gots:
             self.assertTrue(torch.equal(got.view(bits), ref.view(bits)))
@@ -72,7 +73,7 @@ class TestSideAware(TestCase):
         for dtype in (torch.float32, torch.bfloat16):
             for name, fn in ops.items():
                 with self.subTest(op=name, dtype=dtype):
-                    self._check(fn, dtype, expect_side=True)
+                    self._check(fn, dtype)
 
     def test_default_path_outside_arena(self):
         a = torch.randn(self.N, device="cuda")
