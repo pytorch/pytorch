@@ -22,7 +22,7 @@ basic_modules_ListOfLinears_eager,compile_time_instruction_count,852400000,0.1
 
 
 
-basic_modules_ListOfLinears_inductor,compile_time_instruction_count,11600000000,0.1
+basic_modules_ListOfLinears_inductor,compile_time_instruction_count,12030000000,0.1
 
 
 
@@ -138,15 +138,15 @@ dtensor_dispatch_random,instruction_count,531600,0.1
 
 
 
-dtensor_dispatch_custom_handler,instruction_count,35270,0.1
+dtensor_dispatch_custom_handler,instruction_count,36060,0.1
 
 
 
-nn_module_guard_eval,instruction_count,74550,0.1
+nn_module_guard_eval,instruction_count,71160,0.1
 
 
 
-nn_module_guard_eval_dynamic,instruction_count,99280,0.1
+nn_module_guard_eval_dynamic,instruction_count,96320,0.1
 
 
 
@@ -154,15 +154,15 @@ autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
 
 
 
-runtime_overhead_inductor,instruction_count,174000,0.1
+runtime_overhead_inductor,instruction_count,169200,0.1
 
 
 
-runtime_overhead_inductor_inference_mode,instruction_count,184300,0.1
+runtime_overhead_inductor_inference_mode,instruction_count,179300,0.1
 
 
 
-runtime_overhead_inductor_requires_grad,instruction_count,251500,0.1
+runtime_overhead_inductor_requires_grad,instruction_count,201300,0.1
 
 
 
@@ -170,15 +170,15 @@ runtime_overhead_inductor_requires_grad_backward,instruction_count,107500,0.1
 
 
 
-runtime_overhead_inductor_dynamic,instruction_count,171600,0.1
+runtime_overhead_inductor_dynamic,instruction_count,165100,0.1
 
 
 
-runtime_overhead_inductor_inference_mode_dynamic,instruction_count,181800,0.1
+runtime_overhead_inductor_inference_mode_dynamic,instruction_count,176100,0.1
 
 
 
-runtime_overhead_inductor_requires_grad_dynamic,instruction_count,251600,0.1
+runtime_overhead_inductor_requires_grad_dynamic,instruction_count,199700,0.1
 
 
 

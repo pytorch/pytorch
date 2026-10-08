@@ -63,7 +63,6 @@ class TestCodegenRuntimeWrapper(TestCase):
             "backward_epilogue",
             "compiled_function_forward",
             "compiled_function_backward",
-            "compiled_fn_wrapper",
             "runtime_wrapper_orchestration",
         )
         section_offsets = [source.index(f"# {name}\n") for name in section_names]
@@ -115,7 +114,8 @@ class TestCodegenRuntimeWrapper(TestCase):
         source = captured[0]
         self.assertIn("torch._C._set_view_replay_enabled(True)", source)
         self.assertIn("if not prev_view_replay_enabled:", source)
-        self.assertIn("torch.enable_grad()", source)
+        self.assertIn("torch._C._set_grad_enabled(True)", source)
+        self.assertIn("if not prev_grad_enabled:", source)
 
     def test_training_with_detach_indices(self):
         """
