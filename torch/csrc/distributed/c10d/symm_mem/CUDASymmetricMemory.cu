@@ -929,6 +929,20 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
   using IpcChannelType = std::conditional_t<use_fabric_handle, int, IpcChannel>;
   IpcChannelType ipc_channel;
 
+  // At large rank counts, TCPStore gets overloaded during the metadata
+  // exchange. When PG rendezvous is enabled, route the metadata exchange
+  // through the process group's NCCL allgather instead.
+  bool use_pg = group->hasBackendForDeviceType(c10::DeviceType::CUDA) &&
+      group->getBackend(c10::DeviceType::CUDA)->getUsePgForSymmMemRendezvous();
+  std::vector<RendezvousRequest> reqs;
+  std::vector<int> pids(world_size);
+  std::vector<HandleType> handles(world_size);
+  // signal_pads[r] is peer r's mapped base (the signal pad lives at the base,
+  // and it is the address AllocationRef unmaps); buffers[r] is the data buffer
+  // pointer (base + buffer_offset).
+  std::vector<void*> buffers(world_size, nullptr);
+  std::vector<void*> signal_pads(world_size, nullptr);
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   // using the CUDA Driver API to export a GPU memory block as a
@@ -950,115 +964,103 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
 
-  auto close_exported_handle = c10::make_scope_exit([&]() {
-    if constexpr (!use_fabric_handle) {
-      close(block_handle);
+  {
+    auto close_exported_handle = c10::make_scope_exit([&]() {
+      if constexpr (!use_fabric_handle) {
+        close(block_handle);
+      }
+    });
+
+    auto local_req = RendezvousRequest{
+        .device_idx = block->device_idx,
+        .pid = getpid(),
+        .block_size = block->block_size,
+        .buffer_size = block->buffer_size,
+        .buffer_offset = block->buffer_offset,
+        .has_multicast_support =
+            device_has_multicast_support(block->device_idx),
+        .clique_id = at::cuda::get_fabric_clique_id(block->device_idx)};
+
+    // Populate hostname field for host identification
+    gethostname(local_req.hostname, sizeof(local_req.hostname));
+    reqs = use_pg
+        ? pg_all_gather(group, block->device_idx, local_req)
+        : storeExchange.all_gather(store, rank, world_size, local_req);
+    validate_nvlink_fabric_support(reqs, world_size);
+    validate_rendezvous_requests(reqs, world_size);
+
+    for (int r = 0; r < world_size; ++r) {
+      pids[r] = reqs[r].pid;
     }
-  });
 
-  auto local_req = RendezvousRequest{
-      .device_idx = block->device_idx,
-      .pid = getpid(),
-      .block_size = block->block_size,
-      .buffer_size = block->buffer_size,
-      .buffer_offset = block->buffer_offset,
-      .has_multicast_support = device_has_multicast_support(block->device_idx),
-      .clique_id = at::cuda::get_fabric_clique_id(block->device_idx)};
-
-  // Populate hostname field for host identification
-  gethostname(local_req.hostname, sizeof(local_req.hostname));
-  // At large rank counts, TCPStore gets overloaded during the metadata
-  // exchange. When PG rendezvous is enabled, route the metadata exchange
-  // through the process group's NCCL allgather instead.
-  bool use_pg = group->hasBackendForDeviceType(c10::DeviceType::CUDA) &&
-      group->getBackend(c10::DeviceType::CUDA)->getUsePgForSymmMemRendezvous();
-  std::vector<RendezvousRequest> reqs = use_pg
-      ? pg_all_gather(group, block->device_idx, local_req)
-      : storeExchange.all_gather(store, rank, world_size, local_req);
-  validate_nvlink_fabric_support(reqs, world_size);
-  validate_rendezvous_requests(reqs, world_size);
-
-  std::vector<int> pids(world_size);
-  for (int r = 0; r < world_size; ++r) {
-    pids[r] = reqs[r].pid;
-  }
-
-  std::vector<BlockHandleType> imported_handles;
-  if constexpr (!use_fabric_handle) {
-    imported_handles = ipc_channel.all_gather_fds(rank, pids, block_handle);
-  } else {
-    imported_handles = use_pg
-        ? pg_all_gather(group, block->device_idx, block_handle)
-        : storeExchange.all_gather(store, rank, world_size, block_handle);
-  }
-
-  std::vector<HandleType> handles(world_size);
-  // signal_pads[r] is peer r's mapped base (the signal pad lives at the base,
-  // and it is the address AllocationRef unmaps); buffers[r] is the data buffer
-  // pointer (base + buffer_offset).
-  std::vector<void*> buffers(world_size, nullptr);
-  std::vector<void*> signal_pads(world_size, nullptr);
-
-  for (int r = 0; r < world_size; ++r) {
-    if (r == rank) {
-      // Derive pointers from the allocation base (not the rendezvous ptr, which
-      // may be an interior MemPool pointer): this pai is shared by every handle
-      // on the allocation, and per-handle offsets are applied separately.
-      handles[r] = block->alloc_ref->handle;
-      signal_pads[r] = block->alloc_ref->ptr;
-      buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
-      continue;
-    }
-    // This api imports a GPU memory allocation that was previously exported as
-    // a file descriptor or fabric handle and it returns a memory handle.
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-    // note how in one case it's directly imported_handles[r] and in another
-    // &(imported_handles[r]) so can't do with just type definitions
+    std::vector<BlockHandleType> imported_handles;
     if constexpr (!use_fabric_handle) {
-      C10_CUDA_DRIVER_CHECK_MSG(
-          driver_api->cuMemImportFromShareableHandle_(
-              &handles[r],
-              (void*)(uintptr_t)imported_handles[r],
-              CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
-          import_err_msg(rank, r, reqs));
+      imported_handles = ipc_channel.all_gather_fds(rank, pids, block_handle);
     } else {
-      C10_CUDA_DRIVER_CHECK_MSG(
-          driver_api->cuMemImportFromShareableHandle_(
-              &handles[r],
-              (void*)&(imported_handles[r]),
-              CU_MEM_HANDLE_TYPE_FABRIC),
-          import_err_msg(rank, r, reqs));
+      imported_handles = use_pg
+          ? pg_all_gather(group, block->device_idx, block_handle)
+          : storeExchange.all_gather(store, rank, world_size, block_handle);
     }
+
+    for (int r = 0; r < world_size; ++r) {
+      if (r == rank) {
+        // Derive pointers from the allocation base (not the rendezvous ptr,
+        // which may be an interior MemPool pointer): this pai is shared by
+        // every handle on the allocation, and per-handle offsets are applied
+        // separately.
+        handles[r] = block->alloc_ref->handle;
+        signal_pads[r] = block->alloc_ref->ptr;
+        buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
+        continue;
+      }
+      // This api imports a GPU memory allocation that was previously exported
+      // as a file descriptor or fabric handle and it returns a memory handle.
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+      // note how in one case it's directly imported_handles[r] and in another
+      // &(imported_handles[r]) so can't do with just type definitions
+      if constexpr (!use_fabric_handle) {
+        C10_CUDA_DRIVER_CHECK_MSG(
+            driver_api->cuMemImportFromShareableHandle_(
+                &handles[r],
+                (void*)(uintptr_t)imported_handles[r],
+                CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
+            import_err_msg(rank, r, reqs));
+      } else {
+        C10_CUDA_DRIVER_CHECK_MSG(
+            driver_api->cuMemImportFromShareableHandle_(
+                &handles[r],
+                (void*)&(imported_handles[r]),
+                CU_MEM_HANDLE_TYPE_FABRIC),
+            import_err_msg(rank, r, reqs));
+      }
 #elif defined(USE_ROCM)
-    C10_CUDA_CHECK(hipMemImportFromShareableHandle(
-        &handles[r],
+      C10_CUDA_CHECK(hipMemImportFromShareableHandle(
+          &handles[r],
 #if ROCM_VERSION >= 70100
-        reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
+          reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
 #else
-        (void*)(uintptr_t)&(imported_handles[r]),
+          (void*)(uintptr_t)&(imported_handles[r]),
 #endif
-        hipMemHandleTypePosixFileDescriptor));
+          hipMemHandleTypePosixFileDescriptor));
 #else
-    TORCH_CHECK(
-        false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+      TORCH_CHECK(
+          false,
+          "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
-    // map_block returns the mapped base (== signal pad base); the data buffer
-    // follows at buffer_offset.
-    map_block(
-        &signal_pads[r], handles[r], block->block_size, block->device_idx);
-    buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
-    if constexpr (!use_fabric_handle) {
-      close(imported_handles[r]);
+      // map_block returns the mapped base (== signal pad base); the data buffer
+      // follows at buffer_offset.
+      map_block(
+          &signal_pads[r], handles[r], block->block_size, block->device_idx);
+      buffers[r] = static_cast<char*>(signal_pads[r]) + block->buffer_offset;
+      if constexpr (!use_fabric_handle) {
+        close(imported_handles[r]);
+      }
     }
-  }
-  if (use_pg) {
-    pg_barrier(group, block->device_idx);
-  } else {
-    storeExchange.barrier(store, rank, world_size);
-  }
-  close_exported_handle.release();
-  if constexpr (!use_fabric_handle) {
-    close(block_handle);
+    if (use_pg) {
+      pg_barrier(group, block->device_idx);
+    } else {
+      storeExchange.barrier(store, rank, world_size);
+    }
   }
 
   HandleType mc_handle{};
