@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 from torch._inductor import inductor_prims, ir
-from torch._inductor.autows_utils import meta_ws_enabled
+from torch._inductor.autows_utils import has_two_ctas, meta_ws_enabled
 from torch._inductor.lowering import register_lowering
 from torch._inductor.utils import can_use_tma, get_num_sms
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -22,9 +22,6 @@ from .bmm import (
 )
 
 
-USE_META_WS = meta_ws_enabled()
-
-
 # TODO(@jananisriram): Refine the max-autotune search space.
 BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 128, 3, 8, 2, 1, True, False),
@@ -34,6 +31,11 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 64, 4, 4, 1, 1, True, True),
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
 )
+
+
+def effective_two_ctas(config: BlackwellBMMConfig) -> bool:
+    """Whether a partial config runs as 2CTA: needs Meta autoWS and tl.dot two_ctas."""
+    return config.two_ctas and meta_ws_enabled() and has_two_ctas()
 
 
 def _decompose_k_choice_name(
@@ -150,6 +152,9 @@ def _blackwell_decompose_k_partial_kwargs(
     config: BlackwellBMMConfig,
 ) -> dict[str, Any]:
     """Build launch kwargs for the partial-BMM template, not the outer graph."""
+    # Imported here: the heuristics package imports this module's templates.
+    from ..heuristics.template.triton import mm_allow_tf32
+
     m, k = map(int, mat1.get_size())
     k_b, n = map(int, mat2.get_size())
     if k != k_b:
@@ -158,7 +163,7 @@ def _blackwell_decompose_k_partial_kwargs(
         raise NotImplementedError("aligned split leaves an empty final partition")
 
     use_meta_ws = meta_ws_enabled()
-    two_ctas = use_meta_ws and config.two_ctas
+    two_ctas = effective_two_ctas(config)
     if two_ctas and not is_blackwell_bmm_2cta_compatible(
         output_batch_rows=m_pad,
         block_m=config.block_m,
@@ -190,13 +195,15 @@ def _blackwell_decompose_k_partial_kwargs(
         "B_BROADCAST_BATCH": False,
         "VIRTUAL_BATCH": True,
         "OUTPUT_BATCH_ROWS": m_pad,
+        # Even under 2CTA: the kernel strides by NUM_SMS and pairs CTAs.
         "NUM_SMS": min(
-            get_num_sms(),
+            get_num_sms(two_ctas=two_ctas),
             k_split * m_tiles * math.ceil(n / config.block_n),
         ),
         "A_ROW_MAJOR": mat1.get_stride()[1] == 1,
         "B_ROW_MAJOR": mat2.get_stride()[1] == 1,
-        "ALLOW_TF32": False,
+        # Gate TF32 on the full GEMM this plan replaces, as eager mm would.
+        "ALLOW_TF32": mm_allow_tf32(m, n, k, mat1.get_device().type),
         "USE_META_WS": use_meta_ws,
         "WARP_SPECIALIZE": True,
         "FLATTEN": not use_meta_ws,
@@ -236,12 +243,19 @@ def lower_blackwell_decompose_k_partial(
             "Blackwell decompose-K partial config must be static"
         ) from error
 
+    # The kernel bakes operand strides and layouts into constexprs, so fix the
+    # operand layouts before reading them.
+    mat1, mat2 = (ir.ExternKernel.realize_input(node) for node in (mat1, mat2))
+    for node in (mat1, mat2):
+        if isinstance(node.get_layout(), ir.FlexibleLayout):
+            node.freeze_layout()
+
     m = int(mat1.get_size()[0])
     k = int(mat1.get_size()[1])
     n = int(mat2.get_size()[1])
 
     m_tiles = math.ceil(m / partial_config.block_m)
-    if meta_ws_enabled() and partial_config.two_ctas:
+    if effective_two_ctas(partial_config):
         m_tiles = math.ceil(m_tiles / 2) * 2
 
     expected_m_pad = m_tiles * partial_config.block_m
@@ -292,7 +306,7 @@ def blackwell_decompose_k_partial(a, b, k_split, config_index):
     n = b.shape[1]
 
     m_tiles = (m + config.block_m - 1) // config.block_m
-    if USE_META_WS and config.two_ctas:
+    if effective_two_ctas(config):
         m_tiles = (m_tiles + 1) // 2 * 2
 
     m_pad = m_tiles * config.block_m

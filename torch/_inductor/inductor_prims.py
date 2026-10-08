@@ -36,7 +36,7 @@ def _blackwell_decompose_k_partial_impl(
         start = split * k_part
         end = min(start + k_part, k)
         partial = torch.mm(a[:, start:end], b[start:end], out_dtype=torch.float32)
-        partials.append(F.pad(partial, (0, 0, 0, m_pad - m)))
+        partials.append(F.pad(partial, [0, 0, 0, m_pad - m]))
     return torch.stack(partials).view(k_split * m_pad, n)
 
 
