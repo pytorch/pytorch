@@ -1210,7 +1210,7 @@ if __name__ == "__main__":
         with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
             report_dir = Path(tmp) / "reports"
             t0_ms = int(time.time() * 1000)
-            proc = self._run_one(tmp, [f"--save-test-run-reports={report_dir}"])
+            proc = self._run_one(tmp, [f"--save-torchci-reports={report_dir}"])
             t1_ms = int(time.time() * 1000)
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             reports = _report_files(report_dir / "one")
@@ -1239,14 +1239,14 @@ result = []
 for in_ci, args in [
     (False, []),
     (True, []),
-    (False, ["--save-test-run-reports"]),
-    (False, ["--save-test-run-reports=custom"]),
-    (True, ["--no-save-test-run-reports"]),
+    (False, ["--save-torchci-reports"]),
+    (False, ["--save-torchci-reports=custom"]),
+    (True, ["--no-save-torchci-reports"]),
 ]:
     common_utils.IS_CI = in_ci
     sys.argv = ["case.py", *args]
     common_utils.parse_cmd_line_args()
-    result.append(common_utils.TEST_SAVE_RUN_JSONL)
+    result.append(common_utils.TEST_SAVE_TORCHCI_REPORTS)
 print("RESULT=" + json.dumps(result))
 """
         proc = subprocess.run(
@@ -1268,23 +1268,23 @@ print("RESULT=" + json.dumps(result))
         cases = [
             (False, [], None),
             (True, [], None),
-            (False, ["--save-test-run-reports"], default_dir),
-            (False, ["--save-test-run-reports=custom"], str(Path(default_dir).parent / "custom")),
-            (False, [f"--save-test-run-reports={absolute_dir}"], absolute_dir),
-            (True, ["--no-save-test-run-reports"], None),
+            (False, ["--save-torchci-reports"], default_dir),
+            (False, ["--save-torchci-reports=custom"], str(Path(default_dir).parent / "custom")),
+            (False, [f"--save-torchci-reports={absolute_dir}"], absolute_dir),
+            (True, ["--no-save-torchci-reports"], None),
         ]
         for in_ci, args, expected in cases:
             with self.subTest(in_ci=in_ci, args=args):
                 with unittest.mock.patch.object(run_test_module, "IS_CI", in_ci):
                     with unittest.mock.patch.object(sys, "argv", ["run_test.py", *args]):
-                        actual = run_test_module.parse_args().save_test_run_reports
+                        actual = run_test_module.parse_args().save_torchci_reports
                 self.assertEqual(actual, expected)
 
-        with unittest.mock.patch.object(run_test_module, "HAS_TEST_RUN_REPORTS", True):
-            self.assertEqual(run_test_module._test_run_report_args(absolute_dir), [f"--save-test-run-reports={absolute_dir}"])
-            self.assertEqual(run_test_module._test_run_report_args(None), [])
-        with unittest.mock.patch.object(run_test_module, "HAS_TEST_RUN_REPORTS", False):
-            self.assertEqual(run_test_module._test_run_report_args(absolute_dir), [])
+        with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", True):
+            self.assertEqual(run_test_module._torchci_report_args(absolute_dir), [f"--save-torchci-reports={absolute_dir}"])
+            self.assertEqual(run_test_module._torchci_report_args(None), [])
+        with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
+            self.assertEqual(run_test_module._torchci_report_args(absolute_dir), [])
 
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
@@ -1361,7 +1361,7 @@ if __name__ == "__main__":
             proc = subprocess.run(
                 [
                     sys.executable, "crash.py", "--use-pytest", "--subprocess",
-                    f"--save-test-run-reports={report_dir}", "-p", "no:cacheprovider",
+                    f"--save-torchci-reports={report_dir}", "-p", "no:cacheprovider",
                 ],
                 cwd=tmp,
                 env=_REPORT_CHILD_ENV,
