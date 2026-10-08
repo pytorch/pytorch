@@ -5,8 +5,7 @@ self-hosted-runner:
     # GitHub hosted x86 Linux runners
     - linux.24_04.4x
     - linux.24_04.16x
-    # Organization-wide AWS Linux Runners
-    - linux.12xlarge.memory.ephemeral
+    # NVIDIA hosted runners
     - nv-l-arm64grace-16-200-gb300
     # Repo-specific IBM hosted S390x runner
     - linux.s390x
