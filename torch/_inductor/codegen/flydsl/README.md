@@ -245,7 +245,7 @@ system libraries.
 
 - FlyDSL is an optional dependency. Common PyTorch and Inductor imports do not
   import it; availability is checked only when FlyDSL is selected or wrapped.
-- Captured-launcher AOT requires FlyDSL >=0.3.2, a ROCm-enabled PyTorch
+- Captured-launcher AOT requires FlyDSL >=0.3.2,<0.4, a ROCm-enabled PyTorch
   build, and at least one tensor launcher argument.
 - The launcher must return `None`; outputs and workspaces must be explicit
   tensor arguments.

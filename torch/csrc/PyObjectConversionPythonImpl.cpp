@@ -1,10 +1,13 @@
 // Concrete PyObjectConversionInterface, compiled into libtorch_python (it uses
-// THPVariable_* and the CPython C API). Registered with libtorch at load time
-// so the libtorch-only stable shims (torch_tensor_{from,to}_pyobject) can reach
-// it through torch::detail::getPyObjectConversionImpl().
+// THPVariable_* &co and the CPython C API). Registered with libtorch at load
+// time so the libtorch-only stable shims can reach it through
+// torch::detail::getPyObjectConversionImpl().
 
 #include <torch/csrc/PyObjectConversion.h>
 
+#include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/python_headers.h>
 
@@ -13,6 +16,16 @@ namespace torch::detail {
 namespace {
 
 struct ConcretePyObjectConversion final : PyObjectConversionInterface {
+  bool is_tensor_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_is_tensor_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    return THPVariableClass &&
+        PyObject_TypeCheck(
+               obj, reinterpret_cast<PyTypeObject*>(THPVariableClass));
+  }
+
   at::Tensor tensor_from_pyobject(PyObject* obj) const override {
     // The GIL guards the THPVariable access below; a boxed STABLE_TORCH_LIBRARY
     // kernel may run with the GIL released, so assert rather than race.
@@ -21,7 +34,9 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         "torch_tensor_from_pyobject requires the GIL to be held");
     TORCH_CHECK(obj != nullptr, "py_obj must not be null");
     TORCH_CHECK(
-        THPVariable_Check(obj),
+        THPVariableClass &&
+            PyObject_TypeCheck(
+                obj, reinterpret_cast<PyTypeObject*>(THPVariableClass)),
         "torch_tensor_from_pyobject: expected torch.Tensor, got ",
         Py_TYPE(obj)->tp_name);
     return THPVariable_Unpack(obj);
@@ -50,6 +65,57 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         "torch_tensor_to_pyobject: THPVariable_Wrap returned null");
     return py;
   }
+
+  at::ScalarType dtype_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_dtype_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPDtype_Check(obj),
+        "torch_dtype_from_pyobject: expected torch.dtype, got ",
+        Py_TYPE(obj)->tp_name);
+    return reinterpret_cast<THPDtype*>(obj)->scalar_type;
+  }
+
+  PyObject* dtype_to_pyobject(at::ScalarType dtype) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_dtype_to_pyobject requires the GIL to be held");
+    const auto raw = static_cast<int64_t>(dtype);
+    TORCH_CHECK(
+        raw >= 0 && raw < static_cast<int64_t>(at::ScalarType::NumOptions),
+        "torch_dtype_to_pyobject: invalid dtype code ",
+        raw);
+    // getTHPDtype returns a borrowed reference to the registered singleton.
+    PyObject* py = reinterpret_cast<PyObject*>(torch::getTHPDtype(dtype));
+    Py_INCREF(py);
+    return py;
+  }
+
+  at::Device device_from_pyobject(PyObject* obj) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_device_from_pyobject requires the GIL to be held");
+    TORCH_CHECK(obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(
+        THPDevice_Check(obj),
+        "torch_device_from_pyobject: expected torch.device, got ",
+        Py_TYPE(obj)->tp_name);
+    return reinterpret_cast<THPDevice*>(obj)->device;
+  }
+
+  PyObject* device_to_pyobject(const at::Device& device) const override {
+    TORCH_CHECK(
+        PyGILState_Check(),
+        "torch_device_to_pyobject requires the GIL to be held");
+    PyObject* py = THPDevice_New(device);
+    // THPDevice_New throws on failure rather than returning null; guard
+    // defensively so we never hand back a null PyObject.
+    TORCH_CHECK(
+        py != nullptr, "torch_device_to_pyobject: THPDevice_New returned null");
+    return py;
+  }
 };
 
 // Registered once when libtorch_python is loaded (static init), analogous to
@@ -59,6 +125,12 @@ struct RegisterPyObjectConversion {
   RegisterPyObjectConversion() {
     setPyObjectConversionImpl(&impl);
   }
+  RegisterPyObjectConversion(const RegisterPyObjectConversion&) = delete;
+  RegisterPyObjectConversion& operator=(const RegisterPyObjectConversion&) =
+      delete;
+  RegisterPyObjectConversion(RegisterPyObjectConversion&&) = delete;
+  RegisterPyObjectConversion& operator=(RegisterPyObjectConversion&&) = delete;
+
   ~RegisterPyObjectConversion() {
     // On libtorch_python teardown, reset g_impl to the libtorch-resident no-op
     // so a late conversion errors cleanly instead of using this destroyed impl
