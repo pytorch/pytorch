@@ -2285,7 +2285,7 @@ jobs:
 
   libtorch-upload-rocm-preview:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
     permissions:
       id-token: write
       contents: read
