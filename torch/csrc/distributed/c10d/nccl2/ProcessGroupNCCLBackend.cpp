@@ -227,6 +227,10 @@ void ProcessGroupNCCL::setBoundDeviceId(std::optional<at::Device> device) {
         at::kCUDA, static_cast<c10::DeviceIndex>(deviceRank % deviceCount));
   }
   Backend::setBoundDeviceId(device);
+  if (options_c10d_->lazy_init &&
+      init_state_ == InitializationState::UNINITIALIZED) {
+    return;
+  }
   ensureInitialized(*device);
 }
 
