@@ -139,6 +139,81 @@ used for their results.
     export_graph_data
 ```
 
+### Breakable CUDA graphs (prototype)
+
+{class}`torch.cuda.BreakableCUDAGraph` captures a sequence of CUDA graphs separated
+by eager Python functions. Use {class}`torch.cuda.breakable_graph` for capture,
+and decorate functions that must run eagerly with {func}`torch.cuda.no_graph`.
+The graph's `replay()` method launches graph segments and calls eager functions
+in their captured order. A capture without breaks produces one CUDA graph.
+
+```python
+@torch.cuda.no_graph
+def dynamic_scale(buf):
+    if buf.sum().item() > 0:
+        buf.mul_(2)
+
+
+static_input = torch.ones(1024, device="cuda")
+static_output = torch.empty_like(static_input)
+
+
+def workload():
+    static_output.copy_(static_input * 3)
+    dynamic_scale(static_output)
+    static_output.add_(1)
+
+
+s = torch.cuda.Stream()
+s.wait_stream(torch.cuda.current_stream())
+with torch.cuda.stream(s):
+    for _ in range(3):
+        workload()
+torch.cuda.current_stream().wait_stream(s)
+
+g = torch.cuda.BreakableCUDAGraph()
+with torch.cuda.breakable_graph(g):
+    workload()
+
+static_input.fill_(5)
+g.replay()
+```
+
+Eager functions must write CUDA outputs into preallocated argument buffers;
+returning CUDA tensors, including tensors nested in containers, raises during
+capture. CUDA inputs and outputs must keep their captured addresses valid until
+replay completes. Python values and CPU tensors returned during capture are
+allowed, but subsequent graph segments use their capture-time values.
+
+Side streams must join the capture stream before each eager break and before
+leaving the capture context. Set `TORCH_BREAKABLE_CUDA_GRAPHS_DEBUG=1` before
+importing PyTorch to include unjoined stream IDs in capture errors.
+
+All segments share a graph memory pool. Pass `pool=other_graph.pool()` to
+{class}`torch.cuda.BreakableCUDAGraph` to share across sequences, subject to the
+usual [graph memory management constraints](notes/cuda.md#graph-memory-management).
+`reset()` clears the segments and preserves the pool. Nested captures are not
+supported; reset the graph before capturing a replacement sequence.
+
+{func}`torch.cuda.force_no_graph` inserts a break without eager work.
+`@torch.cuda.no_graph(capture_stub=...)` substitutes a callable during capture
+while replay calls the original function. The stub receives the same arguments
+and must follow the same output restrictions. An optional `barrier_fn` passed to
+{class}`torch.cuda.breakable_graph` runs after each graph segment ends and before
+its eager function, during capture only.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    BreakableCUDAGraph
+    breakable_graph
+    no_graph
+    force_no_graph
+    is_in_breakable_graph
+```
+
 ### CUDA graph lifecycle hooks
 
 Register callbacks that fire at each point in any CUDA graph's lifecycle -- capture

@@ -35,6 +35,20 @@ The following are aliases to their counterparts in ``torch.cuda`` in the nested 
 ```
 
 ```{eval-rst}
+.. automodule:: torch.cuda.breakable_graphs
+.. currentmodule:: torch.cuda.breakable_graphs
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    BreakableCUDAGraph
+    breakable_graph
+    no_graph
+    force_no_graph
+    is_in_breakable_graph
+```
+
+```{eval-rst}
 .. automodule:: torch.cuda.streams
 .. currentmodule:: torch.cuda.streams
 .. autosummary::
