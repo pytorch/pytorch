@@ -17,7 +17,7 @@ from torch.testing._internal.common_quantization import (
     get_script_module,
     LinearAddModel,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 from torch.utils import bundled_inputs
 
 
@@ -118,6 +118,8 @@ class OnDevicePTQUtils:
 
 
 class TestOnDeviceDynamicPTQInsertObservers(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _check_num_and_type_of_observers(self, model, num_observers):
         qconfig_dict = {"": default_dynamic_qconfig}
         scripted_model = OnDevicePTQUtils.insert_observers(model, qconfig_dict)
@@ -186,6 +188,8 @@ class TestOnDeviceDynamicPTQInsertObservers(TestCase):
 
 
 class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _validate_quant_dequant_nodes(self, model, num_nodes, per_channel=0):
         quantize_forward_graph = model.quantize_forward.graph
         quantize_per_tensor = quantize_per_channel = 0
@@ -253,6 +257,8 @@ class TestOnDeviceDynamicPTQInsertQuantDequant(TestCase):
 
 
 class TestOnDeviceDynamicPTQFinalize(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _validate_packed_params(self, model, num_nodes, per_channel=0):
         quantize_forward_graph = model.quantize_forward.graph
         quantize_per_tensor = quantize_per_channel = 0
