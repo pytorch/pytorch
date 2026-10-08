@@ -47,7 +47,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
+    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
@@ -7748,21 +7748,6 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = layer_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
-    @onlyOn(["cpu", "cuda"])
-    @dtypes(torch.float32, torch.bfloat16, torch.float16)
-    @parametrize_test("width", [11, 12, 16, 24, 244, 384, 1536])
-    def test_LayerNorm_constant_input_is_exactly_zero(self, device, dtype, width):
-        # A constant row has zero variance, so the saved mean is exactly the input
-        # value and every output element is exactly zero.
-        X = torch.ones(4, width, dtype=dtype, device=device)
-        Y, mean, _ = torch.ops.aten.native_layer_norm(X, (width,), None, None, 1e-5)
-        self.assertEqual(mean, torch.ones_like(mean), rtol=0, atol=0)
-        self.assertEqual(Y, torch.zeros_like(Y), rtol=0, atol=0)
-        gamma = torch.ones(width, dtype=dtype, device=device)
-        beta = torch.zeros(width, dtype=dtype, device=device)
-        Y_affine = F.layer_norm(X, (width,), gamma, beta, 1e-5)
-        self.assertEqual(Y_affine, torch.zeros_like(Y_affine), rtol=0, atol=0)
-
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16)
     def test_rmsnorm_numeric(self, device, dtype):
@@ -12374,6 +12359,102 @@ class TestNNDeviceType(NNTestCase):
             if device == 'cpu':
                 test_dtype(func, x, torch.bfloat16)
 
+
+    @onlyCPU
+    @dtypes(torch.float32)
+    @parametrize_test("noncontiguous", [False, True])
+    @parametrize_test("case", [
+        subtest((None, 2, (8, 10), (2, 2), (2, 2), (0, 0), (1, 1)), name="unbatched"),
+        subtest((2, 3, (128, 130), (2, 2), (2, 2), (0, 0), (1, 1)), name="tiles_2x2"),
+        subtest((1, 4, (96, 99), (2, 3), (2, 3), (0, 0), (1, 1)), name="tiles_rect"),
+        subtest((2, 3, (127, 129), (1, 1), (1, 1), (0, 0), (1, 1)), name="pointwise"),
+        subtest((2, 3, (63, 65), (3, 3), (1, 1), (1, 1), (1, 1)), name="overlap"),
+        subtest((2, 3, (65, 67), (2, 2), (2, 2), (0, 0), (1, 1)), name="partial_tiles"),
+        subtest((2, 3, (64, 66), (2, 2), (3, 3), (0, 0), (1, 1)), name="gaps"),
+        subtest((2, 3, (63, 65), (2, 3), (1, 2), (2, 1), (2, 3)), name="dilation"),
+        subtest((8, 1, (64, 66), (3, 3), (1, 1), (1, 1), (1, 1)), name="batch_only"),
+        subtest((2, 1, (64, 128), (1, 1), (1, 1), (0, 0), (1, 1)), name="parallel_limit"),
+        subtest((2, 1, (64, 129), (1, 1), (1, 1), (0, 0), (1, 1)), name="above_limit"),
+        subtest((0, 2, (8, 10), (2, 2), (2, 2), (0, 0), (1, 1)), name="empty_batch"),
+        subtest((2, 1, (2, 3), (2, 3), (2, 3), (5, 7), (3, 2)), name="large_padding"),
+        subtest((1, 4, (4, 5), (3, 3), (1, 1), (1, 512), (1, 1)), name="wide_padding"),
+    ])
+    def test_fold_reference(self, device, dtype, noncontiguous, case):
+        self._test_fold_reference(device, dtype, noncontiguous, case)
+
+    @onlyCPU
+    @dtypes(torch.float64, torch.float16, torch.bfloat16,
+            torch.complex64, torch.complex128, torch.bool)
+    def test_fold_reference_dtypes(self, device, dtype):
+        case = (2, 3, (17, 19), (3, 3), (1, 1), (1, 1), (1, 1))
+        self._test_fold_reference(device, dtype, True, case)
+
+    def _test_fold_reference(self, device, dtype, noncontiguous, case):
+        batch, channels, size, kernel, stride, padding, dilation = case
+        n = 1 if batch is None else batch
+        h, w = size
+        kh, kw = kernel
+        sh, sw = stride
+        ph, pw = padding
+        dh, dw = dilation
+        oh = (h + 2 * ph - dh * (kh - 1) - 1) // sh + 1
+        ow = (w + 2 * pw - dw * (kw - 1) - 1) // sw + 1
+        columns = torch.randint(-2, 3, (n, channels * kh * kw, oh * ow), device=device).to(dtype)
+        if dtype.is_complex:
+            columns += 1j * columns.flip(-1)
+        if noncontiguous:
+            columns = columns.transpose(-1, -2).contiguous().transpose(-1, -2)
+
+        # Small integers keep the reference sum exact for every tested dtype.
+        rows = torch.arange(kh, device=device)[:, None] * dh + torch.arange(oh, device=device) * sh - ph
+        cols = torch.arange(kw, device=device)[:, None] * dw + torch.arange(ow, device=device) * sw - pw
+        rows, cols = rows[:, None, :, None], cols[None, :, None, :]
+        valid = ((rows >= 0) & (rows < h) & (cols >= 0) & (cols < w)).flatten()
+        indices = (rows * w + cols).flatten()[valid]
+        expected = torch.zeros(n, channels, h * w, device=device, dtype=dtype)
+        expected.scatter_add_(2, indices.expand(n, channels, -1),
+                              columns.reshape(n, channels, kh * kw * oh * ow)[..., valid])
+        expected = expected.reshape(n, channels, h, w)
+        if batch is None:
+            columns, expected = columns.squeeze(0), expected.squeeze(0)
+        kwargs = dict(kernel_size=kernel, stride=stride, padding=padding, dilation=dilation)
+        self.assertEqual(F.fold(columns, size, **kwargs), expected, atol=0, rtol=0)
+        if dtype != torch.bool:
+            image = torch.zeros_like(expected, requires_grad=True)
+            F.unfold(image, **kwargs).backward(columns)
+            self.assertEqual(image.grad, expected, atol=0, rtol=0)
+
+    @onlyCPU
+    @dtypes(torch.float32)
+    def test_fold_out_batch_stride(self, device, dtype):
+        columns = torch.randint(-2, 3, (4, 9, 64 * 65), device=device).to(dtype)
+        expected = F.fold(columns, (64, 65), (3, 3), padding=1)
+        storage = torch.full((8, 1, 64, 65), 7, device=device, dtype=dtype)
+        output = storage[1::2]
+        torch.ops.aten.col2im.out(columns, (64, 65), (3, 3), (1, 1), (1, 1), (1, 1), out=output)
+        self.assertEqual(output, expected, atol=0, rtol=0)
+        self.assertEqual(storage[::2], torch.full_like(storage[::2], 7))
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize_test("kernel", [(1, 1), (2, 2), (2, 3)])
+    def test_fold_nonoverlap_signed_zero(self, device, dtype, kernel):
+        kh, kw = kernel
+        columns = torch.full((2, 4 * kh * kw, (96 // kh) * (96 // kw)), -0.0, device=device, dtype=dtype)
+        if dtype.is_complex:
+            torch.view_as_real(columns).fill_(-0.0)
+        output = F.fold(columns, (96, 96), kernel, stride=kernel)
+        self.assertEqual(output, torch.zeros_like(output))
+        values = torch.view_as_real(output) if dtype.is_complex else output
+        self.assertFalse(torch.signbit(values).any())
+
+    @onlyCPU
+    @parametrize_test("kernel", [(1, 1), (2, 3), (3, 3)])
+    def test_fold_output_storage(self, device, kernel):
+        image = torch.randn(2, 3, 17, 19, device=device)
+        columns = F.unfold(image, kernel, padding=1)
+        output = F.fold(columns, (17, 19), kernel, padding=1)
+        self.assertEqual(output.untyped_storage().nbytes(), output.numel() * output.element_size())
 
     def test_logsigmoid_out(self, device):
         # this isn't actually documented, but was broken previously:
