@@ -926,16 +926,18 @@ __device__ __forceinline__ void fillDataSmem(
 //   3. k (or n + 1 - k) <= REGS_SMALL_K: a threshold from wave or row maxima, then the keys at or above it
 //      are ranked in dataSmem. Gives up when too many keys tie.
 //   4. The radix walk over the held keys, with a one-time compaction of the survivors into dataSmem.
-//      Per-pass counting: 16 bins with DPP and LDS atomics on GFX9 (regs16Count), otherwise 2-bit ballots
-//      or packed byte counters.
+//      Per-pass counting: 16 bins with DPP and LDS atomics on GFX9 with a 32-bit index_t (regs16Count),
+//      otherwise 2-bit ballots or packed byte counters.
 // The steps stay in one function on purpose: moving any of them into a helper changed register allocation
 // and scheduling, and cost 5 to 10 percent on single-row topk on gfx950 and gfx1100.
-// Steps 2 and 3 answer with a key; the all-ones key is also the key of the dtype maximum and of NaN, so
-// it always falls through to the walk, which publishes the original scalar (keeping a NaN payload).
+// Steps 2 and 3 answer with a key. The all-ones key (NaN for floating types, the maximum for integer
+// types) is left to the walk, which publishes the original scalar and so keeps a NaN payload. (For 1- and
+// 2-byte integers with `largest` on GFX9 the key carries extra high bits and is answered directly, which
+// is exact since integers have no payload.)
 //
 // Tests: test_select_ties_at_dtype_extremes (test_sort_and_select.py) targets the step boundaries (k in
-// 1, 2, 16, 17 and their mirrors), the register-path sizes (n = 1023, 1024, 4097, 10241, 14336), ties at
-// the dtype extremes (the all-ones key) and tie-heavy rows that overflow step 3 into the walk.
+// 1, 2, 16, 17 and their mirrors), each register-path size (n = 1023 to 20480), ties at the dtype minimum,
+// maximum and NaN, and tie-heavy rows that overflow step 3 into the walk.
 
 // Wave ballot of a bool. HIP's __ballot takes an int, which makes the compiler materialize the
 // predicate as 0/1 and compare it again before every ballot; the builtins take the mask directly.
@@ -1110,7 +1112,7 @@ __device__ __forceinline__ void pinVgpr(T& x) {
 #endif
 }
 
-// Largest k for which the register path selects by iterative wave extraction instead of the radix walk.
+// Largest kEff (k or n + 1 - k) that step 3 (threshold, then a rank select) handles before the radix walk.
 constexpr int REGS_SMALL_K = 16;
 
 // Drops the head of a descending run held in c[0..N) in the lanes where `hit` holds. Written as a fold
@@ -1137,12 +1139,12 @@ __device__ __forceinline__ void sortDesc(uint32_t (&c)[N], std::integer_sequence
 }
 
 // Register rows per thread from which the per-pass count uses packed per-lane byte counters (one
-// vector add per held key, one cross-lane reduction per pass) instead of four ballots per row. Only
-// the 32-bit instantiations use it: with the 16-bit kernels it slowed their single-row passes.
+// vector add per held key, one cross-lane reduction per pass) instead of four ballots per row. Every
+// type except half and bfloat16 uses it: with their packed keys it slowed single-row passes.
 constexpr int REGS_PACKED_MIN_E = 4;
 
 // How the register path keeps a held element. The generic case keeps the original scalar next to its
-// key (the key alone cannot give back a NaN payload). 16-bit scalars pack their raw bits into the upper
+// key (the key alone cannot give back a NaN payload). Half and bfloat16 pack their raw bits into the upper
 // half of the 32-bit key instead: the match test, the digit extraction and the masks only touch the low
 // 16 bits, so the packing costs nothing and the published value stays bit-exact, NaN payload included.
 template <typename scalar_t, typename bitwise_t>
@@ -1182,7 +1184,7 @@ struct RegKey<at::BFloat16, uint32_t> {
 // Digit width of the register path. On wave64 GFX9 a pass resolves 4 key bits (16 bins): the per-wave
 // count runs on packed one-hot counters (no ballots), the cross-wave sum on LDS atomics, and the
 // decision on a 16-lane scan, so a pass costs about what a 2-bit pass costs and there are half as many.
-// Elsewhere (wave32, SPIR-V) the register path keeps the 2-bit digit of the general path.
+// Elsewhere (wave32, SPIR-V, or a 64-bit index_t) the register path keeps the 2-bit digit of the general path.
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
 constexpr int REGS_RADIX_BITS = 4;
 #else
@@ -1223,7 +1225,7 @@ __device__ __forceinline__ uint32_t dppSumHalfRows(uint32_t x) {
 }
 
 // Number of lanes that add their partial sum to the table (1, 2, 4 or 8): fewer lanes need more DPP
-// steps (row_shr 8 folds the half rows into lanes 16i + 15, row_bcast15 the row sums of lanes 15/31
+// steps (row_shr 8 folds the half rows into lanes 16i + 15, row_bcast15 the row sums of lanes 15/47
 // into 31/63, row_bcast31 those into 63), more lanes make each atomic a same-address conflict of
 // that depth.
 constexpr int REGS16_ADD_LANES = 4;
@@ -1245,8 +1247,8 @@ __device__ __forceinline__ uint32_t dppSumHalfRowsToWave(uint32_t x) {
 
 // Adds this wave's 16 bin counts into the table. b[0..3] are per-lane byte counters of bins
 // (0,2,4,6), (1,3,5,7), (8,10,12,14), (9,11,13,15), already summed over each half row (<= 8 * REGS_MAX_E per
-// byte). They are widened to 16-bit halves with v_perm, summed over the wave, and lane 63
-// adds the 8 words.
+// byte). They are widened to 16-bit halves with v_perm and summed into REGS16_ADD_LANES partial sums
+// (lanes 16i + 15), and each of those lanes adds its 8 words.
 __device__ __forceinline__ void regs16AddCounts(uint32_t* table, bool addLane, const uint32_t (&b)[4]) {
   uint32_t w[REGS16_WORDS];
 #pragma unroll
@@ -1378,7 +1380,8 @@ __device__ __forceinline__ void loadChunks(const scalar_t* data, index_t sliceSi
 
 
 // Register path entry (see the note above) for slices with sliceSize <= E * blockDim.x.
-// Thread t holds elements e * blockDim.x + t, e in [0, E): each is loaded and converted ONCE and every
+// Each thread holds E elements (e * blockDim.x + t, or contiguous chunks, see loadChunks), each loaded
+// and converted ONCE, and every
 // pass only counts the held keys, so there is no per-pass re-read or re-convert and no shared
 // decision state (counts are block-uniform after the aggregation). Rows (values of e) past the slice
 // are padding that never matches (the loops stay statically unrolled, so the keys stay in registers).
@@ -1417,8 +1420,9 @@ __device__ __forceinline__ void radixSelectRegs(
   // Selection by reduction (below) compares keys in a flipped domain, t = (key & keyMask) ^ flipKey, where
   // the wanted extreme is the maximum and 0 the identity. The k-th largest is the (sliceSize + 1 - k)-th
   // smallest, so the nearer end of the order is used. All of this is block-uniform (k, sliceSize and
-  // largest are kernel arguments). Padding rows (e >= nValid) hold the key flipKey, which is 0 in that
-  // domain, so the reductions need no validity mask; the walk masks them by e < nValid as before.
+  // largest are kernel arguments). Padding rows (e >= nValid) hold the key flipKey, the minimum of that
+  // domain (0, or for 1- and 2-byte integers with `largest` on GFX9 the high bits every t shares), so the
+  // reductions need no validity mask; the walk masks them by e < nValid as before.
   constexpr uint32_t keyMask = sizeof(scalar_t) >= 4 ? 0xffffffffu : static_cast<uint32_t>((1u << (8 * sizeof(scalar_t))) - 1u);
   const index_t kMirror = sliceSize + 1 - k;
   const bool mirrored = kMirror < k;
@@ -1468,10 +1472,9 @@ __device__ __forceinline__ void radixSelectRegs(
   // Steps 2 and 3: selection by reduction (block-uniform early-outs; k, sliceSize and largest are kernel
   // arguments).
   // The k-th largest is the (sliceSize + 1 - k)-th smallest, so the nearer end of the order is used.
-  // Keys are compared in a flipped domain where the wanted extreme is the maximum and 0 is the identity
-  // (padding rows and exhausted lanes). The answer K is a key, and deconvert(K) is bit-identical to what
-  // the radix walk publishes for every non-NaN K (convert is a bijection on non-NaN values); the NaN key
-  // (all ones) falls through to the walk, which keeps the payload of a single NaN exactly as before.
+  // Keys are compared in the flipped domain described above. The answer K is a key, and deconvert(K) is
+  // bit-identical to what the radix walk publishes for every non-NaN K (convert is a bijection on non-NaN
+  // values); the all-ones key falls through to the walk (see the note above).
   if constexpr (sizeof(bitwise_t) == 4) {
     constexpr int MAX_WARPS = 1024 / C10_WARP_SIZE_LOWER_BOUND;
     const int WARP_BITS = __builtin_ctz(C10_WARP_SIZE);
@@ -1499,10 +1502,11 @@ __device__ __forceinline__ void radixSelectRegs(
     } else if (kEff <= static_cast<index_t>(REGS_SMALL_K)) {
       // Step 3. Threshold select: T, the kEff-th largest of the wave maxima (of the 16-lane row maxima when kEff
       // exceeds the wave count), is a lower bound with at least kEff keys >= T. Those keys are compacted
-      // into dataSmem and the kEff-th largest among them is the answer. Both selections are rank based (no
-      // per-k extraction rounds) and sized for the usual case of distinct data, where the candidates
-      // number about kEff: up to 16 are ranked by every wave on its own (no broadcast), up to 64 by wave 0,
-      // up to CAP by wave 0's extraction chain. Many equal keys overflow that, and the walk decides.
+      // into dataSmem and the kEff-th largest among them is the answer. T and up to 64 candidates are
+      // selected by rank (no per-k extraction rounds), sized for the usual case of distinct data, where the
+      // candidates number about kEff: up to 16 are ranked by every wave on its own (no broadcast), up to 64
+      // by wave 0, and up to CAP go through wave 0's extraction chain. Many equal keys overflow that, and the
+      // walk decides.
       constexpr int MAX_WARPS = 1024 / C10_WARP_SIZE_LOWER_BOUND;
       constexpr int S3 = (REGS_SMALL_K * E + C10_WARP_SIZE_LOWER_BOUND - 1) / C10_WARP_SIZE_LOWER_BOUND;
       constexpr int SX = S3 > 2 ? S3 : 2; // extraction slots per lane
@@ -1658,7 +1662,7 @@ __device__ __forceinline__ void radixSelectRegs(
         *topK = TopKTypeConfig<scalar_t>::deconvert(K);
         return;
       }
-      // K == keyMask is ambiguous (it is also the key of the dtype maximum and of NaN), so the walk decides.
+      // K == keyMask is ambiguous (NaN for floating types, the maximum for integers), so the walk decides.
       // The candidates above left their count in dataSmemWriteIndex; the walk's compaction must start at 0.
       __syncthreads();
       if (tid == 0) {
