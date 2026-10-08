@@ -603,8 +603,8 @@ void mkldnn_matmul_i8i8i32(
   // both inputs should be 2d
   // oneDNN's matmul primitive only has a reference kernel for operands its gemm
   // cannot read in place, so copying them is orders of magnitude faster.
-  const Tensor a = _blas_layout(mat1) ? mat1 : mat1.contiguous();
-  const Tensor b = _blas_layout(mat2) ? mat2 : mat2.contiguous();
+  const Tensor a = _blas_layout(mat1) ? mat1 : mat1.clone(at::MemoryFormat::Preserve);
+  const Tensor b = _blas_layout(mat2) ? mat2 : mat2.clone(at::MemoryFormat::Preserve);
   if (a.scalar_type() == at::kByte) {
     _mkldnn_gemm_i8i8i32_with_blas<uint8_t>(a, b, result);
   } else {

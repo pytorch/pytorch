@@ -7220,6 +7220,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             (genf(m, 1, x_dtype), genf(1, 3 * n).as_strided((1, n), (0, 3))),
             # no unit stride, broadcast, and overlapping operands
             (genf(m, 2 * k, x_dtype)[:, ::2], genf(k, 2 * n)[:, ::2]),
+            (genf(k, 2 * m, x_dtype)[:, ::2].t(), genf(n, 2 * k)[:, ::2].t()),
             (genf(1, k, x_dtype).expand(m, k), genf(1, n).expand(k, n)),
             (genf(1, m + k, x_dtype).as_strided((m, k), (1, 1)), genf(k, n)),
         ]
