@@ -14,6 +14,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch._logging import warning_once
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
@@ -666,6 +667,54 @@ flex_attention_backward_template = TritonTemplate(
 )
 
 
+def _fuse_nested_index_backward(joint_graph: torch.fx.GraphModule) -> None:
+    r"""Fuse the backward of table[i][j] into one scatter for table[i, j]."""
+    from torch._inductor.pattern_matcher import (
+        CallFunction,
+        KeywordArg,
+        Match,
+        PatternMatcherPass,
+        register_graph_pattern,
+    )
+
+    scatter = torch.ops.flex_lib.zeros_and_scatter.default
+    patterns = PatternMatcherPass(pass_name="flex_attention_index_backward")
+
+    def same_shape(match: Match) -> bool:
+        args = match.kwargs
+        shapes = (args["shape"][len(args["indices"]) :], args["inner_shape"])
+        remaining, inner = torch.fx.map_arg(shapes, lambda n: n.meta["val"])
+        return statically_known_true(sym_eq(remaining, inner))
+
+    @register_graph_pattern(
+        CallFunction(
+            scatter,
+            KeywordArg("shape"),
+            KeywordArg("indices"),
+            CallFunction(
+                scatter,
+                KeywordArg("inner_shape"),
+                KeywordArg("inner_indices"),
+                KeywordArg("value"),
+            ),
+        ),
+        extra_check=same_shape,
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=patterns,
+    )
+    def fuse(match: Match, shape, indices, inner_shape, inner_indices, value):
+        match.output_node().args = (shape, [*indices, *inner_indices], value)
+        match.erase_nodes()
+
+    # Matching runs backward through the graph; repeat to collapse longer chains.
+    changed = False
+    while patterns.apply(joint_graph):
+        changed = True
+    if changed:
+        joint_graph.graph.lint()
+        joint_graph.recompile()
+
+
 def validate_joint_graph(joint_graph: torch.fx.Graph):
     """We do some pre lowering graph checks in order to raise nicer error messages"""
     for node in joint_graph.nodes:
@@ -676,18 +725,19 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
             for user in node.users:
                 if user.op != "output":
                     raise NotImplementedError(
-                        "Using multiple indexing operations on the same tensor that "
-                        "requires gradients in a score_mod is not supported by the "
-                        "compiled FlexAttention backward. For independent uses, clone "
-                        "the tensor outside score_mod before indexing it again. For "
-                        "example:\n\n"
+                        "Using multiple indexing operations on the same tensor that requires gradients "
+                        "in a score_mod function is not currently supported. "
+                        "This typically happens when indexing the same tensor multiple times, like:\n\n"
+                        "    def score_mod(score, b, h, q_idx, kv_idx):\n"
+                        "        return score + bias[q_idx] + bias[kv_idx]  # bias used twice!\n\n"
+                        "A valid workaround is to clone() the tensors that will be indexed multiple times. For example:\n\n"
                         "    bias1 = bias.clone()\n"
                         "    def score_mod(score, b, h, q_idx, kv_idx):\n"
                         "        return score + bias[q_idx] + bias1[kv_idx]\n\n"
-                        "For chained indexing, "
-                        "apply all indices together and move intervening operations "
-                        "afterward, for example rewrite (table[idx] * 2)[0] as "
-                        "table[idx, 0] * 2."
+                        "Note that this solution will use additional memory.\n\n"
+                        "For chained indexing with operations in between, such as "
+                        "(table[idx] * 2)[0], apply all indices in one indexing "
+                        "expression instead: table[idx, 0] * 2."
                     )
     return
 
@@ -893,6 +943,7 @@ def flex_attention_backward(*args, **kwargs):
     ]
     # Sometimes we have weird unused nodes here
     joint_graph.graph_module.graph.eliminate_dead_code()
+    _fuse_nested_index_backward(joint_graph.graph_module)
 
     # It is hard to raise nice errors for some joint graphs during subgraph lowering
     # This lets us do some checks before attempting to lower

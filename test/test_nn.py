@@ -12375,6 +12375,102 @@ class TestNNDeviceType(NNTestCase):
                 test_dtype(func, x, torch.bfloat16)
 
 
+    @onlyCPU
+    @dtypes(torch.float32)
+    @parametrize_test("noncontiguous", [False, True])
+    @parametrize_test("case", [
+        subtest((None, 2, (8, 10), (2, 2), (2, 2), (0, 0), (1, 1)), name="unbatched"),
+        subtest((2, 3, (128, 130), (2, 2), (2, 2), (0, 0), (1, 1)), name="tiles_2x2"),
+        subtest((1, 4, (96, 99), (2, 3), (2, 3), (0, 0), (1, 1)), name="tiles_rect"),
+        subtest((2, 3, (127, 129), (1, 1), (1, 1), (0, 0), (1, 1)), name="pointwise"),
+        subtest((2, 3, (63, 65), (3, 3), (1, 1), (1, 1), (1, 1)), name="overlap"),
+        subtest((2, 3, (65, 67), (2, 2), (2, 2), (0, 0), (1, 1)), name="partial_tiles"),
+        subtest((2, 3, (64, 66), (2, 2), (3, 3), (0, 0), (1, 1)), name="gaps"),
+        subtest((2, 3, (63, 65), (2, 3), (1, 2), (2, 1), (2, 3)), name="dilation"),
+        subtest((8, 1, (64, 66), (3, 3), (1, 1), (1, 1), (1, 1)), name="batch_only"),
+        subtest((2, 1, (64, 128), (1, 1), (1, 1), (0, 0), (1, 1)), name="parallel_limit"),
+        subtest((2, 1, (64, 129), (1, 1), (1, 1), (0, 0), (1, 1)), name="above_limit"),
+        subtest((0, 2, (8, 10), (2, 2), (2, 2), (0, 0), (1, 1)), name="empty_batch"),
+        subtest((2, 1, (2, 3), (2, 3), (2, 3), (5, 7), (3, 2)), name="large_padding"),
+        subtest((1, 4, (4, 5), (3, 3), (1, 1), (1, 512), (1, 1)), name="wide_padding"),
+    ])
+    def test_fold_reference(self, device, dtype, noncontiguous, case):
+        self._test_fold_reference(device, dtype, noncontiguous, case)
+
+    @onlyCPU
+    @dtypes(torch.float64, torch.float16, torch.bfloat16,
+            torch.complex64, torch.complex128, torch.bool)
+    def test_fold_reference_dtypes(self, device, dtype):
+        case = (2, 3, (17, 19), (3, 3), (1, 1), (1, 1), (1, 1))
+        self._test_fold_reference(device, dtype, True, case)
+
+    def _test_fold_reference(self, device, dtype, noncontiguous, case):
+        batch, channels, size, kernel, stride, padding, dilation = case
+        n = 1 if batch is None else batch
+        h, w = size
+        kh, kw = kernel
+        sh, sw = stride
+        ph, pw = padding
+        dh, dw = dilation
+        oh = (h + 2 * ph - dh * (kh - 1) - 1) // sh + 1
+        ow = (w + 2 * pw - dw * (kw - 1) - 1) // sw + 1
+        columns = torch.randint(-2, 3, (n, channels * kh * kw, oh * ow), device=device).to(dtype)
+        if dtype.is_complex:
+            columns += 1j * columns.flip(-1)
+        if noncontiguous:
+            columns = columns.transpose(-1, -2).contiguous().transpose(-1, -2)
+
+        # Small integers keep the reference sum exact for every tested dtype.
+        rows = torch.arange(kh, device=device)[:, None] * dh + torch.arange(oh, device=device) * sh - ph
+        cols = torch.arange(kw, device=device)[:, None] * dw + torch.arange(ow, device=device) * sw - pw
+        rows, cols = rows[:, None, :, None], cols[None, :, None, :]
+        valid = ((rows >= 0) & (rows < h) & (cols >= 0) & (cols < w)).flatten()
+        indices = (rows * w + cols).flatten()[valid]
+        expected = torch.zeros(n, channels, h * w, device=device, dtype=dtype)
+        expected.scatter_add_(2, indices.expand(n, channels, -1),
+                              columns.reshape(n, channels, kh * kw * oh * ow)[..., valid])
+        expected = expected.reshape(n, channels, h, w)
+        if batch is None:
+            columns, expected = columns.squeeze(0), expected.squeeze(0)
+        kwargs = dict(kernel_size=kernel, stride=stride, padding=padding, dilation=dilation)
+        self.assertEqual(F.fold(columns, size, **kwargs), expected, atol=0, rtol=0)
+        if dtype != torch.bool:
+            image = torch.zeros_like(expected, requires_grad=True)
+            F.unfold(image, **kwargs).backward(columns)
+            self.assertEqual(image.grad, expected, atol=0, rtol=0)
+
+    @onlyCPU
+    @dtypes(torch.float32)
+    def test_fold_out_batch_stride(self, device, dtype):
+        columns = torch.randint(-2, 3, (4, 9, 64 * 65), device=device).to(dtype)
+        expected = F.fold(columns, (64, 65), (3, 3), padding=1)
+        storage = torch.full((8, 1, 64, 65), 7, device=device, dtype=dtype)
+        output = storage[1::2]
+        torch.ops.aten.col2im.out(columns, (64, 65), (3, 3), (1, 1), (1, 1), (1, 1), out=output)
+        self.assertEqual(output, expected, atol=0, rtol=0)
+        self.assertEqual(storage[::2], torch.full_like(storage[::2], 7))
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize_test("kernel", [(1, 1), (2, 2), (2, 3)])
+    def test_fold_nonoverlap_signed_zero(self, device, dtype, kernel):
+        kh, kw = kernel
+        columns = torch.full((2, 4 * kh * kw, (96 // kh) * (96 // kw)), -0.0, device=device, dtype=dtype)
+        if dtype.is_complex:
+            torch.view_as_real(columns).fill_(-0.0)
+        output = F.fold(columns, (96, 96), kernel, stride=kernel)
+        self.assertEqual(output, torch.zeros_like(output))
+        values = torch.view_as_real(output) if dtype.is_complex else output
+        self.assertFalse(torch.signbit(values).any())
+
+    @onlyCPU
+    @parametrize_test("kernel", [(1, 1), (2, 3), (3, 3)])
+    def test_fold_output_storage(self, device, kernel):
+        image = torch.randn(2, 3, 17, 19, device=device)
+        columns = F.unfold(image, kernel, padding=1)
+        output = F.fold(columns, (17, 19), kernel, padding=1)
+        self.assertEqual(output.untyped_storage().nbytes(), output.numel() * output.element_size())
+
     def test_logsigmoid_out(self, device):
         # this isn't actually documented, but was broken previously:
         # https://github.com/pytorch/pytorch/issues/36499
@@ -13160,6 +13256,29 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_value_(p1, clip_value, foreach=foreach)
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
+
+    @parametrize_test('foreach', (None, False))
+    @parametrize_test('norm_type', (1.0, 2.0))
+    def test_get_total_norm_dtype(self, norm_type, foreach, device):
+        # foreach=None takes the foreach path on the devices that have it and the per-tensor path elsewhere.
+        # By default each per-tensor norm of low-precision inputs is rounded to their dtype
+        # before the norms are combined, so the total depends on how the tensors are split.
+        # With dtype=torch.float32 every norm is accumulated and returned in float32. The
+        # inputs are small integers, so the float32 sums are exact; a total rounded through
+        # bfloat16 would be off by about 1, far outside the float32 tolerance.
+        g = torch.tensor([255.0, 32.0, 1.0], dtype=torch.bfloat16, device=device)
+        whole, split = [g], [g[:2], g[2:]]
+
+        exact = {1.0: 255.0 + 32.0 + 1.0, 2.0: math.sqrt(255.0**2 + 32.0**2 + 1.0**2)}[norm_type]
+        expected = torch.tensor(exact, dtype=torch.float32, device=device)
+        for tensors in (whole, split):
+            total = get_total_norm(tensors, norm_type=norm_type, foreach=foreach, dtype=torch.float32)
+            self.assertEqual(total, expected)
+            default = get_total_norm(tensors, norm_type=norm_type, foreach=foreach)
+            self.assertEqual(default.dtype, torch.bfloat16)
+
+        empty = get_total_norm([], norm_type=norm_type, dtype=torch.float32)
+        self.assertEqual(empty.dtype, torch.float32)
 
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
@@ -17295,13 +17414,15 @@ class TestUtils(TestCase):
         self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
 
 
-def _make_misaligned_rmsnorm_input(test, M, N, dtype, offset=1):
-    from torch._native.ops.norm.norms import _required_align_bytes
+def _make_misaligned_rmsnorm_input(
+    test: TestCase, M: int, N: int, dtype: torch.dtype, offset: int = 1
+) -> torch.Tensor:
+    from torch._native.utils.tensor import row_alignment
 
     buf = torch.randn(M * N + offset, dtype=dtype, device="cuda")
     x = buf[offset:].view(M, N)
     test.assertTrue(x.is_contiguous())
-    test.assertNotEqual(x.data_ptr() % _required_align_bytes(x, N), 0)
+    test.assertNotEqual(x.data_ptr() % row_alignment(N, x.element_size()), 0)
     return x
 
 
@@ -17320,15 +17441,19 @@ class TestFusedRMSNormOverrideRouting(TestCase):
     """
     hw_classification = HardwareClassification.CUDA
 
-    def test_sm12x_supported(self):
+    @parametrize_test("capability", [(12, 0), (12, 1)])
+    def test_sm12x_supported(self, capability: tuple[int, int]) -> None:
         from torch._native.ops.norm.rmsnorm_impl import _is_supported
+        from torch._native.utils.capability import _arch_ok
 
+        _arch_ok.cache_clear()
+        self.addCleanup(_arch_ok.cache_clear)
         x = torch.randn(8, 128, dtype=torch.float16, device="cuda")
-        for capability in ((12, 0), (12, 1)):
-            with mock.patch(
-                "torch.cuda.get_device_capability", return_value=capability
-            ):
-                self.assertTrue(_is_supported(x))
+        with mock.patch(
+            "torch.cuda.get_device_capability",
+            return_value=capability,
+        ):
+            self.assertTrue(_is_supported(x))
 
     def test_fwd_cond_fires_supported_fp16(self):
         from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_cond
@@ -17509,7 +17634,7 @@ class TestFusedRMSNormOverrideRouting(TestCase):
 
     def test_fwd_cond_misaligned_input_gated_on_size(self):
         # A misaligned base pointer forces a clone before quack can run
-        # (norms._reshape_2d). The clone's extra read+write only pays off when
+        # (reshape_contiguous). The clone's extra read+write only pays off when
         # quack's bandwidth advantage absorbs it (>= _MISALIGNED_MIN_NUMEL,
         # measured on B200); below that the cond falls back to aten.
         from torch._native.ops.norm.rmsnorm_impl import (
@@ -17560,11 +17685,11 @@ class TestFusedRMSNormOverrideRouting(TestCase):
             subtest([False, True], name="mask_FT"),
         ],
     )
-    def test_bwd_cond_fires(self, output_mask):
+    def test_bwd_cond_fires(self, output_mask: list[bool]) -> None:
         from torch._native.ops.norm.rmsnorm_impl import _fused_rms_norm_backward_cond
 
         dtype = torch.float16
-        shape = (8, 128)
+        shape = (8 if output_mask[0] else 8192, 128)
         normalized_shape = [128]
         x = torch.randn(*shape, dtype=dtype, device="cuda")
         w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")
@@ -17715,20 +17840,20 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
         torch.float32: 1e-5,
     }
 
-    def _make_misaligned_weight(self, N, dtype):
-        from torch._native.ops.norm.norms import _required_align_bytes
+    def _make_misaligned_weight(self, N: int, dtype: torch.dtype) -> torch.Tensor:
+        from torch._native.utils.tensor import row_alignment
 
         wbuf = torch.randn(N + 1, dtype=dtype, device="cuda")
         w = wbuf[1:]
         self.assertTrue(w.is_contiguous())
-        self.assertNotEqual(w.data_ptr() % _required_align_bytes(w, N), 0)
+        self.assertNotEqual(w.data_ptr() % row_alignment(N, w.element_size()), 0)
         return w
 
     @parametrize_test("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_misaligned_weight(self, dtype):
         # Weight has the same misaligned-base trap as the input: it is
         # contiguous, so reshape(N).contiguous() in the impl is a no-op and
-        # would hand the kernel a misaligned pointer. norms._aligned_weight
+        # would hand the kernel a misaligned pointer. reshape_contiguous
         # clones it unconditionally (no size gate; weight is only N elements).
         N, M = 2048, 8
         x = torch.randn(M, N, dtype=dtype, device="cuda")
@@ -17791,9 +17916,9 @@ class TestFusedRMSNormOverrideNumerics(TestCase):
         "output_mask",
         [[True, True], [True, False], [False, True]],
     )
-    def test_backward_output_mask_variants(self, output_mask):
+    def test_backward_output_mask_variants(self, output_mask: list[bool]) -> None:
         dtype = torch.float16
-        shape = (8, 128)
+        shape = (8 if output_mask[0] else 8192, 128)
         normalized_shape = [128]
         x = torch.randn(*shape, dtype=dtype, device="cuda")
         w = torch.randn(*normalized_shape, dtype=dtype, device="cuda")
