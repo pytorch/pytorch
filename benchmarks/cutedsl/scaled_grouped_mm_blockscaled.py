@@ -20,6 +20,43 @@ from torch.testing._internal.common_quantized import (
 
 _BENCH_SETTLE_SECONDS = 0.1
 
+# (num_experts, hidden_size, expert intermediate size, top_k), from each
+# model's Hugging Face config.json. Each expert computes
+# (silu(x @ W_gate) * (x @ W_up)) @ W_down; as in torchtitan's GroupedLinear
+# (torchtitan/models/common/linear.py), W_gate and W_up are fused, giving one
+# up GEMM with N = 2 * intermediate, K = hidden and one down GEMM with
+# N = hidden, K = intermediate, over M = tokens * top_k routed rows.
+_MOE_MODELS = {
+    "Mixtral-8x7B": (8, 4096, 14336, 2),
+    "Llama-4-Scout": (16, 5120, 8192, 1),
+    "DeepSeek-V3": (256, 7168, 2048, 8),
+    "gpt-oss-120b": (128, 2880, 2880, 4),
+    "Qwen3-235B-A22B": (128, 4096, 1536, 8),
+}
+_MOE_TOKENS = (256, 16384)
+# Each expert's routed rows are padded to this multiple, as block-scaled
+# quantization requires, so no group is empty.
+_MOE_EXPERT_ROW_ALIGN = 32
+
+
+def _moe_model_gmnk():
+    gmnk = []
+    align = _MOE_EXPERT_ROW_ALIGN
+    for experts, hidden, intermediate, top_k in _MOE_MODELS.values():
+        for tokens in _MOE_TOKENS:
+            rows_per_expert = -(-tokens * top_k // experts)
+            m = experts * (-(-rows_per_expert // align) * align)
+            gmnk.append([experts, m, 2 * intermediate, hidden])
+            gmnk.append([experts, m, hidden, intermediate])
+    return gmnk
+
+
+def _default_gmnk(layout_mode):
+    gmnk = _moe_model_gmnk()
+    if layout_mode == "2d/2d":
+        return [[g, n, k, m] for g, m, n, k in gmnk]
+    return gmnk
+
 
 def is_blackwell():
     if not torch.cuda.is_available():
@@ -411,7 +448,8 @@ def _prepare_inputs(
             n = t.numel()
             x_scale_flat[offset : offset + n] = t.view(-1)
             offset += n
-        x_blocked_scales = x_scale_flat.reshape(-1, k_eff // block_size).contiguous()
+        scale_cols = ((k_eff // block_size + 3) // 4) * 4
+        x_blocked_scales = x_scale_flat.reshape(-1, scale_cols).contiguous()
         xq = xq.view(-1, xq.shape[-1])
         x_global_scales = (
             torch.stack(x_global_scales).to(device=device, dtype=torch.float32)
@@ -521,32 +559,7 @@ def benchmark_scaled_grouped_mm(
         )
 
     if gmnk is None:
-        gmnk = [
-            [2, 5, 16, 16],
-            [3, 13, 16, 32],
-            [8, 128, 16, 16],
-            [8, 512, 32, 64],
-            [16, 1024, 256, 1024],
-            [32, 2048, 512, 256],
-            [32, 2048, 512, 2048],
-            [24, 4834, 5120, 1536],
-            [32, 8257, 5120, 1536],
-            [24, 32768, 6144, 2048],
-            [48, 32768, 6144, 2048],
-            [64, 32768, 6144, 2048],
-            [24, 65536, 6144, 2048],
-            [32, 65536, 6144, 2048],
-            [48, 65536, 6144, 2048],
-            [64, 65536, 6144, 2048],
-            [24, 131072, 6144, 2048],
-            [32, 131072, 6144, 2048],
-            [48, 131072, 6144, 2048],
-            [64, 131072, 6144, 2048],
-        ]
-        if layout_mode == "2d/2d":
-            # Backward-style mapping from 2d/3d forward defaults:
-            # (G, M, N, K) -> (G, K, N, M)
-            gmnk = [[g, k, n, m] for g, m, n, k in gmnk]
+        gmnk = _default_gmnk(layout_mode)
     swizzle = SwizzleType.NO_SWIZZLE
     if torch.version.cuda:
         swizzle = SwizzleType.SWIZZLE_32_4_4

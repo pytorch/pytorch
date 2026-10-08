@@ -1059,6 +1059,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             tile_meta_producer_state = pipeline.make_pipeline_state(
                 pipeline.PipelineUserType.Producer, self.num_tile_meta_stage
             )
+            last_group_idx = cutlass.Int32(-1)
 
             while work_tile.is_valid_tile:
                 cur_tile_coord = work_tile.tile_idx
@@ -1090,6 +1091,16 @@ class Sm100GroupedBlockScaledGemmKernel:
                 tma_desc_b = self.group_tma_desc(tensormaps, cur_group_idx, 1)
                 tma_desc_sfa = self.group_tma_desc(tensormaps, cur_group_idx, 2)
                 tma_desc_sfb = self.group_tma_desc(tensormaps, cur_group_idx, 3)
+                is_group_changed = cur_group_idx != last_group_idx
+                last_group_idx = cur_group_idx
+                if is_group_changed:
+                    for tma_desc in (
+                        tma_desc_a,
+                        tma_desc_b,
+                        tma_desc_sfa,
+                        tma_desc_sfb,
+                    ):
+                        cute.nvgpu.cpasync.fence_tma_desc_acquire(tma_desc)
 
                 mma_tile_coord_mnl = (
                     grouped_gemm_cta_tile_info.cta_tile_idx_m
@@ -1441,6 +1452,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                 num_stages=self.num_c_stage,
                 producer_group=c_producer_group,
             )
+            last_group_idx = cutlass.Int32(-1)
 
             while work_tile.is_valid_tile:
                 if cutlass.const_expr(self.uniform_mn_groups):
@@ -1466,6 +1478,11 @@ class Sm100GroupedBlockScaledGemmKernel:
                     tile_meta_pipeline.consumer_release(tile_meta_consumer_state)
                     tile_meta_consumer_state.advance()
                 tma_desc_c = self.group_tma_desc(tensormaps, cur_group_idx, 4)
+                is_group_changed = cur_group_idx != last_group_idx
+                last_group_idx = cur_group_idx
+                if is_group_changed:
+                    if warp_idx == self.epilog_warp_id[0]:
+                        cute.nvgpu.cpasync.fence_tma_desc_acquire(tma_desc_c)
 
                 mma_tile_coord_mnl = (
                     cta_tile_idx_m // cute.size(tiled_mma.thr_id.shape),
@@ -1757,6 +1774,16 @@ class Sm100GroupedBlockScaledGemmKernel:
         tensormap_manager.update_tensormap(
             real_tensors, tma_atoms, tensormap_ptrs, 0, tensormap_ptrs
         )
+        # Blackwell driver bug: the encoder sets bit 21 of qword 1 for tensors of
+        # 128 KiB or more, and it survives tensormap.replace shrinking the
+        # descriptor to a group, letting out-of-bounds TMA loads fault.
+        if lane == 0:
+            for tensor_idx in range(len(tma_atoms)):
+                tensormaps[g, tensor_idx, 1] = tensormaps[
+                    g, tensor_idx, 1
+                ] & cutlass.Int64(~(1 << 21))
+        cute.arch.sync_warp()
+        cute.nvgpu.cpasync.fence_tma_desc_release()
 
     def _gmem_tensor(self, dtype, ptr_i64, layout):
         ptr = cute.make_ptr(dtype, ptr_i64, cute.AddressSpace.gmem, assumed_align=16)

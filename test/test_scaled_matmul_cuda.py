@@ -743,6 +743,49 @@ def _2d_grouped_tensor_to_blocked_scaled(t, MN, G, offs, format='mxfp8'):
 
     return th, tq, t_blocked_scales, t_global_scales
 
+def _copy_to_end_of_device_mapping(t):
+    # Places a copy of `t` so that it ends exactly where a VMM mapping ends, with
+    # the following page reserved but unmapped, so any read past `t` faults.
+    from torch.cuda._utils import _check_cuda_bindings_driver as check, _HAS_CUDA_BINDINGS
+
+    if not _HAS_CUDA_BINDINGS:
+        raise unittest.SkipTest("cuda.bindings is required")
+    from cuda.bindings import driver
+
+    nbytes = t.numel() * t.element_size()
+    prop = driver.CUmemAllocationProp()
+    prop.type = driver.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
+    prop.location.type = driver.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
+    prop.location.id = t.device.index
+    granularity = check(driver.cuMemGetAllocationGranularity(
+        prop, driver.CUmemAllocationGranularity_flags.CU_MEM_ALLOC_GRANULARITY_MINIMUM
+    ))
+    mapped = -(-nbytes // granularity) * granularity
+    base = int(check(driver.cuMemAddressReserve(mapped + granularity, granularity, 0, 0)))
+    handle = check(driver.cuMemCreate(mapped, prop, 0))
+    check(driver.cuMemMap(base, mapped, 0, handle, 0))
+    access = driver.CUmemAccessDesc()
+    access.location = prop.location
+    access.flags = driver.CUmemAccess_flags.CU_MEM_ACCESS_FLAGS_PROT_READWRITE
+    check(driver.cuMemSetAccess(base, mapped, [access], 1))
+
+    class _CudaArray:
+        __cuda_array_interface__ = {
+            "shape": (nbytes,), "typestr": "|u1", "data": (base + mapped - nbytes, False), "version": 3,
+        }
+
+    guarded = torch.as_tensor(_CudaArray(), device=t.device)
+    guarded.copy_(t.contiguous().view(-1).view(torch.uint8))
+
+    def release():
+        torch.cuda.synchronize(t.device)
+        check(driver.cuMemUnmap(base, mapped))
+        check(driver.cuMemRelease(handle))
+        check(driver.cuMemAddressFree(base, mapped + granularity))
+
+    return guarded.view(t.dtype).view(t.shape), release
+
+
 def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     # Build some standard args that are wordy
     swizzle = SwizzleType.NO_SWIZZLE
@@ -1140,7 +1183,23 @@ class TestFP8Matmul(TestCase):
         # groups spanning several N tiles.
         self._run_scaled_grouped_mm_2d_3d(16, 1024, 8192, 4096, format, False, device, compare_cpp=False)
 
-    def _run_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device, compare_cpp):
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @skipIfNoCuteDSL
+    def test_scaled_grouped_mm_2d_3d_input_at_mapping_end(self, format, device):
+        # Groups smaller than the N tile leave TMA boxes past the last group's
+        # rows; with the input ending at unmapped memory those must not fault.
+        offs = torch.tensor([32, 64, 96, 128], dtype=torch.int32, device=device)
+        self._run_scaled_grouped_mm_2d_3d(
+            4, 128, 4096, 2048, format, False, device, compare_cpp=False,
+            input_group_end_offsets=offs, guard_input_end=True,
+        )
+
+    def _run_scaled_grouped_mm_2d_3d(
+        self, G, M, N, K, format, use_out, device, compare_cpp,
+        input_group_end_offsets=None, guard_input_end=False,
+    ):
         from torch._native import registry
 
         if "_scaled_grouped_mm_v2" not in registry.get_dsl_operations("cutedsl"):
@@ -1154,9 +1213,10 @@ class TestFP8Matmul(TestCase):
         total_M = M  # Alias for clarity that M dim contains groups.
         X = torch.randn((total_M, K), dtype=torch.bfloat16, device=device) * 0.1
         W = torch.randn((G, N, K), dtype=torch.bfloat16, device=device) * 0.01
-        input_group_end_offsets = generate_jagged_offs(
-            G, total_M, multiple_of=32, device=device
-        )
+        if input_group_end_offsets is None:
+            input_group_end_offsets = generate_jagged_offs(
+                G, total_M, multiple_of=32, device=device
+            )
 
         # For each constituent 2d subtensor in the 3d weights, quantize and convert scale to blocked format separately,
         # as they each used for independent gemm in the grouped gemm.
@@ -1237,6 +1297,9 @@ class TestFP8Matmul(TestCase):
             return xh, xq, x_scale, x_global_scales
 
         xh, xq, x_blocked_scales, x_global_scales = _2d_to_blocked_scaled(X, K, G, input_group_end_offsets, format)
+        if guard_input_end:
+            xq, release = _copy_to_end_of_device_mapping(xq)
+            self.addCleanup(release)
 
         if format in ["mxfp8", "mxfp4"]:
             kwargs = _build_scaled_grouped_mm_kwargs(
