@@ -7073,6 +7073,7 @@ class CPUReproTests(TestCase):
             return torch.atanh(x)
 
         values = [1e-4, 1e-6, 1e-8, 1e-10, -1e-4, -1e-6, -1e-8, -1e-10]
+        values += [0.0015894428361207247, -0.0015894428361207247]
         for dtype in (torch.float32, torch.float64):
             x = torch.tensor(values * 3, dtype=dtype)
             expected = fn(x)
