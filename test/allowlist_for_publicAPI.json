@@ -2649,23 +2649,6 @@
   "torch.export.graph_signature": [
     "TokenArgument"
   ],
-  "torch.fx.experimental.shape_inference.infer_shape": [
-    "DimDynamic",
-    "FakeTensorMode",
-    "LocalSource",
-    "ShapeEnv",
-    "defaultdict",
-    "infer_symbol_values",
-    "make_fx"
-  ],
-  "torch.fx.experimental.shape_inference.infer_symbol_values": [
-    "Any",
-    "DefaultDict",
-    "Dict",
-    "List",
-    "Tuple",
-    "Union"
-  ],
   "torch.fx.passes.runtime_assert": [
     "Any",
     "Dict",

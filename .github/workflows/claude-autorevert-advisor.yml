@@ -75,7 +75,7 @@ jobs:
 
       - name: Run AI Advisor
         id: claude
-        uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
+        uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           # Providing the workflow token stops the action from minting its own
           # app token, bypassing Anthropic's OIDC app-token exchange -- the
@@ -88,7 +88,7 @@ jobs:
           allowed_bots: "pytorch-auto-revert[bot],pytorch-bot[bot]"
           use_bedrock: "true"
           claude_args: |
-            --model global.anthropic.claude-opus-4-6-v1
+            --model global.anthropic.claude-opus-5-5
             --allowedTools "Bash,Read,Glob,Grep,WebFetch"
             --json-schema '{"type":"object","required":["verdict","confidence","summary","causal_reasoning"],"properties":{"verdict":{"type":"string","enum":["related","unsure","not_related","infra_issue","garbage"]},"confidence":{"type":"number","minimum":0,"maximum":1},"summary":{"type":"string","description":"1-3 sentence explanation of the verdict"},"causal_reasoning":{"type":"string","description":"Detailed explanation of the causal chain (or lack thereof) between the code change and the observed failures"}}}'
           settings: '{"alwaysThinkingEnabled": true}'

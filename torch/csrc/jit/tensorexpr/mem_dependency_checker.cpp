@@ -1125,7 +1125,7 @@ void MemDependencyChecker::visit(const LetPtr& v) {
 // Don't support AtomicAdd yet, it's a bit more complex since it's both a read
 // and a write. It's only inserted during Cuda codegen so this should be okay.
 void MemDependencyChecker::visit(const AtomicAddPtr& v) {
-  throw std::runtime_error("MemDependencyChecker AtomicAdd unimplemented");
+  TORCH_CHECK(false, "MemDependencyChecker AtomicAdd unimplemented");
 }
 
 void MemDependencyChecker::visit(const AllocatePtr& v) {
