@@ -2713,6 +2713,12 @@ class AUTOGRAD_SAVED_TENSORS_HOOKS : public LeafGuard {
         guard_hooks_ids{get_guard_hooks_ids()} {}
 
   bool check_nopybind(PyObject* value) override {
+    // Ignore value arg, this is just to satisfy the interface.
+    return guard_hooks_ids == get_guard_hooks_ids();
+  }
+
+  bool check_nopybind(FrameLocalsMapping* map) override {
+    // Ignore value arg, this is just to satisfy the interface.
     return guard_hooks_ids == get_guard_hooks_ids();
   }
 
