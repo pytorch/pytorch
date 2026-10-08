@@ -90,10 +90,14 @@ id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
 }
 
 void MPSStream::commitIfNeeded() {
-  // Encoded kernels only start running once their command buffer is committed, so commit every 16 of them.
-  // Metal blocks the creation of a command buffer while its queue has 64 uncompleted ones, which would stall
-  // the caller, so skip the commit while 32 of the stream's own commits are in flight (MPSGraph's are not counted).
-  if (_enableCommitAndContinue && _kernelsSinceCommit >= 16 && _commandBuffersInFlight < 32) {
+  // Encoded kernels only start running once their command buffer is committed, so commit every kKernelsPerCommit
+  // of them. Metal blocks the creation of a command buffer while its queue has 64 uncompleted ones, which would
+  // stall the caller, so skip the commit while kMaxCommandBuffersInFlight of the stream's own commits are in
+  // flight (MPSGraph's are not counted).
+  constexpr uint32_t kKernelsPerCommit = 16; // See https://github.com/pytorch/pytorch/pull/200181 for the sweep
+  constexpr uint32_t kMaxCommandBuffersInFlight = 32;
+  if (_enableCommitAndContinue && _kernelsSinceCommit >= kKernelsPerCommit &&
+      _commandBuffersInFlight < kMaxCommandBuffersInFlight) {
     synchronize(SyncType::COMMIT);
   }
 }
