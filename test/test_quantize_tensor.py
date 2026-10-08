@@ -16,6 +16,7 @@ from torch.testing._internal.common_quantized import (
     from_blocked_format,
     mxfp8_32x32_swizzle_f,
     to_mxfp as to_mxfp8_reference,
+    to_mxfp_dual,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -706,94 +707,241 @@ class TestQuantizeTensorMeta(TestCase):
 
 class TestMXFP8StochasticReferenceNumerics(TestCase):
     @parametrize("input_dtype", (torch.float16, torch.bfloat16, torch.float32))
-    @parametrize("swizzle_type", (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4))
-    def test_stateless_round_trip(self, input_dtype, swizzle_type, device):
+    @parametrize(
+        "orientation,swizzle_type",
+        (
+            subtest(("dim_k", SwizzleType.NO_SWIZZLE), name="dim_k_compact"),
+            subtest(("dim_k", SwizzleType.SWIZZLE_32_4_4), name="dim_k_swizzled"),
+            subtest(("dim_km", SwizzleType.SWIZZLE_32_4_4), name="dim_km"),
+        ),
+    )
+    def test_stateless_round_trip(self, input_dtype, orientation, swizzle_type, device):
         input = torch.randn((96, 160), device=device, dtype=input_dtype)
         key = prng.key(7, device=device)
-        scales, qdata = to_mxfp8_reference(
-            input, swizzle_type=swizzle_type, rounding_mode="stochastic", random_key=key
-        )
-        unswizzled = (
-            from_blocked(qdata, scales, 32)
-            if swizzle_type == SwizzleType.SWIZZLE_32_4_4
-            else scales
-        )
-        reconstructed = from_blocked_format(qdata, unswizzled)
-        self.assertGreater(
-            compute_error(input.float(), reconstructed.float()).item(), 15.0
-        )
+        if orientation == "dim_k":
+            scales, qdata = to_mxfp8_reference(
+                input,
+                swizzle_type=swizzle_type,
+                rounding_mode="stochastic",
+                random_key=key,
+            )
+            unswizzled = (
+                from_blocked(qdata, scales, 32)
+                if swizzle_type == SwizzleType.SWIZZLE_32_4_4
+                else scales
+            )
+            reconstructed = from_blocked_format(qdata, unswizzled)
+            self.assertGreater(
+                compute_error(input.float(), reconstructed.float()).item(), 15.0
+            )
+        else:
+            scales_k, qdata_k, scales_m, qdata_m = to_mxfp_dual(
+                input,
+                swizzle_type=swizzle_type,
+                rounding_mode="stochastic",
+                random_key=key,
+            )
+            scales_k = from_blocked(qdata_k, scales_k, 32)
+            reconstructed_k = from_blocked_format(qdata_k, scales_k)
+            self.assertGreater(
+                compute_error(input.float(), reconstructed_k.float()).item(), 15.0
+            )
+            scales_m = from_blocked(qdata_m, scales_m, 32)
+            reconstructed_m = from_blocked_format(qdata_m, scales_m)
+            self.assertGreater(
+                compute_error(input.t().float(), reconstructed_m.float()).item(), 15.0
+            )
 
-    def test_stateless_nonfinite_groups(self, device):
+    @parametrize("orientation", ("dim_k", "dim_km"))
+    def test_stateless_nonfinite_groups(self, orientation, device):
         input = torch.zeros((32, 32), device=device, dtype=torch.bfloat16)
         input[0, 0] = float("nan")
         input[1, 1] = float("inf")
         input[2, 2] = -float("inf")
-        scales, qdata = to_mxfp8_reference(
-            input, rounding_mode="stochastic", random_key=prng.key(7, device=device)
-        )
-        qbytes = qdata.view(torch.uint8)
-        self.assertEqual(
-            qbytes[:3], torch.full((3, 32), 0x7F, device=device, dtype=torch.uint8)
-        )
-        self.assertEqual(
-            qbytes[3:], torch.zeros((29, 32), device=device, dtype=torch.uint8)
-        )
-        self.assertEqual(
-            scales.view(torch.uint8)[:3],
-            torch.full((3, 1), 0xFF, device=device, dtype=torch.uint8),
-        )
+        key = prng.key(7, device=device)
+        expected_nan = torch.full((3, 32), 0x7F, device=device, dtype=torch.uint8)
+        expected_zero = torch.zeros((29, 32), device=device, dtype=torch.uint8)
+        expected_scale = torch.full((3, 1), 0xFF, device=device, dtype=torch.uint8)
 
+        if orientation == "dim_k":
+            scales, qdata = to_mxfp8_reference(
+                input,
+                swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+                rounding_mode="stochastic",
+                random_key=key,
+            )
+            qbytes = qdata.view(torch.uint8)
+            self.assertEqual(qbytes[:3], expected_nan)
+            self.assertEqual(qbytes[3:], expected_zero)
+            scale_bytes = from_blocked(qdata, scales, 32).view(torch.uint8)
+            self.assertEqual(scale_bytes[:3], expected_scale)
+        else:
+            scales_k, qdata_k, scales_m, qdata_m = to_mxfp_dual(
+                input,
+                swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+                rounding_mode="stochastic",
+                random_key=key,
+            )
+            qbytes_k = qdata_k.view(torch.uint8)
+            self.assertEqual(qbytes_k[:3], expected_nan)
+            self.assertEqual(qbytes_k[3:], expected_zero)
+            scale_bytes_k = from_blocked(qdata_k, scales_k, 32).view(torch.uint8)
+            self.assertEqual(scale_bytes_k[:3], expected_scale)
+
+            qbytes_m = qdata_m.view(torch.uint8)
+            self.assertEqual(qbytes_m[:3], expected_nan)
+            self.assertEqual(qbytes_m[3:], expected_zero)
+            scale_bytes_m = from_blocked(qdata_m, scales_m, 32).view(torch.uint8)
+            self.assertEqual(scale_bytes_m[:3], expected_scale)
+
+    @parametrize("key_offset", (0, 2**32 - 1))
+    def test_stateless_dual_counter_ranges(self, key_offset, device):
+        input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
+        key = prng.key(7, device=device)
+        key[1] = key_offset
+        swizzle = SwizzleType.SWIZZLE_32_4_4
+        outputs = to_mxfp_dual(
+            input, swizzle_type=swizzle, rounding_mode="stochastic", random_key=key
+        )
+        expected_k = to_mxfp8_reference(
+            input, swizzle_type=swizzle, rounding_mode="stochastic", random_key=key
+        )
+        key_i64 = key.view(torch.int64)
+        word_offset = input.numel() // 16
+        key_m = torch.stack((key_i64[0], key_i64[1] + word_offset)).view(torch.uint64)
+        expected_m = to_mxfp8_reference(
+            input.t().contiguous(),
+            swizzle_type=swizzle,
+            rounding_mode="stochastic",
+            random_key=key_m,
+        )
+        for actual, reference in zip(outputs, (*expected_k, *expected_m), strict=True):
+            self.assertEqual(actual.view(torch.uint8), reference.view(torch.uint8))
+
+    @parametrize("orientation", ("dim_k", "dim_km"))
     @parametrize("num_ops", (1, 2))
-    def test_stateful_cuda_graph(self, num_ops, device):
+    def test_stateful_cuda_graph(self, orientation, num_ops, device):
         # verifies that:
         # * cuda graph capture + replay matches eager
-        # * ^ holds for chains of 1 to 2 to_mxfp8_reference ops
+        # * ^ holds for chains of 1 to 2 quantizations in each orientation
         if torch.device(device).type != "cuda" or torch.version.rocm is not None:
             self.skipTest("stateful NVIDIA Philox rounding requires CUDA")
         input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
         generator = torch.cuda.default_generators[input.get_device()]
         with torch.random.fork_rng(devices=[input.get_device()]):
-            torch.manual_seed(123)
-            expected = [
-                to_mxfp8_reference(input, rounding_mode="stochastic")
-                for _ in range(2 * num_ops)
-            ]
-            graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(graph):
-                captured = [
-                    to_mxfp8_reference(input, rounding_mode="stochastic")
-                    for _ in range(num_ops)
-                ]
-
-            torch.manual_seed(123)
-            replays = []
-            for replay in range(2):
-                offset = generator.get_offset()
-                graph.replay()
-                # verify offset advanced correctly
-                self.assertEqual(generator.get_offset(), offset + 4 * num_ops)
-                outputs = []
-                for op, (scales, qdata) in enumerate(captured):
-                    # verify results from cuda graph match eager
-                    scale_bytes = scales.view(torch.uint8).clone()
-                    qdata_bytes = qdata.view(torch.uint8).clone()
-                    expected_scales, expected_qdata = expected[replay * num_ops + op]
-                    self.assertEqual(scale_bytes, expected_scales.view(torch.uint8))
-                    self.assertEqual(qdata_bytes, expected_qdata.view(torch.uint8))
-                    reconstructed = from_blocked_format(qdata, scales)
-                    self.assertGreater(
-                        compute_error(input.float(), reconstructed.float()).item(), 15.0
+            if orientation == "dim_k":
+                torch.manual_seed(123)
+                expected = [
+                    to_mxfp8_reference(
+                        input,
+                        swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+                        rounding_mode="stochastic",
                     )
-                    outputs.append((scale_bytes, qdata_bytes))
-                replays.append(outputs)
+                    for _ in range(2 * num_ops)
+                ]
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph):
+                    captured = [
+                        to_mxfp8_reference(
+                            input,
+                            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+                            rounding_mode="stochastic",
+                        )
+                        for _ in range(num_ops)
+                    ]
 
-            for op in range(num_ops):
-                self.assertEqual(replays[0][op][0], replays[1][op][0])
-                self.assertFalse(torch.equal(replays[0][op][1], replays[1][op][1]))
-            if num_ops == 2:
-                self.assertFalse(torch.equal(replays[0][0][1], replays[0][1][1]))
+                torch.manual_seed(123)
+                replays = []
+                for replay in range(2):
+                    offset = generator.get_offset()
+                    graph.replay()
+                    self.assertEqual(generator.get_offset(), offset + 4 * num_ops)
+                    outputs = []
+                    for op, (scales, qdata) in enumerate(captured):
+                        scale_bytes = scales.view(torch.uint8).clone()
+                        qdata_bytes = qdata.view(torch.uint8).clone()
+                        ref_scales, ref_qdata = expected[replay * num_ops + op]
+                        self.assertEqual(scale_bytes, ref_scales.view(torch.uint8))
+                        self.assertEqual(qdata_bytes, ref_qdata.view(torch.uint8))
+                        unswizzled = from_blocked(qdata, scales, 32)
+                        reconstructed = from_blocked_format(qdata, unswizzled)
+                        self.assertGreater(
+                            compute_error(input.float(), reconstructed.float()).item(),
+                            15.0,
+                        )
+                        outputs.append((scale_bytes, qdata_bytes))
+                    replays.append(outputs)
 
-    def test_stateless_cuda_graph(self, device):
+                for op in range(num_ops):
+                    self.assertEqual(replays[0][op][0], replays[1][op][0])
+                    self.assertFalse(torch.equal(replays[0][op][1], replays[1][op][1]))
+                if num_ops == 2:
+                    self.assertFalse(torch.equal(replays[0][0][1], replays[0][1][1]))
+            else:
+                source_m = input.t().float()
+                torch.manual_seed(123)
+                expected = [
+                    to_mxfp_dual(
+                        input,
+                        swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+                        rounding_mode="stochastic",
+                    )
+                    for _ in range(2 * num_ops)
+                ]
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph):
+                    captured = [
+                        to_mxfp_dual(
+                            input,
+                            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+                            rounding_mode="stochastic",
+                        )
+                        for _ in range(num_ops)
+                    ]
+
+                torch.manual_seed(123)
+                replays = []
+                for replay in range(2):
+                    offset = generator.get_offset()
+                    graph.replay()
+                    self.assertEqual(generator.get_offset(), offset + 4 * num_ops)
+                    outputs = []
+                    for op, result in enumerate(captured):
+                        scales_k, qdata_k, scales_m, qdata_m = result
+                        scale_bytes_k = scales_k.view(torch.uint8).clone()
+                        qdata_bytes_k = qdata_k.view(torch.uint8).clone()
+                        scale_bytes_m = scales_m.view(torch.uint8).clone()
+                        qdata_bytes_m = qdata_m.view(torch.uint8).clone()
+                        ref_sk, ref_qk, ref_sm, ref_qm = expected[replay * num_ops + op]
+                        self.assertEqual(scale_bytes_k, ref_sk.view(torch.uint8))
+                        self.assertEqual(qdata_bytes_k, ref_qk.view(torch.uint8))
+                        self.assertEqual(scale_bytes_m, ref_sm.view(torch.uint8))
+                        self.assertEqual(qdata_bytes_m, ref_qm.view(torch.uint8))
+
+                        unswizzled_k = from_blocked(qdata_k, scales_k, 32)
+                        reconstructed_k = from_blocked_format(qdata_k, unswizzled_k)
+                        sqnr_k = compute_error(input.float(), reconstructed_k.float())
+                        self.assertGreater(sqnr_k.item(), 15.0)
+                        unswizzled_m = from_blocked(qdata_m, scales_m, 32)
+                        reconstructed_m = from_blocked_format(qdata_m, unswizzled_m)
+                        sqnr_m = compute_error(source_m, reconstructed_m.float())
+                        self.assertGreater(sqnr_m.item(), 15.0)
+                        outputs.append(
+                            (scale_bytes_k, qdata_bytes_k, scale_bytes_m, qdata_bytes_m)
+                        )
+                    replays.append(outputs)
+
+                for op in range(num_ops):
+                    self.assertEqual(replays[0][op][0], replays[1][op][0])
+                    self.assertFalse(torch.equal(replays[0][op][1], replays[1][op][1]))
+                    self.assertEqual(replays[0][op][2], replays[1][op][2])
+                    self.assertFalse(torch.equal(replays[0][op][3], replays[1][op][3]))
+                if num_ops == 2:
+                    self.assertFalse(torch.equal(replays[0][0][1], replays[0][1][1]))
+                    self.assertFalse(torch.equal(replays[0][0][3], replays[0][1][3]))
+
+    @parametrize("orientation", ("dim_k", "dim_km"))
+    def test_stateless_cuda_graph(self, orientation, device):
         # verifies that:
         # * cuda graph replay of to_mxfp8_reference with unchanged random_key
         #   leads to results bitwise equivalent to original
@@ -805,8 +953,14 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
         input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
         original_key = prng.key(7, device=device)
         changed_key = prng.fold_in(original_key, 1)
+        quantize_fn = to_mxfp_dual if orientation == "dim_km" else to_mxfp8_reference
         expected = [
-            to_mxfp8_reference(input, rounding_mode="stochastic", random_key=trial_key)
+            quantize_fn(
+                input,
+                swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+                rounding_mode="stochastic",
+                random_key=trial_key,
+            )
             for trial_key in (original_key, changed_key)
         ]
 
@@ -814,8 +968,11 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
         key_for_cuda_graph = original_key.clone()
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
-            scales, qdata = to_mxfp8_reference(
-                input, rounding_mode="stochastic", random_key=key_for_cuda_graph
+            captured = quantize_fn(
+                input,
+                swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+                rounding_mode="stochastic",
+                random_key=key_for_cuda_graph,
             )
 
         # fetch global RNG (to make sure later that it does not change)
@@ -823,7 +980,7 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
         offset = generator.get_offset()
 
         replays = []
-        for trial_key, (expected_scales, expected_qdata) in (
+        for trial_key, reference in (
             (original_key, expected[0]),
             (original_key, expected[0]),
             (changed_key, expected[1]),
@@ -833,19 +990,37 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             graph.replay()
             # verify RNG state did not change
             self.assertEqual(generator.get_offset(), offset)
-            # verify results from cuda graph match expected result from eager mode
-            scale_bytes = scales.view(torch.uint8).clone()
-            qdata_bytes = qdata.view(torch.uint8).clone()
-            self.assertEqual(scale_bytes, expected_scales.view(torch.uint8))
-            self.assertEqual(qdata_bytes, expected_qdata.view(torch.uint8))
-            reconstructed = from_blocked_format(qdata, scales)
-            self.assertGreater(
-                compute_error(input.float(), reconstructed.float()).item(), 15.0
-            )
-            replays.append((scale_bytes, qdata_bytes))
+            pairs = []
+            if orientation == "dim_km":
+                scales_k, qdata_k, scales_m, qdata_m = captured
+                expected_sk, expected_qk, expected_sm, expected_qm = reference
+                quantizations = (
+                    (input, scales_k, qdata_k, expected_sk, expected_qk),
+                    (input.t(), scales_m, qdata_m, expected_sm, expected_qm),
+                )
+            else:
+                scales, qdata = captured
+                expected_scales, expected_qdata = reference
+                quantizations = (
+                    (input, scales, qdata, expected_scales, expected_qdata),
+                )
+
+            for source, scales, qdata, ref_scales, ref_qdata in quantizations:
+                scale_bytes = scales.view(torch.uint8).clone()
+                qdata_bytes = qdata.view(torch.uint8).clone()
+                self.assertEqual(scale_bytes, ref_scales.view(torch.uint8))
+                self.assertEqual(qdata_bytes, ref_qdata.view(torch.uint8))
+                unswizzled = from_blocked(qdata, scales, 32)
+                reconstructed = from_blocked_format(qdata, unswizzled)
+                self.assertGreater(
+                    compute_error(source.float(), reconstructed.float()).item(), 15.0
+                )
+                pairs.append((scale_bytes, qdata_bytes))
+            replays.append(pairs)
 
         self.assertEqual(replays[0], replays[1])
-        self.assertFalse(torch.equal(replays[0][1], replays[2][1]))
+        for pair in range(len(replays[0])):
+            self.assertFalse(torch.equal(replays[0][pair][1], replays[2][pair][1]))
         self.assertEqual(replays[0], replays[3])
 
 
