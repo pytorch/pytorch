@@ -940,7 +940,9 @@ class TestSympySolve(TestCase):
         cases = [
             (op(a * b, 1), 1 / b),
             (op(a * 5, b - 5), (b - 5) / 5),
-            (op(a * b, c), c / b),
+            # b and c may both be 0, so dividing by b is unsound.
+            (op(a * b, c), None),
+            (op(a * b + b, 0), None),
         ]
 
         self._test_cases(cases, a, op)
@@ -1147,6 +1149,13 @@ class TestSympyFunctions(TestCase):
                 expected = (nv * nv + (-1 - q0v) // 2) % (nv * nv)
                 self.assertEqual(actual, expected)
                 self.assertTrue(0 <= actual < nv * nv)
+
+    def test_nested_floordiv(self):
+        x = sympy.Symbol("x", integer=True, nonnegative=True)
+        self.assertEqual(FloorDiv(FloorDiv(x, 3), 2), FloorDiv(x, 6))
+        expr = FloorDiv(FloorDiv(x, 3), -2)
+        for xv in range(12):
+            self.assertEqual(int(expr.subs(x, xv)), (xv // 3) // -2)
 
 
 class TestSingletonInt(TestCase):

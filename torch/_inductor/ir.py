@@ -3956,7 +3956,8 @@ class View(GenericView):
                     x, new_size, FlexibleLayout.contiguous_strides(new_size)
                 )
 
-        if 0 in new_size:
+        # A size-0 dim may be symbolic, e.g. an empty slice under dynamic shapes.
+        if 0 in new_size or V.graph.sizevars.guard_is_empty(new_size):
 
             def fake_reindex(index: Any) -> tuple[int, ...]:
                 return tuple([0] * len(old_size))
@@ -4676,6 +4677,12 @@ class Layout(OutputSpec):
     def is_stride_ordered(self, order: Sequence[int]) -> bool:
         if len(self.stride) != len(order):
             raise AssertionError("Expected len(self.stride) == len(order)")
+
+        # Strides of an empty tensor are insignificant; checking this first
+        # avoids misreading a zero stride (from a size-0 inner dim) as an
+        # expanded dim below.
+        if V.graph.sizevars.guard_is_empty(self.size):
+            return True
 
         # ignore dimensions of size 1, they don't affect layout
         non_1_indices = [

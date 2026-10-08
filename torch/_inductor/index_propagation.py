@@ -224,8 +224,10 @@ class IndexPropagation(DefaultHandler):
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
 
+        # An empty loop may have a symbolic size whose upper bound is 0.
         var_to_range = {
-            k: ValueRanges(0, upper_bound(v) - 1) for k, v in iter_ranges.items()
+            k: ValueRanges(0, max(0, upper_bound(v) - 1))
+            for k, v in iter_ranges.items()
         }
         self.var_to_range = tuple(
             itertools.chain(self.shape_env.var_to_range.items(), var_to_range.items())
@@ -344,7 +346,7 @@ class IndexPropagation(DefaultHandler):
         var_to_range = (
             *self.var_to_range,
             *(
-                (k, ValueRanges(0, upper_bound(v) - 1))
+                (k, ValueRanges(0, max(0, upper_bound(v) - 1)))
                 for k, v in self.indirect_var_ranges.items()
             ),
         )

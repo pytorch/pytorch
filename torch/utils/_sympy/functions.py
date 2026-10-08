@@ -271,7 +271,8 @@ class FloorDiv(sympy.Function):
                 return sympy.Integer(math.floor(r))
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Integer(int(base) // int(divisor))
-        if isinstance(base, FloorDiv):
+        # (x // a) // b == x // (a * b) needs b > 0.
+        if isinstance(base, FloorDiv) and divisor.is_positive:
             return FloorDiv(base.args[0], base.args[1] * divisor)
 
         # Expands (x + y) // b into x // b + y // b.
