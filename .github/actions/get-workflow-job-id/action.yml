@@ -25,6 +25,7 @@ runs:
       id: get-job-id
       run: |
         set -eux
-        python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
+        python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}" --check-run-id "${CHECK_RUN_ID}"
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        CHECK_RUN_ID: ${{ job.check_run_id }}
