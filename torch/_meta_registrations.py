@@ -7280,18 +7280,6 @@ def meta__efficient_attention_backward(
     return grad_query, grad_key, grad_value, grad_bias
 
 
-def _expected_blockwise_scale_numel(dim: int, num_k_blocks: int, is_xpu: bool) -> int:
-    """Expected number of scale elements along `dim` (M or N) for 128-block
-    row/col blockwise scaling (DeepSeek/MXFP8/MXFP4 recipes), given the
-    number of K blocks. XPU uses unswizzled, unpadded scale shapes;
-    CUDA pads/swizzles both dims (128 for M/N, 4 for K blocks).
-    """
-    if is_xpu:
-        return dim * num_k_blocks
-    padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
-    return 128 * ceil_div(dim, 128) * padded_num_k_blocks
-
-
 def _check_scaled_mm_sizes(
     self: torch.Tensor,
     mat2: torch.Tensor,
@@ -7359,31 +7347,29 @@ def _check_scaled_mm_sizes(
         n = mat2.size(1)
 
         is_blockwise_scaling = (
-            scale_a.dtype == torch.float8_e4m3fn
-            and scale_b.dtype == torch.float8_e4m3fn
-        )  # note: this applies to NVFP4 blockwise scaling (1x16 blocks)
+            (
+                scale_a.dtype == torch.float8_e8m0fnu
+                and scale_b.dtype == torch.float8_e8m0fnu
+            )
+            or (
+                scale_a.dtype == torch.float8_e4m3fn
+                and scale_b.dtype == torch.float8_e4m3fn
+            )
+        )  # note: this applies to blockwise scaling for non-FP8 types (FP8 accepts FP32 scales)
 
-        # e8m0fnu could be MXFP8 (1x32 blocks) or DeepSeek-style (1x128/128x128 blocks).
-        # Only treat as MXFP8-style blockwise if numel matches the 1x32 pattern.
-        # Note: expected numel must mirror the CUDA-padded vs. XPU-unpadded
+        # On XPU, e8m0fnu scales are used for *both* MXFP8 (1x32 blocks) and
+        # DeepSeek-style (1x128/128x128 blocks) blockwise recipes.
         if (
             scale_a.dtype == torch.float8_e8m0fnu
             and scale_b.dtype == torch.float8_e8m0fnu
+            and self.dtype != torch.float4_e2m1fn_x2
+            and device_hint(self) == "xpu"
         ):
-            _k_check = _k * 2 if self.dtype == torch.float4_e2m1fn_x2 else _k
-            num_k_blocks_check = ceil_div(_k_check, 32)
-            is_xpu = device_hint(self) == "xpu"
-            expected_mxfp_a = _expected_blockwise_scale_numel(
-                m, num_k_blocks_check, is_xpu
+            num_k_blocks_check = ceil_div(_k, 32)
+            is_blockwise_scaling = (
+                scale_a.numel() == m * num_k_blocks_check
+                and scale_b.numel() == n * num_k_blocks_check
             )
-            expected_mxfp_b = _expected_blockwise_scale_numel(
-                n, num_k_blocks_check, is_xpu
-            )
-            if (
-                scale_a.numel() == expected_mxfp_a
-                and scale_b.numel() == expected_mxfp_b
-            ):
-                is_blockwise_scaling = True
 
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
@@ -7405,18 +7391,30 @@ def _check_scaled_mm_sizes(
                 if self.dtype == torch.float4_e2m1fn_x2:
                     _k = _k * 2
 
+            block_size_mn = 128
+
             num_k_blocks = ceil_div(_k, block_size_k)
 
-            # v1 has no swizzle argument, so on CUDA it accepts only the
-            # padded/swizzled layout, matching `blockwise_1x32_numel` in
-            # cuda/ScaledBlas.cpp. At shapes where the padding coincides (e.g.
-            # m=128, _k=256) a gfx950 32x8-tiled buffer has the same element
-            # count and is accepted here but read as unswizzled; such callers
-            # must use `_scaled_mm_v2` with an explicit swizzle. XPU (oneDNN)
-            # uses unswizzled, unpadded blockwise scale shapes instead.
-            is_xpu = device_hint(self) == "xpu"
-            expected_a_size = _expected_blockwise_scale_numel(m, num_k_blocks, is_xpu)
-            expected_b_size = _expected_blockwise_scale_numel(n, num_k_blocks, is_xpu)
+            if device_hint(self) == "xpu":
+                # XPU (oneDNN) uses unswizzled, unpadded blockwise scale shapes,
+                # unlike the L4-padded SWIZZLE_32_4_4 layout CUDA expects.
+                expected_a_size = num_k_blocks * m
+                expected_b_size = num_k_blocks * n
+            else:
+                # v1 has no swizzle argument, so it accepts only this layout,
+                # matching `blockwise_1x32_numel` in cuda/ScaledBlas.cpp. At
+                # shapes where the padding coincides (e.g. m=128, _k=256) a
+                # gfx950 32x8-tiled buffer has the same element count and is
+                # accepted here but read as unswizzled; such callers must use
+                # `_scaled_mm_v2` with an explicit swizzle.
+                padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
+
+                expected_a_size = (
+                    block_size_mn * ceil_div(m, block_size_mn) * padded_num_k_blocks
+                )
+                expected_b_size = (
+                    block_size_mn * ceil_div(n, block_size_mn) * padded_num_k_blocks
+                )
 
             if (
                 scale_a.numel() == expected_a_size

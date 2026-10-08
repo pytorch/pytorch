@@ -147,31 +147,13 @@ def tensor_to_scale_block(
         scale[amax == 0] = 1.
         x = (x / scale).to(float8_dtype)
     elif scale_dtype == torch.float8_e8m0fnu:
-        # e8m0fnu encodes scale ~= amax / fp_max as a power of 2.
-        E8M0_EXPONENT_BIAS = 127
-        max_pos = torch.finfo(float8_dtype).max
-        exp = torch.where(
-            torch.isnan(scale),
-            0xFF,  # NaN sentinel in e8m0
-            (
-                torch.clamp(
-                    torch.ceil(torch.log2(scale)),
-                    min=-E8M0_EXPONENT_BIAS,
-                    max=E8M0_EXPONENT_BIAS,
-                )
-                + E8M0_EXPONENT_BIAS
-            ).to(torch.uint8),
-        )
-        # Recover the quantization multiplier (1 / scale) to quantize x.
-        # exp == 0 means scale ~= 2^-127; treat as quant_scale = 1
-        # so zero blocks stay zero.
-        quant_scale = torch.where(
-            exp == 0,
-            1.0,
-            torch.exp2(E8M0_EXPONENT_BIAS - exp.to(torch.float32)),
-        )
-        x = torch.clamp(x * quant_scale, min=-1 * max_pos, max=max_pos).to(float8_dtype)
-        scale = exp.view(torch.float8_e8m0fnu)
+        # Reuse data_to_mx_scale()'s scale derivation.
+        outer_blocks, inner_blocks = x.shape[0], x.shape[2]
+        block_size = block_outer * block_inner
+        x_for_scale = x.permute(0, 2, 1, 3).reshape(-1, block_size)
+        scale = data_to_mx_scale(x_for_scale, block_size, "fp8")
+        scale = scale.reshape(outer_blocks, inner_blocks, 1, 1).permute(0, 2, 1, 3)
+        x = (x / scale.float()).clamp(min=-fp8_max, max=fp8_max).to(float8_dtype)
     else:
         raise ValueError(f"Unsupported scale_dtype: {scale_dtype}")
 
@@ -529,7 +511,7 @@ FP4_MAX_VAL = 6.0
 def data_to_mx_scale(x, block_size, recipe):
     # simple implementation of https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
     # section 6.3, not all edge cases (such as NaN) are handled/tested
-    if recipe == "mxfp8":
+    if recipe in ("mxfp8", "fp8"):
         largest_pow2 = F8E4M3_LARGEST_POW2
     elif recipe == "mxfp4":
         largest_pow2 = FP4E2M1FN_LARGEST_POW2
