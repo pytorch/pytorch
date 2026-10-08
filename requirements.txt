@@ -12,7 +12,7 @@ hypothesis
 jinja2
 lintrunner ; platform_machine != "s390x"
 networkx>=2.5.1
-optree>=0.13.0
+optree>=0.13.1
 psutil
 spin
 sympy>=1.13.3
