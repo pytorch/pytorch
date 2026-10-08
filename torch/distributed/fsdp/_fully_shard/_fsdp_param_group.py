@@ -707,7 +707,6 @@ class FSDPParamGroup:
                 fsdp_params_with_grad, unsharded_grads = (
                     self._take_unsharded_grads_to_reduce()
                 )
-                self._upcast_unreduced_grads()
                 if self.reshard_after_backward:
                     self.reshard()
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
