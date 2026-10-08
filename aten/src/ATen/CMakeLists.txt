@@ -825,6 +825,12 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
     set(SLEEF_DISABLE_OPENMP ON CACHE BOOL "OpenMP only used by sleef DFT and tests, both disabled" FORCE)
     if(WIN32)
       set(SLEEF_BUILD_WITH_LIBM OFF CACHE BOOL "Don't build sleef with libm for Windows." FORCE)
+      # Turn off SLEEF SVE on Windows:
+      # - MSVC 14.51 (VS 2026) ships arm_sve.h, so SLEEF's SVE check passes
+      # - SLEEF has no MSVC flag that defines __ARM_FEATURE_SVE, so its SVE files fail to build
+      # - MSVC 14.44 (VS 2022) had no arm_sve.h, so SVE was already off
+      # - ATen builds no SVE kernels with MSVC, so nothing uses SLEEF SVE here
+      set(SLEEF_DISABLE_SVE ON CACHE BOOL "Disable SLEEF SVE on Windows" FORCE)
     endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
       if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
