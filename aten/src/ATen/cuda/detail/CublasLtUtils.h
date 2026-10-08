@@ -26,15 +26,34 @@ struct CuBlasLtDeleter {
 template <typename T, cublasStatus_t (*destructor)(T*)>
 class CuBlasLtDescriptor {
  public:
+  CuBlasLtDescriptor() = default;
+  CuBlasLtDescriptor(const CuBlasLtDescriptor&) = delete;
+  CuBlasLtDescriptor& operator=(const CuBlasLtDescriptor&) = delete;
+  CuBlasLtDescriptor(CuBlasLtDescriptor&&) = default;
+  CuBlasLtDescriptor& operator=(CuBlasLtDescriptor&&) = default;
+
   T* descriptor() const {
+#ifdef USE_ROCM
     return descriptor_.get();
+#else
+    return &descriptor_;
+#endif
   }
   T* descriptor() {
+#ifdef USE_ROCM
     return descriptor_.get();
+#else
+    return &descriptor_;
+#endif
   }
 
  protected:
+#ifdef USE_ROCM
   std::unique_ptr<T, CuBlasLtDeleter<T, destructor>> descriptor_;
+#else
+  // Init descriptors use caller-owned storage and must not be destroyed.
+  mutable T descriptor_;
+#endif
 };
 
 class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
@@ -44,10 +63,15 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
   CuBlasLtMatmulDescriptor(
       cublasComputeType_t compute_type,
       cudaDataType_t scale_type) {
+#ifdef USE_ROCM
     cublasLtMatmulDesc_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(
         cublasLtMatmulDescCreate(&raw_descriptor, compute_type, scale_type));
     descriptor_.reset(raw_descriptor);
+#else
+    TORCH_CUDABLAS_CHECK(
+        cublasLtMatmulDescInit(descriptor(), compute_type, scale_type));
+#endif
   }
 
   template <typename T>
@@ -68,10 +92,15 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
       uint64_t cols,
       int64_t ld,
       bool t = false) {
+#ifdef USE_ROCM
     cublasLtMatrixLayout_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(cublasLtMatrixLayoutCreate(
         &raw_descriptor, type, t ? cols : rows, t ? rows : cols, ld));
     descriptor_.reset(raw_descriptor);
+#else
+    TORCH_CUDABLAS_CHECK(cublasLtMatrixLayoutInit(
+        descriptor(), type, t ? cols : rows, t ? rows : cols, ld));
+#endif
   }
 
   template <typename T>
@@ -94,15 +123,13 @@ class CuBlasLtGroupedMatrixLayout : public CuBlasLtDescriptor<
       const void* ld_array,
       bool t = false,
       bool use_int64 = false) {
-    cublasLtMatrixLayout_t raw_descriptor = nullptr;
-    TORCH_CUDABLAS_CHECK(cublasLtGroupedMatrixLayoutCreate(
-        &raw_descriptor,
+    TORCH_CUDABLAS_CHECK(cublasLtGroupedMatrixLayoutInit(
+        descriptor(),
         type,
         group_count,
         t ? cols_array : rows_array,
         t ? rows_array : cols_array,
         ld_array));
-    descriptor_.reset(raw_descriptor);
     setAttribute(CUBLASLT_MATRIX_LAYOUT_ORDER, CUBLASLT_ORDER_ROW);
     if (use_int64) {
       setAttribute(
@@ -127,9 +154,13 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
                                      &cublasLtMatmulPreferenceDestroy> {
  public:
   CuBlasLtMatmulPreference() {
+#ifdef USE_ROCM
     cublasLtMatmulPreference_t raw_descriptor = nullptr;
     TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceCreate(&raw_descriptor));
     descriptor_.reset(raw_descriptor);
+#else
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceInit(descriptor()));
+#endif
   }
 
   template <typename T>
