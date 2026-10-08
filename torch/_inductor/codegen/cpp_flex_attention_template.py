@@ -356,8 +356,8 @@ extern "C"
 
   // Inputs/outputs buffers
   const scalar_t* q_data = query;
-  const scalar_t* k_data = key;
-  const scalar_t* v_data = value;
+  const {{key_t}}* k_data = key;
+  const {{value_t}}* v_data = value;
   scalar_t* out_data = output;
 
 """
@@ -1121,6 +1121,10 @@ FLEX_DECODING_TEMPLATE = r"""
         auto v_addr =
             v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
         // Fallback Half brgemm is slower than micro gemm
+{%- if lowp_v %}
+        // cpublas::brgemm has no overload for a value in a lower precision than query
+        {
+{%- else %}
 
         if constexpr (!std::is_same_v<scalar_t, at::Half>) {
           at::native::cpublas::brgemm(
@@ -1136,6 +1140,7 @@ FLEX_DECODING_TEMPLATE = r"""
                 tmp_out,
                 false);
         } else {
+{%- endif %}
           if (token_num > 0) {
             {{kernel.kernel_name}}_kernel_micro_gemm<static_cast<bool>(true)>(
               {{kernel.kernel_name}}_conditional_data_ptr(logits, logits_reduced) + token_num,
@@ -1170,10 +1175,12 @@ FLEX_DECODING_TEMPLATE = r"""
       // Move to the next query
       at::native::data_index_step(i, batchSize, j, num_head, partition_id, num_partitions);
     }
+{%- if not lowp_v %}
 
     if constexpr (!std::is_same_v<scalar_t, at::Half>) {
       at::native::cpublas::brgemm_release();
     }
+{%- endif %}
   });
 
 
@@ -1316,6 +1323,9 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.len_mask_other = len_mask_other
         self.kernel_input_name_to_buffer = kernel_input_name_to_buffer
         self.block_vars = block_vars
+        # Key/value may be in a lower precision than query (e.g. an FP8 KV cache)
+        self.key_dtype = self.input_nodes[1].get_dtype()
+        self.value_dtype = self.input_nodes[2].get_dtype()
         self.extra_sizevars = list(
             OrderedSet(
                 val
@@ -1549,32 +1559,31 @@ class CppFlexAttentionTemplate(CppTemplate):
     def apply_score_mod(self, score, b, h, q_idx, kv_idx):
         return self.score_mod.graph_module(score, b, h, q_idx, kv_idx).item()
 
-    def choose_flex_template(
-        self,
+    @staticmethod
+    def use_flex_decoding(
         query: ir.IRNode,
         key: ir.IRNode,
-        num_threads,
-    ):
+        partition_size: int,
+        kv_block_size: int,
+    ) -> bool:
         # choose from FLEX_ATTENTION or FLEX_DECODING
-        FLEX_TEMPLATE = FLEX_ATTENTION_TEMPLATE
         # Logical (B, H, S, D) sizes; the backing buffer may have a different shape.
         q_batch_size, q_num_heads, q_seq_len, _ = query.get_size()
         k_seq_len = key.get_size()[2]
-        if all(
+        if not all(
             sympy.sympify(val).is_number
-            for val in [q_batch_size, q_num_heads, q_seq_len, k_seq_len, num_threads]
+            for val in [q_batch_size, q_num_heads, q_seq_len, k_seq_len]
         ):
-            # if static shape, FLEX_DECODING will be chosen with these conditions:
-            #  1) partition size is multiple of kv block size, so each partition has several blocks
-            #  2) decoding scenario: q seq length is 1
-            #  3) The actual k seq length (k_seq_len / q_batch_size) is large enough
-            if (
-                self.partition_size % self.kv_block_size == 0
-                and q_seq_len == 1
-                and k_seq_len / q_batch_size >= max(self.partition_size * 2, 512)
-            ):
-                FLEX_TEMPLATE = FLEX_DECODING_TEMPLATE
-        return FLEX_TEMPLATE
+            return False
+        # if static shape, FLEX_DECODING will be chosen with these conditions:
+        #  1) partition size is multiple of kv block size, so each partition has several blocks
+        #  2) decoding scenario: q seq length is 1
+        #  3) The actual k seq length (k_seq_len / q_batch_size) is large enough
+        return bool(
+            partition_size % kv_block_size == 0
+            and q_seq_len == 1
+            and k_seq_len / q_batch_size >= max(partition_size * 2, 512)
+        )
 
     def render(  # type: ignore[override,return]
         self,
@@ -1583,6 +1592,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         epilogue_nodes: list[ir.IRNode] | None = None,
         **kwargs,
     ) -> str:
+        """Render the kernel from FLEX_DECODING_TEMPLATE or FLEX_ATTENTION_TEMPLATE."""
         if epilogue_nodes is not None and epilogue_nodes != []:
             raise NotImplementedError(
                 "Unsupported for `epilogue_nodes` in CppFlexAttentionTemplate."
@@ -1599,6 +1609,16 @@ class CppFlexAttentionTemplate(CppTemplate):
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
         self.accumulate_dtype = torch.float
         self.input_dtype = query.layout.dtype
+        lowp_k = self.key_dtype != self.input_dtype
+        lowp_v = self.value_dtype != self.input_dtype
+        q_node, k_node = self.input_nodes[:2]
+        use_decoding = self.use_flex_decoding(
+            q_node, k_node, self.partition_size, self.kv_block_size
+        )
+        if (lowp_k or lowp_v) and not use_decoding:
+            raise AssertionError(
+                "Only FLEX_DECODING_TEMPLATE supports key/value in a lower precision than query"
+            )
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1636,14 +1656,17 @@ class CppFlexAttentionTemplate(CppTemplate):
             mask_buf_idx=self.mask_buf_idx,
             partition_size=self.partition_size,
             amx_supported=self.amx_supported,
+            key_t=kernel.dtype(key) if lowp_k else "scalar_t",
+            value_t=kernel.dtype(value) if lowp_v else "scalar_t",
+            lowp_v=lowp_v,
         )
         with contextlib.ExitStack() as stack:
             for buf in self.fake_buffers:
                 stack.enter_context(
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
-            FLEX_TEMPLATE = self.choose_flex_template(
-                self.input_nodes[0], self.input_nodes[1], num_threads
+            FLEX_TEMPLATE = (
+                FLEX_DECODING_TEMPLATE if use_decoding else FLEX_ATTENTION_TEMPLATE
             )
             return self._template_from_string(INIT_PARAMS + FLEX_TEMPLATE).render(
                 **options
@@ -1689,7 +1712,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         micro_gemm_trans = CppMicroGemmFP32Vec(
             kernel_name + "_kernel_micro_gemm_transpose_b",
             self.input_dtype,
-            self.input_dtype,
+            self.key_dtype,
             self.accumulate_dtype,
             self.accumulate_dtype,
             GemmBlocking(1, 16, 1),
@@ -1701,7 +1724,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         micro_gemm = CppMicroGemmFP32Vec(
             kernel_name + "_kernel_micro_gemm",
             self.input_dtype,
-            self.input_dtype,
+            self.value_dtype,
             self.accumulate_dtype,
             self.accumulate_dtype,
             GemmBlocking(1, 16, 1),
