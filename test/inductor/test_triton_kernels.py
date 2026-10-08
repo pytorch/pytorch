@@ -382,12 +382,11 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
     def test_add_namedtuple_types_to_launcher_scope(self):
         # Heuristics inlines constexprs via repr; Nested field types must be bound.
-        from torch._inductor.utils import (
-            sanitize_constexpr_for_repr as _sanitize_for_repr,
-        )
-
         from torch._inductor.runtime.triton_heuristics import (
             _add_namedtuple_types_to_scope,
+        )
+        from torch._inductor.utils import (
+            sanitize_constexpr_for_repr as _sanitize_for_repr,
         )
 
         class LocalStrides(NamedTuple):
@@ -476,11 +475,18 @@ class KernelTests(torch._inductor.test_case.TestCase):
                     self.assertEqual(rebuilt["mapping"][key].y, 10)
 
     @parametrize(
-        "container", ["dataclass", "attrs", "pydantic", "mapping_key", "set", "frozenset"]
+        "container",
+        ["dataclass", "attrs", "pydantic", "mapping_key", "set", "frozenset"],
     )
     @parametrize("launcher", [False, True])
     def test_namedtuple_constexpr_repr_containers(self, container, launcher):
         import collections
+
+        from triton_constexpr_configs import (
+            UserDefinedAttrsLikeConfig,
+            UserDefinedPydanticLikeConfig,
+            UserDefinedTritonKernelNestedConfig,
+        )
 
         from torch._inductor.codegen.wrapper import codegen_namedtuple_defs
         from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
@@ -488,11 +494,6 @@ class KernelTests(torch._inductor.test_case.TestCase):
             _add_namedtuple_types_to_scope,
         )
         from torch._inductor.utils import sanitize_constexpr_for_repr
-        from triton_constexpr_configs import (
-            UserDefinedAttrsLikeConfig,
-            UserDefinedPydanticLikeConfig,
-            UserDefinedTritonKernelNestedConfig,
-        )
 
         strides = ModuleLevelStrides(8, 1)
         hidden = collections.namedtuple("HiddenStrides", ("unused",))(9)

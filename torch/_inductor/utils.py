@@ -423,7 +423,7 @@ def sanitize_constexpr_for_repr(
             child is original for child, original in zip(children, repr_children.values)
         )
         if canonicalize_namedtuples and pytree.is_namedtuple_instance(value):
-            cls = type(value)
+            cls = cast(type[NamedTuple], type(value))
             helper_type = namedtuple_type(cls.__name__, tuple(cls._fields))
             if cls is helper_type and unchanged:
                 return value

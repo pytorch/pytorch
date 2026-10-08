@@ -4721,8 +4721,9 @@ class PythonWrapperCodegen(CodeGen):
             ]
 
         # Prepare constants before both cache-key construction and type discovery.
-        triton_meta["constants"] = sanitize_constexpr_for_repr(triton_meta["constants"])
-        triton_meta = _sanitize_for_repr(triton_meta)
+        sanitized_constants = sanitize_constexpr_for_repr(triton_meta["constants"])
+        triton_meta["constants"] = cast(dict[str, Any], sanitized_constants)
+        triton_meta = cast("TritonMeta", _sanitize_for_repr(triton_meta))
 
         # Distinguish between different functions using function id
         cache_key: Any = [id(kernel.fn)]
