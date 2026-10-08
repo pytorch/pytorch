@@ -7318,6 +7318,7 @@ def quantize_tensor(
 
     Examples::
 
+        >>> # xdoctest: +SKIP("requires NVIDIA SM100+ and CuTeDSL")
         >>> import torch
         >>> import torch.nn.functional as F
         >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
@@ -7407,6 +7408,7 @@ def quantize_tensor_dual(
 
     Examples::
 
+        >>> # xdoctest: +SKIP("requires NVIDIA SM100+ and CuTeDSL")
         >>> import torch
         >>> import torch.nn.functional as F
         >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)

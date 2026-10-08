@@ -778,9 +778,12 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
 
 
 class TestFP8StochasticRounding(TestCase):
-    def test_exact_neighbors_and_special_values(self, device):
+    def test_exact(self, device):
         key = prng.fold_in(prng.key(7, device=device), 12345)
         words = prng.bits(key, 4, dtype=torch.uint32)
+
+        # verify that SR does not adjust values that are exactly representable
+        # in float8_e4m3fn
         exact = torch.tensor(
             [
                 0.0,
@@ -810,6 +813,9 @@ class TestFP8StochasticRounding(TestCase):
             torch.tensor([0x00, 0x80], device=device, dtype=torch.uint8),
         )
 
+    def test_neighbors(self, device):
+        # verify that tensor values between the representable values of
+        # float8_e4m3fn get rounded to a neighboring representable value
         intervals = torch.tensor(
             [
                 [1.0, 1.125],
@@ -823,12 +829,24 @@ class TestFP8StochasticRounding(TestCase):
             ],
             device=device,
         )
-        between = intervals[:, 0] + 0.375 * (intervals[:, 1] - intervals[:, 0])
-        rounded = _f32_to_fp8_nvidia_sr_with_words(between, words[:2]).view(torch.uint8)
-        endpoints = intervals.to(torch.float8_e4m3fn).view(torch.uint8)
-        neighbors = (rounded == endpoints[:, 0]) | (rounded == endpoints[:, 1])
-        self.assertEqual(neighbors, torch.ones_like(neighbors))
 
+        key = prng.fold_in(prng.key(7, device=device), 12345)
+        for i in range(10):
+            key = prng.fold_in(key, i)
+            words = prng.bits(key, 4, dtype=torch.uint32)
+            ratio = torch.rand_like(intervals[:, 0])
+            between = intervals[:, 0] + ratio * (intervals[:, 1] - intervals[:, 0])
+            rounded = _f32_to_fp8_nvidia_sr_with_words(between, words[:2])
+            rounded = rounded.view(torch.uint8)
+            endpoints = intervals.to(torch.float8_e4m3fn).view(torch.uint8)
+            neighbors = (rounded == endpoints[:, 0]) | (rounded == endpoints[:, 1])
+            self.assertEqual(neighbors, torch.ones_like(neighbors))
+
+    def test_special_values(self, device):
+        key = prng.fold_in(prng.key(7, device=device), 12345)
+        words = prng.bits(key, 4, dtype=torch.uint32)
+
+        # verify that out-of-range values saturate, and NaN gets converted to NaN
         inf = float("inf")
         nan = float("nan")
         nonfinite_or_overflow = torch.tensor(
@@ -846,6 +864,8 @@ class TestFP8StochasticRounding(TestCase):
     @parametrize(
         "lower,upper",
         (
+            # hand chosen pairs of neighboring values exactly representable in 
+            # float8_e4m3fn
             (1.0, 1.125),
             (-1.125, -1.0),
             (1.875, 2.0),
@@ -855,6 +875,10 @@ class TestFP8StochasticRounding(TestCase):
         ),
     )
     def test_round_up_probability(self, lower, upper, device):
+        # given a value x between A and B, verifies that SR rounds
+        # x up to B with probability `P = (x - A) / (B - A)`, and rounds
+        # x down to A with probability `1 - P`
+
         probabilities = torch.tensor((0.125, 0.5, 0.875), device=device)
         values = lower + (upper - lower) * probabilities
         samples = values[:, None].expand(-1, 8192).contiguous()
@@ -872,6 +896,18 @@ class TestFP8StochasticRounding(TestCase):
                 bound.item(),
                 f"[{lower}, {upper}]: expected round-up probability {probability.item()}, got {frequency.item()}",
             )
+
+    def test_mean_preservation(self, device):
+        # test that E(SR(X)) ~= X
+
+        generator = torch.Generator(device=device).manual_seed(1234)
+        values = torch.randn(256, device=device, generator=generator)
+        key = prng.fold_in(prng.key(7, device=device), 12345)
+        rounded_trials = []
+        for trial in range(256):
+            words = prng.bits(prng.fold_in(key, trial), values.numel() // 4, dtype=torch.uint32)
+            rounded_trials.append(_f32_to_fp8_nvidia_sr_with_words(values, words).float())
+        self.assertEqual(torch.stack(rounded_trials).mean(dim=0), values, rtol=0.03, atol=0.001)
 
 
 instantiate_device_type_tests(TestMXFP8ReferenceNumerics, globals(), only_for="cuda")
