@@ -129,7 +129,7 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | Non
         return skip
 
     if node := get_first_incompatible_cudagraph_node(aot_model):
-        return format_default_skip_message(f"incompatible op ({node.name})")
+        return f"incompatible op ({node.name})"
 
     return None
 
@@ -171,9 +171,7 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
         fixed = num_fw_fixed_arguments(len(dynamo_inputs), len(aot_inputs))
         if skip_msg := check_for_skip(aot_model, fixed):
             BoxedBool.disable(do_cudagraphs)
-            log_cudagraph_skip_and_bump_counter(
-                f"skipping cudagraphs due to {skip_msg}"
-            )
+            log_cudagraph_skip_and_bump_counter(format_default_skip_message(skip_msg))
             return interp
 
         boxed_device_index.set(get_device_index(aot_model))
@@ -200,9 +198,7 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
 
         fixed = count_tangents(aot_model)
         if skip_msg := check_for_skip(aot_model, fixed):
-            log_cudagraph_skip_and_bump_counter(
-                f"skipping cudagraphs due to {skip_msg}"
-            )
+            log_cudagraph_skip_and_bump_counter(format_default_skip_message(skip_msg))
 
             # See [Backward Generation Handling]
             device_idx = boxed_device_index.value

@@ -81,6 +81,7 @@ from torch._inductor.cudagraph_utils import (
     check_for_mutation,
     CheckInvariantStatus,
     collect_cuda_data_ptrs,
+    format_default_skip_message,
     FunctionID,
     log_cudagraph_skip_and_bump_counter,
     log_data_ptr_mismatch,
@@ -2605,7 +2606,9 @@ class CUDAGraphTreeManager:
             if function_id in self.warned_mutation:
                 return
             self.warned_mutation.add(function_id)
-            log_cudagraph_skip_and_bump_counter(maybe_mutation_str)
+            log_cudagraph_skip_and_bump_counter(
+                format_default_skip_message(maybe_mutation_str)
+            )
         else:
             self.skip_cudagraph[node_id][function_id] = False
 
