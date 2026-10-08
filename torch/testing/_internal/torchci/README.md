@@ -6,8 +6,8 @@ flushed as tests finish; readers skip a torn last line.
 
 ## Path
 
-`<dir>/<dir name>-<report_uuid>.jsonl`, for example
-`test/torchci-reports/test_type_info/test_type_info-919108f7-52d1-4320-9bac-f847db4148a8.jsonl`.
+`<prefix>-<report_uuid>.report.jsonl`, for example
+`test/torchci-reports/test_type_info-919108f7-52d1-4320-9bac-f847db4148a8.report.jsonl`.
 Each process writes its own file under a new uuid4.
 
 ## Schema version 0.1
@@ -102,11 +102,11 @@ change bumps the minor version (`"0.1"` to `"0.2"`); additive changes keep it.
 ## Enablement
 
 Off by default. `test/run_test.py` and tests using `common_utils.run_tests`
-accept `--save-torchci-reports [DIR]` and `--no-save-torchci-reports`. Each
-test file gets its own folder, `<DIR>/<file>/`, with path separators replaced by
-dots (`distributed.test_c10d_nccl`). `run_test.py` defaults to
-`test/torchci-reports` and resolves a relative `DIR` under `test/`; `run_tests`
-defaults to `torchci-reports` in the cwd.
+accept `--save-torchci-reports [DIR]` and `--no-save-torchci-reports`. A test
+file's reports are `<DIR>/<file>-<report_uuid>.report.jsonl`, with path
+separators in `<file>` replaced by dots (`distributed.test_c10d_nccl`).
+`run_test.py` defaults to `test/torchci-reports` and resolves a relative `DIR`
+under `test/`; `run_tests` defaults to `torchci-reports` in the cwd.
 
 ## Local check
 
@@ -114,5 +114,5 @@ With PyTorch built from this branch, from the repo root:
 
 ```bash
 python test/run_test.py -i test_type_info --save-torchci-reports
-cat test/torchci-reports/test_type_info/*.jsonl | python -m json.tool --json-lines
+cat test/torchci-reports/test_type_info-*.report.jsonl | python -m json.tool --json-lines
 ```
