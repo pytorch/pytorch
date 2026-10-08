@@ -167,6 +167,93 @@ auto extract_malloc_args =
   return 0;
 };
 
+// memset args
+struct memset_args {
+  size_t sizeBytes{0};
+  size_t width{0};
+  size_t height{0};
+  size_t count{0};
+};
+auto extract_memset_args =
+    []([[maybe_unused]] rocprofiler_callback_tracing_kind_t kind,
+       [[maybe_unused]] rocprofiler_tracing_operation_t operation,
+       [[maybe_unused]] uint32_t arg_num,
+       const void* const arg_value_addr,
+       [[maybe_unused]] int32_t indirection_count,
+       [[maybe_unused]] const char* arg_type,
+       const char* arg_name,
+       [[maybe_unused]] const char* arg_value_str,
+       [[maybe_unused]] int32_t dereference_count,
+       void* cb_data) -> int {
+  auto& args = *(static_cast<memset_args*>(cb_data));
+  if (strcmp("sizeBytes", arg_name) == 0)
+    args.sizeBytes = *(reinterpret_cast<const size_t*>(arg_value_addr));
+  else if (strcmp("width", arg_name) == 0)
+    args.width = *(reinterpret_cast<const size_t*>(arg_value_addr));
+  else if (strcmp("height", arg_name) == 0)
+    args.height = *(reinterpret_cast<const size_t*>(arg_value_addr));
+  else if (strcmp("count", arg_name) == 0)
+    args.count = *(reinterpret_cast<const size_t*>(arg_value_addr));
+  return 0;
+};
+
+// Total bytes filled by a HIP memset API call, or 0 if unknown.
+size_t memsetTotalBytes(uint32_t operation, const memset_args& args) {
+  if (args.sizeBytes > 0)
+    return args.sizeBytes;
+  if (args.width > 0 && args.height > 0)
+    return args.width * args.height;
+  // hipMemsetD8/D16/D32 fill 'count' elements of known width.
+  switch (operation) {
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD8:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD8Async:
+      return args.count;
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD16:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD16Async:
+      return args.count * 2;
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD32:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD32Async:
+      return args.count * 4;
+    default:
+      break;
+  }
+  return 0;
+}
+
+// memset api calls
+bool isMemsetApi(uint32_t id) {
+  switch (id) {
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetAsync:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset2D:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset2DAsync:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset3D:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset3DAsync:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD8:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD8Async:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD16:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD16Async:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD32:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD32Async:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetAsync_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset2D_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset2DAsync_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset3D_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemset3DAsync_spt:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D8:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D8Async:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D16:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D16Async:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D32:
+    case ROCPROFILER_HIP_RUNTIME_API_ID_hipMemsetD2D32Async:
+      return true;
+    default:
+      break;
+  }
+  return false;
+}
+
 // copy api calls
 bool isCopyApi(uint32_t id) {
   switch (id) {
@@ -526,6 +613,10 @@ void RocprofLogger::clearLogs() {
     rows_.clear();
   }
   {
+    std::lock_guard<std::mutex> lock(memsetMutex_);
+    memsetOps_.clear();
+  }
+  {
     std::lock_guard<std::mutex> lock(externalCorrelationsMutex_);
     for (auto& correlations : externalCorrelations_) {
       correlations.clear();
@@ -744,6 +835,33 @@ void RocprofLogger::api_callback(
             args.size);
         insert_row_to_buffer(row);
       }
+      // Memset Records
+      // Recorded as plain runtime rows (like other unhandled APIs), but the
+      // correlation id and size are kept to classify the fill kernels that
+      // the runtime dispatches to implement the memset.
+      else if (isMemsetApi(record.operation)) {
+        memset_args args;
+        rocprofiler_iterate_callback_tracing_kind_operation_args(
+            record,
+            extract_memset_args,
+            1 /*max_deref*/
+            ,
+            &args);
+        RocprofLogger& dis = singleton();
+        std::lock_guard<std::mutex> lock(dis.memsetMutex_);
+        dis.memsetOps_.emplace(
+            record.correlation_id.internal,
+            memsetTotalBytes(record.operation, args));
+        rocprofRow* row = new rocprofRow(
+            record.correlation_id.internal,
+            record.kind,
+            record.operation,
+            processId(),
+            systemThreadId(),
+            startTime,
+            endTime);
+        insert_row_to_buffer(row);
+      }
       // Default Records
       else {
         rocprofRow* row = new rocprofRow(
@@ -835,6 +953,24 @@ void RocprofLogger::buffer_callback(
             record.start_timestamp,
             record.end_timestamp,
             kernel_name);
+        // Launch dimensions from the dispatch record itself.  This is the
+        // ground truth for what executed, and it covers kernels that were
+        // never dispatched through a HIP launch API (graph replays, and
+        // runtime-internal fill kernels).  The SDK reports grid_size as the
+        // global work size (CUPTI reports the number of workgroups), so
+        // divide by the workgroup size.
+        const auto divdim = [](uint32_t global, uint32_t local) -> uint32_t {
+          return local > 0 ? global / local : 0;
+        };
+        row->gridX =
+            divdim(dispatch.grid_size.x, dispatch.workgroup_size.x);
+        row->gridY =
+            divdim(dispatch.grid_size.y, dispatch.workgroup_size.y);
+        row->gridZ =
+            divdim(dispatch.grid_size.z, dispatch.workgroup_size.z);
+        row->workgroupX = dispatch.workgroup_size.x;
+        row->workgroupY = dispatch.workgroup_size.y;
+        row->workgroupZ = dispatch.workgroup_size.z;
         insert_row_to_buffer(row);
       } else if (header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) {
         auto& record =

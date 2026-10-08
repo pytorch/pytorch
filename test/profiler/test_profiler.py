@@ -5256,6 +5256,60 @@ class TestMetadataJsonFormat(TestCase):
             self.assertIsInstance(parsed[key], list)
             self.assertEqual(len(parsed[key]), 3)
 
+    def _profile_kernels(self, fn):
+        kernels = []
+        for _ in range(3):
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+            ) as prof:
+                fn()
+                torch.cuda.synchronize()
+            kernels = [
+                act
+                for act in prof.profiler.kineto_results.trace_activities()
+                if act.type() == "kernel"
+            ]
+            if kernels:
+                break
+        return kernels
+
+    def test_all_kernel_events_have_dims(self):
+        # Every kernel-typed event must carry launch dimensions, including
+        # dispatches the runtime issued on a user's behalf.  (Events for
+        # runtime memsets must not be kernel-typed at all.)
+        x = torch.randn(64, 64, device="cuda")
+        kernels = self._profile_kernels(lambda: torch.mm(x, x))
+        self.assertTrue(kernels, "expected at least one kernel event")
+        for act in kernels:
+            parsed = json.loads("{" + act.metadata_json() + "}")
+            for key in ["grid", "block"]:
+                self.assertIn(
+                    key,
+                    parsed,
+                    lambda msg, n=act.name(): (
+                        f"{msg}\nMissing field '{key}' for kernel '{n}'"
+                    ),
+                )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is not available")
+    def test_graph_kernel_events_have_dims(self):
+        # Graph replays issue no per-kernel launch API records; dims must
+        # still be reported for the kernels they dispatch.
+        x = torch.randn(64, 64, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+        try:
+            with torch.cuda.graph(graph):
+                _ = torch.mm(x, x)
+        except RuntimeError as e:
+            self.skipTest(f"CUDA graph capture unavailable: {e}")
+        kernels = self._profile_kernels(graph.replay)
+        self.assertTrue(kernels, "expected at least one kernel event")
+        for act in kernels:
+            parsed = json.loads("{" + act.metadata_json() + "}")
+            self.assertIn("grid", parsed)
+            self.assertIsInstance(parsed["grid"], list)
+            self.assertEqual(len(parsed["grid"]), 3)
+
     def test_metadata_json_key_value_format(self):
         md = self._get_kernel_metadata()
         # Verify the ": " (colon-space) separator convention that string

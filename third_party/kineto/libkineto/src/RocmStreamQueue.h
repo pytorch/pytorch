@@ -15,6 +15,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <rocprofiler-sdk/buffer_tracing.h>
+
 #include "RocLogger.h"
 
 namespace KINETO_NAMESPACE {
@@ -132,6 +134,52 @@ void backfillAsyncStreams(
     auto& mapping = deviceStreamToIndex[async->device];
     auto [it, inserted] = mapping.emplace(key, mapping.size() + 1);
     async->stream = it->second;
+  }
+}
+
+// Classify kernel dispatches the runtime issued to implement HIP memset or
+// memcpy API calls.  Some memsets/copies are implemented with a fill/copy
+// kernel instead of SDMA; for those, the dispatch record is the *only*
+// GPU-side artifact (no MEMORY_SET/MEMORY_COPY record is emitted), so there
+// is no double counting when it is reported as the memset/memcpy the user
+// asked for (CUPTI parity) rather than as a user kernel.  The dispatch
+// shares the correlation id of the runtime API record.
+inline void classifyRuntimeInternalDispatches(
+    std::vector<rocprofBase*>& rows,
+    const std::unordered_map<uint64_t, size_t>& memsetOps) {
+  std::unordered_map<uint64_t, const rocprofCopyRow*> copyByCorrelation;
+  for (const auto* item : rows) {
+    if (item->type == ROCTRACER_ACTIVITY_COPY) {
+      const auto* copy = reinterpret_cast<const rocprofCopyRow*>(item);
+      copyByCorrelation.emplace(copy->id, copy);
+    }
+  }
+  if (memsetOps.empty() && copyByCorrelation.empty()) {
+    return;
+  }
+  for (auto* item : rows) {
+    if (item->type != ROCTRACER_ACTIVITY_ASYNC) {
+      continue;
+    }
+    auto* async = reinterpret_cast<rocprofAsyncRow*>(item);
+    if (async->domain != ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH ||
+        async->internalApi != RocLogger::RuntimeInternalNone) {
+      continue;
+    }
+    const auto copyIt = copyByCorrelation.find(async->id);
+    if (copyIt != copyByCorrelation.end()) {
+      async->internalApi = RocLogger::RuntimeInternalMemcpy;
+      async->internalBytes = copyIt->second->size;
+      // hipMemcpyKind (HostToDevice=1..DeviceToDevice=3) shifted to the
+      // rocprofiler copy operation enum so copy strings render.
+      async->op = copyIt->second->kind + 1;
+      continue;
+    }
+    const auto memsetIt = memsetOps.find(async->id);
+    if (memsetIt != memsetOps.end()) {
+      async->internalApi = RocLogger::RuntimeInternalMemset;
+      async->internalBytes = memsetIt->second;
+    }
   }
 }
 
