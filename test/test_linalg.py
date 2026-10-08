@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import \
      MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
+    (instantiate_device_type_tests, dtypes, has_cusolver, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
      skipCUDAIfNoCusolver, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, onlyAccelerator, onlyOn, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
@@ -846,7 +846,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             if driver == 'gels' and rcond is None:
                 check_solution_correctness(a, b, sol)
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_linalg_lstsq_gelsy_jpvt_is_reset(self, device, dtype):
@@ -2228,7 +2227,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                     self.assertEqual(result.dtype, torch.float32)
                     self.assertEqual(result, expected)
 
-    @onlyCPU
     def test_powsum_dtype_kwarg_1d_reduction(self, device):
         # Test dtype kwarg on CPU with bfloat16 input and float32 computation
         # Tests both the 1D reduction path (explicit conversion) and larger reductions (kernel handles it)
@@ -5286,7 +5284,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         _, actual = torch.func.jvp(f, (t,), (torch.ones_like(t),))
         self.assertEqual(actual, torch.func.grad(f)(t))
 
-    @onlyCPU
     @dtypes(torch.float)
     @parametrize(
         "shape, stride",
@@ -5736,7 +5733,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         bnp_out = torch.full((b, n, p), float('nan'), device=device)
         self.assertEqual(torch.bmm(bnm, bmp), torch.bmm(bnm, bmp, out=bnp_out))
 
-    @onlyCPU  # not supported by CUBLAS
     def test_blas_mv_large_input(self, device):
         # This would previously fail if the allocated output had NaNs, see:
         # https://github.com/pytorch/pytorch/issues/31663 and [NOTE: cpu_zero]
@@ -5749,7 +5745,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
 
         self.assertEqual(torch.mv(nm, _m), torch.mv(nm, _m, out=_m_out))
 
-    @onlyCPU
     def test_renorm_ps(self, device):
         # full reduction
         x = torch.randn(5, 5)
@@ -6213,7 +6208,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                              atol=prec, rtol=0)
 
     @skipCPUIfNoLapack
-    @onlyCPU
     @dtypes(torch.double)
     def test_lobpcg_torchscript(self, device, dtype):
         from torch.testing._internal.common_utils import random_sparse_pd_matrix
@@ -7371,7 +7365,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             coeffs = torch.rand([2, 2], device=device, dtype=dtype)
             res = torch._compute_linear_combination(x, coeffs)
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.complex64)
     def test_linalg_matrix_exp_no_warnings(self, device, dtype):
@@ -8754,7 +8747,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         for shape, batch, nrhs, hermitian in itertools.product(shapes, batches, nrhss, hermitians):
             run_test(shape, batch, nrhs, hermitian)
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_ldl_solve_cpu_errors(self, device, dtype):
