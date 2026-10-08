@@ -9,8 +9,9 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from contextlib import contextmanager, nullcontext
-from unittest import skipIf, skipUnless
+from unittest import mock, skipIf, skipUnless
 
 import torch
 import torch.distributed as dist
@@ -44,6 +45,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_distributed import (
+    core_dumps_disabled,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -57,7 +59,10 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    getRocmVersion,
     instantiate_parametrized_tests,
+    isRocmArchAnyOf,
+    lazy_skip_if,
     MI350_ARCH,
     parametrize,
     requires_cuda,
@@ -383,6 +388,39 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         signal_pad.fill_(42)
         t.fill_(0)
         self.assertTrue(signal_pad.eq(42).all())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    def test_signal_pad_slot_layout(self) -> None:
+        """put_signal() sets the word world_size * channel + src of the
+        destination's pad. Kernels outside PyTorch, such as kraken's
+        symm_mem_barrier, index the pad this way, so the layout must not move.
+        """
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+        t = symm_mem.empty(64, device=self.device)
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        channel = 3
+        src = (self.rank - 1) % self.world_size
+        hdl.put_signal(dst_rank=(self.rank + 1) % self.world_size, channel=channel)
+        torch.cuda.synchronize()
+        dist.barrier()
+        pad = hdl.get_signal_pad(self.rank).view(torch.int32)
+        set_words = pad.nonzero().flatten().tolist()
+        hdl.wait_signal(src_rank=src, channel=channel)
+        torch.cuda.synchronize()
+
+        gathered = [None] * self.world_size
+        dist.all_gather_object(gathered, set_words)
+        expected = [
+            [self.world_size * channel + (r - 1) % self.world_size]
+            for r in range(self.world_size)
+        ]
+        self.assertEqual(gathered, expected)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -728,6 +766,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Hangs at 4 ranks on gfx950 CI distributed runners (file timeout / SIGINT,
+    # no JUnit row). Same P2P/symm_mem family as the AsyncTPTest MI350 skip;
+    # not a min-gpus filter bug. Skipped until the runner P2P path is fixed.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_subgroup(self) -> None:
         self._init_process()
@@ -993,6 +1035,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             t.fill_(self.rank + 10.0)
 
         torch.cuda.synchronize()
+        # The fill follows the last barrier, so nothing orders a peer's fill
+        # against this rank's read below. Local synchronize only covers this
+        # device.
+        dist.barrier()
         buf = hdl.get_buffer(peer, (64,), torch.float32)
         expected = torch.full((64,), peer + 10.0, device="cuda")
         self.assertEqual(buf, expected)
@@ -1035,6 +1081,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             t.fill_(self.rank + 100.0)
 
         torch.cuda.synchronize()
+        # wait_signal only shows that prev_peer sent its signal, which precedes
+        # its fill, so nothing orders that fill against this rank's read below.
+        # Local synchronize only covers this device.
+        dist.barrier()
         buf = hdl.get_buffer(prev_peer, (64,), torch.float32)
         expected = torch.full((64,), prev_peer + 100.0, device="cuda")
         self.assertEqual(buf, expected)
@@ -1424,11 +1474,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
-# The first AsyncTPTest case to execute hangs in its subprocess on the gfx950
-# CI distributed runners (whichever test that is), while the whole class passes
-# locally on gfx950 at world sizes 2/4/8 and on the mi300 CI shard with the same
-# ROCm image; skipped on that arch until it can be investigated on those runners.
-@skip_if_rocm_arch_multiprocess(MI350_ARCH)
+@lazy_skip_if(
+    lambda: TEST_WITH_ROCM
+    and isRocmArchAnyOf(MI350_ARCH)
+    and getRocmVersion() < (10, 1),
+    "symmetric memory hangs on MI350 CI runners before ROCm 10.1",
+)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
@@ -1442,6 +1493,19 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.use_deterministic_algorithms(True)
         torch.set_deterministic_debug_mode("warn")
         torch.utils.deterministic.fill_uninitialized_memory = True
+
+    def _assert_matmul_accuracy(self, out, baseline, A, B):
+        # Two GEMMs that sum K in different orders legitimately differ near zero,
+        # so bound each output's float64 error by the baseline's plus the fp32
+        # accumulation error bound sqrt(K) * eps * (|A| @ |B|).
+        A, B = A.double(), B.double()
+        reference = A @ B
+        slack = A.shape[1] ** 0.5 * torch.finfo(torch.float32).eps * (A.abs() @ B.abs())
+        out_err = (out.double() - reference).abs()
+        baseline_err = (baseline.double() - reference).abs()
+        excess = out_err - baseline_err - slack
+        worst = divmod(excess.argmax().item(), excess.shape[1])
+        self.assertLessEqual(excess.max().item(), 0.0, f"at index {worst}")
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -1486,7 +1550,6 @@ class AsyncTPTest(MultiProcContinuousTest):
                     f"Expected mm_output_0.stride() to be truthy, got {mm_output_0.stride()}"
                 )
 
-    @skip_if_rocm_multiprocess  # this requires async_input_mm support
     @skipIf(
         not SM90OrLater,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
@@ -1498,10 +1561,10 @@ class AsyncTPTest(MultiProcContinuousTest):
         SM100OrLater,
         "https://github.com/pytorch/pytorch/issues/162917",
     )
+    @mock.patch.dict(os.environ, {"TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP": "1"})
     def test_fused_all_gather_matmul_native(
         self, symm_mem_input: bool, is_b_row_major: bool
     ) -> None:
-        os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "1"
         self._init_process()
 
         # See _should_use_fused_all_gather_matmul_native() for the algo
@@ -1534,6 +1597,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         )
         with torch.profiler.profile(
             activities=[
+                torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA,
             ],
         ) as prof:
@@ -1541,13 +1605,58 @@ class AsyncTPTest(MultiProcContinuousTest):
                 A_shard, [B], gather_dim=0, group_name=group_name
             )
 
-        self.assertTrue(
-            any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
+        # The ROCm profiler can drop the GEMM's kernel record, so check for the
+        # op's CPU event instead.
+        event_name = (
+            "symm_mem::_async_input_mm"
+            if TEST_WITH_ROCM
+            else "PersistentAsyncInputScheduler"
         )
+        self.assertTrue(any(event_name in event.key for event in prof.events()))
 
         torch.testing.assert_close(ag_target, ag_baseline)
-        torch.testing.assert_close(mm_target[0], mm_baseline[0])
-        os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "0"
+        self._assert_matmul_accuracy(mm_target[0], mm_baseline[0], ag_baseline, B)
+
+    @skipIf(not TEST_WITH_ROCM, "Native graph capture is only validated on ROCm")
+    @skip_if_lt_x_gpu(2)
+    @mock.patch.dict(os.environ, {"TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP": "1"})
+    def test_fused_all_gather_matmul_native_graph_capture(self) -> None:
+        self._init_process()
+
+        M = 4096
+        N = 1024
+        K = 1024
+        group_name = dist.group.WORLD.group_name
+        torch.manual_seed(42 + self.rank)
+        A_shard = torch.rand(
+            M // self.world_size, K, dtype=torch.bfloat16, device=self.device
+        )
+        B = torch.rand(K, N, dtype=torch.bfloat16, device=self.device)
+        self.assertTrue(
+            symm_mem._should_use_fused_all_gather_matmul_native(
+                A_shard, [B], 0, group_name
+            )
+        )
+
+        ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
+            A_shard, [B], gather_dim=0, group_name=group_name
+        )
+        # Allocates the symmetric memory workspace, which capture cannot do.
+        torch.ops.symm_mem.fused_all_gather_matmul(
+            A_shard, [B], gather_dim=0, group_name=group_name
+        )
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
+                A_shard, [B], gather_dim=0, group_name=group_name
+            )
+        for _ in range(3):
+            ag_target.zero_()
+            mm_target[0].zero_()
+            graph.replay()
+            torch.cuda.synchronize()
+            torch.testing.assert_close(ag_target, ag_baseline)
+            self._assert_matmul_accuracy(mm_target[0], mm_baseline[0], ag_baseline, B)
 
     @skip_if_lt_x_gpu(2)
     @requires_multicast_support()
@@ -1746,7 +1855,6 @@ class AsyncTPTest(MultiProcContinuousTest):
         torch.testing.assert_close(output_0, output_2, rtol=1e-2, atol=1e-2)
         self.assertEqual(output_0.stride(), output_2.stride())
 
-    @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
     @skipUnless(SM89OrLater, "Requires compute capability >= 8.9")
     @parametrize("scatter_dim", [0, 1])
@@ -2002,6 +2110,7 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
 # This Test class is used to test the error handling of SymmetricMemory APIs.
 # Since a process restart is often needed after each test, we use the
 # MultiProcessTestCase instead of MultiProcContinuousTest.
+@instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemNegativeTest(MultiProcessTestCase):
     def setUp(self) -> None:
@@ -2027,12 +2136,13 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         )
         torch.manual_seed(42 + self.rank)
 
-    # These timeout tests are skipped on ROCm because timeout calls trap(), which
-    # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The functionality
-    # is there, meaning timeout is happening correctly. However, there isn't a nice way
-    # to test it as the current executing thread will coredump and exit.
-    @skip_if_rocm_multiprocess
+    # The device-side timeout calls trap(), which surfaces as a catchable
+    # RuntimeError at the next synchronize() on both CUDA (__trap) and ROCm
+    # (abort() -> hipErrorLaunchFailure). On ROCm the HIP runtime only keeps
+    # the fault catchable when core dumps are disabled; otherwise it aborts
+    # the process (the -SIGABRT seen locally). CI already runs with
+    # --ulimit core=0, and core_dumps_disabled() makes this hold on a dev box
+    # too, so the block timing out must stay open through synchronize().
     @skip_if_lt_x_gpu(2)
     def test_barrier_timeout(self) -> None:
         self._init_process()
@@ -2041,7 +2151,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
-            with self.assertRaises(RuntimeError):
+            with core_dumps_disabled(), self.assertRaises(RuntimeError):
                 symm_mem_hdl.barrier(timeout_ms=1000)
                 torch.cuda.synchronize()
         else:
@@ -2053,12 +2163,13 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
-    # These timeout tests are skipped on ROCm because timeout calls trap(), which
-    # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The functionality
-    # is there, meaning timeout is happening correctly. However, there isn't a nice way
-    # to test it as the current executing thread will coredump and exit.
-    @skip_if_rocm_multiprocess
+    # The device-side timeout calls trap(), which surfaces as a catchable
+    # RuntimeError at the next synchronize() on both CUDA (__trap) and ROCm
+    # (abort() -> hipErrorLaunchFailure). On ROCm the HIP runtime only keeps
+    # the fault catchable when core dumps are disabled; otherwise it aborts
+    # the process (the -SIGABRT seen locally). CI already runs with
+    # --ulimit core=0, and core_dumps_disabled() makes this hold on a dev box
+    # too, so the block timing out must stay open through synchronize().
     @skip_if_lt_x_gpu(2)
     def test_put_signal_timeout(self) -> None:
         self._init_process()
@@ -2067,7 +2178,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
-            with self.assertRaises(RuntimeError):
+            with core_dumps_disabled(), self.assertRaises(RuntimeError):
                 # First, put a signal into rank 1's signal pad. Since rank 1
                 # doesn't wait on this signal, the subsequent put will timeout.
                 symm_mem_hdl.put_signal(dst_rank=1)
@@ -2082,12 +2193,13 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
-    # These timeout tests are skipped on ROCm because timeout calls trap(), which
-    # is handled differently inside hip runtime. It collects gpu coredump and causes
-    # the linux kernel to create a core dump of the host application. The functionality
-    # is there, meaning timeout is happening correctly. However, there isn't a nice way
-    # to test it as the current executing thread will coredump and exit.
-    @skip_if_rocm_multiprocess
+    # The device-side timeout calls trap(), which surfaces as a catchable
+    # RuntimeError at the next synchronize() on both CUDA (__trap) and ROCm
+    # (abort() -> hipErrorLaunchFailure). On ROCm the HIP runtime only keeps
+    # the fault catchable when core dumps are disabled; otherwise it aborts
+    # the process (the -SIGABRT seen locally). CI already runs with
+    # --ulimit core=0, and core_dumps_disabled() makes this hold on a dev box
+    # too, so the block timing out must stay open through synchronize().
     @skip_if_lt_x_gpu(2)
     def test_wait_signal_timeout(self) -> None:
         self._init_process()
@@ -2096,7 +2208,7 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
-            with self.assertRaises(RuntimeError):
+            with core_dumps_disabled(), self.assertRaises(RuntimeError):
                 symm_mem_hdl.wait_signal(src_rank=1, timeout_ms=1000)
                 torch.cuda.synchronize()
         else:
@@ -2107,6 +2219,53 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         # launch failure." Using os._exit(0) to abort the test, as it's
         # impossible to terminate the process in this state.
         os._exit(0)
+
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    @parametrize("last_channel", [False, True])
+    def test_multimem_barrier_after_signal(self, last_channel: bool) -> None:
+        """Rank 0 signals rank 1 and then reaches barrier(); rank 1 consumes the
+        signal after the others have arrived and then reaches barrier(). Every
+        signal is consumed before its receiver enters the barrier, so this must
+        complete. While the multimem barrier kept its counter in source rank
+        0's slot (index world_size * channel), the others' arrivals landed on
+        the pending signal and rank 1's wait_signal never completed. The last
+        channel's counter is the highest index in the barrier state. On failure
+        the timeouts trap, which is why this lives in this class."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+        t = symm_mem.empty(64, device="cuda")
+        hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
+        if hdl.multicast_ptr == 0:
+            self.skipTest("barrier() takes the multimem path only with multicast")
+        num_channels = hdl.signal_pad_size // (4 * self.world_size)
+        channel = num_channels - 1 if last_channel else 0
+        timeout_ms = 15000
+
+        # Keep first-launch overhead out of the window below. The signal and
+        # the barrier use channels of their own, so this does not hit the bug.
+        signal_warm, barrier_warm = [c for c in range(num_channels) if c != channel][:2]
+        if self.rank == 0:
+            hdl.put_signal(dst_rank=1, channel=signal_warm, timeout_ms=timeout_ms)
+        elif self.rank == 1:
+            hdl.wait_signal(src_rank=0, channel=signal_warm, timeout_ms=timeout_ms)
+        hdl.barrier(channel=barrier_warm, timeout_ms=timeout_ms)
+        torch.cuda.synchronize()
+
+        if self.rank == 0:
+            hdl.put_signal(dst_rank=1, channel=channel, timeout_ms=timeout_ms)
+            torch.cuda.synchronize()
+        # The signal is in place before any rank reaches the barrier.
+        dist.barrier()
+        if self.rank == 1:
+            # Lets the other ranks' barrier arrivals land before this consumes
+            # the signal. A correct barrier passes either way; only detection
+            # depends on the delay.
+            time.sleep(1.0)
+            hdl.wait_signal(src_rank=0, channel=channel, timeout_ms=timeout_ms)
+        hdl.barrier(channel=channel, timeout_ms=timeout_ms)
+        torch.cuda.synchronize()
 
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
@@ -2355,6 +2514,10 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Hangs at 4 ranks on gfx950 CI distributed runners (recorded fail ~1201s).
+    # Same P2P/symm_mem family as the AsyncTPTest MI350 skip; not a min-gpus
+    # filter bug. Skipped until the runner P2P path is fixed.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_reduce_scatter(self) -> None:
         self._init_process()
@@ -2522,6 +2685,91 @@ class SymmetricMemoryTestCudaGraph(MultiProcContinuousTest):
 
         with _enable_multicast_for_test(self, self.device.index):
             self._run_low_contention_all_gather_ce_multicast_cuda_graph()
+
+    # ---- CUDA graph capture -------------------------------------------------
+    #
+    # Allocation and the first rendezvous of a buffer synchronize the stream,
+    # which is not permitted during capture, so the CUDA backend refuses both
+    # with an actionable error instead of failing inside the driver. Once a
+    # buffer has been rendezvoused and the collective has run once eagerly,
+    # capturing it and replaying must match eager results on every replay.
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    def test_alloc_and_first_rendezvous_during_capture_raise(self) -> None:
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("the capture guard is implemented in the CUDA backend")
+        group_name = dist.group.WORLD.group_name
+        msg = "capturing a graph"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.cuda.graph(torch.cuda.CUDAGraph()):
+                symm_mem.empty(64, dtype=torch.float32, device=self.device)
+
+        t = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.cuda.graph(torch.cuda.CUDAGraph()):
+                # Not rendezvoused yet: the op rendezvouses lazily, and that
+                # first rendezvous must be refused.
+                torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+
+        # Both refusals must leave the process and the buffer usable.
+        t.fill_(float(self.rank))
+        symm_mem.rendezvous(t, group=group_name)
+        res = torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+        self.assertEqual(res, torch.full_like(res, float(sum(range(self.world_size)))))
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    def test_collective_cuda_graph_replay(self) -> None:
+        """Warm up a collective eagerly on a rendezvoused buffer, capture it,
+        replay several times and check the last replay. Inside the graph the
+        buffer is refilled with rank + step and step is incremented, so every
+        replay reduces different values and a skipped or stale replay is
+        detected. Rank 0 is delayed so replay also exercises the in-kernel
+        peer synchronization."""
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        numel = 1920
+        replays = 4
+
+        t = symm_mem.empty(numel, dtype=torch.float32, device=self.device)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
+        step = torch.zeros((), dtype=torch.float32, device=self.device)
+
+        def fill_and_run() -> torch.Tensor:
+            t.fill_(float(self.rank)).add_(step)
+            step.add_(1.0)
+            if self.rank == 0:
+                torch.cuda._sleep(20_000_000)
+            return torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+
+        warmup = fill_and_run()
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph()
+        observed = torch.empty_like(warmup)
+        with torch.cuda.graph(graph):
+            observed.copy_(fill_and_run())
+
+        for _ in range(replays):
+            graph.replay()
+        torch.cuda.synchronize()
+
+        # Capture does not execute, so step counts the warm-up plus replays,
+        # and the last replay reduced rank + replays on every rank.
+        self.assertEqual(step.item(), 1.0 + replays)
+        expected = float(sum(range(self.world_size)) + replays * self.world_size)
+        self.assertEqual(observed, torch.full_like(observed, expected))
+        # Every replay must leave the signal pad back at zero.
+        self.assertTrue(symm_mem_hdl.get_signal_pad(self.rank).eq(0).all().item())
 
 
 @instantiate_parametrized_tests

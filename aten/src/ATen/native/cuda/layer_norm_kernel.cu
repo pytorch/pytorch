@@ -188,9 +188,10 @@ WelfordDataLN cuWelfordCombine(
 #else
       auto coef = fn_rcp(count); //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
 #endif
-      auto nA = dataA.count * coef;
       auto nB = dataB.count * coef;
-      mean = nA*dataA.mean + nB*dataB.mean;
+      // Welford increment, not a weighted average of the two means: the rounding
+      // of nA and nB does not guarantee nA+nB == 1, even with an exact reciprocal.
+      mean = (dataA.count == U(0)) ? dataB.mean : dataA.mean + delta * nB;
       sigma2 = dataA.sigma2 + dataB.sigma2 + delta * delta * dataA.count * nB;
     } else {
       mean = U(0);
@@ -1130,10 +1131,10 @@ void launch_vectorized_layer_norm_kernel(
     T* Y_data2 = Y_data;
 
     while (remaining > 0) {
-      X_data2 += N * blocks.x;
+      X_data2 += static_cast<int64_t>(N) * blocks.x;
       mean_data2 += blocks.x;
       rstd_data2 += blocks.x;
-      Y_data2 += N * blocks.x;
+      Y_data2 += static_cast<int64_t>(N) * blocks.x;
 
       blocks.x = (remaining > blocks.x) ? blocks.x : remaining;
 
