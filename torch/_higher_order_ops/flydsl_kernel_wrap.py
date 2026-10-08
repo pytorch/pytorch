@@ -368,6 +368,13 @@ class FlyDSLKernelWrapperFunctional(HigherOrderOperator):
 flydsl_kernel_wrapper_mutation = FlyDSLKernelWrapperMutation()
 flydsl_kernel_wrapper_functional = FlyDSLKernelWrapperFunctional()
 
+
+def _is_flydsl_kernel_wrapper(target: Any) -> bool:
+    return target is flydsl_kernel_wrapper_mutation or (
+        target is flydsl_kernel_wrapper_functional
+    )
+
+
 # The mutation is represented in the HOP's nested ``args`` tuple rather than
 # its return value, so FX cannot infer this side effect from dataflow alone.
 # Do not use the effects-token system here: independent kernel launches do not

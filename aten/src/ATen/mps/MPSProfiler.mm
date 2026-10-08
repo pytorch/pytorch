@@ -84,7 +84,7 @@ std::string CopyInfo::buildTensorString(const void* buffer, const OptionalTensor
   if (tensor.has_value()) {
     return BaseInfo::buildTensorString(*tensor, includeBufferId);
   }
-  // if tensor is not defined (e.g., copy_blit_mps()), then use buffer
+  // if tensor is not defined (e.g., copy_bytes_mps()), then use buffer
   // pointer to build the string.
   const bool isBufferOnMPS = isStorageOnMPS(buffer, tensor);
   return fmt::format("{}:{:p}", isBufferOnMPS ? "MPS" : "CPU", buffer);
