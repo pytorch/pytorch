@@ -64,6 +64,8 @@ class TestExtendedCUDAIsAvail(TestCase):
     def test_cuda_is_available(self, avoid_init, nvml_avail):
         if IS_JETSON and nvml_avail and avoid_init == "1":
             self.skipTest("Not working for Jetson")
+        if torch.version.hip is not None and nvml_avail and avoid_init == "1":
+            self.skipTest("ROCm availability check initializes the HIP driver")
         patch_env = {"PYTORCH_NVML_BASED_CUDA_CHECK": avoid_init} if avoid_init else {}
         with patch.dict(os.environ, **patch_env):
             if nvml_avail:
@@ -110,6 +112,7 @@ class TestVisibleDeviceParses(TestCase):
         # MIG ids are parsed
         self.assertEqual(_parse_visible_devices("MIG-89c850dc"), ["MIG-89c850dc"])
 
+    @unittest.skipIf(torch.version.hip is not None, "NVML UUID prefix matching")
     def test_partial_uuid_resolver(self):
         from torch.cuda import _transform_uuid_to_ordinals
 
