@@ -10,6 +10,7 @@ from torch.utils._ordered_set import OrderedSet
 from ..utils import get_max_numwarps
 from .hints import (
     InductorMeta,
+    is_valid_mix_order_reduction_config,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     TRITON_MAX_BLOCK,
@@ -23,6 +24,8 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+_MAX_COMBO_ALL_DIRECTIONS_CONFIGS = 1000
 
 
 def get_field(config, name):
@@ -125,6 +128,7 @@ class CoordescTuner:
             # does not have the R0_BLOCK field to guarantee that.
             "R0_BLOCK",
             "R1_BLOCK",
+            "R2_BLOCK",
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",
@@ -173,6 +177,23 @@ class CoordescTuner:
         return False
 
     def value_too_small(self, name: str, val: int) -> bool:
+        field_minimums = self.inductor_meta.get("combo_coordesc_field_minimums")
+        if (
+            isinstance(field_minimums, dict)
+            and name in field_minimums
+            and val < field_minimums[name]
+        ):
+            return True
+
+        tma_minimums = self.inductor_meta.get("tma_min_block_sizes")
+        if (
+            self.inductor_meta.get("uses_tma")
+            and isinstance(tma_minimums, dict)
+            and name in tma_minimums
+            and val < tma_minimums[name]
+        ):
+            return True
+
         min_block = None
         if name == "XBLOCK":
             min_block = self.inductor_meta.get("min_xblock")
@@ -245,11 +266,13 @@ class CoordescTuner:
 
     def is_valid_config(self, config) -> bool:
         if self.is_mix_order_reduction:
-            # Mix order reduction has an extra constraint that
-            # we should not tune XBLOCK beyond RSPLIT_SIZE
-            xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
-            return xblock <= split_size
+            rnumel_hint = (
+                self.size_hints.get("r0_") if self.size_hints is not None else None
+            )
+            return is_valid_mix_order_reduction_config(
+                config.kwargs, split_size, rnumel_hint, self.inductor_meta
+            )
         if self.is_native_matmul:
             r0_block = None
             if "R0_BLOCK" not in config.kwargs:
@@ -274,6 +297,8 @@ class CoordescTuner:
         tunable field, as a list of valid candidate configs."""
         candidate_values_list = []
         effective_fields = []
+        num_candidates = 1
+        combo_fields = self.inductor_meta.get("combo_coordesc_field_order")
         for field in self.tunable_fields:
             old_value = get_field(config, field)
             if old_value is None:
@@ -285,6 +310,15 @@ class CoordescTuner:
                 radius=radius,
                 include_self=True,
             )
+            num_candidates *= len(candidate_values)
+            if combo_fields and num_candidates > _MAX_COMBO_ALL_DIRECTIONS_CONFIGS:
+                log.debug(
+                    "Skipping all-directions search for %s: %d candidates exceeds %d",
+                    self.name,
+                    num_candidates,
+                    _MAX_COMBO_ALL_DIRECTIONS_CONFIGS,
+                )
+                return []
             candidate_values_list.append(candidate_values)
             effective_fields.append(field)
 

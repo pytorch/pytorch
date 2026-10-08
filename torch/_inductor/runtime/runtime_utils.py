@@ -79,6 +79,10 @@ def triton_config_to_hashable(cfg: Config) -> Hashable:
     items.append(("num_warps", cfg.num_warps))
     # pyrefly: ignore [missing-attribute]
     items.append(("num_stages", cfg.num_stages))
+    # A register cap makes a different kernel; without it, unique_configs
+    # discards a capped config as a duplicate of the uncapped one.
+    if getattr(cfg, "maxnreg", None) is not None:
+        items.append(("maxnreg", cfg.maxnreg))
     return tuple(items)
 
 
@@ -170,7 +174,7 @@ def blue_text(msg: str) -> str:
     return _color_text(msg, "blue")
 
 
-def get_first_attr(obj: Any, *attrs: str) -> Any:
+def get_first_attr(obj: object, *attrs: str) -> Any:
     """
     Return the first available attribute or throw an exception if none is present.
     """

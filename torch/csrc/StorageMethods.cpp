@@ -8,7 +8,6 @@
 #include <c10/util/overflows.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
-#include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -33,7 +32,6 @@
 #include <cuda_runtime.h>
 #endif
 
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/native/Resize.h>
 
 #ifdef _MSC_VER
@@ -42,14 +40,14 @@
 #define LSEEK lseek
 #endif
 
-static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_nbytes(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   return py::cast(THPStorage_Unpack(self).sym_nbytes()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self_ = THPStorage_Unpack(self);
   // See Note [Invalid Python Storages]
@@ -62,7 +60,7 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_resizable(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_resizable(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   return PyBool_FromLong(THPStorage_Unpack(self).resizable());
@@ -108,14 +106,14 @@ static PyObject* THPStorage_copy_(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* noargs) {
+static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(_self);
   return THPUtils_packInt64(sizeof(uint8_t));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_new(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   c10::Allocator* allocator = THPStorage_Unpack(self).allocator();
@@ -197,9 +195,7 @@ static PyObject* THPStorage_resize_with_addr_(PyObject* self, PyObject* args) {
         "but got ",
         THPUtils_typename(addr_arg));
     void* addr = PyLong_AsVoidPtr(addr_arg);
-    if (addr == nullptr && PyErr_Occurred()) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(addr != nullptr || !PyErr_Occurred());
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<size_t>(size_bytes_i, /*strict_unsigned=*/true),
@@ -254,7 +250,7 @@ static void decodeWrapper(
 }
 
 static PyObject* THPStorage_fromBuffer(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args,
     PyObject* keywds) {
   HANDLE_TH_ERRORS
@@ -408,7 +404,7 @@ static PyObject* THPStorage_fromBuffer(
 }
 
 static PyObject* THPStorage_fromFile(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args,
     PyObject* keywds) {
   HANDLE_TH_ERRORS
@@ -484,7 +480,7 @@ static PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
+static PyObject* THPStorage_newWithFile(PyObject* /*_unused*/, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyTuple_Size(args) == 2, "_new_with_file takes exactly two arguments");
@@ -659,13 +655,15 @@ static PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_fix_weakref(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_fix_weakref(PyObject* self, PyObject* /*noargs*/) {
   const auto& storage = THPStorage_Unpack(self);
   Py_DECREF(THPStorage_Wrap(storage));
   Py_RETURN_NONE;
 }
 
-static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage__get_filename(
+    PyObject* self,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
 
   const auto& self_ = THPStorage_Unpack(self);

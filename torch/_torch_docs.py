@@ -1420,10 +1420,11 @@ returned tensor will have the same history.
 
 When :attr:`obj` is not a tensor, NumPy array, or DLPack capsule but implements Python's
 buffer protocol then the buffer is interpreted as an array of bytes grouped according to
-the size of the datatype passed to the :attr:`dtype` keyword argument. (If no datatype is
-passed then the default floating point datatype is used, instead.) The returned tensor
-will have the specified datatype (or default floating point datatype if none is specified)
-and, by default, be on the CPU device and share memory with the buffer.
+the size of the datatype passed to the :attr:`dtype` keyword argument. If no :attr:`dtype`
+is passed then it is inferred from the buffer's format, and an error is raised if the
+format cannot be mapped to a PyTorch datatype, in which case :attr:`dtype` must be passed
+explicitly. The returned tensor will have the specified (or inferred) datatype and, by
+default, be on the CPU device and share memory with the buffer.
 
 When :attr:`obj` is a NumPy scalar, the returned tensor will be a 0-dimensional tensor on
 the CPU and that doesn't share its memory (i.e. ``copy=True``). By default datatype will
@@ -7319,7 +7320,8 @@ Returns the median of the values in :attr:`input`.
     compute the mean of both medians, use :func:`torch.quantile` with ``q=0.5`` instead.
 
 .. warning::
-    This function produces deterministic (sub)gradients unlike ``median(dim=0)``
+    This function spreads the (sub)gradient evenly over every element equal to the
+    median, while ``median(dim=0)`` sends it to the element at the returned index.
 
 Args:
     {input}
@@ -7354,9 +7356,9 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 .. warning::
     ``indices`` does not necessarily contain the first occurrence of each
     median value found, unless it is unique.
-    The exact implementation details are device-specific.
-    Do not expect the same result when run on CPU and GPU in general.
-    For the same reason do not expect the gradients to be deterministic.
+    The exact implementation details are device-specific: CUDA returns the
+    first occurrence, while other devices may return another one.
+    Do not expect the same indices, or the same gradients, on CPU and GPU.
 
 Args:
     {input}
@@ -12694,6 +12696,15 @@ defined by the variable argument :attr:`size`.
     Floating point and complex tensors are filled with NaN, and integer tensors
     are filled with the maximum value.
 
+.. warning::
+    For ``dtype=torch.bool``, the uninitialized bytes may hold values other
+    than ``0`` (``False``) and ``1`` (``True``), which are not valid booleans.
+    The behavior of operations that read such values is undefined: they may be
+    preserved as-is or normalized to ``1`` depending on the operation, device
+    and memory layout. Write to the tensor (e.g. with :meth:`~Tensor.fill_` or
+    :meth:`~Tensor.copy_`) before reading from it, or use :func:`torch.zeros`
+    instead.
+
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
@@ -14184,7 +14195,7 @@ Arguments:
 
 .. warning::
 
-    Both blocking and interprocess are not supported right now and are noops.
+    The ``interprocess`` argument is not honored right now and is a noop.
 
 Returns:
     Event: An torch.Event object.
@@ -14905,56 +14916,22 @@ are freshly created instead of aliasing the input.
 """,
 )
 
-for unary_base_func_name in (
-    "exp",
-    "sqrt",
-    "abs",
-    "acos",
-    "asin",
-    "atan",
-    "ceil",
-    "cos",
-    "cosh",
-    "erf",
-    "erfc",
-    "expm1",
-    "floor",
-    "log",
-    "log10",
-    "log1p",
-    "log2",
-    "neg",
-    "tan",
-    "tanh",
-    "sin",
-    "sinh",
-    "round",
-    "lgamma",
-    "frac",
-    "reciprocal",
-    "sigmoid",
-    "trunc",
-    "zero",
-):
-    unary_foreach_func_name = f"_foreach_{unary_base_func_name}"
-    if hasattr(torch, unary_foreach_func_name):
+# Create docs for our private APIs that will link to the public ones
+for private_func_name in dir(torch):
+    if not private_func_name.startswith("_foreach_"):
+        continue
+    if private_func_name == "_foreach_powsum":
+        continue
+    foreach_func_name = private_func_name.removeprefix("_foreach_")
+    private_func = getattr(torch, private_func_name)
+    if private_func.__doc__ is None:
         add_docstr(
-            getattr(torch, unary_foreach_func_name),
+            private_func,
             rf"""
-{unary_foreach_func_name}(self: List[Tensor]) -> List[Tensor]
-
-Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
+Please use our public :func:`torch.foreach.{foreach_func_name}` instead.
+This private API is maintained during migration to support backwards
+compatibility.
             """,
-        )
-    unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
-    if hasattr(torch, unary_inplace_foreach_func_name):
-        add_docstr(
-            getattr(torch, unary_inplace_foreach_func_name),
-            rf"""
-{unary_inplace_foreach_func_name}(self: List[Tensor]) -> None
-
-Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
-        """,
         )
 
 add_docstr(

@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import math
 import os
 import sys
 import tempfile
@@ -8,6 +9,8 @@ import types
 import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch, PropertyMock
+
+import sympy
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -35,7 +38,7 @@ except ImportError:
         sys.exit(0)
     raise unittest.SkipTest("requires triton")  # noqa: B904
 
-from torch._inductor import config
+from torch._inductor import config, metrics
 from torch._inductor.runtime.hints import (
     AttrsDescriptorWrapper,
     AutotuneHint,
@@ -43,6 +46,7 @@ from torch._inductor.runtime.hints import (
     HeuristicType,
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
@@ -50,21 +54,31 @@ from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
     _enforce_reduction_config_block_minimums,
+    _find_names,
+    _fits_hip_work_item_limit,
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
     autotune_hints_to_configs,
+    BenchmarkFailureReason,
     cached_autotune,
     CachingAutotuner,
     CachingAutotunerPlugin,
     check_autotune_cache,
     DEFER,
     make_matmul_triton_config,
+    NoTritonConfigsError,
     template,
     triton_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
+
+
+class _FindNamesProbe:
+    # A gc-tracked stand-in for a CachingAutotuner; object() is untracked, so a
+    # dict holding one can itself stay untracked and escape gc.get_referrers.
+    pass
 
 
 @triton.jit
@@ -95,6 +109,41 @@ def get_autotuned_amd_sqr_kernel():
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
 
+    def test_find_names_ignores_frame_locals(self):
+        """
+        A kernel held only by frame locals has no name, so DebugAutotuner can
+        fall back to inductor_meta["kernel_name"]. The stack walk used to leak
+        _find_names' own `obj` and the caller's `self` into the result.
+        """
+        probe = _FindNamesProbe()
+        self.assertEqual(_find_names(probe), [])
+
+    def test_find_names_finds_namespace_binding(self):
+        probe = _FindNamesProbe()
+        namespace = {"triton_poi_fused_add_0": probe}
+        try:
+            self.assertIn("triton_poi_fused_add_0", _find_names(probe))
+        finally:
+            del namespace
+
+    def test_unbound_kernel_falls_back_to_inductor_meta_name(self):
+        """
+        The label DebugAutotuner.run derives for an unbound kernel. The stack
+        walk made _find_names return ['obj', 'self'], so max(..., key=len)
+        picked "self" instead of reaching the inductor_meta fallback.
+        """
+
+        class FakeAutotuner:
+            inductor_meta = {"kernel_name": "triton_poi_fused_add_0"}
+
+            def kernel_name(self):
+                possible_names = _find_names(self)
+                if possible_names:
+                    return f"{max(possible_names, key=len)}"
+                return self.inductor_meta["kernel_name"]
+
+        self.assertEqual(FakeAutotuner().kernel_name(), "triton_poi_fused_add_0")
+
     def test_triton_config(self):
         """
         Make sure block size does not exceed the maximum defined in inductor config.
@@ -105,6 +154,496 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_hip_launch_grid_validity(self):
+        max_work_items = (1 << 32) - 1
+        threads_per_program = 8 * 64
+        max_grid_x = max_work_items // threads_per_program
+        self.assertTrue(_fits_hip_work_item_limit((max_grid_x, 1, 1), 8, warp_size=64))
+        self.assertFalse(
+            _fits_hip_work_item_limit((max_grid_x + 1, 1, 1), 8, warp_size=64)
+        )
+
+        # HIP applies the uint32 work-item limit per dimension. 2**23 x-blocks
+        # fit with 8 wave32 warps, but overflow with 8 wave64 warps. Large y/z
+        # dimensions do not multiply into x's limit.
+        grid = (1 << 23, 64, 64)
+        self.assertTrue(_fits_hip_work_item_limit(grid, 8, warp_size=32))
+        self.assertFalse(_fits_hip_work_item_limit(grid, 8, warp_size=64))
+        self.assertTrue(_fits_hip_work_item_limit((0, 1, 1), 8, warp_size=64))
+        clustered_grid = (1 << 22, 1, 1)
+        self.assertTrue(_fits_hip_work_item_limit(clustered_grid, 8, warp_size=64))
+        self.assertFalse(
+            _fits_hip_work_item_limit(clustered_grid, 8, warp_size=64, num_ctas=2)
+        )
+        for num_warps, warp_size, num_ctas in (
+            (0, 64, 1),
+            (-1, 64, 1),
+            (8, 0, 1),
+            (8, -1, 1),
+            (8, 64, 0),
+            (8, 64, -1),
+        ):
+            self.assertFalse(
+                _fits_hip_work_item_limit(
+                    (1, 1, 1),
+                    num_warps,
+                    warp_size=warp_size,
+                    num_ctas=num_ctas,
+                )
+            )
+
+    def test_coordesc_skips_unsafe_hip_launch_before_compile(self):
+        baseline = triton.Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        unsafe_candidate = triton.Config({"XBLOCK": 64}, num_warps=8, num_stages=1)
+
+        class Launcher:
+            _is_static = False
+
+            def __init__(self, config, cache_hash):
+                self.config = config
+                self.cache_hash = cache_hash
+
+        launcher = Launcher(baseline, "baseline")
+        runtime_args = (123,)
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.device_props = DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=64,
+        )
+        autotuner._ensure_kernel_loaded = MagicMock()
+        autotuner._interpret_args_grid = MagicMock(
+            return_value=(runtime_args, (1 << 23, 1, 1))
+        )
+        autotuner._precompile_config = MagicMock()
+        autotuner.bench = MagicMock()
+        autotuner.benchmark_failure_reasons = {}
+        autotuner.heuristic_type = HeuristicType.POINTWISE
+        autotuner.deterministic_mode = False
+        autotuner.save_cache_hook = None
+        autotuner.autotune_time_taken_ns = 0
+        autotuner.size_hints = {"x": 1}
+        autotuner.inductor_meta = {"kernel_name": "kernel"}
+        autotuner.compile_id = None
+        autotuner.is_backward = False
+        autotuner.fn = types.SimpleNamespace(src="def kernel(): pass")
+
+        def try_unsafe_candidate(benchmark, initial_config, initial_timing):
+            self.assertIs(initial_config, baseline)
+            self.assertIsNone(initial_timing)
+            self.assertEqual(benchmark(unsafe_candidate), float("inf"))
+            return baseline
+
+        autotuner.coordesc_tuner = MagicMock()
+        autotuner.coordesc_tuner.autotune.side_effect = try_unsafe_candidate
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.TritonBundler.put_winner"
+        ):
+            winner = autotuner.coordinate_descent_tuning(launcher, *runtime_args)
+
+        self.assertIs(winner, launcher)
+        autotuner._interpret_args_grid.assert_any_call(
+            runtime_args, unsafe_candidate, kwargs={}
+        )
+        autotuner._interpret_args_grid.assert_any_call(
+            runtime_args, baseline, kwargs={}
+        )
+        autotuner._precompile_config.assert_not_called()
+        autotuner.bench.assert_not_called()
+
+    def test_coordesc_rejects_unsafe_hip_baseline(self):
+        baseline = triton.Config({"XBLOCK": 64}, num_warps=8, num_stages=1)
+
+        class Launcher:
+            _is_static = False
+            _launch_num_warps = 8
+
+            def __init__(self, config, cache_hash):
+                self.config = config
+                self.cache_hash = cache_hash
+
+        launcher = Launcher(baseline, "baseline")
+        runtime_args = (123,)
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.device_props = DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=64,
+        )
+        autotuner._ensure_kernel_loaded = MagicMock()
+        autotuner._interpret_args_grid = MagicMock(
+            return_value=(runtime_args, (1 << 23, 1, 1))
+        )
+        autotuner._precompile_config = MagicMock()
+        autotuner.benchmark_failure_reasons = {}
+        autotuner.heuristic_type = HeuristicType.POINTWISE
+        autotuner.deterministic_mode = False
+        autotuner.save_cache_hook = MagicMock()
+        autotuner.autotune_time_taken_ns = 0
+        autotuner.size_hints = {"x": 1}
+        autotuner.inductor_meta = {"kernel_name": "kernel"}
+        autotuner.compile_id = None
+        autotuner.is_backward = False
+        autotuner.fn = types.SimpleNamespace(
+            src="def kernel(): pass", __name__="kernel"
+        )
+
+        def keep_unsafe_baseline(benchmark, initial_config, initial_timing):
+            self.assertEqual(benchmark(initial_config), float("inf"))
+            return initial_config
+
+        autotuner.coordesc_tuner = MagicMock()
+        autotuner.coordesc_tuner.autotune.side_effect = keep_unsafe_baseline
+
+        with self.assertRaisesRegex(
+            NoTritonConfigsError, "coordinate descent selected"
+        ):
+            autotuner.coordinate_descent_tuning(launcher, *runtime_args)
+
+        autotuner.save_cache_hook.assert_not_called()
+        autotuner._precompile_config.assert_not_called()
+        self.assertFalse(getattr(baseline, "found_by_coordesc", False))
+
+    def test_coordesc_falls_back_to_launch_safe_spilling_config(self):
+        baseline = triton.Config({"XBLOCK": 64}, num_warps=4, num_stages=1)
+        spilling = triton.Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+
+        class Launcher:
+            _is_static = False
+            n_regs = 0
+            n_spills = 0
+            shared = 0
+
+            def __init__(self, config, cache_hash):
+                self.config = config
+                self.cache_hash = cache_hash
+
+        baseline_launcher = Launcher(baseline, "baseline")
+        spilling_launcher = Launcher(spilling, "spilling")
+        runtime_args = (123,)
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.device_props = DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=64,
+        )
+        autotuner._ensure_kernel_loaded = MagicMock()
+        autotuner.lock = MagicMock()
+        autotuner._interpret_args_grid = MagicMock(
+            return_value=(runtime_args, (1 << 23, 1, 1))
+        )
+
+        def compile_config(config):
+            launcher = baseline_launcher if config is baseline else spilling_launcher
+            compile_result = MagicMock()
+            compile_result.make_launcher.return_value = launcher
+            return compile_result
+
+        autotuner._precompile_config = MagicMock(side_effect=compile_config)
+        autotuner.benchmark_failure_reasons = {}
+
+        def fail_benchmark(candidate, *args, **kwargs):
+            autotuner.benchmark_failure_reasons[candidate] = (
+                BenchmarkFailureReason.INVALID_CONFIG
+                if candidate is baseline_launcher
+                else BenchmarkFailureReason.REGISTER_SPILLING
+            )
+            return float("inf")
+
+        autotuner.bench = MagicMock(side_effect=fail_benchmark)
+        autotuner.heuristic_type = HeuristicType.POINTWISE
+        autotuner.deterministic_mode = False
+        autotuner.save_cache_hook = MagicMock()
+        autotuner.autotune_time_taken_ns = 0
+        autotuner.size_hints = {"x": 1}
+        autotuner.inductor_meta = {"kernel_name": "kernel"}
+        autotuner.compile_id = None
+        autotuner.is_backward = False
+        autotuner.fn = types.SimpleNamespace(
+            src="def kernel(): pass", __name__="kernel"
+        )
+
+        def keep_invalid_baseline(benchmark, initial_config, initial_timing):
+            self.assertEqual(benchmark(initial_config), float("inf"))
+            self.assertEqual(benchmark(spilling), float("inf"))
+            return initial_config
+
+        autotuner.coordesc_tuner = MagicMock()
+        autotuner.coordesc_tuner.autotune.side_effect = keep_invalid_baseline
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.TritonBundler.put_winner"
+        ):
+            winner = autotuner.coordinate_descent_tuning(
+                baseline_launcher, *runtime_args
+            )
+
+        self.assertIs(winner, spilling_launcher)
+        self.assertFalse(getattr(baseline, "found_by_coordesc", False))
+        self.assertTrue(spilling.found_by_coordesc)
+
+    def test_autotune_skips_unsafe_hip_launch_before_benchmark(self):
+        unsafe_config = triton.Config({"XBLOCK": 64}, num_warps=8, num_stages=1)
+        safe_config = triton.Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+
+        class Launcher:
+            _is_static = False
+            n_regs = 0
+            n_spills = 0
+            shared = 0
+
+            def __init__(self, triton_config):
+                self.config = triton_config
+                self.cache_hash = str(triton_config)
+
+        unsafe_launcher = Launcher(unsafe_config)
+        safe_launcher = Launcher(safe_config)
+        runtime_args = (123,)
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.device_props = DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=64,
+        )
+        autotuner.launchers = [unsafe_launcher, safe_launcher]
+        autotuner._interpret_args_grid = MagicMock(
+            return_value=(runtime_args, (1 << 23, 1, 1))
+        )
+        autotuner.benchmark_failure_reasons = {
+            safe_launcher: BenchmarkFailureReason.INVALID_CONFIG
+        }
+        autotuner.coordesc_tuner = MagicMock()
+        autotuner.reset_to_zero_args = MagicMock()
+        autotuner.get_device_interface = MagicMock()
+        autotuner.copy_args_to_cpu_if_needed = MagicMock(return_value={})
+        autotuner.custom_kernel = False
+        autotuner.optimize_mem = False
+        autotuner.compile_results = []
+        autotuner.precompile_time_taken_ns = 0
+        autotuner.save_cache_hook = None
+        autotuner.inductor_meta = {"kernel_name": "kernel"}
+        autotuner.compile_id = None
+        autotuner.is_backward = False
+        autotuner.fn = types.SimpleNamespace(__name__="kernel")
+
+        with (
+            patch.object(metrics, "is_metric_table_enabled", return_value=False),
+            patch(
+                "torch._inductor.runtime.triton_heuristics.benchmarker.benchmark",
+                return_value=1.0,
+            ) as benchmark,
+        ):
+            timings = autotuner.benchmark_all_configs(*runtime_args)
+
+        self.assertEqual(timings[unsafe_launcher], float("inf"))
+        self.assertEqual(timings[safe_launcher], 1.0)
+        self.assertEqual(
+            autotuner.benchmark_failure_reasons[unsafe_launcher],
+            BenchmarkFailureReason.UNSAFE_HIP_LAUNCH,
+        )
+        self.assertNotIn(safe_launcher, autotuner.benchmark_failure_reasons)
+        benchmark.assert_called_once()
+
+        autotuner.launchers = [unsafe_launcher]
+        with self.assertRaisesRegex(NoTritonConfigsError, "No valid Triton configs"):
+            autotuner.autotune_to_one_config(*runtime_args)
+
+    def test_autotune_prefers_launch_safe_spilling_config(self):
+        unsafe_config = triton.Config({"XBLOCK": 64}, num_warps=8, num_stages=1)
+        invalid_config = triton.Config({"XBLOCK": 96}, num_warps=4, num_stages=1)
+        spilling_config = triton.Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+
+        class Launcher:
+            _is_static = False
+            n_regs = 0
+            shared = 0
+
+            def __init__(self, config, n_spills):
+                self.config = config
+                self.cache_hash = str(config)
+                self.n_spills = n_spills
+
+        unsafe_launcher = Launcher(unsafe_config, 0)
+        invalid_launcher = Launcher(invalid_config, 0)
+        spilling_launcher = Launcher(spilling_config, 33)
+        runtime_args = (123,)
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.device_props = DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=64,
+        )
+        autotuner.launchers = [
+            unsafe_launcher,
+            invalid_launcher,
+            spilling_launcher,
+        ]
+        autotuner._interpret_args_grid = MagicMock(
+            return_value=(runtime_args, (1 << 23, 1, 1))
+        )
+        autotuner.benchmark_failure_reasons = {}
+        autotuner.coordesc_tuner = MagicMock()
+        autotuner.reset_to_zero_args = MagicMock()
+        autotuner.custom_kernel = False
+        autotuner.optimize_mem = False
+        autotuner.compile_results = []
+        autotuner.precompile_time_taken_ns = 0
+        autotuner.save_cache_hook = None
+        autotuner.inductor_meta = {"kernel_name": "kernel"}
+        autotuner.compile_id = None
+        autotuner.is_backward = False
+        autotuner.fn = types.SimpleNamespace(__name__="kernel")
+
+        def fail_benchmark(candidate, *args, **kwargs):
+            reason = {
+                unsafe_launcher: BenchmarkFailureReason.UNSAFE_HIP_LAUNCH,
+                invalid_launcher: BenchmarkFailureReason.INVALID_CONFIG,
+                spilling_launcher: BenchmarkFailureReason.REGISTER_SPILLING,
+            }[candidate]
+            autotuner.benchmark_failure_reasons[candidate] = reason
+            return float("inf")
+
+        autotuner.bench = MagicMock(side_effect=fail_benchmark)
+
+        with (
+            patch.object(metrics, "is_metric_table_enabled", return_value=False),
+            patch("torch._inductor.runtime.triton_heuristics.TritonBundler.put_winner"),
+        ):
+            autotuner.autotune_to_one_config(*runtime_args)
+
+        self.assertEqual(autotuner.launchers, [spilling_launcher])
+        self.assertEqual(
+            autotuner.benchmark_failure_reasons[unsafe_launcher],
+            BenchmarkFailureReason.UNSAFE_HIP_LAUNCH,
+        )
+        self.assertEqual(
+            autotuner.benchmark_failure_reasons[invalid_launcher],
+            BenchmarkFailureReason.INVALID_CONFIG,
+        )
+        self.assertEqual(
+            autotuner.benchmark_failure_reasons[spilling_launcher],
+            BenchmarkFailureReason.REGISTER_SPILLING,
+        )
+
+    def test_combo_tuning_prefers_launch_safe_spilling_config(self):
+        baseline_config = triton.Config({"XBLOCK": 64}, num_warps=8, num_stages=1)
+        spilling_config = triton.Config({"XBLOCK": 64}, num_warps=4, num_stages=1)
+
+        class Launcher:
+            _is_static = False
+
+            def __init__(self, config):
+                self.config = config
+
+        baseline_launcher = Launcher(baseline_config)
+        spilling_launcher = Launcher(spilling_config)
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {
+            "combo_tuning_groups": [
+                {
+                    "member_indices": [0],
+                    "configs": [baseline_config],
+                    "skip_rblock": False,
+                }
+            ],
+            "combo_grid_meta": {"block_arg_names": []},
+            "combo_warp_stage_candidates": [(4, 1)],
+        }
+        autotuner._ensure_kernel_loaded = MagicMock()
+        autotuner.lock = MagicMock()
+        compile_result = MagicMock()
+        compile_result.make_launcher.return_value = spilling_launcher
+        autotuner._precompile_config = MagicMock(return_value=compile_result)
+        autotuner.benchmark_failure_reasons = {}
+        autotuner.coordesc_tuner = MagicMock()
+        autotuner.autotune_time_taken_ns = 0
+        autotuner.save_cache_hook = None
+        autotuner.fn = types.SimpleNamespace(__name__="kernel")
+
+        def benchmark(candidate, *args, **kwargs):
+            reason = (
+                BenchmarkFailureReason.INVALID_CONFIG
+                if candidate is baseline_launcher
+                else BenchmarkFailureReason.REGISTER_SPILLING
+            )
+            autotuner.benchmark_failure_reasons[candidate] = reason
+            return float("inf")
+
+        autotuner.bench = MagicMock(side_effect=benchmark)
+        autotuner._is_autotune_launcher_launch_safe = MagicMock(
+            side_effect=lambda args, candidate, **kwargs: candidate is spilling_launcher
+        )
+
+        winner = autotuner._combo_sequential_autotune(baseline_launcher, 123)
+
+        self.assertIs(winner, spilling_launcher)
+        self.assertTrue(spilling_config.found_by_combo_autotune)
+
+    def test_autotune_uses_compiled_hip_warp_count(self):
+        config = triton.Config({"XBLOCK": 128}, num_warps=4, num_stages=1)
+        launcher = types.SimpleNamespace(config=config, _launch_num_warps=8)
+        runtime_args = (123,)
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.device_props = DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=1,
+            cc=0,
+            max_threads_per_block=1024,
+            warp_size=64,
+        )
+        autotuner._interpret_args_grid = MagicMock(
+            return_value=(runtime_args, (1 << 23, 1, 1))
+        )
+
+        self.assertTrue(
+            autotuner._is_autotune_candidate_launch_safe(runtime_args, config)
+        )
+        self.assertFalse(
+            autotuner._is_autotune_launcher_launch_safe(runtime_args, launcher)
+        )
+
+    def test_interpret_grid_accepts_keyword_runtime_args(self):
+        config = triton.Config({"XBLOCK": 64}, num_warps=4, num_stages=1)
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"grid_type": "Grid1D"}
+        autotuner.triton_meta = {"signature": {"xnumel": "i64"}}
+        autotuner.grid_mode = "python"
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.triton_version_uses_attrs_dict",
+            return_value=False,
+        ):
+            args, grid = autotuner._interpret_args_grid(
+                (), config, kwargs={"xnumel": 256}
+            )
+
+        self.assertEqual(args, ())
+        self.assertEqual(grid, (4, 1, 1))
 
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(
@@ -183,6 +722,92 @@ class TestTritonHeuristics(TestCase):
         )[0]
         self.assertEqual(cfg.kwargs["XBLOCK"], 512)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 128)
+
+    @parametrize(
+        "major,cc,expected_baseline_configs,expected_scalar_configs",
+        [
+            (
+                8,
+                80,
+                [(1, 2048, 16, 1)],
+                [(1, 4096, 16, 1), (1, 8192, 4, 1), (1, 16384, 8, 1)],
+            ),
+            (
+                10,
+                100,
+                [(1, 1024, 8, 1)],
+                [(1, 4096, 16, 1), (1, 8192, 4, 1), (1, 16384, 8, 1)],
+            ),
+            (
+                10,
+                103,
+                [(1, 1024, 8, 1), (1, 4096, 8, 1)],
+                [
+                    (1, 4096, 16, 1),
+                    (1, 8192, 4, 1),
+                    (1, 16384, 8, 1),
+                    (1, 4096, 8, 1),
+                ],
+            ),
+        ],
+    )
+    def test_scalar_accumulator_reduction_configs(
+        self, major, cc, expected_baseline_configs, expected_scalar_configs
+    ):
+        device = self._fake_cuda_device_properties()._replace(major=major, cc=cc)
+        size_hints = {"x": 128, "r0_": 32768}
+        triton_meta = {"device": device}
+
+        def config_values(autotune_hints):
+            configs = _reduction_configs(
+                size_hints=size_hints,
+                inductor_meta={
+                    "autotune_hints": autotune_hints,
+                    "reduction_hint": ReductionHint.INNER,
+                },
+                triton_meta=triton_meta,
+            )
+            return [
+                (
+                    config.kwargs["XBLOCK"],
+                    config.kwargs["R0_BLOCK"],
+                    config.num_warps,
+                    config.num_stages,
+                )
+                for config in configs
+            ]
+
+        def tiled_block_products(autotune_hints):
+            configs = _reduction_configs(
+                size_hints={"x": 128, "y": 8, "r0_": 32768},
+                inductor_meta={
+                    "autotune_hints": autotune_hints,
+                    "reduction_hint": ReductionHint.INNER,
+                },
+                triton_meta=triton_meta,
+            )
+            return [
+                math.prod(
+                    value
+                    for name, value in config.kwargs.items()
+                    if name.endswith("BLOCK")
+                )
+                for config in configs
+            ]
+
+        self.assertEqual(
+            config_values(set()),
+            expected_baseline_configs,
+        )
+        self.assertEqual(
+            config_values({AutotuneHint.SCALAR_ACCUMULATORS}),
+            expected_scalar_configs,
+        )
+        baseline_rblock = expected_baseline_configs[0][1]
+        self.assertEqual(tiled_block_products(set())[0], baseline_rblock)
+        scalar_tiled_products = tiled_block_products({AutotuneHint.SCALAR_ACCUMULATORS})
+        self.assertEqual(scalar_tiled_products[0], 4096)
+        self.assertIn(baseline_rblock, scalar_tiled_products)
 
     def test_cached_autotune_enforces_reduction_min_block(self):
         def triton_fn(XBLOCK: tl.constexpr, R0_BLOCK: tl.constexpr):
@@ -364,7 +989,12 @@ class TestTritonHeuristics(TestCase):
             tl.store(out_ptr0 + (x0), tmp1, xmask)
 
         triton_meta = {
-            "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
+            "signature": {
+                "in_ptr0": "*fp32",
+                "out_ptr0": "*fp32",
+                "xnumel": "i32",
+                "XBLOCK": "constexpr",
+            },
             "device": DeviceProperties.create(torch.device(GPU_TYPE)),
             "constants": {},
             "configs": [
@@ -438,6 +1068,15 @@ class TestTritonHeuristics(TestCase):
             _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
 
         self.assertTrue(8 in seen_num_elements_per_warp)
+        self.assertEqual(
+            autotune_hints_to_configs(
+                {AutotuneHint.SCALAR_ACCUMULATORS},
+                size_hints,
+                block_size,
+                device_props,
+            ),
+            [],
+        )
 
     @unittest.skipIf(not HAS_WARP_SPEC, "FBCODE Triton is required for this test")
     def test_template_function_ws(self):
@@ -461,6 +1100,58 @@ class TestTritonHeuristics(TestCase):
             configs = mock_cached_autotune.call_args[0][1]
             self.assertEqual(configs[0].num_consumer_groups, num_consumer_groups)
             self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
+
+    @parametrize(
+        "hip_version, tlx_options, expected_kwargs",
+        [
+            (
+                "7.2",
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 0,
+                    "kpack": 1,
+                },
+            ),
+            ("7.2", (), {}),
+            (
+                None,
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                {},
+            ),
+        ],
+    )
+    def test_template_function_preserves_tlx_hip_options(
+        self, hip_version, tlx_options, expected_kwargs
+    ):
+        triton_meta = {
+            "device": MagicMock(),
+            "matrix_instr_nonkdim": 16,
+            "waves_per_eu": 0,
+            "kpack": 1,
+        }
+
+        def capture_configs(_size_hints, configs, **_kwargs):
+            return configs
+
+        with (
+            patch.object(torch.version, "hip", hip_version),
+            patch(
+                "torch._inductor.runtime.triton_heuristics.tlx_only_hip_options",
+                return_value=tlx_options,
+            ),
+            patch(
+                "torch._inductor.runtime.triton_heuristics.cached_autotune",
+                side_effect=capture_configs,
+            ),
+        ):
+            configs = template(
+                num_stages=1,
+                num_warps=4,
+                triton_meta=triton_meta,
+            )
+
+        self.assertEqual(configs[0].kwargs, expected_kwargs)
 
     @runOnRocm
     def test_amd_special_config_args(self):
@@ -487,6 +1178,27 @@ class TestTritonHeuristics(TestCase):
         ref = fn(x)
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
+
+    @runOnRocm
+    def test_rocm_exhaustive_configs_do_not_enumerate_num_stages(self):
+        """ROCmConfigHeuristic._filter_configs forces num_stages to
+        default_num_stages, so enumerating num_stages in exhaustive_configs would
+        only yield duplicates that get deduped again in _finalize_mm_configs.
+        """
+        from torch._inductor.heuristics.template.triton import (
+            GemmConfig,
+            ROCmConfigHeuristic,
+        )
+
+        heuristic = ROCmConfigHeuristic()
+        self.assertEqual(
+            {c.num_stages for c in heuristic.exhaustive_configs},
+            {heuristic.default_num_stages},
+        )
+
+        # the invariant above is only safe because _filter_configs clobbers it
+        filtered = heuristic._filter_configs([GemmConfig(32, 32, 32, 1, 4, group_m=8)])
+        self.assertEqual(filtered[0].num_stages, heuristic.default_num_stages)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
@@ -520,6 +1232,141 @@ class TestTritonHeuristics(TestCase):
                 config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
             )
             self.assertEqual(len(configs), expected_count)
+
+    @runOnRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_flex_default_configs_gated_on_arch_name(self):
+        """A gfx target gets tuned flex defaults only if registered for them.
+
+        get_device_capability() on ROCm reports the gfx major/minor, which
+        neither orders by capability nor identifies the product line, so gating
+        on `>= (9, 5)` also matches gfx1030, gfx1100 and gfx1250 (MI450) and
+        hands them tables measured on gfx950.
+        """
+        from torch._inductor.heuristics.template.triton import ROCmConfigHeuristic
+        from torch._inductor.utils import rocm_gfx_arch
+
+        heuristic = ROCmConfigHeuristic()
+        dtype, head_dim = torch.float16, 128
+
+        # the registries are keyed on the bare target, so the features that
+        # gcnArchName carries ("gfx950:sramecc+:xnack-") have to be stripped
+        self.assertNotIn(":", rocm_gfx_arch())
+        self.assertTrue(
+            torch.cuda.get_device_properties(0).gcnArchName.startswith(rocm_gfx_arch())
+        )
+
+        # stands in for any target that has no measured values of its own, and
+        # gives the fallback to compare against without pinning its values here
+        unregistered = "gfx000"
+        # RDNA3 is deliberately absent: it has its own branch, keyed by sequence
+        # length rather than by target, so it is not part of this dispatch.
+        targets = ("gfx942", "gfx950", "gfx1250", unregistered)
+
+        def configs_for(arch, get_configs):
+            with (
+                patch(
+                    "torch._inductor.heuristics.template.triton.rocm_gfx_arch",
+                    lambda: arch,
+                ),
+                patch(
+                    "torch._inductor.heuristics.template.triton.using_rocm_rdna3",
+                    lambda: False,
+                ),
+            ):
+                return get_configs()
+
+        paths = (
+            (
+                "forward",
+                heuristic.flex_fwd_config_by_arch,
+                lambda: heuristic.get_flex_attn_fwd_configs(
+                    head_dim, sympy.Integer(1024), dtype
+                ),
+            ),
+            (
+                "backward",
+                heuristic.flex_bwd_config_by_arch,
+                lambda: heuristic.get_flex_attn_bwd_configs(head_dim, dtype),
+            ),
+        )
+        for path, registry, get_configs in paths:
+            with self.subTest(path=path):
+                self.assertIn("gfx950", registry)
+                self.assertNotIn(unregistered, registry)
+                fallback = configs_for(unregistered, get_configs)
+                for arch in targets:
+                    configs = configs_for(arch, get_configs)
+                    tuned = registry.get(arch, {}).get((dtype, head_dim))
+                    if tuned is None:
+                        self.assertEqual(configs, fallback, msg=arch)
+                    else:
+                        self.assertEqual(configs, [tuned], msg=arch)
+                        self.assertNotEqual(configs, fallback, msg=arch)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @parametrize(
+        "arch,f16_count,int8_count,int8_kpack",
+        [
+            ("gfx908", 0, 1, 2),
+            ("gfx90a", 0, 1, 2),
+            ("gfx942", 0, 0, 1),
+            ("gfx950", 1, 1, 1),
+        ],
+    )
+    def test_rocm_prune_block_k_underfills_mfma(
+        self, arch, f16_count, int8_count, int8_kpack
+    ):
+        if not torch.version.hip:
+            self.skipTest("ROCm-specific MFMA config pruning")
+        from torch._inductor.heuristics.template.triton import (
+            BaseHeuristicSingleton,
+            GemmConfig,
+            ROCmConfigHeuristic,
+            ROCmGemmConfig,
+        )
+        from torch._inductor.utils import kpack_supported
+
+        with (
+            patch("torch._inductor.utils.rocm_gfx_arch", return_value=arch),
+            patch.object(BaseHeuristicSingleton, "_instances", {}),
+        ):
+            heuristic = ROCmConfigHeuristic()
+            heuristic.should_scale_configs = False
+            self.assertEqual(kpack_supported(), arch != "gfx950")
+
+            def configs_for(mm_configs, dsize):
+                heuristic.mm_configs = mm_configs
+                return list(
+                    heuristic.get_mm_configs()(
+                        1, 256, 128, dtype_size=dsize, op_name="mm"
+                    )
+                )
+
+            underfilled = ROCmGemmConfig(
+                16, 64, 16, 2, 4, group_m=8, matrix_instr_nonkdim=16, kpack=2
+            )
+            valid = ROCmGemmConfig(
+                16, 64, 32, 2, 4, group_m=8, matrix_instr_nonkdim=16, kpack=2
+            )
+            # f16 has kdim=16 on CDNA1/2/3; gfx950 skips underfill pruning.
+            self.assertEqual(len(configs_for([underfilled], 2)), f16_count)
+            self.assertEqual(len(configs_for([valid], 2)), 1)
+
+            # int8 has kdim=16 on CDNA1/2, but kdim=32 on CDNA3.
+            self.assertEqual(len(configs_for([valid], 1)), int8_count)
+
+            # Unknown dtype kdim skips pruning on every target.
+            self.assertEqual(len(configs_for([underfilled], 8)), 1)
+
+            # Implicit kpack is clamped on CDNA3, preserving both int8 configs.
+            int8_configs = [
+                GemmConfig(64, 64, 32, 2, 4),
+                GemmConfig(128, 128, 32, 2, 8),
+            ]
+            configs = configs_for(int8_configs, 1)
+            self.assertEqual(len(configs), len(int8_configs))
+            self.assertEqual([c.kwargs["kpack"] for c in configs], [int8_kpack] * 2)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_compile_time_autotune_not_repeated_at_runtime(self):
@@ -591,10 +1438,6 @@ class TestCachingAutotunerPrecompileDriverSetup(TestCase):
         self.assertEqual(len(autotuner.compile_results), num_configs)
 
 
-# Triton's HIP MLIR pipeline raises AttributeError("'NoneType' object has no
-# attribute '_unflatten_ir'") inside ast_to_ttir for the trivial cos kernel
-# used by these tests. CUDA paths are unaffected.
-@skipIfRocm
 @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
 class TestCachingAutotunerPlugin(TestCase):
     device_type = GPU_TYPE
@@ -1419,6 +2262,37 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         self.assertIs(result, cfg_b)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_autotune_cache_round_trips_maxnreg(self):
+        """
+        Two configs that differ only in maxnreg must survive save + load as
+        themselves: the cached winner must come back capped, not as the
+        uncapped config with the same warps/stages.
+        """
+        from torch._inductor.runtime.autotune_cache import (
+            _load_cached_autotuning,
+            AutotuneCache,
+            AutotuneCacheBundler,
+        )
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        uncapped = triton.Config({"x": 1}, num_warps=4, num_stages=2)
+        capped = triton.Config({"x": 1}, num_warps=4, num_stages=2, maxnreg=64)
+        original_configs = [uncapped, capped]
+        configs_hash = hash_configs(original_configs)
+
+        cache = AutotuneCache(configs_hash)
+        local = MagicMock()
+        cache.local_cache = (local, "key")
+        with patch.object(AutotuneCacheBundler, "put"):
+            cache.save(capped, time_taken_ns=1_000_000)
+        saved = dict(local.put.call_args[0][1])
+        self.assertEqual(saved.get("maxnreg"), 64)
+
+        result = _load_cached_autotuning(saved, configs_hash, original_configs, {})
+        self.assertIs(result, capped)
+        self.assertNotIn("maxnreg", result.kwargs)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):
         """
         When configs_hash doesn't match, _load_cached_autotuning must
@@ -1658,6 +2532,7 @@ class TestMakeLaunchersMemory(TestCase):
             launchers=[],
             compile_results=results,
             triton_meta={"device": 0},
+            device_props=types.SimpleNamespace(type="cuda", index=0),
             inductor_meta={},
             get_device_interface=lambda: None,
             _make_launcher=fake_make_launcher,
