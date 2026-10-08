@@ -390,7 +390,8 @@ c10::SymDimVector _broadcast_shapes(ArrayRef<c10::SymIntArrayRef> shapes) {
       TORCH_SYM_CHECK(
           sym_eq_folded(common, s),
           "Attempting to broadcast a dimension of length ", s, " at ", idx, "! Mismatching argument at index ", arg_idx,
-          " had ", shape, "; but expected shape should be broadcastable to ", c10::SymIntArrayRef(common_shape));
+          " had torch.Size([", c10::Join(", ", shape), "]); but expected shape should be broadcastable to ",
+          c10::SymIntArrayRef(common_shape));
     }
   }
   return common_shape;
