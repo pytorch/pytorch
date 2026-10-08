@@ -2776,7 +2776,13 @@ class TestAutograd(TestCase):
         )
 
     @parametrize(
-        "mapping_cls", [dict, OrderedDict, partial(defaultdict, None), MappingProxyType]
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            partial(defaultdict, None),
+            MappingProxyType,
+        ],
     )
     def test_grad_dict_inputs(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
@@ -2830,7 +2836,13 @@ class TestAutograd(TestCase):
         self.assertEqual(result2["x"], 6 * x)
 
     @parametrize(
-        "mapping_cls", [dict, OrderedDict, partial(defaultdict, None), MappingProxyType]
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            partial(defaultdict, None),
+            MappingProxyType,
+        ],
     )
     def test_grad_dict_inputs_empty(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
@@ -2843,7 +2855,13 @@ class TestAutograd(TestCase):
         )
 
     @parametrize(
-        "mapping_cls", [dict, OrderedDict, partial(defaultdict, None), MappingProxyType]
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            partial(defaultdict, None),
+            MappingProxyType,
+        ],
     )
     def test_backward_dict_inputs(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
@@ -2857,7 +2875,13 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, x + 4 * y)
 
     @parametrize(
-        "mapping_cls", [dict, OrderedDict, partial(defaultdict, None), MappingProxyType]
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            partial(defaultdict, None),
+            MappingProxyType,
+        ],
     )
     def test_backward_dict_inputs_tensor_backward(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
@@ -2870,7 +2894,13 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, x + 4 * y)
 
     @parametrize(
-        "mapping_cls", [dict, OrderedDict, partial(defaultdict, None), MappingProxyType]
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            partial(defaultdict, None),
+            MappingProxyType,
+        ],
     )
     def test_backward_dict_inputs_empty(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)

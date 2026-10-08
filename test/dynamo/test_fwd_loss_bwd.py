@@ -152,7 +152,13 @@ class <lambda>(torch.nn.Module):
 
     @skipIfCrossRef
     @parametrize(
-        "mapping_cls", [dict, OrderedDict, functools.partial(defaultdict, None), MappingProxyType]
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            functools.partial(defaultdict, None),
+            MappingProxyType,
+        ],
     )
     def test_autograd_grad_dict_inputs(self, mapping_cls):
         mod = torch.nn.Linear(4, 4)
@@ -202,7 +208,13 @@ class <lambda>(torch.nn.Module):
 
     @skipIfCrossRef
     @parametrize(
-        "mapping_cls", [dict, OrderedDict, functools.partial(defaultdict, None), MappingProxyType]
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            functools.partial(defaultdict, None),
+            MappingProxyType,
+        ],
     )
     def test_backward_dict_inputs(self, mapping_cls):
         mod = torch.nn.Linear(4, 4)
