@@ -3042,6 +3042,88 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 (1, 3) if cold_cache else (),
             )
 
+    def test_grouped_benchmark_generates_valid_offsets(self):
+        from torch._inductor.autotune_process import TensorMeta
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmBenchmarkRequest,
+        )
+        from torch._inductor.kernel.mm_grouped import (
+            _create_balanced_grouped_mm_offsets,
+        )
+
+        def tensor_meta(dtype, sizes, strides):
+            return TensorMeta(
+                device=torch.device("cpu"),
+                dtype=dtype,
+                sizes=sizes,
+                strides=strides,
+                offset=0,
+            )
+
+        request = NVUniversalGemmBenchmarkRequest(
+            "kernel",
+            [
+                tensor_meta(torch.bfloat16, (32, 16), (16, 1)),
+                tensor_meta(torch.bfloat16, (4, 16, 8), (128, 1, 16)),
+                tensor_meta(torch.int32, (4,), (1,)),
+            ],
+            tensor_meta(torch.bfloat16, (32, 8), (8, 1)),
+            MagicMock(),
+            torch.float32,
+            GemmVariant.GROUPED_GEMM,
+        )
+        a = torch.randn(32, 16, dtype=torch.bfloat16)
+        b = torch.randn(4, 16, 8, dtype=torch.bfloat16)
+        offsets = torch.tensor([0, 8, 24, 32], dtype=torch.int32)
+        out = torch.empty(32, 8, dtype=torch.bfloat16)
+        device_interface = MagicMock()
+        request._benchmark_on_current_device = MagicMock(return_value=1.25)
+
+        with patch(
+            "torch._dynamo.device_interface.get_interface_for_device",
+            return_value=device_interface,
+        ):
+            self.assertEqual(request.benchmark(a, b, offsets, out=out), 1.25)
+            passed_inputs, passed_out = (
+                request._benchmark_on_current_device.call_args.args
+            )
+            self.assertIsNot(passed_inputs[0], a)
+            self.assertIsNot(passed_inputs[1], b)
+            self.assertIsNot(passed_inputs[2], offsets)
+            self.assertEqual(
+                passed_inputs[2], torch.tensor([8, 16, 24, 32], dtype=torch.int32)
+            )
+            self.assertIs(passed_out, out)
+
+            request.input_tensor_meta = [
+                tensor_meta(torch.bfloat16, (13, 16), (16, 1)),
+                tensor_meta(torch.bfloat16, (20, 16, 8), (128, 1, 16)),
+                tensor_meta(torch.int32, (20,), (1,)),
+            ]
+            request.output_tensor_meta = tensor_meta(torch.bfloat16, (13, 8), (8, 1))
+            request._benchmark_on_current_device.reset_mock()
+            self.assertEqual(request.benchmark(), 1.25)
+            generated_inputs, _ = request._benchmark_on_current_device.call_args.args
+            generated_offsets = generated_inputs[2]
+            self.assertEqual(generated_offsets, generated_offsets.cummax(0).values)
+            self.assertEqual(
+                generated_offsets[:-1] % 8, torch.zeros(19, dtype=torch.int32)
+            )
+            self.assertEqual(generated_offsets[-1], 13)
+
+        large_total = 2**24 + 3
+        large_offsets = _create_balanced_grouped_mm_offsets(
+            large_total, 3, 8, torch.int32, torch.device("cpu")
+        )
+        self.assertEqual(large_offsets[-1], large_total)
+        self.assertEqual(large_offsets, large_offsets.cummax(0).values)
+        self.assertEqual(
+            _create_balanced_grouped_mm_offsets(
+                31, 4, 8, torch.int32, torch.device("cpu")
+            ),
+            torch.tensor([8, 16, 24, 31], dtype=torch.int32),
+        )
+
     def test_worker_precompile_preserves_logical_m_for_swap_ab(self):
         from torch._inductor.autotune_process import TensorMeta
         from torch._inductor.codegen.nv_universal_gemm import nv_universal_gemm_kernel

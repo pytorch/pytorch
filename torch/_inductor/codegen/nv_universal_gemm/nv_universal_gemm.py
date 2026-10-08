@@ -164,16 +164,26 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
     ) -> float:
         """Benchmark the NVIDIA Universal GEMM kernel.
 
-        Override the base class to always create tensors from input_tensor_meta.
-        This is necessary because input_nodes may be ReinterpretViews that share
-        the same underlying buffer name. The autotuning framework deduplicates
-        inputs by name (in AlgorithmSelectorCache.get_inputs()), resulting in
-        fewer tensors than expected. By always creating from input_tensor_meta,
-        we ensure each input gets its own tensor with the correct size/stride/offset
-        from the view's layout.
-
+        Inputs are reconstructed because aliased views may be deduplicated by the
+        autotuner. Grouped GEMM replaces random offsets with valid balanced values.
         """
         input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
+        if self.variant == GemmVariant.GROUPED_GEMM:
+            from torch._inductor.kernel.mm_grouped import (
+                _create_balanced_grouped_mm_offsets,
+            )
+
+            offsets_meta = self.input_tensor_meta[-1]
+            input_tensors = (
+                *input_tensors[:-1],
+                _create_balanced_grouped_mm_offsets(
+                    self.input_tensor_meta[0].sizes[0],
+                    offsets_meta.sizes[0],
+                    16 // self.input_tensor_meta[0].dtype.itemsize,
+                    offsets_meta.dtype,
+                    offsets_meta.device,
+                ),
+            )
         if out is None:
             out = self.output_tensor_meta.to_tensor()
 
