@@ -9,41 +9,40 @@
 `torch.distributed._symmetric_memory` is currently in alpha state and under
 development. Its Python APIs and every operator in `torch.ops.symm_mem` may
 change without notice. A dispatcher-visible operator is not necessarily a
-user-facing API. The status table below identifies which operators are intended
-for direct use and which are implementation details.
+user-facing API. The maturity table below identifies which operators are
+intended for direct use and which are implementation details.
 :::
 
 ## API status and operator guide
 
-The status labels below describe how an operator is intended to be used *within
-the alpha API*. They are not backward-compatibility guarantees:
+The module-level alpha label applies to every operator intended for direct use.
+The table separates maturity from runtime scope so that hardware or backend
+requirements are not presented as a lower maturity level. These classifications
+summarize the current implementations and tests; they do not establish new
+project-wide PyTorch stability levels or backward-compatibility guarantees:
 
-- **Supported alpha** operators have general-purpose interfaces and regular
-  correctness coverage. They are the preferred Symmetric Memory building
-  blocks, but are not stable APIs yet.
-- **Specialized alpha** operators have narrower hardware, backend, dtype, or
-  layout requirements. Validate them on the target system before depending on
-  them.
-- **Experimental** operators are incomplete or primarily compiler-facing. Use
-  them only when you can tolerate interface and support changes.
-- **Internal** operators are compiler targets or implementation details. They
-  have no compatibility guarantee and should not be called directly.
+- **Alpha** identifies operators intended for direct use under the module-wide
+  alpha disclaimer.
+- **Experimental** identifies especially incomplete or compiler-oriented
+  interfaces that may change rapidly.
+- **Internal** identifies compiler targets or implementation details that
+  should not be called directly.
 
-| Operations | Status | When to use them |
-| --- | --- | --- |
-| `empty`, `rendezvous`, `get`, and `get_mem_pool` | Supported alpha | Allocate, establish, access, and reuse symmetric memory. |
-| `fused_all_gather_matmul` and `fused_matmul_reduce_scatter` | Supported alpha | Overlap an unscaled matrix multiplication with a tensor-parallel collective. Ordinary accelerator tensors are accepted; the operators manage a symmetric workspace. These are also targets of the compiler's tensor-parallel fusion pass. |
-| `fused_all_gather_scaled_matmul` and `fused_scaled_matmul_reduce_scatter` | Experimental | FP8 or other scaled matrix multiplication when the accelerator supports `aten._scaled_mm`. Their interfaces closely follow compiler lowering requirements. |
-| `one_shot_all_reduce`, `one_shot_all_reduce_out`, and `two_shot_all_reduce_` | Supported alpha | Low-latency, direct-access all-reduce on a symmetric tensor. |
-| `multimem_all_reduce_` and `multimem_all_gather_out` | Specialized alpha | NVIDIA systems with multicast and multimem support, such as NVLink SHARP. |
-| `multimem_one_shot_all_reduce`, `multimem_one_shot_all_reduce_out`, and `multimem_one_shot_reduce_out` | Experimental | Compiler-oriented multimem variants. Their reduction order is not fixed, so all ranks are not guaranteed to receive bitwise-identical results. |
-| `get_remote_tensors` | Specialized alpha | Create local tensor views of peer allocations when every peer is directly addressable. The views require explicit cross-rank synchronization. |
-| `nvshmem_*`, `all_to_all_vdev*`, `tile_reduce`, and `multi_root_tile_reduce` | Specialized alpha | NVSHMEM or rocSHMEM transport and device-driven collectives. Availability differs by operation and SHMEM implementation. |
-| `reduce_scatter_offset` and `all_to_all_nd` | Specialized alpha | NCCL-backend routing and multidimensional all-to-all. |
-| `put_signal` and `wait_signal` | Experimental | One-sided signaling; currently implemented only for the NCCL backend. |
-| `_low_contention_*`, `_async_input_mm`, `_rendezvous`, and `_barrier` | Internal | Compiler and dispatcher implementation details. |
-| `one_shot_all_reduce_copy`, `one_shot_all_reduce_copy_out`, `two_shot_all_reduce_out`, and `reduce_scatter_out` | Internal | Compiler buffer-planning variants. Use the documented allocating or in-place operator instead. |
-| `stream_write_value32_`, `memset32_`, `memcpy_to_multicast_`, and raw `nccl_*` operators | Internal | Kernel composition or backend dispatch. Use a documented Python wrapper instead. |
+| Operations | Maturity | Scope or requirements | When to use them |
+| --- | --- | --- | --- |
+| `empty`, `rendezvous`, `get`, and `get_mem_pool` | Alpha | General | Allocate, establish, access, and reuse symmetric memory. |
+| `fused_all_gather_matmul` and `fused_matmul_reduce_scatter` | Alpha | General | Overlap an unscaled matrix multiplication with a tensor-parallel collective. Ordinary accelerator tensors are accepted; the operators manage a symmetric workspace. These are also targets of the compiler's tensor-parallel fusion pass. |
+| `fused_all_gather_scaled_matmul` and `fused_scaled_matmul_reduce_scatter` | Experimental | Hardware-specific | FP8 or other scaled matrix multiplication when the accelerator supports `aten._scaled_mm`. Their interfaces closely follow compiler lowering requirements. |
+| `one_shot_all_reduce`, `one_shot_all_reduce_out`, and `two_shot_all_reduce_` | Alpha | Hardware-specific | Low-latency, direct-access all-reduce on a symmetric tensor. |
+| `multimem_all_reduce_` and `multimem_all_gather_out` | Alpha | Hardware-specific | NVIDIA systems with multicast and multimem support, such as NVLink SHARP. |
+| `multimem_one_shot_all_reduce`, `multimem_one_shot_all_reduce_out`, and `multimem_one_shot_reduce_out` | Experimental | Hardware-specific | Compiler-oriented multimem variants. Their reduction order is not fixed, so all ranks are not guaranteed to receive bitwise-identical results. |
+| `get_remote_tensors` | Alpha | Hardware-specific | Create local tensor views of peer allocations when every peer is directly addressable. The views require explicit cross-rank synchronization. |
+| `nvshmem_*`, `all_to_all_vdev*`, `tile_reduce`, and `multi_root_tile_reduce` | Alpha | Backend-specific | NVSHMEM or rocSHMEM transport and device-driven collectives. Availability differs by operation and SHMEM implementation. |
+| `reduce_scatter_offset` and `all_to_all_nd` | Alpha | Backend-specific | NCCL-backend routing and multidimensional all-to-all. |
+| `put_signal` and `wait_signal` | Experimental | Backend-specific | One-sided signaling; currently implemented only for the NCCL backend. |
+| `_low_contention_*`, `_async_input_mm`, `_rendezvous`, and `_barrier` | Internal | Compiler-facing | Compiler and dispatcher implementation details. |
+| `one_shot_all_reduce_copy`, `one_shot_all_reduce_copy_out`, `two_shot_all_reduce_out`, and `reduce_scatter_out` | Internal | Compiler-facing | Compiler buffer-planning variants. Use the documented allocating or in-place operator instead. |
+| `stream_write_value32_`, `memset32_`, `memcpy_to_multicast_`, and raw `nccl_*` operators | Internal | Backend implementation | Kernel composition or backend dispatch. Use a documented Python wrapper instead. |
 
 The scaled fused operators, hardware-specific collectives, and internal
 operators are the least portable parts of the surface. In particular, do not
