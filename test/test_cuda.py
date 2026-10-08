@@ -311,6 +311,7 @@ class TestAmdSmiImport(TestCase):
                     timeout=90,
                 )
 
+    @unittest.skipIf(not IS_LINUX, "requires /proc/self/maps and ELF shared libraries")
     def test_amdsmi_versioned_library_path_is_preserved(self):
         proc = self._run_amdsmi_import(
             """\
@@ -326,6 +327,7 @@ ctypes.CDLL(os.environ["AMDSMI_TEST_LIBRARY"])
         self.assertEqual(proc.stdout.splitlines()[:2], ["False", "OSError"])
         self.assertIn("libamd_smi.so.27", proc.stdout)
 
+    @unittest.skipIf(not IS_LINUX, "requires /proc/self/maps and ELF shared libraries")
     def test_amdsmi_explicit_unversioned_path_is_redirected(self):
         proc = self._run_amdsmi_import(
             """\
@@ -344,6 +346,7 @@ if os.fspath(library._name) == os.environ["AMDSMI_TEST_LIBRARY"]:
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.splitlines()[:2], ["True", "NoneType"])
 
+    @unittest.skipIf(not IS_LINUX, "requires /proc/self/maps and ELF shared libraries")
     def test_amdsmi_bare_unversioned_path_uses_loader_first(self):
         proc = self._run_amdsmi_import(
             """\
