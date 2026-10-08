@@ -526,6 +526,8 @@ aten::_philox_uniform.out
 aten::_philox_uniform_
 aten::_pin_memory
 aten::_pin_memory.out
+aten::_quantize_tensor
+aten::_quantize_tensor_dual
 aten::_reshape_alias_copy
 aten::_reshape_alias_copy.out
 aten::_reshape_copy
