@@ -228,6 +228,28 @@ Tensor amaxamin_jvp(
   return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
 }
 
+Tensor ldexp_jvp(
+    const Tensor& self_t,
+    const Tensor& other_t,
+    const Tensor& other_p,
+    const Tensor& result) {
+  // Short-circuit zerotensor tangents so AOTAutograd's traced forward graph
+  // does not record a _efficientzerotensor + mul chain that crashes on replay
+  // (gh-197086).
+  Tensor out;
+  if (!self_t._is_zerotensor()) {
+    out = self_t * at::pow(2.0, other_p);
+  }
+  if (!other_t._is_zerotensor()) {
+    auto other_term = other_t * result * M_LN2;
+    out = out.defined() ? out + other_term : other_term;
+  }
+  if (!out.defined()) {
+    out = at::zeros_symint(result.sym_sizes(), result.options());
+  }
+  return out;
+}
+
 // Builds the dims vector for aminmax: all dims when dim is nullopt,
 // or the single wrapped dim otherwise.
 static std::vector<int64_t> _aminmax_dims(

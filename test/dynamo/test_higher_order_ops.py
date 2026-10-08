@@ -5886,6 +5886,29 @@ class GraphModule(torch.nn.Module):
         actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
+    def test_jvp_ldexp_aot_eager(self):
+        # gh-197086: ldexp.Tensor forward-mode derivative crashed under
+        # torch.compile(backend="aot_eager") when the exponent had no
+        # user-supplied tangent.
+        counters.clear()
+        for e_dtype in (torch.float32, torch.int64):
+            torch.manual_seed(0)
+            e = torch.randint(-3, 3, (3, 4)).to(e_dtype)
+
+            def fn(x):
+                return torch.ldexp(x, e)
+
+            def wrapper_fn(x, t):
+                return torch.func.jvp(fn, (x,), (t,))
+
+            x = torch.randn(3, 4)
+            t = torch.randn(3, 4)
+            expected = wrapper_fn(x, t)
+            actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(
+                x, t
+            )
+            self.assertEqual(actual, expected)
+
     def test_jvp_jvp(self):
         counters.clear()
 

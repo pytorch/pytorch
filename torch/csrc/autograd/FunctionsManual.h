@@ -859,6 +859,11 @@ Tensor amaxamin_jvp(
     const Tensor& result,
     IntArrayRef dim,
     bool keepdim);
+Tensor ldexp_jvp(
+    const Tensor& self_t,
+    const Tensor& other_t,
+    const Tensor& other_p,
+    const Tensor& result);
 Tensor aminmax_backward(
     const at::Tensor& self,
     std::optional<int64_t> dim,

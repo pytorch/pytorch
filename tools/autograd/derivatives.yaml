@@ -928,7 +928,7 @@
 - name: ldexp.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad * at::pow(2, other).conj()
   other: grad * result.conj() * M_LN2
-  result: self_t * at::pow(2, other_p) + other_t * result * M_LN2
+  result: ldexp_jvp(self_t, other_t, other_p, result)
 
 - name: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
