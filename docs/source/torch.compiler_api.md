@@ -85,6 +85,8 @@ distinct from `torch._dynamo.config.caching_precompile` (a `torch.compile` cachi
 
 .. autoclass:: torch.compiler.precompile.MakeFxTracer
 
+.. autoclass:: torch.compiler.precompile.DynamoTracer
+
 .. autoclass:: torch.compiler.precompile.Capture
    :members: save
 
