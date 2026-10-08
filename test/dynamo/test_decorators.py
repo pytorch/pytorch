@@ -151,6 +151,48 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(inner(x), x + 1)
             self.assertEqual(inner(x), x + 1)
 
+    def test_compiled_graph_honors_eager_on_recompile_stance(self):
+        # Compiled graphs use a C disable wrapper; it must run the graph under
+        # the same callback as the Python disable() would for the stance.
+        callbacks = []
+
+        def backend(gm, example_inputs):
+            def compiled_fn(*args):
+                callbacks.append(torch._C._dynamo.eval_frame.get_eval_frame_callback())
+                return gm(*args)
+
+            return compiled_fn
+
+        @torch.compile(backend=backend)
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(4)
+        fn(x)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            fn(x)
+        fn(x)
+
+        self.assertEqual(callbacks, [None, False, None])
+
+    def test_compiled_graph_module_runs_hooks(self):
+        # A backend may return an nn.Module; disable() must still call it via
+        # Module.__call__ so its hooks run.
+        hook_calls = []
+
+        def backend(gm, example_inputs):
+            gm.register_forward_hook(lambda *args: hook_calls.append(1))
+            return gm
+
+        @torch.compile(backend=backend)
+        def fn(x):
+            return x + 1
+
+        fn(torch.randn(4))
+        fn(torch.randn(4))
+
+        self.assertEqual(len(hook_calls), 2)
+
     def test_disable_ignores_outer_wraps(self):
         def orig_inner():
             pass
