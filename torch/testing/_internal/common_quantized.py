@@ -823,39 +823,6 @@ def to_mxfp(
     rounding_mode: str = "rtne",
     random_key: torch.Tensor | None = None,
 ):
-    r"""to_mxfp(data_hp, block_size=32, format="mxfp8",
-    swizzle_type=SwizzleType.NO_SWIZZLE, *, rounding_mode="rtne",
-    random_key=None) -> tuple[Tensor, Tensor]
-
-    Quantize a tensor to MXFP8 or MXFP4, returning ``(scales, qdata)``.
-
-    Args:
-        data_hp (Tensor): Contiguous input whose last dimension is divisible
-          by ``block_size``.
-        block_size (int, optional): Number of values per scale. Default: ``32``.
-        format (str, optional): ``"mxfp8"`` or ``"mxfp4"``. Default: ``"mxfp8"``.
-        swizzle_type (SwizzleType, optional): Scale layout. Default:
-          ``SwizzleType.NO_SWIZZLE``.
-        rounding_mode (str, optional): ``"rtne"`` or ``"stochastic"``. The
-          latter emulates NVIDIA E4M3 rounding and requires MXFP8 blocks of 32
-          values. Default: ``"rtne"``.
-        random_key (Tensor, optional): A two-element ``uint64`` Philox key on
-          the input device for stateless stochastic rounding. With
-          ``rounding_mode="stochastic"`` and no key, use the default CUDA
-          generator instead. Default: ``None``.
-
-    Returns:
-        tuple[Tensor, Tensor]: E8M0 scales and quantized data. Swizzled scales
-        are returned as a flattened buffer.
-
-    Examples::
-
-        >>> import torch
-        >>> from torch.testing._internal.common_quantized import to_mxfp
-        >>> input = torch.randn(4, 32, dtype=torch.bfloat16)
-        >>> key = torch.func._random.key(7)
-        >>> scales, qdata = to_mxfp(input, rounding_mode="stochastic", random_key=key)
-    """
     if swizzle_type not in (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4):
         raise ValueError(f"unsupported MXFP swizzle type: {swizzle_type}")
     if rounding_mode not in ("rtne", "stochastic"):

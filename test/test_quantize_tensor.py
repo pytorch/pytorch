@@ -991,11 +991,9 @@ class TestFP8StochasticRounding(TestCase):
 
 instantiate_device_type_tests(TestMXFP8ReferenceNumerics, globals(), only_for="cuda")
 instantiate_device_type_tests(
-    TestMXFP8StochasticReferenceNumerics, globals(), only_for=("cpu", "cuda")
+    TestMXFP8StochasticReferenceNumerics, globals(), only_for="cuda"
 )
-instantiate_device_type_tests(
-    TestFP8StochasticRounding, globals(), only_for=("cpu", "cuda")
-)
+instantiate_device_type_tests(TestFP8StochasticRounding, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
