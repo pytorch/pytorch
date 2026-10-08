@@ -558,6 +558,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.cpp",
     "torch/csrc/distributed/fsdp/ChunkCat.cpp",
+    "torch/csrc/distributed/fsdp/CollectiveCopy.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
