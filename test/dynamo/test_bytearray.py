@@ -310,6 +310,46 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         invalid = self.type2test(b"\xffabc")
         self.assertEqual(invalid.decode(errors="replace"), "\ufffdabc")
 
+    @make_dynamo_test
+    def test_upper(self):
+        b = self.type2test(b"hello world")
+        self.assertEqual(b.upper(), self.type2test(b"HELLO WORLD"))
+        # Non-ASCII bytes are unchanged (ASCII-only case mapping)
+        b2 = self.type2test(b"\xff\xfeabc")
+        self.assertEqual(b2.upper(), self.type2test(b"\xff\xfeABC"))
+        self.assertRaises(TypeError, lambda: b.upper(1))
+
+    @make_dynamo_test
+    def test_lower(self):
+        b = self.type2test(b"HELLO WORLD")
+        self.assertEqual(b.lower(), self.type2test(b"hello world"))
+        b2 = self.type2test(b"\xff\xfeABC")
+        self.assertEqual(b2.lower(), self.type2test(b"\xff\xfeabc"))
+        self.assertRaises(TypeError, lambda: b.lower(1))
+
+    @make_dynamo_test
+    def test_title(self):
+        b = self.type2test(b"hello world")
+        self.assertEqual(b.title(), self.type2test(b"Hello World"))
+        b2 = self.type2test(b"they're bill's friends")
+        self.assertEqual(b2.title(), self.type2test(b"They'Re Bill'S Friends"))
+        self.assertRaises(TypeError, lambda: b.title(1))
+
+    def test_input_bytearray_upper_lower_title(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.upper(), ba.lower(), ba.title()
+
+        self.assertEqual(
+            fn(bytearray(b"hello world")),
+            (
+                bytearray(b"HELLO WORLD"),
+                bytearray(b"hello world"),
+                bytearray(b"Hello World"),
+            ),
+        )
+
+
     def test_input_bytearray_hex_decode(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):

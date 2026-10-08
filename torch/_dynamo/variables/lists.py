@@ -2398,11 +2398,65 @@ class ByteArrayVariable(VariableTracker):
             raise_observed_exception(type(e), tx, args=list(e.args))
         return ConstantVariable.create(result)
 
+    def _bytearray_case_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        method_name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # upper(), lower() and title() take no arguments. Convert any passed
+        # args/kwargs to constants so the real method raises the exact
+        # CPython TypeError; decline (graph break) when they are not
+        # constants instead of inlining the C method descriptor
+        # (same as bytearray_hex/decode/find above).
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            result = getattr(self.data, method_name)(*const_args, **const_kwargs)
+        except TypeError as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ByteArrayVariable(
+            result,
+            source=None,
+            mutation_type=ValueMutationNew() if self.mutation_type else None,
+        )
+
+    def bytearray_upper(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "upper", args, kwargs)
+
+    def bytearray_lower(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "lower", args, kwargs)
+
+    def bytearray_title(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "title", args, kwargs)
+
     tp_methods = {
         "index": Method(bytearray_index),
         "count": Method(bytearray_count),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
+        "upper": Method(bytearray_upper),
+        "lower": Method(bytearray_lower),
+        "title": Method(bytearray_title),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
