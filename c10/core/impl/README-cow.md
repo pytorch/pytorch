@@ -89,11 +89,14 @@ stream would need synchronization (`recordStream` or host blocking), which
 we avoid; such materializations raise an error instead. Therefore,
 `Allocator::copy_data` must enqueue the copy on the current stream.
 
-A lazy clone may be made on a stream other than the one the data was
-allocated on (e.g., when warming up for CUDA graph capture on a side
-stream). Until it is materialized, its uses on that stream count as uses
-of the original allocation on a side stream: as usual, they must be
-synchronized with the allocation stream before the allocation is freed.
+Until it is materialized, a lazy clone keeps using the original
+allocation. If it was made on a stream other than the one that allocation
+belongs to (e.g., a copy made for a communication stream, or when warming
+up for CUDA graph capture on a side stream), its uses on that stream would
+race with reuse of the allocation once the original is freed, which an
+eager clone wouldn't. So outside of capture, lazily cloning on such a
+stream clones eagerly instead, and all lazy copies of some data share the
+stream its memory was allocated on.
 
 When the last reference steals the data instead of copying it, it writes
 to the data on the current stream, which has to come after copies of the

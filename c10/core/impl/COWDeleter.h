@@ -85,7 +85,7 @@ class C10_API COWDeleterContext {
 // The `ctx` of a COW DataPtr. There is one of these per DataPtr, while the
 // COWDeleterContext is shared by all lazy copies of the same data.
 struct COWReference {
-  COWDeleterContext* context;
+  COWDeleterContext* context = nullptr;
   // For a lazy clone, the stream that was current when the clone was made.
   // The clone has the semantics of a clone() enqueued on this stream, so it
   // may only be materialized by copying on this stream. Unset for the storage
