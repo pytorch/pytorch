@@ -871,7 +871,11 @@ def _codegen_compiled_fn_invocation(
     trace_joint: bool,
     indices_of_inps_to_detach: list[int],
     disable_amp: bool,
+    boxed: bool,
 ) -> None:
+    # Call an unboxed compiled_fn (e.g. CompiledFunction.apply) directly rather
+    # than through make_boxed_func's extra frame.
+    star = "" if boxed else "*"
     buf.emit("with _first_ctx_():", indent=1)
     # trace_joint is known at codegen time. Only the joint/training path needs
     # forced view replay; inference wrappers should not touch this TLS state.
@@ -897,10 +901,10 @@ def _codegen_compiled_fn_invocation(
         if disable_amp:
             buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
             buf.emit("with _DisableAutocast_():", indent=3)
-            buf.emit("all_outs = _compiled_fn_(args_)", indent=4)
+            buf.emit(f"all_outs = _compiled_fn_({star}args_)", indent=4)
             _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
         else:
-            buf.emit("all_outs = _compiled_fn_(args_)", indent=3)
+            buf.emit(f"all_outs = _compiled_fn_({star}args_)", indent=3)
             _codegen_normalize_as_list(buf, "all_outs", indent_level=3)
         buf.emit("finally:", indent=2)
         buf.emit(
@@ -918,10 +922,10 @@ def _codegen_compiled_fn_invocation(
         if disable_amp:
             buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
             buf.emit("with _DisableAutocast_():", indent=3)
-            buf.emit("all_outs = _compiled_fn_(args)", indent=4)
+            buf.emit(f"all_outs = _compiled_fn_({star}args)", indent=4)
             _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
         else:
-            buf.emit("all_outs = _compiled_fn_(args)", indent=3)
+            buf.emit(f"all_outs = _compiled_fn_({star}args)", indent=3)
             _codegen_normalize_as_list(buf, "all_outs", indent_level=3)
         buf.emit("finally:", indent=2)
         buf.emit("if grad_enabled: torch._C._set_grad_enabled(True)", indent=3)
@@ -1182,8 +1186,9 @@ def _create_runtime_wrapper(
 
     _codegen_capture_orig_inputs(buf, epilogue_args_idx)
     _codegen_increment_mutation_versions(buf, keep_input_mutations, runtime_metadata)
+    boxed = getattr(compiled_fn, "_boxed_call", False)
     _codegen_compiled_fn_invocation(
-        buf, trace_joint, indices_of_inps_to_detach, disable_amp
+        buf, trace_joint, indices_of_inps_to_detach, disable_amp, boxed
     )
     _codegen_epilogue(
         buf,
@@ -1196,7 +1201,7 @@ def _create_runtime_wrapper(
 
     _codegen_runtime_wrapper = buf.build()
 
-    _inner_compiled_fn = compiled_invoker.compiled_fn
+    _inner_compiled_fn = compiled_fn
     _first_invocation_ctx = compiled_invoker.first_invocation_ctx
 
     @simple_wraps(_inner_compiled_fn)
@@ -3260,7 +3265,7 @@ def _codegen_compiled_forward(
 
     buf = PySourceBuilder(
         "_compiled_forward",
-        args="ctx, args, _rng_add_, _save_, _finalize_, _compiled_fw_",
+        args="ctx, args, _rng_add_, _save_, _compiled_fw_",
         artifact_name="compiled_function_forward",
     )
     buf.bind(torch=torch, BackwardState=BackwardState)
@@ -3291,9 +3296,90 @@ def _codegen_compiled_forward(
             _codegen_normalize_as_list(buf, "fw_outs", indent_level=1)
 
         buf.writeline("_save_(ctx, fw_outs)")
-        buf.writeline("return _finalize_(ctx, fw_outs)")
+        _codegen_forward_finalize(buf, fw_metadata)
 
     return buf.build()
+
+
+def _codegen_forward_finalize(
+    buf: "PySourceBuilder", fw_metadata: ViewAndMutationMeta
+) -> None:
+    """Codegen'd _AutogradForwardEpilogue.finalize, with all indices resolved at
+    compile time."""
+    num_mutated_runtime_inps = fw_metadata.num_mutated_inp_runtime_indices
+    num_outputs = fw_metadata.num_outputs
+    num_outputs_aliased = fw_metadata.num_outputs_aliased
+    buf.bind(TensorAlias=TensorAlias, Tensor=Tensor)
+
+    buf.writeline(f"raw_returns = fw_outs[:{fw_metadata.num_forward_returns}]")
+    for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
+        info = fw_metadata.input_info[idx]
+        if info.mutates_metadata and not info.mutates_data:
+            buf.writeline(f"raw_returns[{i}] = TensorAlias(raw_returns[{i}])")
+
+    for idx in fw_metadata.unsafe_view_out_indices:
+        ri = num_mutated_runtime_inps + idx
+        buf.writeline(f"_o = raw_returns[{ri}]")
+        buf.writeline(f"raw_returns[{ri}] = torch.ops.aten._unsafe_view(_o, _o.shape)")
+
+    for idx in fw_metadata.aliased_out_indices:
+        ri = num_mutated_runtime_inps + idx
+        buf.writeline(f"raw_returns[{ri}] = TensorAlias(raw_returns[{ri}])")
+
+    if config.debug_assert:
+        if num_mutated_runtime_inps > 0:
+            num_mut_inp_infos = sum(
+                x.mutates_data or x.mutates_metadata for x in fw_metadata.input_info
+            )
+            mutated = f"raw_returns[:{num_mutated_runtime_inps}]"
+            buf.writeline(f"if len({mutated}) != {num_mut_inp_infos}:")
+            with buf.indent():
+                buf.writeline(
+                    "raise AssertionError(f'expected len(user_mutated_inputs_raw) == "
+                    f"len(mut_inp_infos), got {{len({mutated})}} != {num_mut_inp_infos}')"
+                )
+        if num_outputs_aliased > 0:
+            intermediates = f"raw_returns[{num_mutated_runtime_inps + num_outputs}:]"
+            buf.writeline(
+                f"if any(isinstance(x, TensorAlias) for x in {intermediates}):"
+            )
+            with buf.indent():
+                buf.writeline(
+                    "raise AssertionError('expected no TensorAlias in intermediates_raw')"
+                )
+
+    # Intermediate bases always require grad, so only mutated inputs and
+    # outputs can be non-differentiable.
+    returns_meta = [
+        x
+        for x in fw_metadata.input_info
+        if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
+    ] + list(fw_metadata.output_info)
+    non_diff_indices = [
+        i
+        for i, meta in enumerate(returns_meta)
+        if i < num_mutated_runtime_inps + num_outputs and not meta.requires_grad
+    ]
+    if non_diff_indices:
+        checks = " + ".join(
+            f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
+            for i in non_diff_indices
+        )
+        buf.writeline(f"non_diff = {checks}")
+        buf.writeline("if non_diff:")
+        with buf.indent():
+            buf.writeline("ctx.mark_non_differentiable(*non_diff)")
+    buf.writeline("ctx._materialize_non_diff_grads = False")
+
+    # The registry is only ever mutated in place, so binding it is safe.
+    buf.bind(
+        _external_refs_=index_to_external_object_weakref,
+        _snapshot_external_objects_=_snapshot_external_objects,
+    )
+    buf.writeline("if _external_refs_:")
+    with buf.indent():
+        buf.writeline("_snapshot_external_objects_(ctx)")
+    buf.writeline("return tuple(raw_returns)")
 
 
 def _codegen_save_from_forward(fw_metadata: ViewAndMutationMeta) -> Callable[..., Any]:
@@ -3455,7 +3541,6 @@ class _AOTDispatchAutogradFunctionFactory:
         self.spec.fw_metadata.compile_id_str = compile_id_str
 
         saved_state = _AutogradSavedState(self.spec.fw_metadata)
-        forward_epilogue = _AutogradForwardEpilogue(self.spec.fw_metadata)
         rng_state = _AutogradRngStateTracker(
             num_rng=self.spec.fw_metadata.num_graphsafe_rng_states,
             graphsafe_idx=self.spec.fw_metadata.graphsafe_rng_state_index,
@@ -3516,104 +3601,6 @@ class _AOTDispatchAutogradFunctionFactory:
             any(inp.requires_grad for inp in fw_metadata.input_info),
         )
 
-        # Codegen for CompiledFunction.forward: emit straight-line TensorAlias
-        # wrapping, _unsafe_view, and non-differentiable output collection with
-        # all indices resolved at compile time.
-        num_mutated_runtime_inps = fw_metadata.num_mutated_inp_runtime_indices
-        num_outputs = fw_metadata.num_outputs
-        num_outputs_aliased = fw_metadata.num_outputs_aliased
-
-        from .codegen import PySourceBuilder
-
-        buf = PySourceBuilder(
-            "_transform_raw_returns",
-            args="raw_returns",
-            artifact_name="compiled_fn_wrapper",
-        )
-        buf.bind(TensorAlias=TensorAlias, torch=torch, Tensor=Tensor)
-
-        with buf.indent():
-            for i, idx in enumerate(fw_metadata.mutated_inp_runtime_indices):
-                info = fw_metadata.input_info[idx]
-                if info.mutates_metadata and not info.mutates_data:
-                    buf.writeline(f"raw_returns[{i}] = TensorAlias(raw_returns[{i}])")
-
-            if fw_metadata.num_unsafe_view_outputs > 0:
-                for idx in fw_metadata.unsafe_view_out_indices:
-                    ri = num_mutated_runtime_inps + idx
-                    buf.writeline(f"_o = raw_returns[{ri}]")
-                    buf.writeline(
-                        f"raw_returns[{ri}] = torch.ops.aten._unsafe_view(_o, _o.shape)"
-                    )
-
-            if num_outputs_aliased > 0:
-                for idx in fw_metadata.aliased_out_indices:
-                    ri = num_mutated_runtime_inps + idx
-                    buf.writeline(f"raw_returns[{ri}] = TensorAlias(raw_returns[{ri}])")
-
-            # Non-differentiable output collection: build a list of specific indices
-            # at compile time rather than iterating at runtime.
-            _non_diff_indices: list[int] = []
-            _returns_meta = [
-                x
-                for x in fw_metadata.input_info
-                if x.mutation_type == MutationType.MUTATED_OUT_GRAPH
-            ] + list(fw_metadata.output_info)
-            for i, meta in enumerate(_returns_meta):
-                if (
-                    i < num_mutated_runtime_inps + num_outputs
-                    and not meta.requires_grad
-                ):
-                    _non_diff_indices.append(i)
-            if _non_diff_indices:
-                checks = " + ".join(
-                    f"([raw_returns[{i}]] if isinstance(raw_returns[{i}], Tensor) else [])"
-                    for i in _non_diff_indices
-                )
-                buf.writeline(f"non_diff = {checks}")
-            else:
-                buf.writeline("non_diff = []")
-            buf.writeline("return non_diff")
-
-        _codegen_transform_raw_returns: Callable[..., list[Any]] = buf.build()  # type: ignore[assignment]
-        # Config variable resolution is expensive; get it off the hot path.
-        do_debug_assert = config.debug_assert
-        num_forward_returns = fw_metadata.num_forward_returns
-
-        # Monkey-patch forward_epilogue.finalize to use codegen'd transform
-        def _codegen_finalize(ctx: Any, fw_outs: Any) -> tuple[Any, ...]:
-            raw_returns = list(fw_outs[:num_forward_returns])
-            fw_outs_not_requiring_grad = _codegen_transform_raw_returns(raw_returns)
-            if do_debug_assert:
-                if num_mutated_runtime_inps > 0:
-                    user_mutated_inputs_raw = raw_returns[0:num_mutated_runtime_inps]
-                    mut_inp_infos = [
-                        x
-                        for x in fw_metadata.input_info
-                        if x.mutates_data or x.mutates_metadata
-                    ]
-                    if len(user_mutated_inputs_raw) != len(mut_inp_infos):
-                        raise AssertionError(
-                            f"expected len(user_mutated_inputs_raw) == len(mut_inp_infos), "
-                            f"got {len(user_mutated_inputs_raw)} != {len(mut_inp_infos)}"
-                        )
-                if num_outputs_aliased > 0:
-                    intermediates_raw = raw_returns[
-                        num_mutated_runtime_inps + num_outputs :
-                    ]
-                    if any(isinstance(x, TensorAlias) for x in intermediates_raw):
-                        raise AssertionError(
-                            "expected no TensorAlias in intermediates_raw"
-                        )
-            if fw_outs_not_requiring_grad:
-                ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
-            ctx._materialize_non_diff_grads = False
-            _snapshot_external_objects(ctx)
-
-            return tuple(raw_returns)
-
-        forward_epilogue.finalize = _codegen_finalize  # type: ignore[method-assign]
-
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
             compiled_bw = compiled_bw_func
@@ -3640,7 +3627,6 @@ class _AOTDispatchAutogradFunctionFactory:
                     deduped_flat_tensor_args,
                     rng_state.add_forward_args,
                     saved_state.save_from_forward,
-                    forward_epilogue.finalize,
                     CompiledFunction.compiled_fw,
                 )
 
