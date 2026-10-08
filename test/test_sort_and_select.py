@@ -1432,6 +1432,76 @@ class TestSortAndSelectCUDA(TestCase):
                     expected = rank.sort(stable=True).indices[:, :k]
                     self.assertEqual(idx.cpu(), expected, msg=msg)
 
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.half, torch.float)
+    def test_select_ties_at_dtype_extremes(self, device, dtype):
+        # Covers the steps of the ROCm register-path select (see the note in SortingRadixSelect.cuh). Its
+        # reductions answer with a key and leave the all-ones key (the dtype maximum, and NaN) to the radix
+        # walk, so ties at either extreme near the selected rank must still give exact values.
+        if dtype.is_floating_point:
+            lo, hi = float("-inf"), float("inf")
+        else:
+            lo, hi = torch.iinfo(dtype).min, torch.iinfo(dtype).max
+        g = torch.Generator().manual_seed(0)
+        # Slice lengths around the register-path limits for a 1024-thread block; k = 1 and n take the max
+        # reduction, k <= 16 from either end the small-k threshold, the rest the radix walk.
+        for n in (1023, 1024, 4097, 10241, 14336):
+            if dtype.is_floating_point:
+                x = torch.randn(3, n, generator=g).to(dtype)
+            else:
+                x = torch.randint(
+                    max(lo, -1000), min(hi, 1000), (3, n), generator=g
+                ).to(dtype)
+            for value in (lo, hi):
+                y = x.clone()
+                y[:, torch.randperm(n, generator=g)[:5]] = value
+                y_dev = y.to(device)
+                # k near n with five tied extremes selects the extreme itself through the small-k path.
+                for k in (1, 2, 16, 17, n - 16, n - 15, n - 4, n - 3, n - 1, n):
+                    msg = f"{n=} {value=} {k=}"
+                    self.assertEqual(
+                        torch.kthvalue(y_dev, k, dim=1).values,
+                        torch.kthvalue(y, k, dim=1).values,
+                        msg=msg,
+                    )
+                    for largest in (True, False):
+                        self.assertEqual(
+                            torch.topk(y_dev, k, dim=1, largest=largest).values,
+                            torch.topk(y, k, dim=1, largest=largest).values,
+                            msg=f"{msg} {largest=}",
+                        )
+                self.assertEqual(
+                    torch.median(y_dev, dim=1).values,
+                    torch.median(y, dim=1).values,
+                    msg=f"{n=} {value=}",
+                )
+        # Few distinct values overflow the small-k candidate buffer, so the radix walk decides.
+        for n in (1000, 4000, 14336):
+            x = torch.randint(0, 4, (3, n), generator=g).to(dtype)
+            for k in (2, 8, 16, n - 15, n - 7, n - 1):
+                for largest in (True, False):
+                    self.assertEqual(
+                        torch.topk(x.to(device), k, dim=1, largest=largest).values,
+                        torch.topk(x, k, dim=1, largest=largest).values,
+                        msg=f"few values {n=} {k=} {largest=}",
+                    )
+                self.assertEqual(
+                    torch.kthvalue(x.to(device), k, dim=1).values,
+                    torch.kthvalue(x, k, dim=1).values,
+                    msg=f"few values {n=} {k=}",
+                )
+        if dtype in (torch.uint8, torch.int8):
+            # Many equal 8-bit keys overflow the small-k candidate buffer (k = n - 15 selects the 16th smallest).
+            n = 1024
+            gen = torch.Generator().manual_seed(35)
+            x = torch.randint(lo, hi, (n,), generator=gen)
+            ties = torch.rand(n, generator=gen) < 0.003
+            ties[torch.randint(0, n, (3,), generator=gen)] = True
+            x[ties] = hi
+            x = x.to(dtype)
+            self.assertEqual(
+                torch.topk(x.to(device), n - 15).values, torch.topk(x, n - 15).values
+            )
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @slowTest
     @largeTensorTest("170GB", "cpu")

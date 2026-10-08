@@ -292,6 +292,28 @@ __device__ scalar_t findPattern(
 
 #else
 
+// Moves a block-uniform value the compiler cannot prove uniform (an LDS load, or a value merged
+// through lane-dependent control flow) to a scalar register, so the decisions made on it compile
+// to scalar branches instead of exec-mask manipulation. A no-op under SPIR-V.
+template <typename T>
+__device__ __forceinline__ T blockUniform(T x) {
+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__SPIRV__)
+  if constexpr (sizeof(T) == 4) {
+    return static_cast<T>(__builtin_amdgcn_readfirstlane(static_cast<int>(x)));
+  } else if constexpr (sizeof(T) == 8) {
+    const uint64_t u = static_cast<uint64_t>(x);
+    const uint32_t lo = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(u));
+    const uint32_t hi = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(u >> 32));
+    return static_cast<T>((static_cast<uint64_t>(hi) << 32) | lo);
+  } else {
+    return x;
+  }
+#else
+  return x;
+#endif
+}
+
+
 /*
 This implementation of radixSelect optimizes the k-th element selection
 algorithm by dynamically utilizing shared memory to cache input data when
@@ -459,6 +481,14 @@ __device__ __forceinline__ void countRadixLoop(
 // performs __syncthreads() internally, at most two loop iterations can be in flight
 // simultaneously, so two buffers are sufficient. buffer_index is toggled after each
 // countRadixUsingMaskDataSmem invocation.
+//
+// On GFX9 the per-warp counts are stored bin-major (smem[buffer_offset + bin * MAX_WARPS + warp_id]) so
+// that after ONE barrier every wave reads the whole num_warps x RadixSize table with one LDS load per
+// lane and reduces it with cross-lane operations. With 32-bit counts a bin is exactly one 16-lane DPP
+// row (wave64, MAX_WARPS == 16): four row_shr adds leave the bin total in lane 15 and v_readlane moves it
+// to a scalar register, so the decision chain in radixSelect stays wave-uniform; 64-bit counts use a
+// shuffle butterfly instead. Other targets (wave32, SPIR-V) use the two-barrier form, where warp 0 sums
+// the table: with 32 warps per block, every wave reducing the table costs more than the barrier saves.
 template <
     typename CountType,
     int RadixSize,
@@ -472,44 +502,37 @@ __device__ __forceinline__ void countRadixAggregateCounts(
     int buffer_index){ // buffer index for smem.
 
   // Maximum number of warps per workgroup. HIP workgroups have at most 1024 threads.
-  // Warp size is at least 32 (can be 64 on some architectures), so we use 32 for safety.
-  // This sizes shared memory buffers to accommodate all possible warps: 1024/32 = 32.
-  constexpr uint MAX_WARPS = 1024/C10_WARP_SIZE_LOWER_BOUND;
+  // Warp size is at least C10_WARP_SIZE_LOWER_BOUND, so this bounds the number of warps.
+  // This sizes shared memory buffers to accommodate all possible warps.
+  constexpr int MAX_WARPS = 1024/C10_WARP_SIZE_LOWER_BOUND;
   const int buffer_offset = buffer_index * MAX_WARPS * RadixSize; // offset of the buffer in smem.
-  const uint WARP_BITS = __builtin_ctz(C10_WARP_SIZE);
+  const int WARP_BITS = __builtin_ctz(C10_WARP_SIZE);
 
-  const uint num_warps = blockDim.x >> WARP_BITS;  // Actual number of warps in this block
-  const uint warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / C10_WARP_SIZE
+  const int num_warps = blockDim.x >> WARP_BITS;  // Actual number of warps in this block
+  const int warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / C10_WARP_SIZE
   const int lane_id = at::cuda::getLaneId(); // = threadIdx.x % C10_WARP_SIZE
 
-  // Stage 1: Each warp's lane 0 stores its counts in smem.
-  // Layout after Stage 1: [warp0: all radix bins], [warp1: all radix bins], ...
-  // this layout starts from index buffer_offset.
+#if !(defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__))
+  // Not GFX9 (wave32, SPIR-V): a wave has no cheap cross-lane sum over 32 warps (each shuffle is a
+  // ds_bpermute), so one wave reduces for the block and a second barrier publishes the totals. Every
+  // wave reducing the table itself (below) saves that barrier but costs num_warps times the work,
+  // which loses once the device is throughput bound (many blocks).
+  // Stage 1: Each warp's lane 0 stores its counts in smem, warp-major.
   if (lane_id == 0) {
 #pragma unroll
-    for (uint32_t i = 0; i < RadixSize; ++i) {
-      smem[
-            buffer_offset
-          + warp_id * RadixSize
-          + i
-          ] = counts[i];
+    for (int i = 0; i < RadixSize; ++i) {
+      smem[buffer_offset + warp_id * RadixSize + i] = counts[i];
     }
   }
 
   __syncthreads(); // wait for all warps to finish storing their counts to smem.
 
-  // Stage 2: Warp0 performs reduction for all bins.
-  // Layout after Stage 2: [final radix0 sum], [final radix1 sum], ..., [final radix(RadixSize-1) sum]
-  // this layout starts from index buffer_offset.
+  // Stage 2: Warp0 performs reduction for all bins, in place.
   if (warp_id == 0 && lane_id < RadixSize) {
     CountType sum = 0;
 #pragma unroll
     for (int w = 0; w < num_warps; ++w) {
-      sum += smem[
-                    buffer_offset
-                  + w * RadixSize
-                  + lane_id
-                  ];
+      sum += smem[buffer_offset + w * RadixSize + lane_id];
     }
     smem[buffer_offset + lane_id] = sum;
   }
@@ -518,9 +541,52 @@ __device__ __forceinline__ void countRadixAggregateCounts(
 
   // Stage 3: Each thread reads the final counts from smem.
 #pragma unroll
-  for (uint32_t i = 0; i < RadixSize; ++i) {
+  for (int i = 0; i < RadixSize; ++i) {
     counts[i] = smem[buffer_offset + i];
   }
+#else
+  // Stage 1: Each warp's lane 0 stores its counts in smem, bin-major.
+  // Layout after Stage 1: [bin0: warp0..warp(MAX_WARPS-1)], [bin1: ...], ..., [bin(RadixSize-1): ...]
+  // this layout starts from index buffer_offset.
+  if (lane_id == 0) {
+#pragma unroll
+    for (int i = 0; i < RadixSize; ++i) {
+      smem[buffer_offset + i * MAX_WARPS + warp_id] = counts[i];
+    }
+  }
+
+  __syncthreads(); // wait for all warps to finish storing their counts to smem.
+
+  // Stage 2: every wave reduces the table itself; the results are wave-uniform.
+  if constexpr (sizeof(CountType) == 4 && MAX_WARPS * RadixSize == 64) {
+    // Lane l holds the word of bin (l / 16), warp (l % 16); warps beyond num_warps contribute 0.
+    uint32_t c = ((lane_id & (MAX_WARPS - 1)) < num_warps)
+        ? static_cast<uint32_t>(smem[buffer_offset + lane_id]) : 0u;
+    // row_shr:d (dpp_ctrl 0x110 + d) within the 16-lane row; lanes with (lane % 16) < d read 0 (bound_ctrl),
+    // i.e. add nothing. The dpp_ctrl argument must be a literal, hence the four explicit steps.
+    c += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(c), 0x111, 0xf, 0xf, true));
+    c += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(c), 0x112, 0xf, 0xf, true));
+    c += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(c), 0x114, 0xf, 0xf, true));
+    c += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(c), 0x118, 0xf, 0xf, true));
+#pragma unroll
+    for (int i = 0; i < RadixSize; ++i) {
+      counts[i] = static_cast<CountType>(static_cast<uint32_t>(
+          __builtin_amdgcn_readlane(static_cast<int>(c), i * MAX_WARPS + MAX_WARPS - 1)));
+    }
+  } else {
+    // Lane w of every warp loads warp w's count of each bin; a butterfly over the MAX_WARPS lanes
+    // (lanes >= num_warps hold 0) and a broadcast from lane 0 give the block total.
+#pragma unroll
+    for (int i = 0; i < RadixSize; ++i) {
+      CountType c = (lane_id < num_warps) ? smem[buffer_offset + i * MAX_WARPS + lane_id] : CountType(0);
+#pragma unroll
+      for (int d = 1; d < MAX_WARPS; d <<= 1) {
+        c += __shfl_xor(c, d);
+      }
+      counts[i] = __shfl(c, 0);
+    }
+  }
+#endif
 }
 
 // This function counts the distribution of all input values in a
@@ -603,14 +669,21 @@ __device__ void countRadixUsingMaskDataSmem(
 // that matches the pattern ((val & desired) == desiredMask) in the input data.
 // DataAccessor is a function that returns the input data value at index i.
 // It could potentially be a global memory accessor or a shared memory accessor.
+//
+// One barrier per block-stride iteration: the matching thread publishes value then flag, the barrier
+// orders those stores before every thread's reads, and the found decision is block-uniform. The flag
+// and value words are double buffered by iteration parity: a wave can only reach iteration j + 2 (and
+// rewrite the words of iteration j) after the barrier of iteration j + 1, which every wave arrives at
+// only after finishing its reads of iteration j. Both flags are zeroed once at the start of radixSelect
+// and written at most once (the match is unique and all threads return right after it is seen).
 template <
     typename scalar_t,
     typename bitwise_t,
     typename index_t,
     typename DataAccessor>
 __device__ __forceinline__ scalar_t findPatternLoop(
-    scalar_t* smem, // shared memory for inter-thread communication of the found
-                    // value.
+    int* foundFlag, // two shared flag words, zero on entry.
+    scalar_t* foundValue, // two shared value words.
     bitwise_t
         desired, // combined with desiredMask to filter relevant elements. An
                  // element is relevant if ((val & desiredMask) == desired).
@@ -621,24 +694,13 @@ __device__ __forceinline__ scalar_t findPatternLoop(
     DataAccessor&&
         getData) { // a function that returns the input data value at index i.
 
-  // TODO: this loop has two areas for improvement:
-  //   1. no need to synchronize two times at each iteration. The assumption
-  //   here is that the
-  //      data is unique. So we can have the loop truncated to the part that
-  //      smem is filled. We then do __syncthreads outside the loop. The current
-  //      early termination is probably costing us way more performance than
-  //      it's worth. If synchronization is moved outside the loop, we no longer
-  //      need to pad loopbound to round_up(loopbound, blockDim.x).
-  //   2. given this loop is potentially reading from global memory, we can
-  //   prefetch the next value
-  //      to improve performance. But it should not have a significant impact
-  //      unless point 1 above is addressed.
-
-  // we pad loopbound to round_up(loopbound, blockDim.x) to make sure all
+  // Every thread runs the same (block-uniform) number of block-stride iterations so that all
   // threads in the block participate in the synchronization.
-  for (index_t i = threadIdx.x;
-       i < round_up(loopBound, static_cast<index_t>(blockDim.x));
-       i += blockDim.x) {
+  const index_t stride = blockDim.x;
+  const index_t numIter = (loopBound + stride - 1) / stride;
+  int parity = 0;
+  for (index_t it = 0; it < numIter; ++it) {
+    const index_t i = it * stride + threadIdx.x;
     bool inRange = (i < loopBound);
     scalar_t v = inRange ? getData(i) : static_cast<scalar_t>(0);
 
@@ -646,25 +708,16 @@ __device__ __forceinline__ scalar_t findPatternLoop(
         ((TopKTypeConfig<scalar_t>::convert(v) & desiredMask) == desired)) {
       // There should not be conflicts if we are using findPattern,
       // since the result is unique
-      smem[0] = static_cast<scalar_t>(1); // set the flag to 1.
-      smem[1] = v; // store the value in smem. can't use val as the flag, since
-                   // it could be 0.
+      foundValue[parity] = v; // store the value; can't use it as the flag, since it could be 0.
+      foundFlag[parity] = 1; // set the flag.
     }
 
-    __syncthreads(); // wait for all threads in the warp to finish setting the
-                     // flag and storing the value.
+    __syncthreads(); // publish the flag and value to the whole block.
 
-    scalar_t found = smem[0]; // read the flag from smem.
-    scalar_t val = smem[1]; // read the value from smem.
-
-    __syncthreads(); // wait for all threads in the warp to finish reading the
-                     // flag and value.
-
-    // Checking to see if a thread found the value. If so, all threads return
-    // this value.
-    if (found != static_cast<scalar_t>(0)) {
-      return val;
+    if (blockUniform(foundFlag[parity]) != 0) {
+      return foundValue[parity];
     }
+    parity ^= 1;
   }
 
   CUDA_KERNEL_ASSERT(false); // should not get here.
@@ -677,8 +730,8 @@ __device__ __forceinline__ scalar_t findPatternLoop(
 // It works when data is in global memory or in shared memory.
 template <typename scalar_t, typename bitwise_t, typename index_t>
 __device__ scalar_t findPatternDataSmem(
-    scalar_t* smem, // shared memory for inter-thread communication of the found
-                    // value.
+    int* foundFlag, // two shared flag words, zero on entry.
+    scalar_t* foundValue, // two shared value words.
     const scalar_t* data, // input data.
     index_t sliceSize, // size of the input slice.
     index_t withinSliceStride, // stride of the input slice.
@@ -691,33 +744,15 @@ __device__ scalar_t findPatternDataSmem(
     const scalar_t* dataSmem, // input data stored in shared memory.
     index_t dataSmemSize) { // input data size stored in shared memory.
 
-  // Ensure all threads have finished reading from smem before overwriting it.
-  // countRadixAggregateCounts Stage 3 reads from smem[buffer_offset + i];
-  // when buffer_offset == 0, those locations overlap with smem[0]/smem[1]
-  // written below. Warp 0 (which writes smem[0]/smem[1]) may get ahead of
-  // lagging warps still in Stage 3. Syncing here (rather than at the end of
-  // Stage 3) is cheaper because findPatternDataSmem is called at most once per
-  // radixSelect invocation, only when a unique element is found (count == 1).
-  __syncthreads();
-
-  // initialize smem to 0.
-  // smem[0] is a flag to indicate if a value has been found.
-  // smem[1] is the found value.
-  if (threadIdx.x < 2) {
-    smem[threadIdx.x] = static_cast<scalar_t>(0);
-  }
-
-  __syncthreads(); // all threads in the block wait for smem to be initialized.
-
   if (dataSmemSize >
       0) { // if shared memory is filled, use dataSmem as the input data.
     return findPatternLoop<scalar_t, bitwise_t, index_t>(
-        smem, desired, desiredMask, dataSmemSize, [&](index_t i) -> scalar_t {
+        foundFlag, foundValue, desired, desiredMask, dataSmemSize, [&](index_t i) -> scalar_t {
           return dataSmem[i];
         });
   } else { // if shared memory is not filled, fall back to global memory.
     return findPatternLoop<scalar_t, bitwise_t, index_t>(
-        smem, desired, desiredMask, sliceSize, [&](index_t i) -> scalar_t {
+        foundFlag, foundValue, desired, desiredMask, sliceSize, [&](index_t i) -> scalar_t {
           return doLdg(&data[i * withinSliceStride]);
         });
   }
@@ -870,6 +905,951 @@ __device__ __forceinline__ void fillDataSmem(
   }
 }
 
+
+// ROCm register-resident select (the helpers from here to radixSelectRegs).
+//
+// radixSelect picks one of two implementations for a slice; both return bit-identical results (the same
+// decision order and tie rules), so the choice is purely about speed.
+//
+//   general path   1-, 2-, 4-, 8-byte types   the radix walk in radixSelect: every pass re-reads
+//                                             the slice from global memory, or from dataSmem once the
+//                                             survivors fit there.
+//   register path  2- and 4-byte types, and 1-byte types on GFX9, with sliceSize <= REGS_MAX_E * blockDim.x:
+//                  each thread loads and converts its E = 1, 4, 10 or REGS_MAX_E rows once and keeps them
+//                  in registers. 8-byte types would double the register cost. 1-byte keys off GFX9 need only
+//                  four 2-bit passes, and on gfx1100 the general path was faster for single short rows.
+//
+// radixSelectRegs runs these steps in order, each a labeled section of the function; each returns once
+// it has the answer:
+//   1. Load the rows and convert them to keys.
+//   2. k (or n + 1 - k) == 1: one block-wide max reduction.
+//   3. k (or n + 1 - k) <= REGS_SMALL_K: a threshold from wave or row maxima, then the keys at or above it
+//      are ranked in dataSmem. Gives up when too many keys tie.
+//   4. The radix walk over the held keys, with a one-time compaction of the survivors into dataSmem.
+//      Per-pass counting: 16 bins with DPP and LDS atomics on GFX9 (regs16Count), otherwise 2-bit ballots
+//      or packed byte counters.
+// The steps stay in one function on purpose: moving any of them into a helper changed register allocation
+// and scheduling, and cost 5 to 10 percent on single-row topk on gfx950 and gfx1100.
+// Steps 2 and 3 answer with a key; the all-ones key is also the key of the dtype maximum and of NaN, so
+// it always falls through to the walk, which publishes the original scalar (keeping a NaN payload).
+//
+// Tests: test_select_ties_at_dtype_extremes (test_sort_and_select.py) targets the step boundaries (k in
+// 1, 2, 16, 17 and their mirrors), the register-path sizes (n = 1023, 1024, 4097, 10241, 14336), ties at
+// the dtype extremes (the all-ones key) and tie-heavy rows that overflow step 3 into the walk.
+
+// Wave ballot of a bool. HIP's __ballot takes an int, which makes the compiler materialize the
+// predicate as 0/1 and compare it again before every ballot; the builtins take the mask directly.
+__device__ __forceinline__ uint64_t ballotBool(bool p) {
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ballot_w64)) {
+    return __builtin_amdgcn_ballot_w64(p);
+  }
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_ballot_w32)) {
+    return __builtin_amdgcn_ballot_w32(p);
+  }
+  return WARP_BALLOT(p);
+}
+
+// Sum of `x` over the wave, returned wave-uniform.
+__device__ __forceinline__ uint32_t waveSum(uint32_t x) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+  // wave64: row_shr 1/2/4/8 leave each 16-lane row's sum in its lane 15, row_bcast15 (0x142, rows 1 and 3)
+  // and row_bcast31 (0x143, rows 2 and 3) fold the rows into lane 63. dpp_ctrl must be a literal.
+  x += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x111, 0xf, 0xf, true));
+  x += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x112, 0xf, 0xf, true));
+  x += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x114, 0xf, 0xf, true));
+  x += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x118, 0xf, 0xf, true));
+  x += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x142, 0xa, 0xf, false));
+  x += static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x143, 0xc, 0xf, false));
+  return static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(x), 63));
+#else
+  for (int o = C10_WARP_SIZE / 2; o > 0; o >>= 1) {
+    x += __shfl_xor(x, o);
+  }
+  return x;
+#endif
+}
+
+// Maximum of `x` over the wave, returned wave-uniform (same DPP pattern as waveSum; 0 is the identity).
+__device__ __forceinline__ uint32_t waveMax(uint32_t x) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x111, 0xf, 0xf, true)));
+  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x112, 0xf, 0xf, true)));
+  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x114, 0xf, 0xf, true)));
+  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x118, 0xf, 0xf, true)));
+  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x142, 0xa, 0xf, false)));
+  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x143, 0xc, 0xf, false)));
+  return static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(x), 63));
+#else
+  for (int o = C10_WARP_SIZE / 2; o > 0; o >>= 1) {
+    x = max(x, __shfl_xor(x, o));
+  }
+  return x;
+#endif
+}
+
+// Minimum of `x` over the wave, returned wave-uniform (0xffffffff is the identity).
+__device__ __forceinline__ uint32_t waveMin(uint32_t x) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x111, 0xf, 0xf, false)));
+  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x112, 0xf, 0xf, false)));
+  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x114, 0xf, 0xf, false)));
+  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x118, 0xf, 0xf, false)));
+  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x142, 0xa, 0xf, false)));
+  x = min(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(-1, static_cast<int>(x), 0x143, 0xc, 0xf, false)));
+  return static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(x), 63));
+#else
+  for (int o = C10_WARP_SIZE / 2; o > 0; o >>= 1) {
+    x = min(x, __shfl_xor(x, o));
+  }
+  return x;
+#endif
+}
+
+// Maximum of `x` over each 16-lane row, valid in lane 15 of the row (row_shr 1, 2, 4, 8; lanes shifted
+// in from outside the row read 0, the identity). Elsewhere every lane of the row holds it.
+__device__ __forceinline__ uint32_t rowMax16(uint32_t x) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x111, 0xf, 0xf, true)));
+  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x112, 0xf, 0xf, true)));
+  x = max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x114, 0xf, 0xf, true)));
+  return max(x, static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x118, 0xf, 0xf, true)));
+#else
+  for (int o = 8; o > 0; o >>= 1) {
+    x = max(x, __shfl_xor(x, o, 16));
+  }
+  return x;
+#endif
+}
+
+// kEff-th largest of S values per lane (zeros count as values), wave-uniform, without a dependent
+// extraction chain: every lane counts the values strictly greater than each of its own (one readlane
+// broadcast per value, all independent), the values with fewer than kEff greater ones are the top kEff
+// with multiplicity, and the smallest of those is the answer. 3 * 64 * S * S independent vector ALU
+// instructions; with S == 1 that is about what 8 extraction rounds cost, with no dependency on kEff.
+template <int S>
+__device__ __forceinline__ uint32_t rankSelectWave(const uint32_t (&v)[S], uint32_t kEff) {
+  uint32_t above[S] = {};
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+#pragma unroll
+  for (int j = 0; j < 64; ++j) {
+#pragma unroll
+    for (int q = 0; q < S; ++q) {
+      const uint32_t o = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(v[q]), j));
+#pragma unroll
+      for (int r = 0; r < S; ++r) {
+        above[r] += (o > v[r]) ? 1u : 0u;
+      }
+    }
+  }
+#else
+  for (int j = 0; j < C10_WARP_SIZE; ++j) {
+#pragma unroll
+    for (int q = 0; q < S; ++q) {
+      const uint32_t o = __shfl(v[q], j);
+#pragma unroll
+      for (int r = 0; r < S; ++r) {
+        above[r] += (o > v[r]) ? 1u : 0u;
+      }
+    }
+  }
+#endif
+  uint32_t best = 0xffffffffu;
+#pragma unroll
+  for (int r = 0; r < S; ++r) {
+    best = min(best, above[r] < kEff ? v[r] : 0xffffffffu);
+  }
+  return waveMin(best);
+}
+
+// kEff-th largest of the 16 values held by the lanes of a 16-lane row (zeros count as values), returned
+// wave-uniform; the rows must hold the same 16 values. Each lane counts the row's values greater than its
+// own through 15 row rotations (no readlane, no dependency chain), then the smallest value with fewer
+// than kEff greater ones is the answer. About 40 vector ALU instructions.
+template <int... K>
+__device__ __forceinline__ uint32_t rankSelectRow16(uint32_t x, uint32_t kEff, std::integer_sequence<int, K...>) {
+  uint32_t above = 0;
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+  ((above += (static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), 0x120 + K + 1, 0xf, 0xf, false)) > x) ? 1u : 0u), ...);
+#else
+  ((above += (static_cast<uint32_t>(__shfl_xor(x, K + 1, 16)) > x) ? 1u : 0u), ...);
+#endif
+  return waveMin(above < kEff ? x : 0xffffffffu);
+}
+__device__ __forceinline__ uint32_t rankSelectRow16(uint32_t x, uint32_t kEff) {
+  return rankSelectRow16(x, kEff, std::make_integer_sequence<int, 15>{});
+}
+
+// Number of set bits of `ballot` in lanes below the calling lane.
+__device__ __forceinline__ uint32_t lanesBelow(uint64_t ballot) {
+  const uint32_t r = __builtin_amdgcn_mbcnt_lo(static_cast<uint32_t>(ballot), 0u);
+  return __builtin_amdgcn_mbcnt_hi(static_cast<uint32_t>(ballot >> 32), r);
+}
+
+// Stores a key (at most 8 * sizeof(scalar_t) significant bits) in a scalar_t shared-memory slot and back.
+template <int N> struct UIntOfSize;
+template <> struct UIntOfSize<1> { using type = uint8_t; };
+template <> struct UIntOfSize<2> { using type = uint16_t; };
+template <> struct UIntOfSize<4> { using type = uint32_t; };
+template <typename scalar_t>
+__device__ __forceinline__ scalar_t keyToSlot(uint32_t key) {
+  using U = typename UIntOfSize<sizeof(scalar_t)>::type;
+  return __builtin_bit_cast(scalar_t, static_cast<U>(key));
+}
+template <typename scalar_t>
+__device__ __forceinline__ uint32_t keyFromSlot(scalar_t v) {
+  using U = typename UIntOfSize<sizeof(scalar_t)>::type;
+  return static_cast<uint32_t>(__builtin_bit_cast(U, v));
+}
+
+// Keeps `x` in a vector register at this point of the program (an empty asm the optimizer cannot look
+// through), which stops the compiler from sinking its computation into a later conditional region.
+template <typename T>
+__device__ __forceinline__ void pinVgpr(T& x) {
+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__SPIRV__)
+  asm("" : "+v"(x));
+#endif
+}
+
+// Largest k for which the register path selects by iterative wave extraction instead of the radix walk.
+constexpr int REGS_SMALL_K = 16;
+
+// Drops the head of a descending run held in c[0..N) in the lanes where `hit` holds. Written as a fold
+// over constant indices (no loop) so the slots stay in registers instead of an indexed array.
+template <int N, int... I>
+__device__ __forceinline__ void popHead(uint32_t (&c)[N], bool hit, std::integer_sequence<int, I...>) {
+  ((c[I] = hit ? c[I + 1] : c[I]), ...);
+  c[N - 1] = hit ? 0u : c[N - 1];
+}
+
+// Sorts c[0..N) descending with constant indices only (insertion sort as a fold; N is small).
+template <int N, int... I>
+__device__ __forceinline__ void sortDesc(uint32_t (&c)[N], std::integer_sequence<int, I...>) {
+  auto insert = [&](auto J) {
+    constexpr int j = decltype(J)::value;
+    if constexpr (j > 0) {
+      uint32_t t;
+      [&]<int... P>(std::integer_sequence<int, P...>) {
+        ((t = max(c[j - 1 - P], c[j - P]), c[j - P] = min(c[j - 1 - P], c[j - P]), c[j - 1 - P] = t), ...);
+      }(std::make_integer_sequence<int, j>{});
+    }
+  };
+  (insert(std::integral_constant<int, I>{}), ...);
+}
+
+// Register rows per thread from which the per-pass count uses packed per-lane byte counters (one
+// vector add per held key, one cross-lane reduction per pass) instead of four ballots per row. Only
+// the 32-bit instantiations use it: with the 16-bit kernels it slowed their single-row passes.
+constexpr int REGS_PACKED_MIN_E = 4;
+
+// How the register path keeps a held element. The generic case keeps the original scalar next to its
+// key (the key alone cannot give back a NaN payload). 16-bit scalars pack their raw bits into the upper
+// half of the 32-bit key instead: the match test, the digit extraction and the masks only touch the low
+// 16 bits, so the packing costs nothing and the published value stays bit-exact, NaN payload included.
+template <typename scalar_t, typename bitwise_t>
+struct RegKey {
+  static constexpr bool kPacked = false;
+  static constexpr bitwise_t kFlip = ~static_cast<bitwise_t>(0); // complements the whole key
+  static __device__ __forceinline__ bitwise_t pack(scalar_t v) {
+    return TopKTypeConfig<scalar_t>::convert(v);
+  }
+  static __device__ __forceinline__ scalar_t unpack(bitwise_t) {
+    return static_cast<scalar_t>(0);
+  }
+};
+template <>
+struct RegKey<at::Half, uint32_t> {
+  static constexpr bool kPacked = true;
+  static constexpr uint32_t kFlip = 0xffffu; // complements the 16-bit key, not the raw bits
+  static __device__ __forceinline__ uint32_t pack(at::Half v) {
+    return TopKTypeConfig<at::Half>::convert(v) | (static_cast<uint32_t>(v.x) << 16);
+  }
+  static __device__ __forceinline__ at::Half unpack(uint32_t key) {
+    return at::Half(static_cast<unsigned short>(key >> 16), at::Half::from_bits());
+  }
+};
+template <>
+struct RegKey<at::BFloat16, uint32_t> {
+  static constexpr bool kPacked = true;
+  static constexpr uint32_t kFlip = 0xffffu;
+  static __device__ __forceinline__ uint32_t pack(at::BFloat16 v) {
+    return TopKTypeConfig<at::BFloat16>::convert(v) | (static_cast<uint32_t>(v.x) << 16);
+  }
+  static __device__ __forceinline__ at::BFloat16 unpack(uint32_t key) {
+    return at::BFloat16(static_cast<unsigned short>(key >> 16), at::BFloat16::from_bits());
+  }
+};
+
+// Digit width of the register path. On wave64 GFX9 a pass resolves 4 key bits (16 bins): the per-wave
+// count runs on packed one-hot counters (no ballots), the cross-wave sum on LDS atomics, and the
+// decision on a 16-lane scan, so a pass costs about what a 2-bit pass costs and there are half as many.
+// Elsewhere (wave32, SPIR-V) the register path keeps the 2-bit digit of the general path.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+constexpr int REGS_RADIX_BITS = 4;
+#else
+constexpr int REGS_RADIX_BITS = RADIX_BITS;
+#endif
+
+// Largest number of rows per thread the register path is instantiated with. Each row costs about three
+// VGPRs; past 96 VGPRs a wave32 GFX11 kernel drops from 16 to 12 waves per SIMD, so only one 32-wave
+// block fits a WGP instead of two. Off GFX9 the last step is therefore smaller; longer slices take
+// the general path. With 14, the largest gfx1100 kernels here (32-bit gatherKthValue / gatherMedian)
+// compile to about 92 VGPRs; recheck that margin when changing the register path.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+constexpr int REGS_MAX_E = 20;
+#else
+constexpr int REGS_MAX_E = 14;
+#endif
+
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+// 16-bin count table in the caller's smem: 8 words per buffer, word p holds the block totals of bins 2p
+// (low half) and 2p + 1 (high half); a total is at most REGS_MAX_E * 1024, so the halves never carry into each
+// other. Three buffers rotate: pass t adds into buffer t % 3, zeroes buffer (t + 1) % 3 before its
+// barrier (last read during pass t - 2, before barrier t - 1), and reads buffer t % 3 after its barrier.
+static_assert(REGS_MAX_E * 1024 < 65536 && 8 * REGS_MAX_E < 256, "16-bit bin totals and 8-bit per-lane counters must not carry");
+constexpr int REGS16_WORDS = 8;
+constexpr int REGS16_BUFS = 3;
+
+template <int Ctrl, int RowMask, bool BoundCtrl>
+__device__ __forceinline__ uint32_t dppAdd(uint32_t x) {
+  return x + static_cast<uint32_t>(__builtin_amdgcn_update_dpp(0, static_cast<int>(x), Ctrl, RowMask, 0xf, BoundCtrl));
+}
+
+// Sum of the 8 lanes of each half row, valid in lanes 8i + 7 (row_shr 1, 2, 4; lanes shifted in from
+// outside the row read 0).
+__device__ __forceinline__ uint32_t dppSumHalfRows(uint32_t x) {
+  x = dppAdd<0x111, 0xf, true>(x);
+  x = dppAdd<0x112, 0xf, true>(x);
+  return dppAdd<0x114, 0xf, true>(x);
+}
+
+// Number of lanes that add their partial sum to the table (1, 2, 4 or 8): fewer lanes need more DPP
+// steps (row_shr 8 folds the half rows into lanes 16i + 15, row_bcast15 the row sums of lanes 15/31
+// into 31/63, row_bcast31 those into 63), more lanes make each atomic a same-address conflict of
+// that depth.
+constexpr int REGS16_ADD_LANES = 4;
+
+// Sum of the wave given valid lanes 8i + 7: those lanes (REGS16_ADD_LANES == 8), lanes 16i + 15 (4),
+// lanes 31 and 63 (2) or lane 63 (1) hold partial sums that together make the wave total.
+__device__ __forceinline__ uint32_t dppSumHalfRowsToWave(uint32_t x) {
+  if constexpr (REGS16_ADD_LANES <= 4) {
+    x = dppAdd<0x118, 0xf, true>(x);
+  }
+  if constexpr (REGS16_ADD_LANES <= 2) {
+    x = dppAdd<0x142, 0xa, false>(x);
+  }
+  if constexpr (REGS16_ADD_LANES == 1) {
+    x = dppAdd<0x143, 0xc, false>(x);
+  }
+  return x;
+}
+
+// Adds this wave's 16 bin counts into the table. b[0..3] are per-lane byte counters of bins
+// (0,2,4,6), (1,3,5,7), (8,10,12,14), (9,11,13,15), already summed over each half row (<= 8 * REGS_MAX_E per
+// byte). They are widened to 16-bit halves with v_perm, summed over the wave, and lane 63
+// adds the 8 words.
+__device__ __forceinline__ void regs16AddCounts(uint32_t* table, bool addLane, const uint32_t (&b)[4]) {
+  uint32_t w[REGS16_WORDS];
+#pragma unroll
+  for (int p = 0; p < 4; ++p) {
+    // byte0 = byte p of the even word (bin 2p), byte2 = byte p of the odd word (bin 2p + 1), others 0.
+    const uint32_t sel = 0x0c000c00u | (static_cast<uint32_t>(4 + p) << 16) | static_cast<uint32_t>(p);
+    w[p] = __builtin_amdgcn_perm(b[1], b[0], sel);
+    w[4 + p] = __builtin_amdgcn_perm(b[3], b[2], sel);
+  }
+#pragma unroll
+  for (int p = 0; p < REGS16_WORDS; ++p) {
+    w[p] = dppSumHalfRowsToWave(w[p]);
+    // Pin the sum here: sunk into the adding lanes' branch, the last DPP add splits into a DPP move
+    // plus an add.
+    asm("" : "+v"(w[p]));
+  }
+  if (addLane) {
+    // A zero the compiler cannot see through keeps the address divergent: a uniform-address atomic is
+    // rewritten by the AMDGPU atomic optimizer into a per-lane readlane loop plus one atomic, which is
+    // what this single-lane store already is.
+    uint32_t opaqueZero = 0;
+    asm("" : "+v"(opaqueZero));
+#pragma unroll
+    for (int p = 0; p < REGS16_WORDS; ++p) {
+      atomicAdd(&table[p + opaqueZero], w[p]);
+    }
+  }
+}
+
+// Counts the digit at digitPos of this thread's matching keys (rows e < nValid with
+// (key & desiredMask) == desired) into the table. Nibble d of a 64-bit one-hot accumulator counts the
+// rows with digit d (at most 15 per accumulator); the nibbles are widened to bytes, summed over each half
+// row, and handed to regs16AddCounts. With one key per thread a nibble also holds the half-row sum, so
+// the two nibble words are reduced before widening.
+template <int E>
+__device__ __forceinline__ void regs16Count(
+    uint32_t* table,
+    bool addLane,
+    const uint32_t (&keys)[E],
+    uint32_t nValid,
+    uint32_t desired,
+    uint32_t desiredMask,
+    int digitPos) {
+  constexpr int kRowsPerAcc = 15;
+  constexpr int kAccs = (E + kRowsPerAcc - 1) / kRowsPerAcc;
+  uint64_t acc[kAccs] = {};
+#pragma unroll
+  for (int e = 0; e < E; ++e) {
+    const bool match = (static_cast<uint32_t>(e) < nValid) && ((keys[e] & desiredMask) == desired);
+    const uint32_t shift = static_cast<uint32_t>(at::cuda::Bitfield<uint32_t>::getBitfield(keys[e], digitPos, 4)) << 2;
+    acc[e / kRowsPerAcc] += static_cast<uint64_t>(match ? 1u : 0u) << shift;
+  }
+  uint32_t b[4] = {0u, 0u, 0u, 0u};
+  if constexpr (E == 1) {
+    const uint32_t lo = dppSumHalfRows(static_cast<uint32_t>(acc[0]));
+    const uint32_t hi = dppSumHalfRows(static_cast<uint32_t>(acc[0] >> 32));
+    b[0] = lo & 0x0f0f0f0fu;
+    b[1] = (lo >> 4) & 0x0f0f0f0fu;
+    b[2] = hi & 0x0f0f0f0fu;
+    b[3] = (hi >> 4) & 0x0f0f0f0fu;
+  } else {
+#pragma unroll
+    for (int a = 0; a < kAccs; ++a) {
+      const uint32_t lo = static_cast<uint32_t>(acc[a]);
+      const uint32_t hi = static_cast<uint32_t>(acc[a] >> 32);
+      b[0] += lo & 0x0f0f0f0fu;
+      b[1] += (lo >> 4) & 0x0f0f0f0fu;
+      b[2] += hi & 0x0f0f0f0fu;
+      b[3] += (hi >> 4) & 0x0f0f0f0fu;
+    }
+#pragma unroll
+    for (int i = 0; i < 4; ++i) {
+      b[i] = dppSumHalfRows(b[i]);
+    }
+  }
+  regs16AddCounts(table, addLane, b);
+}
+
+// Decision on the aggregated table: lane i reads the total of bin i (lanes 16-63 repeat the rows), a
+// row_shr scan gives the inclusive prefix sums in bin order, and the answer is the first bin whose
+// prefix reaches kToFind: step = number of prefix sums below kToFind, identical in every row. Returns
+// that bin and its count and the total of the bins before it, all wave-uniform.
+__device__ __forceinline__ int regs16Decide(const uint16_t* bins, uint32_t kToFind, uint32_t& binCount, uint32_t& before) {
+  const uint32_t c = *bins;
+  uint32_t p = c;
+  p = dppAdd<0x111, 0xf, true>(p);
+  p = dppAdd<0x112, 0xf, true>(p);
+  p = dppAdd<0x114, 0xf, true>(p);
+  p = dppAdd<0x118, 0xf, true>(p);
+  const int step = __popcll(__builtin_amdgcn_ballot_w64(p < kToFind)) >> 2;
+  binCount = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(c), step));
+  before = static_cast<uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(p), step)) - binCount;
+  return step;
+}
+#endif
+
+// Loads rows [Off, Off + Rem) of a contiguous slice for radixSelectRegs in chunks of V consecutive elements
+// per thread (the largest power of two with V * sizeof(Raw) <= 16 that still fits), one vector load each.
+// Thread t holds elements i0 .. i0 + V - 1 of a chunk, i0 = Off * blockDim.x + t * V, so the element
+// order of the rows differs from the strided layout, which is free: every result is a value and the
+// compaction order is arbitrary anyway. A thread whose chunk runs past the slice reads from the clamped
+// base sliceSize - V (in bounds, as E > 1 implies sliceSize > blockDim.x) and keeps its rows in reverse
+// element order, so its valid rows (the elements >= i0, none once i0 >= sliceSize) are a prefix of the
+// chunk; chunks come in increasing element order, so a thread's valid rows are a prefix of the e range.
+// A misaligned vector load (odd slice base) is legal on AMD GPUs (unaligned access mode); the compiler
+// emits it from the memcpy.
+template <int Off, int Rem, int MaxV, typename scalar_t, typename index_t, typename Raw, int E>
+__device__ __forceinline__ void loadChunks(const scalar_t* data, index_t sliceSize, uint32_t bd, uint32_t tid, Raw (&raw)[E], uint32_t& nValid) {
+  if constexpr (Rem > 0) {
+    constexpr int V = Rem >= MaxV ? MaxV : (Rem >= 4 ? 4 : (Rem >= 2 ? 2 : 1));
+    const index_t i0 = static_cast<index_t>(Off) * bd + static_cast<index_t>(tid) * V;
+    const int held = min(max(static_cast<int>(sliceSize) - static_cast<int>(i0), 0), V);
+    nValid += static_cast<uint32_t>(held);
+    const index_t base = i0 < sliceSize - V ? i0 : sliceSize - V;
+    if constexpr (V == 1) {
+      raw[Off] = __builtin_bit_cast(Raw, data[base]);
+    } else {
+      using Vec = Raw __attribute__((ext_vector_type(V)));
+      Vec l;
+      __builtin_memcpy(&l, data + base, sizeof(Vec));
+#pragma unroll
+      for (int j = 0; j < V; ++j) {
+        raw[Off + j] = l[V - 1 - j];
+      }
+    }
+    loadChunks<Off + V, Rem - V, MaxV>(data, sliceSize, bd, tid, raw, nValid);
+  }
+}
+
+
+// Register path entry (see the note above) for slices with sliceSize <= E * blockDim.x.
+// Thread t holds elements e * blockDim.x + t, e in [0, E): each is loaded and converted ONCE and every
+// pass only counts the held keys, so there is no per-pass re-read or re-convert and no shared
+// decision state (counts are block-uniform after the aggregation). Rows (values of e) past the slice
+// are padding that never matches (the loops stay statically unrolled, so the keys stay in registers).
+// For E > 1, once the surviving bin fits one element per thread (and in dataSmem) the survivors are
+// compacted into dataSmem once and the remaining passes run on a single key per thread; the slot
+// order is arrival dependent, the counts and the unique value are not. When a unique answer is found
+// its owner publishes the ORIGINAL scalar through dataSmem[0] with one barrier (any compaction read of
+// dataSmem is separated from that write by a later pass's barriers). Decision order and tie rules are
+// those of the general path below, so the result is bit-identical.
+//
+// With the 16-bin digit (REGS_RADIX_BITS == 4) the keys are complemented when `largest`, so every pass
+// walks the bins in increasing order and `desired` is uncomplemented on exit; the complement is an
+// order-reversing bijection, so counts, the unique exit and the result are those of the direct walk.
+template <typename scalar_t, typename bitwise_t, typename index_t, int E>
+__device__ __forceinline__ void radixSelectRegs(
+    const scalar_t* data,
+    index_t k,
+    bool largest,
+    index_t sliceSize,
+    index_t withinSliceStride,
+    index_t* smem,
+    scalar_t* dataSmem,
+    index_t dataSmemCap,
+    int& dataSmemWriteIndex,
+    scalar_t* topK) {
+  using Key = RegKey<scalar_t, bitwise_t>;
+  // The 16-bin pass packs 16-bit counts and 4-bit digits of 32-bit keys.
+  constexpr int RB = (REGS_RADIX_BITS == 4 && sizeof(bitwise_t) == 4 && sizeof(index_t) == 4) ? 4 : RADIX_BITS;
+  constexpr int RS = 1 << RB;
+  const uint32_t bd = __builtin_amdgcn_readfirstlane(blockDim.x);
+  const uint32_t tid = threadIdx.x;
+  // Survivors fit the single-key continuation once at most this many remain.
+  const index_t compactCap = dataSmemCap < static_cast<index_t>(bd) ? dataSmemCap : static_cast<index_t>(bd);
+  const bitwise_t flip = (RB == 4 && largest) ? Key::kFlip : static_cast<bitwise_t>(0);
+
+  // Selection by reduction (below) compares keys in a flipped domain, t = (key & keyMask) ^ flipKey, where
+  // the wanted extreme is the maximum and 0 the identity. The k-th largest is the (sliceSize + 1 - k)-th
+  // smallest, so the nearer end of the order is used. All of this is block-uniform (k, sliceSize and
+  // largest are kernel arguments). Padding rows (e >= nValid) hold the key flipKey, which is 0 in that
+  // domain, so the reductions need no validity mask; the walk masks them by e < nValid as before.
+  constexpr uint32_t keyMask = sizeof(scalar_t) >= 4 ? 0xffffffffu : static_cast<uint32_t>((1u << (8 * sizeof(scalar_t))) - 1u);
+  const index_t kMirror = sliceSize + 1 - k;
+  const bool mirrored = kMirror < k;
+  const index_t kEff = mirrored ? kMirror : k;
+  const uint32_t flipSel = (largest != mirrored) ? 0u : keyMask; // t-domain -> raw key
+  const uint32_t flipKey = flipSel ^ static_cast<uint32_t>(flip); // stored key -> t-domain
+  const bitwise_t padKey = static_cast<bitwise_t>(flipKey);
+
+  // Step 1: load. Every row is loaded unconditionally so the loads issue back to back (a guarded load per row puts each
+  // in its own exec-mask region, where the compiler re-fetched the stride argument from the kernarg
+  // segment before every load); padding rows read a clamped in-bounds index. A contiguous slice is read
+  // in chunks of V consecutive elements per thread with one vector load each (loadChunks).
+  const index_t stride = blockUniform(withinSliceStride);
+  const index_t last = blockUniform(sliceSize - 1);
+  using Raw = typename UIntOfSize<sizeof(scalar_t)>::type;
+  Raw raw[E];
+  uint32_t nValid = 0; // rows this thread holds (a prefix of the e range)
+  if (E > 1 && stride == 1) {
+    loadChunks<0, E, 16 / static_cast<int>(sizeof(Raw))>(data, sliceSize, bd, tid, raw, nValid);
+  } else {
+#pragma unroll
+    for (int e = 0; e < E; ++e) {
+      const index_t i = static_cast<index_t>(e) * bd + tid;
+      const bool valid = i < sliceSize;
+      raw[e] = __builtin_bit_cast(Raw, doLdg(&data[(valid ? i : last) * stride]));
+      nValid += valid ? 1u : 0u;
+    }
+  }
+  scalar_t vals[Key::kPacked ? 1 : E];
+  bitwise_t keys[E];
+#pragma unroll
+  for (int e = 0; e < E; ++e) {
+    const scalar_t v = __builtin_bit_cast(scalar_t, raw[e]);
+    if constexpr (!Key::kPacked) {
+      vals[e] = v;
+    }
+    bitwise_t key = Key::pack(v) ^ flip;
+    // Pinned so the pack stays straight-line code and the select is one v_cndmask: left to itself the
+    // compiler sinks the (longer, 16-bit) pack into a per-row exec-mask region behind the validity test.
+    pinVgpr(key);
+    keys[e] = (static_cast<uint32_t>(e) < nValid) ? key : padKey;
+  }
+  if (E > 1 && tid == 0) {
+    dataSmemWriteIndex = 0; // ordered before any compaction by the first pass's barriers
+  }
+
+  // Steps 2 and 3: selection by reduction (block-uniform early-outs; k, sliceSize and largest are kernel
+  // arguments).
+  // The k-th largest is the (sliceSize + 1 - k)-th smallest, so the nearer end of the order is used.
+  // Keys are compared in a flipped domain where the wanted extreme is the maximum and 0 is the identity
+  // (padding rows and exhausted lanes). The answer K is a key, and deconvert(K) is bit-identical to what
+  // the radix walk publishes for every non-NaN K (convert is a bijection on non-NaN values); the NaN key
+  // (all ones) falls through to the walk, which keeps the payload of a single NaN exactly as before.
+  if constexpr (sizeof(bitwise_t) == 4) {
+    constexpr int MAX_WARPS = 1024 / C10_WARP_SIZE_LOWER_BOUND;
+    const int WARP_BITS = __builtin_ctz(C10_WARP_SIZE);
+    const uint32_t num_warps = bd >> WARP_BITS;
+    const uint32_t warp_id = tid >> WARP_BITS;
+    const uint32_t lane_id = at::cuda::getLaneId();
+    if (kEff == 1) {
+      // Step 2. One reduction round: wave maxima through the second count buffer (unused until the second pass).
+      uint32_t best = 0;
+#pragma unroll
+      for (int e = 0; e < E; ++e) {
+        best = max(best, (static_cast<uint32_t>(keys[e]) & keyMask) ^ flipKey);
+      }
+      index_t* waveBest = smem + MAX_WARPS * RADIX_SIZE;
+      best = waveMax(best);
+      if (lane_id == 0) {
+        waveBest[warp_id] = best;
+      }
+      __syncthreads();
+      const uint32_t K = waveMax((lane_id < num_warps) ? static_cast<uint32_t>(waveBest[lane_id]) : 0u) ^ flipSel;
+      if (K != keyMask) {
+        *topK = TopKTypeConfig<scalar_t>::deconvert(K);
+        return;
+      }
+    } else if (kEff <= static_cast<index_t>(REGS_SMALL_K)) {
+      // Step 3. Threshold select: T, the kEff-th largest of the wave maxima (of the 16-lane row maxima when kEff
+      // exceeds the wave count), is a lower bound with at least kEff keys >= T. Those keys are compacted
+      // into dataSmem and the kEff-th largest among them is the answer. Both selections are rank based (no
+      // per-k extraction rounds) and sized for the usual case of distinct data, where the candidates
+      // number about kEff: up to 16 are ranked by every wave on its own (no broadcast), up to 64 by wave 0,
+      // up to CAP by wave 0's extraction chain. Many equal keys overflow that, and the walk decides.
+      constexpr int MAX_WARPS = 1024 / C10_WARP_SIZE_LOWER_BOUND;
+      constexpr int S3 = (REGS_SMALL_K * E + C10_WARP_SIZE_LOWER_BOUND - 1) / C10_WARP_SIZE_LOWER_BOUND;
+      constexpr int SX = S3 > 2 ? S3 : 2; // extraction slots per lane
+      constexpr uint32_t CAP = SX * C10_WARP_SIZE_LOWER_BOUND; // candidate slots
+      constexpr int SR = 64 / C10_WARP_SIZE_LOWER_BOUND; // rank slots per lane for 64 values
+      // Scratch after the first count buffer: MAX_WARPS wave maxima, 64 row maxima (1024 / 16), 1 broadcast.
+      static_assert(MAX_WARPS * RADIX_SIZE + MAX_WARPS + 64 + 1 <= 256, "scratch must fit the caller's 256-word smem");
+      index_t* waveMaxima = smem + MAX_WARPS * RADIX_SIZE;
+      index_t* rowMaxima = waveMaxima + MAX_WARPS;
+      index_t* bcast = rowMaxima + 64;
+      uint32_t t[E];
+      uint32_t best = 0;
+#pragma unroll
+      for (int e = 0; e < E; ++e) {
+        t[e] = (static_cast<uint32_t>(keys[e]) & keyMask) ^ flipKey;
+        best = max(best, t[e]);
+      }
+      const uint32_t rowsPerWave = C10_WARP_SIZE / 16;
+      const uint32_t rm = rowMax16(best);
+      if ((lane_id & 15) == 15) {
+        rowMaxima[warp_id * rowsPerWave + (lane_id >> 4)] = rm;
+      }
+      const uint32_t wm = waveMax(best);
+      if (lane_id == 0) {
+        waveMaxima[warp_id] = wm;
+      }
+      if (tid == 0) {
+        dataSmemWriteIndex = 0;
+      }
+      __syncthreads();
+      const uint32_t l16 = lane_id & 15;
+      uint32_t T;
+      if (static_cast<uint32_t>(kEff) <= num_warps) {
+        // Every wave ranks the wave maxima on its own.
+        if constexpr (MAX_WARPS <= 16) {
+          T = rankSelectRow16((l16 < num_warps) ? static_cast<uint32_t>(waveMaxima[l16]) : 0u, static_cast<uint32_t>(kEff));
+        } else {
+          uint32_t r[1] = {(lane_id < num_warps) ? static_cast<uint32_t>(waveMaxima[lane_id]) : 0u};
+          T = rankSelectWave(r, static_cast<uint32_t>(kEff));
+        }
+      } else {
+        // More wanted than waves: the row maxima (at most 64) give a usable bound; wave 0 ranks them.
+        const uint32_t nRows = num_warps * rowsPerWave;
+        if (warp_id == 0) {
+          uint32_t r[SR];
+#pragma unroll
+          for (int q = 0; q < SR; ++q) {
+            const uint32_t at = lane_id + static_cast<uint32_t>(q) * C10_WARP_SIZE;
+            r[q] = (at < nRows) ? static_cast<uint32_t>(rowMaxima[at]) : 0u;
+          }
+          const uint32_t v = rankSelectWave(r, static_cast<uint32_t>(kEff));
+          if (lane_id == 0) {
+            *bcast = v;
+          }
+        }
+        __syncthreads();
+        T = blockUniform(static_cast<uint32_t>(*bcast));
+      }
+      if constexpr (E == 1) {
+        // One slot reservation per wave.
+        const bool cand = t[0] >= T;
+        const uint64_t b = ballotBool(cand);
+        int base = 0;
+        if (lane_id == 0 && b != 0) {
+          base = atomicAdd(&dataSmemWriteIndex, __popcll(b));
+        }
+        const uint32_t at = static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(base)) + lanesBelow(b);
+        if (cand && at < CAP) {
+          dataSmem[at] = keyToSlot<scalar_t>(t[0]);
+        }
+      } else {
+        // Few lanes hold a key >= T, so each such lane reserves its own run of slots and writes them in row
+        // order.
+        uint32_t cnt = 0;
+#pragma unroll
+        for (int e = 0; e < E; ++e) {
+          cnt += (t[e] >= T) ? 1u : 0u;
+        }
+        if (cnt > 0) {
+          uint32_t at = static_cast<uint32_t>(atomicAdd(&dataSmemWriteIndex, static_cast<int>(cnt)));
+#pragma unroll
+          for (int e = 0; e < E; ++e) {
+            if (t[e] >= T) {
+              if (at < CAP) {
+                dataSmem[at] = keyToSlot<scalar_t>(t[e]);
+              }
+              ++at;
+            }
+          }
+        }
+      }
+      __syncthreads();
+      const uint32_t total = blockUniform(static_cast<uint32_t>(dataSmemWriteIndex));
+      uint32_t m;
+      if (total <= 16) {
+        m = rankSelectRow16((l16 < total) ? keyFromSlot<scalar_t>(dataSmem[l16]) : 0u, static_cast<uint32_t>(kEff));
+      } else if (total <= 64) {
+        if (warp_id == 0) {
+          uint32_t c[SR];
+#pragma unroll
+          for (int q = 0; q < SR; ++q) {
+            const uint32_t at = lane_id + static_cast<uint32_t>(q) * C10_WARP_SIZE;
+            c[q] = (at < total) ? keyFromSlot<scalar_t>(dataSmem[at]) : 0u;
+          }
+          m = rankSelectWave(c, static_cast<uint32_t>(kEff));
+          if (lane_id == 0) {
+            *bcast = m;
+          }
+        }
+        __syncthreads();
+        m = blockUniform(static_cast<uint32_t>(*bcast));
+      } else if (total <= CAP) {
+        if (warp_id == 0) {
+          uint32_t c[SX];
+#pragma unroll
+          for (int q = 0; q < SX; ++q) {
+            const uint32_t at = lane_id * SX + q;
+            c[q] = (at < total) ? keyFromSlot<scalar_t>(dataSmem[at]) : 0u;
+          }
+          sortDesc(c, std::make_integer_sequence<int, SX>{});
+          uint32_t i = 0;
+          auto extract = [&]() {
+            m = waveMax(c[0]);
+            const bool hit = (c[0] == m);
+            i += __popcll(ballotBool(hit));
+            popHead(c, hit, std::make_integer_sequence<int, SX - 1>{});
+          };
+          for (;;) {
+            extract();
+            if (i >= static_cast<uint32_t>(kEff)) {
+              break;
+            }
+            extract();
+            if (i >= static_cast<uint32_t>(kEff)) {
+              break;
+            }
+          }
+          if (lane_id == 0) {
+            *bcast = m;
+          }
+        }
+        __syncthreads();
+        m = blockUniform(static_cast<uint32_t>(*bcast));
+      } else {
+        __syncthreads(); // every wave has read `total`
+        if (tid == 0) {
+          dataSmemWriteIndex = 0; // the walk's first barrier orders the reset before any compaction
+        }
+        m = keyMask ^ flipSel; // too many equal keys for the candidate buffer: the walk decides
+      }
+      const uint32_t K = m ^ flipSel;
+      if (K != keyMask) {
+        *topK = TopKTypeConfig<scalar_t>::deconvert(K);
+        return;
+      }
+      // K == keyMask is ambiguous (it is also the key of the dtype maximum and of NaN), so the walk decides.
+      // The candidates above left their count in dataSmemWriteIndex; the walk's compaction must start at 0.
+      __syncthreads();
+      if (tid == 0) {
+        dataSmemWriteIndex = 0;
+      }
+    }
+  }
+
+  // Step 4: the radix walk.
+  bitwise_t desired = 0;
+  bitwise_t desiredMask = 0;
+  index_t kToFind = k;
+  int buffer_index = 0;
+  bool compacted = false; // block-uniform
+  index_t remaining = 0; // survivors after compaction, block-uniform
+  bitwise_t key1 = 0; // this thread's survivor after compaction
+  scalar_t val1 = static_cast<scalar_t>(0);
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+  const int lane_id = at::cuda::getLaneId();
+  const bool addLane = (lane_id & (C10_WARP_SIZE / REGS16_ADD_LANES - 1)) == C10_WARP_SIZE / REGS16_ADD_LANES - 1;
+  // The 16-bin tables are 32-bit words; RB == 4 only for 4-byte index_t (int or uint32_t).
+  uint32_t* smem32 = reinterpret_cast<uint32_t*>(smem);
+  const uint16_t* bins16 = reinterpret_cast<const uint16_t*>(smem32) + (lane_id & 15);
+  if constexpr (RB == 4) {
+    if (tid < REGS16_BUFS * REGS16_WORDS) {
+      smem32[tid] = 0;
+    }
+    __syncthreads();
+  }
+#endif
+
+  for (int digitPos = sizeof(scalar_t) * 8 - RB; digitPos >= 0; digitPos -= RB) {
+    int bin;
+    index_t binCount;
+    index_t before;
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+    if constexpr (RB == 4) {
+      uint32_t* table = smem32 + buffer_index * REGS16_WORDS;
+      if (E == 1 || compacted) {
+        const uint32_t key[1] = {compacted ? key1 : keys[0]};
+        const uint32_t valid = compacted ? ((static_cast<index_t>(tid) < remaining) ? 1u : 0u) : nValid;
+        regs16Count<1>(table, addLane, key, valid, desired, desiredMask, digitPos);
+      } else {
+        regs16Count<E>(table, addLane, keys, nValid, desired, desiredMask, digitPos);
+      }
+      const int nextBuffer = buffer_index == REGS16_BUFS - 1 ? 0 : buffer_index + 1;
+      if (tid < REGS16_WORDS) {
+        smem32[nextBuffer * REGS16_WORDS + tid] = 0;
+      }
+      __syncthreads();
+      uint32_t c, p;
+      bin = regs16Decide(bins16 + buffer_index * 2 * REGS16_WORDS, kToFind, c, p);
+      binCount = c;
+      before = p;
+      buffer_index = nextBuffer;
+    } else
+#endif
+    {
+      index_t counts[RS];
+#pragma unroll
+      for (int j = 0; j < RS; ++j) {
+        counts[j] = 0;
+      }
+      if (E > 1 && compacted) {
+        const bool match = (static_cast<index_t>(tid) < remaining) && ((key1 & desiredMask) == desired);
+        const uint32_t digit4 = match ? static_cast<uint32_t>(at::cuda::Bitfield<bitwise_t>::getBitfield(key1, digitPos, RB)) : RS;
+#pragma unroll
+        for (uint32_t j = 0; j < RS; ++j) {
+          counts[j] += __popcll(ballotBool(digit4 == j));
+        }
+      } else if constexpr (E >= REGS_PACKED_MIN_E && !Key::kPacked) {
+        // Byte b of `packed` counts this thread's matching keys with digit b (E <= 255 rows); the bins
+        // are then widened to 16-bit fields (64 lanes x E < 65536) and summed across the wave once.
+        uint32_t packed = 0;
+#pragma unroll
+        for (int e = 0; e < E; ++e) {
+          const bool match = (static_cast<uint32_t>(e) < nValid) && ((keys[e] & desiredMask) == desired);
+          const uint32_t digit = static_cast<uint32_t>(at::cuda::Bitfield<bitwise_t>::getBitfield(keys[e], digitPos, RB));
+          packed += match ? (1u << (digit << 3)) : 0u;
+        }
+        const uint32_t lo = waveSum((packed & 0xffu) | ((packed & 0xff00u) << 8));
+        const uint32_t hi = waveSum(((packed >> 16) & 0xffu) | ((packed >> 8) & 0xff0000u));
+        counts[0] = lo & 0xffffu;
+        counts[1] = lo >> 16;
+        counts[2] = hi & 0xffffu;
+        counts[3] = hi >> 16;
+      } else {
+#pragma unroll
+        for (int e = 0; e < E; ++e) {
+          const bool match = (static_cast<uint32_t>(e) < nValid) && ((keys[e] & desiredMask) == desired);
+          // Non-matching elements vote for a fifth, uncounted bin so each ballot is one compare.
+          const uint32_t digit4 = match ? static_cast<uint32_t>(at::cuda::Bitfield<bitwise_t>::getBitfield(keys[e], digitPos, RB)) : RS;
+#pragma unroll
+          for (uint32_t j = 0; j < RS; ++j) {
+            counts[j] += __popcll(ballotBool(digit4 == j));
+          }
+        }
+      }
+
+      countRadixAggregateCounts<index_t, RS, RB>(counts, smem, buffer_index);
+      buffer_index ^= 1;
+
+      // Same rule as the general path, as straight-line scalar code: walking the bins largest-first or
+      // smallest-first, the answer lives in the first bin whose cumulative count reaches kToFind, the bins
+      // before it are skipped (kToFind shrinks by their total), and it is unique when that bin holds one
+      // element and one is left to find. This decision runs on every wave, so it is kept branch-free.
+      const index_t c0 = largest ? counts[3] : counts[0];
+      const index_t c1 = largest ? counts[2] : counts[1];
+      const index_t c2 = largest ? counts[1] : counts[2];
+      const index_t c3 = largest ? counts[0] : counts[3];
+      const index_t p0 = c0;
+      const index_t p1 = p0 + c1;
+      const index_t p2 = p1 + c2;
+      const int step = (p0 < kToFind ? 1 : 0) + (p1 < kToFind ? 1 : 0) + (p2 < kToFind ? 1 : 0);
+      before = step == 0 ? 0 : (step == 1 ? p0 : (step == 2 ? p1 : p2));
+      binCount = step == 0 ? c0 : (step == 1 ? c1 : (step == 2 ? c2 : c3));
+      bin = largest ? RS - 1 - step : step;
+    }
+
+    kToFind -= before;
+    const bool unique = (binCount == 1) && (kToFind == 1);
+    desired = at::cuda::Bitfield<bitwise_t>::setBitfield(desired, bin, digitPos, RB);
+    desiredMask = at::cuda::Bitfield<bitwise_t>::setBitfield(desiredMask, RS - 1, digitPos, RB);
+
+    if (unique) {
+      // Exactly one held element matches; its owner publishes the original scalar.
+      if (E > 1 && compacted) {
+        if ((static_cast<index_t>(tid) < remaining) && ((key1 & desiredMask) == desired)) {
+          dataSmem[0] = val1;
+        }
+      } else {
+#pragma unroll
+        for (int e = 0; e < E; ++e) {
+          const bool match = (static_cast<uint32_t>(e) < nValid) && ((keys[e] & desiredMask) == desired);
+          if (match) {
+            if constexpr (Key::kPacked) {
+              dataSmem[0] = Key::unpack(keys[e]);
+            } else {
+              dataSmem[0] = vals[e];
+            }
+          }
+        }
+      }
+      __syncthreads();
+      *topK = dataSmem[0];
+      return;
+    }
+
+    if (E > 1 && !compacted && binCount <= compactCap) {
+      // Compact the survivors into dataSmem: one slot reservation per warp (the per-row ballots are
+      // cheap to redo, an LDS atomic round trip per row is not), then hold one survivor each.
+      const int lane_id = at::cuda::getLaneId();
+      const uint64_t lanesBelow = (1ULL << lane_id) - 1;
+      uint32_t warpTotal = 0;
+#pragma unroll
+      for (int e = 0; e < E; ++e) {
+        const bool match = (static_cast<uint32_t>(e) < nValid) && ((keys[e] & desiredMask) == desired);
+        warpTotal += __popcll(ballotBool(match));
+      }
+      int warp_base = 0;
+      if (lane_id == 0 && warpTotal > 0) {
+        warp_base = atomicAdd(&dataSmemWriteIndex, static_cast<int>(warpTotal));
+      }
+      uint32_t slot = static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(warp_base));
+#pragma unroll
+      for (int e = 0; e < E; ++e) {
+        const bool match = (static_cast<uint32_t>(e) < nValid) && ((keys[e] & desiredMask) == desired);
+        const uint64_t ballot = ballotBool(match);
+        if (match) {
+          if constexpr (Key::kPacked) {
+            dataSmem[slot + __popcll(ballot & lanesBelow)] = Key::unpack(keys[e]);
+          } else {
+            dataSmem[slot + __popcll(ballot & lanesBelow)] = vals[e];
+          }
+        }
+        slot += __popcll(ballot);
+      }
+      __syncthreads();
+      remaining = binCount;
+      if (static_cast<index_t>(tid) < remaining) {
+        val1 = dataSmem[tid];
+        key1 = Key::pack(val1) ^ flip;
+      }
+      compacted = true;
+    }
+  }
+
+  // There is no unique result, but there is a non-unique result matching `desired` exactly.
+  *topK = TopKTypeConfig<scalar_t>::deconvert(desired ^ flip);
+}
+
 #endif
 
 // Returns the top-Kth element found in the data using radix selection
@@ -904,15 +1884,51 @@ __device__ void radixSelect(
           scalar_t); // max number of elements that can be stored in dataSmem.
   __shared__ scalar_t dataSmem[dataSmemCap];
   __shared__ index_t dataSmemSize; // actual number of elements in dataSmem.
-  __shared__ index_t
-      dataSizeRemaining; // number of relevant elements remaining. We put data
-                         // on dataSmem once dataSizeRemaining <= dataSmemCap.
   __shared__ int DataSmemWriteIndex; // index used to write data to dataSmem.
+  // findPattern's flag and value words, double buffered by iteration parity (see findPatternLoop).
+  __shared__ int findFlag[2];
+  __shared__ scalar_t findValue[2];
+  // number of relevant elements remaining. We put data on dataSmem once dataSizeRemaining <= dataSmemCap.
+  // The counts it is derived from are block-uniform, so every thread keeps its own copy in a register.
+  index_t dataSizeRemaining = sliceSize;
+  // Register copy of dataSmemSize: fillDataSmem publishes it under a barrier and it only ever changes
+  // from 0 to its final value, so once it is non-zero no pass needs to touch it (or fillDataSmem) again.
+  index_t dataSmemSizeNow = 0;
+
+  // Path choice: see the register-path note above.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+  constexpr bool kRegsPath = sizeof(scalar_t) <= 4;
+#else
+  constexpr bool kRegsPath = sizeof(scalar_t) == 2 || sizeof(scalar_t) == 4;
+#endif
+  if constexpr (kRegsPath) {
+    // Slices that fit in the block's registers take the register-resident path (block-uniform choice,
+    // smallest E that fits so the VGPR cost scales with the slice); it uses dataSmem for its one-time
+    // compaction and as the publish slot of the unique answer, the rest of this function is skipped.
+    const index_t bd = static_cast<index_t>(__builtin_amdgcn_readfirstlane(blockDim.x));
+    if (sliceSize <= bd) {
+      radixSelectRegs<scalar_t, bitwise_t, index_t, 1>(data, k, largest, sliceSize, withinSliceStride, smem, dataSmem, dataSmemCap, DataSmemWriteIndex, topK);
+      return;
+    }
+    if (sliceSize <= 4 * bd) {
+      radixSelectRegs<scalar_t, bitwise_t, index_t, 4>(data, k, largest, sliceSize, withinSliceStride, smem, dataSmem, dataSmemCap, DataSmemWriteIndex, topK);
+      return;
+    }
+    if (sliceSize <= 10 * bd) {
+      radixSelectRegs<scalar_t, bitwise_t, index_t, 10>(data, k, largest, sliceSize, withinSliceStride, smem, dataSmem, dataSmemCap, DataSmemWriteIndex, topK);
+      return;
+    }
+    if (sliceSize <= REGS_MAX_E * bd) {
+      radixSelectRegs<scalar_t, bitwise_t, index_t, REGS_MAX_E>(data, k, largest, sliceSize, withinSliceStride, smem, dataSmem, dataSmemCap, DataSmemWriteIndex, topK);
+      return;
+    }
+  }
 
   if (threadIdx.x == 0) {
     dataSmemSize = 0;
     DataSmemWriteIndex = 0;
-    dataSizeRemaining = sliceSize;
+    findFlag[0] = 0;
+    findFlag[1] = 0;
   }
 
   __syncthreads(); // so the initialization is visible to all threads in the
@@ -948,18 +1964,21 @@ __device__ void radixSelect(
 
 #ifdef USE_ROCM
 
-    // fill dataSmem with the input data if not already filled.
-    fillDataSmem<scalar_t, bitwise_t, index_t>(
-        dataSmem,
-        dataSmemCap,
-        dataSizeRemaining,
-        dataSmemSize,
-        sliceSize,
-        withinSliceStride,
-        data,
-        desired,
-        desiredMask,
-        DataSmemWriteIndex);
+    // fill dataSmem with the input data if not already filled (block-uniform decision).
+    if (dataSmemSizeNow == 0) {
+      fillDataSmem<scalar_t, bitwise_t, index_t>(
+          dataSmem,
+          dataSmemCap,
+          dataSizeRemaining,
+          dataSmemSize,
+          sliceSize,
+          withinSliceStride,
+          data,
+          desired,
+          desiredMask,
+          DataSmemWriteIndex);
+      dataSmemSizeNow = blockUniform(dataSmemSize);
+    }
 
     // count the distribution of the bits in the radix digit at `digitPos` to
     // `digitPos`+RADIX_BITS-1
@@ -980,7 +1999,7 @@ __device__ void radixSelect(
         withinSliceStride,
         data,
         dataSmem,
-        dataSmemSize);
+        dataSmemSizeNow);
 
     buffer_index ^= 1; // toggle buffer index.
 
@@ -1031,14 +2050,15 @@ __device__ void radixSelect(
 #else
         // find the unique value that matches the desired pattern
         *topK = findPatternDataSmem<scalar_t, bitwise_t, index_t>(
-            (scalar_t*)smem,
+            findFlag,
+            findValue,
             data,
             sliceSize,
             withinSliceStride,
             desired,
             desiredMask,
             dataSmem,
-            dataSmemSize);
+            dataSmemSizeNow);
 #endif
         return true;
       }
@@ -1052,16 +2072,14 @@ __device__ void radixSelect(
             desiredMask, RADIX_MASK, digitPos, RADIX_BITS);
 
 #ifdef USE_ROCM
-        if (dataSmemSize == 0) { // we only care about updating
-                                 // dataSizeRemaining when dataSmem is empty.
-          if (threadIdx.x == 0) {
-            // this bucket has count >= kToFind elements. This means topK is in
-            // this bucket and the number of elements with value & desiredMask
-            // == desired (which is the relevant data) equals count. so we
-            // update dataSizeRemaining to count.
-            dataSizeRemaining = count;
-          }
-          __syncthreads();
+        if (dataSmemSizeNow == 0) { // we only care about updating
+                                    // dataSizeRemaining when dataSmem is empty.
+          // this bucket has count >= kToFind elements. This means topK is in
+          // this bucket and the number of elements with value & desiredMask
+          // == desired (which is the relevant data) equals count. so we
+          // update dataSizeRemaining to count. count is block-uniform, so
+          // this needs neither a shared store nor a barrier.
+          dataSizeRemaining = count;
         }
 #endif
         /* The top-Kth element v must now be one such that: */
