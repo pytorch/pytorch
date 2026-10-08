@@ -4337,6 +4337,30 @@ class CommonTemplate:
             b_neg = torch.full_like(a, -divisor)
             self.common(fn, (a, b_neg))
 
+    @skip_if_halide  # floordiv goes through floats, inexact for large values
+    def test_floordiv_int_min_negative_divisor(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/198545
+        def fn(a, b):
+            return a // b
+
+        for dtype in [torch.int32, torch.int64]:
+            info = torch.iinfo(dtype)
+            a = torch.tensor(
+                [info.min, info.min, info.min, info.min, info.min + 1, 5, -5, 0],
+                dtype=dtype,
+                device=self.device,
+            )
+            self.common(lambda x: x // -3, (a,))
+            for divisor in [-2, -3, -7, info.min]:
+                b = torch.full_like(a, divisor)
+                self.common(fn, (a, b))
+            b = torch.tensor(
+                [-2, -5, info.min, -(2**30), info.min, info.min, info.min, -1],
+                dtype=dtype,
+                device=self.device,
+            )
+            self.common(fn, (a, b))
+
     def test_floordiv_int_min_neg_one_cpu(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/184406
         if not is_cpp_backend(self.device):
@@ -9884,6 +9908,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 2, 6, 6]),))
 
+    @parametrize("dtype", test_int_dtypes)
+    def test_sign_int_dtypes(self, dtype):
+        vals = [-3, -1, 0, 2, 7] if dtype.is_signed else [0, 1, 2, 7]
+        x = torch.tensor(vals, dtype=dtype, device=self.device)
+        self.common(torch.sign, [x], check_lowp=False)
+
     def test_frac_signed_zero(self):
         def fn(x):
             y = torch.frac(x)
@@ -11797,9 +11827,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             y.index_put_((mask,), torch.tensor(7.0, device=x.device))
             return y
 
-        # Integer values keep the mm, and so the mask, exact in low precision.
-        x = torch.randint(-2, 3, (8, 8)).float()
-        w = torch.randint(-2, 3, (8, 8)).float()
+        # Keep the mm exact and bounded away from zero in low precision, so the
+        # mask does not change when check_model_gpu downcasts the inputs.
+        x = torch.tensor([-2, 0, 1, 2]).repeat(16).view(8, 8).float()
+        w = 2 * torch.eye(8)
         self.common(fn, (x, w))
 
     @skip_if_halide  # won't fuse a read of the buffer it writes in place
@@ -20973,6 +21004,17 @@ if RUN_GPU or HAS_MPS:
                         bad_decomp_bias, bad_decomp_x, bad_decomp_weight
                     )
 
+            def baddbmm_beta_zero(bias, x, weight):
+                return torch.baddbmm(bias, x, weight, beta=0.0)
+
+            cpu_bias = torch.tensor(0.0)
+            with self.assertRaisesRegex(RuntimeError, "same device"):
+                baddbmm_beta_zero(cpu_bias, bad_x[None], bad_weight[None])
+            with self.assertRaisesRegex(Exception, "must be on the same device"):
+                torch.compile(baddbmm_beta_zero, fullgraph=True)(
+                    cpu_bias, bad_x[None], bad_weight[None]
+                )
+
             with config.patch({"shape_padding": False, "triton.native_matmul": True}):
                 with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
                     torch.compile(addmm_dtype_mismatch, fullgraph=True)(
@@ -21003,6 +21045,15 @@ if RUN_GPU or HAS_MPS:
                         zero_weight,
                     ),
                 )
+                # alpha == 0 zero-fills without autotuning; this case needs
+                # Triton GEMM choices, which only big GPUs get.
+                if IS_BIG_GPU:
+                    check(
+                        lambda bias, x, weight: torch.addmm(
+                            bias, x, weight.t(), beta=0.0, alpha=0.1
+                        ),
+                        (torch.full((8,), float("nan"), device=self.device), x, weight),
+                    )
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
