@@ -34,7 +34,7 @@ import site
 import sys
 import sysconfig
 import types
-from typing import Generic, ParamSpec, TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 import torch
 import torch._functorch.config as functorch_config
@@ -1585,11 +1585,7 @@ def _summarize(
     )
 
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
-
-class PrecompileSession(Generic[_P, _R]):
+class PrecompileSession:
     """A caller-driven multi-graph capture in progress.
 
     Enter it to get the callable to exercise, call that with real inputs inside
@@ -1601,15 +1597,14 @@ class PrecompileSession(Generic[_P, _R]):
 
     The artifact is STANDALONE: it rebuilds each captured frame from its code
     object and guard trees (see ``torch._precompile_driver._build_multigraph_forward``)
-    and installs nothing, unless the entry cannot reach a frame through a
-    graph-break continuation -- one entered by an ordinary call, such as a child
-    module's forward that graph-breaks. That artifact is rendered installed-mode
-    instead (see ``torch._precompile_driver._build_installed_forward``).
+    and installs nothing, so a frame the entry cannot reach through a graph-break
+    continuation -- one entered by an ordinary call, such as a child module's
+    forward that graph-breaks -- is refused at render rather than served eager.
     """
 
     def __init__(
         self,
-        fn: Callable[_P, _R],
+        fn: Callable[..., object],
         *,
         backend: str = "inductor",
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
@@ -1634,7 +1629,7 @@ class PrecompileSession(Generic[_P, _R]):
         self._guard_filter_fn = self._recording_filter(
             default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
         )
-        self._compiled: Callable[_P, _R] | None = None
+        self._compiled: Callable[..., object] | None = None
         self._entered = False
         self._finished = False
 
@@ -1704,7 +1699,7 @@ class PrecompileSession(Generic[_P, _R]):
 
         return filter_fn
 
-    def __enter__(self) -> Callable[_P, _R]:
+    def __enter__(self) -> Callable[..., object]:
         if self._entered:
             raise PackageError(
                 "PrecompileSession cannot be re-entered; start a new capture."
@@ -1723,7 +1718,7 @@ class PrecompileSession(Generic[_P, _R]):
         )(self._fn)
         return self._call
 
-    def _call(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def _call(self, *args: object, **kwargs: object) -> object:
         if self._compiled is None or self._finished:
             raise PackageError("PrecompileSession is not active")
         # The compiler configuration is per call, not per block: user code
@@ -1806,9 +1801,6 @@ class PrecompileSession(Generic[_P, _R]):
         # across a frame's variants: a dropped guard that told the variants
         # apart cannot pick between them at serve time. Merely being absent
         # from one variant (a MODULE_MATCH a branch does not touch) is not.
-        # Only variants some kept guard split apart can be compared, so a
-        # dropped slot that is the sole difference between two calls never
-        # recompiles and is never reported here.
         risky = set(self._risky_dropped_guards)
         for variants in self._guard_sets.values():
             values: dict[tuple[str, str], set[str]] = {}
@@ -1921,22 +1913,22 @@ class PrecompileSession(Generic[_P, _R]):
 
 
 def precompile_capture(
-    fn: Callable[_P, _R],
+    fn: Callable[..., object],
     *,
     backend: str = "inductor",
     guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
     | None = None,
     recompile_limit: int = 256,
     dynamic: bool | None = None,
-) -> PrecompileSession[_P, _R]:
+) -> PrecompileSession:
     """Begin capturing ``fn`` into a multi-graph artifact.
 
     ``recompile_limit`` defaults well above Dynamo's usual 8 because a precompile
     deliberately wants one compiled variant per condition, whereas the normal
-    limit exists to catch runaway recompilation. ``guard_filter_fn`` applies to
-    the runtime guards as well as the serialized ones, so a dropped guard never
-    triggers a recompile during capture, just as it cannot pick a graph at serve
-    time.
+    limit exists to catch runaway recompilation. Runtime guards remain intact
+    during capture: ``guard_filter_fn`` applies only to the serialized guard
+    state, so every call observes the same recompilation behavior as ordinary
+    ``torch.compile``.
     """
     if isinstance(fn, functools.partial):
         raise PackageError(
@@ -1949,7 +1941,7 @@ def precompile_capture(
         raise PackageError(
             "precompile cannot capture an nn.Module directly: capture the function "
             "that CALLS the model, e.g. a module-level 'def step(model, x): return "
-            "model(x)'."
+            "model(x)', calling cap(model, x)."
         )
     if isinstance(fn, types.MethodType):
         # The artifact rebuilds fn from its code object, which takes the
@@ -1957,7 +1949,7 @@ def precompile_capture(
         raise PackageError(
             "precompile cannot capture a bound method: capture a module-level "
             "function that takes the receiver as an argument, e.g. 'def step(model, "
-            "x): return model(x)'."
+            "x): return model(x)', calling cap(model, x)."
         )
     return PrecompileSession(
         fn,
