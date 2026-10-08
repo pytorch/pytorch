@@ -916,6 +916,7 @@ class ProcessGroupNCCL(Backend):
         min_ctas: int
         max_ctas: int
         host_cft_mode: int
+        nvls_host_mode: int
         def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):
