@@ -242,7 +242,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 #endif
   }
   bool supportsSplitting() const override {
-    return !options_c10d_->lazy_init;
+    // A lazy_init communicator is created by every member on the first
+    // operation, so ranks agree once it has started.
+    return !options_c10d_->lazy_init ||
+        init_state_ != InitializationState::UNINITIALIZED;
   }
   bool isInitialized() override;
   bool supportsShrinking() const override {

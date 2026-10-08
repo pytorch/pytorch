@@ -569,7 +569,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     int split_color{NCCL_SPLIT_NOCOLOR - 1};
 
     // nccl2 only: create the communicator on the first operation instead of
-    // when the device is bound. Such a group can't be split from.
+    // when the device is bound. Such a group can't be split from until its
+    // first operation.
     bool lazy_init{false};
 
    private:

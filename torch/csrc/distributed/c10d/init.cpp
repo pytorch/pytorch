@@ -4145,7 +4145,8 @@ Attributes:
     lazy_init (bool): nccl2 only. Create the communicator on the first
             operation instead of when the group is bound to a device, so a
             group that never communicates allocates no NCCL resources. Such a
-            group is not split from by ``new_group``. Default is False.
+            group can't be split from until its first operation. Default is
+            False.
 
 Example::
     >>> import torch.distributed as dist
