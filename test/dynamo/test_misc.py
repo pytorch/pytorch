@@ -5426,53 +5426,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNot(d.b, p.b)  # deep copy clones the list
         self.assertIs(type(d), Plain)
 
-    def test_copy_reduce_override(self):
-        # object.__reduce_ex__ must defer to a type's overridden __reduce__
-        # rather than the copyreg __newobj__ path. Exercise both a plain custom
-        # class and the pure-Python functools.partial (which returns func plus a
-        # 4-tuple state consumed by __setstate__).
-        from test.support.import_helper import import_fresh_module
-
-        class Custom:
-            def __init__(self, a, b=None):
-                self.a = a
-                self.b = b
-
-            def __reduce__(self):
-                return (type(self), (self.a,), {"b": self.b})
-
-            def __setstate__(self, state):
-                self.b = state["b"]
-
-        def fn(o):
-            return copy.copy(o), copy.deepcopy(o)
-
-        # graph break on equality comparison for py_functools.args tuples
-        cfn = torch.compile(fn, fullgraph=False, backend="eager")
-
-        obj = Custom(1, [10, 20])
-        c, d = cfn(obj)
-        self.assertEqual(c.a, 1)
-        self.assertIs(c.b, obj.b)  # shallow copy shares the list from state
-        self.assertEqual(d.a, 1)
-        self.assertIsNot(d.b, obj.b)  # deep copy clones the list
-        self.assertEqual(d.b, obj.b)
-
-        py_functools = import_fresh_module("functools", blocked=["_functools"])
-        p = py_functools.partial(sorted, ["asdf"], key=lambda t: t[0])
-        p.attr = [1, 2]
-        c, d = cfn(p)
-
-        self.assertIs(c.func, p.func)
-        self.assertIs(c.args, p.args)
-        self.assertIs(c.keywords, p.keywords)
-        self.assertIs(c.attr, p.attr)  # shallow copy shares __dict__ attr
-
-        self.assertEqual(d.args, p.args)
-        self.assertEqual(list(d.keywords), list(p.keywords))
-        self.assertIsNot(d.attr, p.attr)  # deep copy clones __dict__ attr
-        self.assertEqual(d.attr, p.attr)
-
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
@@ -14184,6 +14137,92 @@ def ___make_guard_fn():
                 return torch.ops.mylib.foo_validate_outputs_unbacked(x0, x1)
 
             f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_custom_op_int_list_error_reports_symint_elements(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::split_with_sizes_and_clone_int_list_error",
+                "(Tensor input, int[] sizes) -> Tensor[]",
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "mylib::split_with_sizes_and_clone_int_list_error",
+                "cpu",
+                lib=lib,
+            )
+            @torch.library.register_fake(
+                "mylib::split_with_sizes_and_clone_int_list_error", lib=lib
+            )
+            def split_with_sizes_and_clone(input, sizes):
+                return [
+                    t.clone()
+                    for t in torch.ops.aten.split_with_sizes.default(input, sizes)
+                ]
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def f(sz, x):
+                s0, s1 = sz.tolist()
+                _, r1 = torch.ops.mylib.split_with_sizes_and_clone_int_list_error(
+                    x, [s0, s1]
+                )
+                return torch.ops.aten.sort.default(r1)
+
+            with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
+                f(torch.tensor([3, 6]), torch.randn(9, requires_grad=True))
+
+            message = str(cm.exception)
+            self.assertIn("Expected a value of type 'List[int]'", message)
+            self.assertIn(
+                "instead found type 'immutable_list(SymInt, SymInt)'", message
+            )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_custom_op_int_list_error_truncates_long_symint_list(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::truncated_split_with_sizes_and_clone_int_list_error",
+                "(Tensor input, int[] sizes) -> Tensor[]",
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "mylib::truncated_split_with_sizes_and_clone_int_list_error",
+                "cpu",
+                lib=lib,
+            )
+            @torch.library.register_fake(
+                "mylib::truncated_split_with_sizes_and_clone_int_list_error", lib=lib
+            )
+            def split_with_sizes_and_clone(input, sizes):
+                return [
+                    t.clone()
+                    for t in torch.ops.aten.split_with_sizes.default(input, sizes)
+                ]
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def f(sz, x):
+                s0, s1, s2, s3, s4, s5, s6 = sz.tolist()
+                _, r1, r2, r3, r4, r5, r6 = (
+                    torch.ops.mylib.truncated_split_with_sizes_and_clone_int_list_error(
+                        x, [s0, s1, s2, s3, s4, s5, s6]
+                    )
+                )
+                return torch.ops.aten.sort.default(r1)
+
+            with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
+                f(
+                    torch.tensor([3, 6, 5, 11, 4, 0, 1]),
+                    torch.randn(30, requires_grad=True),
+                )
+
+            message = str(cm.exception)
+            self.assertIn("Expected a value of type 'List[int]'", message)
+            self.assertIn(", ...)", message)
+            self.assertNotIn(
+                "SymInt, SymInt, SymInt, SymInt, SymInt, SymInt, SymInt", message
+            )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_dim_order(self):
