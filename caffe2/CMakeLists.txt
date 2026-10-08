@@ -636,6 +636,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/GroupStreamGuard.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/ops/nccl_reduce_scatter_offset.cu
@@ -689,6 +690,38 @@ if(USE_ROCM)
     append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_HIP_SRCS)
     if(NOT WIN32)
       append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_HIP_SRCS)
+      # On ROCm the native async-TP GEMM is the CK-tile kernel in
+      # hip/AsyncMM.hip instead of the CUTLASS one in cuda/AsyncMM.cu. The .hip
+      # file always provides the async_input_mm symbol the op registration
+      # needs; the kernel itself (USE_ROCM_ASYNC_MM) needs gfx942/gfx950 in
+      # PYTORCH_ROCM_ARCH and the CK headers, which ATen adds to the include
+      # path only when CK SDPA or CK GEMM is enabled.
+      list(REMOVE_ITEM Caffe2_HIP_SRCS
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu)
+      set(ASYNC_MM_HIP_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/hip/AsyncMM.hip")
+      list(APPEND Caffe2_HIP_SRCS ${ASYNC_MM_HIP_FILE})
+      set(_have_async_mm_arch FALSE)
+      if((USE_FLASH_ATTENTION AND USE_ROCM_CK_SDPA) OR USE_ROCM_CK_GEMM)
+        foreach(ARCH gfx942 gfx950)
+          if("${ARCH}" IN_LIST PYTORCH_ROCM_ARCH)
+            set(_have_async_mm_arch TRUE)
+            break()
+          endif()
+        endforeach()
+      endif()
+      if(_have_async_mm_arch)
+        # ck_tile does not compile for every arch, so build the kernel for
+        # gfx942/gfx950 only.
+        set(_async_mm_no_arch_opts)
+        foreach(ARCH IN LISTS PYTORCH_ROCM_ARCH)
+          if(NOT ARCH MATCHES "^gfx9(42|50)$")
+            list(APPEND _async_mm_no_arch_opts "--no-offload-arch=${ARCH}")
+          endif()
+        endforeach()
+        set_source_files_properties(${ASYNC_MM_HIP_FILE} PROPERTIES
+          COMPILE_DEFINITIONS USE_ROCM_ASYNC_MM
+          COMPILE_OPTIONS "${_async_mm_no_arch_opts}")
+      endif()
     endif()
   endif()
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
@@ -869,7 +902,7 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML
   endif()
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
   foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
-    set_property(SOURCE ${generated_file} APPEND PROPERTY COMPILE_OPTIONS "-Wno-missing-prototypes" "-Wno-error=missing-prototypes" "-mllvm=-openmp-opt-disable")
+    set_property(SOURCE ${generated_file} APPEND PROPERTY COMPILE_OPTIONS "-Wno-missing-prototypes" "-Wno-error=missing-prototypes" "-mllvm" "-openmp-opt-disable")
   endforeach()
   foreach(source_file IN LISTS TORCH_CPU_SOURCES)
     get_filename_component(source_file "${source_file}" REALPATH)
@@ -2207,6 +2240,9 @@ if(BUILD_TEST)
   if(USE_ROCM)
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
+      # hipify renames cuda_foo_test to hip_foo_test; keep the CUDA binary
+      # name so ROCm and CUDA C++ test reports line up.
+      string(REGEX REPLACE "^hip_" "cuda_" test_name ${test_name})
       if(test_src MATCHES "^.*\.hip$")
         set_source_files_properties(${test_src} PROPERTIES LANGUAGE HIP)
         add_executable(${test_name} "${test_src}")

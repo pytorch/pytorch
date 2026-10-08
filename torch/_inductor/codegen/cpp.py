@@ -28,11 +28,13 @@ from .. import config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..debug import set_kernel_post_grad_provenance_tracing
 from ..loop_body import LoopBody
 from ..scheduler import (
+    _LoopStateSnapshot,
     BaseSchedulerNode,
     BaseScheduling,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
+    refresh_group_node_dependencies,
     Scheduler,
     SchedulerNode,
 )
@@ -1843,17 +1845,15 @@ class CppVecOverrides(CppOverrides):
         dtype = result.dtype
         body_code = f"{var}()"
 
-        def maskify_or_vecify(code):
-            return (
-                f"{V.kernel._get_mask_type()}::from({code})"
-                if dtype == torch.bool
-                else f"{V.kernel._get_vec_type(dtype)}({code})"
-            )
+        def maskify_or_vecify(code, is_vec=False):
+            if dtype == torch.bool:
+                if is_vec:
+                    num_vectors = V.kernel._get_num_vectors(torch.float)
+                    return f"inductor_vec_mask_cast<float,{num_vectors}>({code})"
+                return f"{V.kernel._get_mask_type()}::from({code})"
+            return code if is_vec else f"{V.kernel._get_vec_type(dtype)}({code})"
 
-        if result.is_vec:
-            body_code_vec = body_code
-        else:
-            body_code_vec = maskify_or_vecify(body_code)
+        body_code_vec = maskify_or_vecify(body_code, result.is_vec)
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
         # loading bool as VecMask<float, N>
         other_code_vec = maskify_or_vecify(other_code)
@@ -5169,19 +5169,6 @@ class CppScheduling(BaseScheduling):
             body.var_ranges, list(body.indexing_exprs.values())
         )
 
-    def _snapshot_node_loop_states(self, node):
-        if isinstance(node, SchedulerNode):
-            return [(node, node.snapshot_loop_state())]
-
-        if not isinstance(node, FusedSchedulerNode):
-            raise AssertionError("expected isinstance(node, FusedSchedulerNode)")
-        snapshots = []
-        for snode in node.snodes:
-            if not isinstance(snode, SchedulerNode):
-                raise AssertionError("expected isinstance(snode, SchedulerNode)")
-            snapshots.append((snode, snode.snapshot_loop_state()))
-        return snapshots
-
     def _align_compatible_range_nodes(self, node1, node2):
         if not isinstance(node1, (SchedulerNode, FusedSchedulerNode)):
             raise AssertionError(
@@ -5230,6 +5217,13 @@ class CppScheduling(BaseScheduling):
                 snode.recompute_size_and_body(
                     extra_indexing_constraints=node_to_recomp_indexing_constraints
                 )
+            ref_group = ref_node.snodes[0].group
+            if any(snode.group != ref_group for snode in ref_node.snodes[1:]):
+                # Simplification picked a different loop factorization per snode
+                return False
+            # Update the reference to avoid comparing with the stale one
+            ref_node.group = ref_group
+            refresh_group_node_dependencies(ref_node)
 
         _, (vars1, _) = node1.group
         _, (vars2, _) = node2.group
@@ -5342,13 +5336,11 @@ class CppScheduling(BaseScheduling):
         if ranges1 != ranges2:
             return False
 
-        snapshots = self._snapshot_node_loop_states(node_to_recomp)
-        snapshots.extend(self._snapshot_node_loop_states(ref_node))
+        snapshot = _LoopStateSnapshot.create((node_to_recomp, ref_node))
         try:
             return self._align_compatible_range_nodes(node1, node2)
         finally:
-            for node, state in reversed(snapshots):
-                node.restore_loop_state(state)
+            snapshot.restore()
 
     def _can_fuse_horizontal_impl(self, node1, node2):
         if not (
@@ -5736,13 +5728,16 @@ class CppScheduling(BaseScheduling):
                             def is_contiguous_index(x):
                                 return x == contiguous_index_expr
 
+                            # Users of a mutation output load the mutated buffer's
+                            # name, so they may have no read of this buffer.
                             return is_contiguous_index(write_index_expr) and all(
                                 isinstance(user.node, SchedulerNode)
-                                and is_contiguous_index(
-                                    user.node._body.get_read_expr(
+                                and (
+                                    read_exprs := user.node._body.get_all_read_expr(
                                         scheduler_buffer.get_name()
-                                    ),
+                                    )
                                 )
+                                and is_contiguous_index(read_exprs[0])
                                 for user in scheduler_buffer.users
                             )
 

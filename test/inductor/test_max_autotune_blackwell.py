@@ -11,9 +11,11 @@ from torch._inductor.heuristics.template.triton import (
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
+    TMATemplateConfigMixin,
 )
 from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
+from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch.testing import FileCheck
@@ -995,7 +997,7 @@ class TestBlackwellAutoWSConstraints(TestCase):
                 return_value=True,
             ),
         ):
-            for num_stages in range(2, 7):
+            for num_stages in range(2, 9):
                 kwargs["num_stages"] = num_stages
                 self.assertTrue(
                     CUDABlackwellPersistentTMATemplateConfigHeuristic._autows_constraints_ok(
@@ -1159,24 +1161,40 @@ class TestBlackwellAutoWSConfigs(TestCase):
                                 + heuristic.blackwell_persistent_addmm_configs,
                             )
 
-    def test_autows_default_configs_are_subset_of_exhaustive(self):
-        with mock.patch.dict(BaseHeuristicSingleton._instances, clear=True):
+    @parametrize("global_meta_ws", (False, True))
+    def test_global_meta_ws_disables_flatten(self, global_meta_ws):
+        # Triton's Meta WS knob rewrites every WS kernel, so configs with
+        # use_meta_ws=False must not be flattened either.
+        mat1, mat2 = mock.Mock(), mock.Mock()
+        mat2.get_dtype.return_value = torch.bfloat16
+        kernel_inputs = MMKernelInputs([mat1, mat2], mat1_idx=0, mat2_idx=1)
+        base = {
+            "BLOCK_M": 128,
+            "BLOCK_N": 128,
+            "BLOCK_K": 64,
+            "num_stages": 3,
+            "num_warps": 4,
+            "WARP_SPECIALIZE": True,
+            "FLATTEN": True,
+            "USE_META_WS": False,
+        }
+        with (
+            mock.patch.dict(BaseHeuristicSingleton._instances, clear=True),
+            mock.patch(
+                "torch._inductor.heuristics.template.triton.USE_META_WS",
+                global_meta_ws,
+            ),
+            mock.patch.object(
+                TMATemplateConfigMixin,
+                "_get_template_configs_impl",
+                return_value=iter([base]),
+            ),
+        ):
             heuristic = CUDABlackwellPersistentTMATemplateConfigHeuristic()
-            configs = heuristic._generate_autows_configs()
-            exhaustive_configs = heuristic._generate_autows_exhaustive_configs()
-            for cfg in configs:
-                self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
-                self.assertTrue(cfg.use_meta_ws)
-                self.assertIn(cfg, exhaustive_configs)
-            expected_stages = [
-                cfg.num_stages for cfg in heuristic.blackwell_persistent_mm_configs
-            ]
-            two_cta_stages = [
-                cfg.num_stages
-                for cfg in configs
-                if cfg.two_ctas and cfg.data_partition_factor == 1
-            ]
-            self.assertEqual(two_cta_stages, expected_stages)
+            configs = list(heuristic._get_template_configs_impl(kernel_inputs, "mm"))
+        self.assertEqual(len(configs), 1)
+        self.assertTrue(configs[0]["WARP_SPECIALIZE"])
+        self.assertEqual(configs[0]["FLATTEN"], not global_meta_ws)
 
 
 if __name__ == "__main__":
