@@ -2465,7 +2465,7 @@ def _aot_stage2b_bw_compile(
                         bw_module_copy = copy.deepcopy(bw_module)
                     compiled_bw_func = bw_compiler(bw_module_copy, placeholder_list)
                     del bw_module_copy
-                except Exception as e:
+                except Exception:
                     if aot_config.force_non_lazy_backward_lowering:
                         raise
                     trace_structured(
@@ -2474,15 +2474,7 @@ def _aot_stage2b_bw_compile(
                             "name": "eager_compile_backwards_failure",
                             "encoding": "string",
                         },
-                        # Bind the exception as a default, not a local: a local
-                        # would keep it, and through its traceback this frame
-                        # (e.g. bw_module_copy) and its callers, alive in a
-                        # reference cycle after this handler.
-                        payload_fn=lambda exc=e: "\n".join(
-                            traceback.format_exception(
-                                type(exc), exc, exc.__traceback__
-                            )
-                        ),
+                        payload_fn=traceback.format_exc,
                     )
                     log.warning(
                         "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
