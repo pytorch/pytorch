@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocmVersionInRange,
+    skipIfXpu,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -260,7 +261,7 @@ class ElasticLaunchTest(TestCase):
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
-    @patch("torch.cuda.is_available", return_value=False)
+    @patch("torch.accelerator.is_available", return_value=False)
     def test_nproc_launch_auto_configurations(self, _mock1):
         expected = torch._utils.cpu_count()
         self._test_nproc_launch_configuration("auto", expected)
@@ -689,18 +690,21 @@ class ElasticLaunchTest(TestCase):
 
 
 class ElasticLaunchVirtualRankTest(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
-    # ElasticLaunchVirtualRankTest uses instantiate_device_type_tests(only_for="cuda"),
+    # ElasticLaunchVirtualRankTest uses instantiate_device_type_tests(only_for=("cuda", "xpu")),
     # but this test launches `torchrun --nproc-per-node=2` which needs 2 GPUs.
     # That process spawning happens via torchrun, not MultiProcessTestCase, so
     # the conftest heuristic (see test/conftest.py) can't detect it; mark it
     # multigpu explicitly.
     @pytest.mark.multigpu
     @skipIfRocmVersionInRange([7, 14], [10, 2], "rocprofiler-sdk visibility conflict")
+    @skipIfXpu(
+        msg="--virtual-local-rank does not set ZE_AFFINITY_MASK, so XPU workers are not isolated: https://github.com/intel/torch-xpu-ops/issues/5613"
+    )
     def test_virtual_local_rank(self, device):
         """
         Test that virtual-local-rank ensures consistent device IDs across ranks.
@@ -737,7 +741,8 @@ class ElasticLaunchVirtualRankTest(TestCase):
             default0 = []
             default1 = []
             for line in output.splitlines():
-                if "cuda:" not in line:
+                # Check for accelerator device references (cuda: or xpu:)
+                if not any(dev in line for dev in ("cuda:", "xpu:")):
                     continue
                 if line.startswith("[default0]:"):
                     default0.append(line[11:])
@@ -789,9 +794,7 @@ class ElasticLaunchVirtualRankTest(TestCase):
 
 
 instantiate_device_type_tests(
-    ElasticLaunchVirtualRankTest,
-    globals(),
-    only_for="cuda",
+    ElasticLaunchVirtualRankTest, globals(), only_for=("cuda", "xpu"), allow_xpu=True
 )
 
 if __name__ == "__main__":

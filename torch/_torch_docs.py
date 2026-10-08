@@ -7320,7 +7320,8 @@ Returns the median of the values in :attr:`input`.
     compute the mean of both medians, use :func:`torch.quantile` with ``q=0.5`` instead.
 
 .. warning::
-    This function produces deterministic (sub)gradients unlike ``median(dim=0)``
+    This function spreads the (sub)gradient evenly over every element equal to the
+    median, while ``median(dim=0)`` sends it to the element at the returned index.
 
 Args:
     {input}
@@ -7355,9 +7356,9 @@ the outputs tensor having 1 fewer dimension than :attr:`input`.
 .. warning::
     ``indices`` does not necessarily contain the first occurrence of each
     median value found, unless it is unique.
-    The exact implementation details are device-specific.
-    Do not expect the same result when run on CPU and GPU in general.
-    For the same reason do not expect the gradients to be deterministic.
+    The exact implementation details are device-specific: CUDA returns the
+    first occurrence, while other devices may return another one.
+    Do not expect the same indices, or the same gradients, on CPU and GPU.
 
 Args:
     {input}
