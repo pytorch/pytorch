@@ -106,6 +106,11 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         }
         use_meta_ws = meta_ws_enabled()
         for candidate in BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS:
+            # Meta autoWS data partitioning offsets the batch coordinate of a
+            # rank-3 A descriptor load instead of M, so only a broadcast
+            # (rank-2) A may be partitioned.
+            if candidate.data_partition_factor > 1 and not a_broadcast:
+                continue
             yield {
                 "BLOCK_M": candidate.block_m,
                 "BLOCK_N": candidate.block_n,
