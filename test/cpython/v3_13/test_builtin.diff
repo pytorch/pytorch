@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_builtin.py b/test/cpython/v3_13/test_builtin.py
-index 12a1c48732fab1d449f775dd6a8d68b7c22a3f7f..b335bdc3895878e0a2ae4d0551e6b599cd7bdadb 100644
+index 12a1c48732fab1d449f775dd6a8d68b7c22a3f7f..f26b743d9d0ba550784f373e20c9c76166d90889 100644
 --- a/test/cpython/v3_13/test_builtin.py
 +++ b/test/cpython/v3_13/test_builtin.py
 @@ -1,3 +1,24 @@
@@ -384,7 +384,96 @@ index 12a1c48732fab1d449f775dd6a8d68b7c22a3f7f..b335bdc3895878e0a2ae4d0551e6b599
      def test_new_type(self):
          A = type('A', (), {})
          self.assertEqual(A.__name__, 'A')
-@@ -2772,10 +2823,5 @@ class TestType(unittest.TestCase):
+@@ -2628,10 +2679,11 @@ class TestType(unittest.TestCase):
+         self.assertEqual(x.to_bytes(2, 'little'), b'\x2a\x00')
+ 
+     def test_type_nokwargs(self):
+-        with self.assertRaises(TypeError):
+-            type('a', (), {}, x=5)
+         with self.assertRaises(TypeError):
+             type('a', (), dict={})
++        with self.assertRaises(TypeError):
++            with torch._dynamo.error_on_graph_break(False):
++                type('a', (), {}, x=5)
+ 
+     def test_type_name(self):
+         for name in 'A', '\xc4', '\U0001f40d', 'B.A', '42', '':
+@@ -2726,41 +2778,43 @@ class TestType(unittest.TestCase):
+             type('A', (), {}, ())
+         with self.assertRaises(TypeError):
+             type('A', (), dict={})
+-        with self.assertRaises(TypeError):
+-            type('A', [], {})
+-        with self.assertRaises(TypeError):
+-            type('A', (), types.MappingProxyType({}))
+-        with self.assertRaises(TypeError):
+-            type('A', (None,), {})
+-        with self.assertRaises(TypeError):
+-            type('A', (bool,), {})
+-        with self.assertRaises(TypeError):
+-            type('A', (int, str), {})
++        with torch._dynamo.error_on_graph_break(False):
++            with self.assertRaises(TypeError):
++                type('A', [], {})
++            with self.assertRaises(TypeError):
++                type('A', (), types.MappingProxyType({}))
++            with self.assertRaises(TypeError):
++                type('A', (None,), {})
++            with self.assertRaises(TypeError):
++                type('A', (bool,), {})
++            with self.assertRaises(TypeError):
++                type('A', (int, str), {})
+ 
+     def test_bad_slots(self):
+-        with self.assertRaises(TypeError):
+-            type('A', (), {'__slots__': b'x'})
+-        with self.assertRaises(TypeError):
+-            type('A', (int,), {'__slots__': 'x'})
+-        with self.assertRaises(TypeError):
+-            type('A', (), {'__slots__': ''})
+-        with self.assertRaises(TypeError):
+-            type('A', (), {'__slots__': '42'})
+-        with self.assertRaises(TypeError):
+-            type('A', (), {'__slots__': 'x\x00y'})
+-        with self.assertRaises(ValueError):
+-            type('A', (), {'__slots__': 'x', 'x': 0})
+-        with self.assertRaises(TypeError):
+-            type('A', (), {'__slots__': ('__dict__', '__dict__')})
+-        with self.assertRaises(TypeError):
+-            type('A', (), {'__slots__': ('__weakref__', '__weakref__')})
+-
+         class B:
+             pass
+-        with self.assertRaises(TypeError):
+-            type('A', (B,), {'__slots__': '__dict__'})
+-        with self.assertRaises(TypeError):
+-            type('A', (B,), {'__slots__': '__weakref__'})
++
++        with torch._dynamo.error_on_graph_break(False):
++            with self.assertRaises(TypeError):
++                type('A', (), {'__slots__': b'x'})
++            with self.assertRaises(TypeError):
++                type('A', (int,), {'__slots__': 'x'})
++            with self.assertRaises(TypeError):
++                type('A', (), {'__slots__': ''})
++            with self.assertRaises(TypeError):
++                type('A', (), {'__slots__': '42'})
++            with self.assertRaises(TypeError):
++                type('A', (), {'__slots__': 'x\x00y'})
++            with self.assertRaises(ValueError):
++                type('A', (), {'__slots__': 'x', 'x': 0})
++            with self.assertRaises(TypeError):
++                type('A', (), {'__slots__': ('__dict__', '__dict__')})
++            with self.assertRaises(TypeError):
++                type('A', (), {'__slots__': ('__weakref__', '__weakref__')})
++            with self.assertRaises(TypeError):
++                type('A', (B,), {'__slots__': '__dict__'})
++            with self.assertRaises(TypeError):
++                type('A', (B,), {'__slots__': '__weakref__'})
+ 
+     def test_namespace_order(self):
+         # bpo-34320: namespace should preserve order
+@@ -2772,10 +2826,5 @@ class TestType(unittest.TestCase):
          self.assertEqual(list(C.__dict__.items())[:2], [('b', 2), ('a', 1)])
  
  
