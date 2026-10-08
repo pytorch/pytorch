@@ -2719,6 +2719,21 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
+    # CUDA median with dim returns the first occurrence of the median value
+    @onlyCUDA
+    @dtypes(torch.int8, torch.int32, torch.half, torch.float)
+    def test_median_dim_index_is_first_occurrence(self, device, dtype):
+        for size in [(7, 1100), (5, 19999)]:
+            t = torch.randint(0, 4, size, device=device).to(dtype)
+            if dtype.is_floating_point:
+                t[0, 5::3] = float('nan')
+                t[1] = float('nan')
+            # dim=0 reduces strided slices
+            for op, dim in product([torch.median, torch.nanmedian], [0, 1]):
+                values, indices = op(t, dim)
+                is_median = (t == values.unsqueeze(dim)) | (t.isnan() & values.isnan().unsqueeze(dim))
+                self.assertEqual(indices, is_median.int().argmax(dim))
+
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/pull/138657 discovers a latent bug")
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
