@@ -38,6 +38,7 @@ self-hosted-runner:
     - lf.linux.arm64.2xlarge
     - lf.linux.g5.4xlarge.nvidia.gpu
     - lf.linux.c7i.2xlarge
+    - nv-l-arm64grace-16-200-gb300
     # Repo-specific IBM hosted S390x runner
     - linux.s390x
     # Organization wide AWS Windows runners
