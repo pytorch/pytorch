@@ -291,7 +291,7 @@ if HAS_CUDA_AND_TRITON:
 
         def get_manager(self, device_index=None):
             return torch._inductor.cudagraph_trees.get_container(
-                device_index if device_index else self.device_idx
+                torch.device("cuda", device_index if device_index else self.device_idx)
             ).tree_manager
 
         def get_roots(self):
@@ -309,7 +309,7 @@ if HAS_CUDA_AND_TRITON:
             return tree_cudagraphify_impl(
                 *args,
                 **kwargs,
-                device_index=self.device_idx,
+                device=torch.device("cuda", self.device_idx),
                 is_inference=is_inference,
                 is_backward=is_backward,
             )
@@ -662,7 +662,7 @@ if HAS_CUDA_AND_TRITON:
                     result = opt_foo(x, y)
                     if check_manager:
                         manager = torch._inductor.cudagraph_trees.get_manager(
-                            x.device.index, create_if_none_exists=False
+                            x.device, create_if_none_exists=False
                         )
                         self.assertIsNotNone(manager)
                     results.put((result, expected))
@@ -2584,7 +2584,7 @@ if HAS_CUDA_AND_TRITON:
                 torch._C._cuda_clearCublasWorkspaces()
                 graphs.clear_matmul_workspaces = staticmethod(prev)
                 torch._inductor.cudagraph_trees.get_container(
-                    self.device_idx
+                    torch.device("cuda", self.device_idx)
                 ).tree_manager = None
 
         def test_peristed_output_livenes(self):
@@ -4224,7 +4224,7 @@ if HAS_CUDA_AND_TRITON:
                 static_input_idxs=[],
                 is_backward=False,
                 is_inference=False,
-                device_index=self.device_idx,
+                device=torch.device("cuda", self.device_idx),
                 stack_traces=["dummy stack trace1", "dummy stack trace2"],
             )
 

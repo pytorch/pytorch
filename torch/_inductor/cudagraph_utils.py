@@ -89,9 +89,10 @@ class CUDAGraphPolicy:
         example_inputs: Sequence[InputType],
         static_input_idxs: Sequence[int],
         *,
-        device_index: int,
+        device: torch.device,
         is_backward: bool,
         is_inference: bool,
+        device_index: int | None = None,
         **kwargs: Any,
     ) -> Callable[..., Any]:
         """Wrap a single compiled callable with CUDA graph capture/replay.
@@ -111,13 +112,17 @@ class CUDAGraphPolicy:
         instead, so this method wraps the *entire* callable, not individual
         partitions.  Subclasses that need per-partition control should
         handle partitioning internally.
+
+        ``device_index`` is ``device.index``, still passed so that subclasses
+        written against the older signature keep resolving; new code should
+        use ``device``.
         """
         from torch._inductor.compile_fx import cudagraphify
 
         return cudagraphify(
             model,
             static_input_idxs,
-            device_index=device_index,
+            device=device,
             is_backward=is_backward,
             is_inference=is_inference,
             **kwargs,
@@ -414,14 +419,23 @@ def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
 
 @dataclasses.dataclass
 class BoxedDeviceIndex:
-    value: int | None
+    """Boxes the device whose cudagraph manager a forward graph used, so its
+    backward can reach the same manager. Boxed because it is filled in after
+    the kwarg dict carrying it has been built.
 
-    def set(self, device_idx: int | None) -> None:
-        if not (device_idx is None or isinstance(device_idx, int)):
+    Holds a whole ``torch.device``, not an index: an index alone cannot name a
+    manager now that they are keyed per device type. The class name is kept
+    because it also names a kwarg threaded through aot_autograd.
+    """
+
+    value: torch.device | None
+
+    def set(self, device: torch.device | None) -> None:
+        if not (device is None or isinstance(device, torch.device)):
             raise AssertionError(
-                f"expected device_idx to be None or int, got {device_idx!r}"
+                f"expected device to be None or torch.device, got {device!r}"
             )
-        self.value = device_idx
+        self.value = device
 
 
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
@@ -647,8 +661,9 @@ def get_partition_cudagraph_metadata(
     )
 
 
-def collect_cuda_data_ptrs(obj: object) -> OrderedSet[int]:
-    """Debug helper that collects the data pointers of all CUDA tensors in the object."""
+def collect_device_data_ptrs(obj: object, device_type: str) -> OrderedSet[int]:
+    """Debug helper that collects the data pointers of all tensors in the object
+    that live on ``device_type``."""
     if not isinstance(obj, torch.Tensor):
         return OrderedSet()
 
@@ -656,7 +671,7 @@ def collect_cuda_data_ptrs(obj: object) -> OrderedSet[int]:
     for base in get_plain_tensors(obj, out=[]):
         if type(base) is not torch.Tensor:
             continue
-        if is_fake(base) or base.is_meta or base.device.type != "cuda":
+        if is_fake(base) or base.is_meta or base.device.type != device_type:
             continue
         try:
             ptrs.add(base.data_ptr())

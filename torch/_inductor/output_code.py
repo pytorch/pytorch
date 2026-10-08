@@ -178,6 +178,17 @@ def copy_strided_storage_(dst: torch.Tensor, src: torch.Tensor) -> None:
     )
 
 
+def cudagraph_device(compiled_graph: CompiledFxGraph) -> torch.device:
+    """Device the graph's cudagraph manager lives on.
+
+    Only called where the cudagraph gate has already established a single
+    accelerator device; graph partition additionally allows cpu nodes
+    alongside it.
+    """
+    device_type = next(d for d in compiled_graph.device_types if is_gpu(d))
+    return torch.device(device_type, next(iter(compiled_graph.device_idxs)))
+
+
 def maybe_handle_backward_generation(
     compiled_graph: CompiledFxGraph,
     boxed_forward_device_index: BoxedDeviceIndex | None,
@@ -224,7 +235,7 @@ def prepare_cudagraph_post_compile(
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     if boxed_forward_device_index is not None and not is_inference and not is_backward:
-        boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+        boxed_forward_device_index.set(cudagraph_device(compiled_graph))
 
 
 def cudagraph_post_compile(
@@ -281,9 +292,9 @@ def cudagraph_post_compile(
             k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
         }
 
-        device_index = next(iter(compiled_graph.device_idxs))
+        device = cudagraph_device(compiled_graph)
         cudagraphify_kwargs = dict(
-            device_index=device_index,
+            device=device,
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
@@ -300,6 +311,7 @@ def cudagraph_post_compile(
                 current_callable,
                 example_inputs,
                 static_input_idxs or (),
+                device_index=device.index,
                 **cudagraphify_kwargs,
             )
         else:
@@ -372,7 +384,7 @@ def cudagraph_partition_post_compile(
     is_backward = compiled_graph.fx_kwargs["is_backward"]
     static_input_idxs = OrderedSet(compiled_graph.fx_kwargs["static_input_idxs"] or ())
     mutated_input_idxs = compiled_graph.mutated_input_idxs
-    device_index = next(iter(compiled_graph.device_idxs))
+    device = cudagraph_device(compiled_graph)
 
     # Filter to only tensor constants (exclude opaque value type classes)
     tensor_constants = {
@@ -413,7 +425,7 @@ def cudagraph_partition_post_compile(
         cudagraphify_fn = partial(
             cudagraphify,
             static_input_idxs=tuple(partition_metadata.static_input_idxs),
-            device_index=device_index,
+            device=device,
             stack_traces=partition_metadata.stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,

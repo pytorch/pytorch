@@ -275,9 +275,12 @@ class CacheCompiledArtifact(CompiledArtifact):
 
             from .compile_fx import _CompileFxKwargs
 
+            # Safe to leave unset only because cudagraphs is disabled here:
+            # maybe_handle_backward_generation raises on a None value when a
+            # backward runs with cudagraph trees on.
             fx_config = _CompileFxKwargs(
                 cudagraphs=BoxedBool(False),
-                boxed_forward_device_index=BoxedDeviceIndex(0),
+                boxed_forward_device_index=BoxedDeviceIndex(None),
             )
 
             context = torch._guards.TracingContext(FakeTensorMode(shape_env=ShapeEnv()))

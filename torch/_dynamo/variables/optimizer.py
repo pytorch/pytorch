@@ -69,7 +69,7 @@ def _is_static_for_cudagraphs(x: torch.Tensor) -> bool:
     from torch._inductor.cudagraph_trees import get_manager
 
     if x.is_cuda:
-        manager = get_manager(x.device.index, False)
+        manager = get_manager(x.device, False)
         is_static_address = torch._dynamo.utils.get_static_address_type(x) is not None
         if manager:
             if manager.current_node is None:
