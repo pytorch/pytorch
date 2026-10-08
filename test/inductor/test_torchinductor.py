@@ -9884,6 +9884,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 2, 6, 6]),))
 
+    @parametrize("dtype", test_int_dtypes)
+    def test_sign_int_dtypes(self, dtype):
+        vals = [-3, -1, 0, 2, 7] if dtype.is_signed else [0, 1, 2, 7]
+        x = torch.tensor(vals, dtype=dtype, device=self.device)
+        self.common(torch.sign, [x], check_lowp=False)
+
     def test_frac_signed_zero(self):
         def fn(x):
             y = torch.frac(x)
