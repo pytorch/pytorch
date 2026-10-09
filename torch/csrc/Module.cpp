@@ -29,6 +29,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -100,6 +101,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
@@ -3448,6 +3450,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
+
+  // See Note [in_kernel_invocation].
+  torch::impl::py_context_manager<c10::impl::FakeInKernelInvocationGuard>(
+      py_module, "_FakeInKernelInvocation");
+
+  py_module.def("_in_kernel_invocation", []() {
+    return c10::impl::in_kernel_invocation();
+  });
 
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();

@@ -231,7 +231,8 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 // storing shape env and converter from Python, we'll use these later
 // to implement sym ints, real tensor conversion, etc
 // this doesn't have caching because we're not implementing it
-// no in_kernel_invocation_manager since that's handled by dispatch keys in C++
+// no in_kernel_invocation flag; that state is thread-local in C++
+// (see Note [in_kernel_invocation] in FakeTensorModeTLS.h)
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;

@@ -2,12 +2,17 @@
 
 #include <ATen/ATen.h>
 #include <ATen/FakeTensor.h>
+#include <ATen/ThreadLocalState.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/as_strided_native.h>
 #endif
+#include <c10/core/impl/FakeTensorModeTLS.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/irange.h>
+
+#include <thread>
 
 using namespace at;
 
@@ -282,6 +287,39 @@ TEST(TestNative, AsStridedPreservesFakeTensorMetadata) {
   ASSERT_TRUE(fake_device.has_value());
   EXPECT_EQ(*fake_device, c10::Device(c10::kCPU));
   EXPECT_EQ(result_impl->fake_tensor_mode(), mode);
+}
+
+TEST(TestNative, FakeInKernelInvocationReportsMetaDevice) {
+  auto t = at::empty({2}, at::device(at::kMeta));
+  at::set_and_normalize_fake_device(
+      t.unsafeGetTensorImpl(), c10::Device(c10::kCPU));
+  EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
+  {
+    // Suspending fake dispatch does not change the reported device.
+    c10::impl::ExcludeDispatchKeyGuard no_fake(c10::DispatchKey::Fake);
+    EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
+  }
+  {
+    c10::impl::FakeInKernelInvocationGuard in_kernel;
+    EXPECT_EQ(t.device(), c10::Device(c10::kMeta));
+    at::ThreadLocalState state;
+    std::thread worker([&] {
+      at::ThreadLocalStateGuard guard(state);
+      EXPECT_TRUE(c10::impl::in_kernel_invocation());
+      EXPECT_EQ(t.device(), c10::Device(c10::kMeta));
+    });
+    worker.join();
+  }
+  EXPECT_FALSE(c10::impl::in_kernel_invocation());
+  EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
+
+  EXPECT_THROW(
+      {
+        c10::impl::FakeInKernelInvocationGuard in_kernel;
+        TORCH_CHECK(false, "meta kernel failed");
+      },
+      c10::Error);
+  EXPECT_FALSE(c10::impl::in_kernel_invocation());
 }
 
 TEST(TestNative, NativeTestGPU) {
