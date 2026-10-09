@@ -529,15 +529,10 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
 def _torchci_report_args(
     test_file: str, is_cpp_test: bool, reports_dir: str | None
 ) -> list[str]:
-    if not HAS_TORCHCI_REPORTS:
+    if not HAS_TORCHCI_REPORTS or not reports_dir:
         return []
     if not is_cpp_test:
-        # Explicit either way, since run_tests defaults to on in CI.
-        if reports_dir:
-            return [f"--save-torchci-reports={reports_dir}"]
-        return ["--no-save-torchci-reports"]
-    if not reports_dir:
-        return []
+        return [f"--save-torchci-reports={reports_dir}"]
     # C++ tests run under pytest-cpp, not run_tests, so register the plugin here.
     prefix = Path(reports_dir) / sanitize_test_filename(test_file)
     plugin = "torch.testing._internal.torchci.plugin"
@@ -1706,22 +1701,14 @@ def parse_args():
         help="enable coverage",
         default=PYTORCH_COLLECT_COVERAGE,
     )
-    reports_dir = str(REPO_ROOT / "test/torchci-reports")
     parser.add_argument(
         "--save-torchci-reports",
-        nargs="?",
-        const=reports_dir,
-        default=reports_dir if IS_CI else None,
+        # Absolute, since tests run from test/.
+        type=os.path.abspath,
+        # upload-test-artifacts uploads this folder.
+        default=str(REPO_ROOT / "test/torchci-reports") if IS_CI else None,
         metavar="DIR",
-        help="write test run reports (default: test/torchci-reports)",
-    )
-    parser.add_argument(
-        "--no-save-torchci-reports",
-        dest="save_torchci_reports",
-        action="store_const",
-        const=None,
-        default=argparse.SUPPRESS,
-        help="don't write test run reports",
+        help="write test run reports to DIR (default in CI: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",
@@ -1882,10 +1869,6 @@ def parse_args():
     args, extra = parser.parse_known_args()
     if "--" in extra:
         extra.remove("--")
-    # Tests run from test/, so a relative DIR means test/DIR.
-    reports_dir = args.save_torchci_reports
-    if reports_dir and not os.path.isabs(reports_dir):
-        args.save_torchci_reports = str(REPO_ROOT / "test" / reports_dir)
     args.additional_args = extra
     return args
 
