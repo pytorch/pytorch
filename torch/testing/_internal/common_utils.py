@@ -2697,6 +2697,21 @@ def requires_cuda_p2p_access():
         "cuda p2p access is not available",
     )
 
+def requires_accelerator_p2p_access():
+    acc = torch.accelerator.current_accelerator(True)
+    if acc is not None and acc.type == "cuda":
+        return requires_cuda_p2p_access()
+    device_module = torch.get_device_module(acc) if acc is not None else None
+    can_access_peer = getattr(device_module, "can_device_access_peer", None)
+    num_devices = torch.accelerator.device_count()
+    p2p_access_available = can_access_peer is not None and num_devices >= 2 and all(
+        can_access_peer(i, j) for i in range(num_devices) for j in range(i + 1, num_devices)
+    )
+    return skip_but_pass_in_sandcastle_if(
+        not p2p_access_available,
+        "accelerator p2p access is not available",
+    )
+
 # Reverts the linalg backend back to default to make sure potential failures in one
 # test do not affect other tests
 def setLinalgBackendsToDefaultFinally(fn):
@@ -2971,8 +2986,8 @@ def requires_multigpu(fn):
     run under an internal test runner that has no pytest, where the skip alone
     is the whole behaviour.
     """
-    reason = "requires >= 2 GPUs"
-    skip = torch.cuda.device_count() < 2
+    reason = "requires >= 2 accelerators"
+    skip = torch.accelerator.device_count() < 2
 
     if isinstance(fn, type):
         if has_pytest:
@@ -3071,8 +3086,9 @@ def to_gpu(obj, type_map=None):
         if not obj.is_leaf:
             raise AssertionError("expected obj to be a leaf tensor")
         t = type_map.get(obj.dtype, obj.dtype)
+        device_type = torch.accelerator.current_accelerator(check_available=True).type
         with torch.no_grad():
-            res = obj.to(dtype=t, device="cuda", copy=True)
+            res = obj.to(dtype=t, device=device_type, copy=True)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
