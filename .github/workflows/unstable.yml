@@ -66,7 +66,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: l-arm64g4-16-62
+      runner: l-barm64g4-62-226
       build-environment: linux-jammy-aarch64-cuda13.2-py3.12-gcc13
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
