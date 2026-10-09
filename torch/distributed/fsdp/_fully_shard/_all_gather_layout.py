@@ -42,19 +42,13 @@ AllGatherCopyIn = Callable[
     [list[torch.Tensor], torch.Tensor, list[int], int, int],
     tuple[torch.Tensor, torch.Tensor],
 ]
-# Called as fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size)
-# under no_grad on the current stream after the all-gather, with the outputs'
-# version counters preserved. all_gather_output is the flat rank-major
-# collective buffer, and outputs are the preallocated all-gather outputs, viewed
-# as uint8 if the buffer is uint8, in which case split_sizes count bytes.
-# outputs[i] receives each rank's split_sizes[i] elements concatenated across
-# ranks along the dim whose leading dims multiply to outer_sizes[i]. A Tensor
-# returned by fsdp_pre_all_gather may be smaller than its cached output, in
-# which case it fills the leading split_sizes[i] * world_size elements of the
-# rank-major buffer that is reassembled into outputs[i], with zeros after it.
-# The callback must only write to outputs and must not keep references to its
-# arguments. It is not called when the all-gather buffer is empty, or when the
-# all-gather group has one rank, since FSDP then copies the inputs directly.
+# fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size) runs under
+# no_grad on the current stream to copy the flat rank-major all_gather_output into
+# outputs: outputs[i] gets each rank's split_sizes[i] elements, concatenated along
+# the dim whose leading dims multiply to outer_sizes[i]. A payload smaller than
+# outputs[i] is reassembled from a zero-padded rank-major buffer. uint8 buffers
+# come with uint8 output views and byte sizes. fn may only write outputs and must
+# not keep its arguments. It is skipped for empty buffers and single-rank groups.
 AllGatherOutputFn = Callable[
     [torch.Tensor, list[torch.Tensor], list[int], list[int], int], None
 ]
@@ -67,12 +61,7 @@ def _default_all_gather_output_fn(
     outer_sizes: list[int],
     world_size: int,
 ) -> None:
-    r"""Copy gathered payloads through intermediate buffers when needed.
-
-    Nonempty payloads with more than one outer slice copy through intermediate
-    buffers, then concatenate into their final layout. Other payloads copy
-    directly.
-    """
+    r"""Copy payloads with outer_size > 1 via intermediate buffers, others directly."""
     copy_outputs: list[torch.Tensor] = []
     for output, split_size, outer_size in zip(outputs, split_sizes, outer_sizes):
         if outer_size == 1 or not output.numel():

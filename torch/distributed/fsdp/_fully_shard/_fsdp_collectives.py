@@ -40,8 +40,7 @@ class AllGatherResult(NamedTuple):
     # 1D flattened version of `param_all_gather_input_numels` saved to avoid
     # CPU overhead from recomputing
     all_gather_input_split_sizes: list[int]
-    # For each all-gather input, the product of its dims before the dim that
-    # ranks are concatenated along (see AllGatherOutputFn)
+    # Product of each input's dims before its concatenation dim
     all_gather_input_outer_sizes: list[int]
     layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
     output_metadata: object | None = None
@@ -495,14 +494,11 @@ def _get_param_all_gather_inputs(
     return param_all_gather_inputs
 
 
-# Called as copy_in = fn(unsharded_grads, shard_dims, world_size) on the current
-# stream before FSDP allocates the reduce-scatter input, whose layout is fixed by
-# the padded sharded parameter sizes: for each rank in order, its padded shard of
-# each gradient, flattened. fn may replace entries of unsharded_grads, e.g. with
-# reordered copies. FSDP then calls copy_in(reduce_scatter_input) once to fill
-# the flat buffer, converting to its dtype, and frees copy_in and the gradients
-# afterward, so neither may be kept elsewhere. world_size is 1 when no
-# reduce-scatter is needed.
+# copy_in = fn(unsharded_grads, shard_dims, world_size) runs before FSDP allocates
+# the reduce-scatter input and may replace gradients, e.g. with reordered copies.
+# copy_in(reduce_scatter_input) then fills that flat buffer with each rank's padded
+# gradient shards in rank order, casting to its dtype. Both run on the current
+# stream; FSDP frees copy_in and the gradients afterward, so keep neither.
 PrepareReduceScatterInputsFn = Callable[
     [list[torch.Tensor], list[int], int], Callable[[torch.Tensor], None]
 ]
@@ -620,12 +616,7 @@ def _default_reduce_scatter_input_fn(
     shard_dims: list[int],
     world_size: int,
 ) -> Callable[[torch.Tensor], None]:
-    r"""Pack nonzero-dimension gradients into intermediate buffers before copying.
-
-    When the group has more than one rank, nonzero-dimension gradients are
-    chunked and concatenated into intermediate buffers grouped by destination
-    rank, then copied into the reduce-scatter buffer.
-    """
+    r"""Reorder gradients sharded on a nonzero dim by rank, then copy them in."""
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim != 0:
