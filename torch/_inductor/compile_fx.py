@@ -12,7 +12,6 @@ import os
 import sys
 import threading
 import time
-import types
 import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -63,12 +62,7 @@ from torch._functorch.aot_autograd import (
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
-from torch._inductor.codecache import (
-    code_hash,
-    FxGraphCache,
-    output_code_log,
-    PyCodeCache,
-)
+from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     cudagraph_trees_clone_live_user_visible_outputs,
@@ -1878,8 +1872,6 @@ class _InProcessFxCompile(FxCompile):
 
                     compiled_fn: Any
                     compiled_fn_runner: CompiledFnRunner | None = None
-                    # The module holding the compiled graph's code and constants.
-                    loaded_module: types.ModuleType | None = None
                     with dynamo_timed(
                         "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                     ):
@@ -1947,8 +1939,6 @@ class _InProcessFxCompile(FxCompile):
                             compiled_fn_runner = getattr(
                                 compiled_module, "runner", None
                             )
-                            if isinstance(compiled_module, types.ModuleType):
-                                loaded_module = compiled_module
 
                     # Dump provenance artifacts for debugging trace
                     inductor_provenance_tracking_node_mappings = None
@@ -2111,7 +2101,7 @@ class _InProcessFxCompile(FxCompile):
                                 compile_id
                             )
 
-                    compiled_graph = CompiledFxGraph(
+                    return CompiledFxGraph(
                         compiled_fn,
                         graph,
                         gm,
@@ -2132,9 +2122,6 @@ class _InProcessFxCompile(FxCompile):
                         inductor_provenance_tracking_node_mappings,
                         inductor_kernel_stack_trace_str,
                     )
-                    if loaded_module is not None:
-                        PyCodeCache.forget_module_with(compiled_graph, loaded_module)
-                    return compiled_graph
 
 
 def fx_codegen_and_compile(
