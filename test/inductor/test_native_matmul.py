@@ -6,10 +6,20 @@ from collections.abc import Callable
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, metrics
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import (
+    fresh_inductor_cache,
+    run_and_get_code,
+    run_and_get_triton_code,
+)
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -257,6 +267,248 @@ class TestTritonDotReduction(TestCase):
         ).check("tl.arange(0, YBLOCK)[None, :, None, None]").check(
             "tl.arange(0, XBLOCK)[None, None, :, None]"
         ).check("tl.arange(0, R0_BLOCK)[None, None, None, :]").run(code)
+
+
+@inductor_config.patch({"triton.native_matmul": True})
+@instantiate_parametrized_tests
+class TestNativeMatmulRowReduction(TestCase):
+    """[M, N] -> [M] reductions of a native matmul fuse into the matmul kernel."""
+
+    def check(self, f, args, *, fused, tol=5e-2):
+        metrics.reset()
+        torch._dynamo.reset()
+        actual, code = run_and_get_code(torch.compile(f), *args)
+        self.assertEqual(actual, f(*args), atol=tol, rtol=tol)
+        self.assertEqual(metrics.generated_kernel_count == 1, fused)
+        return code[0]
+
+    @parametrize(
+        "shape",
+        (
+            (256, 128, 16),
+            (256, 2048, 64),
+            (256, 1024, 128),
+            (256, 128, 62),
+            (512, 4096, 64),
+            (128, 64, 64),
+        ),
+    )
+    def test_output_reduction(self, shape):
+        def f(x, w1, bias1, w2, bias2):
+            hidden = torch.relu(x @ w1 + bias1)
+            return (hidden * w2).sum(dim=-1) + bias2
+
+        m, k, n = shape
+        args = (
+            torch.randn(m, k, dtype=torch.float16),
+            torch.randn(k, n, dtype=torch.float16),
+            torch.randn(n, dtype=torch.float16),
+            torch.randn(n, dtype=torch.float16),
+            torch.randn(1, dtype=torch.float16),
+        )
+        self.check(f, args, fused=True, tol=5e-1)
+
+    def test_reduced_epilogue(self):
+        def f(x, weight, scale):
+            return torch.sqrt((x @ weight).sum(-1).abs()) * scale
+
+        args = (
+            torch.randn(100, 64, dtype=torch.float16),
+            torch.randn(64, 100, dtype=torch.float16),
+            torch.randn(100, dtype=torch.float16),
+        )
+        code = self.check(f, args, fused=True)
+        # The row stage is rank 2, so [M] stores are not repeated across a row.
+        FileCheck().check("tl.sum(").check("tl.store(").check_same(
+            "local_xindex_mask)"
+        ).run(code)
+
+    def test_matmul_output_precision(self):
+        def f(x, weight):
+            return (x @ weight).sum(-1)
+
+        x = torch.ones((16, 16), dtype=torch.float16)
+        weight = torch.empty((16, 8), dtype=torch.float16)
+        weight[:, 0::2] = 5000
+        weight[:, 1::2] = -5000
+        code = self.check(f, (x, weight), fused=True, tol=0)
+        FileCheck().check("Original ATen: [aten.mm, aten.sum]").check("tl.dot").check(
+            ".to(tl.float16)"
+        ).check("tl.sum").run(code)
+
+    def test_row_reduction_output_precision(self):
+        def f(x, weight):
+            reduced = (x @ weight).sum(-1)
+            return (reduced - 4.3984375) * 1000
+
+        x = torch.zeros((16, 16), dtype=torch.float16)
+        x[:, 0] = 1
+        weight = torch.zeros((16, 8), dtype=torch.float16)
+        weight[0, ::2] = 1
+        weight[0, 1::2] = 0.1
+        code = self.check(f, (x, weight), fused=True, tol=0)
+        FileCheck().check("tl.dot").check("tl.sum").check(".to(tl.float16)").run(code)
+
+    def test_indirect_index_from_row_reduction_not_fused(self):
+        def f(x, weight, table):
+            index = (x @ weight).amax(-1).clamp(0, 15).long()
+            return table[index] * 2
+
+        args = (
+            torch.rand(100, 64, dtype=torch.float16),
+            torch.rand(64, 48, dtype=torch.float16) * 0.01,
+            torch.randn(16),
+        )
+        self.check(f, args, fused=False, tol=0)
+
+    @parametrize("reduction_type", ("prod", "any"))
+    def test_additional_reduction_types(self, reduction_type):
+        def f(x, weight):
+            output = x @ weight
+            return output.prod(-1) if reduction_type == "prod" else output.any(-1)
+
+        args = (
+            torch.eye(16, dtype=torch.float16).repeat(2, 1),
+            torch.full((16, 8), 0.5, dtype=torch.float16),
+        )
+        self.check(f, args, fused=True, tol=1e-3)
+
+    @parametrize("reduction_type", ("amax", "amin"))
+    def test_padded_lanes(self, reduction_type):
+        def f(x, weight):
+            output = x @ weight
+            if reduction_type == "amax":
+                return output.amax(dim=-1)
+            return output.amin(dim=-1)
+
+        sign = -1 if reduction_type == "amax" else 1
+        args = (
+            torch.ones(16, 16, dtype=torch.float16),
+            torch.full((16, 8), sign, dtype=torch.float16),
+        )
+        code = self.check(f, args, fused=True, tol=0)
+        FileCheck().check("tl.where(local_r0_index_mask").run(code)
+
+    def test_atomic_add(self):
+        def f(x, weight, index, out):
+            return out.index_add_(0, index, (x @ weight).sum(dim=-1))
+
+        torch.manual_seed(6928)
+        args = (
+            torch.randn(16, 16, dtype=torch.float16),
+            torch.randn(16, 8, dtype=torch.float16),
+            torch.zeros(16, dtype=torch.int64),
+        )
+        out = torch.zeros(1, dtype=torch.float16)
+        expected = f(*args, out.clone())
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(epilogue_fusion_with_atomic_add=True),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), *args, out.clone())
+        self.assertEqual(actual, expected, atol=5e-2, rtol=5e-2)
+        FileCheck().check_count("@triton.jit", 1, exactly=True).check(
+            "tl.atomic_add"
+        ).run(code[0])
+        FileCheck().check_not("'mutated_arg_names': []").run(code[0])
+
+    @largeTensorTest("3GB", device=GPU_TYPE, inductor=True)
+    def test_index_dtype(self):
+        def f(x, weight, scale):
+            return ((x @ weight) * scale).sum(dim=-1)
+
+        # Only the row stage reads scale, and its storage spans > 2**31
+        # elements, so the fused kernel must use 64-bit indexing.
+        stride = 2**27 + 2**24
+        scale_storage = torch.ones(15 * stride + 1, dtype=torch.uint8)
+        args = (
+            torch.randn(16, 16, dtype=torch.float16),
+            torch.randn(16, 16, dtype=torch.float16),
+            scale_storage[::stride],
+        )
+        code = self.check(f, args, fused=True)
+        if not TEST_WITH_ROCM:
+            FileCheck().check(".to(tl.int64)").run(code)
+
+    def test_reused_prologue(self):
+        # K == N, so the [M, K] prologue and [M, N] output share a numel.
+        def f(x, weight):
+            prologue = x + 1
+            output = prologue @ weight
+            return (output + prologue).sum(dim=-1)
+
+        args = (
+            torch.randn(64, 64, dtype=torch.float16),
+            torch.randn(64, 64, dtype=torch.float16),
+        )
+        self.check(f, args, fused=True)
+
+    def test_column_reduction_not_fused(self):
+        def f(x, weight):
+            return (x @ weight).sum(dim=0)
+
+        args = (
+            torch.randn(16, 32, dtype=torch.float16),
+            torch.randn(32, 16, dtype=torch.float16),
+        )
+        self.check(f, args, fused=False)
+
+    def test_mismatched_row_reduction_not_fused(self):
+        def f(x, weight, other):
+            return (x @ weight).sum(-1) + other.sum(-1)
+
+        args = (
+            torch.randn(16, 16, dtype=torch.float16),
+            torch.randn(16, 16, dtype=torch.float16),
+            torch.randn(16, 32, dtype=torch.float16),
+        )
+        self.check(f, args, fused=False)
+
+    def test_transposed_pointwise_not_fused(self):
+        def f(x, weight):
+            output = torch.ops._inductor_test.realize((x @ weight).T + 1)
+            return output.sum(dim=-1)
+
+        args = (
+            torch.randn(64, 32, dtype=torch.float16),
+            torch.randn(32, 64, dtype=torch.float16),
+        )
+        self.check(f, args, fused=False)
+
+    @parametrize("case", ("flattened", "reshaped"))
+    def test_partial_row_reduction_not_fused(self, case):
+        def f(x, weight):
+            output = x @ weight
+            if case == "flattened":
+                return output.reshape(1, -1).expand(64, -1).sum(-1)
+            return output.reshape(32, 1, 8).expand(32, 32, 8).amax(-1)
+
+        m, n = (4, 8) if case == "flattened" else (16, 16)
+        args = (
+            torch.randn(m, 64, dtype=torch.float16),
+            torch.randn(64, n, dtype=torch.float16),
+        )
+        self.check(f, args, fused=False)
+
+    @parametrize("op", ("sort", "cumsum"))
+    def test_sort_scan_not_fused(self, op):
+        def f(x, weight):
+            output = x @ weight
+            return output.sort(-1).values if op == "sort" else output.cumsum(-1)
+
+        args = (torch.randn(64, 32), torch.randn(32, 16))
+        self.check(f, args, fused=False, tol=1e-4)
+
+    def test_broadcast_consumer_not_fused(self):
+        def f(x, weight):
+            hidden = x @ weight
+            return hidden - hidden.sum(-1, keepdim=True)
+
+        args = (
+            torch.randn(256, 128, dtype=torch.float16),
+            torch.randn(128, 16, dtype=torch.float16),
+        )
+        self.check(f, args, fused=False)
 
 
 if HAS_GPU:
