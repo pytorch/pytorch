@@ -132,7 +132,7 @@ from .fx_passes.post_grad import (
 )
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .ir import get_device_type, IRNode
+from .ir import get_device_type, IRNode, is_triton
 from .triton_bundler import TritonBundler
 from .utils import (
     _unstable_customized_partition_wrapper,
@@ -1083,8 +1083,6 @@ class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
     cudagraphs_region_aware: bool
     cudagraphs_top_level: bool
-    # Whether a backward graph must transition an existing forward CUDA graph.
-    cudagraphs_forward_enabled: bool
     cudagraph_partition_only_regions: bool
     # Graph partitioning was turned on only to isolate a nested region.
     cudagraph_region_forced_partition: bool
@@ -1106,13 +1104,10 @@ def _cudagraph_compile_kwargs(
     region_aware: bool,
     forced_region_partition: bool,
     top_level: bool,
-    forward_enabled: bool | None = None,
 ) -> _CompileFxKwargs:
     kwargs: _CompileFxKwargs = {"cudagraphs_top_level": top_level}
     if region_aware:
         kwargs["cudagraphs_region_aware"] = True
-    if forward_enabled is not None:
-        kwargs["cudagraphs_forward_enabled"] = forward_enabled
     if forced_region_partition:
         kwargs["cudagraph_region_forced_partition"] = True
         if not top_level:
@@ -1893,6 +1888,9 @@ class _InProcessFxCompile(FxCompile):
                 const_graph = None
                 const_wrapper_code = None
                 const_kernel_code = None
+                # Shared so the const graph's proxy-executor calls get indices
+                # distinct from the main graph's in the one serialized list.
+                extern_kernel_nodes: list[ExternKernelNode] = []
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
                     # torchbind objects have name that starts with _torchbind_obj
@@ -1923,7 +1921,7 @@ class _InProcessFxCompile(FxCompile):
                     )
                     with (
                         V.set_graph_handler(const_graph),
-                        V.set_extern_kernel_nodes([]),
+                        V.set_extern_kernel_nodes(extern_kernel_nodes),
                     ):
                         if not cpp_wrapper:
                             raise AssertionError("AOT mode only supports C++ wrapper")
@@ -1990,7 +1988,7 @@ class _InProcessFxCompile(FxCompile):
                 graph.freeze_runtime_asserts()
                 with (
                     V.set_graph_handler(graph),
-                    V.set_extern_kernel_nodes([]),
+                    V.set_extern_kernel_nodes(extern_kernel_nodes),
                     distributed_autotune.graph_context(),
                 ):
                     graph.run(*example_inputs)
@@ -2398,7 +2396,6 @@ def cudagraphify(
     mutated_input_idxs: tuple[int, ...] = (),
     kernel_free_cudagraph: bool = False,
     user_visible_output_idxs: tuple[int, ...] = (),
-    forward_device_index: BoxedDeviceIndex | None = None,
 ) -> Callable[..., Any]:
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -2423,7 +2420,6 @@ def cudagraphify(
             mutated_input_idxs=mutated_input_idxs,
             kernel_free_cudagraph=kernel_free_cudagraph,
             user_visible_output_idxs=user_visible_output_idxs,
-            forward_device_index=forward_device_index,
             cudagraph_managed_input_rerecord_limit=managed_input_rerecord_limit,
             cudagraph_managed_input_rerecord_action=managed_input_rerecord_action,
             cudagraph_initial_mempool_allocation_gb=(
@@ -3258,10 +3254,6 @@ def compile_fx_backward(
                 backward_cudagraphs_requested = False
             cudagraphs = BoxedBool(backward_cudagraphs_requested)
 
-        forward_cudagraphs_enabled = (
-            compiler_config_extra.forward_device_index.value is not None
-        )
-
         enable_backward_region_graph_partition = (
             not config.graph_partition and backward_region_preference_differs
         )
@@ -3312,7 +3304,6 @@ def compile_fx_backward(
                     region_aware=backward_region_preference_differs,
                     forced_region_partition=enable_backward_region_graph_partition,
                     top_level=backward_top_level_cudagraphs,
-                    forward_enabled=forward_cudagraphs_enabled,
                 ),
             )
 
@@ -3440,10 +3431,9 @@ def compile_fx(
         compile_region_name=compile_region_name,
     )
 
-    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
+    # Wake up the AsyncCompile subproc pool as early as possible (if the graph uses Triton).
     if any(
-        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
-        for e in example_inputs_
+        isinstance(e, torch.Tensor) and is_triton(e.device) for e in example_inputs_
     ):
         torch._inductor.async_compile.AsyncCompile.wakeup()
 
