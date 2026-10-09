@@ -7810,6 +7810,7 @@ class Scheduler:
                 ) and ms_fused_choice is not None:
                     is_nvgemm = isinstance(ms_fused_choice, NVUniversalGemmCaller)
                     if is_nvgemm:
+                        ms_fused_choice._guard_dynamic_shape_constraints()
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_nvgemm_caller(ms_fused_choice)
                     elif config.multi_kernel_hints:

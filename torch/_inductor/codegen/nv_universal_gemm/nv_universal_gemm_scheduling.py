@@ -592,7 +592,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     selected_choice = NVUniversalGemmScheduling._best_nvgemm_choice(
                         ir_node
                     )
-            tensor_box = selected_choice.output_node()
+            tensor_box = selected_choice.output_node(install_guards=False)
             # pyrefly: ignore [missing-attribute]
             return cast(NVUniversalGemmBuffer, tensor_box.data.data)
 

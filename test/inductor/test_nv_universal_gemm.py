@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import sympy
 
 import torch
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, guard_failures
 from torch._higher_order_ops import flex_gemm
 from torch._inductor import config, ir
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
@@ -46,6 +46,10 @@ from torch._inductor.utils import (
 )
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     dtype_name,
     instantiate_parametrized_tests,
@@ -284,6 +288,130 @@ class TestNVUniversalGemmDense(TestCase):
 @instantiate_parametrized_tests
 class TestNVUniversalGemmPDLMetadata(TestCase):
     """Hardware-independent tests for selective NVGEMM PDL metadata."""
+
+    def test_symbolic_cache_key_reuses_compatible_shapes(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_cache_key,
+        )
+
+        def tensors(m):
+            return (
+                (
+                    torch.empty_strided((m, 256), (256, 1)),
+                    torch.empty_strided((256, 128), (128, 1)),
+                ),
+                torch.empty_strided((m, 128), (128, 1)),
+            )
+
+        inputs64, out64 = tensors(64)
+        inputs65, out65 = tensors(65)
+        self.assertEqual(
+            _create_gemm_cache_key(inputs64, out64, symbolic_shapes=True),
+            _create_gemm_cache_key(inputs65, out65, symbolic_shapes=True),
+        )
+        self.assertNotEqual(
+            _create_gemm_cache_key(inputs64, out64),
+            _create_gemm_cache_key(inputs65, out65),
+        )
+        transposed = inputs65[0].T.contiguous().T
+        self.assertNotEqual(
+            _create_gemm_cache_key(inputs65, out65, symbolic_shapes=True),
+            _create_gemm_cache_key(
+                (transposed, inputs65[1]), out65, symbolic_shapes=True
+            ),
+        )
+
+    def test_evt_fallback_uses_symbolic_epilogue_tensors(self):
+        import cutlass
+        from cutlass.operators.arguments import EpilogueArguments
+
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+            _symbolic_epilogue_sig,
+        )
+
+        source = "def epilogue(accum, bias):\n    D = accum + bias\n    return D"
+        a = torch.empty(64, 256, dtype=torch.bfloat16)
+        b = torch.empty(256, 128, dtype=torch.bfloat16)
+        out = torch.empty(64, 128, dtype=torch.bfloat16)
+        epilogue = EpilogueArguments(
+            source,
+            bias=torch.empty(128, 64, dtype=torch.bfloat16).T,
+            D=out,
+        )
+        dynamic_epilogue = EpilogueArguments(
+            source,
+            bias=torch.empty(128, 65, dtype=torch.bfloat16).T,
+            D=torch.empty(65, 128, dtype=torch.bfloat16),
+        )
+        self.assertEqual(
+            _symbolic_epilogue_sig(epilogue),
+            _symbolic_epilogue_sig(dynamic_epilogue),
+        )
+        args = _create_gemm_arguments(
+            "GEMM", (a, b), out, cutlass.Float32, epilogue=epilogue
+        )
+
+        self.assertEqual(args.epilogue.tensors["bias"].stride, (128, 1))
+        self.assertEqual(
+            args.epilogue.traced_epilogue.example_inputs["bias"].stride(), (128, 1)
+        )
+        self.assertNotIsInstance(
+            args.epilogue.tensors["bias"].compile_time_tensor.shape[0], int
+        )
+
+    def test_evt_fallback_traces_scalar_before_normalization(self):
+        import cutlass
+        from cutlass.operators.arguments import EpilogueArguments
+
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _create_gemm_arguments,
+        )
+
+        source = "def epilogue(accum, scalar):\n    D = accum + scalar\n    return D"
+        a = torch.empty(64, 256, dtype=torch.bfloat16)
+        b = torch.empty(256, 128, dtype=torch.bfloat16)
+        out = torch.empty(64, 128, dtype=torch.bfloat16)
+        epilogue = EpilogueArguments(
+            source, scalar=torch.tensor(1, dtype=torch.bfloat16), D=out
+        )
+        args = _create_gemm_arguments(
+            "GEMM", (a, b), out, cutlass.Float32, epilogue=epilogue
+        )
+
+        self.assertEqual(args.epilogue.tensors["scalar"].shape, (8, 1))
+
+    def test_compiled_artifact_cache_is_bounded(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _cache_compiled_artifact,
+            _MAX_COMPILED_CACHE_ENTRIES,
+        )
+        from torch._inductor.runtime.cutedsl_cache import (
+            _cache_memory_value,
+            _MAX_MEMORY_CACHE_ENTRIES,
+        )
+
+        cache = {}
+        for key in range(_MAX_COMPILED_CACHE_ENTRIES):
+            _cache_compiled_artifact(cache, key, key)
+
+        _cache_compiled_artifact(cache, 0, 0)
+        _cache_compiled_artifact(cache, _MAX_COMPILED_CACHE_ENTRIES, "new")
+
+        self.assertEqual(len(cache), _MAX_COMPILED_CACHE_ENTRIES)
+        self.assertIn(0, cache)
+        self.assertNotIn(1, cache)
+
+        cache = {}
+        for key in range(_MAX_MEMORY_CACHE_ENTRIES):
+            _cache_memory_value(cache, key, key)
+
+        _cache_memory_value(cache, 0, 0)
+        _cache_memory_value(cache, _MAX_MEMORY_CACHE_ENTRIES, "new")
+
+        self.assertEqual(len(cache), _MAX_MEMORY_CACHE_ENTRIES)
+        self.assertIn(0, cache)
+        self.assertNotIn(1, cache)
 
     @staticmethod
     def _make_pdl_chain():
@@ -751,6 +879,24 @@ class TestNVUniversalGemm(TestCase):
         self.assertEqual(schema.outputs, ("D",))
         self.assertEqual(schema.parameter_names, ("D",))
         self.assertTrue(schema.returns_local_reduce)
+
+    def test_direct_epilogue_preserves_input_output_alias(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _normalize_epilogue_inputs,
+            CuTeDSLEpilogueArguments,
+        )
+
+        out = torch.empty_strided((4, 8), (1, 4))
+        args = CuTeDSLEpilogueArguments(
+            "def epilogue(accum, D):\n    D = accum + D\n    return D", D=out
+        )
+        _normalize_epilogue_inputs(args)
+        self.assertIs(args.tensors["D"], out)
+
+        args.to_tensor_wrappers([1, 0])
+        runtime_out = args.tensors["D"].runtime_tensor
+        self.assertEqual(runtime_out.data_ptr(), out.data_ptr())
+        self.assertEqual(runtime_out.stride(), out.permute(1, 0).stride())
 
     def test_arch_filter_rejects_min_cc_only_kernels(self):
         """designed_for_min_cc <= device cc is insufficient: an arch-conditional
@@ -3685,6 +3831,16 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 {"local_reduce": dataclasses.replace(base, output=torch.empty((8, 4)))}
             ),
         )
+        self.assertEqual(
+            _local_reduce_specialization(
+                {"local_reduce": dataclasses.replace(base, output=tensor)},
+                symbolic_shapes=True,
+            ),
+            _local_reduce_specialization(
+                {"local_reduce": dataclasses.replace(base, output=torch.empty((8, 4)))},
+                symbolic_shapes=True,
+            ),
+        )
         self.assertNotEqual(
             tensor_specialization,
             _local_reduce_specialization(
@@ -4261,23 +4417,486 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             ):
                 compiled_fn(x, w)
 
-    def test_dynamic_shapes_rejected(self):
-        """Test that NVGEMM rejects backed symbolic shapes."""
+    def test_dynamic_shapes(self):
+        """Test NVGEMM across backed symbolic shapes."""
 
         def matmul(a, b):
             return a @ b
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(matmul, dynamic=True)
+
+            shapes = (
+                (64, 128, 256),
+                (65, 128, 256),
+                (128, 256, 512),
+                (256, 64, 128),
+            )
+            for m, n, k in shapes:
+                a = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
+                b = torch.randn(k, n, dtype=torch.bfloat16, device="cuda")
+                self.assertEqual(compiled_fn(a, b), a @ b)
+
+            self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+            a = torch.randn(4, 4, dtype=torch.bfloat16, device="cuda")
+            b = torch.randn(4, 4, dtype=torch.bfloat16, device="cuda")
+            with self.assertRaisesRegex(
+                Exception, "NoValidChoicesError|no valid choice"
+            ):
+                compiled_fn(a, b)
+
+            m, n, k = shapes[0]
+            a = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
+            b = torch.randn(k, n, dtype=torch.bfloat16, device="cuda")
+            self.assertEqual(compiled_fn(a, b), a @ b)
+
+    def test_dynamic_padded_extent_guard(self):
+        def matmul(a, b):
+            return a @ b
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(matmul, dynamic=True)
+
+            a = torch.randn(64, 264, dtype=torch.bfloat16, device="cuda")[:, :256]
+            b = torch.randn(256, 128, dtype=torch.bfloat16, device="cuda")
+            self.assertEqual(compiled_fn(a, b), a @ b)
+
+            a = torch.randn(64, 264, dtype=torch.bfloat16, device="cuda")[:, :250]
+            b = torch.randn(250, 128, dtype=torch.bfloat16, device="cuda")
+            with self.assertRaisesRegex(
+                Exception,
+                "NoValidChoicesError|no valid choice|expected to be divisible by 8",
+            ):
+                compiled_fn(a, b)
+
+            failures = [
+                str(reason) for reasons in guard_failures.values() for reason in reasons
+            ]
+            self.assertTrue(any("% 8" in reason for reason in failures), failures)
+
+    def test_dynamic_layout_guards(self):
+        def matmul(a, b):
+            return a @ b
+
+        cases = (
+            (
+                torch.randn(64, 264, dtype=torch.bfloat16, device="cuda")[:, :256],
+                torch.randn(256, 128, dtype=torch.bfloat16, device="cuda"),
+                torch.randn(64, 262, dtype=torch.bfloat16, device="cuda")[:, :256],
+                torch.randn(256, 128, dtype=torch.bfloat16, device="cuda"),
+                "a.stride()[0]",
+            ),
+            (
+                torch.randn(64, 256, dtype=torch.bfloat16, device="cuda"),
+                torch.randn(128, 264, dtype=torch.bfloat16, device="cuda")[:, :256].T,
+                torch.randn(64, 256, dtype=torch.bfloat16, device="cuda"),
+                torch.randn(128, 262, dtype=torch.bfloat16, device="cuda")[:, :256].T,
+                "b.stride()[1]",
+            ),
+            (
+                torch.randn(64, 256, dtype=torch.bfloat16, device="cuda"),
+                torch.randn(256, 256, dtype=torch.bfloat16, device="cuda").T,
+                torch.randn(64, 256, dtype=torch.bfloat16, device="cuda"),
+                torch.randn(250, 256, dtype=torch.bfloat16, device="cuda").T,
+                "b.size()[1]",
+            ),
+        )
+
+        for a, b, invalid_a, invalid_b, expected_guard in cases:
+            with self.subTest(expected_guard=expected_guard):
+                torch._dynamo.reset()
+
+                with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+                    compiled_fn = torch.compile(matmul, dynamic=True)
+                    self.assertEqual(compiled_fn(a, b), a @ b)
+
+                    with self.assertRaisesRegex(
+                        Exception,
+                        "NoValidChoicesError|no valid choice|expected to be divisible by 8",
+                    ):
+                        compiled_fn(invalid_a, invalid_b)
+
+                failures = [
+                    str(reason)
+                    for reasons in guard_failures.values()
+                    for reason in reasons
+                ]
+                self.assertTrue(
+                    any(expected_guard in reason for reason in failures), failures
+                )
+
+    def test_dynamic_shapes_swap_ab(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        def matmul(a, b):
+            return a @ b
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_max_profiling_configs=2,
+                    nvgemm_swap_ab=True,
+                )
+            ),
+            _force_nvgemm_choice(
+                lambda caller: isinstance(caller, NVUniversalGemmCaller)
+                and caller.swap_ab
+            ),
+        ):
+            compiled_fn = torch.compile(matmul, dynamic=True)
+
+            for m, n, k in ((16, 512, 256), (32, 256, 512), (64, 1024, 128)):
+                a = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
+                b = torch.randn(k, n, dtype=torch.bfloat16, device="cuda")
+                self.assertEqual(compiled_fn(a, b), a @ b)
+
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_dynamic_epilogue_aux_tensor(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_gemm_efc_kernel import (
+            VendoredDenseGemmEFCOperator,
+        )
+
+        def fn(a, b, bias):
+            return torch.relu(a @ b) + bias
+
+        def is_vendored_efc(caller):
+            return (
+                isinstance(caller, NVUniversalGemmCaller)
+                and isinstance(caller.kernel, VendoredDenseGemmEFCOperator)
+                and caller.supports_epilogue_fusion
+            )
+
+        def inputs(m, misaligned=False):
+            bias = torch.randn(
+                m + int(misaligned), device="cuda", dtype=torch.bfloat16
+            )[int(misaligned) :]
+            return (
+                torch.randn(m, 256, device="cuda", dtype=torch.bfloat16),
+                torch.randn(256, 128, device="cuda", dtype=torch.bfloat16),
+                bias.view(m, 1),
+            )
+
+        torch._dynamo.reset()
+        counters.clear()
+        original_compile = VendoredDenseGemmEFCOperator._compile
+
+        with (
+            config.patch(
+                _nvgemm_config(
+                    nvgemm_max_profiling_configs=2,
+                    benchmark_template_fusion=True,
+                    max_template_fusion_benchmarked_choices=1,
+                    compile_threads=1,
+                    force_disable_caches=True,
+                )
+            ),
+            _force_nvgemm_choice(is_vendored_efc),
+            mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", return_value=(1.0, "")
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", return_value=(0.5, "")
+            ),
+            mock.patch.object(
+                VendoredDenseGemmEFCOperator,
+                "_compile",
+                autospec=True,
+                side_effect=original_compile,
+            ) as compile_mock,
+        ):
+            compiled_fn = torch.compile(fn, dynamic=True)
+            args = inputs(64)
+            result, code = run_and_get_code(compiled_fn, *args)
+            self.assertEqual(result, fn(*args), atol=1e-2, rtol=1e-2)
+            self.assertIn("CuTeDSLEpilogueArguments", "\n".join(code))
+            initial_compile_calls = compile_mock.call_count
+            self.assertEqual(initial_compile_calls, 1)
+            for m in (65, 66, 72):
+                args = inputs(m)
+                self.assertEqual(compiled_fn(*args), fn(*args), atol=1e-2, rtol=1e-2)
+            self.assertEqual(counters["stats"]["unique_graphs"], 1)
+            self.assertEqual(compile_mock.call_count, initial_compile_calls)
+
+            args = inputs(64, misaligned=True)
+            self.assertEqual(compiled_fn(*args), fn(*args), atol=1e-2, rtol=1e-2)
+
+        self.assertEqual(counters["stats"]["unique_graphs"], 2)
+
+    def test_dynamic_reduction_epilogue_falls_back(self):
+        def fn(a, b):
+            return (a @ b).sum(dim=-1, keepdim=True)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(fn, dynamic=True)
+            a = torch.randn(64, 256, device="cuda", dtype=torch.bfloat16)
+            b = torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+            result, code = run_and_get_code(compiled_fn, a, b)
+            self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+            self.assertNotIn("'local_reduce': GemmReductionArguments", "\n".join(code))
+
+            b = torch.randn(256, 256, device="cuda", dtype=torch.bfloat16)
+            self.assertEqual(compiled_fn(a, b), fn(a, b), atol=1e-2, rtol=1e-2)
+
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_dynamic_pointer_alignment_guard(self):
+        def matmul(x, b):
+            start = x.shape[0]
+            return x[:, start : start + 16] @ b
 
         torch._dynamo.reset()
 
         with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
             compiled_fn = torch.compile(matmul, dynamic=True)
 
-            a = torch.randn(16, 16, dtype=torch.bfloat16, device="cuda")
-            b = torch.randn(16, 16, dtype=torch.bfloat16, device="cuda")
+            x = torch.randn(8, 32, dtype=torch.bfloat16, device="cuda")
+            b = torch.randn(16, 128, dtype=torch.bfloat16, device="cuda")
+            self.assertEqual(compiled_fn(x, b), matmul(x, b))
+
+            x = torch.randn(9, 32, dtype=torch.bfloat16, device="cuda")
+            with self.assertRaisesRegex(
+                Exception,
+                "operand pointer is misaligned|Misaligned Tensor data|"
+                "NoValidChoicesError|no valid choice",
+            ):
+                compiled_fn(x, b)
+
+        failures = [
+            str(reason) for reasons in guard_failures.values() for reason in reasons
+        ]
+        self.assertTrue(any("x.size()[0]" in reason for reason in failures), failures)
+
+    def test_misaligned_choice_falls_back(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        def matmul(x, b):
+            return x[:, 1:257] @ b
+
+        x = torch.randn(512, 264, dtype=torch.bfloat16, device="cuda")
+        b = torch.randn(256, 512, dtype=torch.bfloat16, device="cuda")
+
+        torch._dynamo.reset()
+
+        with (
+            config.patch(_nvgemm_config(max_autotune_gemm_backends="NVGEMM,ATEN")),
+            _force_nvgemm_choice(
+                lambda caller: isinstance(caller, NVUniversalGemmCaller)
+            ),
+        ):
+            compiled_fn = torch.compile(matmul)
+            self.assertEqual(compiled_fn(x, b), matmul(x, b))
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unbacked_offset_falls_back(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        def matmul(storage, b, mask):
+            start = torch.nonzero(mask).shape[0]
+            a = torch.as_strided(storage, (64, 16), (32, 1), start)
+            return a @ b
+
+        storage = torch.randn(2048, dtype=torch.bfloat16, device="cuda")
+        b = torch.randn(16, 128, dtype=torch.bfloat16, device="cuda")
+        mask = torch.tensor([1] * 8 + [0] * 8, device="cuda")
+
+        torch._dynamo.reset()
+
+        with (
+            config.patch(_nvgemm_config(max_autotune_gemm_backends="NVGEMM,ATEN")),
+            _force_nvgemm_choice(
+                lambda caller: isinstance(caller, NVUniversalGemmCaller)
+            ),
+        ):
+            compiled_fn = torch.compile(matmul, fullgraph=True)
+            self.assertEqual(compiled_fn(storage, b, mask), matmul(storage, b, mask))
+
+    def test_rejected_fusion_does_not_install_guards(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.select_algorithm import AlgorithmSelectorCache
+
+        def benchmark(_selector, choices, *_args, **_kwargs):
+            return {
+                choice: 0.1005 if isinstance(choice, NVUniversalGemmCaller) else 0.1
+                for choice in choices
+            }
+
+        def fn(a, b):
+            return torch.relu(a @ b)
+
+        torch._dynamo.reset()
+        counters.clear()
+        guard_failures.clear()
+
+        with (
+            config.patch(
+                _nvgemm_config(
+                    max_autotune_gemm_backends="NVGEMM,ATEN",
+                    force_disable_caches=True,
+                    benchmark_fusion=True,
+                    max_template_fusion_benchmarked_choices=1,
+                )
+            ),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark",
+                autospec=True,
+                side_effect=benchmark,
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                autospec=True,
+                return_value=(0.001, ""),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                autospec=True,
+                return_value=(1.0, ""),
+            ),
+        ):
+            compiled_fn = torch.compile(fn, dynamic=True)
+            for m, n, k in ((64, 128, 256), (4, 4, 4)):
+                a = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
+                b = torch.randn(k, n, dtype=torch.bfloat16, device="cuda")
+                self.assertEqual(compiled_fn(a, b), fn(a, b))
+
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+        failures = [
+            str(reason) for reasons in guard_failures.values() for reason in reasons
+        ]
+        self.assertFalse(
+            any("(a.size()[1] % 8) == 0" in reason for reason in failures), failures
+        )
+
+    def test_preferred_cluster_shape_guard(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.select_algorithm import AlgorithmSelectorCache
+
+        preferred_seen = False
+
+        def benchmark(_selector, choices, *_args, **_kwargs):
+            nonlocal preferred_seen
+            timings = {}
+            for choice in choices:
+                is_preferred = isinstance(choice, NVUniversalGemmCaller) and (
+                    choice.kernel.metadata.design.fallback_cluster_shape is not None
+                )
+                preferred_seen |= is_preferred
+                timings[choice] = 0.1 if is_preferred else 1.0
+            return timings
+
+        def matmul(a, b):
+            return a @ b
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with (
+            config.patch(_nvgemm_config(nvgemm_max_profiling_configs=8)),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark",
+                autospec=True,
+                side_effect=benchmark,
+            ),
+        ):
+            compiled_fn = torch.compile(matmul, dynamic=True)
+            for m, n, k in ((512, 512, 256), (64, 64, 256)):
+                a = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
+                b = torch.randn(k, n, dtype=torch.bfloat16, device="cuda")
+                self.assertEqual(compiled_fn(a, b), matmul(a, b))
+
+        self.assertTrue(preferred_seen)
+        self.assertEqual(counters["stats"]["unique_graphs"], 2)
+
+
+@unittest.skipIf(
+    not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
+    "NVIDIA Universal GEMM (cutlass.operators) library not available or not on Blackwell",
+)
+class TestNVUniversalGemmDynamicAutograd(TestCase):
+    @dtypes(torch.bfloat16)
+    def test_dynamic_backward_guards(self, device, dtype):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        def matmul(a, b):
+            return a @ b
+
+        backward_frozen = []
+        original_guard = NVUniversalGemmCaller._guard_dynamic_shape_constraints
+
+        def guard(caller):
+            if V.graph.is_backward:
+                backward_frozen.append(V.graph.sizevars.shape_env.frozen)
+            original_guard(caller)
+
+        torch._dynamo.reset()
+        counters.clear()
+        guard_failures.clear()
+
+        with (
+            config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)),
+            mock.patch.object(
+                NVUniversalGemmCaller, "_guard_dynamic_shape_constraints", guard
+            ),
+        ):
+            compiled_fn = torch.compile(matmul, dynamic=True)
+            for m, n, k in ((64, 128, 256), (65, 128, 256), (128, 256, 512)):
+                a = torch.randn(m, k, device=device, dtype=dtype, requires_grad=True)
+                b = torch.randn(k, n, device=device, dtype=dtype, requires_grad=True)
+                grad = torch.randn(m, n, device=device, dtype=dtype)
+                expected = matmul(a, b)
+                expected_grads = torch.autograd.grad(expected, (a, b), grad)
+                result = compiled_fn(a, b)
+                self.assertEqual(result, expected)
+                grads = torch.autograd.grad(result, (a, b), grad)
+                self.assertEqual(grads, expected_grads)
+
+            self.assertEqual(counters["stats"]["unique_graphs"], 1)
+            self.assertGreaterEqual(len(backward_frozen), 2)
+            self.assertFalse(any(backward_frozen), backward_frozen)
+
+            a = torch.randn(64, 256, device=device, dtype=dtype, requires_grad=True)
+            b = torch.randn(256, 130, device=device, dtype=dtype, requires_grad=True)
             with self.assertRaisesRegex(
                 Exception, "NoValidChoicesError|no valid choice"
             ):
                 compiled_fn(a, b)
+
+        failures = [
+            str(reason) for reasons in guard_failures.values() for reason in reasons
+        ]
+        self.assertTrue(any("% 8" in reason for reason in failures), failures)
 
 
 @unittest.skipIf(
@@ -5749,6 +6368,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             any(math.isfinite(ms) for ms, _ in bench_results),
             f"No finite NVGEMM benchmarks: {bench_results}",
         )
+
+
+instantiate_device_type_tests(
+    TestNVUniversalGemmDynamicAutograd, globals(), only_for="cuda"
+)
 
 
 if __name__ == "__main__":
