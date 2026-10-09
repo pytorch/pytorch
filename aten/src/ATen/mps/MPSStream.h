@@ -3,6 +3,9 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
+#include <optional>
+#include <string>
 #include <utility>
 
 #include <ATen/mps/MPSDevice.h>
@@ -75,6 +78,8 @@ class TORCH_API MPSStream {
   }
 
   MPSCommandBuffer_t commandBuffer();
+  // Must be called from a block running on queue(), and the returned encoder
+  // is only valid for the rest of that block.
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
   void synchronize(SyncType syncType);
@@ -130,12 +135,24 @@ class TORCH_API MPSStream {
   bool _enableCommitAndContinue = true;
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
+  // First execution error reported by an asynchronously committed command buffer
+  // (e.g. out of memory), rethrown by checkLastError() at the next sync point
+  struct CommandBufferError {
+    bool is_oom;
+    int32_t code;
+    std::string message;
+  };
+  std::mutex _commandBufferErrorMutex;
+  std::optional<CommandBufferError> _commandBufferError;
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();
   void commitAndWait();
   void commitAndContinue();
   void flush();
+  // records execution errors of the current command buffer once it completes
+  void addErrorHandler();
+  void recordCommandBufferError(CommandBufferError error);
 };
 
 /**
@@ -162,6 +179,11 @@ TORCH_API MPSStream* getDefaultMPSStream();
  * in round-robin order. Note: The default stream is not in the pool.
  */
 TORCH_API MPSStream* getStreamFromPool();
+
+/**
+ * Get a stream by its ID. 0 is the default stream, 1 - 32 are pool streams.
+ */
+TORCH_API MPSStream* getStreamByID(int64_t stream_id);
 
 /**
  * Synchronize the default stream and any pool streams created so far.

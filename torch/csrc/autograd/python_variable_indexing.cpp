@@ -240,7 +240,8 @@ static Variable applySlicing(
     bool is_tracing,
     const at::Device& self_device,
     const std::optional<int64_t>& self_ndim,
-    int64_t specified_dims) {
+    int64_t specified_dims,
+    bool allow_device_index_for_setitem = false) {
   int64_t size = PyTuple_GET_SIZE(index);
   int64_t dim = 0;
 
@@ -266,11 +267,14 @@ static Variable applySlicing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
         /*index=*/([&]() {
-          if (THPUtils_checkLong(obj)) {
+          if (THPUtils_checkLong(obj) || torch::is_symint(obj)) {
             if (is_tracing && THPVariable_Check(obj)) {
               recordSelectTrace(THPVariable_Unpack(obj));
             }
-            return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
+            auto symint = torch::is_symint(obj)
+                ? py::cast<SymInt>(obj)
+                : SymInt(THPUtils_unpackLong(obj));
+            return at::indexing::TensorIndex(symint);
           } else if (PySlice_Check(obj)) {
             auto val = __PySlice_Unpack(obj);
             if (is_tracing) {
@@ -290,7 +294,10 @@ static Variable applySlicing(
               auto scalar_type = tensor.scalar_type();
               if (tensor.dim() == 0 &&
                   at::isIntegralType(scalar_type, /*includeBool=*/false) &&
-                  scalar_type != at::kByte) {
+                  scalar_type != at::kByte &&
+                  !(allow_device_index_for_setitem &&
+                    at::indexing::impl::canKeepScalarIndexOnDevice(
+                        tensor, self))) {
                 recordSelectTrace(tensor);
               }
             }
@@ -318,7 +325,8 @@ static Variable applySlicing(
         // tensor indexing functions from Python ]
         /*disable_slice_optimization=*/is_tracing,
         /*original_tensor_device=*/self_device,
-        /*prev_dim_result_sizes=*/result_sizes);
+        /*prev_dim_result_sizes=*/result_sizes,
+        /*allow_device_index_for_setitem=*/allow_device_index_for_setitem);
   }
   return result;
 }
@@ -430,12 +438,14 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   bool is_tracing = torch::jit::tracer::isTracing();
 
   // handle simple types: integers, slices, bool
-  if (THPUtils_checkLong(index)) {
+  if (THPUtils_checkLong(index) || torch::is_symint(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    return THPVariable_Wrap(at::indexing::get_item(
-        self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}));
+    auto symint = torch::is_symint(index) ? py::cast<SymInt>(index)
+                                          : SymInt(THPUtils_unpackLong(index));
+    return THPVariable_Wrap(
+        at::indexing::get_item(self_, {at::indexing::TensorIndex(symint)}));
   } else if (PySlice_Check(index)) {
     auto val = __PySlice_Unpack(index);
     if (is_tracing) {
@@ -586,7 +596,9 @@ static int THPVariable_setitem_impl(
       /*is_tracing=*/is_tracing,
       self_device,
       self_.ndimension(),
-      specified_dims);
+      specified_dims,
+      /*allow_device_index_for_setitem=*/
+      at::indexing::impl::allowsScalarIndexOnDevice(value, self_));
   if (variableIndices.empty()) {
     pybind11::gil_scoped_release no_gil;
     at::indexing::copy_to(sliced, value);
@@ -595,6 +607,14 @@ static int THPVariable_setitem_impl(
 
   {
     pybind11::gil_scoped_release no_gil;
+    if constexpr (std::is_same_v<T, Scalar>) {
+      if (at::indexing::try_dispatch_masked_fill_(
+              sliced, variableIndices, value) ||
+          at::indexing::try_dispatch_index_fill_(
+              sliced, variableIndices, value)) {
+        return 0;
+      }
+    }
     Tensor valueTensor = asTensor(value, self_);
     SymIntArrayRef valueSizes = valueTensor.sym_sizes();
     SymIntArrayRef slicedValueSizes =
