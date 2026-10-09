@@ -31,13 +31,9 @@ from collections.abc import Callable
 import torch
 from torch.distributed.fsdp._fully_shard._all_gather_layout import (
     _default_all_gather_output_fn,
-    AllGatherOutputFn,
     DefaultAllGatherLayout,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
-from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    PrepareReduceScatterInputsFn,
-)
 
 
 __all__ = [
@@ -81,7 +77,7 @@ def reduce_scatter_input_fn_with_native_copy(
     unsharded_grads: list[torch.Tensor],
     shard_dims: list[int],
     world_size: int,
-) -> Callable[[torch.Tensor], None]:
+) -> Callable:
     r"""Prepare gradients for a native copy into the reduce-scatter buffer.
 
     Register with

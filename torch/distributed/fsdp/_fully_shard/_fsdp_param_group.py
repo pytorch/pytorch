@@ -37,7 +37,6 @@ from ._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
-    PrepareReduceScatterInputsFn,
     ProcessGroupAllocAllGather,
     ProcessGroupAllocReduceScatter,
     ReduceScatter,
@@ -267,9 +266,7 @@ class FSDPParamGroup:
         # FSDP-owned buffers behind the all-gather outputs when a custom layout
         # chose them on the first unshard, freed on reshard
         self._all_gather_buffers: _PersistentBuffers | None = None
-        self._prepare_reduce_scatter_inputs: PrepareReduceScatterInputsFn = (
-            _default_reduce_scatter_input_fn
-        )
+        self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._reduce_scatter_param_indices: list[int] = []
         self._fsdp_params_deferring_grad_upcast: list[FSDPParam] = []
         self._param_group_index: int = 0

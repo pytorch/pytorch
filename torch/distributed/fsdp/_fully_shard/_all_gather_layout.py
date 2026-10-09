@@ -12,7 +12,7 @@ group frees their storage on reshard, unless its parameters keep their
 unsharded storage, and re-allocates it to its recorded size before each later
 finalize, which must refill the same outputs in place.
 ``DefaultAllGatherLayout`` gives each output its own buffer, which its
-parameter allocates and frees, and refills it with an ``AllGatherOutputFn``.
+parameter allocates and frees, and refills it with its ``output_fn``.
 
 A layout that needs a specific collective holds it as ``comm``.
 ``FSDPModule.set_all_gather_layout`` is the only way to install a layout, and
@@ -26,7 +26,6 @@ out-of-tree backends must target a matching revision of them.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -34,24 +33,20 @@ import torch
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ._fsdp_api import AllGather
     from ._fsdp_param import FSDPParam
 
 
-AllGatherCopyIn = Callable[
-    [list[torch.Tensor], torch.Tensor, list[int], int, int],
-    tuple[torch.Tensor, torch.Tensor],
-]
-# fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size) runs under
+# An all-gather output fn, like the default below, is called as
+# fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size) under
 # no_grad on the current stream to copy the flat rank-major all_gather_output into
 # outputs: outputs[i] gets each rank's split_sizes[i] elements, concatenated along
 # the dim whose leading dims multiply to outer_sizes[i]. A payload smaller than
 # outputs[i] is reassembled from a zero-padded rank-major buffer. uint8 buffers
 # come with uint8 output views and byte sizes. fn may only write outputs and must
 # not keep its arguments. It is skipped for empty buffers and single-rank groups.
-AllGatherOutputFn = Callable[
-    [torch.Tensor, list[torch.Tensor], list[int], list[int], int], None
-]
 
 
 def _default_all_gather_output_fn(
@@ -91,7 +86,7 @@ class AllGatherInputMetadata:
     """Description of this call's flattened local input.
 
     ``input_outer_sizes`` gives, for each payload, the product of its dims
-    before the dim that ranks are concatenated along (see ``AllGatherOutputFn``).
+    before the dim that ranks are concatenated along.
     """
 
     input_split_sizes: list[int]
@@ -193,7 +188,7 @@ class AllGatherLayout(ABC):
 
     def prepare(
         self, input_metadata: AllGatherInputMetadata
-    ) -> tuple[AllGatherCopyIn, AllGatherLayout, object | None]:
+    ) -> tuple[Callable, AllGatherLayout, object | None]:
         """Select input packing and per-call metadata before allocating the output."""
         metadata = self.prepare_output(input_metadata)
         if metadata is None:
@@ -253,7 +248,7 @@ class DefaultAllGatherLayout(AllGatherLayout):
 
     Inputs are packed into each rank's slot of the collective output, and
     ``output_fn`` copies the gathered output into the parameters' all-gather
-    outputs (see ``AllGatherOutputFn``). Instances are stateless and can be
+    outputs. Instances are stateless and can be
     shared across modules. Install one with
     :meth:`torch.distributed.fsdp.FSDPModule.set_all_gather_layout`.
 
@@ -264,12 +259,12 @@ class DefaultAllGatherLayout(AllGatherLayout):
             for a native implementation.
     """
 
-    def __init__(self, output_fn: AllGatherOutputFn = _default_all_gather_output_fn):
+    def __init__(self, output_fn: Callable = _default_all_gather_output_fn):
         self.output_fn = output_fn
 
     def prepare(
         self, input_metadata: AllGatherInputMetadata
-    ) -> tuple[AllGatherCopyIn, AllGatherLayout, object | None]:
+    ) -> tuple[Callable, AllGatherLayout, object | None]:
         return torch.ops.fsdp.all_gather_copy_in, self, None
 
     def prepare_output(self, input_metadata: AllGatherInputMetadata) -> None:

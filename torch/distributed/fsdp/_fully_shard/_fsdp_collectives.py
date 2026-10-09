@@ -494,16 +494,6 @@ def _get_param_all_gather_inputs(
     return param_all_gather_inputs
 
 
-# copy_in = fn(unsharded_grads, shard_dims, world_size) runs before FSDP allocates
-# the reduce-scatter input and may replace gradients, e.g. with reordered copies.
-# copy_in(reduce_scatter_input) then fills that flat buffer with each rank's padded
-# gradient shards in rank order, casting to its dtype. Both run on the current
-# stream; FSDP frees copy_in and the gradients afterward, so keep neither.
-PrepareReduceScatterInputsFn = Callable[
-    [list[torch.Tensor], list[int], int], Callable[[torch.Tensor], None]
-]
-
-
 def _prepare_default_all_gather_outputs(
     fsdp_params: list[FSDPParam],
     all_gather_result: AllGatherResult,
@@ -611,11 +601,17 @@ def foreach_all_gather_copy_out(
     return persistent_buffers
 
 
+# A reduce-scatter input fn, like the default below, is called as
+# copy_in = fn(unsharded_grads, shard_dims, world_size) before FSDP allocates the
+# reduce-scatter input and may replace gradients, e.g. with reordered copies.
+# copy_in(reduce_scatter_input) then fills that flat buffer with each rank's padded
+# gradient shards in rank order, casting to its dtype. Both run on the current
+# stream; FSDP frees copy_in and the gradients afterward, so keep neither.
 def _default_reduce_scatter_input_fn(
     unsharded_grads: list[torch.Tensor],
     shard_dims: list[int],
     world_size: int,
-) -> Callable[[torch.Tensor], None]:
+) -> Callable:
     r"""Reorder gradients sharded on a nonzero dim by rank, then copy them in."""
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
@@ -645,7 +641,7 @@ def foreach_reduce(
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
     *,
-    prepare_reduce_scatter_inputs: PrepareReduceScatterInputsFn = _default_reduce_scatter_input_fn,
+    prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
 ) -> tuple[
     torch.Tensor,
     torch.Event,
