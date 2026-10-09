@@ -671,8 +671,10 @@ function test_pool_grouped_by_stream() {
       { action: 'free_completed', addr: 2000, size: 300, frames: [], stream: 2 },
     ],
     segments: [
-      { device: 0, address: 0, total_size: 4096, segment_pool_id: poolId,
-        stream: 0, blocks: [] },
+      { device: 0, address: 1000, total_size: 512, segment_pool_id: poolId,
+        stream: 1, blocks: [] },
+      { device: 0, address: 2000, total_size: 512, segment_pool_id: poolId,
+        stream: 2, blocks: [] },
     ],
   });
 
@@ -685,6 +687,7 @@ function test_pool_grouped_by_stream() {
   const keys = envelopes.map(e => e.elem).sort();
   assertEqual(keys[0], 'pool:1,5,s1', 'first envelope key includes stream 1');
   assertEqual(keys[1], 'pool:1,5,s2', 'second envelope key includes stream 2');
+  assertEqual(result.max_size, 1024, 'both streams contribute their reserved memory');
 }
 
 // ============================================================
@@ -750,10 +753,71 @@ function test_segment_snapshot_no_trace() {
   const result = process_alloc_data(snapshot, 0, false, 15000, true);
   assertEqual(result.elements_length, 0,
     'snapshot-only block should not be added (include_private_inactive=true)');
+  const envelope = result.allocations_over_time.find(d => d.elem === 'pool:1,42,s0');
+  assertEqual(result.max_size, 8192, 'inactive private pool still reserves memory');
+  assertEqual(envelope.timesteps.join(','), '0,1', 'snapshot-only reservation has a visible timeline');
+  assertEqual(envelope.size.join(','), '8192,8192', 'reservation is constant without trace events');
 
   const result2 = process_alloc_data(snapshot, 0, false, 15000, false);
   assertEqual(result2.elements_length, 0,
     'snapshot-only block should not be added (include_private_inactive=false)');
+}
+
+function test_idle_private_pool_reservation() {
+  console.log('test_idle_private_pool_reservation');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0, pool_id: [0, 0] },
+      { action: 'free_completed', addr: 0x1000, size: 512, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x10000, total_size: 8192, segment_pool_id: [1, 1], stream: 0,
+      blocks: [{ address: 0x10000, requested_size: 8192, state: 'inactive', frames: [] }],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const envelope = result.allocations_over_time.find(d => d.elem === 'pool:1,1,s0');
+  assertEqual(result.max_size, 8704, 'peak includes an idle private pool');
+  assertEqual(envelope.timesteps[0], 0, 'existing reservation starts at the beginning');
+  assertEqual(envelope.size[0], 8192, 'all reserved bytes are represented');
+}
+
+function test_private_pool_segment_events_without_blocks() {
+  console.log('test_private_pool_segment_events_without_blocks');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr: 0x1000, size: 8192, frames: [], stream: 0, pool_id: [1, 1] },
+      { action: 'segment_unmap', addr: 0x1000, size: 8192, frames: [], stream: 0, pool_id: [1, 1] },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const envelope = result.allocations_over_time.find(d => d.elem === 'pool:1,1,s0');
+  assertEqual(result.elements_length, 0, 'segment-only history does not invent block allocations');
+  assertEqual(result.max_size, 8192, 'segment events create the pool reservation');
+  assert(envelope.timesteps.at(-1) > envelope.timesteps[0], 'reservation has a visible lifetime');
+}
+
+function test_released_pool_initial_reservation() {
+  console.log('test_released_pool_initial_reservation');
+  for (const action of ['segment_free', 'segment_unmap']) {
+    for (const active of [false, true]) {
+      const traces = [];
+      if (active) {
+        traces.push({ action: 'free_completed', addr: 0x1000, size: 1024,
+          frames: [], stream: 3, pool_id: [1, 1] });
+      }
+      traces.push({ action, addr: 0x1000, size: 8192, frames: [], stream: 3, pool_id: [1, 1] });
+      const snapshot = makeSnapshot({ traces });
+
+      const result = process_alloc_data(snapshot, 0, false, 15000, true);
+      const envelope = result.allocations_over_time.find(d => d.elem === 'pool:1,1,s3');
+      assertEqual(result.max_size, 8192, 'released pool retains its historical reservation');
+      assertEqual(envelope.timesteps[0], 0, 'reservation existed before the trace');
+      assertEqual(envelope.size[0], 8192, 'initial reservation includes inactive bytes');
+    }
+  }
 }
 
 function test_ghost_blocks() {
@@ -1719,6 +1783,9 @@ test_pool_grouped_by_stream();
 test_segment_snapshot_with_trace_history();
 test_segment_snapshot_no_trace();
 test_default_pool_ghost_block();
+test_idle_private_pool_reservation();
+test_private_pool_segment_events_without_blocks();
+test_released_pool_initial_reservation();
 test_ghost_blocks();
 test_ghost_blocks_not_created_for_traced_addrs();
 test_ghost_blocks_default_pool_collected();

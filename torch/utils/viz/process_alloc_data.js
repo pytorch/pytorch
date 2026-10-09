@@ -633,6 +633,20 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     return pools[pool_key];
   }
 
+  function create_pool_envelope(pool, pool_key) {
+    const env = {
+      elem: `pool:${pool_key}`,
+      timesteps: [timestep],
+      offsets: [total_mem],
+      size: [pool.max],
+      color: 9,
+    };
+    pool.envelope_data = env;
+    current.push(env.elem);
+    current_data.push(env);
+    data.push(env);
+  }
+
   function elem_color(elem_idx) {
     if (snapshot.categories.length > 0) {
       return snapshot.categories.indexOf(elements[elem_idx].category || 'unknown');
@@ -761,18 +775,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
 
       // Create pool envelope on first encounter
       if (pool.envelope_data === null) {
-        const env = {
-          elem: `pool:${pk}`,
-          timesteps: [0],
-          offsets: [total_mem],
-          size: [0],
-          color: 9,
-        };
-        pool.envelope_data = env;
-        // Add to the global stack so elements above it shift when it grows
-        current.push(`pool:${pk}`);
-        current_data.push(env);
-        data.push(env);
+        create_pool_envelope(pool, pk);
       }
 
       pool.active += size;
@@ -875,11 +878,13 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     for (const se of pool_segment_events) {
       net_from_trace[se.pool_key] = (net_from_trace[se.pool_key] || 0) + se.delta;
     }
-    for (const pk in snapshot_reserved) {
+    const pool_keys = new Set([...Object.keys(snapshot_reserved), ...Object.keys(net_from_trace)]);
+    for (const pk of pool_keys) {
       const pool = get_or_create_pool(pk);
-      pool.reserved = snapshot_reserved[pk] - (net_from_trace[pk] || 0);
+      pool.reserved = (snapshot_reserved[pk] || 0) - (net_from_trace[pk] || 0);
       // Grow envelope to initial reserved (no animation — pre-existing)
-      if (pool.reserved > pool.max && pool.envelope_data) {
+      if (pool.reserved > pool.max) {
+        if (pool.envelope_data === null) create_pool_envelope(pool, pk);
         const delta = pool.reserved - pool.max;
         pool.max = pool.reserved;
         const env = pool.envelope_data;
@@ -915,7 +920,8 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       const se = pool_segment_events[seg_event_idx];
       const pool = get_or_create_pool(se.pool_key);
       pool.reserved += se.delta;
-      if (pool.reserved > pool.max && pool.envelope_data) {
+      if (pool.reserved > pool.max) {
+        if (pool.envelope_data === null) create_pool_envelope(pool, se.pool_key);
         grow_pool_envelope(pool, se.pool_key, pool.reserved);
       }
       seg_event_idx++;
@@ -933,17 +939,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         const pool = get_or_create_pool(pool_key);
 
         if (pool.envelope_data === null) {
-          const env = {
-            elem: `pool:${pool_key}`,
-            timesteps: [timestep],
-            offsets: [total_mem],
-            size: [0],
-            color: 9,
-          };
-          pool.envelope_data = env;
-          current.push(`pool:${pool_key}`);
-          current_data.push(env);
-          data.push(env);
+          create_pool_envelope(pool, pool_key);
         }
 
         pool.active += size;
@@ -1062,13 +1058,15 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     const se = pool_segment_events[seg_event_idx];
     const pool = get_or_create_pool(se.pool_key);
     pool.reserved += se.delta;
-    if (pool.reserved > pool.max && pool.envelope_data) {
+    if (pool.reserved > pool.max) {
+      if (pool.envelope_data === null) create_pool_envelope(pool, se.pool_key);
       grow_pool_envelope(pool, se.pool_key, pool.reserved);
     }
     seg_event_idx++;
   }
 
   // --- Finalize: close all still-active elements ---
+  if (timestep === 0 && current.length > 0) advance(1);
   for (const elem of current_data) {
     elem.timesteps.push(timestep);
     elem.offsets.push(elem.offsets.at(-1));
