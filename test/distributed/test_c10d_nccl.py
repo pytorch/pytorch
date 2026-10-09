@@ -2155,6 +2155,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.destroy_process_group()
         else:
             log_test_info(self.rank, "Excluded from shrink test - exiting immediately")
+            pg1._get_backend(torch.device(device)).abort()
             dist.destroy_process_group()
             return
 
