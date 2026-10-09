@@ -155,6 +155,12 @@ class TORCH_API TCPStore : public Store {
 
   void ping();
   void validate();
+  void doPing();
+  void doValidate();
+
+  // Reconnects if the previous operation failed and applies the current
+  // timeout. Requires activeOpLock_.
+  void prepareClient();
 
   std::vector<uint8_t> doGet(const std::string& key);
 
@@ -165,6 +171,9 @@ class TORCH_API TCPStore : public Store {
   detail::SocketAddress addr_;
   std::shared_ptr<detail::TCPServer> server_;
   std::unique_ptr<detail::TCPClient> client_;
+  // Guards replacing client_ against repr(), which does not take
+  // activeOpLock_.
+  mutable std::mutex clientLock_;
   std::optional<std::size_t> numWorkers_;
 
   const std::string initKey_ = "init/";

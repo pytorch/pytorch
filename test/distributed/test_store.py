@@ -1331,6 +1331,65 @@ class TestClientProtocol(TestCase):
 
         thread.join()
 
+    def test_client_op_timeout_reconnects(self) -> None:
+        server = dist.TCPStore("localhost", 0, is_master=True, wait_for_workers=False)
+        server.set("key", "value")
+        listen = socket.create_server(("localhost", 0))
+        self.addCleanup(listen.close)
+        stalled = threading.Event()
+        conns = []
+
+        def forward(src, dst, drop):
+            try:
+                while data := src.recv(4096):
+                    if not drop.is_set():
+                        dst.sendall(data)
+            except OSError:
+                pass
+
+        # Proxies two client connections to the server; replies on the first
+        # are dropped once stalled is set.
+        def proxy() -> None:
+            for drop in (stalled, threading.Event()):
+                client, _ = listen.accept()
+                upstream = socket.create_connection(("localhost", server.port))
+                for s in (client, upstream):
+                    conns.append(s)
+                    self.addCleanup(s.close)
+                for args in (
+                    (client, upstream, threading.Event()),
+                    (upstream, client, drop),
+                ):
+                    threading.Thread(target=forward, args=args, daemon=True).start()
+
+        threading.Thread(target=proxy, daemon=True).start()
+        store = dist.TCPStore(
+            "localhost",
+            listen.getsockname()[1],
+            is_master=False,
+            timeout=timedelta(seconds=1),
+            wait_for_workers=False,
+        )
+        self.assertEqual(store.get("key"), b"value")
+
+        stalled.set()
+        with self.assertRaises(DistNetworkError):
+            store.check(["key"])
+        self.assertTrue(store.check(["key"]))
+        self.assertEqual(store.get("key"), b"value")
+
+        # Once the server is gone, ops fail fast rather than each retrying
+        # the connection until the timeout.
+        store.set_timeout(timedelta(seconds=60))
+        listen.close()
+        for s in conns:
+            s.shutdown(socket.SHUT_RDWR)
+        start = time.monotonic()
+        for _ in range(3):
+            with self.assertRaises(DistNetworkError):
+                store.check(["key"])
+        self.assertLess(time.monotonic() - start, 30)
+
 
 if __name__ == "__main__":
     if device_type != "cpu":
