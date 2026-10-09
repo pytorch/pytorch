@@ -36,6 +36,14 @@ The scan covers module-level statements and statements recursively nested within
 ``if``, ``try`` (including ``except`` handlers), ``with``, ``for``, and ``while``
 bodies, so conditionally defined test classes and instantiation calls are linted
 as well.
+
+Usage:
+
+    # Lint the given files (every test file if none are given)
+    python tools/linter/adapters/test_linter.py [filenames ...]
+
+    # Regenerate the allowlist from the linter's own results
+    python tools/linter/adapters/test_linter.py --regenerate
 """
 
 from __future__ import annotations
@@ -43,16 +51,20 @@ from __future__ import annotations
 import argparse
 import ast
 import concurrent.futures
+import fnmatch
 import json
 import logging
 import os
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 LINTER_CODE = "TEST_LINTER"
@@ -61,11 +73,19 @@ INSTANTIATE_FN_NAME = "instantiate_device_type_tests"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+# Files in this allowlist are temporarily excluded from test linter checks
+ALLOWLIST_PATH = Path(__file__).resolve().parent / "test_linter_allowlist.json"
+ALLOWLIST_REL_PATH = os.path.relpath(ALLOWLIST_PATH, REPO_ROOT)
+
+INCLUDE_PATTERNS = ("test/**/test_*.py", "test/**/*_test.py")
+EXCLUDE_PREFIXES = (
+    "test/cpp_extensions/open_registration_extension/",
+    "test/cpython/",
+)
+
+
 class _UnknownKwarg:
     pass
-
-
-_KWARG_UNKNOWN = _UnknownKwarg()  # sentinel: kwarg present but not a literal
 
 
 # Mirrors the member names of `torch.testing._internal.common_utils.HardwareClassification`.
@@ -78,21 +98,6 @@ class HardwareClassification(Enum):
     CUDA = "CUDA"
     MPS = "MPS"
     XPU = "XPU"
-
-
-# Files in this allowlist are temporarily excluded from test linter checks
-ALLOWLIST_PATH = Path(__file__).resolve().parent / "test_linter_allowlist.json"
-ALLOWLIST_REL_PATH = os.path.relpath(ALLOWLIST_PATH, REPO_ROOT)
-
-
-def _load_allowlist() -> set[str]:
-    if ALLOWLIST_PATH.exists():
-        with open(ALLOWLIST_PATH) as f:
-            return set(json.load(f))
-    return set()
-
-
-_allowlist: set[str] = _load_allowlist()
 
 
 # Lint message types
@@ -125,11 +130,39 @@ error_msg = partial(
 )
 
 
+def _load_allowlist() -> set[str]:
+    if ALLOWLIST_PATH.exists():
+        with open(ALLOWLIST_PATH) as f:
+            return set(json.load(f))
+    return set()
+
+
+_allowlist: set[str] = _load_allowlist()
+
+_KWARG_UNKNOWN = _UnknownKwarg()  # sentinel: kwarg present but not a literal
+
+
 def _is_test_file(filename: str) -> bool:
-    name = os.path.basename(filename)
-    if not name.endswith(".py"):
+    """True for test files this linter applies to."""
+    rel_path = os.path.relpath(filename, REPO_ROOT).replace("\\", "/")
+    if rel_path.startswith(EXCLUDE_PREFIXES):
         return False
-    return name.startswith("test_") or name.endswith("_test.py")
+
+    return any(
+        fnmatch.fnmatchcase(rel_path, pattern)
+        or fnmatch.fnmatchcase(rel_path, pattern.replace("**/", ""))
+        for pattern in INCLUDE_PATTERNS
+    )
+
+
+def _discover_files() -> list[Path]:
+    """Return the test files this linter applies to, sorted."""
+    files: set[Path] = set()
+    for pattern in INCLUDE_PATTERNS:
+        for path in REPO_ROOT.glob(pattern):
+            if _is_test_file(str(path)):
+                files.add(path)
+    return sorted(files)
 
 
 def _is_test_class(node: ast.ClassDef) -> bool:
@@ -268,30 +301,12 @@ def _is_instantiate_call(call: ast.Call) -> bool:
     return False
 
 
-def _collect_test_classes(
-    tree: ast.Module, filename: str
-) -> tuple[dict[str, ClassEntry], list[LintMessage]]:
-    """Map each test class name to its definition and instantiation call, if any.
-
-    Also report duplicate class definitions and repeated instantiate calls, so
-    that silent shadowing (only the last definition/call is linted) does not go
-    unnoticed.
-    """
+def _collect_test_classes(tree: ast.Module) -> dict[str, ClassEntry]:
+    """Map each test class name to its definition and instantiation call, if any."""
     class_defs: dict[str, ast.ClassDef] = {}
     instantiations: dict[str, ast.Call] = {}
-    duplicate_messages: list[LintMessage] = []
     for stmt in _scanned_statements(tree):
         if isinstance(stmt, ast.ClassDef) and _is_test_class(stmt):
-            if stmt.name in class_defs:
-                duplicate_messages.append(
-                    error_msg(
-                        name="[duplicate_class]",
-                        path=filename,
-                        line=stmt.lineno,
-                        description=f"Test class '{stmt.name}' is defined more than once; "
-                        f"only the last definition is linted.",
-                    )
-                )
             class_defs[stmt.name] = stmt
         elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
             call = stmt.value
@@ -300,25 +315,11 @@ def _collect_test_classes(
                 and call.args
                 and isinstance(call.args[0], ast.Name)
             ):
-                if call.args[0].id in instantiations:
-                    duplicate_messages.append(
-                        error_msg(
-                            name="[duplicate_instantiation]",
-                            path=filename,
-                            line=call.lineno,
-                            description=f"Class '{call.args[0].id}' is passed to "
-                            f"{INSTANTIATE_FN_NAME} more than once; "
-                            f"only the last call is linted.",
-                        )
-                    )
                 instantiations[call.args[0].id] = call
-    return (
-        {
-            name: ClassEntry(class_defs[name], instantiations.get(name))
-            for name in class_defs
-        },
-        duplicate_messages,
-    )
+    return {
+        name: ClassEntry(class_defs[name], instantiations.get(name))
+        for name in class_defs
+    }
 
 
 def _get_string_list_kwarg(
@@ -358,6 +359,33 @@ def _get_string_list_kwarg(
         return _KWARG_UNKNOWN
 
     return None
+
+
+def _accelerator_availability_check(call: ast.Call) -> str | None:
+    """Return the dotted name of an accelerator is_available() call, or None."""
+
+    # Device modules an availability check may probe. "accelerator" is included on
+    # purpose: torch.accelerator.is_available() still needs some accelerator.
+    ACCELERATOR_MODULES = {
+        "accelerator",
+        "cuda",
+        "hpu",
+        "ipu",
+        "mps",
+        "mtia",
+        "xla",
+        "xpu",
+    }
+
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "is_available"):
+        return None
+
+    name = ast.unparse(func)
+    parts = name.split(".")
+    if parts[0] != "torch" or not ACCELERATOR_MODULES.intersection(parts):
+        return None
+    return name
 
 
 @dataclass(frozen=True)
@@ -413,239 +441,330 @@ class RuleContext:
         )
 
 
-RuleFunc = Callable[[RuleContext], list[LintMessage]]
-rules: dict[HardwareClassification, list[RuleFunc]] = {}
+class RuleId(Enum):
+    """Short names of lint rules, used as message names and registry keys."""
+
+    HW_CLASSIFICATION = "hw_classification"
+    DEVICE_PARAM = "device_param"
+    INSTANTIATION = "instantiation"
+    ACCELERATOR_AVAILABILITY = "accelerator_availability"
+    DECORATOR = "decorator"
+    ONLY_FOR = "only_for"
 
 
-def _register(*groups: HardwareClassification) -> Callable[[RuleFunc], RuleFunc]:
-    """Decorator: register a rule function into one or more classification groups.
+class Rule:
+    """Base class for lint rules.
+
+    Each rule is a class declaring its id, a summary of what it checks and why
+    it is needed, and a ``check`` classmethod implementing the rule. The check
+    builds its own messages with ``error_msg``; check signatures are
+    rule-specific.
+    """
+
+    id: RuleId
+    summary: str
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        if getattr(cls, "id", None) is None or not getattr(cls, "summary", None):
+            raise TypeError(
+                f"Rule {cls.__name__} must define 'id' and a non-empty 'summary'"
+            )
+
+    @classmethod
+    def tag(cls) -> str:
+        return f"[{cls.id.value}]"
+
+    @classmethod
+    def hint(cls) -> str:
+        """Pointer to this rule's summary, appended to every message."""
+        return (
+            f"See the '{cls.id.value}' rule summary in "
+            f"{os.path.relpath(__file__, REPO_ROOT)} for details."
+        )
+
+    @classmethod
+    def check(cls, ctx: RuleContext) -> list[LintMessage]:
+        raise NotImplementedError
+
+
+rules: dict[HardwareClassification, list[type[Rule]]] = {}
+
+
+def _register(*groups: HardwareClassification) -> Callable[[type[Rule]], type[Rule]]:
+    """Decorator: register a Rule subclass into one or more classification groups.
 
     Example::
 
         @_register(HardwareClassification.ACCELERATOR)
-        def _check_no_only_for(ctx): ...
-
-
-        @_register(HardwareClassification.GENERIC)
-        def _check_no_device_param(ctx): ...
+        class DecoratorRule(Rule): ...
     """
 
-    def decorator(fn: RuleFunc) -> RuleFunc:
-        for g in groups:
-            rules.setdefault(g, []).append(fn)
-        return fn
+    def decorator(rule_cls: type[Rule]) -> type[Rule]:
+        for group in groups:
+            rules.setdefault(group, []).append(rule_cls)
+        return rule_cls
 
     return decorator
 
 
-def _check_device_param(ctx: RuleContext, *, required: bool) -> list[LintMessage]:
-    """Validate whether test methods accept device(s) parameters."""
-    messages: list[LintMessage] = []
-    for stmt in ctx.test_methods:
-        params = {
-            a.arg for a in stmt.args.args + stmt.args.posonlyargs + stmt.args.kwonlyargs
-        }
-        has_device_param = "device" in params or "devices" in params
-        if has_device_param == required:
-            continue
-        action = "must accept" if required else "must not accept"
-        messages.append(
-            error_msg(
-                name="[device_param]",
-                path=ctx.filename,
-                line=stmt.lineno,
-                description=f"{ctx.classification.value} test method '{ctx.class_node.name}.{stmt.name}' "
-                f"{action} a 'device' or 'devices' parameter.",
-            )
-        )
-    return messages
-
-
-def _check_instantiation(
-    ctx: RuleContext,
-    *,
-    required: bool,
-) -> list[LintMessage]:
-    """Validate test class instantiation through `instantiate_device_type_tests`."""
-    is_instantiated = ctx.instantiation is not None
-    if is_instantiated == required:
-        return []
-    action = "must be" if required else "must not be"
-    return [
-        error_msg(
-            name="[instantiation]",
-            path=ctx.filename,
-            line=ctx.class_node.lineno,
-            description=f"{ctx.classification.value} class '{ctx.class_node.name}' {action} "
-            f"instantiated via 'instantiate_device_type_tests'.",
-        )
-    ]
-
-
 # ---------------------------------------------------------------------------
-# Instantiation and device-parameter rules
+# Rules. Keep this list in sync with the module docstring.
 # ---------------------------------------------------------------------------
 
 
-@_register(HardwareClassification.ACCELERATOR)
-def _check_requires_instantiation(ctx: RuleContext) -> list[LintMessage]:
-    return _check_instantiation(ctx, required=True)
+# The gate rule: it must run before dispatch, when the classification is not
+# known yet, so it is called explicitly instead of being registered.
+class HwClassificationRule(Rule):
+    id = RuleId.HW_CLASSIFICATION
+    summary = (
+        "Every test class must declare a valid hw_classification attribute "
+        "(GENERIC, ACCELERATOR, CPU, CUDA, MPS, or XPU) so test "
+        "infrastructure knows which hardware the tests target.\n"
+        "GENERIC marks device-agnostic tests, ACCELERATOR marks tests that "
+        "run on every accelerator via instantiate_device_type_tests, and "
+        "CPU/CUDA/MPS/XPU mark device-specific classes. Declare the "
+        "attribute in the class body, e.g.:\n"
+        "    hw_classification = HardwareClassification.GENERIC"
+    )
 
+    @classmethod
+    def parse(
+        cls, filename: str, node: ast.ClassDef
+    ) -> tuple[HardwareClassification | None, list[LintMessage]]:
+        """Parse and validate the class's hw_classification declaration.
 
-@_register(HardwareClassification.GENERIC)
-def _check_forbids_instantiation(ctx: RuleContext) -> list[LintMessage]:
-    return _check_instantiation(ctx, required=False)
-
-
-@_register(HardwareClassification.ACCELERATOR)
-def _check_requires_device_param(ctx: RuleContext) -> list[LintMessage]:
-    return _check_device_param(ctx, required=True)
-
-
-@_register(HardwareClassification.GENERIC)
-def _check_forbids_device_param(ctx: RuleContext) -> list[LintMessage]:
-    return _check_device_param(ctx, required=False)
-
-
-# ---------------------------------------------------------------------------
-# GENERIC rules
-# ---------------------------------------------------------------------------
-
-# Device modules an availability check may probe. "accelerator" is included on
-# purpose: torch.accelerator.is_available() still needs some accelerator.
-ACCELERATOR_MODULES = {
-    "accelerator",
-    "cuda",
-    "hpu",
-    "ipu",
-    "mps",
-    "mtia",
-    "xla",
-    "xpu",
-}
-
-
-def _accelerator_availability_check(call: ast.Call) -> str | None:
-    """Return the dotted name of an accelerator is_available() call, or None."""
-    func = call.func
-    if not (isinstance(func, ast.Attribute) and func.attr == "is_available"):
-        return None
-
-    name = ast.unparse(func)
-    parts = name.split(".")
-    if parts[0] != "torch" or not ACCELERATOR_MODULES.intersection(parts):
-        return None
-    return name
-
-
-@_register(HardwareClassification.GENERIC)
-def _check_no_accelerator_availability(ctx: RuleContext) -> list[LintMessage]:
-    """GENERIC classes must not check accelerator availability in the class body."""
-    messages: list[LintMessage] = []
-    for stmt in ctx.class_node.body:
-        owner = ctx.class_node.name
-        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            owner = f"{owner}.{stmt.name}"
-        for node in ast.walk(stmt):
-            if not isinstance(node, ast.Call):
-                continue
-            check = _accelerator_availability_check(node)
-            if check is None:
-                continue
-            messages.append(
+        Returns the classification and any errors (non-empty iff the
+        declaration is missing or invalid).
+        """
+        classification = _get_hw_classification(node)
+        if classification is None:
+            return None, [
                 error_msg(
-                    name="[accelerator_availability]",
-                    path=ctx.filename,
+                    name=cls.tag(),
+                    path=filename,
                     line=node.lineno,
-                    description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
-                    f"must not check accelerator availability in '{owner}': "
-                    f"'{check}()'. Use an appropriately classified test instead.",
+                    description=(
+                        f"Test class '{node.name}': missing or invalid hw_classification."
+                        f"\n{cls.hint()}"
+                    ),
                 )
+            ]
+        return classification, []
+
+
+@_register(HardwareClassification.GENERIC, HardwareClassification.ACCELERATOR)
+class InstantiationRule(Rule):
+    id = RuleId.INSTANTIATION
+    summary = (
+        "GENERIC classes must not be used with instantiate_device_type_tests; "
+        "ACCELERATOR classes must be.\n"
+        "instantiate_device_type_tests turns a device-parameterized test "
+        "class into per-accelerator test classes, which only makes sense for "
+        "accelerator tests. For ACCELERATOR classes, add the call at module "
+        "level, e.g.:\n"
+        "    instantiate_device_type_tests(TestFoo, globals())"
+    )
+
+    @classmethod
+    def check(cls, ctx: RuleContext) -> list[LintMessage]:
+        is_instantiated = ctx.instantiation is not None
+        required = ctx.classification is HardwareClassification.ACCELERATOR
+        if is_instantiated == required:
+            return []
+        class_name = ctx.class_node.name
+        if required:
+            description = (
+                f"Test class '{class_name}' ({ctx.classification.value}): "
+                f"must be used with {INSTANTIATE_FN_NAME}."
             )
-    return messages
-
-
-# ---------------------------------------------------------------------------
-# ACCELERATOR rules
-# ---------------------------------------------------------------------------
-
-
-# Device-specific only* decorators forbidden in ACCELERATOR classes.
-_FORBIDDEN_ONLY_DECORATORS = {
-    "onlyCPU",
-    "onlyCUDA",
-    "onlyMPS",
-    "onlyXPU",
-    "onlyHPU",
-    "onlyPRIVATEUSE1",
-    "onlyOn",
-    "onlyCUDAAndPRIVATEUSE1",
-    "onlyNativeDeviceTypes",
-    "onlyNativeDeviceTypesAnd",
-}
-
-
-@_register(HardwareClassification.ACCELERATOR)
-def _check_no_only_decorators(ctx: RuleContext) -> list[LintMessage]:
-    """ACCELERATOR classes: test methods must not use device-specific only* decorators, except onlyAccelerator."""
-
-    def get_decorator_name(dec: ast.expr) -> str | None:
-        """Extract the decorator name from forms like @foo, @obj.foo, and @foo(...)."""
-        if isinstance(dec, ast.Name):
-            return dec.id
-        if isinstance(dec, ast.Attribute):
-            return dec.attr
-        if isinstance(dec, ast.Call):
-            if isinstance(dec.func, ast.Name):
-                return dec.func.id
-            if isinstance(dec.func, ast.Attribute):
-                return dec.func.attr
-        return None
-
-    messages: list[LintMessage] = []
-    for stmt in ctx.test_methods:
-        for dec in stmt.decorator_list:
-            name = get_decorator_name(dec)
-            if name in _FORBIDDEN_ONLY_DECORATORS:
-                messages.append(
-                    error_msg(
-                        name="[decorator]",
-                        path=ctx.filename,
-                        line=stmt.lineno,
-                        description=f"{ctx.classification.value} test method '{ctx.class_node.name}.{stmt.name}' "
-                        f"must not use '@{name}' decorators except onlyAccelerator",
-                    )
-                )
-    return messages
-
-
-@_register(HardwareClassification.ACCELERATOR)
-def _check_no_only_for(ctx: RuleContext) -> list[LintMessage]:
-    """ACCELERATOR classes: instantiate_device_type_tests must not use only_for.
-
-    Use except_for for a blacklist approach instead.
-    """
-    if ctx.instantiation is not None and ctx.instantiation.only_for is not None:
+        else:
+            description = (
+                f"Test class '{class_name}' ({ctx.classification.value}): "
+                f"must not be used with {INSTANTIATE_FN_NAME}."
+            )
         return [
             error_msg(
-                name="[only_for]",
+                name=cls.tag(),
                 path=ctx.filename,
-                line=ctx.instantiation.call.lineno,
-                description=f"{ctx.classification.value} class '{ctx.class_node.name}' "
-                f"must not use only_for in instantiate_device_type_tests. "
-                f"Use except_for instead (blacklist approach).",
+                line=ctx.class_node.lineno,
+                description=f"{description}\n{cls.hint()}",
             )
         ]
-    return []
+
+
+@_register(HardwareClassification.GENERIC, HardwareClassification.ACCELERATOR)
+class DeviceParamRule(Rule):
+    id = RuleId.DEVICE_PARAM
+    summary = (
+        "GENERIC test methods must not accept a device or devices parameter; "
+        "ACCELERATOR test methods must accept one.\n"
+        "GENERIC tests exercise device-agnostic logic and must not depend on "
+        "an accelerator. ACCELERATOR tests run on every accelerator and "
+        "receive the device under test through this parameter."
+    )
+
+    @classmethod
+    def check(cls, ctx: RuleContext) -> list[LintMessage]:
+        required = ctx.classification is HardwareClassification.ACCELERATOR
+        messages: list[LintMessage] = []
+        for stmt in ctx.test_methods:
+            params = {
+                a.arg
+                for a in stmt.args.args + stmt.args.posonlyargs + stmt.args.kwonlyargs
+            }
+            has_device_param = "device" in params or "devices" in params
+            if has_device_param == required:
+                continue
+            action = "must accept" if required else "must not accept"
+            messages.append(
+                error_msg(
+                    name=cls.tag(),
+                    path=ctx.filename,
+                    line=stmt.lineno,
+                    description=(
+                        f"Test method '{ctx.class_node.name}.{stmt.name}' "
+                        f"({ctx.classification.value}): {action} a 'device' or 'devices' parameter."
+                        f"\n{cls.hint()}"
+                    ),
+                )
+            )
+        return messages
+
+
+@_register(HardwareClassification.GENERIC)
+class AcceleratorAvailabilityRule(Rule):
+    id = RuleId.ACCELERATOR_AVAILABILITY
+    summary = (
+        "GENERIC classes must not check accelerator availability in the "
+        "class body.\n"
+        "Such checks make test behavior depend on the available accelerators, "
+        "which is inconsistent with the GENERIC classification. Move the "
+        "check to an ACCELERATOR or device-specific test class."
+    )
+
+    @classmethod
+    def check(cls, ctx: RuleContext) -> list[LintMessage]:
+        messages: list[LintMessage] = []
+        for stmt in ctx.class_node.body:
+            owner = ctx.class_node.name
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                owner = f"{owner}.{stmt.name}"
+            for node in ast.walk(stmt):
+                if not isinstance(node, ast.Call):
+                    continue
+                check = _accelerator_availability_check(node)
+                if check is None:
+                    continue
+                messages.append(
+                    error_msg(
+                        name=cls.tag(),
+                        path=ctx.filename,
+                        line=node.lineno,
+                        description=(
+                            f"Test class '{ctx.class_node.name}' ({ctx.classification.value}): "
+                            f"must not check accelerator availability in '{owner}': "
+                            f"'{check}()'."
+                            f"\n{cls.hint()}"
+                        ),
+                    )
+                )
+        return messages
+
+
+@_register(HardwareClassification.ACCELERATOR)
+class DecoratorRule(Rule):
+    id = RuleId.DECORATOR
+    summary = (
+        "ACCELERATOR test methods must not use device-specific only* "
+        "decorators; @onlyAccelerator is permitted.\n"
+        "Device-specific decorators restrict tests to particular devices, "
+        "which conflicts with the device-generic intent of the ACCELERATOR "
+        "classification."
+    )
+
+    @classmethod
+    def check(cls, ctx: RuleContext) -> list[LintMessage]:
+        # Device-specific only* decorators forbidden in ACCELERATOR classes.
+        forbidden = {
+            "onlyCPU",
+            "onlyCUDA",
+            "onlyMPS",
+            "onlyXPU",
+            "onlyHPU",
+            "onlyPRIVATEUSE1",
+            "onlyOn",
+            "onlyCUDAAndPRIVATEUSE1",
+            "onlyNativeDeviceTypes",
+            "onlyNativeDeviceTypesAnd",
+        }
+
+        def get_decorator_name(dec: ast.expr) -> str | None:
+            """Extract the decorator name from forms like @foo, @obj.foo, and @foo(...)."""
+            if isinstance(dec, ast.Name):
+                return dec.id
+            if isinstance(dec, ast.Attribute):
+                return dec.attr
+            if isinstance(dec, ast.Call):
+                if isinstance(dec.func, ast.Name):
+                    return dec.func.id
+                if isinstance(dec.func, ast.Attribute):
+                    return dec.func.attr
+            return None
+
+        messages: list[LintMessage] = []
+        for stmt in ctx.test_methods:
+            for dec in stmt.decorator_list:
+                name = get_decorator_name(dec)
+                if name in forbidden:
+                    messages.append(
+                        error_msg(
+                            name=cls.tag(),
+                            path=ctx.filename,
+                            line=stmt.lineno,
+                            description=(
+                                f"Test method '{ctx.class_node.name}.{stmt.name}' "
+                                f"({ctx.classification.value}): must not use '@{name}'; "
+                                f"only '@onlyAccelerator' is allowed."
+                                f"\n{cls.hint()}"
+                            ),
+                        )
+                    )
+        return messages
+
+
+@_register(HardwareClassification.ACCELERATOR)
+class OnlyForRule(Rule):
+    id = RuleId.ONLY_FOR
+    summary = (
+        "ACCELERATOR classes must not use only_for in "
+        "instantiate_device_type_tests.\n"
+        "only_for restricts tests to specific devices, preventing coverage "
+        "on other accelerators. Use except_for to exclude known-unsupported "
+        "devices when necessary."
+    )
+
+    @classmethod
+    def check(cls, ctx: RuleContext) -> list[LintMessage]:
+        if ctx.instantiation is None or ctx.instantiation.only_for is None:
+            return []
+        return [
+            error_msg(
+                name=cls.tag(),
+                path=ctx.filename,
+                line=ctx.instantiation.call.lineno,
+                description=(
+                    f"Test class '{ctx.class_node.name}' ({ctx.classification.value}): "
+                    f"must not use only_for in {INSTANTIATE_FN_NAME}; use except_for instead."
+                    f"\n{cls.hint()}"
+                ),
+            )
+        ]
 
 
 def check_file(filename: str) -> list[LintMessage]:
-    if not _is_test_file(filename):
-        return []
-
+    # Callers pre-filter with _is_test_file; only the allowlist gate remains.
     rel_path = os.path.relpath(filename, REPO_ROOT).replace("\\", "/")
-
-    # Skip checks for files in the allowlist
     if rel_path in _allowlist:
         return []
 
@@ -654,37 +773,20 @@ def check_file(filename: str) -> list[LintMessage]:
             source = f.read()
         tree = ast.parse(source, filename=filename)
     except (OSError, SyntaxError) as e:
-        return [
-            error_msg(
-                name="[parse_error]",
-                path=filename,
-                line=None,
-                description=f"Failed to parse '{filename}': {e}",
-            )
-        ]
+        logging.error("Failed to parse '%s': %s", filename, e)
+        return []
 
-    test_classes, duplicate_messages = _collect_test_classes(tree, filename)
+    test_classes = _collect_test_classes(tree)
 
-    messages: list[LintMessage] = list(duplicate_messages)
+    messages: list[LintMessage] = []
     for entry in test_classes.values():
         node = entry.class_def
-        classification = _get_hw_classification(node)
+        classification, errors = HwClassificationRule.parse(filename, node)
+        messages.extend(errors)
         if classification is None:
-            messages.append(
-                error_msg(
-                    name="[hw_classification]",
-                    path=filename,
-                    line=node.lineno,
-                    description=f"Test class '{node.name}' is missing or has an invalid "
-                    f"hw_classification. Only the exact forms below are accepted "
-                    f"(aliased imports are not recognized):\n"
-                    f"    hw_classification = HardwareClassification.<MEMBER>\n"
-                    f"    hw_classification: HardwareClassification = HardwareClassification.<MEMBER>",
-                )
-            )
             continue
 
-        # Dispatch to registered rule functions for this classification
+        # Dispatch to registered rules for this classification
         ctx = RuleContext.from_node(
             filename=filename,
             class_node=node,
@@ -692,9 +794,44 @@ def check_file(filename: str) -> list[LintMessage]:
             classification=classification,
         )
         for rule in rules.get(classification, []):
-            messages.extend(rule(ctx))
+            messages.extend(rule.check(ctx))
 
     return messages
+
+
+def _regenerate_allowlist() -> None:
+    """Regenerate the allowlist from the linter's results on all test files."""
+
+    # check_file() returns nothing for files already in the allowlist, which
+    # would drop every existing entry; clear it so the list is rebuilt from the
+    # linter's real output rather than from its current contents.
+    global _allowlist
+    _allowlist = set()
+
+    files = _discover_files()
+    entries = [
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in files
+        if check_file(str(path))
+    ]
+
+    old_content = (
+        ALLOWLIST_PATH.read_text(encoding="utf-8") if ALLOWLIST_PATH.exists() else ""
+    )
+    old: list[str] = json.loads(old_content) if old_content else []
+
+    added = sorted(set(entries) - set(old))
+    removed = sorted(set(old) - set(entries))
+
+    print(f"Checked {len(files)} test files; {len(entries)} require allowlisting.")
+    print(f"Allowlist changes: {len(added)} added, {len(removed)} removed.")
+
+    for prefix, paths in (("+", added), ("-", removed)):
+        for path in paths:
+            print(f"  {prefix} {path}")
+
+    ALLOWLIST_PATH.write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {len(entries)} entries to {ALLOWLIST_REL_PATH}")
 
 
 def _default_num_workers() -> int | None:
@@ -714,8 +851,21 @@ def main() -> None:
         action="store_true",
         help="verbose logging",
     )
-    parser.add_argument("filenames", nargs="+", help="paths to lint")
+    parser.add_argument(
+        "--regenerate",
+        action="store_true",
+        help="regenerate the allowlist from actual linter results",
+    )
+    parser.add_argument(
+        "filenames", nargs="*", help="paths to lint (all test files if omitted)"
+    )
     args = parser.parse_args()
+
+    if args.regenerate:
+        if args.filenames:
+            parser.error("filenames cannot be combined with --regenerate")
+        _regenerate_allowlist()
+        return
 
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
@@ -723,11 +873,15 @@ def main() -> None:
         stream=sys.stderr,
     )
 
+    # No filenames means lint every test file this linter applies to.
+    candidates = args.filenames or [str(p) for p in _discover_files()]
+    filenames = [x for x in candidates if _is_test_file(x)]
+
     found_errors = False
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=_default_num_workers(),
     ) as executor:
-        futures = {executor.submit(check_file, x): x for x in args.filenames}
+        futures = {executor.submit(check_file, x): x for x in filenames}
         for future in concurrent.futures.as_completed(futures):
             try:
                 for lint_message in future.result():
@@ -735,37 +889,11 @@ def main() -> None:
                     found_errors = True
             except Exception:
                 logging.critical('Failed at "%s".', futures[future])
-                print(
-                    json.dumps(
-                        error_msg(
-                            name="[internal_error]",
-                            path=futures[future],
-                            line=None,
-                            description=f"Linter failed on '{futures[future]}'",
-                        )._asdict()
-                    ),
-                    flush=True,
-                )
 
     if found_errors:
-        print(
-            json.dumps(
-                LintMessage(
-                    path=ALLOWLIST_REL_PATH,
-                    line=None,
-                    char=None,
-                    code=LINTER_CODE,
-                    severity=LintSeverity.ADVICE,
-                    name="[allowlist_hint]",
-                    original=None,
-                    replacement=None,
-                    description=(
-                        "To temporarily exempt a test file from TEST_LINTER, "
-                        f"add it to {ALLOWLIST_REL_PATH}."
-                    ),
-                )._asdict()
-            ),
-            flush=True,
+        logging.info(
+            "To temporarily exempt a test file from TEST_LINTER, add it to %s.",
+            ALLOWLIST_REL_PATH,
         )
 
 
