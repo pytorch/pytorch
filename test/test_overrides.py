@@ -1995,6 +1995,12 @@ class TestTorchFunctionRedispatch(TestCase):
         call_log_str = '\n'.join(f"{entry[0]}" for entry in filtered)
         self.assertExpectedInline(call_log_str, """bar""")
 
+    def test_const_data_ptr(self):
+        x = torch.ones(1)
+        wrapped = RedispatchTensor(x)
+        self.assertEqual(wrapped.const_data_ptr(), x.const_data_ptr())
+        self.assertEqual(len(wrapped.call_log), 1)
+
     def test_skip_to_inner(self):
         call_log = []
         x = RedispatchTensor(torch.full((1,), 1), call_log=call_log)

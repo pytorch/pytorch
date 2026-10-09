@@ -923,6 +923,7 @@ class ProcessGroupNCCL(Backend):
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
         split_color: int
+        lazy_init: bool
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
@@ -1092,6 +1093,8 @@ class _SymmetricMemory:
     def rank(self) -> int: ...
     @property
     def world_size(self) -> int: ...
+    @property
+    def group_name(self) -> GroupName: ...
     @staticmethod
     def rendezvous(
         tensor: torch.Tensor, group_name: str | None = None

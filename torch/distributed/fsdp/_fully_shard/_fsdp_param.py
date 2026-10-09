@@ -1254,6 +1254,32 @@ class FSDPParam:
             if i not in dp_dims
         )
 
+    @property
+    def defers_grad_upcast(self) -> bool:
+        """Whether a forward and its backward may set the unsharded
+        ``grad_dtype=None`` so that autograd leaves gradients in the compute
+        dtype instead of casting each one to the unsharded gradient dtype. The
+        reduce-scatter copy-in widens fresh gradients, AccumulateGrad adds later
+        ones in place to accumulated wider ones, and post-backward widens a fresh
+        gradient that isn't reduced. Gradients from several uses in one such
+        backward are summed in the compute dtype."""
+        grad_dtype = self.unsharded_grad_dtype
+        compute_dtype = self.param_dtype or self.orig_dtype
+        # A larger floating-point dtype holds a smaller one exactly (e.g. fp32
+        # and bf16). Compare sizes since torch.promote_types rejects float8.
+        # Gradients reduced outside DP keep autograd's upcast so that reduction
+        # runs in the wider dtype too. All-gather extensions run their own
+        # compute, which may read grad_dtype to pick the dtype its backward
+        # produces, so it stays fixed for them.
+        return (
+            grad_dtype is not None
+            and compute_dtype.is_floating_point
+            and grad_dtype.is_floating_point
+            and grad_dtype.itemsize > compute_dtype.itemsize
+            and not self.may_reduce_grad_outside_dp
+            and not hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather")
+        )
+
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
         if self.is_spmd_types:
             if self._unsharded_dtensor_spec is None:
