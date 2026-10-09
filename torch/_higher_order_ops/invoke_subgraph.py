@@ -8,6 +8,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
+from operator import attrgetter
 from typing import Any
 
 import torch
@@ -199,6 +200,97 @@ def get_backward_nested_region_config(
             bw_inductor_config_patches=None,
         )
     return fw_config
+
+
+def _specialize_nested_region_configs_for_backward(
+    gm: torch.fx.GraphModule,
+) -> None:
+    """Switch every region nested in a backward HOP graph to its backward config.
+
+    Both the HOP node meta and the subgraph module mirror are specialized. gm,
+    which the partitioner just built, is updated in place. A module nested in it
+    can also be reachable from the forward, since the proxy dispatch cache can
+    hand the same traced body to several traces, so a nested module that has to
+    change is replaced by a copy that only the backward uses.
+    """
+    from torch.fx.experimental.const_fold import get_unique_attr_name_in_module
+
+    def child_modules(module: torch.fx.GraphModule) -> dict[str, torch.fx.GraphModule]:
+        children = {}
+        for node in module.graph.nodes:
+            if node.op not in ("get_attr", "call_module"):
+                continue
+            try:
+                child = attrgetter(node.target)(module)
+            except AttributeError:
+                continue
+            if isinstance(child, torch.fx.GraphModule):
+                children[node.target] = child
+        return children
+
+    def region_nodes(module: torch.fx.GraphModule) -> list[torch.fx.Node]:
+        return module.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        )
+
+    changes: dict[int, bool] = {}
+
+    def has_changes(module: torch.fx.GraphModule) -> bool:
+        if id(module) not in changes:
+            changes[id(module)] = False
+            configs = [module.meta.get("nested_region_config")] + [
+                node.meta.get("custom", {}).get("nested_region_config")
+                for node in region_nodes(module)
+            ]
+            changes[id(module)] = any(
+                get_backward_nested_region_config(config) is not config
+                for config in configs
+            ) or any(has_changes(child) for child in child_modules(module).values())
+        return changes[id(module)]
+
+    copies: dict[int, torch.fx.GraphModule] = {}
+
+    def specialize(module: torch.fx.GraphModule) -> None:
+        if "nested_region_config" in module.meta:
+            module.meta["nested_region_config"] = get_backward_nested_region_config(
+                module.meta["nested_region_config"]
+            )
+        for node in region_nodes(module):
+            custom = node.meta.get("custom", {})
+            config = custom.get("nested_region_config")
+            backward_config = get_backward_nested_region_config(config)
+            if backward_config is not config:
+                node.meta["custom"] = {
+                    **custom,
+                    "nested_region_config": backward_config,
+                }
+        retargeted = False
+        for target, child in child_modules(module).items():
+            if not has_changes(child):
+                continue
+            if id(child) not in copies:
+                child_copy = torch.fx._lazy_graph_module._make_graph_module(
+                    child, copy.deepcopy(child.graph)
+                )
+                child_copy.meta = dict(child.meta)
+                copies[id(child)] = child_copy
+                specialize(child_copy)
+            if "." not in target:
+                setattr(module, target, copies[id(child)])
+                continue
+            # A container on a dotted path can be shared with the forward (FX
+            # installs it by reference when the graph also gets it whole), so
+            # attach the copy to module itself rather than write into it.
+            name = get_unique_attr_name_in_module(module, target)
+            setattr(module, name, copies[id(child)])
+            for node in module.graph.nodes:
+                if node.op in ("get_attr", "call_module") and node.target == target:
+                    node.target = name
+            retargeted = True
+        if retargeted:
+            module.recompile()
+
+    specialize(gm)
 
 
 # Per-call id used by downstream graph passes to pair fw and bw
