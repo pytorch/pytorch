@@ -11,6 +11,7 @@ import itertools
 import keyword
 import math
 import operator
+import os
 import random
 import sys
 import types
@@ -2364,6 +2365,150 @@ partial_fn = functools.partial(fn, scale=2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    @parametrize("wrapped", (False, True))
+    def test_inspect_signature_skip_function(self, wrapped):
+        def fn(x):
+            target = torch.fx.Node.__init__
+            if wrapped:
+                target = torch.no_grad()(target)
+            return x + 1, str(inspect.signature(target))
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(1)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        with patch.object(
+            torch.fx.Node.__init__, "__signature__", inspect.Signature(), create=True
+        ):
+            self.assertEqual(fn(x), opt_fn(x))
+
+        if wrapped:
+
+            def user_fn(x):
+                return x
+
+            def identity_fn(x):
+                target = torch.no_grad()(torch.fx.Node.__init__)
+                alias = target
+                other = torch.no_grad()(torch.fx.Node.__init__)
+                user_target = torch.no_grad()(user_fn)
+                return x + 1, (
+                    target is alias,
+                    target.__wrapped__ is torch.fx.Node.__init__,
+                    target.__wrapped__ is target,
+                    target is target.__wrapped__,
+                    target is other,
+                    target is user_target,
+                    user_target is target,
+                )
+
+            opt_identity_fn = torch.compile(
+                identity_fn, backend="eager", fullgraph=True
+            )
+            self.assertEqual(identity_fn(x), opt_identity_fn(x))
+
+    @parametrize(
+        "target",
+        (torch.fx.Node.__init__, os.getpid, str.join, int.__add__),
+        name_fn=lambda target: type(target).__name__,
+    )
+    def test_skip_function_missing_attr_error(self, target):
+        def fn(x):
+            try:
+                target.__missing_attribute__
+            except AttributeError as exc:
+                return x + 1, exc.args, exc.name, exc.obj
+
+        x = torch.ones(1)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(expected[:3], actual[:3])
+        self.assertIs(expected[3], actual[3])
+
+    @parametrize(
+        "target",
+        (torch.fx.Node.__init__, os.getpid, str.join, int.__add__),
+        name_fn=lambda target: type(target).__name__,
+    )
+    def test_wrapped_skip_function_metadata(self, target):
+        def fn(x):
+            wrapped = torch.no_grad()(target)
+            return (
+                x + 1,
+                wrapped.__qualname__.upper(),
+                wrapped.__module__.split("."),
+                wrapped.__name__.startswith("__"),
+                len(wrapped.__doc__),
+            )
+
+        counter = CompileCounterWithBackend("eager")
+        fullgraph = hasattr(target, "__module__")
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=fullgraph)
+        x = torch.ones(1)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x + 1), opt_fn(x + 1))
+        if fullgraph:
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize(
+        "target",
+        (torch.fx.Node.__init__, os.getpid, str.join, int.__add__),
+        name_fn=lambda target: type(target).__name__,
+    )
+    def test_wrapped_skip_function_defaultdict(self, target):
+        def fn(x):
+            wrapped = torch.no_grad()(target)
+            try:
+                dd = collections.defaultdict(wrapped)
+                result = len(dd), dd.default_factory is wrapped
+            except TypeError:
+                result = "TypeError"
+            return x + 1, result
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
+    @parametrize("consumer", ("dict", "vars", "closure", "instancecheck"))
+    def test_wrapped_skip_function_runtime_attributes(self, consumer):
+        target = torch.fx.Node.__init__
+
+        class Meta(type):
+            def __instancecheck__(cls, obj):
+                return obj is target
+
+        class Marker(metaclass=Meta):
+            pass
+
+        def fn(x):
+            result = x + 1
+            wrapped = torch.no_grad()(target)
+            if consumer in ("dict", "vars"):
+                attributes = wrapped.__dict__ if consumer == "dict" else vars(wrapped)
+                return result, len(attributes), "__wrapped__" in attributes
+            if consumer == "closure":
+                return result, wrapped.__closure__ is target.__closure__
+            return result, isinstance(wrapped, Marker)
+
+        counter = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(
+            fn, backend=counter, fullgraph=consumer == "instancecheck"
+        )
+        x = torch.ones(1)
+        self.assertEqual(fn(x), opt_fn(x))
+        if consumer == "instancecheck":
+            self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_wrapped_skip_function_metadata_in_helper(self):
+        def helper(x, target):
+            return x + 1 if target.__name__.startswith("__") else x - 1
+
+        def fn(x):
+            return helper(x, torch.no_grad()(torch.fx.Node.__init__))
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
 
     def test_default_dict_constr(self):
         param = torch.nn.Parameter(torch.ones([2, 2]))
