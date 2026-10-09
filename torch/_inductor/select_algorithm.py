@@ -555,6 +555,20 @@ class _TemplateLocalEpilogueOpsHandler(V.WrapperHandler):  # type: ignore[name-d
         value = self._inner.load(name, index)
         if value.dtype is None:
             raise AssertionError("template epilogue source must have a known dtype")
+        buffer_dtype = V.graph.get_dtype(name)
+        if value.dtype != buffer_dtype:
+            compute_dtype = value.dtype
+            value = self._inner.to_dtype(
+                value,
+                buffer_dtype,
+                src_dtype=compute_dtype,
+                use_compute_types=False,
+            )
+            value = self._inner.to_dtype(
+                value,
+                compute_dtype,
+                src_dtype=buffer_dtype,
+            )
         if name in self.template_tile_buffers:
             tile_m, tile_n = self.tile
             block_m, block_n = self.block
@@ -851,8 +865,8 @@ class TritonTemplateKernel(TritonKernel):
             if local_root is not None
             else contextlib.nullcontext()
         )
+        loop_state = None
         with context:
-            loop_state = node.snapshot_loop_state()
             try:
                 numels = TritonScheduling._template_local_node_numels(
                     self.output_node,
@@ -895,6 +909,7 @@ class TritonTemplateKernel(TritonKernel):
                             and isinstance(node.node.data, ir.Reduction)
                         ):
                             raise AssertionError("expected a reduction buffer")
+                        loop_state = node.snapshot_loop_state()
                         pointwise_ranges = tuple(
                             cast(sympy.Expr, sympy.sympify(value))
                             for value in node.node.data.ranges
@@ -904,7 +919,8 @@ class TritonTemplateKernel(TritonKernel):
                         node.codegen(self.split_and_set_ranges(node.get_ranges()))
                     self.codegen_body()
             finally:
-                node.restore_loop_state(loop_state)
+                if loop_state is not None:
+                    node.restore_loop_state(loop_state)
         template_tile_buffers.difference_update(node.get_buffer_names())
 
     def get_index_dtype_as_torch_dtype(self) -> torch.dtype:

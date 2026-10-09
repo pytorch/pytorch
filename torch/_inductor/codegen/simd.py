@@ -14,6 +14,7 @@ import textwrap
 from collections import Counter
 from typing import Any, cast, Generic, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVar
+from unittest.mock import patch
 
 import sympy
 
@@ -536,7 +537,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         pid_cache: dict[str, str] | None = None,
         override_persistent_reduction: bool | None = None,
         override_cooperative_reduction: bool | None = None,
-        metadata_features: SIMDKernelFeatures | None = None,
         tiling_scores: dict[str, sympy.Expr] | None = None,
         mix_order_reduction: bool = False,
     ) -> None:
@@ -544,8 +544,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             pid_cache = {}
         super().__init__()
         self.features = features
-        metadata_features = metadata_features or features
-        self.mutations = metadata_features.get_mutations()
+        self.mutations = features.get_mutations()
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.numels = {
@@ -553,7 +552,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         }
         self.range_trees: list[IterationRangesRoot] = []
         self.range_tree_nodes: dict[sympy.Symbol, IterationRangesEntry] = {}
-        self._emitted_derived_range_headers: OrderedSet[int] = OrderedSet()
         self.iter_vars_count = itertools.count()
         self.inside_reduction = features.is_reduction()
         self.cooperative_reduction: bool = (
@@ -600,7 +598,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.min_xblock: int | None = None
         self.min_rblock: int | None = None
         self.saved_partial_accumulate: list[PartialAccumulate] = []
-        self._index_dtype = metadata_features.select_index_dtype()
+        self._index_dtype = self.features.select_index_dtype()
 
     def codegen_template_body(
         self,
@@ -1691,16 +1689,12 @@ class _DerivedIterationFamily:
             return
         for tree in self.range_trees:
             if isinstance(tree, DerivedIterationRangesRoot):
-                tree_id = id(tree)
-                if tree_id in kernel._emitted_derived_range_headers:
-                    continue
                 # Looped derived trees depend on the current reduction-loop
                 # offset, so emit them in the loop-local indexing buffer.
                 # Non-looped trees can be emitted once in the kernel prologue.
                 emit_in_loop_body = tree.is_loop and kernel.inside_reduction
                 target = kernel.indexing_code if emit_in_loop_body else kernel.body
                 kernel.iteration_ranges_codegen_header(tree, target)
-                kernel._emitted_derived_range_headers.add(tree_id)
         self._headers_emitted = True
 
     @contextlib.contextmanager
@@ -1750,7 +1744,7 @@ class _GroupedReductionLayout:
     ) -> _GroupedReductionLayout:
         if len(kernel.range_trees) != 2:
             raise AssertionError(
-                f"expected 2 range trees, got {len(kernel.range_trees)}"
+                f"expected exactly 2 range trees, got {len(kernel.range_trees)}"
             )
         x_tree, r_tree = kernel.range_trees
         if x_tree.prefix != "x":
@@ -1818,7 +1812,7 @@ class _GroupedReductionLayout:
         return str(self.local_reduction_size_sym)
 
     @property
-    def reshape_shape(self) -> tuple[str, ...]:
+    def reshape_shape(self) -> tuple[str, str, str]:
         """Shape used before the local group reduction."""
         if self.local_reduction_in_r:
             return (
@@ -1838,7 +1832,7 @@ class _GroupedReductionLayout:
         return 2 if self.local_reduction_in_r else 1
 
     @property
-    def output_shape(self) -> tuple[str, ...]:
+    def output_shape(self) -> tuple[str, str]:
         if self.local_reduction_in_r:
             return (self.passthrough_block, self.num_groups_str)
         return (self.num_groups_str, self.passthrough_block)
@@ -1966,7 +1960,9 @@ class _GroupedReductionLayout:
     def make_parent_full_family(
         self,
     ) -> _DerivedIterationFamily:
-        return _DerivedIterationFamily(range_trees=(self.x_tree, self.r_tree))
+        return _DerivedIterationFamily(
+            range_trees=(self.x_tree, self.r_tree),
+        )
 
     def parent_full_iteration_values(
         self, group_reduction_vars: _GroupedReductionVars
@@ -2256,171 +2252,11 @@ class _GroupedReductionLayout:
 
 
 @dataclasses.dataclass(frozen=True)
-class _NativeFullXReductionLayout(_GroupedReductionLayout):
-    """Native-matmul layout for reducing the complete output-column tile."""
-
-    y_tree: IterationRangesRoot
-    output_x_tree: DerivedIterationRangesRoot
-    output_r_tree: DerivedIterationRangesRoot
-
-    @classmethod
-    def from_native_matmul_kernel(
-        cls,
-        kernel: SIMDKernel[Any],
-        local_reduction_size: sympy.Integer,
-    ) -> _NativeFullXReductionLayout:
-        if len(kernel.range_trees) != 3:
-            raise AssertionError(
-                f"expected 3 native matmul range trees, got {len(kernel.range_trees)}"
-            )
-        y_tree, x_tree, r_tree = kernel.range_trees
-        if y_tree.prefix != "y" or x_tree.prefix != "x" or r_tree.prefix != "r0_":
-            raise AssertionError(
-                f"expected y/x/r0_ range trees, got "
-                f"{y_tree.prefix}/{x_tree.prefix}/{r_tree.prefix}"
-            )
-        if not V.graph.sizevars.statically_known_equals(
-            x_tree.numel, local_reduction_size
-        ):
-            raise AssertionError(
-                "native matmul grouped reduction must consume the complete X tile"
-            )
-        output_x_tree = DerivedIterationRangesRoot(
-            x_tree,
-            numel=sympy.S.One,
-            block_size=sympy.S.One,
-            block_offset=sympy.S.Zero,
-            name_suffix="nested_output",
-        )
-        output_r_tree = DerivedIterationRangesRoot(
-            r_tree,
-            numel=sympy.S.One,
-            block_size=sympy.S.One,
-            block_offset=sympy.S.Zero,
-            name_suffix="nested_output",
-        )
-        return cls(
-            x_tree=x_tree,
-            r_tree=r_tree,
-            local_reduction_size=local_reduction_size,
-            local_reduction_in_r=False,
-            y_tree=y_tree,
-            output_x_tree=output_x_tree,
-            output_r_tree=output_r_tree,
-        )
-
-    @property
-    def passthrough_tree(self) -> IterationRangesRoot:
-        return self.y_tree
-
-    @property
-    def parent_axis(self) -> int:
-        return 1
-
-    @property
-    def num_groups(self) -> sympy.Expr:
-        return sympy.S.One
-
-    @property
-    def reshape_shape(self) -> tuple[str, ...]:
-        return (
-            self.passthrough_block,
-            "1",
-            self.parent_block,
-            "1",
-        )
-
-    @property
-    def reduce_axis(self) -> int:
-        return 2
-
-    @property
-    def output_shape(self) -> tuple[str, ...]:
-        return (self.passthrough_block, "1", "1")
-
-    def construct_group_reduction_vars(
-        self,
-        body: Any,
-    ) -> _GroupedReductionVars:
-        if len(body.iter_vars) != 1 or len(body.reduce_vars) != 1:
-            raise AssertionError(
-                "native matmul grouped reduction expects one iter and one reduce var"
-            )
-        passthrough_var = self.y_tree.construct([self.y_tree.numel])[0]
-        local_reduction_var = self.x_tree.full_range().symbol()
-        return _GroupedReductionVars(
-            iter_remapped=[passthrough_var],
-            reduce_remapped=[local_reduction_var],
-            passthrough_iter_var=passthrough_var,
-            group_index_var=None,
-            group_index_expr=sympy.S.Zero,
-            local_reduction_var=local_reduction_var,
-        )
-
-    def make_reduced_output_family(
-        self,
-        group_reduction_vars: _GroupedReductionVars,
-    ) -> _DerivedIterationFamily:
-        return _DerivedIterationFamily(
-            range_trees=(self.y_tree, self.output_x_tree, self.output_r_tree),
-            index_subs={
-                group_reduction_vars.passthrough_iter_var: self.y_tree.full_range().symbol()
-            },
-        )
-
-    def make_parent_full_family(self) -> _DerivedIterationFamily:
-        return _DerivedIterationFamily(
-            range_trees=(self.y_tree, self.x_tree, self.output_r_tree)
-        )
-
-    def parent_full_iteration_values(
-        self, group_reduction_vars: _GroupedReductionVars
-    ) -> _IterationSpace:
-        return _IterationSpace(
-            [self.y_tree.numel, self.x_tree.numel, sympy.S.One],
-            [
-                self.y_tree.full_range().symbol(),
-                self.x_tree.full_range().symbol(),
-                sympy.S.Zero,
-            ],
-        )
-
-    def _broadcast_value_to_parent_resolution(
-        self,
-        kernel: TritonKernel,
-        value: CSEVariable,
-        *,
-        materialize_singleton: bool,
-    ) -> CSEVariable:
-        if value.dtype is None or value.shape is None or len(value.shape) < 2:
-            raise AssertionError("value must have a known native matmul tile shape")
-        parent_dim = str(value.shape[self.parent_axis])
-        if parent_dim == self.parent_block or (
-            parent_dim == "1" and not materialize_singleton
-        ):
-            return value
-        if parent_dim != "1":
-            raise AssertionError(f"unexpected native matmul X dimension: {parent_dim}")
-        shape = (self.passthrough_block, self.parent_block, "1")
-        return kernel.emit_broadcast_via_reshape(
-            value=value,
-            pre_broadcast_shape=(self.passthrough_block, "1", "1"),
-            broadcast_shape=shape,
-            final_shape=shape,
-            dtype=value.dtype,
-            out_shape=shape,
-        )
-
-
-_NestedReductionLayout = _GroupedReductionLayout | _NativeFullXReductionLayout
-
-
-@dataclasses.dataclass(frozen=True)
 class _ParentFullLoadTransform:
     """Lift loaded values to parent-full resolution when needed."""
 
     kernel: TritonKernel
-    layout: _NestedReductionLayout
+    layout: _GroupedReductionLayout
 
     def apply(self, value: CSEVariable) -> CSEVariable:
         return self.layout.maybe_broadcast_value_to_parent_resolution(
@@ -2442,7 +2278,7 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         inner,
         kernel: TritonKernel,
         *,
-        layout: _NestedReductionLayout,
+        layout: _GroupedReductionLayout,
         family: _DerivedIterationFamily,
         load_transform: _ParentFullLoadTransform | None = None,
     ):
@@ -2470,16 +2306,6 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         """Reshape the parent-full tile and reduce over the local reduction."""
         k = self._kernel
         value = self._layout.ensure_parent_tile_resolution(k, value)
-        default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
-        if not isinstance(default, (int, float)):
-            raise AssertionError(f"expected scalar reduction identity, got {default}")
-        value = k.cse.generate(
-            k.compute,
-            f"tl.where({self._layout.group_tree.mask_name()}, {value}, "
-            f"{constant_repr(default)})",
-            dtype=value.dtype,
-            shape=value.shape,
-        )
         # The grouped-reduction reshape uses the grouped-axis named constants
         # from the reduced-output family, so emit the derived headers before
         # we materialize the reshape line.
@@ -2498,6 +2324,44 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         remapped_index = self._family.remap_index(index)
         with self._family.ensure_active(self._kernel):
             self._inner.store(name, remapped_index, value)
+
+
+class _NativeMatmulRowLoadHandler(WrapperHandler):  # type: ignore[type-arg]
+    """Reshape native matmul [YBLOCK, XBLOCK, 1] tile values into the rank-2
+    [YBLOCK, XBLOCK] row space."""
+
+    def __init__(self, inner, kernel: TritonKernel, tile_buffers: OrderedSet[str]):
+        super().__init__(inner)
+        self._kernel = kernel
+        self._tile_buffers = tile_buffers
+
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
+        value = self._inner.load(name, index)
+        if name in self._kernel.cse.store_cache:
+            if value.dtype is None:
+                raise AssertionError("native matmul row source must have a known dtype")
+            buffer_dtype = V.graph.get_dtype(name)
+            if value.dtype != buffer_dtype:
+                compute_dtype = value.dtype
+                value = self._inner.to_dtype(
+                    value,
+                    buffer_dtype,
+                    src_dtype=compute_dtype,
+                    use_compute_types=False,
+                )
+                value = self._inner.to_dtype(
+                    value,
+                    compute_dtype,
+                    src_dtype=buffer_dtype,
+                )
+        if name in self._tile_buffers:
+            if value.dtype is None:
+                raise AssertionError(
+                    "native matmul tile source must have a known dtype"
+                )
+            shape = self._kernel.dense_size_list()
+            value = self._kernel.emit_reshape(value, shape, value.dtype)
+        return value
 
 
 class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
@@ -3023,6 +2887,99 @@ class SIMDScheduling(BaseScheduling):
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
+    # Each program holds complete mm rows, so N is bounded by the X tile.
+    MAX_NATIVE_MATMUL_ROW_SIZE = 128
+
+    @staticmethod
+    def _is_native_matmul_node(node: BaseSchedulerNode) -> bool:
+        return (
+            isinstance(node, scheduler.SchedulerNode)
+            and isinstance(node.node, ir.ComputedBuffer)
+            and node.is_native_matmul()
+        )
+
+    @staticmethod
+    def _native_matmul_row_split(
+        nodes: Sequence[BaseSchedulerNode],
+    ) -> tuple[sympy.Expr, int, int] | None:
+        """Return (M, N, index of the first row node) for a non-batched native
+        matmul [M, N] output followed by row nodes: [M, N] -> [M] reductions
+        and [M] pointwise ops."""
+        mm_index = next(
+            (
+                i
+                for i, node in enumerate(nodes)
+                if SIMDScheduling._is_native_matmul_node(node)
+            ),
+            None,
+        )
+        if mm_index is None:
+            return None
+        mm = nodes[mm_index]
+        if not isinstance(mm, scheduler.SchedulerNode):
+            return None
+        iter_ranges, _ = mm.get_ranges()
+        if len(iter_ranges) != 2 or not isinstance(iter_ranges[1], sympy.Integer):
+            return None
+        m, n = iter_ranges[0], int(iter_ranges[1])
+        for i in range(mm_index + 1, len(nodes)):
+            if SIMDScheduling._is_native_matmul_row_node(nodes[i], m, n):
+                return m, n, i
+        return m, n, len(nodes)
+
+    @staticmethod
+    def _is_native_matmul_row_node(
+        node: BaseSchedulerNode, m: sympy.Expr, n: int
+    ) -> bool:
+        if not isinstance(node, scheduler.SchedulerNode):
+            return False
+        if any(
+            isinstance(dep, MemoryDep) and free_symbol_is_type(dep.index, SymT.TMP)
+            for dep in node.read_writes.reads
+        ):
+            return False
+        sizevars = V.graph.sizevars
+        iter_ranges, reduce_ranges = node.get_ranges()
+        if not sizevars.statically_known_equals(sympy_product(iter_ranges), m):
+            return False
+        if not reduce_ranges:
+            return True
+        # Sorts and scans also have reduce ranges, and arg/welford reduction
+        # codegen refers to r0_ by name, which is K in a native matmul kernel.
+        buf = node.node
+        return (
+            sizevars.statically_known_equals(sympy_product(reduce_ranges), n)
+            and isinstance(buf, ir.ComputedBuffer)
+            and isinstance(buf.data, ir.Reduction)
+            and buf.data.reduction_type in ("sum", "prod", "max", "min", "any")
+        )
+
+    def _native_matmul_row_epilogue_can_fuse(self, node1, node2) -> bool:
+        """Whether node2 consumes complete rows of node1's native matmul output.
+
+        Index alignment of node2's reads is proven by ordinary vertical fusion.
+        """
+        nodes1 = node1.get_nodes()
+        split = self._native_matmul_row_split(nodes1)
+        if split is None or split[1] > self.MAX_NATIVE_MATMUL_ROW_SIZE:
+            return False
+        m, n, _ = split
+        if not all(
+            self._is_native_matmul_row_node(sn, m, n) for sn in node2.get_nodes()
+        ):
+            return False
+        # Values written before the mm (prologues) live in its [M, K] tile.
+        mm_index = next(
+            i for i, node in enumerate(nodes1) if self._is_native_matmul_node(node)
+        )
+        on_tile = OrderedSet(
+            name for sn in nodes1[mm_index:] for name in sn.get_buffer_names()
+        )
+        reads = OrderedSet(dep.name for dep in node2.read_writes.reads)
+        return bool(reads & on_tile) and not (
+            reads & (node1.get_buffer_names() - on_tile)
+        )
+
     def can_fuse(self, node1, node2):
         """
         Hook called by Scheduler to determine if the Triton backend
@@ -3033,6 +2990,13 @@ class SIMDScheduling(BaseScheduling):
             node2, scheduler.ForeachKernelSchedulerNode
         ):
             return scheduler.ForeachKernelSchedulerNode.can_fuse(node1, node2)
+
+        split = self._native_matmul_row_split(node1.get_nodes())
+        if split is not None:
+            row_epilogue = self._native_matmul_row_epilogue_can_fuse(node1, node2)
+            # Once the row stage has started, only row nodes can follow it.
+            if row_epilogue or split[2] < len(node1.get_nodes()):
+                return row_epilogue
 
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
@@ -3052,7 +3016,6 @@ class SIMDScheduling(BaseScheduling):
                 return False
 
         if node1.is_reduction() and node2.is_reduction():
-            nested_reduction_can_fuse = False
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
             if not reduction_can_fuse:
                 from torch._inductor.scheduler import MixOrderReduction
@@ -3066,11 +3029,9 @@ class SIMDScheduling(BaseScheduling):
                 # reductions intentionally use different iteration spaces.
                 from torch._inductor.scheduler import NestedReduction
 
-                nested_reduction_can_fuse = (
-                    NestedReduction._is_dependent_reduction_pair(node1, node2)
-                    and NestedReduction.can_fuse(node1, node2)
-                )
-                reduction_can_fuse = nested_reduction_can_fuse
+                reduction_can_fuse = NestedReduction._is_dependent_reduction_pair(
+                    node1, node2
+                ) and NestedReduction.can_fuse(node1, node2)
 
             if not reduction_can_fuse:
                 why(
@@ -3081,10 +3042,8 @@ class SIMDScheduling(BaseScheduling):
                     rnumel2,
                 )
 
-            if (
-                reduction_can_fuse
-                and (node1.is_native_matmul() or node2.is_native_matmul())
-                and not nested_reduction_can_fuse
+            if reduction_can_fuse and (
+                node1.is_native_matmul() or node2.is_native_matmul()
             ):
                 # Ensure node1 is always the native matmul side
                 if not node1.is_native_matmul():
@@ -3899,12 +3858,6 @@ class SIMDScheduling(BaseScheduling):
             coalesce_analysis,
             indexing_node_schedule=indexing_schedule,
         )
-        metadata_features = SIMDKernelFeatures(
-            indexing_schedule,
-            outer_numel,
-            outer_rnumel,
-            coalesce_analysis,
-        )
         # The outer reduction owns the grid and tiling choice. Index-width
         # analysis still includes every node emitted into that grid.
         tiling, tiling_score = self.get_tiling_and_scores(
@@ -3913,16 +3866,12 @@ class SIMDScheduling(BaseScheduling):
             outer_rnumel,
             coalesce_analysis,
         )
-        native_full_x_reduction = (
-            node.grouped_axis is scheduler.NestedReduction.GroupedAxis.NATIVE_FULL_X
-        )
-        if "z" in tiling or ("y" in tiling and not native_full_x_reduction):
+        if "y" in tiling or "z" in tiling:
             raise AssertionError("nested reduction does not support tiled reductions")
 
         metrics.codegen_nested_reduction += 1
         kernel_kwargs: dict[str, Any] = {
             "features": kernel_features,
-            "metadata_features": metadata_features,
             "override_cooperative_reduction": False,
             "tiling_scores": tiling_score,
         }
@@ -3934,24 +3883,18 @@ class SIMDScheduling(BaseScheduling):
                 kernel_kwargs,
             ),
         )
+
         for kernel in kernels:
             if local_reduction_in_r:
                 kernel.min_rblock = local_reduction_size_hint
             else:
                 kernel.min_xblock = local_reduction_size_hint
 
-            with kernel, contextlib.ExitStack() as nested_context:
-                layout: _NestedReductionLayout = (
-                    _NativeFullXReductionLayout.from_native_matmul_kernel(
-                        kernel,
-                        local_reduction_size,
-                    )
-                    if native_full_x_reduction
-                    else _GroupedReductionLayout.from_kernel(
-                        kernel,
-                        local_reduction_size,
-                        local_reduction_in_r,
-                    )
+            with kernel:
+                layout: _GroupedReductionLayout = _GroupedReductionLayout.from_kernel(
+                    kernel,
+                    local_reduction_size,
+                    local_reduction_in_r,
                 )
                 sub_parent_family: _DerivedIterationFamily | None = None
                 value_resolver: _SubParentValueResolver | None = None
@@ -3975,8 +3918,6 @@ class SIMDScheduling(BaseScheduling):
                 #   and post-loop code, but pending buffers may still have the next
                 #   pass. Flush it now so later nested stages can consume it.
                 kernel.codegen_body()
-                if native_full_x_reduction:
-                    nested_context.enter_context(kernel.disable_reduction())
 
                 group_reduction_vars = layout.construct_group_reduction_vars(
                     grouped_reduction_body
@@ -4078,7 +4019,7 @@ class SIMDScheduling(BaseScheduling):
         kernel,
         grouped_schedule,
         grouped_reduction: scheduler.SchedulerNode,
-        layout: _NestedReductionLayout,
+        layout: _GroupedReductionLayout,
         group_reduction_vars: _GroupedReductionVars,
         local_reduction_source: _IterationSpace,
         parent_full_source: _IterationSpace,
@@ -4194,7 +4135,7 @@ class SIMDScheduling(BaseScheduling):
         self,
         kernel,
         grouped_reduction: scheduler.SchedulerNode,
-        layout: _NestedReductionLayout,
+        layout: _GroupedReductionLayout,
         group_reduction_vars: _GroupedReductionVars,
         reduced_output_family,
     ) -> None:
@@ -4454,6 +4395,10 @@ class SIMDScheduling(BaseScheduling):
         if len(nodes) == 0:
             return
 
+        split = self._native_matmul_row_split(nodes)
+        if split is not None and split[2] < len(nodes):
+            return self._codegen_native_matmul_row_epilogue(nodes, *split)
+
         if torch._inductor.config.triton.coalesce_tiling_analysis:
             if len(nodes) != len(node.get_nodes()):
                 if not self.scheduler:
@@ -4464,6 +4409,86 @@ class SIMDScheduling(BaseScheduling):
             coalesce_analysis = None
 
         return self._codegen_nodes(nodes, coalesce_analysis)  # type: ignore[arg-type]
+
+    def _codegen_native_matmul_row_epilogue(self, nodes, m, n, first_row_node):
+        """Native matmul whose [M, N] output is reduced over complete rows.
+
+        After the dot, K is gone and the [YBLOCK, XBLOCK] tile is an ordinary
+        persistent reduction over N. min_xblock = N gives each program complete
+        rows, so the row nodes run in a rank-2 space with rows on x (block
+        YBLOCK) and N on r0_ (block XBLOCK).
+        """
+        _, (numel, rnumel) = next(
+            node for node in nodes if self._is_native_matmul_node(node)
+        ).group
+        outer_nodes, row_nodes = nodes[:first_row_node], nodes[first_row_node:]
+        outer_schedule = self.generate_node_schedule(outer_nodes, numel, rnumel)
+        combined_schedule = [*outer_schedule, *row_nodes]
+        features = SIMDKernelFeatures(
+            outer_schedule,
+            numel,
+            rnumel,
+            indexing_node_schedule=combined_schedule,
+        )
+        tiling, tiling_score = self.get_tiling_and_scores(outer_schedule, numel, rnumel)
+        kernel_kwargs: dict[str, Any] = {
+            "features": features,
+            "override_cooperative_reduction": False,
+            "tiling_scores": tiling_score,
+        }
+        kernels = cast(
+            "list[TritonKernel]",
+            self.create_kernel_choices(features, [tiling], kernel_kwargs),
+        )
+        tile_buffers = OrderedSet(
+            name for sn in outer_nodes for name in sn.get_buffer_names()
+        )
+        for kernel in kernels:
+            kernel.min_xblock = n
+            with kernel:
+                self._codegen_node_schedule_body(outer_schedule, kernel)
+                kernel.codegen_body()
+                y_tree, x_tree, _ = kernel.range_trees
+                numels = {"x": m, "r0_": sympy.Integer(n)}
+                roots = kernel.construct_range_trees(
+                    None,
+                    True,
+                    True,
+                    numels,
+                    False,
+                    persistent_reduction=True,
+                )
+                range_trees = tuple(
+                    DerivedIterationRangesRoot(
+                        root,
+                        numel=root.numel,
+                        block_size=block.block_size(),
+                        block_offset=block.block_offset(),
+                        name_suffix="local",
+                    )
+                    for root, block in zip(roots, (y_tree, x_tree), strict=True)
+                )
+                with (
+                    patch.object(kernel, "is_native_matmul", False),
+                    kernel.use_iteration_ranges(range_trees, is_reduction=True),
+                ):
+                    for tree in range_trees:
+                        kernel.iteration_ranges_codegen_header(tree, kernel.body)
+                    handler = _NativeMatmulRowLoadHandler(
+                        V.get_ops_handler(), kernel, tile_buffers
+                    )
+                    with V.set_ops_handler(handler):
+                        for sn in row_nodes:
+                            self._prepare_loop_body(sn._body)
+                            ranges = sn.get_ranges()
+                            if ranges[1]:
+                                sn.codegen(kernel.split_and_set_ranges(ranges))
+                            else:
+                                with kernel.disable_reduction():
+                                    sn.codegen(kernel.split_and_set_ranges(ranges))
+                    kernel.codegen_body()
+
+        self._finalize_nested_reduction_kernels(kernels, combined_schedule, nodes)
 
     @staticmethod
     def can_use_32bit_indexing(

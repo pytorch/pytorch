@@ -194,6 +194,9 @@ class CUDACombinedScheduling(BaseScheduling):
     ) -> ReductionEpilogueFusion | None:
         return self._triton_scheduling.analyze_reduction_epilogue(node1, node2)
 
+    def has_template_local_reduction(self, node: BaseSchedulerNode) -> bool:
+        return self._triton_scheduling.has_template_local_reduction(node)
+
     def get_fusion_pair_priority(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:

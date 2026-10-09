@@ -228,6 +228,37 @@ class TestMaxAutotune(TestCase):
         has_datacenter_blackwell_tma_device(),
         "Hopper persistent TMA template is shadowed on Blackwell",
     )
+    def test_persistent_tma_block_local_reduction_buffer_precision(self):
+        def f(a, b):
+            reduced = (a @ b).view(2, 128, 2, 128).sum((1, 3))
+            return (reduced - 9024) * 100
+
+        a = torch.zeros((256, 64), device=GPU_TYPE, dtype=torch.bfloat16)
+        a[:, 0] = 1
+        b = torch.zeros((64, 256), device=GPU_TYPE, dtype=torch.bfloat16)
+        b[0, ::2] = 1
+        b[0, 1::2] = 0.1
+        with config.patch(
+            {
+                "benchmark_epilogue_fusion": False,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        FileCheck().check("block_local_").check(".to(tl.bfloat16)").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
     @parametrize("groups", ((2, 2), (3, 2)))
     def test_persistent_tma_block_local_reduction_indexed_input(self, groups):
         groups_m, groups_n = groups
@@ -264,22 +295,35 @@ class TestMaxAutotune(TestCase):
         has_datacenter_blackwell_tma_device(),
         "Hopper persistent TMA template is shadowed on Blackwell",
     )
-    def test_persistent_tma_block_local_reduction_later_consumer(self):
+    @parametrize("tile", ((128, 128), (256, 256)))
+    def test_persistent_tma_block_local_reduction_later_consumer(self, tile):
         def f(a, b):
             mm = a @ b
-            blocked = mm.view(2, 128, 2, 128)
+            blocked = mm.view(3, 128, 3, 128)
             reduced = blocked.amax((1, 3))
             return blocked - reduced[:, None, :, None]
 
-        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "triton.enable_persistent_tma_matmul": "1",
-                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
-            }
+        a = torch.randn(384, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 384, device=GPU_TYPE, dtype=torch.bfloat16)
+        from torch._inductor.heuristics.registry import get_template_heuristic
+
+        heuristic = get_template_heuristic("triton::mm_persistent_tma", GPU_TYPE, "mm")
+        with (
+            mock.patch.object(
+                heuristic,
+                "mm_configs",
+                [GemmConfig(*tile, 64, 3, 8)],
+            ),
+            config.patch(
+                {
+                    "benchmark_epilogue_fusion": False,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": "1",
+                    "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                    "test_configs.max_mm_configs": 1,
+                }
+            ),
         ):
             actual, code = run_and_get_code(torch.compile(f), a, b)
 
@@ -562,7 +606,8 @@ class TestMaxAutotune(TestCase):
         if case.startswith("larger_tile"):
             FileCheck().check("tl.arange(0, 2)").check("tl.reshape").run(code[0])
             FileCheck().check_regex(
-                r"tl\.store\([^\n]*block_local_xindex_mask & block_local_yindex_mask"
+                r"tl\.store\([^\n]*block_local(?:_\d+)?_xindex_mask & "
+                r"block_local(?:_\d+)?_yindex_mask"
             ).run(code[0])
         if case in (
             "non_power_of_two_chain",
@@ -6113,11 +6158,14 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 "torch._inductor.codegen.cuda_combined_scheduling."
                 "CUDACombinedScheduling.can_fuse_reduction_epilogue_choice",
                 return_value=False,
-            ),
+            ) as can_fuse_choice,
         ):
             actual, code = run_and_get_code(torch.compile(f), a, b)
 
         self.assertEqual(actual, f(a, b))
+        self.assertGreater(can_fuse_choice.call_count, 0)
+        for call in can_fuse_choice.call_args_list:
+            self.assertEqual(call.args[-1], (128, 128))
         FileCheck().check_not("extern_kernels.mm").check_not("block_local_").run(
             code[0]
         )

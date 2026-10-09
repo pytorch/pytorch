@@ -8937,6 +8937,15 @@ class TritonScheduling(SIMDScheduling):
             )
         return self._template_local_reduction_analysis_cache[cache_key]
 
+    def has_template_local_reduction(self, node: BaseSchedulerNode) -> bool:
+        template = node.get_template_node()
+        if not isinstance(template, ir.TritonTemplateBuffer):
+            return False
+        nodes = [
+            candidate for candidate in node.get_nodes() if not candidate.is_template()
+        ]
+        return self._template_local_reduction_plan(template, nodes) is not None
+
     def can_fuse_reduction_epilogue_choice(
         self,
         choice: ir.ChoiceCaller,

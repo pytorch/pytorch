@@ -14,7 +14,7 @@ from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
-from torch._inductor.dependencies import MemoryDep
+from torch._inductor.dependencies import IndexExprDep, MemoryDep
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.sizevars import (
     simplify_index_in_vec_range,
@@ -799,7 +799,7 @@ class TestIndexConstOverflowInt32(InductorTestCase):
         # Bypass __init__ (needs V.graph) and shadow scheduler_nodes().
         deps = [MemoryDep(f"buf{i}", idx, (), ()) for i, idx in enumerate(indices)]
         node = types.SimpleNamespace(
-            read_writes=types.SimpleNamespace(reads=deps, writes=[])
+            read_writes=types.SimpleNamespace(reads=deps, writes=[], index_exprs=[])
         )
         feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
         feats.scheduler_nodes = lambda: [node]
@@ -847,9 +847,11 @@ class TestIndexExprUpperBounds(InductorTestCase):
     addressing expression over each loop variable's iteration range (catching
     fused `V * x0` terms while letting a stride on a size-1 dim drop out)."""
 
-    def make_feats(self, deps):
+    def make_feats(self, deps, index_exprs=()):
         node = types.SimpleNamespace(
-            read_writes=types.SimpleNamespace(reads=deps, writes=[])
+            read_writes=types.SimpleNamespace(
+                reads=deps, writes=[], index_exprs=index_exprs
+            )
         )
         feats = SIMDKernelFeatures.__new__(SIMDKernelFeatures)
         feats.scheduler_nodes = lambda: [node]
@@ -890,12 +892,25 @@ class TestIndexExprUpperBounds(InductorTestCase):
         dep = self.dep(1_000_000_000_000 * d0, [d0], [s0])
         self.assertFalse(self.check([dep]))
 
+    def test_negative_value_index_overflow_caught(self):
+        x0 = sympy.Symbol("x0", integer=True)
+        dep = IndexExprDep(-(2**31 + 1) * x0, (x0,), (sympy.Integer(2),))
+        self.assertTrue(self.make_feats([], (dep,)).any_index_expr_overflows_int32())
+
+    def test_symbolic_value_index_uses_int64(self):
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        x0 = sympy.Symbol("x0", integer=True)
+        dep = IndexExprDep(x0, (x0,), (s0,))
+        self.assertTrue(self.make_feats([], (dep,)).any_index_expr_overflows_int32())
+
     def test_uses_indexing_schedule(self):
         x0 = sympy.Symbol("x0", integer=True)
         regular = self.make_feats([self.dep(x0, [x0], [2])])
         overflow = types.SimpleNamespace(
             read_writes=types.SimpleNamespace(
-                reads=[self.dep(2**31 + x0, [x0], [2])], writes=[]
+                reads=[self.dep(2**31 + x0, [x0], [2])],
+                writes=[],
+                index_exprs=[],
             )
         )
         regular.indexing_node_schedule = [overflow]

@@ -15,7 +15,7 @@ from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, Min, ModularIndexing
 from ...utils._sympy.symbol import make_symbol, SymT
 from .. import ir
-from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
+from ..dependencies import Dep, extract_loop_body_with_args, IndexExprDep, MemoryDep
 from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import next_power_of_2
 from ..scheduler import SchedulerNode
@@ -204,7 +204,7 @@ class SIMDKernelFeatures:
 
     def get_mutations(self) -> OrderedSet[str]:
         mutations: OrderedSet[str] = OrderedSet()
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for buf in node.get_outputs():
                 mutations.update(buf.get_mutations())
         return mutations
@@ -235,7 +235,7 @@ class SIMDKernelFeatures:
 
     @cache_on_self
     def any_index_expr_overflows_int32(self) -> bool:
-        """Return True if any MemoryDep addressing expression can overflow int32.
+        """Return True if any address or value index expression can overflow int32.
 
         Two complementary checks are applied to each index:
 
@@ -259,8 +259,12 @@ class SIMDKernelFeatures:
         int32_max = sympy.Integer(2**31 - 1)
         int32_min = sympy.Integer(-(2**31))
         for node in self.indexing_scheduler_nodes():
-            for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes):
-                if not isinstance(dep, MemoryDep):
+            for dep in itertools.chain(
+                node.read_writes.reads,
+                node.read_writes.writes,
+                node.read_writes.index_exprs,
+            ):
+                if not isinstance(dep, (MemoryDep, IndexExprDep)):
                     continue
                 index = dep.index
                 if not isinstance(index, sympy.Expr):
@@ -278,25 +282,38 @@ class SIMDKernelFeatures:
                 except (ZeroDivisionError, TypeError, ValueError):
                     pass
 
-                # Variable-scaled bound over concrete loop-var ranges. A
-                # ValueRanges bound must be concrete, so skip a dep with any
-                # symbolic loop-var size.
-                sizes = dep.size
-                if any(getattr(s, "free_symbols", None) for s in sizes):
+                # Variable-scaled bound over concrete loop-var ranges. Buffer
+                # storage bounds cover symbolic MemoryDeps, but a symbolic
+                # value-producing index has no equivalent fallback.
+                relevant_ranges = [
+                    (var, size)
+                    for var, size in zip(dep.var_names, dep.size)
+                    if var in index.free_symbols
+                ]
+                if any(
+                    getattr(size, "free_symbols", None)
+                    for _var, size in relevant_ranges
+                ):
+                    if isinstance(dep, IndexExprDep):
+                        return True
                     continue
                 try:
                     var_ranges = {
                         var: ValueRanges(0, max(int(size) - 1, 0))
-                        for var, size in zip(dep.var_names, sizes)
+                        for var, size in relevant_ranges
                     }
-                    upper = bound_sympy(index, var_ranges).upper
-                    if (
-                        isinstance(upper, sympy.Expr)
-                        and not upper.has(int_oo, sympy.oo)
-                        and upper > int32_max
+                    bounds = bound_sympy(index, var_ranges)
+                    if bounds.lower.has(int_oo, sympy.oo) or bounds.upper.has(
+                        int_oo, sympy.oo
                     ):
+                        if isinstance(dep, IndexExprDep):
+                            return True
+                        continue
+                    if bounds.lower < int32_min or bounds.upper > int32_max:
                         return True
                 except (ZeroDivisionError, TypeError, ValueError):
+                    if isinstance(dep, IndexExprDep):
+                        return True
                     continue
         return False
 
