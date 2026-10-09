@@ -3147,17 +3147,12 @@ class TMACompatibilityChecker:
             and output_node.get_name() == self.buffer_name
         ):
             buffer = output_node
-        if isinstance(buffer, ir.TensorBox):
+        while isinstance(buffer, ir.MutableBox):
             buffer = buffer.data
-        if isinstance(buffer, ir.StorageBox):
-            buffer = buffer.data
-        if not isinstance(buffer, ir.Buffer):
-            return False
-        if not buffer.has_tensor_output():
+        if not isinstance(buffer, ir.Buffer) or not buffer.has_tensor_output():
             return False
 
         sizevars = V.graph.sizevars
-        int32_max = torch.iinfo(torch.int32).max
         layout = buffer.get_layout()
         storage_size = V.graph.get_allocation_storage_size(buffer)
         return (
@@ -3165,11 +3160,10 @@ class TMACompatibilityChecker:
             and all(
                 sizevars.statically_known_geq(stride, 0) for stride in layout.stride
             )
-            and all(
-                sizevars.statically_known_leq(size, int32_max)
-                for size in V.graph.get_allocation_size(buffer)
+            and _descriptor_shape_fits_in_int32(V.graph.get_allocation_size(buffer))
+            and sizevars.statically_known_leq(
+                storage_size, torch.iinfo(torch.int32).max
             )
-            and sizevars.statically_known_leq(storage_size, int32_max)
         )
 
     def are_block_parameters_compatible(
@@ -7836,6 +7830,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "dynamic_disable_pipelining": config.triton.dynamic_disable_pipelining,
         }
 
+        if config.incremental_autotune:
+            inductor_meta["incremental_autotune_max_dispatches"] = (
+                config.incremental_autotune_max_dispatches
+            )
+
         if config.write_are_deterministic_algorithms_enabled:
             inductor_meta["are_deterministic_algorithms_enabled"] = (
                 torch.are_deterministic_algorithms_enabled()
@@ -8964,6 +8963,7 @@ class TritonScheduling(SIMDScheduling):
         [
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
+            BackendFeature.INDIRECT_INDEXING,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,

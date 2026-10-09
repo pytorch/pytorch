@@ -1203,7 +1203,7 @@ class TestTraceback(TestCase):
     def test_symbolize_mode(self):
         script = "import torch; print(torch._C._get_symbolize_mode())"
         for disable_addr2line, expected in [
-            (None, "dladdr"),
+            (None, "fast"),
             ("0", "addr2line"),
             ("1", "dladdr"),
         ]:
