@@ -923,6 +923,7 @@ class ProcessGroupNCCL(Backend):
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
         split_color: int
+        lazy_init: bool
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
