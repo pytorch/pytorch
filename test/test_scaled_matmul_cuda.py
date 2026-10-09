@@ -759,7 +759,23 @@ class _TestFP8MatmulMixin:
         self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
 
 
-class TestFP8Matmul(TestCase, _TestFP8MatmulMixin):
+class TestFP8Matmul(TestCase):
+    def test_pack_uint4(self):
+        """
+        Verify that given a tensor with high precision values [val0, val1],
+        the x2 packed representation is val1:val0 (from MSB to LSB), and
+        not val0:val1.
+
+        Note that the packing function is private to this file, but it's still
+        good to test that we are packing in the expected way.
+        """
+        hp_data = torch.tensor([0b00000010, 0b00001011], dtype=torch.uint8)
+        lp_data_actual = pack_uint4(hp_data)
+        lp_data_expected = torch.tensor([0b10110010], dtype=torch.uint8)
+        torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
+
+
+class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
@@ -2347,21 +2363,6 @@ class TestFP8Matmul(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    @skipXPU
-    def test_pack_uint4(self):
-        """
-        Verify that given a tensor with high precision values [val0, val1],
-        the x2 packed representation is val1:val0 (from MSB to LSB), and
-        not val0:val1.
-
-        Note that the packing function is private to this file, but it's still
-        good to test that we are packing in the expected way.
-        """
-        hp_data = torch.tensor([0b00000010, 0b00001011], dtype=torch.uint8)
-        lp_data_actual = pack_uint4(hp_data)
-        lp_data_expected = torch.tensor([0b10110010], dtype=torch.uint8)
-        torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
-
     @skipIfRocm
     @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
@@ -3784,7 +3785,7 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
             )
 
 
-instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestFP8MatmulDevice, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestFP8MatmulCudaOnly, globals(), only_for=("cuda",))
 
 if __name__ == '__main__':
