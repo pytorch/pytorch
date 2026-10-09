@@ -1,4 +1,3 @@
-import functools
 import math
 from collections.abc import Callable, Sequence
 from itertools import chain, groupby
@@ -28,8 +27,6 @@ class AllGatherResult(NamedTuple):
     # 1D flattened version of `param_all_gather_input_numels` saved to avoid
     # CPU overhead from recomputing
     all_gather_input_split_sizes: list[int]
-    # Product of each input's dims before its concatenation dim
-    all_gather_input_outer_sizes: list[int]
 
 
 lib = torch.library.Library("fsdp", "FRAGMENT")
@@ -364,12 +361,6 @@ def foreach_all_gather(
     device_handle = _get_device_handle(device.type)
     with device_handle.stream(all_gather_copy_in_stream):
         param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        # Extension layouts are set by the all_gather_inputs call above
-        outer_sizes = [
-            layout.outer_size
-            for fsdp_param in fsdp_params
-            for layout in fsdp_param.all_gather_copy_layouts
-        ]
         (
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
@@ -410,7 +401,6 @@ def foreach_all_gather(
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
             inp_split_sizes,
-            outer_sizes,
         )
 
 
@@ -467,10 +457,11 @@ def _get_param_all_gather_inputs(
 # fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size) under
 # no_grad on the current stream to copy the flat rank-major all_gather_output into
 # outputs: outputs[i] gets each rank's split_sizes[i] elements, concatenated along
-# the dim whose leading dims multiply to outer_sizes[i]. A payload smaller than
-# outputs[i] is reassembled from a zero-padded rank-major buffer. uint8 buffers
-# come with uint8 output views and byte sizes. fn may only write outputs and must
-# not keep its arguments. It is skipped for empty buffers and single-rank groups.
+# the dim whose leading dims multiply to outer_sizes[i]. Only payloads with
+# outer_sizes[i] == 1 may be smaller than outputs[i], and they fill its prefix.
+# uint8 buffers come with uint8 output views and byte sizes. fn may only write
+# outputs and must not keep its arguments. It is skipped for empty buffers and
+# single-rank groups.
 def _default_all_gather_output_fn(
     all_gather_output: torch.Tensor,
     outputs: list[torch.Tensor],
@@ -480,22 +471,17 @@ def _default_all_gather_output_fn(
 ) -> None:
     r"""Copy payloads with outer_size > 1 via intermediate buffers, others directly."""
     copy_outputs: list[torch.Tensor] = []
+    split_outputs: list[torch.Tensor] = []
     for output, split_size, outer_size in zip(outputs, split_sizes, outer_sizes):
-        if outer_size == 1 or not output.numel():
-            copy_output = output
-        elif output.numel() == split_size * world_size:
+        copy_output = output
+        if outer_size > 1 and output.numel():
             copy_output = torch.empty_like(output)
-        else:
-            copy_output = output.new_zeros(output.numel())
         copy_outputs.append(copy_output)
+        if (numel := split_size * world_size) != copy_output.numel():
+            copy_output = copy_output.narrow(0, 0, numel)
+        split_outputs.append(copy_output.view(world_size, -1))
     torch.ops.fsdp.split_with_sizes_copy(
-        all_gather_output.view(world_size, -1),
-        split_sizes,
-        dim=1,
-        out=[
-            t.view(-1).narrow(0, 0, split_size * world_size).view(world_size, -1)
-            for t, split_size in zip(copy_outputs, split_sizes)
-        ],
+        all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
     )
     for copy_output, output, outer_size in zip(copy_outputs, outputs, outer_sizes):
         if copy_output is not output:
@@ -528,7 +514,6 @@ def foreach_all_gather_copy_out(
         param_all_gather_input_dtypes,
         param_all_gather_input_numels,
         all_gather_input_split_sizes,
-        all_gather_input_outer_sizes,
     ) = all_gather_result
     device = all_gather_output.device
     device_handle = _get_device_handle(device.type)
@@ -538,6 +523,7 @@ def foreach_all_gather_copy_out(
         all_gather_work.wait()
     world_size = group.size()
     outputs: list[torch.Tensor] = []
+    outer_sizes: list[int] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
@@ -546,6 +532,8 @@ def foreach_all_gather_copy_out(
         )
         fsdp_param.alloc_all_gather_outputs()
         outputs.extend(fsdp_param.all_gather_outputs)
+        for layout in fsdp_param.all_gather_output_layouts:
+            outer_sizes.append(layout.outer_size)
     if all_gather_output.numel() == 0:
         return
     non_inference_outputs = tuple(t for t in outputs if not t.is_inference())
@@ -557,7 +545,7 @@ def foreach_all_gather_copy_out(
             all_gather_output,
             outputs,
             all_gather_input_split_sizes,
-            all_gather_input_outer_sizes,
+            outer_sizes,
             world_size,
         )
 
@@ -573,14 +561,14 @@ def _default_reduce_scatter_input_fn(
     shard_dims: list[int],
     world_size: int,
 ) -> Callable:
-    r"""Reorder gradients sharded on a nonzero dim by rank, then copy them in."""
+    r"""Reorder gradients sharded on a nonzero dim by rank and return their copy-in."""
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim != 0:
                 chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
                 unsharded_grads[i] = torch.cat(chunks, dim=0)
-    return functools.partial(
-        foreach_reduce_scatter_copy_in, unsharded_grads, world_size=world_size
+    return lambda reduce_scatter_input: foreach_reduce_scatter_copy_in(
+        unsharded_grads, reduce_scatter_input, world_size
     )
 
 
