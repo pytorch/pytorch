@@ -1705,8 +1705,10 @@ def parse_args():
         "--save-torchci-reports",
         # Absolute, since tests run from test/.
         type=os.path.abspath,
+        # upload-test-artifacts uploads this folder.
+        default=str(REPO_ROOT / "test/torchci-reports") if IS_CI else None,
         metavar="DIR",
-        help="write test run reports to DIR",
+        help="write test run reports to DIR (default in CI: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",
