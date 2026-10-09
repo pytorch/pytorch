@@ -76,6 +76,7 @@ def _local_reduce_source_constant(field: str) -> str:
 
 def _normalize_epilogue_input_tensor(value: Any, permute=None) -> Any:
     import torch
+    from torch._subclasses.fake_tensor import is_fake_tensor
 
     if not isinstance(value, torch.Tensor):
         return value
@@ -88,6 +89,8 @@ def _normalize_epilogue_input_tensor(value: Any, permute=None) -> Any:
         value = value.expand(8, 1).contiguous()
     elif not value.is_contiguous():
         value = value.contiguous()
+    if not is_fake_tensor(value) and value.data_ptr() % 16:
+        value = value.clone()
     return value
 
 

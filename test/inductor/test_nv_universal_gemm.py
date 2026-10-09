@@ -46,6 +46,7 @@ from torch._inductor.utils import (
 )
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     dtype_name,
     instantiate_parametrized_tests,
@@ -4242,7 +4243,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
     """Test cases for NVIDIA Universal GEMM with dynamic shapes."""
 
     @torch._dynamo.config.patch({"capture_dynamic_output_shape_ops": True})
-    def test_unbacked_symint_rejected(self):
+    def test_unbacked_symint_rejected(self, device):
         """Test that NVGEMM rejects unbacked symbolic integers."""
 
         def fn(x, w):
@@ -4250,8 +4251,8 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             a = torch.ones(nz.size(0), w.size(0), dtype=w.dtype, device=w.device)
             return a @ w
 
-        x = torch.tensor([1.0, 0.0, 1.0, 0.0, 1.0], device="cuda")
-        w = torch.randn(64, 64, dtype=torch.bfloat16, device="cuda")
+        x = torch.tensor([1.0, 0.0, 1.0, 0.0, 1.0], device=device)
+        w = torch.randn(64, 64, dtype=torch.bfloat16, device=device)
 
         torch._dynamo.reset()
 
@@ -4262,8 +4263,8 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             ):
                 compiled_fn(x, w)
 
-    def test_dynamic_shapes_rejected(self):
-        """Test that NVGEMM rejects backed symbolic shapes."""
+    def test_dynamic_shapes(self, device):
+        """Test NVGEMM across backed symbolic shapes."""
 
         def matmul(a, b):
             return a @ b
@@ -4273,12 +4274,446 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
         with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
             compiled_fn = torch.compile(matmul, dynamic=True)
 
-            a = torch.randn(16, 16, dtype=torch.bfloat16, device="cuda")
-            b = torch.randn(16, 16, dtype=torch.bfloat16, device="cuda")
+            shapes = (
+                (4, 4, 4, False),
+                (16, 16, 16, True),
+                (2048, 64, 128, True),
+                (4, 4, 4, False),
+                (64, 2048, 128, True),
+                (128, 128, 2048, True),
+                (2048, 2048, 512, True),
+                (16, 16, 16, True),
+            )
+
+            for m, n, k, supported in shapes:
+                a = torch.randn(m, k, dtype=torch.bfloat16, device=device)
+                b = torch.randn(k, n, dtype=torch.bfloat16, device=device)
+                if not supported:
+                    with self.assertRaisesRegex(
+                        Exception, "NoValidChoicesError|no valid choice"
+                    ):
+                        compiled_fn(a, b)
+                else:
+                    self.assertEqual(compiled_fn(a, b), a @ b)
+
+    def test_compatible_shapes_share_graph(self, device):
+        def fn(a, b):
+            return a @ b
+
+        torch._dynamo.reset()
+        counters.clear()
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled = torch.compile(fn, dynamic=True)
+            for m, n, k in ((64, 128, 256), (65, 128, 256), (128, 256, 512)):
+                a = torch.randn(m, k, device=device, dtype=torch.bfloat16)
+                b = torch.randn(k, n, device=device, dtype=torch.bfloat16)
+                self.assertEqual(compiled(a, b), fn(a, b))
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    @parametrize(
+        "operand,valid,invalid",
+        (("a", 264, 262), ("b", 264, 262), ("extent", 256, 254), ("output", 128, 126)),
+    )
+    def test_view_layout_guard(self, device, operand, valid, invalid):
+        def fn(a, b):
+            return a @ b
+
+        def inputs(pitch):
+            a = torch.randn(64, 256, device=device, dtype=torch.bfloat16)
+            b = torch.randn(256, 128, device=device, dtype=torch.bfloat16)
+            if operand == "output":
+                b = torch.randn(pitch, 256, device=device, dtype=b.dtype).T
+            elif operand == "extent":
+                a = torch.randn(64, 264, device=device, dtype=a.dtype)[:, :pitch]
+                b = torch.randn(pitch, 128, device=device, dtype=b.dtype)
+            elif operand == "a":
+                a = torch.randn(64, pitch, device=device, dtype=a.dtype)[:, :256]
+            else:
+                b = torch.randn(128, pitch, device=device, dtype=b.dtype)[:, :256].T
+            return a, b
+
+        torch._dynamo.reset()
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled = torch.compile(fn, dynamic=True)
+            args = inputs(valid)
+            self.assertEqual(compiled(*args), fn(*args))
             with self.assertRaisesRegex(
                 Exception, "NoValidChoicesError|no valid choice"
             ):
-                compiled_fn(a, b)
+                compiled(*inputs(invalid))
+            self.assertEqual(compiled(*args), fn(*args))
+
+    def test_symbolic_reduction_group_stays_unfused(self, device):
+        def fn(a, b):
+            return (a @ b).float().sum(-1, keepdim=True)
+
+        torch._dynamo.reset()
+        counters.clear()
+        with (
+            config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)),
+            mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", return_value=(1.0, "")
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", return_value=(0.5, "")
+            ),
+        ):
+            compiled = torch.compile(fn, dynamic=True)
+            code = None
+            for n in (128, 256):
+                a = torch.randn(64, 256, device=device, dtype=torch.bfloat16)
+                b = torch.randn(256, n, device=device, dtype=torch.bfloat16)
+                if code is None:
+                    actual, code = run_and_get_code(compiled, a, b)
+                else:
+                    actual = compiled(a, b)
+                self.assertEqual(actual, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertNotIn("'local_reduce': GemmReductionArguments", "\n".join(code))
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    @parametrize("epilogue", ("relu", "symbolic_scalar", "symbolic_value"))
+    def test_dynamic_pointwise_epilogue(self, device, epilogue):
+        def fn(a, b):
+            result = a @ b
+            if epilogue == "relu":
+                return result.relu()
+            if epilogue == "symbolic_value":
+                return result + torch.full(
+                    result.shape, a.shape[0], device=a.device, dtype=result.dtype
+                )
+            return result * a.shape[0]
+
+        torch._dynamo.reset()
+        counters.clear()
+        with (
+            config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)),
+            mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", return_value=(1.0, "")
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", return_value=(0.5, "")
+            ),
+        ):
+            compiled = torch.compile(fn, dynamic=True)
+            code = None
+            for m in (64, 65):
+                a = torch.randn(m, 256, device=device, dtype=torch.bfloat16)
+                b = torch.randn(256, 128, device=device, dtype=torch.bfloat16)
+                if code is None:
+                    actual, code = run_and_get_code(compiled, a, b)
+                else:
+                    actual = compiled(a, b)
+                self.assertEqual(actual, fn(a, b))
+            self.assertEqual(EPILOGUE_FN_NAME in "\n".join(code), epilogue == "relu")
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_dynamic_swap_ab(self, device):
+        def fn(a, b):
+            return a @ b
+
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        torch._dynamo.reset()
+        counters.clear()
+        with (
+            config.patch(
+                _nvgemm_config(nvgemm_max_profiling_configs=2, nvgemm_swap_ab=True)
+            ),
+            _force_nvgemm_choice(
+                lambda c: isinstance(c, NVUniversalGemmCaller) and c.swap_ab
+            ),
+        ):
+            compiled = torch.compile(fn, dynamic=True)
+            code = None
+            for m, n, k in ((64, 128, 256), (128, 256, 512)):
+                a = torch.randn(m, k, device=device, dtype=torch.bfloat16)
+                b = torch.randn(k, n, device=device, dtype=torch.bfloat16)
+                if code is None:
+                    actual, code = run_and_get_code(compiled, a, b)
+                else:
+                    actual = compiled(a, b)
+                self.assertEqual(actual, fn(a, b))
+            self.assertIn("swap_ab=True", "\n".join(code))
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_dynamic_backward(self, device):
+        def fn(a, b):
+            return a @ b
+
+        torch._dynamo.reset()
+        counters.clear()
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled = torch.compile(fn, dynamic=True)
+            for m in (64, 65):
+                a = torch.randn(
+                    m, 256, device=device, dtype=torch.bfloat16, requires_grad=True
+                )
+                b = torch.randn(
+                    256, 128, device=device, dtype=torch.bfloat16, requires_grad=True
+                )
+                expected = fn(a, b)
+                actual = compiled(a, b)
+                self.assertEqual(actual, expected)
+                upstream = torch.randn_like(actual)
+                self.assertEqual(
+                    torch.autograd.grad(actual, (a, b), upstream),
+                    torch.autograd.grad(expected, (a, b), upstream),
+                )
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_dynamic_internal_view_offset(self, device):
+        def fn(a, b, offset):
+            return a[:, offset : offset + 256] @ b
+
+        from torch._dynamo.exc import BackendCompilerFailed
+
+        torch._dynamo.reset()
+        a = torch.randn(64, 272, device=device, dtype=torch.bfloat16)
+        b = torch.randn(256, 128, device=device, dtype=torch.bfloat16)
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled = torch.compile(fn, dynamic=True, fullgraph=True)
+            self.assertEqual(compiled(a, b, 8), fn(a, b, 8))
+            with self.assertRaisesRegex(
+                BackendCompilerFailed, "NoValidChoicesError|no valid choice"
+            ):
+                compiled(a, b, 9)
+            self.assertEqual(compiled(a, b, 16), fn(a, b, 16))
+
+
+instantiate_device_type_tests(
+    TestNVUniversalGemmDynamicShapes, globals(), only_for="cuda"
+)
+
+
+@instantiate_parametrized_tests
+class TestNVUniversalGemmShapeConstraints(TestCase):
+    @parametrize("mode", ("frozen", "size_oblivious"))
+    @parametrize("proven", (False, True))
+    def test_guards_require_existing_proof(self, mode, proven):
+        import torch.fx.experimental._config as exp_config
+        from torch._dynamo.source import LocalSource
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        env = ShapeEnv()
+        size = env.create_symbol(256, LocalSource("size"), DimDynamic.DYNAMIC)
+        sizevars = SizeVarAllocator(env)
+        if proven:
+            sizevars.guard_or_false(sympy.Eq(sympy.Mod(size, 8), 0))
+        if mode == "frozen":
+            env.freeze()
+        before = len(env.guards)
+        caller = object.__new__(NVUniversalGemmCaller)
+        caller.variant = GemmVariant.GEMM
+        constraint = SimpleNamespace(
+            stride=(None, 1), divisibility=8, ptr_alignment_bytes=16
+        )
+        caller._operand_constraints = mock.Mock(
+            return_value=[([64, size], [size, 1], constraint, torch.bfloat16, 0)]
+        )
+        with (
+            exp_config.patch(backed_size_oblivious=mode == "size_oblivious"),
+            V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
+        ):
+            self.assertEqual(caller._supports_current_shape_constraints(), proven)
+            if proven:
+                caller._guard_dynamic_shape_constraints()
+        self.assertEqual(len(env.guards), before)
+        self.assertEqual(env.counter["ignored_backward_guard"], 0)
+
+    @parametrize(
+        "size,stride,expected,accepted",
+        (
+            ([64, 256], [256, 1], [None, 1], True),
+            ([64, 256], [262, 1], [None, 1], False),
+            ([64, 254], [256, 1], [None, 1], False),
+            ([64, 256], [256, 1], [None, None, None, 1], False),
+            ([64, 256], [256, 1], [None, None], False),
+        ),
+    )
+    def test_invalid_constraint_is_filtered(self, size, stride, expected, accepted):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.sizevars import SizeVarAllocator
+
+        caller = object.__new__(NVUniversalGemmCaller)
+        caller.variant = GemmVariant.GEMM
+        constraint = SimpleNamespace(
+            stride=expected, divisibility=8, ptr_alignment_bytes=16
+        )
+        caller._operand_constraints = mock.Mock(
+            return_value=[(size, stride, constraint, torch.bfloat16, 0)]
+        )
+        with V.set_graph_handler(SimpleNamespace(sizevars=SizeVarAllocator())):
+            self.assertEqual(caller._supports_current_shape_constraints(), accepted)
+
+    @parametrize("mode", ("default", "aggressive_1", "aggressive_2", "unbacked"))
+    @parametrize("aligned", (False, True))
+    def test_constraint_filter_matches_guard(self, mode, aligned):
+        import torch.fx.experimental._config as exp_config
+        from torch._dynamo.source import LocalSource
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        env = ShapeEnv()
+        if mode == "unbacked":
+            pitch = env.create_unbacked_symint().node.expr
+        else:
+            pitch = env.create_symbol(
+                264 if aligned else 262, LocalSource("pitch"), DimDynamic.DYNAMIC
+            )
+        caller = object.__new__(NVUniversalGemmCaller)
+        caller.variant = GemmVariant.GEMM
+        constraint = SimpleNamespace(
+            stride=(None, 1), divisibility=8, ptr_alignment_bytes=16
+        )
+        caller._operand_constraints = mock.Mock(
+            return_value=[([64, 256], [pitch, 1], constraint, torch.bfloat16, 0)]
+        )
+        aggressive = int(mode[-1]) if mode.startswith("aggressive") else 0
+        accepted = mode == "default" and aligned
+        with (
+            exp_config.patch(aggressive_guard_free_semantics=aggressive),
+            V.set_graph_handler(SimpleNamespace(sizevars=SizeVarAllocator(env))),
+        ):
+            self.assertEqual(caller._supports_current_shape_constraints(), accepted)
+            if accepted:
+                caller._guard_dynamic_shape_constraints()
+        self.assertEqual(bool(env.guards), accepted)
+
+    @parametrize("offset,accepted", ((0, True), (8, True), (9, False)))
+    def test_pointer_alignment_constraint(self, offset, accepted):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.sizevars import SizeVarAllocator
+
+        caller = object.__new__(NVUniversalGemmCaller)
+        caller.variant = GemmVariant.GEMM
+        constraint = SimpleNamespace(
+            stride=(None, 1), divisibility=8, ptr_alignment_bytes=16
+        )
+        caller._operand_constraints = mock.Mock(
+            return_value=[([64, 256], [272, 1], constraint, torch.bfloat16, offset)]
+        )
+        with V.set_graph_handler(SimpleNamespace(sizevars=SizeVarAllocator())):
+            self.assertEqual(caller._supports_current_shape_constraints(), accepted)
+            if accepted:
+                caller._guard_dynamic_shape_constraints()
+
+    @parametrize("symbolic", (False, True))
+    def test_reduction_group_requires_static_extent(self, symbolic):
+        from torch._dynamo.source import LocalSource
+        from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
+            NVGemmEpilogueLowering,
+        )
+        from torch._inductor.kernel.loop_ir_epilogue_lowering import (
+            GemmEpilogueIRAnalysis,
+        )
+        from torch._inductor.runtime.hints import ReductionHint
+        from torch._inductor.sizevars import SizeVarAllocator
+        from torch._inductor.virtualized import ops
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        env = ShapeEnv()
+        group = (
+            env.create_symbol(16, LocalSource("group"), DimDynamic.DYNAMIC)
+            if symbolic
+            else 16
+        )
+        n = group * 8
+        device = torch.device("cpu")
+        gemm = ir.Buffer("gemm", ir.FixedLayout(device, torch.float32, (64, n), (n, 1)))
+
+        def inner(index, reduction_index):
+            return ops.load(
+                "gemm", n * index[0] + group * index[1] + reduction_index[0]
+            )
+
+        reduction = ir.Reduction(
+            device,
+            torch.float32,
+            inner,
+            (64, 8),
+            (group,),
+            "sum",
+            torch.float32,
+            ReductionHint.DEFAULT,
+        )
+        buffer = ir.ComputedBuffer(
+            "reduced", ir.FixedLayout(device, torch.float32, (64, 8), (8, 1)), reduction
+        )
+        graph = SimpleNamespace(
+            sizevars=SizeVarAllocator(env),
+            get_dtype=lambda _: torch.float32,
+            get_buffer=lambda name: gemm if name == "gemm" else buffer,
+            graph_inputs={},
+            removed_buffers=OrderedSet(),
+        )
+        node = SimpleNamespace(node=buffer)
+        scheduler_node = SimpleNamespace(get_nodes=lambda: (node,))
+        with V.set_graph_handler(graph):
+            analysis = GemmEpilogueIRAnalysis.from_buffers((buffer,))
+            result = NVGemmEpilogueLowering._grouped_reduce_config(
+                gemm, scheduler_node, analysis
+            )
+        if symbolic:
+            self.assertIsNone(result)
+        else:
+            self.assertIsNotNone(result)
+            self.assertEqual(
+                (result.group, result.axis, result.reduction_type), (16, 1, "sum")
+            )
+
+    @parametrize("offset", (0, 1))
+    def test_readonly_epilogue_input_alignment(self, offset):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _normalize_epilogue_input_tensor,
+        )
+
+        value = torch.arange(16 + offset, dtype=torch.float32)[offset:]
+        normalized = _normalize_epilogue_input_tensor(value)
+        self.assertEqual(normalized, value)
+        self.assertEqual(normalized.data_ptr() % 16, 0)
+        if offset == 0:
+            self.assertIs(normalized, value)
+
+    @parametrize("operation", ("index_expr", "value_expr"))
+    def test_symbolic_epilogue_scalar_is_deferred(self, operation):
+        from torch._inductor.kernel.gemm_epilogue_codegen import (
+            GemmEpilogueCuteDSLOpOverrides,
+        )
+
+        handler = getattr(GemmEpilogueCuteDSLOpOverrides, operation)
+        self.assertEqual(handler(sympy.Integer(7), torch.float32), "7")
+        with self.assertRaisesRegex(NotImplementedError, "symbolic index expressions"):
+            handler(sympy.Symbol("s0"), torch.float32)
+
+    def test_speculative_output_does_not_install_guards(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            NVUniversalGemmCaller,
+        )
+
+        caller = object.__new__(NVUniversalGemmCaller)
+        caller._guard_dynamic_shape_constraints = mock.Mock()
+        buffer = SimpleNamespace(get_name=lambda: "cached")
+        caller._cached_output_node = SimpleNamespace(data=SimpleNamespace(data=buffer))
+        with V.set_graph_handler(SimpleNamespace(name_to_buffer={"cached": buffer})):
+            self.assertIs(
+                caller.output_node(install_guards=False), caller._cached_output_node
+            )
+            caller._guard_dynamic_shape_constraints.assert_not_called()
+            self.assertIs(caller.output_node(), caller._cached_output_node)
+            caller._guard_dynamic_shape_constraints.assert_called_once()
 
 
 @unittest.skipIf(
