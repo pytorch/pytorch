@@ -768,6 +768,139 @@ class TestOptimRenewed(TestCase):
         new_optim.load_state_dict(old_adamw_dict)
         self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
 
+    def test_adam_beta1_zero_skips_first_moment(self, device):
+        # With beta1 == 0 the first moment is the gradient, so it is not stored.
+        n = 4096
+        weight = torch.nn.Parameter(torch.randn(n, device=device))
+        skipped = torch.optim.Adam([weight], lr=1e-2, betas=(0.0, 0.99))
+        kept = torch.optim.Adam(
+            [torch.nn.Parameter(weight.detach().clone())], lr=1e-2, betas=(0.9, 0.99)
+        )
+        for opt in (skipped, kept):
+            next(iter(opt.param_groups[0]["params"])).grad = torch.randn(
+                n, device=device
+            )
+            opt.step()
+
+        def state_bytes(opt):
+            return sum(
+                v.numel() * v.element_size()
+                for st in opt.state.values()
+                for v in st.values()
+                if torch.is_tensor(v)
+            )
+
+        self.assertNotIn("exp_avg", skipped.state[weight])
+        self.assertLess(state_bytes(skipped), state_bytes(kept))
+
+        # With beta1 == 0 the bias-corrected first moment is the gradient.
+        start = torch.randn(n, device=device)
+        checked = torch.nn.Parameter(start.clone())
+        opt = torch.optim.Adam([checked], lr=1e-2, betas=(0.0, 0.99))
+        beta2, lr, eps = 0.99, 1e-2, 1e-8
+        expected = start.clone()
+        second = torch.zeros_like(expected)
+        for step in range(1, 5):
+            grad = torch.randn(n, device=device)
+            checked.grad = grad
+            opt.step()
+            second.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+            bias_correction2 = 1 - beta2**step
+            expected.addcdiv_(
+                grad, second.sqrt().div(bias_correction2**0.5).add(eps), value=-lr
+            )
+        self.assertEqual(checked, expected)
+        self.assertNotIn("exp_avg", opt.state[checked])
+
+        # Switching beta1 on creates the moment from zero instead of failing.
+        opt.param_groups[0]["betas"] = (0.5, 0.99)
+        checked.grad = torch.randn(n, device=device)
+        opt.step()
+        self.assertIn("exp_avg", opt.state[checked])
+
+        # Switching it back keeps the moment that was already saved.
+        saved = opt.state[checked]["exp_avg"].clone()
+        opt.param_groups[0]["betas"] = (0.0, 0.99)
+        checked.grad = torch.randn(n, device=device)
+        opt.step()
+        self.assertIn("exp_avg", opt.state[checked])
+        self.assertNotEqual(opt.state[checked]["exp_avg"], saved)
+
+        # load_state_dict restores the betas too, so the switch is setting them
+        # after the load. A state saved with beta1 == 0 has no exp_avg; the first
+        # step after beta1 becomes positive creates one.
+        saved_without = skipped.state_dict()
+        self.assertNotIn("exp_avg", saved_without["state"][0])
+        restored = torch.nn.Parameter(weight.detach().clone())
+        restored_opt = torch.optim.Adam([restored], lr=1e-2, betas=(0.9, 0.99))
+        restored_opt.load_state_dict(saved_without)
+        restored_opt.param_groups[0]["betas"] = (0.9, 0.99)
+        restored.grad = torch.randn(n, device=device)
+        restored_opt.step()
+        self.assertIn("exp_avg", restored_opt.state[restored])
+
+        # Saving and loading continues from the saved parameters. beta1 == 0
+        # omits exp_avg; beta1 > 0 keeps it.
+        for beta1 in (0.0, 0.9):
+            src = torch.nn.Parameter(torch.randn(16, device=device))
+            src_opt = torch.optim.Adam([src], lr=1e-2, betas=(beta1, 0.99))
+            grads = [torch.randn(16, device=device) for _ in range(4)]
+            for grad in grads[:2]:
+                src.grad = grad
+                src_opt.step()
+            saved_param = src.detach().clone()
+            saved_state = deepcopy(src_opt.state_dict())
+            rest = [grad.clone() for grad in grads[2:]]
+            moment = saved_state["state"][0]
+            if beta1 == 0.0:
+                self.assertNotIn("exp_avg", moment)
+            else:
+                self.assertIn("exp_avg", moment)
+            for grad in rest:
+                src.grad = grad
+                src_opt.step()
+            dst = torch.nn.Parameter(saved_param.clone())
+            dst_opt = torch.optim.Adam([dst], lr=1e-2, betas=(beta1, 0.99))
+            dst_opt.load_state_dict(deepcopy(saved_state))
+            for grad in rest:
+                dst.grad = grad.clone()
+                dst_opt.step()
+            self.assertEqual(dst, src)
+
+        # An older beta1 == 0 checkpoint still contains exp_avg. Loading it and
+        # stepping matches an optimizer that never stored that moment, because
+        # beta1 == 0 replaces the moment with the current gradient.
+        src = torch.nn.Parameter(torch.randn(16, device=device))
+        src_opt = torch.optim.Adam([src], lr=1e-2, betas=(0.0, 0.99))
+        first, later = (torch.randn(16, device=device) for _ in range(2))
+        src.grad = first
+        src_opt.step()
+        saved_param = src.detach().clone()
+        legacy = deepcopy(src_opt.state_dict())
+        self.assertNotIn("exp_avg", legacy["state"][0])
+        legacy["state"][0]["exp_avg"] = torch.randn(16, device=device)
+        held = later.clone()
+        src.grad = held
+        src_opt.step()
+        dst = torch.nn.Parameter(saved_param.clone())
+        dst_opt = torch.optim.Adam([dst], lr=1e-2, betas=(0.0, 0.99))
+        dst_opt.load_state_dict(legacy)
+        dst.grad = held.clone()
+        dst_opt.step()
+        self.assertEqual(dst, src)
+        self.assertIn("exp_avg", dst_opt.state[dst])
+
+        # The fused kernels read the buffer, so they still allocate it.
+        fused_weight = torch.nn.Parameter(torch.randn(8, device=device))
+        fused = torch.optim.Adam([fused_weight], lr=1e-2, betas=(0.0, 0.99), fused=True)
+        fused_weight.grad = torch.randn(8, device=device)
+        try:
+            fused.step()
+        except Exception:
+            pass
+        if len(fused.state[fused_weight]) != 0:
+            self.assertIn("exp_avg", fused.state[fused_weight])
+
     def _compare_between(
         self, inputs, models, optimizers, assert_eq_kwargs=None, assert_step_dtype=None
     ):
