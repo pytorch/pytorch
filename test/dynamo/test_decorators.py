@@ -1274,6 +1274,25 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(y, torch.ones(3) + 3)
 
+    @parametrize("attr", ["__torch_dynamo_polyfill__", "__wrapped__"])
+    def test_substitute_in_graph_callable_attribute(self, attr):
+        def original(x):
+            return x + 1
+
+        @torch.compiler.substitute_in_graph(original)
+        def wrapped(x):
+            return x + 1
+
+        self.addCleanup(
+            torch._dynamo.decorators._unregister_substitute_in_graph, original
+        )
+
+        def fn(x):
+            return getattr(wrapped, attr)(x)
+
+        x = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), x + 1)
+
     def test_substitute_in_graph(self):
         counters.clear()
 
