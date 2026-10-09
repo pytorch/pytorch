@@ -14,6 +14,16 @@
 @property(readwrite, atomic) BOOL enableCommitAndContinue;
 @end
 
+@interface MPSStreamCommandBuffer : MPSCommandBuffer
+@property(nonatomic) std::function<void()> willCommitAndContinue;
+@end
+@implementation MPSStreamCommandBuffer
+- (void)commitAndContinue {
+  _willCommitAndContinue();
+  [super commitAndContinue];
+}
+@end
+
 namespace at::mps {
 namespace {
 // Returns true if the command buffer failed to execute (e.g. was aborted by the driver)
@@ -70,7 +80,9 @@ MPSStream::~MPSStream() {
 
 MPSCommandBuffer* MPSStream::commandBuffer() {
   if (!_commandBuffer) {
-    _commandBuffer = [MPSCommandBuffer commandBufferFromCommandQueue:_commandQueue].retain;
+    auto cb = [[MPSStreamCommandBuffer alloc] initWithCommandBuffer:[_commandQueue commandBuffer]];
+    cb.willCommitAndContinue = [this] { addErrorHandler(); };
+    _commandBuffer = cb;
   }
 
   return _commandBuffer;
@@ -116,7 +128,6 @@ void MPSStream::synchronize(SyncType syncType) {
 
 void MPSStream::commit() {
   if (_enableCommitAndContinue) {
-    addErrorHandler();
     [commandBuffer() commitAndContinue];
   } else {
     flush();
@@ -153,7 +164,6 @@ void MPSStream::commitAndWait() {
 
 void MPSStream::commitAndContinue() {
   assert(_commandBuffer);
-  addErrorHandler();
   [_commandBuffer commitAndContinue];
 }
 
