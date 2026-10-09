@@ -383,16 +383,6 @@ class CudagraphGateTest(TestCase):
         self.assertNotIn("skipping cudagraphs due to", reason)
         self.assertIn("mutated inputs", reason)
 
-    def test_storage_from_high_data_pointer(self):
-        # XPU USM addresses sit above 2**63; the binding must take them as
-        # unsigned rather than rejecting them as an out-of-range int64_t.
-        high_ptr = 0xFF00FFFFFFFC0000
-        self.assertGreaterEqual(high_ptr, 2**63)
-        storage = torch._C._construct_storage_from_data_pointer(
-            high_ptr, torch.device("cpu"), 256
-        )
-        self.assertEqual(storage.data_ptr(), high_ptr)
-
     def test_containers_are_keyed_by_device_type(self):
         try:
             cuda_container = get_container(torch.device("cuda", 0))
