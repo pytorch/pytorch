@@ -226,14 +226,17 @@ class FakeTensorTLS(threading.local):
 fake_tensor_tls = FakeTensorTLS()
 
 
+def tracking_fake_tensors_for_export() -> bool:
+    return (
+        torch.compiler.is_exporting()
+        and torch._export.config.detect_non_strict_fake_tensor_leaks
+    )
+
+
 # C++ fake tensors have no Python __init__, and constructor-only tracking misses
 # memoized tensors reused during non-strict export.
 def track_fake_tensor_for_export(t: object) -> None:
-    if (
-        torch.compiler.is_exporting()
-        and torch._export.config.detect_non_strict_fake_tensor_leaks
-        and is_fake_tensor(t)
-    ):
+    if tracking_fake_tensors_for_export() and is_fake_tensor(t):
         fake_tensor_tls.non_strict_export_fake_tensor_tracker[t] = None
 
 
