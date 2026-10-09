@@ -12,7 +12,12 @@ Run:
 import unittest
 from unittest.mock import MagicMock, patch
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TestCase,
+)
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 def _make_mock_launcher(
@@ -36,30 +41,43 @@ def _make_mock_launcher(
     bin_mock.num_warps = num_warps
     bin_mock.shared = shared
     bin_mock.launch_metadata_schema = launch_metadata_schema
-    bin_mock.asm = {"cubin": b"\x00", "ptx": "mock_ptx"}
+    # Populate asm entries for every supported backend so a single mock works
+    # regardless of the device_type under test (save_gpu_kernel picks
+    # bin_type/asm_type from device_props.type).
+    bin_mock.asm = {
+        "cubin": b"\x00",
+        "ptx": "mock_ptx",
+        "hsaco": b"\x00",
+        "amdgcn": "mock_amdgcn",
+        "spv": b"\x00",
+        "zebin": b"\x00",
+    }
     launcher.bin = bin_mock
 
     return launcher
 
 
-def _make_mock_autotuner(kernel_name="test_kernel"):
+def _make_mock_autotuner(kernel_name="test_kernel", device_type=GPU_TYPE):
     """Create a mock CachingAutotuner (self) for save_gpu_kernel."""
     autotuner = MagicMock()
     autotuner.inductor_meta = {"kernel_name": kernel_name}
     autotuner.triton_meta = {"signature": {0: "*fp32"}}
     autotuner.device_props = MagicMock()
-    autotuner.device_props.type = "cuda"
+    autotuner.device_props.type = device_type
     return autotuner
 
 
+@instantiate_parametrized_tests
 class SaveGpuKernelSchemaTest(TestCase):
     """Unit tests for save_gpu_kernel() reading from Level 0 schema."""
 
-    def _call_save_gpu_kernel(self, launcher, kernel_name="test_kernel"):
+    def _call_save_gpu_kernel(
+        self, launcher, kernel_name="test_kernel", device_type=GPU_TYPE
+    ):
         """Call save_gpu_kernel with mocks and return the params passed to cache."""
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
-        autotuner = _make_mock_autotuner(kernel_name)
+        autotuner = _make_mock_autotuner(kernel_name, device_type)
         with (
             patch(
                 "torch._inductor.codecache.CudaKernelParamCache.set"
@@ -76,7 +94,8 @@ class SaveGpuKernelSchemaTest(TestCase):
             )
         return params
 
-    def test_schema_path_reads_entry_name(self):
+    @parametrize("device_type", ("cuda", "hip", "xpu"))
+    def test_schema_path_reads_entry_name(self, device_type):
         """When schema exists, mangled_name should come from schema['entry_name']."""
         schema = {
             "abi_version": 1,
@@ -88,10 +107,11 @@ class SaveGpuKernelSchemaTest(TestCase):
             metadata_name="metadata_kernel_name",
             launch_metadata_schema=schema,
         )
-        params = self._call_save_gpu_kernel(launcher)
+        params = self._call_save_gpu_kernel(launcher, device_type=device_type)
         self.assertEqual(params["mangled_name"], "schema_kernel_name")
 
-    def test_schema_path_reads_num_warps(self):
+    @parametrize("device_type", ("cuda", "hip", "xpu"))
+    def test_schema_path_reads_num_warps(self, device_type):
         """When schema exists, num_warps should come from schema."""
         schema = {
             "abi_version": 1,
@@ -103,10 +123,11 @@ class SaveGpuKernelSchemaTest(TestCase):
             num_warps=4,
             launch_metadata_schema=schema,
         )
-        params = self._call_save_gpu_kernel(launcher)
+        params = self._call_save_gpu_kernel(launcher, device_type=device_type)
         self.assertEqual(params["num_warps"], 16)
 
-    def test_schema_path_reads_shared_mem(self):
+    @parametrize("device_type", ("cuda", "hip", "xpu"))
+    def test_schema_path_reads_shared_mem(self, device_type):
         """When schema exists, shared_mem should come from schema."""
         schema = {
             "abi_version": 1,
@@ -118,10 +139,11 @@ class SaveGpuKernelSchemaTest(TestCase):
             shared=0,
             launch_metadata_schema=schema,
         )
-        params = self._call_save_gpu_kernel(launcher)
+        params = self._call_save_gpu_kernel(launcher, device_type=device_type)
         self.assertEqual(params["shared_mem"], 49152)
 
-    def test_fallback_when_no_schema(self):
+    @parametrize("device_type", ("cuda", "hip", "xpu"))
+    def test_fallback_when_no_schema(self, device_type):
         """Without schema, should use hasattr probing (metadata.name, etc.)."""
         launcher = _make_mock_launcher(
             metadata_name="fallback_name",
@@ -129,7 +151,7 @@ class SaveGpuKernelSchemaTest(TestCase):
             shared=1024,
             launch_metadata_schema=None,
         )
-        params = self._call_save_gpu_kernel(launcher)
+        params = self._call_save_gpu_kernel(launcher, device_type=device_type)
         self.assertEqual(params["mangled_name"], "fallback_name")
         self.assertEqual(params["num_warps"], 4)
         self.assertEqual(params["shared_mem"], 1024)
@@ -144,12 +166,12 @@ _HAS_GPU = False
 try:
     import torch
 
-    _HAS_GPU = hasattr(torch, "cuda") and torch.cuda.is_available()
+    _HAS_GPU = hasattr(torch, GPU_TYPE) and getattr(torch, GPU_TYPE).is_available()
 except (ImportError, AttributeError):
     pass
 
 
-@unittest.skipUnless(_HAS_GPU, "requires CUDA GPU")
+@unittest.skipUnless(_HAS_GPU, "requires GPU")
 class SaveGpuKernelAOTIE2ETest(TestCase):
     """E2E tests for 3/N: verify AOTI pipeline uses save_gpu_kernel schema path."""
 
@@ -163,7 +185,11 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
         # NOTE: triton.fb is fbcode-only; OSS CI sets CUDA_HOME via env.
         import os
 
-        if "CUDA_HOME" not in os.environ and "CUDA_PATH" not in os.environ:
+        if (
+            GPU_TYPE == "cuda"
+            and "CUDA_HOME" not in os.environ
+            and "CUDA_PATH" not in os.environ
+        ):
             try:
                 from triton.fb.build import build_paths
 
@@ -188,9 +214,9 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
             def forward(self, x, y):
                 return x + y
 
-        model = AddModel().to("cuda")
-        x = torch.randn(1024, device="cuda")
-        y = torch.randn(1024, device="cuda")
+        model = AddModel().to(GPU_TYPE)
+        x = torch.randn(1024, device=GPU_TYPE)
+        y = torch.randn(1024, device=GPU_TYPE)
         expected = model(x, y)
 
         ep = torch.export.export(model, (x, y))
@@ -226,10 +252,10 @@ class SaveGpuKernelAOTIE2ETest(TestCase):
                 def forward(self, x, y, z):
                     return x * y + z
 
-            model = MulAddModel().to("cuda")
-            x = torch.randn(512, device="cuda")
-            y = torch.randn(512, device="cuda")
-            z = torch.randn(512, device="cuda")
+            model = MulAddModel().to(GPU_TYPE)
+            x = torch.randn(512, device=GPU_TYPE)
+            y = torch.randn(512, device=GPU_TYPE)
+            z = torch.randn(512, device=GPU_TYPE)
             expected = model(x, y, z)
 
             ep = torch.export.export(model, (x, y, z))
