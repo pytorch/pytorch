@@ -563,6 +563,7 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
     }
   }
   // TODO make it sync with one block for no-copy case
+  __syncthreads();
   sync_remote_blocks<true, true>(signal_pads, rank, world_size);
   __syncthreads();
 
