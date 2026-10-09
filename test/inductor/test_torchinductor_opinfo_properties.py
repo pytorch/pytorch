@@ -495,19 +495,45 @@ def sample_operates_on_batch_dim(op_name, sample_input):
 fp32, fp16, bf16, ALL = torch.float32, torch.float16, torch.bfloat16, None
 
 # A one-epsilon rtol can reject a two-ULP difference at the bottom of a binade.
-# These ROCm cases measured at two ULP on MI250X (gfx90a) with ROCm 7.14.
-# Keep their two-epsilon envelopes local instead of weakening every comparison.
+# These ROCm cases measured at most two ULP: log1p, tanh and cos on MI250X
+# (gfx90a) with ROCm 7.14; layer_norm, rms_norm, softmax and sin on gfx942 with
+# Triton 3.9 and ROCm 7.14.1 or 10.0. Keep their two-epsilon envelopes local
+# instead of weakening every comparison.
 ROCM_NUMERICAL_TOLERANCE_OVERRIDES = {
+    (
+        "eager_equivalence",
+        "aot_eager_decomp_partition",
+        "nn.functional.layer_norm",
+        fp32,
+    ): (_dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)),
+    (
+        "eager_equivalence",
+        "aot_eager_decomp_partition",
+        "nn.functional.rms_norm",
+        fp32,
+    ): (_dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)),
+    ("eager_equivalence", "aot_eager_decomp_partition", "softmax", fp32): (
+        _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
+    ),
     ("eager_equivalence", "inductor_default", "log1p", fp32): (
         _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
     ),
+    ("eager_equivalence", "inductor_default", "softmax", fp32): (
+        _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
+    ),
     ("eager_equivalence", "inductor_default", "tanh", fp32): (
+        _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
+    ),
+    ("eager_equivalence", "inductor_numerics", "softmax", fp32): (
         _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
     ),
     ("unary_numerical", "inductor_default", "cos", fp32): (
         _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
     ),
     ("unary_numerical", "inductor_default", "log1p", fp32): (
+        _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
+    ),
+    ("unary_numerical", "inductor_default", "sin", fp32): (
         _dtype_numerical_tolerances(fp32, rtol_multiplier=2.0)
     ),
 }
@@ -587,23 +613,17 @@ XFAIL_DICTS = {
 
 ROCM_EAGER_EQUIV_XFAILS = {
     "aot_eager_decomp_partition": {
-        "nn.functional.layer_norm": {fp32},
-        "nn.functional.rms_norm": {fp32},
-        "softmax": {fp32},
         "log_softmax": {fp32},
     },
     "inductor_default": {
         "sigmoid": {fp32},
-        "nn.functional.gelu": {fp32},
         "nn.functional.layer_norm": {fp32},
-        "softmax": {fp32},
         "log_softmax": {fp32},
     },
     "inductor_numerics": {
         "sigmoid": {fp32},
         "sub": {ALL},
         "nn.functional.layer_norm": {fp32},
-        "softmax": {fp32},
         "log_softmax": {fp32},
     },
 }
@@ -616,6 +636,10 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
     },
     "inductor_default": {
         "nn.functional.linear": {ALL},
+        # Triton FP fusion compiles OCML log1p differently in the static-shape
+        # kernel and its dynamic-shape recompile, so slices differ by 1 ULP
+        # (#191552). inductor_numerics disables FP fusion and stays batch
+        # invariant.
         "log1p": {fp32},
     },
     "inductor_numerics": {
@@ -626,7 +650,6 @@ ROCM_BATCH_INVARIANCE_XFAILS = {
 ROCM_UNARY_NUMERICAL_XFAILS = {
     "inductor_default": {
         "sigmoid": {fp32},
-        "sin": {fp32},
         "tan": {fp32},
     },
     "inductor_numerics": {
@@ -707,17 +730,6 @@ def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
             FBCODE_XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
         )
         xfails = xfails | fbcode_xfails
-    if (
-        test_type == "batch_invariance"
-        and backend == "inductor_default"
-        and op_name == "log1p"
-        and isRocmArchAnyOf(MI200_ARCH)
-    ):
-        # log1p fp32 batch invariance holds on MI200 (gfx90a) but not on
-        # MI300/MI350, which stay xfailed (#191552). Checked at runtime, not
-        # in ROCM_BATCH_INVARIANCE_XFAILS, because the arch query would force
-        # import-time HIP init that this module otherwise avoids.
-        xfails.discard(fp32)
     return dtype in xfails or ALL in xfails
 
 
@@ -843,6 +855,16 @@ class TestOpInfoProperties(TestCase):
         across batch sizes, as split-k can produce different rounding based on
         how the work is partitioned.
         """
+        if (
+            op.name == "log1p"
+            and dtype == torch.float32
+            and backend == "inductor_default"
+            and isRocmArchAnyOf(MI200_ARCH)
+        ):
+            # The static- vs dynamic-shape log1p mismatch (#191552) shows up on
+            # every MI300/MI350 run but only on some MI200 runs, so a strict
+            # xfail would flake there.
+            self.skipTest("log1p mismatch is intermittent on MI200 (#191552)")
         torch._dynamo.reset()
         device_type = torch.device(device).type
 
