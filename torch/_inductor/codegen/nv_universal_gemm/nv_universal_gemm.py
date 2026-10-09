@@ -282,6 +282,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             args_kwargs=helper_kwargs,
             output_scale=output_scale,
             fallback_fn=disk_fallback,
+            cc=_current_target_sm(dev_idx).cc,
         )
 
         if was_compiled:
@@ -381,6 +382,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             epilogue_source=_NVGEMM_BIAS_ADD_EPILOGUE_FINGERPRINT,
             fallback_fn=disk_fallback,
             base_kernel=self.kernel,
+            cc=_current_target_sm(dev_idx).cc,
         )
 
         if was_compiled:

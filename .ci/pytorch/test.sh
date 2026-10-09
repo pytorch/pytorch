@@ -603,8 +603,11 @@ test_h100_symm_mem() {
   _run_fabric_handle_tests
 }
 
+# PYTHON_TEST_EXTRA_OPTION intentionally expands into multiple arguments.
+# shellcheck disable=SC2086
 test_h100_fabric() {
   time python test/run_test.py --include distributed/test_p2p_ipc.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_multiprocessing -k test_rebuild_cuda_tensor $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
