@@ -9,7 +9,10 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+)
 
 
 if dist.is_available():
@@ -27,6 +30,8 @@ def normalize_graph(gm):
 
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributed(DynamoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Use FakeProcessGroup to run tests on a single process
@@ -166,6 +171,30 @@ class GraphModule(torch.nn.Module):
         expected = all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
         self.assertEqual(result, expected)
 
+    def test_all_gather_tensor_gather_dim_negative_view_path(self):
+        """gather_dim=-1 on a 2D input must match gather_dim=1 (view path)."""
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            return all_gather_single(x, gather_dim=-1, group=dist.group.WORLD)
+
+        x = torch.randn(1, 4)
+        result = fn(x)
+        expected = all_gather_single(x, gather_dim=1, group=dist.group.WORLD)
+        self.assertEqual(result, expected)
+
+    def test_all_gather_tensor_gather_dim_negative_chunk_cat_path(self):
+        """gather_dim=-1 on a 3D input must match gather_dim=2 (chunk+cat path)."""
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            return all_gather_single(x, gather_dim=-1, group=dist.group.WORLD)
+
+        x = torch.randn(1, 3, 4)
+        result = fn(x)
+        expected = all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
+        self.assertEqual(result, expected)
+
     def test_device_mesh_get_local_rank(self):
         device_mesh = init_device_mesh(
             device_type="cpu",
@@ -232,6 +261,8 @@ instantiate_parametrized_tests(TestFakeDistributed)
 
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributedP2P(DynamoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         dist.init_process_group(backend="fake", rank=0, world_size=2)
@@ -481,6 +512,8 @@ instantiate_parametrized_tests(TestFakeDistributedP2P)
 
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributedP2PSubgroup(DynamoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Regression test: on a sub-group, the functional P2P helpers must pass a
     # GROUP-LOCAL peer rank to the _c10d_functional ops (which, like the eager
     # ProcessGroup send/recv path, expect a group-local rank). Previously a

@@ -72,7 +72,7 @@ from sys import maxsize
 from typing import Any
 
 import torch
-from torch._utils import _sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
+from torch._utils import _get_sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
 
 
 # modules in this list are never allowed, even if the user attempts to allowlist
@@ -118,6 +118,12 @@ class _safe_globals:
 
     def __exit__(self, type, value, tb):
         _remove_safe_globals(self.safe_globals)
+
+
+class _PendingNewobj:
+    def __init__(self, cls, args):
+        self.cls = cls
+        self.args = args
 
 
 # Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
@@ -318,6 +324,7 @@ class Unpickler:
         """
         self.metastack = []
         self.stack: list[Any] = []
+        pending_newobjs: set[_PendingNewobj] = set()
         self.append = self.stack.append
         read = self.read
         while True:
@@ -379,9 +386,14 @@ class Unpickler:
                     cls in _get_user_allowed_globals().values()
                     or cls in _get_allowed_globals().values()
                 ):
-                    result = cls.__new__(cls, *args)
+                    result: Any
+                    if torch._C._is_pybind11_type(cls):
+                        result = _PendingNewobj(cls, args)
+                        pending_newobjs.add(result)
+                    else:
+                        result = cls.__new__(cls, *args)
                     if cls in torch._tensor_classes and "sparse" in cls.__module__:
-                        _sparse_tensors_to_validate.append(result)
+                        _get_sparse_tensors_to_validate().append(result)
                     self.append(result)
                 else:
                     raise UnpicklingError(
@@ -403,11 +415,19 @@ class Unpickler:
                     raise UnpicklingError(error_msg)
                 result = func(*args)
                 if func in torch._tensor_classes and "sparse" in func.__module__:
-                    _sparse_tensors_to_validate.append(result)
+                    _get_sparse_tensors_to_validate().append(result)
                 self.stack[-1] = result
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
                 inst = self.stack[-1]
+                if isinstance(inst, _PendingNewobj):
+                    pending = inst
+                    inst = pending.cls.__new__(pending.cls, *pending.args)
+                    self.stack[-1] = inst
+                    for memo_id, memo_value in self.memo.items():
+                        if memo_value is pending:
+                            self.memo[memo_id] = inst
+                    pending_newobjs.remove(pending)
                 if type(inst) is torch.Tensor:
                     # Legacy unpickling
 
@@ -546,6 +566,11 @@ class Unpickler:
                         stacklevel=2,
                     )
             elif key[0] == STOP[0]:
+                if pending_newobjs:
+                    raise UnpicklingError(
+                        "Object created by NEWOBJ was not initialized by BUILD; "
+                        "the pickle data is likely corrupt or malicious"
+                    )
                 rc = self.stack.pop()
                 return rc
             else:

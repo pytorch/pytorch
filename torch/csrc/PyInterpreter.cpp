@@ -2,7 +2,6 @@
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
@@ -102,6 +101,7 @@ struct ConcretePyInterpreterVTable final
   c10::SymInt sym_numel(const c10::TensorImpl* self) const override;
   c10::SymIntArrayRef sym_strides(const c10::TensorImpl* self) const override;
   c10::SymInt sym_storage_offset(const c10::TensorImpl* self) const override;
+  bool backed_size_oblivious() const override;
 
   void trace_gpu_event_creation(at::DeviceType device_type, uintptr_t event)
       const override {
@@ -303,17 +303,14 @@ void ConcretePyInterpreterVTable::dispatch(
   py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   // Find overloaded tensors
-  for (const auto idx : c10::irange(arguments.size())) {
-    const auto& ivalue = arguments[idx];
+  for (const auto& ivalue : arguments) {
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {
         append_overloaded_tensor(&overloaded_args, py::cast(tensor).ptr());
       }
     } else if (ivalue.isList()) {
-      const auto& list = ivalue.toListRef();
-      for (const auto jdx : c10::irange(list.size())) {
-        const auto& nv = list[jdx];
+      for (const auto& nv : ivalue.toListRef()) {
         if (nv.isTensor()) {
           const auto& tensor = nv.toTensor();
           if (isPythonTensor(tensor)) {
@@ -901,6 +898,13 @@ c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
   }
   return torch::is_symint(out) ? out.cast<c10::SymInt>()
                                : c10::SymInt{py::cast<int64_t>(out)};
+}
+
+bool ConcretePyInterpreterVTable::backed_size_oblivious() const {
+  pybind11::gil_scoped_acquire gil;
+  return py::module::import("torch.fx.experimental._config")
+      .attr("backed_size_oblivious")
+      .cast<bool>();
 }
 
 c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(

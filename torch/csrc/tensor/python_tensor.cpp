@@ -1,7 +1,6 @@
 #include <torch/csrc/tensor/python_tensor.h>
 
 #include <pybind11/pybind11.h>
-#include <structmember.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/Dtype.h>
@@ -11,10 +10,7 @@
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/cuda_enabled.h>
-#include <torch/csrc/utils/device_lazy_init.h>
-#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_types.h>
 
@@ -114,15 +110,15 @@ static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* Tensor_dtype(PyTensorType* self, void* unused) {
+static PyObject* Tensor_dtype(PyTensorType* self, void* /*unused*/) {
   return torch::autograd::utils::wrap(self->dtype);
 }
 
-static PyObject* Tensor_layout(PyTensorType* self, void* unused) {
+static PyObject* Tensor_layout(PyTensorType* self, void* /*unused*/) {
   return torch::autograd::utils::wrap(self->layout);
 }
 
-static PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_cuda(PyTensorType* self, void* /*unused*/) {
   if (self->is_cuda) {
     Py_RETURN_TRUE;
   } else {
@@ -130,7 +126,7 @@ static PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
   }
 }
 
-static PyObject* Tensor_is_xpu(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_xpu(PyTensorType* self, void* /*unused*/) {
   if (self->is_xpu) {
     Py_RETURN_TRUE;
   } else {
@@ -138,7 +134,7 @@ static PyObject* Tensor_is_xpu(PyTensorType* self, void* unused) {
   }
 }
 
-static PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_sparse(PyTensorType* self, void* /*unused*/) {
   if (self->layout->layout == at::Layout::Strided) {
     Py_RETURN_FALSE;
   } else {
@@ -146,7 +142,7 @@ static PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
   }
 }
 
-static PyObject* Tensor_is_sparse_csr(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_sparse_csr(PyTensorType* self, void* /*unused*/) {
   if (self->layout->layout == at::Layout::SparseCsr) {
     Py_RETURN_TRUE;
   } else {
@@ -200,7 +196,7 @@ static void py_initialize_tensor_type(
   // we need to initialize as many types as there are VariableType instances.
   // We copy the basic object fields from a prototype definition and initialize
   // the remaining fields below.
-  memcpy(&type, &tensor_type_prototype, sizeof(PyTypeObject));
+  type = tensor_type_prototype;
   // Subclassing from torch.<ScalarType>Tensor isn't supported.
   // (Py_TPFLAGS_BASETYPE omitted). Subclassing torch.Tensor still allowed.
   type.tp_flags = Py_TPFLAGS_DEFAULT;

@@ -79,9 +79,35 @@ torch.backends.cudnn.conv.fp32_precision = "tf32"
 torch.backends.cudnn.rnn.fp32_precision = "tf32"
 ```
 
-The fp32_precision can be set to `ieee` or `tf32` for `cuda/cudnn`.
-`ieee` fp32_precision indicate that we will use `FP32` as internal computation precision.
-`tf32` fp32_precision indicate that we will allow to use `TF32` as internal computation precision.
+The `fp32_precision` setting can be set to `ieee` or `tf32` for CUDA matmuls
+and cuDNN. `ieee` uses FP32 for internal computation, while `tf32` allows TF32
+for internal computation.
+
+With a CUDA 12.9 or newer build, CUDA matmuls also accept `bfx9`, which allows
+cuBLAS to use its BF16x9 algorithm:
+
+```python
+torch.backends.cuda.matmul.fp32_precision = "bfx9"
+```
+
+This mode keeps the inputs and output in FP32 while allowing cuBLAS to decompose
+each input into three BF16 values and evaluate the resulting nine BF16 products
+with FP32 accumulation. The decomposition retains all FP32 input bits, but the
+resulting arithmetic is not IEEE-754 compliant and its relative accuracy is
+workload-dependent. The BF16x9 algorithm is available on GPUs with compute
+capability 10.0 or 10.3. On other NVIDIA GPU architectures, cuBLAS accepts the
+mode but uses native FP32 because no BF16x9 implementation is available. `bfx9`
+requires a PyTorch build with CUDA 12.9 or newer and is valid only for
+`torch.backends.cuda.matmul.fp32_precision`; using it for a generic, cuDNN, or
+MKLDNN precision setting raises an error. Setting `bfx9` on an older CUDA build
+or ROCm raises an error.
+
+As with `tf32`, operations implemented using CUDA GEMM can inherit the matmul
+precision setting, including slow or naive convolution fallbacks. Under
+`torch.compile`, FP32 matmuls using `bfx9` remain ATen/cuBLAS calls because
+Triton's `bf16x3` and `bf16x6` modes do not implement the full nine-product
+algorithm. Fused Triton kernels that cannot preserve `bfx9`, such as FP32
+FlexAttention, warn once and use IEEE precision instead.
 
 We can override a generic setting for a specific operator if the fp32_precision is set to `ieee`.
 
@@ -870,7 +896,6 @@ You can now define a new memory pool by passing this allocator to {class}`torch.
 pool = torch.cuda.MemPool(allocator)
 ```
 
-
 The pool can then be used with the {class}`torch.cuda.use_mem_pool` context manager to
 allocate tensors into that pool:
 
@@ -978,6 +1003,53 @@ with torch.cuda.use_mem_pool(pool):
      requirements (`CU_MULTICAST_GRANULARITY_RECOMMENDED`, `CU_MULTICAST_GRANULARITY_MINIMUM`),
      and can cause your workload to run out of memory.
 ```
+
+
+(cuda-memory-python-allocators)=
+## Python-defined CUDA allocators
+
+Use {meth}`torch.cuda.MemPool.from_py_allocator` to implement a pool's segment
+allocator with Python callables:
+
+```python
+from cuda.bindings import runtime
+
+
+def alloc(size: int) -> int | None:
+    err, ptr = runtime.cudaMalloc(size)
+    return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
+
+
+def free(ptr: int, _size: int) -> None:
+    (err,) = runtime.cudaFree(ptr)
+    if err != runtime.cudaError_t.cudaSuccess:
+        raise RuntimeError(f"cudaFree failed with error {err}")
+
+
+pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
+```
+
+The size passed to the free callback is the size of the backing segment.
+An allocator may use it when releasing the segment, as needed, or ignore it
+when the pointer alone is sufficient.
+
+Return `None` or zero when an allocation cannot be satisfied. This lets the
+caching allocator release cached blocks, retry the allocation, notify OOM
+observers, and report a normal {class}`torch.OutOfMemoryError` if recovery
+fails. Other exceptions raised by the allocation callback propagate normally.
+Exceptions raised by the free callback produce a warning and are swallowed.
+
+PyTorch makes the segment's device and allocation stream current before calling
+either function. A callback that needs them can use
+{func}`torch.cuda.current_device` and {func}`torch.cuda.current_stream`.
+
+Callbacks can be invoked concurrently from multiple threads, so their Python
+and native state must be thread-safe, including in a no-GIL Python build.
+
+During CUDA graph capture, the allocation callback runs in relaxed capture
+mode. It may call allocation APIs such as `cudaMalloc` or CUDA virtual-memory
+APIs, but it must not launch work on or synchronize the capturing stream,
+synchronize the device, or begin or end capture.
 
 
 ## Tuning NVLink Performance with Custom Memory Allocator on H100/H200 GPUs
@@ -1105,14 +1177,18 @@ void customCudaFree(CustomAllocInfo* info) {
 
 ## cuBLAS workspaces
 
-For each combination of cuBLAS handle and CUDA stream, a cuBLAS workspace will be allocated
-if that handle and stream combination executes a cuBLAS kernel that requires a workspace.
-In order to avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
-`torch._C._cuda_clearCublasWorkspaces()` is called. The workspace size per allocation can be
-specified via the environment variable `CUBLAS_WORKSPACE_CONFIG` with the format `:[SIZE]:[COUNT]`.
-As an example, the default workspace size per allocation is `CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8`
-which specifies a total size of `2 * 4096 + 8 * 16 KiB`. To force cuBLAS to avoid using workspaces,
-set `CUBLAS_WORKSPACE_CONFIG=:0:0`.
+By default, ATen allocates a cuBLAS workspace for each operation from the CUDA caching allocator
+and releases it when the operation returns. Set `TORCH_CUBLAS_WORKSPACE_CACHE=1` to instead retain
+one workspace for each cuBLAS handle and CUDA stream until
+`torch._C._cuda_clearCublasWorkspaces()` is called. Persistent workspaces must not be used when
+capturing multiple CUDA graphs on the same stream. Handles returned by
+`torch.cuda.current_blas_handle()` use cuBLAS's default workspace when ATen workspace caching is
+disabled.
+
+The workspace size per allocation can be specified via `CUBLAS_WORKSPACE_CONFIG` with the format
+`:[SIZE]:[COUNT]`. For example, `CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8` specifies a total size of
+`2 * 4096 + 8 * 16 KiB`. To force cuBLAS to avoid using workspaces, set
+`CUBLAS_WORKSPACE_CONFIG=:0:0`.
 
 (cufft-plan-cache)=
 
