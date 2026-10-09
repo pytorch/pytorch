@@ -23307,18 +23307,18 @@ def _run_and_get_stripped_kernels(
 class NoOpFoldingTests(InductorTestCase):
     def test_identity_before_mm_is_folded(self):
         def fn(x, y):
-            return torch.mm(x + 0, y)
+            return torch.mm(x * 1, y)
 
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
         gm = make_fx(fn, tracing_mode="real")(x, y)
         self.assertEqual(
-            len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 1
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
         )
         remove_no_ops(gm, OrderedSet(), OrderedSet())
         gm.recompile()
         self.assertEqual(
-            len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 0
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 0
         )
         self.assertEqual(gm(x, y), fn(x, y))
 
@@ -23361,12 +23361,34 @@ class NoOpFoldingTests(InductorTestCase):
         )
         self.assertEqual(gm(x.clone(), y), fn(x.clone(), y))
 
+    @parametrize("case", ("float_negative_zero", "complex_conjugate"))
+    def test_add_zero_preserves_signed_zero(self, case):
+        if case == "complex_conjugate":
+            x = torch.tensor([-1 + 0j], dtype=torch.complex64)
+
+            def fn(x):
+                return torch.angle(x.conj() + 0)
+
+        else:
+            x = torch.tensor([-0.0])
+
+            def fn(x):
+                return torch.sin(x + 0)
+
+        gm = make_fx(fn, tracing_mode="real")(x)
+        remove_no_ops(gm, OrderedSet(), OrderedSet())
+        gm.recompile()
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 1
+        )
+        self.assertEqual(torch.signbit(gm(x)), torch.signbit(fn(x)))
+
     @parametrize(
         "op_name",
         ["add", "sub", "mul", "div"],
     )
     @parametrize("consumer", ["sin", "sum"])
-    def test_identity_before_value_consumer_is_folded(self, op_name, consumer):
+    def test_identity_before_value_consumer_preserves_value(self, op_name, consumer):
         op = getattr(aten, op_name).Tensor
         identity = 0 if op_name in ("add", "sub") else 1
 
@@ -23377,7 +23399,11 @@ class NoOpFoldingTests(InductorTestCase):
         gm = make_fx(fn, tracing_mode="real")(x)
         remove_no_ops(gm, OrderedSet(), OrderedSet())
         gm.recompile()
-        self.assertEqual(len(gm.graph.find_nodes(op="call_function", target=op)), 0)
+        # Floating-point addition by zero changes negative zero to positive zero.
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=op)),
+            1 if op_name == "add" else 0,
+        )
         self.assertEqual(gm(x), fn(x))
 
 
