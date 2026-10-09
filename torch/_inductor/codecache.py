@@ -25,6 +25,7 @@ import tempfile
 import textwrap
 import threading
 import warnings
+import weakref
 from bisect import bisect_right
 from collections.abc import Set as AbstractSet
 from copy import copy
@@ -4986,6 +4987,7 @@ class PyCodeCache:
         if attrs is not None:
             for k, v in attrs.items():
                 setattr(mod, k, v)
+            mod._inductor_attr_names = tuple(attrs)  # type: ignore[attr-defined]
 
         if in_toplevel:
             # we only cache when attrs is None
@@ -4994,6 +4996,29 @@ class PyCodeCache:
 
             cls.modules.append(mod)
         return mod
+
+    @classmethod
+    def forget_module_with(cls, owner: object, mod: ModuleType) -> None:
+        """
+        Drop this cache's references to `mod` (in `modules` and `sys.modules`),
+        and the attrs it was loaded with, once `owner` -- the only object that
+        runs it -- is garbage collected. Modules loaded with attrs are never
+        reused from the cache, and their attrs can be large (e.g. a compiled
+        graph's frozen constants, i.e. model weights), so they shouldn't outlive
+        their owner.
+        """
+        finalizer = weakref.finalize(owner, cls._forget_module, mod)
+        finalizer.atexit = False
+
+    @classmethod
+    def _forget_module(cls, mod: ModuleType) -> None:
+        if sys.modules.get(mod.__name__) is mod:
+            del sys.modules[mod.__name__]
+        cls.modules[:] = [m for m in cls.modules if m is not mod]
+        # The module's functions and its globals reference each other, so the
+        # module itself is only freed by the cyclic GC; release the attrs now.
+        for name in getattr(mod, "_inductor_attr_names", ()):
+            mod.__dict__.pop(name, None)
 
     @classmethod
     def cache_clear(cls, purge: bool = False) -> None:
