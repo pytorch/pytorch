@@ -28,8 +28,6 @@ class C10_API FakeTensorModeTLS {
   static void set_in_kernel_invocation(bool value);
 };
 
-// Sets the flag for the guard's lifetime and restores the previous value,
-// including when the kernel throws.
 struct C10_API FakeInKernelInvocationGuard {
   FakeInKernelInvocationGuard()
       : prev_(FakeTensorModeTLS::in_kernel_invocation()) {
