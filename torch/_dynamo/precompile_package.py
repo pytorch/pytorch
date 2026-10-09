@@ -1280,6 +1280,7 @@ _UNMODELLED_GUARD_TYPES = frozenset(
         "DUAL_LEVEL",
         "FSDP_TRAINING_STATE",
         "FUNCTORCH_STACK_MATCH",
+        "FX_ANNOTATION",
         "GLOBAL_STATE",
         "OPAQUE_OBJ_GUARD_FN_MATCH",
         "SHAPE_ENV",
