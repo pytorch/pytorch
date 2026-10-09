@@ -752,6 +752,21 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(str(m), "kwarg mismatch: x")
         self.assertIsNone(m.__traceback__)
 
+    def test_auto_functionalized_default_kwarg_matches(self):
+        # functionalization passes defaulted args too; patterns written against
+        # auto_functionalized usually omit them
+        lib = self.enterContext(torch.library._scoped_library("pm_af", "FRAGMENT"))
+        lib.define("quant(Tensor! result, Tensor input, int[]? group_shape=None) -> ()")
+        op = torch.ops.pm_af.quant.default
+        af = torch.ops.higher_order.auto_functionalized
+        pattern = CallFunction(af, op, result=KeywordArg("r"), input=KeywordArg("i"))
+        graph = torch.fx.Graph()
+        r, i = graph.placeholder("r"), graph.placeholder("i")
+        for group_shape, ok in ((None, True), ([1, 128], False)):
+            kwargs = {"result": r, "input": i, "group_shape": group_shape}
+            node = graph.call_function(af, (op,), kwargs)
+            self.assertEqual(bool(pattern.match(node)), ok)
+
     def test_addcdiv_fma_keeps_add_alpha(self):
         # https://github.com/pytorch/pytorch/issues/199839
         args = [torch.randn(8, device=GPU_TYPE) for _ in range(3)]
