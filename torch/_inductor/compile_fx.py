@@ -2237,7 +2237,7 @@ def cudagraphify(
     model: Callable[..., Any],
     static_input_idxs: Sequence[int] = (),
     *,
-    device_index: int,
+    device: torch.device,
     stack_traces: list[str | None],
     is_backward: bool,
     is_inference: bool,
@@ -2261,7 +2261,7 @@ def cudagraphify(
         )
         cudagraphify_fn = functools.partial(
             new_cudagraphify_impl,
-            device_index=device_index,
+            device=device,
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
