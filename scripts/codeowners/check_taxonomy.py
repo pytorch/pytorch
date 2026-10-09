@@ -60,6 +60,7 @@ class TaxonomyPattern:
     group: str
     path: str
     line_number: int
+    labels: tuple[str, ...] = ()
 
 
 @dataclass
@@ -129,13 +130,18 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
     patterns = []
     section_groups = []
     group = None
+    labels: tuple[str, ...] = ()
     for line_number, raw_line in enumerate(lines[start:], start=start + 1):
         line = raw_line.strip()
         if line.startswith(GROUP_PREFIX) and line.endswith("]"):
             group = line[len(GROUP_PREFIX) : -1]
+            labels = ()
             if group in section_groups:
                 raise ValueError(f"{codeowners}:{line_number}: repeated group: {group}")
             section_groups.append(group)
+        elif line.startswith("# label:"):
+            label_names = line.removeprefix("# label:").split(",")
+            labels = tuple(label.strip() for label in label_names)
         elif line.startswith(("# /", "/")):
             location = f"{codeowners}:{line_number}"
             active = line.startswith("/")
@@ -160,7 +166,7 @@ def parse_patterns(codeowners: Path) -> tuple[list[TaxonomyPattern], list[str]]:
                     )
             if pattern == "/" or any(character in pattern for character in "?[\\"):
                 raise ValueError(f"{location}: invalid taxonomy path: {pattern!r}")
-            patterns.append(TaxonomyPattern(group, pattern[1:], line_number))
+            patterns.append(TaxonomyPattern(group, pattern[1:], line_number, labels))
         elif line and not line.startswith("#"):
             raise ValueError(f"{codeowners}:{line_number}: invalid taxonomy entry")
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Map test files to owners: `# Owner(s):` labels, else the CODEOWNERS surface."""
+"""Map test files to CODEOWNERS module labels, else their review surface."""
 
 import json
 import subprocess
@@ -15,9 +15,7 @@ from check_taxonomy import (
 )
 
 
-OWNERS_PREFIXES = ("# Owner(s): ", "// Owner(s): ")
 IGNORED_OWNERS = {"unknown", "tests"}
-EXCLUDED_PATHS = {"test/run_test.py"}
 EXCLUDED_DIRECTORIES = {"fb", "third_party"}
 TEST_GLOBS = [
     # Python tests.
@@ -57,45 +55,27 @@ TEST_GLOBS = [
 ]
 
 
-def header_owners(test_path: Path, relative_path: str) -> set[str]:
-    """Return the `module:` labels of the file's `# Owner(s):` header, if any."""
-    with test_path.open(encoding="utf-8") as test_file:
-        for line in test_file:
-            if not line.startswith(OWNERS_PREFIXES):
-                continue
-            try:
-                labels = json.loads(line.partition(": ")[2])
-            except json.JSONDecodeError as error:
-                raise ValueError(f"Invalid owners header in {relative_path}") from error
-            if not isinstance(labels, list) or any(
-                not isinstance(label, str) for label in labels
-            ):
-                raise ValueError(f"Expected a list of owner labels in {relative_path}")
-            return {
-                label.removeprefix("module: ")
-                for label in labels
-                if label.startswith("module: ")
-            } - IGNORED_OWNERS
-    return set()
-
-
 def collect_test_owners(repo: Path) -> dict[str, list[str]]:
-    """Map every tracked test file to its owners, else to its review surface."""
+    """Map every tracked test file to CODEOWNERS module labels or its review surface."""
     index = TaxonomyIndex(parse_patterns(repo / "CODEOWNERS")[0])
     test_globs = [compile_glob(test_glob) for test_glob in TEST_GLOBS]
     owners_by_file = {}
     for path in tracked_paths(repo):
-        if (
-            path in EXCLUDED_PATHS
-            or EXCLUDED_DIRECTORIES.intersection(path.split("/"))
-            or not any(test_glob.fullmatch(path) for test_glob in test_globs)
+        if EXCLUDED_DIRECTORIES.intersection(path.split("/")) or not any(
+            test_glob.fullmatch(path) for test_glob in test_globs
         ):
             continue
-        owners = header_owners(repo / path, path)
-        if not owners:
-            matches = index.matches(path)
-            if matches:
-                owners = {max(matches, key=pattern_specificity).group}
+        owners = set()
+        matches = index.matches(path)
+        if matches:
+            pattern = max(matches, key=pattern_specificity)
+            owners = {
+                label.removeprefix("module: ")
+                for label in pattern.labels
+                if label.startswith("module: ")
+            } - IGNORED_OWNERS
+            if not owners:
+                owners = {pattern.group}
         owners_by_file[path] = sorted(owners)
     if not owners_by_file:
         raise ValueError(f"No test files found in {repo}")
