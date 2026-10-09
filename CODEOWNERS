@@ -1009,6 +1009,7 @@
 # /codex_setup.sh
 # /defs.bzl
 # /docker.Makefile
+# /mkldnn.bzl
 # /pt_ops.bzl
 # /pt_template_srcs.bzl
 # /pyproject.toml
@@ -1070,6 +1071,7 @@
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @lw
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @lw
 # label: oncall: distributed, module: c10d
+/test/cpp/c10d/ @d4l3k @fduwjj @kapilsh
 /torch/csrc/distributed/c10d/ @d4l3k @fduwjj @kapilsh
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
