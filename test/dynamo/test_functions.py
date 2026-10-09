@@ -224,6 +224,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = inline_unused(x)
         return
 
+    def test_script_function_graph_break(self):
+        @torch.jit.script
+        def scripted():
+            if torch.jit.is_scripting():
+                return 1
+            print("unreachable")
+            return 2
+
+        def fn():
+            return scripted()
+
+        self.assertEqual(torch.compile(fn, backend="eager")(), 1)
+
     @make_test
     def test_inline_script_if_tracing_fn_with_default_args(a, b):
         return inline_script_if_tracing_fn_with_default_args(a, b)
