@@ -5089,6 +5089,11 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
                 )
 
 
+class SlowCudaAdder:
+    def add(self, x, y):
+        return TensorPipeAgentCudaRpcTest._slow_add_on_user_stream(x, y)
+
+
 class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def _test_device_maps(self, options, errMsg):
         with self.assertRaisesRegex(ValueError, errMsg):
@@ -5714,6 +5719,24 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     @skip_if_lt_x_gpu(2)
     def test_custom_stream_multi(self):
         self._test_custom_stream(self._test_stream_multi_async, {"cuda:0": "cuda:1"})
+
+    def _test_stream_rref_proxy_async(self, dst):
+        rref = rpc.remote(dst, SlowCudaAdder)
+        for i in range(10):
+            x = torch.ones(2048, 2048).to(0) * i
+            self.assertEqual(rref.rpc_async().add(x, x).wait(), 2 * x)
+
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream_rref_proxy_async(self):
+        self._test_custom_stream(
+            self._test_stream_rref_proxy_async, {"cuda:0": "cuda:1"}
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream_rref_proxy_async_cpu_device_map(self):
+        self._test_custom_stream(
+            self._test_stream_rref_proxy_async, {"cuda:0": "cuda:1", "cpu": "cpu"}
+        )
 
     @staticmethod
     def _nested_slow_add_on_user_stream(dst, x, y, z):
