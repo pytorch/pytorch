@@ -67,6 +67,7 @@ FILE_TMPL = """\
 // op header added here. torch/library.h registers the embedded architectures and
 // optional coverage predicate.
 #include <ATen/core/Tensor.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/NativeAotStubs.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/cuda/CUDAContext.h>
