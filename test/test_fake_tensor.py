@@ -4785,5 +4785,89 @@ class FakeTensorViewCopy(TestCase):
                     _ = yf.view(-1)
 
 
+# Exercises the C++ FakeTensorMode bindings directly. No op runs under the
+# mode: running ops needs the C++ Fake fallback kernel, which is added later.
+class CppFakeTensorModeBindingsTest(TestCase):
+    class Wrapper:
+        pass
+
+    def _make_mode(self, shape_env=None):
+        wrapper = self.Wrapper()
+        mode = torch._C._CppFakeTensorMode(FakeTensorConverter(), shape_env, wrapper)
+        return mode, wrapper
+
+    def test_mode_state(self):
+        mode, _ = self._make_mode()
+        self.assertTrue(mode.static_shapes)
+        self.assertEqual(mode.epoch, 0)
+        self.assertFalse(mode.allow_non_fake_inputs)
+        self.assertFalse(mode.allow_scalar_outputs)
+        self.assertEqual(
+            mode.allow_unsafe_data_ptr_access,
+            torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access,
+        )
+        mode.epoch = 3
+        mode.allow_non_fake_inputs = True
+        mode.allow_scalar_outputs = True
+        mode.static_shapes = False
+        self.assertEqual(mode.epoch, 3)
+        self.assertTrue(mode.allow_non_fake_inputs)
+        self.assertTrue(mode.allow_scalar_outputs)
+        self.assertFalse(mode.static_shapes)
+
+        symbolic_mode, _ = self._make_mode(ShapeEnv())
+        self.assertFalse(symbolic_mode.static_shapes)
+
+    def test_push_pop(self):
+        mode, wrapper = self._make_mode()
+        fake_key = torch._C.DispatchKey.Fake
+
+        def state():
+            return (
+                torch._C._current_cpp_fake_tensor_mode(),
+                torch._C._dispatch_tls_is_dispatch_key_included(fake_key),
+            )
+
+        self.assertEqual(state(), (None, False))
+        torch._C._push_cpp_fake_tensor_mode(mode)
+        try:
+            self.assertEqual(state(), (wrapper, True))
+            torch._C._push_cpp_fake_tensor_mode(mode)
+            torch._C._pop_cpp_fake_tensor_mode()
+            self.assertEqual(state(), (wrapper, True))
+            # Pushing None suspends the mode until the matching pop.
+            torch._C._push_cpp_fake_tensor_mode(None)
+            self.assertEqual(state(), (None, False))
+            torch._C._pop_cpp_fake_tensor_mode()
+            self.assertEqual(state(), (wrapper, True))
+        finally:
+            torch._C._pop_cpp_fake_tensor_mode()
+        self.assertEqual(state(), (None, False))
+        with self.assertRaisesRegex(RuntimeError, "without a matching"):
+            torch._C._pop_cpp_fake_tensor_mode()
+
+    def test_from_meta_and_device(self):
+        mode, wrapper = self._make_mode()
+        fake = torch._C._from_meta_and_device(
+            torch.empty(2, 3, device="meta"), torch.device("cpu"), mode
+        )
+        self.assertTrue(torch._C._is_fake_tensor(fake))
+        self.assertEqual(fake.device, torch.device("cpu"))
+        self.assertEqual(fake.shape, (2, 3))
+        self.assertIs(torch._C._maybe_get_fake_mode(fake), wrapper)
+        self.assertIsNone(torch._C._maybe_get_fake_mode(torch.empty(2)))
+        with self.assertRaisesRegex(RuntimeError, "Expected a meta tensor"):
+            torch._C._from_meta_and_device(torch.empty(2), torch.device("cpu"), mode)
+
+    def test_unsafe_data_ptr_access(self):
+        mode, _ = self._make_mode()
+        mode.allow_unsafe_data_ptr_access = False
+        fake = torch._C._from_meta_and_device(
+            torch.empty(2, device="meta"), torch.device("cpu"), mode
+        )
+        with self.assertRaisesRegex(RuntimeError, "data pointer"):
+            fake.data_ptr()
+
+
 if __name__ == "__main__":
     run_tests()
