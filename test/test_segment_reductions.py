@@ -8,6 +8,7 @@ import torch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
+    dtypesIfMPS,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -125,6 +126,7 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(*product((torch.half, torch.bfloat16, torch.float), (torch.int, torch.int64)))
     def test_simple_1d(self, device, dtypes):
         val_dtype, length_type = dtypes
         lengths = [1, 2, 3, 0]
@@ -182,6 +184,7 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(*product((torch.half, torch.bfloat16, torch.float), (torch.int, torch.int64)))
     def test_simple_zero_length(self, device, dtypes):
         val_dtype, length_type = dtypes
         lengths = [0, 0]
@@ -239,6 +242,7 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(*product((torch.half, torch.bfloat16, torch.float), (torch.int, torch.int64)))
     def test_multi_d_simple(self, device, dtypes):
         val_dtype, _ = dtypes
         axis = 0
@@ -367,6 +371,7 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(*product((torch.half, torch.bfloat16, torch.float), (torch.int, torch.int64)))
     @parametrize("reduce", ['sum', 'prod', 'min', 'max', 'mean'])
     def test_pytorch_scatter_test_cases(self, device, dtypes, reduce):
         val_dtype, length_dtype = dtypes
@@ -489,6 +494,7 @@ class TestSegmentReductions(TestCase):
             (torch.int, torch.int64),
         )
     )
+    @dtypesIfMPS(*product((torch.half, torch.bfloat16, torch.float), (torch.int, torch.int64)))
     def test_multi_d(self, device, dtypes):
         val_dtype, _ = dtypes
         axis = 0
@@ -553,6 +559,67 @@ class TestSegmentReductions(TestCase):
                     check_backward,
                 )
 
+    @dtypes(torch.float32)
+    @parametrize("reduce", reductions)
+    @parametrize("inner", [1, 3])
+    def test_long_segment_backward(self, device, dtype, reduce, inner):
+        data = torch.ones((8, 8254, inner), dtype=dtype, device=device)[:, ::2]
+        values = torch.tensor([
+            [2., 3., 4.],
+            [-2., 3., 4.],
+            [0., 2., 3.],
+            [0., 0., 3.],
+            [float("nan"), 2., 3.],
+            [float("inf"), 2., 3.],
+            [0., float("inf"), 3.],
+            [1., 1., 1.],
+        ], dtype=dtype, device=device).unsqueeze(-1)
+        data[:, 3:6] = values
+        data[:, 2053:2056] = values
+        data.requires_grad_()
+        offsets = torch.tensor([[1, 2051, 2052, 2052, 4126]] * 8, dtype=torch.int32, device=device)
+        actual = torch.segment_reduce(data, reduce, offsets=offsets, axis=1)
+        reference = data.detach().cpu().double().requires_grad_()
+        expected = torch.segment_reduce(reference, reduce, offsets=offsets.cpu(), axis=1)
+        self.assertEqual(actual, expected.to(dtype))
+        grad = torch.tensor([1., -2., 0., 3.], dtype=dtype, device=device).view(1, 4, 1).expand_as(actual).clone()
+        grad[1::2].neg_()
+        grad[2::3].zero_()
+        actual.backward(grad)
+        expected.backward(grad.cpu().double())
+        self.assertEqual(data.grad, reference.grad.to(dtype))
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("initial", [None, 0., 2.])
+    def test_prod_backward_special_values(self, device, dtype, initial):
+        nan, inf = float("nan"), float("inf")
+        data = torch.tensor([
+            [0., 2., 3.], [2., 0., 3.], [2., 3., 0.], [0., 0., 3.],
+            [nan, 2., 3.], [2., nan, 3.], [2., 3., nan], [nan, nan, 3.],
+            [0., nan, 3.], [0., inf, 3.], [0., 0., inf],
+        ], dtype=dtype, device=device, requires_grad=True)
+        lengths = torch.full((11, 1), 3, dtype=torch.int64, device=device)
+        result = torch.segment_reduce(data, "prod", lengths=lengths, axis=1, initial=initial)
+        result.sum().backward()
+        expected = torch.tensor([
+            [6., 0., 0.], [0., 6., 0.], [0., 0., 6.], [0., 0., 0.],
+            [6., nan, nan], [nan, 6., nan], [nan, nan, 6.], [nan, nan, nan],
+            [nan, 0., nan], [inf, nan, nan], [nan, nan, nan],
+        ], dtype=dtype, device=device)
+        if initial is not None:
+            expected = expected * initial
+        self.assertEqual(data.grad, expected)
+
+    @dtypes(torch.float32)
+    @parametrize("reduce", ["sum", "mean"])
+    @parametrize("size", [31, 32])
+    def test_empty_segment_signed_zero(self, device, dtype, reduce, size):
+        data = torch.ones(2 * size, dtype=dtype, device=device)
+        offsets = torch.tensor([0, 0, 2 * size], device=device)
+        result = torch.segment_reduce(data, reduce, offsets=offsets, initial=-0.)
+        self.assertEqual(result[0], 0.)
+        self.assertTrue(result[0].signbit().item())
+
     @dtypes(torch.int, torch.int64)
     def test_unsafe_flag(self, device, dtype):
         length_type = dtype
@@ -572,7 +639,7 @@ class TestSegmentReductions(TestCase):
 
 
 
-instantiate_device_type_tests(TestSegmentReductions, globals())
+instantiate_device_type_tests(TestSegmentReductions, globals(), allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()

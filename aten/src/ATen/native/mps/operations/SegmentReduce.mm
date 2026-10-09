@@ -97,25 +97,37 @@ SegmentReduceParams segment_params(const Tensor& data,
   return p;
 }
 
-Tensor validate_offsets(const Tensor& offsets, const SegmentReduceParams& p) {
-  auto valid = at::empty({static_cast<int64_t>(p.outer)}, offsets.options().dtype(kInt));
-  if (p.outer == 0) {
-    return valid;
-  }
+template <typename F>
+void dispatch_segment(const std::string& name, uint64_t size, bool parallel, const F& set_args) {
   auto* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      auto pipeline = lib.getPipelineStateForFunc("segment_validate_" + scalarToMetalTypeString(offsets));
+      auto pipeline = lib.getPipelineStateForFunc(name);
       [encoder setComputePipelineState:pipeline];
-      for (uint64_t base = 0; base < p.outer;) {
-        const auto count = std::min<uint64_t>(p.outer - base, std::numeric_limits<uint32_t>::max());
-        mtl_setArgs(encoder, offsets, valid, p, stream->getErrorBuffer(), base);
-        mtl_dispatch1DJob(encoder, pipeline, count);
+      for (uint64_t base = 0; base < size;) {
+        const auto count = std::min<uint64_t>(size - base, std::numeric_limits<uint32_t>::max());
+        set_args(encoder, base);
+        if (parallel) {
+          [encoder dispatchThreadgroups:MTLSizeMake(count, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        } else {
+          mtl_dispatch1DJob(encoder, pipeline, count);
+        }
         base += count;
       }
     }
   });
+}
+
+Tensor validate_offsets(const Tensor& offsets, const SegmentReduceParams& p) {
+  auto valid = at::empty({static_cast<int64_t>(p.outer)}, offsets.options().dtype(kInt));
+  if (p.outer != 0) {
+    auto* stream = getCurrentMPSStream();
+    dispatch_segment(
+        "segment_validate_" + scalarToMetalTypeString(offsets), p.outer, false, [&](auto encoder, auto base) {
+          mtl_setArgs(encoder, offsets, valid, p, stream->getErrorBuffer(), base);
+        });
+  }
   return valid;
 }
 
@@ -140,23 +152,8 @@ Tensor segment_reduce_mps(ReductionType reduction,
                                 scalarToMetalTypeString(data),
                                 scalarToMetalTypeString(offsets),
                                 reduction_name(reduction));
-  auto* stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto encoder = stream->commandEncoder();
-      auto pipeline = lib.getPipelineStateForFunc(name);
-      [encoder setComputePipelineState:pipeline];
-      for (uint64_t base = 0; base < static_cast<uint64_t>(output.numel());) {
-        const auto count = std::min<uint64_t>(output.numel() - base, std::numeric_limits<uint32_t>::max());
-        mtl_setArgs(encoder, data, output, offsets, valid, p, base);
-        if (parallel) {
-          [encoder dispatchThreadgroups:MTLSizeMake(count, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
-        } else {
-          mtl_dispatch1DJob(encoder, pipeline, count);
-        }
-        base += count;
-      }
-    }
+  dispatch_segment(name, output.numel(), parallel, [&](auto encoder, auto base) {
+    mtl_setArgs(encoder, data, output, offsets, valid, p, base);
   });
   return output;
 }
