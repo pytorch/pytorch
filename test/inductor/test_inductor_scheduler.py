@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+from types import SimpleNamespace
 from unittest import skipIf
 from unittest.mock import Mock, patch, PropertyMock
 
@@ -47,6 +48,10 @@ from torch._inductor.scheduler import (
     SubParentEpilogueCandidate,
     SubParentEpilogueGrouping,
     SubParentOutputGroup,
+)
+from torch._inductor.select_algorithm import (
+    tma_store_outputs_within_budget,
+    TritonTemplateKernel,
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import (
@@ -1118,6 +1123,160 @@ class TestScheduler(TestCase):
             self.assertFalse(
                 tile_fits_reduction_epilogue(tile, template, [mean, center, sq_sum])
             )
+
+    def test_tma_store_outputs_within_budget(self):
+        outputs = [("bf16", 32768), ("fp32_a", 65536), ("fp32_b", 65536)]
+        # The largest go first; an output that no longer fits doesn't stop a
+        # smaller one that does.
+        self.assertEqual(
+            list(tma_store_outputs_within_budget(outputs, 100000)), ["fp32_a", "bf16"]
+        )
+        self.assertEqual(
+            list(tma_store_outputs_within_budget(outputs, 200000)),
+            ["fp32_a", "fp32_b", "bf16"],
+        )
+        self.assertEqual(list(tma_store_outputs_within_budget(outputs, 32767)), [])
+        self.assertEqual(list(tma_store_outputs_within_budget(outputs, -1)), [])
+
+    def test_epilogue_tma_store_budget(self):
+        def budget(
+            meta,
+            num_stages,
+            dtypes=(torch.bfloat16, torch.bfloat16),
+            props=SimpleNamespace(shared_memory_per_block_optin=232448),
+        ):
+            kernel = Mock(
+                meta=meta,
+                num_stages=num_stages,
+                input_nodes=[Mock(get_dtype=Mock(return_value=d)) for d in dtypes],
+                prefix_args=0,
+                suffix_args=0,
+            )
+            kernel._staged_tile_elems = lambda: (
+                TritonTemplateKernel._staged_tile_elems(kernel)
+            )
+            kernel.output_node.get_device.return_value = torch.device("cuda", 0)
+            kernel.output_node.get_dtype.return_value = torch.bfloat16
+            with patch("torch.cuda.get_device_properties", return_value=props):
+                return TritonTemplateKernel._epilogue_tma_store_budget(kernel)
+
+        tile = {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64}
+        # 232448 - operand ring 3 * (128 * 64 + 64 * 128) * 2 - template output
+        # 128 * 128 * 2 - margin 128 * 128 + 16 KB: one fp32 tile fits.
+        self.assertEqual(budget(tile, 3), 68608)
+        # fp32 operands double the ring.
+        self.assertEqual(budget(tile, 3, (torch.float32, torch.float32)), 68608 - 98304)
+        # The ring is what Triton allocates: num_stages A and B tiles, so
+        # BLOCK_K=128 overflows the budget.
+        self.assertEqual(budget({**tile, "BLOCK_K": 128}, 3), -29696)
+        # A TMA store stages one 128 x (128 / EPILOGUE_SUBTILE) subtile.
+        for subtile in (2, 4):
+            subtiled = {**tile, "EPILOGUE_SUBTILE": subtile}
+            self.assertEqual(
+                TritonTemplateKernel._staged_tile_elems(Mock(meta=subtiled)),
+                128 * 128 // subtile,
+            )
+            self.assertEqual(
+                budget(subtiled, 3), 68608 + 128 * 128 * 2 * (subtile - 1) // subtile
+            )
+        # ROCm reports only shared_memory_per_block.
+        self.assertEqual(
+            budget(tile, 3, props=SimpleNamespace(shared_memory_per_block=65536)),
+            68608 - (232448 - 65536),
+        )
+        # Without a shared memory size or the tile sizes, nothing is budgeted.
+        self.assertLess(budget(tile, 3, props=SimpleNamespace()), 0)
+        self.assertEqual(budget({}, 3), 0)
+
+    def test_tile_tma_store_int32_coordinates(self):
+        """A post-reduction TMA store passes the tile origin as the descriptor's
+        int32 coordinates, also when a large output makes the kernel index in
+        int64, and falls back to tl.store when the output's shape exceeds int32."""
+        x, r, cm, cn = sympy.symbols("xtile r0_tile offs_cm offs_cn_i", integer=True)
+
+        def store_line(rows, index_dtype, view=None):
+            size = [*(view or [rows]), 128]
+            layout = ir.FixedLayout(
+                torch.device("cuda"),
+                torch.bfloat16,
+                size,
+                ir.FlexibleLayout.contiguous_strides(size),
+            )
+            kernel = Mock(
+                _tile_tma_store_ctx=((x, r), [cm, cn], (128, 128)),
+                tma_store_epilogue_outputs={"buf1"},
+                range_tree_nodes={},
+                prologue_cache={},
+                block_ptr_id=iter([1]),
+                index_dtype=index_dtype,
+            )
+            graph = Mock(sizevars=SizeVarAllocator())
+            graph.get_buffer.return_value.get_layout.return_value = layout
+            with V.set_graph_handler(graph):
+                if not TritonTemplateKernel._tile_tma_store(
+                    kernel, "buf1", 128 * x + r, "tmp0"
+                ):
+                    return None
+            return "\n".join(
+                buf.writeline.call_args.args[0].line
+                for buf in (kernel.prologue, kernel.stores)
+            )
+
+        self.assertIn(".store([offs_cm, offs_cn_i], ", store_line(4096, "tl.int32"))
+        self.assertIn(
+            ".store([(offs_cm).to(tl.int32), (offs_cn_i).to(tl.int32)], ",
+            store_line(2**24, "tl.int64"),
+        )
+        self.assertIsNone(store_line(2**31, "tl.int64"))
+        # A [B, S, N] view gets the same [M, N] descriptor.
+        self.assertIn(
+            "shape=[4096, 128], strides=[128, 1]",
+            store_line(4096, "tl.int32", view=[4, 1024]),
+        )
+
+    def test_full_tile_epilogue_outputs(self):
+        m, n = 64, 32
+        layouts = {
+            "full": ([m, n], [n, 1]),
+            "padded_rows": ([m, n], [n + 8, 1]),
+            "view_3d": ([4, 16, n], [16 * n, n, 1]),
+            "size_1": ([m, 1, n], [n, n, 1]),
+            "batched": ([2, m, n], [m * n, n, 1]),
+            "transposed": ([m, n], [1, m]),
+            "gap_between_batches": ([4, 16, n], [32 * n, n, 1]),
+            "other_last_dim": ([n, m], [m, 1]),
+            "row_result": ([m, 1], [1, 1]),
+        }
+        device = torch.device("cuda", 0)
+        buffers = {
+            name: Mock(
+                get_layout=Mock(
+                    return_value=ir.FixedLayout(device, torch.bfloat16, size, stride)
+                )
+            )
+            for name, (size, stride) in layouts.items()
+        }
+        kernel = Mock(meta={"BLOCK_M": 32, "BLOCK_N": 32})
+        kernel._staged_tile_elems = lambda: 32 * 32
+        kernel.output_node.get_size.return_value = [sympy.Integer(m), sympy.Integer(n)]
+        epilogue = Mock(get_buffer_names=Mock(return_value=list(layouts)))
+        epilogue.is_reduction.return_value = False
+        graph = Mock(get_buffer=lambda name: buffers[name])
+        graph.scheduler.can_buffer_be_removed_through_fusion.return_value = False
+        with (
+            V.set_graph_handler(graph),
+            patch("torch._inductor.select_algorithm.can_use_tma", return_value=True),
+        ):
+            outputs = TritonTemplateKernel._full_tile_epilogue_outputs(
+                kernel, Mock(), [epilogue]
+            )
+        self.assertEqual(
+            outputs,
+            [
+                (name, 32 * 32 * 2)
+                for name in ("full", "padded_rows", "view_3d", "size_1")
+            ],
+        )
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
