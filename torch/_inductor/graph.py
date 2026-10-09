@@ -117,6 +117,7 @@ from .utils import (
     get_sympy_Expr_dtype,
     GraphPartitionMap,
     is_same_tensor,
+    is_using_cudagraph_partition,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
@@ -422,6 +423,8 @@ class GraphLowering(torch.fx.Interpreter):
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+        graph_partition: bool | None = None,
+        use_cudagraph_partition: bool | None = None,
     ) -> None:
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
@@ -602,6 +605,19 @@ class GraphLowering(torch.fx.Interpreter):
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
         self.kernel_free_cudagraph: bool = False
+        # Whether codegen splits this graph into partition functions.
+        # Everything that reasons about partitioning must read this rather than
+        # the ambient config, which stays at what the user asked for.
+        self.graph_partition = (
+            config.graph_partition if graph_partition is None else graph_partition
+        )
+        # Partitioning decision this graph was lowered with. The ambient config
+        # can differ by the time post-compile inspects the result.
+        self.use_cudagraph_partition = (
+            is_using_cudagraph_partition()
+            if use_cudagraph_partition is None
+            else use_cudagraph_partition
+        )
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
@@ -1009,7 +1025,24 @@ class GraphLowering(torch.fx.Interpreter):
             is_inference=self.is_inference,
             is_backward=self.is_backward,
             name=self.qualify_name(subgraph_name),
+            graph_partition=False,
+            use_cudagraph_partition=False,
         )
+
+    @property
+    def partition_handles_cudagraph_unsafe_ops(self) -> bool:
+        """
+        Whether an op that cannot be CUDA Graph captured gets split into its own
+        partition rather than disabling capture for the whole graph.
+
+        Only consult this from a site that is already gated on cudagraphs being
+        requested. It folds in use_cudagraph_partition, which is False whenever
+        capture was not asked for, so from an ungated site it reads as "no
+        partitioning" for a graph that is in fact partitioned. Every current
+        caller either sits under `if cudagraphs:` or only writes
+        disable_cudagraphs_reason, which nothing reads unless capture is on.
+        """
+        return self.use_cudagraph_partition
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
         """
