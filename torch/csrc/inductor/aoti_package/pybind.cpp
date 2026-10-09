@@ -8,6 +8,8 @@
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
+#include <memory>
+
 namespace torch::inductor {
 
 class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
@@ -36,8 +38,14 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
     // Explicitly clear the passed-in Python list
     inputs.attr("clear")();
 
-    std::vector<at::Tensor> result_tensors = AOTIModelPackageLoader::boxed_run(
-        std::move(input_tensors), stream_handle);
+    // Only the execution may run without the GIL: the conversions above and
+    // below touch Python objects, so this binding cannot use a py::call_guard.
+    std::vector<at::Tensor> result_tensors;
+    {
+      py::gil_scoped_release no_gil;
+      result_tensors = AOTIModelPackageLoader::boxed_run(
+          std::move(input_tensors), stream_handle);
+    }
 
     py::list outputs;
     for (const auto& tensor : result_tensors) {
@@ -51,15 +59,25 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
 void initAOTIPackageBindings(PyObject* module) {
   auto rootModule = py::handle(module).cast<py::module>();
   auto m = rootModule.def_submodule("_aoti");
-  py::class_<AOTIModelPackageLoaderPybind>(m, "AOTIModelPackageLoader")
+  // Releases the GIL like the runner bindings; see aoti_runner/pybind.cpp.
+  py::class_<AOTIModelPackageLoaderPybind>(
+      m, "AOTIModelPackageLoader", py::release_gil_before_calling_cpp_dtor())
       .def(
-          py::init<
-              const std::string&,
-              const std::string&,
-              const bool,
-              const size_t,
-              const c10::DeviceIndex,
-              const bool>(),
+          py::init([](const std::string& model_package_path,
+                      const std::string& model_name,
+                      const bool run_single_threaded,
+                      const size_t num_runners,
+                      const c10::DeviceIndex device_index,
+                      const bool use_stream_affinity) {
+            py::gil_scoped_release no_gil;
+            return std::make_unique<AOTIModelPackageLoaderPybind>(
+                model_package_path,
+                model_name,
+                run_single_threaded,
+                num_runners,
+                device_index,
+                use_stream_affinity);
+          }),
           py::arg("model_package_path"),
           py::arg("model_name") = "model",
           py::arg("run_single_threaded") = false,
@@ -71,7 +89,8 @@ void initAOTIPackageBindings(PyObject* module) {
           "run",
           &AOTIModelPackageLoaderPybind::run,
           py::arg("inputs"),
-          py::arg("stream_handle") = nullptr)
+          py::arg("stream_handle") = nullptr,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "boxed_run",
           &AOTIModelPackageLoaderPybind::boxed_run,

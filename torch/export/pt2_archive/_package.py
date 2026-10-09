@@ -1105,7 +1105,8 @@ def load_pt2(
 
         run_single_threaded (bool): Whether the model should be run without
             thread synchronization logic. This is useful to avoid conflicts with
-            CUDAGraphs.
+            CUDAGraphs. Callers that share the model across threads must then
+            serialize calls to it themselves.
 
         device_index (int): The index of the device to which the PT2 package is
             to be loaded. By default, `device_index=-1` is used, which corresponds
