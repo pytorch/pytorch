@@ -138,10 +138,12 @@ def remove_no_ops(
                 replacement_val, torch.Tensor
             ):
                 return False
-            # A floating-point +0 can change the sign of -0. Complex
-            # arithmetic can change the sign of an imaginary zero as well.
+            # Floating-point addition by +0 and subtraction by -0 can change
+            # the sign of zero. Complex arithmetic can change the sign of an
+            # imaginary zero as well.
             if node_val.dtype.is_complex or (
-                node.target == aten.add.Tensor and node_val.dtype.is_floating_point
+                node.target in (aten.add.Tensor, aten.sub.Tensor)
+                and node_val.dtype.is_floating_point
             ):
                 return False
             if (

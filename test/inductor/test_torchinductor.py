@@ -23383,6 +23383,21 @@ class NoOpFoldingTests(InductorTestCase):
         )
         self.assertEqual(torch.signbit(gm(x)), torch.signbit(fn(x)))
 
+    def test_sub_negative_zero_preserves_signed_zero(self):
+        def fn(x):
+            return torch.sin(x - torch.full_like(x, -0.0))
+
+        x = torch.tensor([-0.0])
+        gm = make_fx(fn, tracing_mode="real")(x)
+        zero = gm.graph.find_nodes(op="call_function", target=aten.full_like.default)
+        self.assertEqual(len(zero), 1)
+        remove_no_ops(gm, OrderedSet(zero), OrderedSet())
+        gm.recompile()
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.sub.Tensor)), 1
+        )
+        self.assertEqual(torch.signbit(gm(x)), torch.signbit(fn(x)))
+
     @parametrize(
         "op_name",
         ["add", "sub", "mul", "div"],
@@ -23399,10 +23414,10 @@ class NoOpFoldingTests(InductorTestCase):
         gm = make_fx(fn, tracing_mode="real")(x)
         remove_no_ops(gm, OrderedSet(), OrderedSet())
         gm.recompile()
-        # Floating-point addition by zero changes negative zero to positive zero.
+        # Floating-point addition/subtraction by zero can change its sign.
         self.assertEqual(
             len(gm.graph.find_nodes(op="call_function", target=op)),
-            1 if op_name == "add" else 0,
+            1 if op_name in ("add", "sub") else 0,
         )
         self.assertEqual(gm(x), fn(x))
 
