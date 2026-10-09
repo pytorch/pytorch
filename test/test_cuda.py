@@ -3368,6 +3368,307 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_lazy_clone_materialize(self):
+        # A lazy clone made during capture can be read in the graph: replays
+        # read the current contents of its source.
+        static_in = torch.full((1024,), float("nan"), device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            y = static_in._lazy_clone()
+            y.const_data_ptr()
+            out = y * 2
+        # The graph's temporaries are dropped after capture, so that refilling
+        # its input doesn't need to copy it.
+        del y
+        for _ in range(2):
+            static_in.copy_(torch.randn(1024, device="cuda"))
+            g.replay()
+            self.assertEqual(out, static_in * 2)
+
+        # But materializing it by copying is an error during capture.
+        for materialize in (lambda t: t.data_ptr(), lambda t: t.add_(0)):
+            static_in = torch.randn(1024, device="cuda")
+            g = torch.cuda.CUDAGraph()
+            with self.assertRaisesRegex(
+                RuntimeError, "during graph capture: it shares memory"
+            ):
+                with torch.cuda.graph(g):
+                    y = static_in._lazy_clone()
+                    materialize(y)
+            self.assertTrue(torch._C._is_cow_tensor(y))
+            del y
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_lazy_clone_side_stream_warmup(self):
+        static_input = torch.randn(1024, device="cuda")
+
+        def model(x):
+            y = x._lazy_clone()
+            y.const_data_ptr()
+            return y * 2
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            for _ in range(3):
+                model(static_input)
+        torch.cuda.current_stream().wait_stream(s)
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out = model(static_input)
+
+        for _ in range(2):
+            data = torch.randn(1024, device="cuda")
+            static_input.copy_(data)
+            g.replay()
+            self.assertEqual(out, data * 2)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
+    )
+    def test_graph_lazy_clone_mixed_capture_states(self):
+        # A tensor lazily cloned both during and outside of a capture can be
+        # written outside of capture (on its allocation stream).
+        x = torch.randn(1024, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            y = x._lazy_clone()
+            x * 2
+        del y
+        y2 = x._lazy_clone()
+        x_orig = x.clone()
+        x.add_(1)
+        self.assertEqual(y2, x_orig)
+        self.assertEqual(x, x_orig + 1)
+
+        # While a lazy clone made before a capture is alive, lazily cloning
+        # the same tensor during the capture clones eagerly (in the graph).
+        x = torch.randn(1024, device="cuda")
+        y = x._lazy_clone()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            y2 = x._lazy_clone()
+            x * 2
+        self.assertFalse(torch._C._is_cow_tensor(y2))
+        y.add_(1)
+        self.assertEqual(y, x + 1)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
+    )
+    def test_graph_lazy_clone_private_pool(self):
+        # Replays rewrite a graph's outputs (in its private pool) without
+        # materializing, so lazily cloning them after the capture clones
+        # eagerly, even on the stream they were allocated on.
+        s = torch.cuda.Stream()
+        for use_side_stream in (False, True):
+            with self.subTest(use_side_stream=use_side_stream):
+                static_in = torch.randn(1024, device="cuda")
+                g = torch.cuda.CUDAGraph()
+                if use_side_stream:
+                    s.wait_stream(torch.cuda.current_stream())
+                    with torch.cuda.graph(g, stream=s):
+                        out = static_in * 2
+                    ctx = torch.cuda.stream(s)
+                else:
+                    with torch.cuda.graph(g):
+                        out = static_in * 2
+                    ctx = contextlib.nullcontext()
+                with ctx:
+                    g.replay()
+                    snap = out._lazy_clone()
+                    self.assertFalse(torch._C._is_cow_tensor(snap))
+                    snap_orig = snap.clone()
+                    static_in.copy_(torch.randn(1024, device="cuda"))
+                    g.replay()
+                torch.cuda.synchronize()
+                self.assertEqual(out, static_in * 2)
+                self.assertEqual(snap, snap_orig)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_lazy_clone_materialize_errors(self):
+        # Capture on the stream the tensors were made on, so that only the
+        # capture, not the stream, differs.
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            x = torch.randn(1024, device="cuda")
+
+            # Copying a lazy clone made before the capture, or the tensor it
+            # was cloned from, during the capture.
+            y = x._lazy_clone()
+            for t in (y, x):
+                g = torch.cuda.CUDAGraph()
+                with self.assertRaisesRegex(
+                    RuntimeError, "during graph capture: it shares memory"
+                ):
+                    with torch.cuda.graph(g, stream=s):
+                        t.add_(1)
+                self.assertTrue(torch._C._is_cow_tensor(t))
+            del y
+
+            # Copying a graph input that was lazily cloned during the capture
+            # (which would move it to new memory inside of the graph).
+            z = torch.randn(1024, device="cuda")
+            g = torch.cuda.CUDAGraph()
+            with self.assertRaisesRegex(
+                RuntimeError, "during graph capture: it shares memory"
+            ):
+                with torch.cuda.graph(g, stream=s):
+                    w = z._lazy_clone()
+                    z.add_(1)
+            self.assertTrue(torch._C._is_cow_tensor(z))
+            del w
+
+            # Copying a lazy clone made during the capture after it.
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g, stream=s):
+                y = x._lazy_clone()
+            with self.assertRaisesRegex(
+                RuntimeError, "lazy copy .* made during a graph capture"
+            ):
+                y.add_(1)
+            self.assertTrue(torch._C._is_cow_tensor(y))
+        torch.cuda.current_stream().wait_stream(s)
+
+    def test_lazy_clone_concurrent(self):
+        # Lazily cloning is logically a read, so it can happen concurrently on
+        # the same tensor, including while it is the only reference to its
+        # data (which moves the data to the current stream).
+        x = torch.randn(1024, device="cuda")
+        x._lazy_clone()
+        expected = x.clone()
+
+        def clone_repeatedly():
+            for _ in range(1000):
+                y = x._lazy_clone()
+                del y
+
+        threads = [threading.Thread(target=clone_repeatedly) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        # x is the only reference again, so it can be written in place.
+        self.assertTrue(torch._C._is_cow_tensor(x))
+        x.add_(1)
+        self.assertFalse(torch._C._is_cow_tensor(x))
+        self.assertEqual(x, expected + 1)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
+    )
+    def test_lazy_clone_cross_stream(self):
+        s = torch.cuda.Stream()
+
+        # Lazily cloning on a stream other than the one the memory was
+        # allocated on (e.g., when warming up for CUDA graph capture on a side
+        # stream) clones eagerly.
+        x = torch.randn(1024, device="cuda")
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            y = x._lazy_clone()
+            self.assertFalse(torch._C._is_cow_tensor(x))
+            self.assertFalse(torch._C._is_cow_tensor(y))
+            y.add_(1)
+        torch.cuda.current_stream().wait_stream(s)
+        self.assertEqual(y, x + 1)
+
+        # Materializing a lazy clone on a stream other than the one it was
+        # lazily cloned on.
+        x = torch.randn(1024, device="cuda")
+        y = x._lazy_clone()
+        with torch.cuda.stream(s):
+            with self.assertRaisesRegex(RuntimeError, "lazy copy .* made on"):
+                y.add_(1)
+        self.assertTrue(torch._C._is_cow_tensor(y))
+        # Same for the tensor that was lazily cloned from.
+        with torch.cuda.stream(s):
+            with self.assertRaisesRegex(RuntimeError, "lazy copy .* made on"):
+                x.add_(1)
+        self.assertTrue(torch._C._is_cow_tensor(x))
+
+        # The last reference stealing the data on another stream waits for
+        # pending copies of it. Delay the copy to make sure it is still pending.
+        x = torch.randn(1024, device="cuda")
+        x_orig = x.clone()
+        y = x._lazy_clone()
+        s.wait_stream(torch.cuda.current_stream())
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+        y.add_(1)
+        # Lazily cloning x again while it is the only reference (and dropping
+        # the clone) must not lose track of the pending copy.
+        tmp = x._lazy_clone()
+        del tmp
+        with torch.cuda.stream(s):
+            x.add_(1)
+        torch.cuda.current_stream().wait_stream(s)
+        self.assertFalse(torch._C._is_cow_tensor(x))
+        self.assertEqual(y, x_orig + 1)
+        self.assertEqual(x, x_orig + 1)
+
+        # Without a pending copy, the last reference can be written on any
+        # stream.
+        z = torch.randn(1024, device="cuda")
+        w = z._lazy_clone()
+        del w
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            z.add_(1)
+        torch.cuda.current_stream().wait_stream(s)
+        self.assertFalse(torch._C._is_cow_tensor(z))
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
+    )
+    def test_lazy_clone_steal_waits_for_reads(self):
+        # The last reference stealing the data on a third stream must wait
+        # for reads of the shared memory on another stream that were ordered
+        # before the stream the memory belongs to, like a reallocation would.
+        a = torch.cuda.current_stream()
+        b = torch.cuda.Stream()
+        c = torch.cuda.Stream()
+        for lazy_read in (False, True):
+            with self.subTest(lazy_read=lazy_read):
+                x = torch.randn(1024 * 1024, device="cuda")
+                x_orig = x.clone()
+                y = x._lazy_clone()
+                b.wait_stream(a)
+                c.wait_stream(a)
+                with torch.cuda.stream(b):
+                    # Delay the read to make sure it is still pending.
+                    torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+                    if lazy_read:
+                        # Clones eagerly, reading the shared memory on b.
+                        r = x._lazy_clone()
+                        self.assertFalse(torch._C._is_cow_tensor(r))
+                    else:
+                        r = x * 2
+                # Orders the read before a, as needed before freeing x.
+                a.wait_stream(b)
+                del x
+                with torch.cuda.stream(c):
+                    # y is the last reference: it steals the data.
+                    y.add_(1)
+                self.assertFalse(torch._C._is_cow_tensor(y))
+                torch.cuda.synchronize()
+                self.assertEqual(r, x_orig if lazy_read else x_orig * 2)
+                self.assertEqual(y, x_orig + 1)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     @unittest.skipIf(
         not torch.cuda.get_arch_list(),
         "torch was built without CUDA kernels (GPU sections stripped)",

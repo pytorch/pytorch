@@ -5,10 +5,12 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
 #include <c10/core/alignment.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
@@ -220,10 +222,30 @@ struct C10_API Allocator {
   // Derived class implementation can simply call `default_copy_data`
   // to use `std::memcpy`.
   //
+  // On CUDA, the copy must be enqueued on the current stream (it may be
+  // asynchronous with respect to the host), so that it is ordered like any
+  // other operation on that stream, including under CUDA graph capture. Copy-
+  // on-write materialization relies on this (see c10/core/impl/README-cow.md).
+  //
   // Requires: src and dest were allocated by this allocator
   // Requires: src and dest both have length >= count
   virtual void copy_data(void* dest, const void* src, std::size_t count)
       const = 0;
+
+  // Returns whether the allocation starting at `ptr` is tied to `stream`, in
+  // the sense that its memory will only be reused for later allocations on
+  // `stream`, so that work already enqueued on `stream` is ordered before any
+  // reuse. Returns false if the memory is tied to another stream, or may be
+  // reused or written independently of the stream it was allocated on (e.g.,
+  // memory in a CUDA graph's private pool, which graph replays write).
+  // Returns nullopt only if this is unknown: e.g., `ptr` was not allocated by
+  // this allocator, or this allocator does not track the streams of its
+  // allocations.
+  virtual std::optional<bool> was_allocated_on_stream(
+      const void* /*ptr*/,
+      const Stream& /*stream*/) const {
+    return std::nullopt;
+  }
 
  protected:
   // Uses `std::memcpy` to copy data.
