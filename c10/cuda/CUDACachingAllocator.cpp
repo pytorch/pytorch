@@ -5508,11 +5508,17 @@ class NativeCachingAllocator : public CUDAAllocator {
     Block* block = ptr
         ? const_cast<NativeCachingAllocator*>(this)->get_allocated_block(ptr)
         : nullptr;
-    // Blocks in private pools (e.g., CUDA graph pools) are not reused by
-    // ordinary allocations on their stream, so their stream says nothing about
-    // when they may be reused.
-    if (block == nullptr || block->pool->owner_PrivatePool != nullptr) {
+    if (block == nullptr) {
       return std::nullopt;
+    }
+    // Memory in private pools (e.g., CUDA graph pools) isn't tied to any
+    // stream: it is reused and written according to the graphs that use the
+    // pool, independently of the stream it was allocated on. E.g., every
+    // replay of a graph rewrites its outputs through the addresses baked into
+    // it, without going through copy-on-write materialization, so a lazy
+    // clone of a graph output must be an eager clone.
+    if (block->pool->owner_PrivatePool != nullptr) {
+      return false;
     }
     return block->stream == cuda::CUDAStream(stream).stream();
   }

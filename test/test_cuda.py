@@ -3462,6 +3462,41 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
+    )
+    def test_graph_lazy_clone_private_pool(self):
+        # Replays rewrite a graph's outputs (in its private pool) without
+        # materializing, so lazily cloning them after the capture clones
+        # eagerly, even on the stream they were allocated on.
+        s = torch.cuda.Stream()
+        for use_side_stream in (False, True):
+            with self.subTest(use_side_stream=use_side_stream):
+                static_in = torch.randn(1024, device="cuda")
+                g = torch.cuda.CUDAGraph()
+                if use_side_stream:
+                    s.wait_stream(torch.cuda.current_stream())
+                    with torch.cuda.graph(g, stream=s):
+                        out = static_in * 2
+                    ctx = torch.cuda.stream(s)
+                else:
+                    with torch.cuda.graph(g):
+                        out = static_in * 2
+                    ctx = contextlib.nullcontext()
+                with ctx:
+                    g.replay()
+                    snap = out._lazy_clone()
+                    self.assertFalse(torch._C._is_cow_tensor(snap))
+                    snap_orig = snap.clone()
+                    static_in.copy_(torch.randn(1024, device="cuda"))
+                    g.replay()
+                torch.cuda.synchronize()
+                self.assertEqual(out, static_in * 2)
+                self.assertEqual(snap, snap_orig)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_lazy_clone_materialize_errors(self):
         # Capture on the stream the tensors were made on, so that only the
         # capture, not the stream, differs.
@@ -3593,6 +3628,43 @@ torch.cuda.synchronize()
             z.add_(1)
         torch.cuda.current_stream().wait_stream(s)
         self.assertFalse(torch._C._is_cow_tensor(z))
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "requires allocation streams from the allocator"
+    )
+    def test_lazy_clone_steal_waits_for_reads(self):
+        # The last reference stealing the data on a third stream must wait
+        # for reads of the shared memory on another stream that were ordered
+        # before the stream the memory belongs to, like a reallocation would.
+        a = torch.cuda.current_stream()
+        b = torch.cuda.Stream()
+        c = torch.cuda.Stream()
+        for lazy_read in (False, True):
+            with self.subTest(lazy_read=lazy_read):
+                x = torch.randn(1024 * 1024, device="cuda")
+                x_orig = x.clone()
+                y = x._lazy_clone()
+                b.wait_stream(a)
+                c.wait_stream(a)
+                with torch.cuda.stream(b):
+                    # Delay the read to make sure it is still pending.
+                    torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+                    if lazy_read:
+                        # Clones eagerly, reading the shared memory on b.
+                        r = x._lazy_clone()
+                        self.assertFalse(torch._C._is_cow_tensor(r))
+                    else:
+                        r = x * 2
+                # Orders the read before a, as needed before freeing x.
+                a.wait_stream(b)
+                del x
+                with torch.cuda.stream(c):
+                    # y is the last reference: it steals the data.
+                    y.add_(1)
+                self.assertFalse(torch._C._is_cow_tensor(y))
+                torch.cuda.synchronize()
+                self.assertEqual(r, x_orig if lazy_read else x_orig * 2)
+                self.assertEqual(y, x_orig + 1)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

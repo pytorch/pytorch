@@ -100,17 +100,30 @@ belongs to (e.g., a copy made for a communication stream, or when warming
 up for CUDA graph capture on a side stream), its uses on that stream would
 race with reuse of the allocation once the original is freed, which an
 eager clone wouldn't. So outside of capture, lazily cloning on such a
-stream clones eagerly instead. All references to some data share one stream
+stream clones eagerly instead. The same goes for memory in a CUDA graph's
+private pool (e.g., a graph output), which isn't tied to any stream:
+replays of the graph rewrite it through baked-in addresses, bypassing
+materialization, so the allocator reports it as allocated on no stream.
+All references to some data share one stream
 (and capture state, see below), which is recorded on their shared context:
 lazily cloning when they don't match clones eagerly too, unless the storage
 being cloned is the only reference left, in which case its context is moved
-to the current stream (after waiting for pending copies).
+to the current stream (which first waits for the previous stream, outside
+of capture).
 
-When the last reference steals the data instead of copying it, it writes
-to the data on the current stream, which has to come after copies of the
-data that may still be pending on the shared stream. Each copy records an
-event on that stream (superseding the previous one), and a stealing stream
-other than that one waits for it on the device.
+When the last reference steals the data instead of copying it, it reuses
+memory that belongs to the shared stream on the current stream, which has
+to come after any use of the data by the other references that may still
+be pending (e.g., a kernel reading the original on a side stream, or a copy
+made by materializing). As for any allocation, the user orders those uses
+before the shared stream before freeing the other references, so outside
+of capture, a stealing stream other than the shared stream waits for the
+work enqueued on it so far, on the device.
+
+Neither of these waits is done during capture: a capture can't wait for
+eager work, and doesn't need to, since work captured into a graph (e.g., a
+steal during capture) only runs when the graph is replayed, and the user
+already orders replays after the eager work they depend on.
 
 CUDA graph capture relaxes the invariant above for one pattern: a graph
 input (or a parameter), whose memory was allocated before the capture on
@@ -132,14 +145,27 @@ for a copy on every replay, so data shared by lazy clones made during a
 capture can't be materialized by copying after the capture either. Stealing doesn't move the data, so it is allowed during and
 after capture (e.g., when the user refills a graph input).
 
-Two hazards are not checked, and are the user's responsibility:
+Some hazards are not checked, and are the user's responsibility:
 
 - During capture, a lazy clone counts as a use of its source's memory for
   as long as it is alive (it reads that memory). Anything that releases
   that memory, e.g., an external event recorded mid-graph that lets another
   stream overwrite a graph input, must come after the worst-case point where
   the lazy clone may still be used.
-- Materialization moves a storage to a new allocation. If a CUDA graph (or
-  anything else that caches raw pointers) already captured its address, it
-  keeps using the old memory: e.g., writing a lazily cloned tensor after a
-  graph that reads it was captured is silently not seen by the graph.
+- Materialization moves a storage to a new allocation. Anything that
+  already cached its address (e.g., a captured CUDA graph, or a buffer
+  registered with NCCL or symmetric memory) keeps using the old memory,
+  which stays shared with the other lazy clones: e.g., writing a lazily
+  cloned tensor after a graph that reads it was captured is silently not
+  seen by the graph.
+- Writes that bypass materialization aren't seen by copy-on-write, and
+  change every lazy clone sharing the memory: CUDA graph replays (memory in
+  a graph's private pool is cloned eagerly for this reason, but not, e.g.,
+  a graph input that the graph writes in place and that was lazily cloned
+  after the capture), communication into buffers registered with NCCL or
+  symmetric memory, and kernels writing through `const_data_ptr()`.
+- Allocators that can't report the stream of an allocation (cudaMallocAsync,
+  pluggable allocators, and ROCm's wrapper that masquerades as CUDA) can't
+  tell when a lazy clone is made on another stream. The stream shared by the
+  references is then the stream of the first lazy clone, which may differ
+  from the real allocation stream, on which freed memory is reused.

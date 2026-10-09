@@ -168,11 +168,12 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
   // stream it was allocated on, so its uses on another stream would race with
   // reuse of that memory once the original is freed. So all references to
   // some data share one stream (and capture state, see materialize_cow), and
-  // we clone eagerly instead when that's not the current one. (Except during
-  // graph capture, where keeping the memory of graph inputs alive is the
-  // user's responsibility anyway, and cloning eagerly would add a copy to
-  // every replay of the graph.) See "Streams and CUDA graphs" in
-  // README-cow.md.
+  // we clone eagerly instead when that's not the current one, or when the
+  // memory isn't tied to any stream (e.g., a CUDA graph's private pool, which
+  // replays write without materializing). (Except during graph capture, where
+  // keeping the memory of graph inputs alive is the user's responsibility
+  // anyway, and cloning eagerly would add a copy to every replay of the
+  // graph.) See "Streams and CUDA graphs" in README-cow.md.
   const std::optional<c10::Stream> stream = current_stream(data_ptr.device());
   const bool capturing = stream.has_value() && stream->is_capturing();
   if (stream.has_value() && !capturing && storage.allocator() != nullptr) {
@@ -244,8 +245,8 @@ void materialize_cow(StorageImpl* storage) {
   // if this is the last reference to it. See "Streams and CUDA graphs" in
   // README-cow.md for why the checks below are needed.
   //
-  // Everything that can fail (the checks, allocating, copying, recording and
-  // waiting for events) happens before this reference gives up its count on
+  // Everything that can fail (the checks, allocating, copying, waiting for
+  // the shared stream) happens before this reference gives up its count on
   // the context, so that the storage remains a valid copy-on-write storage if
   // it does. While we hold the count, the data can't be stolen or freed by
   // another reference.
@@ -261,12 +262,16 @@ void materialize_cow(StorageImpl* storage) {
   const bool capturing = stream.has_value() && stream->is_capturing();
   std::optional<DataPtr> copy;
   if (ctx->is_unique()) {
-    // Stealing the data means writing to it on the current stream, which
-    // must be ordered after any copies of it that may still be pending.
-    // (During capture, we can't wait for eager work, but torch.cuda.graph
-    // synchronizes before capturing.)
+    // Stealing the data reuses memory that belongs to the shared stream on
+    // the current stream. The user orders the uses of the other references
+    // (including copies, which are made on the shared stream) before the
+    // shared stream before freeing them, as for any allocation, so the
+    // current stream waits for the shared stream. (Not during capture: a
+    // capture can't wait for eager work, and a steal captured into a graph
+    // only runs when the graph is replayed, which the user already orders
+    // after the eager work it depends on.)
     if (stream.has_value() && !capturing) {
-      ctx->wait_for_copies(*stream);
+      ctx->fence(*stream);
     }
   } else {
     if (stream.has_value()) {
@@ -277,9 +282,6 @@ void materialize_cow(StorageImpl* storage) {
       device_guard.reset_device(device);
     }
     copy = storage->allocator()->clone(data_ptr.get(), storage->nbytes());
-    if (stream.has_value()) {
-      ctx->record_copy_event();
-    }
   }
 
   // Nothing below can fail.

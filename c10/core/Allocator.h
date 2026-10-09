@@ -235,9 +235,12 @@ struct C10_API Allocator {
   // Returns whether the allocation starting at `ptr` is tied to `stream`, in
   // the sense that its memory will only be reused for later allocations on
   // `stream`, so that work already enqueued on `stream` is ordered before any
-  // reuse. Returns nullopt if this is unknown: e.g., `ptr` was not allocated
-  // by this allocator, this allocator does not tie allocations to streams, or
-  // the memory may be reused independently of the stream it was allocated on.
+  // reuse. Returns false if the memory is tied to another stream, or may be
+  // reused or written independently of the stream it was allocated on (e.g.,
+  // memory in a CUDA graph's private pool, which graph replays write).
+  // Returns nullopt only if this is unknown: e.g., `ptr` was not allocated by
+  // this allocator, or this allocator does not track the streams of its
+  // allocations.
   virtual std::optional<bool> was_allocated_on_stream(
       const void* /*ptr*/,
       const Stream& /*stream*/) const {

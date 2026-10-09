@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/Event.h>
 #include <c10/core/Stream.h>
 #include <c10/macros/Export.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -64,7 +63,8 @@ class C10_API COWDeleterContext {
 
   // Called through an existing reference when lazily cloning the data on
   // `stream`. If this is the only reference, moves the context to `stream`
-  // and `captured` (keeping pending copies ordered before later steals);
+  // and `captured` (outside of capture, `stream` first waits for the work
+  // enqueued on the previous stream, so that later fences cover it);
   // otherwise, they must match the context's. Then increments the refcount
   // and returns true, or returns false (without changing anything) if the
   // data must be cloned eagerly instead. Safe to call concurrently through
@@ -81,14 +81,11 @@ class C10_API COWDeleterContext {
     return captured_;
   }
 
-  // Records an event after a copy of the data was enqueued on stream().
-  // Must be called before the reference that made the copy is decremented.
-  void record_copy_event();
-
-  // Makes `stream` wait (on the device) for the copies recorded with
-  // record_copy_event(), if they were enqueued on another stream. Must be
-  // called through the only remaining reference.
-  void wait_for_copies(c10::Stream stream);
+  // Makes `stream` wait (on the device) for all work enqueued on stream() so
+  // far, if it is another stream (and isn't being captured into a graph).
+  // Must be called through the only remaining reference, before it steals
+  // the data on `stream`.
+  void fence(c10::Stream stream);
 
  private:
   // The destructor is hidden, this should only ever be used within
@@ -103,10 +100,6 @@ class C10_API COWDeleterContext {
   std::mutex stream_mutex_;
   std::optional<c10::Stream> stream_;
   bool captured_ = false;
-  // An event recorded after the last copy of the data, and the stream it was
-  // recorded on.
-  std::optional<c10::Event> copy_event_;
-  std::optional<c10::Stream> copy_event_stream_;
 };
 
 // `cow_deleter` is used as the `ctx_deleter` for DataPtr to implement a COW
