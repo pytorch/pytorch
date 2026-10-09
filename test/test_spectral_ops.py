@@ -159,7 +159,6 @@ class TestFFT(TestCase):
             )
         ]
 
-
         for iargs in test_args:
             args = list(iargs)
             input = args[0]
