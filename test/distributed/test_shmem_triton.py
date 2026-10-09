@@ -507,6 +507,8 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=torch.int64).fill_(0)
 
         peer = 1 - rank
+        # NVSHMEM_SIGNAL_ADD = 5  (nvshmem_common.h)
+        # ROCSHMEM_SIGNAL_ADD = 1 (rocshmem_common.hpp enum ROCSHMEM_SIGNAL_OPS)
         NVSHMEM_SIGNAL_ADD = int(_ShmemSignalOp.ADD)
         SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
         NVSHMEM_CMP_EQ = int(_ShmemCompareOp.EQ)

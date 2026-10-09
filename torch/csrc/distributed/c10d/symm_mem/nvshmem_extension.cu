@@ -90,6 +90,7 @@ std::array<int64_t, 6> shmem_compare_op_values() {
       static_cast<int64_t>(NVSHMEM_CMP_LE)};
 }
 
+
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 void nvshmemx_cumodule_init(uintptr_t module) {
@@ -1211,6 +1212,10 @@ void multi_root_tile_reduce(
         stream);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
+}
+
+void release_nvshmem_team_pool(const std::string& group_name) {
+  TeamManager::release_group_if_initialized(group_name);
 }
 
 } // namespace c10d::nvshmem_extension

@@ -9,10 +9,10 @@ _IS_FBCODE = os.environ.get("IS_FBCODE", "0") == "1"
 # The header location is src/rccl.h versus rccl/rccl.h, respectively.
 _RCCL_HEADER = "<rccl.h>" if _IS_FBCODE else "<rccl/rccl.h>"
 
-# List of math functions that should be replaced inside device code only.
+# std:: math functions rewritten to their global-namespace versions. The rewrite applies to
+# whole .cu/.cuh files, host code included, so std::max/std::min are deliberately absent:
+# on the host HIP only defines ::max(int, int)/::min(int, int), silently narrowing 64-bit arguments.
 MATH_TRANSPILATIONS = collections.OrderedDict([
-    ("std::max", ("::max")),
-    ("std::min", ("::min")),
     ("std::ceil", ("::ceil")),
     ("std::floor", ("::floor")),
     ("std::exp", ("::exp")),
@@ -3435,7 +3435,8 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cudnnTensorDescriptor_t ", "miopenTensorDescriptor_t "),
     ("CUDNN_ENFORCE", "MIOPEN_ENFORCE"),
     ("CUDNN_CHECK", "MIOPEN_CHECK"),
-    # NVSHMEM → rocSHMEM mappings (only symbols used in hipified files).
+    # NVSHMEM → rocSHMEM mappings (only symbols used in hipified files:
+    # NVSHMEMSymmetricMemory.cpp and nvshmem_team_manager.hpp).
     ("NVSHMEM_TEAM_INVALID", "rocshmem::ROCSHMEM_TEAM_INVALID"),
     ("NVSHMEM_TEAM_WORLD", "rocshmem::ROCSHMEM_TEAM_WORLD"),
     ("NVSHMEMX_INIT_WITH_UNIQUEID", "rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID"),

@@ -23,6 +23,9 @@ TORCH_API bool is_nvshmem_available();
 TORCH_API std::array<int64_t, 2> shmem_signal_op_values();
 TORCH_API std::array<int64_t, 6> shmem_compare_op_values();
 
+// Release the NVSHMEM team pool associated with a process group.
+TORCH_API void release_nvshmem_team_pool(const std::string& group_name);
+
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 TORCH_API void nvshmemx_cumodule_init(uintptr_t module);
