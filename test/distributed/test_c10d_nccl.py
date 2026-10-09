@@ -1110,6 +1110,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         if self.rank == 0:
             # Ideally we want to sleep for a very long time, but this is not
             # feasible in unit test. So this is only a very tiny case.
+            # Hold the first allreduce until rank 1 has issued both allreduces:
+            # w1 completing earlier releases its extension before w2 exists.
+            store.wait(["extend_timeout_issued"])
             time.sleep(5)
             pg.allreduce(torch.rand(10).cuda(self.rank))
             time.sleep(5)
@@ -1123,6 +1126,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             )
             w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
             w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
+            store.set("extend_timeout_issued", "1")
             self.assertEqual(w1.timeout, timedelta(seconds=13))
             self.assertEqual(w2.timeout, timedelta(seconds=13))
             w1.wait()
