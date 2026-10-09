@@ -34,7 +34,7 @@ from torch.utils._sympy.symbol import (
 )
 
 from ..._dynamo.utils import counters
-from .. import config, ir, scheduler
+from .. import config, dependencies, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..autows_utils import meta_ws_enabled
 from ..codecache import code_hash, PyCodeCache
@@ -548,6 +548,23 @@ def is_row_major_read(dep: MemoryDep, numel: sympy.Expr) -> bool:
     return dep.is_contiguous() and dep.get_numel() == numel
 
 
+def linear_loop_body(
+    node: scheduler.SchedulerNode,
+) -> tuple[dependencies._RecordLoadStoreInner, sympy.Expr, sympy.Expr]:
+    """node's unnormalized loads and stores, and its iteration and reduction
+    indices, each linearized over its ranges."""
+    sizes = node.get_ranges()
+    args, var_ranges = dependencies.index_vars_squeeze(*sizes)
+    x, r = (
+        sympy_dot(arg, ir.FlexibleLayout.contiguous_strides(size))
+        for arg, size in zip(args, sizes)
+    )
+    body = dependencies.extract_loop_body_with_args(
+        node._body, [list(arg) for arg in args], var_ranges
+    )
+    return body, x, r
+
+
 def template_reduction_axis(
     node: scheduler.BaseSchedulerNode,
     template: ir.Buffer,
@@ -559,7 +576,8 @@ def template_reduction_axis(
     just its batch dim is BATCH_AXIS, a reduction over just its M dim is
     BATCH_COLUMN_AXIS, and one over its M and N dims is BATCH_MATRIX_AXIS.
     produced are the template and epilogue buffers, which
-    node must read in place. See
+    node must read in place, except that a row reduction may read a per-row
+    result of the epilogue at its row. See
     TritonTemplateKernel.codegen_tile_reduction_epilogue."""
     m, n = template_output_matrix(template)
 
@@ -579,8 +597,54 @@ def template_reduction_axis(
             and dep.index == sympy_dot((1, *(n * s for s in strides)), dep.var_names)
         )
 
-    if node.group[1] == (m, n) and reads(
-        node, functools.partial(is_row_major_read, numel=m * n)
+    # Whether node reads every produced buffer at its (row, col), or a row stat
+    # at its row. Indices are unnormalized, since normalized ones can't tell a
+    # row index from a column index when the output is square.
+    def reads_row_stats(node, at_rows=False):
+        body, x, r = linear_loop_body(node)
+        renames = node.mutation_renames
+        return all(
+            isinstance(dep, MemoryDep)
+            and (
+                (not at_rows and sympy.expand(dep.index - (r + n * x)) == 0)
+                or (sympy.expand(dep.index - x) == 0 and is_row_stat(dep.name))
+            )
+            for dep in body._reads
+            if renames.get(dep.name, dep.name) in produced
+        )
+
+    # A per-row result of the row pass, e.g. the mean that a two-pass variance
+    # reads back: stored at the row index by a row reduction, or by a node over
+    # the rows that reads only row stats at its row.
+    @functools.cache
+    def is_row_stat(name):
+        buf = node.scheduler.name_to_buf.get(name)
+        writer = buf.defining_op if buf is not None else None
+        if not (
+            isinstance(writer, scheduler.SchedulerNode)
+            and not writer.is_template()
+            and (
+                template_reduction_axis(writer, template, produced) == 0
+                if writer.is_reduction()
+                else writer.group[1] == (m, sympy.S.One)
+                and reads_row_stats(writer, at_rows=True)
+            )
+        ):
+            return False
+        body, x, _ = linear_loop_body(writer)
+        writes = [dep for dep in body._writes if dep.name == name]
+        return bool(writes) and all(
+            isinstance(dep, MemoryDep) and sympy.expand(dep.index - x) == 0
+            for dep in writes
+        )
+
+    if node.group[1] == (m, n) and (
+        reads(node, functools.partial(is_row_major_read, numel=m * n))
+        or (
+            isinstance(node, scheduler.SchedulerNode)
+            and node.is_reduction()
+            and reads_row_stats(node)
+        )
     ):
         return 0
     if not (isinstance(node, scheduler.SchedulerNode) and node.is_reduction()):
