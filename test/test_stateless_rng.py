@@ -828,6 +828,26 @@ class TestStatelessRNGCompile(TestCase):
         x = torch.randn(16, device=device)
         self.assertEqual(torch.compile(f, dynamic=False)(key, x), f(key, x))
 
+    @onlyAccelerator
+    @parametrize("op", ["uniform", "normal", "randint"])
+    def test_generation_returned_directly_with_cudagraphs(self, device, op):
+        # Regression test: returning a reinplaced (Tensor(a!)) result used to
+        # reference a name bound only inside the graph partition.
+        if torch.device(device).type == "cuda" and not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        gen_fn = getattr(random, op)
+
+        def f(x):
+            d = x.sum().to(torch.uint64)
+            key = random.fold_in(random.key(42, device=device), d)
+            return gen_fn(key, (2, 3))
+
+        x = torch.tensor([0.1, 0.2, 0.3, 0.4], device=device)
+        expected = f(x)
+        compiled = torch.compile(f, fullgraph=True, mode="reduce-overhead")
+        self.assertEqual(compiled(x), expected)
+
 
 class TestStatelessRNGInteger(TestCase):
     @parametrize("dtype", all_int_dtypes)
