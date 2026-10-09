@@ -5493,8 +5493,34 @@ class NativeCachingAllocator : public CUDAAllocator {
     return "native";
   }
   void copy_data(void* dest, const void* src, std::size_t count) const final {
-    C10_CUDA_CHECK(
-        cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
+    C10_CUDA_CHECK(cudaMemcpyAsync(
+        dest,
+        src,
+        count,
+        cudaMemcpyKind::cudaMemcpyDeviceToDevice,
+        cuda::getCurrentCUDAStream()));
+  }
+  std::optional<bool> was_allocated_on_stream(
+      const void* ptr,
+      const c10::Stream& stream) const override {
+    // get_allocated_block only reads the map of allocated blocks (under its
+    // lock), but isn't const because the lock isn't mutable.
+    Block* block = ptr
+        ? const_cast<NativeCachingAllocator*>(this)->get_allocated_block(ptr)
+        : nullptr;
+    if (block == nullptr) {
+      return std::nullopt;
+    }
+    // Memory in private pools (e.g., CUDA graph pools) isn't tied to any
+    // stream: it is reused and written according to the graphs that use the
+    // pool, independently of the stream it was allocated on. E.g., every
+    // replay of a graph rewrites its outputs through the addresses baked into
+    // it, without going through copy-on-write materialization, so a lazy
+    // clone of a graph output must be an eager clone.
+    if (block->pool->owner_PrivatePool != nullptr) {
+      return false;
+    }
+    return block->stream == cuda::CUDAStream(stream).stream();
   }
 };
 
