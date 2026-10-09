@@ -6671,8 +6671,9 @@ def exponential(self, rate=1, generator=None):
         lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
     )
 
-    # Convert rand_like's [0, 1) interval to (0, 1].
-    uniform_val = 1 - torch.rand_like(self)
+    # rand_like has range [0, 1) change it to (0,1] by sending 0 -> 1
+    uniform_val = torch.rand_like(self)
+    uniform_val = torch.where(uniform_val == 0, 1, uniform_val)
 
     # copying numerics of transformation::exponential see comment:
     # curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
