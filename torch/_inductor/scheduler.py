@@ -23,7 +23,7 @@ from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
 
-from .ir import ComputedBuffer, Pointwise
+from .ir import ComputedBuffer, is_triton, Pointwise
 
 
 if TYPE_CHECKING:
@@ -84,7 +84,6 @@ from .utils import (
     decompose_index,
     device_need_guard,
     fx_node_crosses_devices,
-    get_current_backend,
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
@@ -269,9 +268,7 @@ def _is_gpu_triton_backend(
     if not node1.is_gpu() or not node2.is_gpu():
         return False
     device_type = node1.get_device().type  # type: ignore[union-attr]
-    return (
-        device_type in ("cuda", "xpu") and get_current_backend(device_type) == "triton"
-    )
+    return is_triton(device_type)
 
 
 def _is_loop_carried_compile_error(e: Exception) -> bool:
