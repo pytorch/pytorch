@@ -73,6 +73,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     unique,
+    upcast_compute_type,
 )
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
@@ -2274,13 +2275,16 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         # from the reduced-output family, so emit the derived headers before
         # we materialize the reshape line.
         self._family.ensure_headers(k)
-        reshaped = k.emit_reshape(value, self._layout.reshape_shape, src_dtype)
+        # Like TritonKernel.reduction, [b]float16 tiles reduce in float32.
+        reshaped = k.emit_reshape(
+            value, self._layout.reshape_shape, upcast_compute_type(src_dtype)
+        )
         k.num_reduction += 1
         return k.emit_reduce(
             reshaped,
             reduction_type,
             self._layout.reduce_axis,
-            dtype,
+            upcast_compute_type(dtype),
             self._layout.output_shape,
         )
 
