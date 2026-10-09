@@ -1420,21 +1420,25 @@ class TestCompileSupported(TestCase):
         ):
             self.assertFalse(utils.is_compile_supported("cpu"))
 
-    def test_cuda_requires_triton_package(self):
-        with (
-            mock.patch(
-                "torch._dynamo.eval_frame.is_dynamo_supported", return_value=True
-            ),
-            mock.patch("torch.utils._triton.has_triton", return_value=False),
-        ):
-            self.assertFalse(utils.is_compile_supported("cuda"))
-        with (
-            mock.patch(
-                "torch._dynamo.eval_frame.is_dynamo_supported", return_value=True
-            ),
-            mock.patch("torch.utils._triton.has_triton", return_value=True),
-        ):
-            self.assertTrue(utils.is_compile_supported("cuda"))
+    def test_cuda_xpu_mtia_require_triton_package(self):
+        for device_type in ("cuda", "xpu", "mtia"):
+            with self.subTest(device_type=device_type):
+                with (
+                    mock.patch(
+                        "torch._dynamo.eval_frame.is_dynamo_supported",
+                        return_value=True,
+                    ),
+                    mock.patch("torch.utils._triton.has_triton", return_value=False),
+                ):
+                    self.assertFalse(utils.is_compile_supported(device_type))
+                with (
+                    mock.patch(
+                        "torch._dynamo.eval_frame.is_dynamo_supported",
+                        return_value=True,
+                    ),
+                    mock.patch("torch.utils._triton.has_triton", return_value=True),
+                ):
+                    self.assertTrue(utils.is_compile_supported(device_type))
 
     def test_registered_backend_without_opt_in_defaults_to_false(self):
         class FakeInterface(DeviceInterface):
@@ -1444,7 +1448,7 @@ class TestCompileSupported(TestCase):
             "torch._dynamo.device_interface.get_interface_for_device",
             return_value=FakeInterface,
         ):
-            self.assertFalse(utils.is_compile_supported("cpu"))
+            self.assertFalse(utils.is_compile_supported("meta"))
 
     def test_backend_override_opts_in(self):
         class FakeInterface(DeviceInterface):
@@ -1456,14 +1460,14 @@ class TestCompileSupported(TestCase):
             "torch._dynamo.device_interface.get_interface_for_device",
             return_value=FakeInterface,
         ):
-            self.assertTrue(utils.is_compile_supported("cpu"))
+            self.assertTrue(utils.is_compile_supported("meta"))
 
     def test_no_interface_returns_false(self):
         with mock.patch(
             "torch._dynamo.device_interface.get_interface_for_device",
             side_effect=NotImplementedError("No interface for device"),
         ):
-            self.assertFalse(utils.is_compile_supported("cpu"))
+            self.assertFalse(utils.is_compile_supported("meta"))
 
     def test_mps_defaults_to_false(self):
         self.assertFalse(utils.is_compile_supported("mps"))

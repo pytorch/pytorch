@@ -5151,12 +5151,19 @@ def build_checkpoint_variable(**options: Any) -> Any:
     )
 
 
-def is_compile_supported(device_type: DeviceLikeType) -> Any:
+def is_compile_supported(device_type: DeviceLikeType) -> bool:
+    """Returns whether torch.compile is supported for ``device_type``.
+
+    Registry-driven: each DeviceInterface declares its own support (in-tree
+    cpu/cuda/xpu/mtia opt in). Unregistered device types and backends that
+    have not opted in return False. Unparsable device strings raise from
+    torch.device(...) exactly as before.
+    """
     from .device_interface import get_interface_for_device
 
-    type = torch.device(device_type).type
+    device = torch.device(device_type)
     try:
-        interface = get_interface_for_device(type)
+        interface = get_interface_for_device(device.type)
     except NotImplementedError:
         # Unregistered device types keep the legacy conservative answer.
         return False
