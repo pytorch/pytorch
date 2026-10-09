@@ -794,6 +794,89 @@ class XpuInterface(DeviceInterface):
 
             return caching_worker_device_properties["xpu"][device]
 
+    class Graphs(DeviceInterface.Graphs):
+        supported = True
+
+        Graph = torch.xpu.XPUGraph  # type: ignore[assignment]
+
+        pool_handle = staticmethod(torch.xpu.graph_pool_handle)  # type: ignore[assignment]
+        memory_snapshot = staticmethod(torch.xpu.memory_snapshot)  # type: ignore[assignment]
+
+        @staticmethod
+        def capture(
+            graph: Any, *, pool: Any, stream: Any
+        ) -> AbstractContextManager[None]:
+            # torch.xpu.graph has no capture_error_mode; Level Zero command
+            # graphs expose no equivalent control.
+            return torch.xpu.graph(graph, pool=pool, stream=stream)  # type: ignore[return-value]
+
+        @staticmethod
+        def begin_allocate_current_thread_to_pool(
+            device_index: int, pool: tuple[int, int]
+        ) -> None:
+            torch._C._xpu_beginAllocateCurrentThreadToPool(device_index, pool)
+
+        @staticmethod
+        def end_allocate_to_pool(device_index: int, pool: tuple[int, int]) -> None:
+            torch._C._xpu_endAllocateToPool(device_index, pool)
+
+        @staticmethod
+        def release_pool(device_index: int, pool: tuple[int, int]) -> None:
+            torch._C._xpu_releasePool(device_index, pool)
+
+        @staticmethod
+        def get_checkpoint_state(device_index: int, pool: tuple[int, int]) -> Any:
+            return torch._C._xpu_getCheckpointState(device_index, pool)
+
+        @staticmethod
+        def set_checkpoint_pool_state(
+            device_index: int,
+            state: Any,
+            stale_storages: list[int],
+            live_storages: list[int],
+        ) -> None:
+            torch._C._xpu_setCheckpointPoolState(
+                device_index, state, stale_storages, live_storages
+            )
+
+        @staticmethod
+        def check_pool_live_allocations(
+            device_index: int, pool: tuple[int, int], live_data_ptrs: set[int]
+        ) -> bool:
+            return torch._C._xpu_checkPoolLiveAllocations(
+                device_index, pool, live_data_ptrs
+            )
+
+        @staticmethod
+        def raw_delete(data_ptr: int) -> None:
+            torch._C._xpu_xpuCachingAllocator_raw_delete(data_ptr)
+
+        @staticmethod
+        @contextlib.contextmanager
+        def history_recording() -> Generator[None, None, None]:
+            enabled = torch._C._xpu_isHistoryEnabled()
+            try:
+                if not enabled:
+                    torch.xpu.memory._record_memory_history()
+                yield
+            finally:
+                if not enabled:
+                    torch.xpu.memory._record_memory_history(None)
+
+        @staticmethod
+        def construct_tensor(metadata: dict[str, Any], storage: Any) -> torch.Tensor:
+            return torch._C._construct_XPU_Tensor_From_Storage_And_Metadata(
+                metadata, storage
+            )
+
+        @staticmethod
+        def has_standard_deleter(storage_impl_ptr: int) -> bool:
+            return torch._C._xpu_has_standard_deleter(storage_impl_ptr)
+
+        @staticmethod
+        def free_and_remove_deleter(storage_impl_ptr: int) -> None:
+            torch._C._xpu_free_and_remove_deleter(storage_impl_ptr)
+
     current_device = staticmethod(torch.xpu.current_device)
     set_device = staticmethod(torch.xpu.set_device)
     device_count = staticmethod(torch.xpu.device_count)  # type: ignore[has-type]

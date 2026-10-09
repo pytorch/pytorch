@@ -33,7 +33,23 @@ static_inputs_log = torch._logging.getArtifactLogger(
 OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
 
-_CUDAGRAPH_SUPPORTED_DEVICE_TYPES = frozenset(OrderedSet(["cuda"]))
+
+def _cudagraph_supported_device_types() -> OrderedSet[str]:
+    """Freshly scan the DeviceInterface registry for device types that can
+    capture graphs, skipping indexed aliases such as "cuda:0". Production code
+    should use the _CUDAGRAPH_SUPPORTED_DEVICE_TYPES snapshot below; this scan
+    exists to compute it and for tests.
+    """
+    from torch._dynamo.device_interface import get_registered_device_interfaces
+
+    return OrderedSet(
+        name
+        for name, device_interface in get_registered_device_interfaces()
+        if ":" not in name and device_interface.Graphs.supported
+    )
+
+
+_CUDAGRAPH_SUPPORTED_DEVICE_TYPES = frozenset(_cudagraph_supported_device_types())
 
 
 def cudagraph_trees_generation_cloning() -> Literal["user_visible"] | None:
@@ -399,10 +415,23 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> str | None:
-    return (
-        check_caching_allocator_for_cudagraphs()
-        or check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
-    )
+    if reason := check_caching_allocator_for_cudagraphs():
+        return reason
+    if reason := check_multiple_devices_or_any_cpu_nodes(device_node_mapping):
+        return reason
+
+    # Only cudagraph trees are device generic; compile_fx's non-trees
+    # cudagraphify_impl captures through torch.cuda directly.
+    if not config.triton.cudagraph_trees:
+        for device in device_node_mapping:
+            if device.type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES and (
+                device.type != "cuda"
+            ):
+                return (
+                    f"cudagraph trees are disabled and {device.type} has no "
+                    "non-trees cudagraph implementation"
+                )
+    return None
 
 
 def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
