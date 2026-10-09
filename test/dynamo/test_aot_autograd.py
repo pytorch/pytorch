@@ -23,7 +23,10 @@ from torch._functorch.partitioners import _extract_fwd_bwd_modules
 from torch._guards import CompileContext, StorageOverlap, TracingContext
 from torch._inductor.graph import GraphLowering
 from torch._inductor.virtualized import V
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    FakeTensorMode,
+)
 from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -1005,7 +1008,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
             fake_mode = torch._dynamo.utils.detect_fake_mode(sample_inputs)
 
-            with patch.object(fake_mode, "allow_non_fake_inputs", True), fake_mode:
+            with allow_non_fake_inputs_temporarily(fake_mode), fake_mode:
                 return aot_export_joint_simple(gm, sample_inputs, trace_joint=False)
 
         sample_inputs = [torch.rand((3, 4, 5))]
