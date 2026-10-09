@@ -3145,7 +3145,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # we're sure static cuda launcher was used for this compile
         set_feature_use("static_triton_launcher", True)
         # Load the binary on the parent
-        if not self.kernel.cubin_path:
+        if not self.kernel.cubin_path and self.kernel.function is None:
             self.reload_cubin_path()
         # compile-on-one-rank: a None device in compile_meta marks a rank/device-agnostic
         # kernel, so the launcher must keep its loaded handles per device.
