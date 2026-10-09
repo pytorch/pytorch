@@ -58,6 +58,30 @@ def _canonical_mask(
 
 __all__ += ["_canonical_mask"]
 
+def _in_projection(
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    w_q: Tensor,
+    w_k: Tensor,
+    w_v: Tensor,
+    b_q: Tensor | None = None,
+    b_k: Tensor | None = None,
+    b_v: Tensor | None = None,
+) -> tuple[Tensor, Tensor, Tensor]: ...
+
+__all__ += ["_in_projection"]
+
+def _in_projection_packed(
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    w: Tensor,
+    b: Tensor | None = None,
+) -> list[Tensor]: ...
+
+__all__ += ["_in_projection_packed"]
+
 def _none_or_dtype(input: Tensor | None) -> _dtype | None: ...
 
 __all__ += ["_none_or_dtype"]
