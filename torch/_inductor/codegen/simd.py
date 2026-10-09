@@ -73,6 +73,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     unique,
+    upcast_compute_type,
 )
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
@@ -2274,13 +2275,16 @@ class _GroupedReductionOpsHandler(WrapperHandler):  # type: ignore[type-arg]
         # from the reduced-output family, so emit the derived headers before
         # we materialize the reshape line.
         self._family.ensure_headers(k)
-        reshaped = k.emit_reshape(value, self._layout.reshape_shape, src_dtype)
+        # Like TritonKernel.reduction, [b]float16 tiles reduce in float32.
+        reshaped = k.emit_reshape(
+            value, self._layout.reshape_shape, upcast_compute_type(src_dtype)
+        )
         k.num_reduction += 1
         return k.emit_reduce(
             reshaped,
             reduction_type,
             self._layout.reduce_axis,
-            dtype,
+            upcast_compute_type(dtype),
             self._layout.output_shape,
         )
 
@@ -2552,11 +2556,12 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         split loads. When the same op ran on the same operands at parent
         resolution, its recorded result already holds every lane, so the chain
         collapses into one split of its final value. The split is deferred so
-        intermediate lanes never reach the generated code.
+        intermediate lanes never reach the generated code. Bitcasts of fully
+        consumed sources may create that parent result first.
         """
         if name not in registered_pointwise_ops or self._kernel._load_mask is not None:
             return None
-        if not self._lane_projections or not self._parent_twins:
+        if not self._lane_projections:
             return None
         if any(isinstance(v, CSEVariable) for v in kwargs.values()):
             return None
@@ -2581,6 +2586,20 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         if lane is None:
             return None
         parent_value = self._parent_twins.get(self._twin_key(name, parent_args, kwargs))
+        if parent_value is None and name == "to_dtype_bitcast":
+            # Sparse readers do not amortize a new tile conversion and split.
+            # Restrict synthesis to original sources, rather than cast chains.
+            if not any(
+                parent_args[0] in values
+                and (lanes := self._contracts[source].parent_lanes) is not None
+                and len(lanes) == self._sub_parent_factor
+                for source, values in self._values.items()
+            ):
+                return None
+            if not self._kernel.cse.contains_value(parent_args[0]):
+                return None
+            parent_value = self._inner.to_dtype_bitcast(*parent_args, **kwargs)
+            self._record_parent_twin(name, tuple(parent_args), kwargs, parent_value)
         if parent_value is None or parent_value.shape is None:
             return None
         if not self._kernel.cse.contains_value(cast("TritonCSEVariable", parent_value)):
@@ -2681,22 +2700,17 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         )
         return materialized
 
-    def materialize_sources(
+    def check_sources(
         self, relations: Iterable[scheduler.SubParentAccessRelation]
     ) -> None:
-        """Preserve required lane sources before the parent body is flushed.
-
-        External sources are plain loads: their lanes split lazily when a
-        consumer needs them, or reload if the value has expired by then.
-        """
+        """Check required sources are live; split lanes when a consumer needs them."""
         for name in OrderedSet(relation.consumer_access.name for relation in relations):
             if not self._contracts[name].source_is_internal:
                 continue
-            materialized = any(
-                self._materialize(value) is not None
+            if not any(
+                self._kernel.cse.contains_value(cast("TritonCSEVariable", value))
                 for value in self._values.get(name, ())
-            )
-            if not materialized:
+            ):
                 raise AssertionError(f"lost required sub-parent source {name!r}")
 
     def is_planned(self, name: str) -> bool:
@@ -3785,7 +3799,7 @@ class SIMDScheduling(BaseScheduling):
                 if sub_parent_stage is not None:
                     if sub_parent_family is None or value_resolver is None:
                         raise AssertionError("sub-parent stage requires codegen state")
-                    value_resolver.materialize_sources(
+                    value_resolver.check_sources(
                         relation
                         for relation in sub_parent_stage.access_relations
                         if relation.parent_lane is not None
@@ -4191,7 +4205,7 @@ class SIMDScheduling(BaseScheduling):
                 if not required_lane_relations:
                     kernel.codegen_body()
                 else:
-                    value_resolver.materialize_sources(required_lane_relations)
+                    value_resolver.check_sources(required_lane_relations)
                 self._codegen_sub_parent_output_groups(
                     kernel,
                     stage,
