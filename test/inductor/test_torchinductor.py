@@ -9396,6 +9396,27 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 16]), torch.randn([12, 1])))
 
+    def test_stack_realized_inputs(self):
+        # Each input reads x eight times, so it is realized before stack, and
+        # its unsqueeze view freezes it. The copy into the stack output should
+        # fuse into the producer instead of a separate pointwise cat.
+        def fn(x):
+            return torch.stack(
+                [sum(x[:, j] * (i + j) for j in range(8)) for i in range(3)], -1
+            )
+
+        torch._inductor.metrics.reset()
+        self.common(fn, (torch.randn([4096, 16]),))
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_stack_realized_input_twice(self):
+        # One realized buffer copied into two slices, plus another reader.
+        def fn(x):
+            y = sum(x[:, j] * (j + 1) for j in range(8))
+            return torch.stack([y, y], -1), y[None, :] + 1
+
+        self.common(fn, (torch.randn([4096, 16]),))
+
     def test_hardtanh(self):
         def fn(x):
             return F.hardtanh(x), F.hardtanh(x + 1), F.hardtanh(x - 1)

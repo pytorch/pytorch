@@ -432,7 +432,9 @@ class TestBenchmarker(TestCase):
         self.assertEqual(result, 3.0)
         self.assertEqual(calls, ["enter", (1, 2, True), "fn", "exit"])
 
-    def _run_fake_cuda_graph_benchmark(self, iters, return_mode="min", grads=None):
+    def _run_fake_cuda_graph_benchmark(
+        self, iters, return_mode="min", grads=None, nested=False
+    ):
         from torch._inductor.runtime import benchmarking as _bench
 
         class FakeCUDAGraph:
@@ -442,6 +444,9 @@ class TestBenchmarker(TestCase):
         class FakeBenchmarker(Benchmarker):
             @_bench.gpu_benchmark_lock
             def benchmark_gpu(self, _callable, **kwargs):
+                # Like InductorBenchmarker: graph path unless timing a replay.
+                if not self._in_cudagraph_benchmark:
+                    return self.benchmark_gpu_with_cuda_graph(_callable, **kwargs)
                 calls.append("benchmark_gpu")
                 _callable()
                 if kwargs.get("return_mode") == "all":
@@ -468,6 +473,12 @@ class TestBenchmarker(TestCase):
 
         current_stream = FakeStream()
 
+        def fn():
+            calls.append("call")
+            # Emulates a callable that autotunes on its first launch.
+            if nested and calls.count("call") == 1:
+                benchmarker.benchmark_gpu(lambda: calls.append("inner"))
+
         previous = _bench.set_gpu_benchmark_lock_context(custom_context)
         try:
             with (
@@ -484,7 +495,7 @@ class TestBenchmarker(TestCase):
                 patch("torch.cuda.graph", return_value=contextlib.nullcontext()),
             ):
                 result = benchmarker.benchmark_gpu_with_cuda_graph(
-                    lambda: calls.append("call"),
+                    fn,
                     grad_to_none=grads,
                     return_mode=return_mode,
                 )
@@ -541,6 +552,18 @@ class TestBenchmarker(TestCase):
         tensor = FakeTensor()
         self._run_fake_cuda_graph_benchmark(iters=3, grads=[tensor])
         self.assertEqual(tensor.grad_clear_count, 1 + 3)
+
+    def test_benchmark_gpu_with_cuda_graph_nested_benchmark_uses_graph(self):
+        # Only the replay timing is guarded against graph capture; a benchmark
+        # nested in the warmup gets its own warmup, capture and replay.
+        _, calls = self._run_fake_cuda_graph_benchmark(iters=1, nested=True)
+        inner = ["enter", "inner", "inner", "inner"]
+        replay = ["enter", "benchmark_gpu", "replay", "exit"]
+        self.assertEqual(
+            calls,
+            ["enter", "call", "enter", *inner, *replay, "exit", "exit"]
+            + ["call", "call", *replay, "exit"],
+        )
 
     def test_autotune_cudagraph_benchmarking_requires_max_autotune(self):
         from torch._inductor.runtime import benchmarking as _bench

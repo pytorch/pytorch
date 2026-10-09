@@ -469,6 +469,31 @@ class _NestedReductionBase:
         """D/G need not be a power of 2."""
         self._norm_block_reduce(_layernorm, "amax", 16, 6144, 128)
 
+    @parametrize("norm", ["layernorm", "rmsnorm"])
+    def test_norm_block_scale_contiguous_epilogue(self, norm):
+        """Affine row norm materialized in bf16, per-group amax, and a
+        full-domain epilogue with a contiguous scale layout: the MX group
+        quantization shape. Nested reductions assume loop_ordering_after_fusion,
+        which this suite enables; without it the grouped reduction's iteration
+        dims are merged before planning and the pipeline is not formed.
+        """
+        G = 32
+        norm_fn = {"layernorm": _layernorm, "rmsnorm": _rmsnorm}[norm]
+
+        def f(x, w, b):
+            normed = (norm_fn(x) * w + b).to(torch.bfloat16).float()
+            blocks = normed.reshape(x.shape[0], x.shape[1] // G, G)
+            # A smooth scale keeps the check tolerant; the fusion shape is the
+            # same as an E8M0 block scale.
+            scale = blocks.abs().amax(dim=-1).clamp_min(1e-30) / 448.0
+            return (blocks / scale.unsqueeze(-1)).reshape(x.shape), scale
+
+        x = torch.randn(1024, 4096, device=GPU_TYPE)
+        w = torch.randn(4096, device=GPU_TYPE)
+        b = torch.randn(4096, device=GPU_TYPE)
+        self.check_numeric(f, (x, w, b))
+        self.check_fusion()
+
     # ---- Epilogue dtype conversion ----
 
     def test_weighted_rmsnorm_reduce_k_bf16_epilogue(self):
@@ -1406,7 +1431,12 @@ class _NestedReductionBase:
         self.check_fusion()
         # One split of the lane source and one of the per-group scale, which
         # is lifted to the parent tile and split like the data.
-        FileCheck().check_count("tl.split(", 2, exactly=True).run("\n".join(sources))
+        source = "\n".join(sources)
+        FileCheck().check_count("tl.split(", 2, exactly=True).run(source)
+        self.assertEqual(
+            source.count("tl.load("),
+            3 if self.force_persistent_outer_reduction is False else 2,
+        )
 
     def test_producer_consumer_lane_fold_splits_computed_value(self):
         """Lanes split the normalized value once, not the raw x and w loads."""
@@ -2683,6 +2713,22 @@ class _NestedReductionBase:
         expected_kernels = 1 if self.force_persistent_outer_reduction is False else 2
         self.check_fusion(expected_kernels)
 
+    def test_half_grouped_reduction_bitcast_epilogue(self):
+        # The grouped amin over fp16 reduces in fp32; a bitcast of its result
+        # must see the fp16 value, not the fp32 tile.
+        group = 8
+
+        def f(x):
+            total = x.sum(-1, keepdim=True)
+            peak = x.abs().amax(-1, keepdim=True)
+            value = (x * x.shape[1] - total) * 2.0**-8 + peak * 0.25
+            value = torch.ops._inductor_test.realize(value.to(torch.float16))
+            return value.view(x.shape[0], -1, group).amin(-1).view(torch.int16) + 1
+
+        x = torch.randint(-64, 64, (37, 48 * group), device=GPU_TYPE).float() / 8
+        self.check_nested_matches_unnested(f, (x,), tol=0)
+        self.check_fusion(expected_kernels=None)
+
 
 @inductor_config.patch("force_disable_caches", True)
 class NestedReductionTest(_NestedReductionBase, TestBase):
@@ -3214,6 +3260,7 @@ class _InternalsBase:
 
     def setUp(self):
         super().setUp()
+        self.enterContext(inductor_config.patch("loop_ordering_after_fusion", True))
         metrics.reset()
         torch._dynamo.utils.clear_compilation_metrics()
 
