@@ -77,6 +77,9 @@ Pytest reruns and flakefinder repeats within one process count up
 `rerun_number`. A test's subtests share its run line, and a failing subtest fails
 it.
 
+A test aliased under a longer name (`test_x_dynamic = TestX.test_x`) reports the
+original's `declared_case_name`, `test_x`.
+
 ## Crash recording
 
 A process that dies can't record the test it was running, so whoever sees it die
