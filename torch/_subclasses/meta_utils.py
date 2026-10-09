@@ -1115,7 +1115,11 @@ class MetaConverter(Generic[_TensorT]):
             " will perform operations on them which need fake tensor mode to"
             " be active.  You will segfault if you are in a no_dispatch() block."
         )
-        if torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python):
+        if torch._C._dispatch_tls_local_exclude_set().has(
+            torch._C.DispatchKey.Python
+        ) and not torch._C._dispatch_tls_is_dispatch_key_included(
+            torch._C.DispatchKey.Fake
+        ):
             raise AssertionError(msg)
         self.arg_cnt += 1
 
@@ -2384,8 +2388,22 @@ class MetaConverter(Generic[_TensorT]):
             trace = False
 
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
-        # to query them when figuring out what to put in here
-        t_desc = self.describer.describe_tensor(t, trace=trace)
+        # to query them when figuring out what to put in here.  The exception is
+        # a real tensor under a C++ fake mode: its metadata queries (e.g.
+        # sparse_dim) would route to the fake fallback, which rejects non-fake
+        # inputs.  Python's mode only intercepts while it is on the mode stack,
+        # so this is a no-op there.
+        from torch._subclasses.fake_tensor import is_fake_tensor
+
+        maybe_exclude_fake: contextlib.AbstractContextManager[Any] = (
+            contextlib.nullcontext()
+            if is_fake_tensor(t)
+            else torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+            )
+        )
+        with maybe_exclude_fake:
+            t_desc = self.describer.describe_tensor(t, trace=trace)
 
         if trace:
             if source is None:
