@@ -2551,6 +2551,9 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
       heartbeat_++;
     }
     done = pg_->workMetaList_.empty();
+
+    lock.unlock();
+    desyncDebugger_.flush();
   }
 }
 
@@ -2583,6 +2586,8 @@ void ProcessGroupNCCL::DesyncDebugger::init(
 void ProcessGroupNCCL::DesyncDebugger::run() {
   if (!enabled_)
     return;
+  // Publish our own buffered trace state before reading every rank's.
+  flush();
   auto logPrefix = c10::str("Rank ", rank_);
   ::c10d::C10dLoggingData log;
   log.integers["pg_id"] = pgId_;
@@ -2618,7 +2623,7 @@ void ProcessGroupNCCL::DesyncDebugger::run() {
   }
 }
 
-// Log work start to store.
+// Buffer a work start. Published by flush().
 void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
   if (!enabled_)
     return;
@@ -2626,12 +2631,10 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
     return;
 
   work.startTraceUpdated_ = true;
-  // If not successful, disable the debugger
-  enabled_ = c10d::traceUpdate(
-      store_, traceKeyStart_, work.seq_, opTypeToString(work.opType_));
+  pendingStart_ = {work.seq_, opTypeToString(work.opType_)};
 }
 
-// Log work end to store.
+// Buffer a work end. Published by flush().
 void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
   if (!enabled_)
     return;
@@ -2641,9 +2644,26 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
     logWorkStart(work);
   }
 
-  // If not successful, disable the debugger
-  enabled_ = c10d::traceUpdate(
-      store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
+  pendingEnd_ = {work.seq_, opTypeToString(work.opType_)};
+}
+
+// Push the buffered start/end to the store. traceUpdate() overwrites a single
+// fixed key per rank, so once a pass finishes only its last write is
+// observable -- writing just that value is identical in effect, at one
+// round-trip per pass instead of one per work.
+void ProcessGroupNCCL::DesyncDebugger::flush() {
+  if (pendingStart_.has_value()) {
+    // If not successful, disable the debugger
+    enabled_ = c10d::traceUpdate(
+        store_, traceKeyStart_, pendingStart_->first, pendingStart_->second);
+    pendingStart_.reset();
+  }
+  if (enabled_ && pendingEnd_.has_value()) {
+    // If not successful, disable the debugger
+    enabled_ = c10d::traceUpdate(
+        store_, traceKeyEnd_, pendingEnd_->first, pendingEnd_->second);
+  }
+  pendingEnd_.reset();
 }
 
 // We want to have both PG ID and global unique ID (guid) for the logging
