@@ -3207,6 +3207,24 @@ def forward(self, arg0_1, arg1_1):
             torch.compile(f, fullgraph=True)(x, y)
 
     @requires_gpu
+    def test_triton_kernel_autotune_config_maxnreg_conflicts_with_launch_kwarg(self):
+        # Same as above for a Config's maxnreg, which is a Config attribute
+        # rather than a kwarg: direct Triton raises on the duplicate keyword.
+        add_kernel = triton.autotune(
+            configs=[triton.Config({"BLOCK_SIZE": 128}, num_warps=4, maxnreg=64)],
+            key=[],
+        )(_get_backend_options_kernel(with_enable_fp_fusion=False))
+        f = _get_backend_options_fn(add_kernel, maxnreg=40)
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        msg = "Triton launch kwargs conflict with autotune config kwargs"
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            torch.compile(f, backend="eager", fullgraph=True)(x, y)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            torch.compile(f, fullgraph=True)(x, y)
+
+    @requires_gpu
     def test_triton_kernel_backend_options_with_autotune(self):
         # Backend options passed at launch should survive through the
         # user-defined Triton autotune wrapper as compile metadata.
@@ -3466,6 +3484,46 @@ def forward(self, arg0_1, arg1_1):
             RuntimeError, "Triton backend options must be concrete values"
         ):
             make_fx(f, tracing_mode="symbolic")(torch.randn(4, device=GPU_TYPE))
+
+    @requires_cuda_and_triton
+    @common_utils.parametrize("autotune_at_compile_time", [True, False])
+    def test_triton_kernel_autotune_config_maxnreg(self, autotune_at_compile_time):
+        # A triton.Config's maxnreg must survive serialization into the
+        # generated code, config deduplication, and reach triton.compile. The
+        # capped config differs from the first one ONLY in maxnreg, so both
+        # must be compiled.
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 128}, num_warps=4),
+                triton.Config({"BLOCK_SIZE": 128}, num_warps=4, maxnreg=64),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def add_kernel(in_ptr0, out_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + 1, mask=mask)
+
+        def f(x):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, output, n_elements)
+            return output
+
+        x = torch.randn(1024, device=GPU_TYPE)
+        with inductor_config.patch(
+            {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        ):
+            out, _, options = self._run_and_get_triton_compile_options(f, x)
+        self.assertEqual(out, x + 1)
+        # One compile per config on every backend. Backends without a maxnreg
+        # option (e.g. ROCm) drop it in parse_options, so both configs compile
+        # to the same kernel there; config dedup does not know the device.
+        self.assertCountEqual([o.get("maxnreg") for o in options], [None, 64])
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
