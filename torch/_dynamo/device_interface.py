@@ -443,9 +443,8 @@ class CudaInterface(DeviceInterface):
     def should_warn_tf32_disabled() -> bool:
         if torch.backends.cuda.matmul.fp32_precision == "bfx9":
             return False
-        min_cap = (8, 0)
         return (
-            torch.cuda.is_available() and torch.cuda.get_device_capability() >= min_cap
+            torch.cuda.is_available() and torch.cuda.is_tf32_supported()
         )
 
     @staticmethod
