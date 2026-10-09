@@ -2133,8 +2133,18 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
         "batch_col_sum_offset": lambda a, b: ((a @ b).float() + 1).sum(1),
         "batch_col_amax": lambda a, b: ((a @ b) - 100).amax(1),
         "batch_col_sum_extra_input": lambda a, b, w: ((a @ b).float() * w).sum(1),
+        "batch_sum": lambda a, b: (a @ b).float().sum(0),
+        "batch_sum_bf16": lambda a, b: (a @ b).sum(0),
+        "batch_sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(0)),
+        "batch_sum_extra_input": lambda a, b, w: ((a @ b).float() * w).sum(0),
+        # RMSNorm backward: batch and row sums of one product.
+        "batch_and_row_sum": lambda a, b, w: (
+            (c := (a @ b).float() * w).sum(0),
+            c.sum(-1),
+        ),
         "all_axes": lambda a, b, w: (
-            (c := (a @ b).float() * w).sum(1),
+            (c := (a @ b).float() * w).sum(0),
+            c.sum(1),
             c.sum(-1),
             c.sum((0, 1)),
         ),
@@ -2153,7 +2163,7 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
         self, op: str, shape: tuple[int, int, int, int], tma_store: bool
     ):
         fn = self.BMM_OPS[op]
-        kernels, _ = self._run_bmm_reduction(
+        kernels, code = self._run_bmm_reduction(
             fn,
             *shape,
             BlackwellBMMConfig(128, 128, 64, 3, 8),
@@ -2164,6 +2174,11 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
         )
         self.assertEqual(len(kernels), 1, kernels)
         self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        if "batch_sum" in op or op in ("batch_and_row_sum", "all_axes"):
+            # Each program stores its accumulator once, on its last tile.
+            FileCheck().check("_batch_acc0 = tl.zeros(").check("for tile_id").check(
+                "_batch_acc0 = _batch_acc0 +"
+            ).check("tile_id + NUM_SMS >= num_tiles").run(code)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
@@ -2172,7 +2187,13 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
     @parametrize(
         "case",
         (
+            # bmm -> RMSNorm backward.
+            ("batch_and_row_sum", (5247, 128, 72, 128)),
             ("row_sum", (5247, 128, 72, 128)),
+            ("batch_sum", (5247, 256, 16, 80)),
+            # 3 tiles per batch with a program count they divide, and 4.
+            ("batch_sum", (40, 128, 64, 384)),
+            ("batch_sum", (300, 256, 64, 256)),
             ("row_sum", (5247, 256, 16, 80)),
             ("batch_col_sum", (5247, 80, 16, 256)),
         ),
@@ -2189,6 +2210,39 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
         )
         self.assertEqual(len(kernels), 1, kernels)
         self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize(
+        "case", ("tiles_per_batch", "subtiled", "batch_amax", "batch_and_n_sum", "sum")
+    )
+    def test_blackwell_bmm_batch_reduction_epilogue_not_fused(self, case: str):
+        """The batch sum stays unfused when programs of the persistent loop
+        would see different tiles of a batch (3 tiles per batch don't divide
+        the SM count), or with epilogue subtiles. So do batch maxes and
+        reductions over the batch and N dims, or over all dims."""
+        if case == "tiles_per_batch" and get_num_sms() % 3 == 0:
+            self.skipTest("needs an SM count that 3 doesn't divide")
+        if case == "subtiled" and meta_ws_enabled():
+            self.skipTest("meta WS doesn't fuse reductions over subtiles")
+        ops = {
+            "batch_amax": lambda a, b: ((a @ b) - 100).amax(0),
+            "batch_and_n_sum": lambda a, b: (a @ b).float().sum((0, 2)),
+            "sum": lambda a, b: (a @ b).float().sum(),
+        }
+        kernels, _ = self._run_bmm_reduction(
+            ops.get(case, self.BMM_OPS["batch_sum"]),
+            # 3 tiles per batch and more tiles than SMs, or 1 tile per batch.
+            *((512, 128, 64, 384) if case == "tiles_per_batch" else (300, 96, 64, 128)),
+            BlackwellBMMConfig(
+                128, 128, 64, 3, 8, epilogue_subtile=2 if case == "subtiled" else 1
+            ),
+        )
+        self.assertTrue(
+            any(k.startswith(("triton_red", "triton_per")) for k in kernels), kernels
+        )
 
 
 @instantiate_parametrized_tests

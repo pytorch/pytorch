@@ -9007,9 +9007,9 @@ class TritonScheduling(SIMDScheduling):
     def can_fuse_template_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
-        """Row or column reductions over a row-major template output, when some
-        template choice stores output tiles they fit. See
-        TritonTemplateKernel.codegen_tile_reduction_epilogue."""
+        """Row or column reductions over a row-major template output, or batch
+        reductions of a batched one, when some template choice stores output
+        tiles they fit. See TritonTemplateKernel.codegen_tile_reduction_epilogue."""
         template = node1.get_template_node()
         if not isinstance(template, ir.TritonTemplateBuffer):
             return False
