@@ -171,6 +171,10 @@ def log_cache_bypass(*args, **kwargs) -> None:
     pass
 
 
+def _maybe_init_compiled_graph_wrapper() -> None:
+    pass
+
+
 def log_torchscript_usage(api: str, **kwargs):
     _ = api
     return
