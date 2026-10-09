@@ -163,6 +163,29 @@ def remove_no_ops(
         mm_targets = (aten.mm.default, aten.bmm.default, aten.addmm.default)
         mutated_storages = get_mutated_storages(gm)
 
+        def view_source(node):
+            if (
+                node.op != "call_function"
+                or not node.args
+                or not isinstance(node.args[0], torch.fx.Node)
+            ):
+                return None
+            source = node.args[0]
+            target = node.target
+            if target is operator.getitem:
+                return (
+                    source
+                    if isinstance(source.meta.get("val"), (tuple, list))
+                    else None
+                )
+            if isinstance(target, torch._ops.OpOverload) and (
+                target
+                in (aten._unsafe_view.default, aten.data.default, aten.lift.default)
+                or _is_view_op(target) is True
+            ):
+                return source
+            return None
+
         def replacement_is_mutated(replacement):
             storage = get_node_storage(replacement)
             if storage is not None and storage in mutated_storages:
@@ -172,65 +195,23 @@ def remove_no_ops(
             worklist = [replacement]
             while worklist:
                 alias = worklist.pop()
-                if alias.op == "call_function":
-                    target = alias.target
-                    source = None
-                    if (
-                        target is operator.getitem
-                        and isinstance(alias.args[0], torch.fx.Node)
-                        and isinstance(alias.args[0].meta.get("val"), (tuple, list))
-                    ):
-                        source = alias.args[0]
-                    elif (
-                        isinstance(target, torch._ops.OpOverload)
-                        and alias.args
-                        and isinstance(alias.args[0], torch.fx.Node)
-                        and (
-                            target
-                            in (
-                                aten._unsafe_view.default,
-                                aten.data.default,
-                                aten.lift.default,
-                            )
-                            or _is_view_op(target) is True
-                        )
-                    ):
-                        source = alias.args[0]
-                    if source is not None and source not in aliases:
-                        aliases.add(source)
-                        worklist.append(source)
+                source = view_source(alias)
+                if source is not None and source not in aliases:
+                    aliases.add(source)
+                    worklist.append(source)
                 for user in alias.users:
                     if alias in get_mutated_input_nodes(user):
                         return True
+                    if view_source(user) is alias and (
+                        user.target is not operator.getitem
+                        or isinstance(user.meta.get("val"), torch.Tensor)
+                    ):
+                        if user not in aliases:
+                            aliases.add(user)
+                            worklist.append(user)
+                        continue
                     target = user.target
-                    if (
-                        target is operator.getitem
-                        and user.args[0] is alias
-                        and isinstance(alias.meta.get("val"), (tuple, list))
-                        and isinstance(user.meta.get("val"), torch.Tensor)
-                    ):
-                        if user not in aliases:
-                            aliases.add(user)
-                            worklist.append(user)
-                        continue
                     if not isinstance(target, torch._ops.OpOverload):
-                        continue
-                    if (
-                        user.args
-                        and user.args[0] is alias
-                        and (
-                            target
-                            in (
-                                aten._unsafe_view.default,
-                                aten.data.default,
-                                aten.lift.default,
-                            )
-                            or _is_view_op(target) is True
-                        )
-                    ):
-                        if user not in aliases:
-                            aliases.add(user)
-                            worklist.append(user)
                         continue
                     return_aliases = OrderedSet().union(
                         *(
