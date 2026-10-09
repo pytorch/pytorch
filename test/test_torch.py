@@ -7429,6 +7429,33 @@ def disable_gc():
 class TestTorch(TestCase):
     exact_dtype = True
 
+    def test_python_binding_argument_parsing(self):
+        class SumOverride(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return func, args, kwargs
+
+        x = torch.arange(6).view(2, 3)
+
+        self.assertEqual(torch.sum(input=x, dim=1), torch.tensor([3, 12]))
+        self.assertEqual(torch.sum(x, axis=1, keepdims=True), torch.tensor([[3], [12]]))
+        self.assertEqual(x.sum(dim=1), torch.tensor([3, 12]))
+        self.assertEqual(x.view(3, 2), torch.tensor([[0, 1], [2, 3], [4, 5]]))
+        self.assertEqual(x.size(1), 3)
+        self.assertEqual(x.stride(0), 3)
+
+        with self.assertRaisesRegex(TypeError, "received an invalid combination of arguments"):
+            torch.sum(x, input=x)
+        with self.assertRaisesRegex(TypeError, "received an invalid combination of arguments"):
+            torch.sum(x, unexpected=True)
+
+        overridden = x.as_subclass(SumOverride)
+        func, args, kwargs = torch.sum(input=overridden, dim=1)
+        self.assertIs(func, torch.sum)
+        self.assertEqual(args, ())
+        self.assertIs(kwargs["input"], overridden)
+        self.assertEqual(kwargs["dim"], 1)
+
     def test_dir(self):
         dir(torch)
 

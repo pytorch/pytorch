@@ -831,11 +831,11 @@ def generate_return_type_declarations(
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-# python binding for all overloads of a particular function/method
-PY_VARIABLE_METHOD_VARARGS = CodeTemplate(
+# vectorcall python binding for all overloads of a particular function/method
+PY_VARIABLE_METHOD_FASTCALL = CodeTemplate(
     r"""\
 // ${name}
-static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
+static PyObject * ${pycname}(PyObject* self_, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames)
 {
   ${method_header}
   static PythonArgParser parser({
@@ -843,7 +843,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   }, /*traceable=*/${traceable});
 
   ParsedArgs<${max_args}> parsed_args;
-  auto _r = parser.parse(${self_}, args, kwargs, parsed_args);
+  auto _r = parser.parse(${self_}, args, nargs, kwnames, parsed_args);
   ${check_has_torch_function}
   switch (_r.idx) {
     ${dispatch}
@@ -856,7 +856,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 
 # handler for a single parsed signature - may be a single overload or
 # a pair of overloads that whose signatures only differ in output params
-# (plugged into PY_VARIABLE_METHOD_VARARGS as an item in ${dispatch})
+# (plugged into PY_VARIABLE_METHOD_FASTCALL as an item in ${dispatch})
 PY_VARIABLE_CASE = CodeTemplate(
     """\
 case ${overload_index}: {
@@ -865,11 +865,11 @@ case ${overload_index}: {
 """
 )
 
-# python binding for single-overload function/method
-PY_VARIABLE_METHOD_VARARGS_SINGLETON = CodeTemplate(
+# vectorcall python binding for single-overload function/method
+PY_VARIABLE_METHOD_FASTCALL_SINGLETON = CodeTemplate(
     """\
 // ${name}
-static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
+static PyObject * ${pycname}(PyObject* self_, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames)
 {
   ${method_header}
   static PythonArgParser parser({
@@ -877,7 +877,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   }, /*traceable=*/${traceable});
 
   ParsedArgs<${max_args}> parsed_args;
-  auto _r = parser.parse(${self_}, args, kwargs, parsed_args);
+  auto _r = parser.parse(${self_}, args, nargs, kwnames, parsed_args);
   ${check_has_torch_function}
   ${dispatch}
   ${method_footer}
@@ -948,9 +948,9 @@ def method_impl(
     if noarg:
         template = PY_VARIABLE_METHOD_NOARGS
     elif is_singleton:
-        template = PY_VARIABLE_METHOD_VARARGS_SINGLETON
+        template = PY_VARIABLE_METHOD_FASTCALL_SINGLETON
     else:
-        template = PY_VARIABLE_METHOD_VARARGS
+        template = PY_VARIABLE_METHOD_FASTCALL
 
     return template.substitute(
         name=name,
@@ -972,7 +972,11 @@ def method_impl(
 
 
 def gen_has_torch_function_check(
-    name: BaseOperatorName, module: str | None, *, noarg: bool, method: bool
+    name: BaseOperatorName,
+    module: str | None,
+    *,
+    noarg: bool,
+    method: bool,
 ) -> str:
     if noarg:
         if method:
@@ -1001,7 +1005,7 @@ if (has_torch_function(self_)) {{
 
     return f"""\
 if(_r.has_torch_function()) {{
-  return handle_torch_function(_r, {self_}, args, kwargs, {namespace}, "{module or "torch.Tensor"}");
+  return handle_torch_function(_r, {self_}, args, nargs, kwnames, {namespace}, "{module or "torch.Tensor"}");
 }}
 """
 
@@ -1077,7 +1081,7 @@ static PyObject * {pycname}(PyObject* self_, PyObject* args);
     else:
         return (
             f"""\
-static PyObject * {pycname}(PyObject* self_, PyObject* args, PyObject* kwargs);
+static PyObject * {pycname}(PyObject* self_, PyObject* const* args, Py_ssize_t nargs, PyObject* kwnames);
 """,
         )
 
@@ -1108,8 +1112,8 @@ def method_def(
     if is_noarg(overloads):
         flags = "METH_NOARGS" if method else "METH_VARARGS | METH_KEYWORDS"
     else:
-        pycname = f"castPyCFunctionWithKeywords({pycname})"
-        flags = "METH_VARARGS | METH_KEYWORDS"
+        pycname = f"castPyCFunctionFastWithKeywords({pycname})"
+        flags = "METH_FASTCALL | METH_KEYWORDS"
 
     if module == "torch":
         flags += " | METH_STATIC"
