@@ -189,23 +189,8 @@ Tensor segment_reduce_backward_mps(const Tensor& grad,
                                 scalarToMetalTypeString(data),
                                 scalarToMetalTypeString(offsets),
                                 reduction_name(reduction));
-  auto* stream = getCurrentMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto encoder = stream->commandEncoder();
-      auto pipeline = lib.getPipelineStateForFunc(name);
-      [encoder setComputePipelineState:pipeline];
-      for (uint64_t base = 0; base < static_cast<uint64_t>(output.numel());) {
-        const auto count = std::min<uint64_t>(output.numel() - base, std::numeric_limits<uint32_t>::max());
-        mtl_setArgs(encoder, grad, output, data, grad_input, offsets, valid, p, base, prod_prefix);
-        if (parallel) {
-          [encoder dispatchThreadgroups:MTLSizeMake(count, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
-        } else {
-          mtl_dispatch1DJob(encoder, pipeline, count);
-        }
-        base += count;
-      }
-    }
+  dispatch_segment(name, output.numel(), parallel, [&](auto encoder, auto base) {
+    mtl_setArgs(encoder, grad, output, data, grad_input, offsets, valid, p, base, prod_prefix);
   });
   return grad_input;
 }
