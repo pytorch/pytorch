@@ -3,12 +3,14 @@
 import inspect
 
 import torch
+import torch.func._random as prng
 from torch.nn import functional as F
 from torch.nn.functional import SwizzleType
 from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import (
     _f32_to_e8m0_rceil,
+    _f32_to_fp8_nvidia_sr_with_words,
     compute_error,
     from_blocked,
     from_blocked_format,
@@ -562,7 +564,339 @@ class TestQuantizeTensorMeta(TestCase):
         )
 
 
+class TestMXFP8StochasticReferenceNumerics(TestCase):
+    def test_stateless_round_trip(self, device):
+        # * calculate a = mxfp8_with_sr(input)
+        # * calculate b = mxfp8(input)
+        # * verify that input and a are close
+        # * verify that a and b are very close
+        input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
+        key = prng.key(7, device=device)
+        scales, qdata = to_mxfp8_reference(
+            input,
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+            rounding_mode="stochastic",
+            random_key=key,
+        )
+        rtne_scales, rtne_qdata = to_mxfp8_reference(
+            input, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+        )
+        self.assertEqual(scales.view(torch.uint8), rtne_scales.view(torch.uint8))
+        unswizzled = from_blocked(qdata, scales, 32)
+        reconstructed = from_blocked_format(qdata, unswizzled)
+        rtne_reconstructed = from_blocked_format(rtne_qdata, unswizzled)
+        self.assertGreater(
+            compute_error(input.float(), reconstructed.float()).item(), 15.0
+        )
+        self.assertGreater(
+            compute_error(rtne_reconstructed.float(), reconstructed.float()).item(),
+            24.0,
+        )
+
+    def test_stateless_nonfinite_groups(self, device):
+        # verify that mxfp8 with SR handles special values correctly
+        input = torch.zeros((32, 32), device=device, dtype=torch.bfloat16)
+        input[0, 0] = float("nan")
+        input[1, 1] = float("inf")
+        input[2, 2] = -float("inf")
+        scales, qdata = to_mxfp8_reference(
+            input, rounding_mode="stochastic", random_key=prng.key(7, device=device)
+        )
+        qbytes = qdata.view(torch.uint8)
+        # verify qdata for blocks with NaN/inf are all NaN
+        self.assertEqual(
+            qbytes[:3], torch.full((3, 32), 0x7F, device=device, dtype=torch.uint8)
+        )
+        # verify other blocks qdata stay zeros
+        self.assertEqual(
+            qbytes[3:], torch.zeros((29, 32), device=device, dtype=torch.uint8)
+        )
+        # verify scales for blocks with NaN/inf are NaN
+        self.assertEqual(
+            scales.view(torch.uint8)[:3],
+            torch.full((3, 1), 0xFF, device=device, dtype=torch.uint8),
+        )
+
+    @parametrize("num_ops", (1, 2))
+    def test_stateful_cuda_graph(self, num_ops, device):
+        # verifies that:
+        # * cuda graph capture + replay matches eager
+        # * ^ holds for chains of 1 to 2 to_mxfp8_reference ops
+        if torch.device(device).type != "cuda" or torch.version.rocm is not None:
+            self.skipTest("stateful NVIDIA Philox rounding requires CUDA")
+        input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
+        generator = torch.cuda.default_generators[input.get_device()]
+        with torch.random.fork_rng(devices=[input.get_device()]):
+            torch.manual_seed(123)
+            expected = [
+                to_mxfp8_reference(input, rounding_mode="stochastic")
+                for _ in range(2 * num_ops)
+            ]
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured = [
+                    to_mxfp8_reference(input, rounding_mode="stochastic")
+                    for _ in range(num_ops)
+                ]
+
+            torch.manual_seed(123)
+            replays = []
+            for replay in range(2):
+                offset = generator.get_offset()
+                graph.replay()
+                # verify offset advanced correctly
+                self.assertEqual(generator.get_offset(), offset + 4 * num_ops)
+                outputs = []
+                for op, (scales, qdata) in enumerate(captured):
+                    # verify results from cuda graph match eager
+                    scale_bytes = scales.view(torch.uint8).clone()
+                    qdata_bytes = qdata.view(torch.uint8).clone()
+                    expected_scales, expected_qdata = expected[replay * num_ops + op]
+                    self.assertEqual(scale_bytes, expected_scales.view(torch.uint8))
+                    self.assertEqual(qdata_bytes, expected_qdata.view(torch.uint8))
+                    reconstructed = from_blocked_format(qdata, scales)
+                    self.assertGreater(
+                        compute_error(input.float(), reconstructed.float()).item(), 15.0
+                    )
+                    outputs.append((scale_bytes, qdata_bytes))
+                replays.append(outputs)
+
+            for op in range(num_ops):
+                self.assertEqual(replays[0][op][0], replays[1][op][0])
+                self.assertFalse(torch.equal(replays[0][op][1], replays[1][op][1]))
+            if num_ops == 2:
+                self.assertFalse(torch.equal(replays[0][0][1], replays[0][1][1]))
+
+    def test_stateless_cuda_graph(self, device):
+        # verifies that:
+        # * cuda graph replay of to_mxfp8_reference with unchanged random_key
+        #   leads to results bitwise equivalent to original
+        # * cuda graph replay of to_mxfp8_reference with changed random_key
+        #   leads to a fresh random draw + different (and still valid) results
+
+        if torch.device(device).type != "cuda" or torch.version.rocm is not None:
+            self.skipTest("NVIDIA Philox rounding requires CUDA")
+        input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
+        original_key = prng.key(7, device=device)
+        changed_key = prng.fold_in(original_key, 1)
+        expected = [
+            to_mxfp8_reference(input, rounding_mode="stochastic", random_key=trial_key)
+            for trial_key in (original_key, changed_key)
+        ]
+
+        # record the CUDA graph
+        key_for_cuda_graph = original_key.clone()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            scales, qdata = to_mxfp8_reference(
+                input, rounding_mode="stochastic", random_key=key_for_cuda_graph
+            )
+
+        # fetch global RNG (to make sure later that it does not change)
+        generator = torch.cuda.default_generators[input.get_device()]
+        offset = generator.get_offset()
+
+        replays = []
+        for trial_key, (expected_scales, expected_qdata) in (
+            (original_key, expected[0]),
+            (original_key, expected[0]),
+            (changed_key, expected[1]),
+            (original_key, expected[0]),
+        ):
+            key_for_cuda_graph.copy_(trial_key)
+            graph.replay()
+            # verify RNG state did not change
+            self.assertEqual(generator.get_offset(), offset)
+            # verify results from cuda graph match expected result from eager mode
+            scale_bytes = scales.view(torch.uint8).clone()
+            qdata_bytes = qdata.view(torch.uint8).clone()
+            self.assertEqual(scale_bytes, expected_scales.view(torch.uint8))
+            self.assertEqual(qdata_bytes, expected_qdata.view(torch.uint8))
+            reconstructed = from_blocked_format(qdata, scales)
+            self.assertGreater(
+                compute_error(input.float(), reconstructed.float()).item(), 15.0
+            )
+            replays.append((scale_bytes, qdata_bytes))
+
+        self.assertEqual(replays[0], replays[1])
+        self.assertFalse(torch.equal(replays[0][1], replays[2][1]))
+        self.assertEqual(replays[0], replays[3])
+
+    def test_mean_preservation(self, device):
+        # test that E(dequant(mxfp8_with_sr(X))) ~= X
+        generator = torch.Generator(device=device).manual_seed(1234)
+        input = torch.randn(
+            (8, 32), device=device, dtype=torch.bfloat16, generator=generator
+        )
+        key = prng.key(7, device=device)
+        reconstructed_trials = []
+        for trial in range(256):
+            scales, qdata = to_mxfp8_reference(
+                input,
+                rounding_mode="stochastic",
+                random_key=prng.fold_in(key, trial),
+            )
+            reconstructed_trials.append(from_blocked_format(qdata, scales).float())
+
+        self.assertEqual(
+            torch.stack(reconstructed_trials).mean(dim=0),
+            input.float(),
+            rtol=0.03,
+            atol=0.01,
+        )
+
+
+class TestFP8StochasticRounding(TestCase):
+    # Verify that the fp32 -> fp8 SR emulation (without scaling) is correct.
+    # Note: since this is bitwise matching NVIDIA's `cvt.rs.satfinite.e4m3x4.f32`
+    # intrinsic, we also make a general assumption that NVIDIA's testing
+    # of the intrinsic also applies here, and thus we do not test every possible
+    # case.
+
+    def test_exact(self, device):
+        key = prng.fold_in(prng.key(7, device=device), 12345)
+        words = prng.bits(key, 4, dtype=torch.uint32)
+
+        # verify that SR does not adjust values that are exactly representable
+        # in float8_e4m3fn
+        exact = torch.tensor(
+            [
+                0.0,
+                -0.0,
+                1.0,
+                -1.0,
+                1.125,
+                -1.125,
+                2**-9,
+                -(2**-9),
+                2**-6,
+                -(2**-6),
+                1.875,
+                2.0,
+                416.0,
+                448.0,
+                -448.0,
+                0.0,
+            ],
+            device=device,
+        )
+        rounded = _f32_to_fp8_nvidia_sr_with_words(exact, words)
+        expected_exact = exact.to(torch.float8_e4m3fn).view(torch.uint8)
+        self.assertEqual(rounded.view(torch.uint8), expected_exact)
+        self.assertEqual(
+            rounded[:2].view(torch.uint8),
+            torch.tensor([0x00, 0x80], device=device, dtype=torch.uint8),
+        )
+
+    def test_neighbors(self, device):
+        # verify that tensor values between the representable values of
+        # float8_e4m3fn get rounded to a neighboring representable value
+        intervals = torch.tensor(
+            [
+                [1.0, 1.125],
+                [-1.125, -1.0],
+                [1.875, 2.0],
+                [416.0, 448.0],
+                [0.0, 2**-9],
+                [7 * 2**-9, 2**-6],
+                [-(2**-9), -0.0],
+                [-(2**-6), -(7 * 2**-9)],
+            ],
+            device=device,
+        )
+
+        key = prng.fold_in(prng.key(7, device=device), 12345)
+        for i in range(10):
+            key = prng.fold_in(key, i)
+            words = prng.bits(key, 4, dtype=torch.uint32)
+            ratio = torch.rand_like(intervals[:, 0])
+            between = intervals[:, 0] + ratio * (intervals[:, 1] - intervals[:, 0])
+            rounded = _f32_to_fp8_nvidia_sr_with_words(between, words[:2])
+            rounded = rounded.view(torch.uint8)
+            endpoints = intervals.to(torch.float8_e4m3fn).view(torch.uint8)
+            neighbors = (rounded == endpoints[:, 0]) | (rounded == endpoints[:, 1])
+            self.assertEqual(neighbors, torch.ones_like(neighbors))
+
+    def test_special_values(self, device):
+        key = prng.fold_in(prng.key(7, device=device), 12345)
+        words = prng.bits(key, 4, dtype=torch.uint32)
+
+        # verify that out-of-range values saturate, and NaN gets converted to NaN
+        inf = float("inf")
+        nan = float("nan")
+        nonfinite_or_overflow = torch.tensor(
+            [449.0, -449.0, 1e6, -1e6, inf, -inf, nan, -nan],
+            device=device,
+        )
+        rounded = _f32_to_fp8_nvidia_sr_with_words(nonfinite_or_overflow, words[:2])
+        expected_finite = torch.tensor([448.0, -448.0] * 3, device=device)
+        self.assertEqual(rounded[:6].float(), expected_finite)
+        self.assertEqual(
+            rounded[6:].view(torch.uint8),
+            torch.tensor([0x7F, 0x7F], device=device, dtype=torch.uint8),
+        )
+
+    @parametrize(
+        "lower,upper",
+        (
+            # hand chosen pairs of neighboring values exactly representable in
+            # float8_e4m3fn
+            (1.0, 1.125),
+            (-1.125, -1.0),
+            (1.875, 2.0),
+            (416.0, 448.0),
+            (0.0, 2**-9),
+            (-(2**-9), -0.0),
+            (7 * 2**-9, 2**-6),
+        ),
+    )
+    def test_round_up_probability(self, lower, upper, device):
+        # given a value x between A and B, verifies that SR rounds
+        # x up to B with probability `P = (x - A) / (B - A)`, and rounds
+        # x down to A with probability `1 - P`
+
+        probabilities = torch.tensor((0.125, 0.5, 0.875), device=device)
+        values = lower + (upper - lower) * probabilities
+        samples = values[:, None].expand(-1, 8192).contiguous()
+        key = prng.fold_in(prng.key(7, device=device), 12345)
+        words = prng.bits(key, samples.numel() // 4, dtype=torch.uint32)
+        rounded = _f32_to_fp8_nvidia_sr_with_words(samples, words).float()
+        neighbors = (rounded == lower) | (rounded == upper)
+        self.assertEqual(neighbors, torch.ones_like(neighbors))
+
+        observed = (rounded == upper).float().mean(dim=1)
+        tolerance = 6 * torch.sqrt(probabilities * (1 - probabilities) / 8192)
+        for probability, frequency, bound in zip(probabilities, observed, tolerance):
+            self.assertLessEqual(
+                abs(frequency.item() - probability.item()),
+                bound.item(),
+                f"[{lower}, {upper}]: expected round-up probability {probability.item()}, got {frequency.item()}",
+            )
+
+    def test_mean_preservation(self, device):
+        # test that E(SR(X)) ~= X
+
+        generator = torch.Generator(device=device).manual_seed(1234)
+        values = torch.randn(256, device=device, generator=generator)
+        key = prng.fold_in(prng.key(7, device=device), 12345)
+        rounded_trials = []
+        for trial in range(256):
+            words = prng.bits(
+                prng.fold_in(key, trial), values.numel() // 4, dtype=torch.uint32
+            )
+            rounded_trials.append(
+                _f32_to_fp8_nvidia_sr_with_words(values, words).float()
+            )
+        self.assertEqual(
+            torch.stack(rounded_trials).mean(dim=0), values, rtol=0.03, atol=0.001
+        )
+
+
 instantiate_device_type_tests(TestMXFP8ReferenceNumerics, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestMXFP8StochasticReferenceNumerics, globals(), only_for="cuda"
+)
+instantiate_device_type_tests(TestFP8StochasticRounding, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
