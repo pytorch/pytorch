@@ -1052,6 +1052,7 @@ class CompiledFxGraph(OutputCode):
                     code_cache, "recursively_apply_fns", None
                 )
                 self.compiled_fn_runner = getattr(code_cache, "runner", None)
+                PyCodeCache.forget_module_with(self, code_cache)
         except OSError:
             log.error("Failed to load artifact: %s", artifact_path)
             raise
