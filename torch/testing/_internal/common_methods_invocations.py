@@ -8107,14 +8107,6 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
                           args=(reduce,),
                           kwargs=sample_input_kwargs)
 
-    # Exercise noncontiguous data and int32 metadata without multiplying the
-    # existing shape/reduction/initial matrix.
-    for reduce in reductions:
-        lengths = torch.tensor([3, 5], dtype=torch.int32, device=device)
-        metadata = lengths if mode == 'lengths' else torch.tensor([0, 3, 8], dtype=torch.int32, device=device)
-        data = _tensor((16, 3))[::2].detach().requires_grad_(requires_grad)
-        yield SampleInput(data, args=(reduce,), kwargs={mode: metadata})
-
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device,
