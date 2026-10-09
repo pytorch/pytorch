@@ -1083,7 +1083,7 @@ __device__ __forceinline__ uint32_t rankSelectRow16(uint32_t x, uint32_t kEff) {
 }
 
 // Number of set bits of `ballot` in lanes below the calling lane.
-__device__ __forceinline__ uint32_t lanesBelow(uint64_t ballot) {
+__device__ __forceinline__ uint32_t laneRank(uint64_t ballot) {
   const uint32_t r = __builtin_amdgcn_mbcnt_lo(static_cast<uint32_t>(ballot), 0u);
   return __builtin_amdgcn_mbcnt_hi(static_cast<uint32_t>(ballot >> 32), r);
 }
@@ -1574,7 +1574,7 @@ __device__ __forceinline__ void radixSelectRegs(
         if (lane_id == 0 && b != 0) {
           base = atomicAdd(&dataSmemWriteIndex, __popcll(b));
         }
-        const uint32_t at = static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(base)) + lanesBelow(b);
+        const uint32_t at = static_cast<uint32_t>(__builtin_amdgcn_readfirstlane(base)) + laneRank(b);
         if (cand && at < CAP) {
           dataSmem[at] = keyToSlot<scalar_t>(t[0]);
         }
