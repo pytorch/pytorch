@@ -4384,8 +4384,13 @@ def _get_fake_value_impl(
                 )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
+        ) or (
+            isinstance(cause, RuntimeError)
+            and "Unsupported operator for C++ FakeTensor" in str(cause)
         ):
-            op = cause.func  # type: ignore[assignment]
+            op = getattr(cause, "func", node.target)  # type: ignore[assignment]
+            if isinstance(op, torch._ops.OpOverloadPacket):
+                op = op.default
             import_suggestion = ""
             if isinstance(op, torch._ops.OpOverload):
                 maybe_pystub = torch._C._dispatch_pystub(
@@ -4400,7 +4405,7 @@ def _get_fake_value_impl(
                     )
             unimplemented(
                 gb_type="Operator does not support running with fake tensors",
-                context=f"unsupported operator: {cause.func}",
+                context=f"unsupported operator: {op}",
                 explanation="",
                 hints=[
                     f"{import_suggestion}see "
