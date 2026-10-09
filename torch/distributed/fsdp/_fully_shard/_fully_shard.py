@@ -19,10 +19,7 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_collectives import (
-    _default_reduce_scatter_input_fn,
-    PrepareReduceScatterInputsFn,
-)
+from ._fsdp_collectives import _default_reduce_scatter_input_fn
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -882,7 +879,7 @@ class FSDPModule:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
     def set_reduce_scatter_input_fn(
-        self, fn: PrepareReduceScatterInputsFn | None, /, *, recurse: bool = True
+        self, fn: Callable | None, /, *, recurse: bool = True
     ) -> None:
         r"""Set the function that prepares reduce-scatter inputs.
 
