@@ -1432,14 +1432,15 @@ def sanitize_pytest_xml(xml_file: str):
     tree.write(xml_file)
 
 
-def get_pytest_test_cases(argv: list[str]) -> list[str]:
+def get_pytest_test_cases(argv: list[str]) -> dict[str, Any]:
+    """Maps the cwd-relative node id of each collected test to its pytest item."""
     class TestCollectorPlugin:
         def __init__(self) -> None:
-            self.tests: list[Any] = []
+            self.tests: dict[str, Any] = {}
 
         def pytest_collection_finish(self, session):
             for item in session.items:
-                self.tests.append(session.config.cwd_relative_nodeid(item.nodeid))
+                self.tests[session.config.cwd_relative_nodeid(item.nodeid)] = item
 
     test_collector_plugin = TestCollectorPlugin()
     import pytest
@@ -1581,7 +1582,20 @@ def run_tests(argv=None):
 
             timeout = None if RERUN_DISABLED_TESTS else 15 * 60
 
+            started = time.time()
             exitcode, _ = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
+
+            if TEST_SAVE_TORCHCI_REPORTS and USE_PYTEST:
+                # A child that crashed or timed out couldn't record its test.
+                try:
+                    from torch.testing._internal.torchci import plugin, recovery
+
+                    prefix = os.path.join(TEST_SAVE_TORCHCI_REPORTS, sanitize_test_filename(argv[0]))
+                    test = plugin.identity(test_cases[test_case_full_name])
+                    recorded = recovery.effective_exit_code(exitcode, time.time() - started, timeout)
+                    recovery.record_dead_subprocess(prefix, test, recorded, started)
+                except Exception as e:
+                    print(f"torchci: could not record the test: {e!r}", file=sys.stderr)
 
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.

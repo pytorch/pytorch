@@ -35,3 +35,5 @@ def pytest_configure(config):
         plugin.ReportWriter._finish = boom
     elif mode == "worker" and hasattr(config, "workerinput"):
         plugin.identity = boom
+    elif mode == "cache":
+        plugin.ReportWriter._publish = boom
