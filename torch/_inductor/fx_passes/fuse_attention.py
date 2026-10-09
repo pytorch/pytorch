@@ -6,10 +6,7 @@ import logging
 import torch
 from torch.utils._ordered_set import OrderedSet
 
-from ..._dynamo.device_interface import (
-    DeviceInterface,
-    get_interface_for_device,
-)
+from ..._dynamo.device_interface import DeviceInterface, get_interface_for_device
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
@@ -1016,7 +1013,9 @@ def _sfdp_params_check(match):
     return True
 
 
-def _sfdp_extra_check(scale_factor_op=None, fp32_upcast_softmax=False, math_path_only=False):
+def _sfdp_extra_check(
+    scale_factor_op=None, fp32_upcast_softmax=False, math_path_only=False
+):
     def fn(match):
         if math_path_only and "query" in match.kwargs:
             query = match.kwargs["query"].meta["val"]

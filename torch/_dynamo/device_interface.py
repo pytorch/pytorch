@@ -434,14 +434,19 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def is_fp32_attention_fusion_safe(dtype: torch.dtype) -> bool:
-        return dtype != torch.float32 or torch.backends.cuda.matmul.fp32_precision == "tf32"
+        return (
+            dtype != torch.float32
+            or torch.backends.cuda.matmul.fp32_precision == "tf32"
+        )
 
     @staticmethod
     def should_warn_tf32_disabled() -> bool:
         if torch.backends.cuda.matmul.fp32_precision == "bfx9":
             return False
         min_cap = (8, 0)
-        return torch.cuda.is_available() and torch.cuda.get_device_capability() >= min_cap
+        return (
+            torch.cuda.is_available() and torch.cuda.get_device_capability() >= min_cap
+        )
 
     @staticmethod
     def is_fp32_softmax_attention_fusion_safe() -> bool:
