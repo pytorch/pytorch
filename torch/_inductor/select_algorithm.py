@@ -2242,9 +2242,10 @@ class TritonTemplateKernel(TritonKernel):
             return None
         return bm * (bn // self.meta.get("EPILOGUE_SUBTILE", 1))
 
-    def _epilogue_tma_store_budget(self) -> int:
+    def _epilogue_tma_store_budget(self, template_stored: bool) -> int:
         """Shared memory left for staging the TMA stores of epilogue outputs,
-        after the operand ring and the template output's own staging."""
+        after the operand ring and, if it's stored, the template output's own
+        staging."""
         device = self.output_node.get_device()
         tile = [self.meta.get(k) for k in ("BLOCK_M", "BLOCK_N", "BLOCK_K")]
         staged = self._staged_tile_elems()
@@ -2265,29 +2266,41 @@ class TritonTemplateKernel(TritonKernel):
         elem = max(node.get_dtype().itemsize for node in operands)
         ring = self.num_stages * (bm * bk + bk * bn) * elem
         template_out = staged * self.output_node.get_dtype().itemsize
-        # Err toward tl.store: an overflow drops the fused choice to
-        # num_stages=1, or fails it outright. The margin covers the epilogue's
-        # layout-conversion and reduction scratch and the barriers, measured at
-        # under BM * BN / EPILOGUE_SUBTILE bytes plus 1 KB on B200.
-        margin = bm * bn + 16 * 1024
+        # An overflow drops the fused choice to num_stages=1, or fails it
+        # outright. Besides the ring, the staging buffers and the layout
+        # scratch _tma_store_epilogue_outputs charges, B200 fused kernels
+        # measured at most 1.6 KB of barriers and reduction scratch.
+        margin = 2 * 1024
+        if not template_stored:
+            template_out = 0
         return limit - ring - template_out - margin
+
+    def _plain_store_scratch(self, itemsizes: Sequence[int]) -> int:
+        """Shared memory the full-tile tensors an epilogue reads or plain-stores
+        take to convert the subtile's layout, shared by all of them: measured at
+        BLOCK_M x BLOCK_N / EPILOGUE_SUBTILE x itemsize / 4 bytes for the widest
+        dtype, and 8 KB at small subtiles."""
+        if not itemsizes:
+            return 0
+        return max((self._staged_tile_elems() or 0) * max(itemsizes) // 4, 8 * 1024)
 
     def _full_tile_epilogue_outputs(
         self, template_node, epilogue_nodes
-    ) -> list[tuple[str, int]]:
+    ) -> tuple[list[tuple[str, int]], list[int]]:
         """The epilogue outputs a TMA store can write whole, with the bytes of
         their staged (sub)tile: materialized, the template output's shape or
-        a row-major view of it, and 16-byte aligned. Smaller or irregular
-        outputs use tl.store."""
+        a row-major view of it, and 16-byte aligned. Also the itemsizes of the
+        other materialized outputs with the template output's elements, which
+        use tl.store. epilogue_nodes are the ones this kernel computes."""
         staged = self._staged_tile_elems()
         scheduler = V.graph.scheduler
         if staged is None or scheduler is None:
-            return []
+            return [], []
         fused = OrderedSet(
             [template_node.get_name(), *(n.get_name() for n in epilogue_nodes)]
         )
         size = self.output_node.get_size()
-        outputs = []
+        outputs, plain = [], []
         for node in epilogue_nodes:
             if node.is_reduction():
                 continue
@@ -2295,14 +2308,15 @@ class TritonTemplateKernel(TritonKernel):
                 if scheduler.can_buffer_be_removed_through_fusion(name, fused):
                     continue
                 layout = V.graph.get_buffer(name).get_layout()
+                if sympy_product(layout.size) != sympy_product(size):  # not full-tile
+                    continue
                 if (
                     not all(
                         isinstance(x, (int, sympy.Integer))
                         for x in (*layout.size, *layout.stride, layout.offset)
                     )  # dynamic layout
                     # [M, N] or a row-major view of it, e.g. [B, S, N]
-                    or sympy_product(layout.size) != sympy_product(size)
-                    or layout.size[-1] != size[-1]  # not full-tile
+                    or layout.size[-1] != size[-1]
                     or layout.offset != 0  # irregular output
                     or layout.stride[-1] != 1  # irregular output
                     or any(  # irregular output
@@ -2311,9 +2325,89 @@ class TritonTemplateKernel(TritonKernel):
                     )
                     or not can_use_tma(output_layout=layout)
                 ):
+                    plain.append(layout.dtype.itemsize)
                     continue
                 outputs.append((name, staged * layout.dtype.itemsize))
-        return outputs
+        return outputs, plain
+
+    def _tma_store_epilogue_outputs(
+        self, template_node, epilogue_nodes
+    ) -> OrderedSet[str]:
+        """The full-tile epilogue outputs that keep their TMA store: the
+        largest first, while their staging fits in shared memory."""
+        from torch._inductor.dependencies import MemoryDep
+
+        bm, bn = self.meta.get("BLOCK_M"), self.meta.get("BLOCK_N")
+        scheduler = V.graph.scheduler
+        if bm is None or bn is None or scheduler is None:
+            return OrderedSet()
+        subtiles = self.meta.get("EPILOGUE_SUBTILE", 1)
+        template = template_node.node
+        # Nodes reading reduction results run after the kernel.
+        _, after = finished_after_kernel(
+            (bm, bn // subtiles, subtiles), template, epilogue_nodes
+        )
+        nodes = [n for n in epilogue_nodes if n not in after]
+        produced = OrderedSet([template.get_name()]).union(
+            *(n.get_buffer_names() for n in nodes)
+        )
+        # A removed template output stores nothing, unless a column pass reloads
+        # it after invalidating the CSE cache, which keeps it.
+        columns = any(
+            n.is_reduction() and template_reduction_axis(n, template, produced) == 1
+            for n in nodes
+        )
+        template_stored = columns or not scheduler.can_buffer_be_removed_through_fusion(
+            template.get_name(),
+            OrderedSet([template_node.get_name(), *(n.get_name() for n in nodes)]),
+        )
+        outputs, plain = self._full_tile_epilogue_outputs(template_node, nodes)
+        budget = self._epilogue_tma_store_budget(template_stored)
+        # The column pass needs scratch for the transposed tile, measured at
+        # under BLOCK_M x BLOCK_N / EPILOGUE_SUBTILE bytes.
+        if columns:
+            budget -= self._staged_tile_elems() or 0
+        # Full-tile tensors the epilogue reads, including the template's own
+        # extra inputs such as addmm's bias, and plain-stores share one layout
+        # conversion buffer. Read through TMA, each also has its own staging.
+        numel = sympy_product(template.get_size())
+        reads = [
+            node.get_dtype().itemsize
+            for node in (
+                *self.input_nodes[: self.prefix_args],
+                *self.input_nodes[len(self.input_nodes) - self.suffix_args :],
+            )
+            if sympy_product(node.get_size()) == numel
+        ]
+        for n in nodes:
+            for dep in n.read_writes.reads:
+                buf = V.graph.try_get_buffer(dep.name)
+                if (
+                    dep.name not in produced
+                    and isinstance(dep, MemoryDep)
+                    and buf is not None
+                    and dep.get_numel() == numel
+                    and V.graph.sizevars.statically_known_geq(
+                        sympy_product(buf.get_size()), numel
+                    )
+                ):
+                    reads.append(buf.get_dtype().itemsize)
+        if self.tma_load_for_template_epilogue:
+            budget -= (self._staged_tile_elems() or 0) * sum(reads)
+        kept = tma_store_outputs_within_budget(
+            outputs, budget - self._plain_store_scratch([*plain, *reads])
+        )
+        if len(kept) < len(outputs):
+            # Some outputs fall back to tl.store, so they need the scratch too.
+            staged = self._staged_tile_elems() or 1
+            kept = tma_store_outputs_within_budget(
+                outputs,
+                budget
+                - self._plain_store_scratch(
+                    [*plain, *reads, *(nbytes // staged for _, nbytes in outputs)]
+                ),
+            )
+        return kept
 
     def _compute_fusion_metadata(
         self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
@@ -2352,9 +2446,8 @@ class TritonTemplateKernel(TritonKernel):
             # Each TMA store stages its whole tile in its own shared-memory
             # buffer, so a reduction epilogue's many, often fp32, outputs can
             # overflow it. Keep the largest on TMA while they fit.
-            self.tma_store_epilogue_outputs = tma_store_outputs_within_budget(
-                self._full_tile_epilogue_outputs(template_node, epilogue_nodes),
-                self._epilogue_tma_store_budget(),
+            self.tma_store_epilogue_outputs = self._tma_store_epilogue_outputs(
+                template_node, epilogue_nodes
             )
         with self:
             partial_code = render()
