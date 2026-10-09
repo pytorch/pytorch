@@ -2661,41 +2661,6 @@ class SkipFunctionVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
-    def get_source(self) -> Source | None:
-        return self.source
-
-    def lookup_instance_dict(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker | None":
-        if not isinstance(self.value, types.FunctionType):
-            return None
-        fn_dict = self.value.__dict__
-        if name not in fn_dict:
-            return None
-        source = self.get_source()
-        source = AttrSource(source, name) if source is not None else None
-        if source is not None:
-            return variables.LazyVariableTracker.create(fn_dict[name], source, tx=tx)
-        return VariableTracker.build(tx, fn_dict[name])
-
-    def call_getattr_fallback(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker | None":
-        if not is_function(self.value):
-            return None
-        source = self.get_source()
-        if source is not None:
-            install_guard(
-                source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
-            )
-        msg = f"'{type(self.value).__name__}' object has no attribute '{name}'"
-        raise_observed_exception(
-            AttributeError,
-            tx,
-            args=[msg],
-            kwargs={"name": ConstantVariable.create(name), "obj": self},
-        )
-
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "SkipFunctionVariable":
         # Use closure match guard (i.e. guard on __code__ object instead of
@@ -3009,19 +2974,6 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
         super().__init__(wrapped.value, reason=wrapped.reason, **kwargs)
         self.wrapped = wrapped
         self.context = context
-
-    def get_source(self) -> Source | None:
-        return self.wrapped.get_source()
-
-    def lookup_instance_dict(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "VariableTracker | None":
-        if name == "__wrapped__":
-            return self.wrapped
-        return super().lookup_instance_dict(tx, name)
-
-    def get_real_python_backed_value(self) -> object:
-        return NO_SUCH_SUBOBJ
 
     def call_function(
         self,
