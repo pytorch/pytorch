@@ -710,8 +710,17 @@ if(USE_ROCM)
         endforeach()
       endif()
       if(_have_async_mm_arch)
+        # ck_tile does not compile for every arch, so build the kernel for
+        # gfx942/gfx950 only.
+        set(_async_mm_no_arch_opts)
+        foreach(ARCH IN LISTS PYTORCH_ROCM_ARCH)
+          if(NOT ARCH MATCHES "^gfx9(42|50)$")
+            list(APPEND _async_mm_no_arch_opts "--no-offload-arch=${ARCH}")
+          endif()
+        endforeach()
         set_source_files_properties(${ASYNC_MM_HIP_FILE} PROPERTIES
-          COMPILE_DEFINITIONS USE_ROCM_ASYNC_MM)
+          COMPILE_DEFINITIONS USE_ROCM_ASYNC_MM
+          COMPILE_OPTIONS "${_async_mm_no_arch_opts}")
       endif()
     endif()
   endif()
