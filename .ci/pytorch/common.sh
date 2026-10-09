@@ -23,10 +23,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *gcc* ]]; then
   export CC=gcc
   export CXX=g++
-  if sudo -n true 2>/dev/null; then
-    sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100
-    sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 100
-  fi
+  sudo update-alternatives --install /usr/bin/cc cc /usr/bin/gcc 100
+  sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++ 100
 fi
 
 # Figure out which Python to use for ROCm
