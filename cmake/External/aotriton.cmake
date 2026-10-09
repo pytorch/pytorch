@@ -65,6 +65,7 @@ if(NOT __AOTRITON_INCLUDED)
      "e4bda76fd6857a733cd7b4b3eb9ccb21c0f47b565ce304777a61bbb13d12ad6e" # amd-gfx115x
      "f173671cc5112897e134f1d209bd6f572ecd507f4d68dc84cb6f07b67e13e851" # amd-gfx120x
      "6a354bf84a18d7689affaef953ea4a2d1f6943569da4a4ca26fd5e6b5eb67a0f" # amd-gfx1250
+     # TO-DO: Add amd-gfx117x hash when available
      )
   set(__AOTRITON_BASE_URL "$ENV{PYTORCH_AOTRITON_BASE_URL}")
   if(NOT __AOTRITON_BASE_URL)
@@ -174,6 +175,7 @@ if(NOT __AOTRITON_INCLUDED)
       CMAKE_ARGS
       -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
       -DAOTRITON_GPU_BUILD_TIMEOUT=0
+      -DAOTRITON_INHERIT_SYSTEM_SITE_TRITON=ON # TODO: Remove this once AOTriton default triton version is updated to use triton with gfx117X support
       -DAOTRITON_NO_PYTHON=ON
       -DAOTRITON_NOIMAGE_MODE=${noimage}
       -DHIP_PLATFORM=amd
