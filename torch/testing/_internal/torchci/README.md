@@ -42,7 +42,7 @@ open-ended string-to-string maps.
 | `cc_compiler` | string | `gcc`, `clang`, `msvc`, or `""` |
 | `cc_compiler_version` | string | Compiler major version |
 | `accelerator` | string | `cpu`, `cuda`, `rocm`, `xpu`, or `mps` |
-| `accelerator_version` | string | CUDA toolkit, ROCm release (not HIP), or SYCL compiler major.minor; `""` for CPU and MPS |
+| `accelerator_version` | string | `torch.version.cuda`, `torch.version.rocm` (the ROCm release, not HIP), or `torch.version.xpu` (the SYCL compiler, `20250101`); `""` for CPU and MPS |
 | `device_count` | int | Visible devices of `accelerator`, honoring `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`; `0` for CPU |
 | `device_name` | string | The first visible device's name as its vendor reports it (`NVIDIA L4`, `AMD Instinct MI350X VF`, `Apple M2 Pro`, `Intel(R) Data Center GPU Max 1100`); empty with no device |
 
