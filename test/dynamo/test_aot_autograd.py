@@ -1910,6 +1910,40 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         result = torch.compile(f)(x, w)  # noqa: UNSPECIFIED_BACKEND
         self.assertIsInstance(result, torch.Tensor)
 
+    def test_current_autograd_invocation_pairs_forward_and_backward(self):
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            current_autograd_invocation,
+        )
+
+        seen = []
+
+        def recording_compiler(gm, example_inputs):
+            def run(*args):
+                seen.append(current_autograd_invocation())
+                return gm(*args)
+
+            return make_boxed_func(run)
+
+        backend = aot_autograd(
+            fw_compiler=recording_compiler, bw_compiler=recording_compiler
+        )
+        fn = torch.compile(lambda x: (x.sin() * 2).sum(), backend=backend)
+        out_x = fn(torch.randn(4, requires_grad=True))
+        out_y = fn(torch.randn(4, requires_grad=True))
+        out_y.backward()
+        out_x.backward()
+
+        # Each call's backward sees the ctx its own forward saw, whatever the
+        # order the backwards run in.
+        forward_x, forward_y, backward_y, backward_x = seen
+        self.assertIsNotNone(forward_x)
+        self.assertIsNot(forward_x, forward_y)
+        self.assertIs(backward_x, forward_x)
+        self.assertIs(backward_y, forward_y)
+        self.assertIsNone(current_autograd_invocation())
+
 
 class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
     @onlyAccelerator
