@@ -877,7 +877,6 @@ def main() -> None:
     candidates = args.filenames or [str(p) for p in _discover_files()]
     filenames = [x for x in candidates if _is_test_file(x)]
 
-    found_errors = False
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=_default_num_workers(),
     ) as executor:
@@ -886,15 +885,8 @@ def main() -> None:
             try:
                 for lint_message in future.result():
                     print(json.dumps(lint_message._asdict()), flush=True)
-                    found_errors = True
             except Exception:
                 logging.critical('Failed at "%s".', futures[future])
-
-    if found_errors:
-        logging.info(
-            "To temporarily exempt a test file from TEST_LINTER, add it to %s.",
-            ALLOWLIST_REL_PATH,
-        )
 
 
 if __name__ == "__main__":
