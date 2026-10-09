@@ -19,12 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .descriptors import (
-    AOTInput,
-    BackwardTokenAOTInput,
-    GradAOTOutput,
-    SubclassGetAttrAOTOutput,
-)
+from .descriptors import AOTInput, BackwardTokenAOTInput
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
@@ -483,35 +478,6 @@ def aot_dispatch_base_graph(
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
-_GRAD_CAST_OPS = (
-    torch.ops.aten._to_copy.default,
-    torch.ops.prims.convert_element_type.default,
-)
-
-
-def _narrowed_input_grad_dtypes(
-    fx_g: torch.fx.GraphModule, flat_args_descs: list[AOTInput]
-) -> dict[int, torch.dtype]:
-    # The autograd engine casts each input grad to the input's grad_dtype. Find the
-    # inputs where that cast narrows the grad; it carries no user stack trace.
-    narrowed = {}
-    out = fx_g.graph.find_nodes(op="output")[0]
-    for node, desc in zip(out.args[0], out.meta["desc"]):
-        while isinstance(desc, SubclassGetAttrAOTOutput):
-            desc = desc.base
-        if not isinstance(desc, GradAOTOutput) or not isinstance(node, torch.fx.Node):
-            continue
-        if node.target not in _GRAD_CAST_OPS or "stack_trace" in node.meta:
-            continue
-        src_node = node.args[0]
-        if not isinstance(src_node, torch.fx.Node):
-            continue
-        src, dst = src_node.meta["val"].dtype, node.meta["val"].dtype
-        if src.is_floating_point and dst.itemsize < src.itemsize:
-            narrowed[flat_args_descs.index(desc.grad_of)] = dst
-    return narrowed
-
-
 def aot_dispatch_autograd_graph(
     flat_fn: TraceFn,
     flat_args: list[Any],
@@ -578,8 +544,11 @@ def aot_dispatch_autograd_graph(
         aot_config=aot_config,
     )
 
-    narrowed = _narrowed_input_grad_dtypes(fx_g, flat_args_descs)
-    fw_metadata.narrowed_input_grad_dtypes = narrowed
+    fw_metadata.input_grad_dtypes = {
+        i: arg.grad_dtype
+        for i, (arg, info) in enumerate(zip(flat_args, fw_metadata.input_info))
+        if info.requires_grad and info.is_leaf and arg.grad_dtype is not None
+    }
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.

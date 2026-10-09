@@ -591,10 +591,14 @@ class ViewAndMutationMeta:
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
 
-    # Inputs whose grad the traced backward narrows to the grad_dtype seen at trace
-    # time (input index -> that dtype). Widening grad_dtype before backward can't
-    # recover the lost precision, so the runtime checks it.
-    narrowed_input_grad_dtypes: dict[int, torch.dtype] = field(default_factory=dict)
+    # grad_dtype of each grad-requiring leaf input at trace time. The traced backward
+    # bakes it in (its grad cast, and any choice a custom backward made by reading
+    # it), so the runtime rejects changes to it between forward and backward. Inputs
+    # traced with None are skipped: their grads leave the graph uncast and the
+    # autograd engine casts them to the grad_dtype set at backward time, as in eager.
+    # FSDP2 relies on this when an earlier backward restores grad_dtype under a
+    # forward that chose None.
+    input_grad_dtypes: dict[int, torch.dtype] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
