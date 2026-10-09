@@ -742,9 +742,7 @@ class TestGpuBenchmarkDeviceTypes(TestCase):
         # delegate imports it by name at each call, sidestepping its
         # functools.cache.
         sentinel = "privateuse1_test_device"
-        with patch(
-            "torch._inductor.utils.get_gpu_type", return_value=sentinel
-        ):
+        with patch("torch._inductor.utils.get_gpu_type", return_value=sentinel):
             self.assertEqual(_get_default_gpu_device_type(), sentinel)
 
 
