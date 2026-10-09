@@ -863,7 +863,11 @@ class CompiledFxGraph(OutputCode):
         This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
         The results of this function are *not* saved in the cache itself.
         """
-        if config.graph_partition and _unstable_customized_partition_wrapper.wrapper:
+        # partition_maps also records partitioning that a nested region forced
+        # on. cpp_wrapper/aot_mode graphs never partition but still follow
+        # config.graph_partition here.
+        partitioned = config.graph_partition or self.partition_maps is not None
+        if partitioned and _unstable_customized_partition_wrapper.wrapper:
             # Mechanically apply user-specified cudagraph wrappers without modification
             if self.recursively_apply_fns is None:
                 raise AssertionError("self.recursively_apply_fns must not be None")
@@ -926,7 +930,7 @@ class CompiledFxGraph(OutputCode):
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
             else:
-                if config.graph_partition and policy is None:
+                if partitioned and policy is None:
                     # With graph_partition=True, we skip some cudagraph checks
                     # if it's supported with partition, so we use
                     # cudagraph_partition_post_compile.  When a CUDAGraphPolicy
