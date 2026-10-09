@@ -4,13 +4,15 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/hash.h>
 #include <nccl.h>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
-#include <map>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -546,6 +548,9 @@ cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
   };
 
   const auto& internal_stream = internal_stream_.value();
+  if (C10_LIKELY(!c10::cuda::CUDACachingAllocator::isCaptureContext(device))) {
+    return sync_stream(internal_stream);
+  }
   auto cur_info = c10::cuda::captureInfoMayInitCtx(current_stream.stream());
   if (cur_info.status != c10::cuda::CaptureStatus::Active) {
     return sync_stream(internal_stream);
@@ -560,7 +565,9 @@ cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
   // and destruction while allocator recordStream references still exist.
   static std::mutex pool_mutex;
   using StreamPool = std::vector<at::cuda::CUDAStream>;
-  static std::map<std::pair<c10::DeviceIndex, int>, StreamPool> pools;
+  using StreamPoolKey = std::pair<c10::DeviceIndex, int>;
+  static ska::flat_hash_map<StreamPoolKey, StreamPool, c10::hash<StreamPoolKey>>
+      pools;
   const auto priority = internal_stream.priority();
   std::lock_guard<std::mutex> lock(pool_mutex);
   auto& streams = pools[{device, priority}];
