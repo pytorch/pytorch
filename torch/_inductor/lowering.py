@@ -9020,6 +9020,16 @@ def sym_stride(a, dim):
         return int(val)
 
 
+@register_lowering(aten.sym_storage_offset.default)
+def sym_storage_offset(a):
+    # Read the FX offset; lowering may have changed the input's layout.
+    val = V.graph.current_node.meta["val"]
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
+
+
 @register_lowering(aten.sym_numel)
 def sym_numel(a):
     return a.get_numel()
