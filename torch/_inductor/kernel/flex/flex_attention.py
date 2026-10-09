@@ -952,7 +952,7 @@ def flex_attention_backward(*args, **kwargs):
         kernel_options.setdefault("IS_DIVISIBLE", False)
 
     if backend == "FLYDSL":
-        return create_flydsl_flex_attention_backward_kernel(
+        flydsl_result = create_flydsl_flex_attention_backward_kernel(
             query,
             key,
             value,
@@ -979,6 +979,8 @@ def flex_attention_backward(*args, **kwargs):
                 ),
             ),
         )
+        if flydsl_result is not None:
+            return flydsl_result
 
     fwd_placeholder_inps = [
         create_placeholder(name, dtype, device)

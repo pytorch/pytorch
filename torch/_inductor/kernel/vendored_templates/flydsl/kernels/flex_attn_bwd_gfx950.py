@@ -22,8 +22,8 @@ from .flex_attn_bwd_utils import (
     MASK_TRAVERSAL_DIRECT_RANGE,
     MASK_TRAVERSAL_UNMASKED,
 )
-
 from .flex_attn_utils import make_global_view, make_mask_buffers, make_mask_evaluator
+
 
 _LOG2E = 1.4426950408889634
 
@@ -125,7 +125,11 @@ def build_flex_attn_bwd_module(
     workspace_head_group = min(32, batch_heads & -batch_heads)
     cta_head_group = min(16, batch_heads & -batch_heads)
     dq_partitions = choose_dq_partitions(
-        batch_heads, sequence_length, key_rows, dq_workspace_bytes
+        batch_heads,
+        sequence_length,
+        key_rows,
+        dq_workspace_bytes,
+        qk_head_dim=qk_head_dim,
     )
     num_sparse_blocks = sequence_length // sparse_q_block_size
     metadata_chunks = sequence_length // sparse_q_block_size
@@ -378,7 +382,9 @@ def build_flex_attn_bwd_module(
             )
             zero_packs = fx.logical_divide(zero_view, fx.make_layout(zero_elements, 1))
             zero = fx.make_rmem_tensor(zero_elements, dq_workspace_dtype)
-            zero.store(fx.Vector.filled(zero_elements, 0.0, dq_workspace_dtype).ir_value())
+            zero.store(
+                fx.Vector.filled(zero_elements, 0.0, dq_workspace_dtype).ir_value()
+            )
             for part in fx.range_constexpr(
                 dq_partitions
                 * delta_rows_per_block
@@ -977,7 +983,9 @@ def build_flex_attn_bwd_module(
                         4, softmax_scale, fx.Float32
                     )
                     if const_expr(not initialize):
-                        values = values + fx.Vector(previous_dq[part].load()).to(fx.Float32)
+                        values = values + fx.Vector(previous_dq[part].load()).to(
+                            fx.Float32
+                        )
                     output = fx.make_rmem_tensor(4, dq_workspace_dtype)
                     output.store(values.to(dq_workspace_dtype).ir_value())
                     offset = (
@@ -991,7 +999,9 @@ def build_flex_attn_bwd_module(
                         + lane * fx.Int32(4)
                     )
                     fx.copy(
-                        dq_copy, output, fx.slice(packed_dq, (None, offset // fx.Int32(4)))
+                        dq_copy,
+                        output,
+                        fx.slice(packed_dq, (None, offset // fx.Int32(4))),
                     )
 
                 def consume(
@@ -1702,10 +1712,15 @@ def build_flex_attn_bwd_module(
                 for index in fx.range_constexpr(qk_head_dim // 16):
                     accumulator = fragments[index]
                     if const_expr(owner == 0):
-                        accumulator.store(fx.Vector(loaded[index].load()).to(fx.Float32).ir_value())
+                        accumulator.store(
+                            fx.Vector(loaded[index].load()).to(fx.Float32).ir_value()
+                        )
                     else:
                         accumulator.store(
-                            (fx.Vector(accumulator.load()) + fx.Vector(loaded[index].load()).to(fx.Float32)).ir_value()
+                            (
+                                fx.Vector(accumulator.load())
+                                + fx.Vector(loaded[index].load()).to(fx.Float32)
+                            ).ir_value()
                         )
         for block in fx.range_constexpr(qk_head_dim // 64):
             column = lane % fx.Int32(16) * fx.Int32(4) + fx.Int32(block * 64)
@@ -1717,7 +1732,9 @@ def build_flex_attn_bwd_module(
                     fx.slice(view, (query_base + row_base + fx.Int32(row), None)),
                     fx.make_layout(4, 1),
                 )
-                fx.copy(store, output, fx.slice(destination, (None, column // fx.Int32(4))))
+                fx.copy(
+                    store, output, fx.slice(destination, (None, column // fx.Int32(4)))
+                )
 
     @flyc.jit
     def _launch(

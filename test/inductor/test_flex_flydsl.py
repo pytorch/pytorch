@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import operator
+import sys
 from importlib.util import find_spec
 from types import SimpleNamespace
 from unittest import mock
@@ -16,10 +17,16 @@ from torch._inductor.kernel.flex.flex_flydsl_attention import (
     flex_flydsl_backward_template,
 )
 from torch._inductor.kernel.flex.flex_flydsl_mask import lower_flydsl_mask_graph
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_utils import (
+    choose_dq_partitions,
+    MAX_DQ_WORKSPACE_BYTES,
+)
+from torch._inductor.runtime import flydsl_cache
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.attention.flex_attention import (
     and_masks,
+    AuxRequest,
     create_block_mask,
     flex_attention,
 )
@@ -243,6 +250,159 @@ class TestFlexFlyDSLGates(TestCase):
 
 @instantiate_parametrized_tests
 class TestFlexFlyDSLConfig(TestCase):
+    @parametrize("compile_only", (False, True))
+    def test_template_cache_and_precompile(self, compile_only):
+        config, reason = _backward_config_result(_supported_fake_backward_inputs())
+        self.assertIsNotNone(config, reason)
+        config.update(
+            SPARSE_Q_BLOCK_SIZE=128,
+            SPARSE_KV_BLOCK_SIZE=128,
+            DQ_STRIDE=config["Q_STRIDE"],
+            DK_STRIDE=config["K_STRIDE"],
+            DV_STRIDE=config["V_STRIDE"],
+            DQ_ACCUM_FP32=True,
+        )
+        dispatch = mock.Mock()
+
+        def compiler(launcher, *args):
+            if not compile_only:
+                dispatch(*args)
+            return dispatch
+
+        fake_compiler = SimpleNamespace(
+            compile=mock.Mock(side_effect=compiler),
+            from_torch_tensor=lambda tensor: SimpleNamespace(
+                __cache_signature__=lambda: "fixed-backward-layout"
+            ),
+        )
+        builder = mock.Mock(return_value=SimpleNamespace())
+        source = flex_flydsl_backward_template.template.render(
+            gen_defines=lambda: "",
+            def_kernel=lambda *names: (
+                f"def backward_main({', '.join(names)}, output, stream):"
+            ),
+            get_output=lambda: "output",
+            kernel_name="backward",
+            MASK_BUFFER_COUNT=0,
+        )
+        namespace = {**config, "flyc": fake_compiler}
+        with (
+            mock.patch.dict(
+                sys.modules,
+                {
+                    "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_gfx950": SimpleNamespace(
+                        build_flex_attn_bwd_module=builder
+                    )
+                },
+            ),
+            mock.patch.object(flydsl_cache, "_device_gpu_arch", return_value="gfx950"),
+            flydsl_cache.temporary_env(
+                {
+                    "COMPILE_ONLY": "1" if compile_only else "0",
+                    "FLYDSL_COMPILE_ONLY": "1" if compile_only else "0",
+                }
+            ),
+        ):
+            exec(compile(source, "flydsl_backward.py.jinja", "exec"), namespace)
+            tensors = [
+                SimpleNamespace(device=torch.device("cuda", 0)) for _ in range(19)
+            ]
+            run = namespace["_run_flydsl_backward"]
+            with mock.patch.object(flydsl_cache.os, "getpid", return_value=100):
+                run(*tensors, 0)
+                run(*tensors, 0)
+                tensors[0] = SimpleNamespace(device=torch.device("cuda", 1))
+                run(*tensors, 0)
+            with mock.patch.object(flydsl_cache.os, "getpid", return_value=101):
+                run(*tensors, 0)
+        builder.assert_called_once()
+        self.assertEqual(fake_compiler.compile.call_count, 4 if compile_only else 3)
+        self.assertEqual(dispatch.call_count, 0 if compile_only else 4)
+
+    def test_unavailable_backward_falls_back(self):
+        with mock.patch.object(
+            flex_flydsl_attention, "runtime_available", return_value=False
+        ):
+            self.assertIsNone(
+                flex_flydsl_attention.create_flydsl_flex_attention_backward_kernel(
+                    None, None, None, None, None, None, None, 1.0, 128, 128
+                )
+            )
+
+    @parametrize("unsupported", ("gqa", "decode", "head_dim", "grad_lse"))
+    def test_ineligible_backward_falls_back(self, unsupported):
+        inputs = _supported_fake_backward_inputs()
+        if unsupported == "gqa":
+            shape = (1, 1, 256, 128)
+            inputs["key"] = _FakeNode(shape, _contiguous_stride(shape))
+            inputs["value"] = _FakeNode(shape, _contiguous_stride(shape))
+        elif unsupported == "decode":
+            shape = (1, 2, 4, 128)
+            inputs["query"] = _FakeNode(shape, _contiguous_stride(shape))
+            inputs["out"] = _FakeNode(shape, _contiguous_stride(shape))
+            inputs["grad_out"] = _FakeNode(shape, _contiguous_stride(shape))
+        elif unsupported == "head_dim":
+            shape = (1, 2, 256, 64)
+            for name in ("query", "key"):
+                inputs[name] = _FakeNode(shape, _contiguous_stride(shape))
+        else:
+            inputs["grad_logsumexp"] = inputs["out"]
+        with (
+            V.set_graph_handler(_fake_graph()),
+            mock.patch.object(
+                flex_flydsl_attention, "runtime_available", return_value=True
+            ),
+            mock.patch.object(torch.version, "hip", "6.0.0"),
+            mock.patch.object(
+                flex_flydsl_attention, "_is_gfx950_device", return_value=True
+            ),
+            mock.patch.object(
+                flex_flydsl_attention, "maybe_realize", side_effect=lambda nodes: nodes
+            ),
+            mock.patch.object(flex_flydsl_attention, "empty_strided") as allocate,
+        ):
+            inputs["logsumexp"] = inputs["out"]
+            self.assertIsNone(
+                flex_flydsl_attention.create_flydsl_flex_attention_backward_kernel(
+                    **inputs
+                )
+            )
+            allocate.assert_not_called()
+
+    @parametrize("element_bytes", (2, 4))
+    @parametrize("key_rows", (128, 192))
+    @parametrize("head_dim", (128, 192))
+    def test_dq_workspace_is_bounded(self, element_bytes, key_rows, head_dim):
+        batch_heads, sequence_length = 1024, 8192
+        partitions = choose_dq_partitions(
+            batch_heads,
+            sequence_length,
+            key_rows,
+            element_bytes,
+            qk_head_dim=head_dim,
+        )
+        self.assertGreater(partitions, 0)
+        self.assertLessEqual(
+            batch_heads * partitions * sequence_length * head_dim * element_bytes,
+            MAX_DQ_WORKSPACE_BYTES,
+        )
+
+    def test_oversized_dq_workspace_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "workspace larger than 16 GiB"):
+            choose_dq_partitions(2048, 16384, 192, qk_head_dim=192)
+
+    def test_oversized_dq_config_is_ineligible(self):
+        inputs = _supported_fake_backward_inputs()
+        shape = (32, 64, 16384, 192)
+        value_shape = (*shape[:-1], 128)
+        for name in ("query", "key"):
+            inputs[name] = _FakeNode(shape, _contiguous_stride(shape))
+        for name in ("value", "out", "grad_out"):
+            inputs[name] = _FakeNode(value_shape, _contiguous_stride(value_shape))
+        config, reason = _backward_config_result(inputs)
+        self.assertIsNone(config)
+        self.assertIn("workspace larger than 16 GiB", reason)
+
     @parametrize("value", (None, 0, 1, "bf16", torch.float32))
     def test_invalid_dq_accumulation_option(self, value):
         with self.assertRaisesRegex(ValueError, "DQ_ACCUM_FP32 must be a bool"):
@@ -1146,13 +1306,14 @@ class TestFlexFlyDSLRuntime(TestCase):
         self.assertEqual(traversal, MASK_TRAVERSAL_BLOCK_LIST)
         self.assertIsNone(direct_range_kind)
 
-    def test_gqa_is_rejected(self, device):
+    @parametrize("query_length", (4, 256))
+    def test_gqa_backward_falls_back_to_triton(self, device, query_length):
         self._require_runtime()
         batch, seq = 1, 256
         q = torch.randn(
             batch,
             4,
-            seq,
+            query_length,
             128,
             device=device,
             dtype=torch.bfloat16,
@@ -1169,21 +1330,77 @@ class TestFlexFlyDSLRuntime(TestCase):
         )
         v = torch.randn_like(k, requires_grad=True)
         grad_out = torch.randn_like(q)
-        block_mask = self._make_mask("dense", device=device, heads=4, seq=seq)
-        torch._dynamo.reset()
-        compiled = torch.compile(
-            lambda q_, k_, v_: flex_attention(
-                q_,
-                k_,
-                v_,
-                block_mask=block_mask,
-                enable_gqa=True,
-                kernel_options={"BACKEND": "FLYDSL"},
-            ),
-            fullgraph=True,
+        block_mask = create_block_mask(
+            lambda b, h, query, key: query + seq - query_length >= key,
+            1,
+            1,
+            query_length,
+            seq,
+            device=device,
+            BLOCK_SIZE=128,
         )
-        with self.assertRaisesRegex(RuntimeError, "MHA with matching Q/K"):
-            compiled(q, k, v).backward(grad_out)
+
+        def run(backend):
+            inputs = tuple(
+                tensor.detach().clone().requires_grad_() for tensor in (q, k, v)
+            )
+            torch._dynamo.reset()
+            compiled = torch.compile(
+                lambda query, key, value: flex_attention(
+                    query,
+                    key,
+                    value,
+                    block_mask=block_mask,
+                    enable_gqa=True,
+                    kernel_options={"BACKEND": backend},
+                ),
+                fullgraph=True,
+            )
+            result = compiled(*inputs)
+            result.backward(grad_out)
+            return result, tuple(tensor.grad for tensor in inputs)
+
+        output, gradients = run("FLYDSL")
+        reference, reference_gradients = run("TRITON")
+        self.assertEqual(output, reference, atol=0.03, rtol=0.02)
+        for gradient, expected in zip(gradients, reference_gradients):
+            self.assertEqual(gradient, expected, atol=0.03, rtol=0.02)
+
+    def test_lse_aux_backward_falls_back_to_triton(self, device):
+        self._require_runtime()
+        inputs = tuple(
+            torch.randn(1, 2, 256, 128, device=device, dtype=torch.bfloat16)
+            for _ in range(3)
+        )
+        grad_output = torch.randn_like(inputs[0])
+        grad_lse = torch.randn(1, 2, 256, device=device, dtype=torch.float32)
+        block_mask = self._make_mask("causal", device=device)
+
+        def run(backend):
+            tensors = tuple(
+                tensor.detach().clone().requires_grad_() for tensor in inputs
+            )
+            torch._dynamo.reset()
+            compiled = torch.compile(
+                lambda query, key, value: flex_attention(
+                    query,
+                    key,
+                    value,
+                    block_mask=block_mask,
+                    return_aux=AuxRequest(lse=True),
+                    kernel_options={"BACKEND": backend},
+                ),
+                fullgraph=True,
+            )
+            output, aux = compiled(*tensors)
+            return torch.autograd.grad(
+                (output, aux.lse), tensors, (grad_output, grad_lse)
+            )
+
+        gradients = run("FLYDSL")
+        reference = run("TRITON")
+        for gradient, expected in zip(gradients, reference):
+            self.assertEqual(gradient, expected, atol=0.03, rtol=0.02)
 
     @largeTensorTest("36GB")
     def test_standalone_four_gib_buffers(self, device):
@@ -1205,7 +1422,7 @@ class TestFlexFlyDSLRuntime(TestCase):
             choose_dq_partitions,
         )
 
-        partitions = choose_dq_partitions(batch * heads, seq, 192)
+        partitions = choose_dq_partitions(batch * heads, seq, 192, qk_head_dim=dim)
         workspace = torch.empty(
             (batch * heads // 32, partitions, seq, dim, 32),
             device=device,
@@ -1346,7 +1563,9 @@ class TestFlexFlyDSLRuntime(TestCase):
             choose_dq_partitions,
         )
 
-        partitions = choose_dq_partitions(batch * heads, sequence_length, 192)
+        partitions = choose_dq_partitions(
+            batch * heads, sequence_length, 192, qk_head_dim=head_dim
+        )
         grad_query_workspace = torch.empty(
             batch * heads * partitions * sequence_length * head_dim,
             device=device,

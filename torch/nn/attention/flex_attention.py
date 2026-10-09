@@ -302,10 +302,13 @@ class FlexKernelOptions(TypedDict, total=False):
         - "TRITON": Standard Triton flex_attention kernel
         - "TRITON_DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
         - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
-        - "FLYDSL": Experimental FlyDSL FlexAttention forward kernel
+        - "FLYDSL": Experimental FlyDSL FlexAttention forward and backward kernels
+          for BF16 on ROCm gfx950, requiring the optional FlyDSL dependency.
+          Unsupported backward configurations fall back to Triton, including GQA,
+          decode, gradients through LSE, and shapes exceeding the dQ workspace limit.
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
-    Raises an error if the requested backend cannot be used. Default: "AUTO"
+    Raises an error if the requested forward backend cannot be used. Default: "AUTO"
     """
 
 

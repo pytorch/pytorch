@@ -18,6 +18,9 @@ from ...ir import FixedLayout, Pointwise, ShapeAsConstantBuffer, Subgraph, Tenso
 from ...lowering import empty_strided, full
 from ...select_algorithm import autotune_select_algorithm
 from ...virtualized import ops, V
+from ..vendored_templates.flydsl.kernels.flex_attn_bwd_utils import (
+    MAX_DQ_WORKSPACE_BYTES,
+)
 from .common import (
     construct_strides,
     create_indices_fake,
@@ -610,6 +613,7 @@ def _get_flydsl_flex_attention_backward_config(
     scale: float | None = None,
     sparse_q_block_size: int | None = None,
     sparse_kv_block_size: int | None = None,
+    dq_accum_fp32: bool = True,
 ) -> tuple[dict[str, Any] | None, str]:
     score_mod_other_buffers = score_mod_other_buffers or ()
     mask_mod_other_buffers = mask_mod_other_buffers or ()
@@ -710,6 +714,9 @@ def _get_flydsl_flex_attention_backward_config(
         return None, "FlyDSL flex bwd currently supports sequence length <= 16384"
     if grad_logsumexp is not None:
         return None, "FlyDSL flex bwd does not support gradients through LSE aux"
+    workspace_element_bytes = 4 if dq_accum_fp32 else 2
+    if b * h * sq * dqk * workspace_element_bytes > MAX_DQ_WORKSPACE_BYTES:
+        return None, "FlyDSL flex bwd requires a dQ workspace larger than 16 GiB"
 
     if (
         kv_num_blocks is None
@@ -859,12 +866,12 @@ def create_flydsl_flex_attention_backward_kernel(
     full_kv_num_blocks: TensorBox | None = None,
     full_kv_indices: TensorBox | None = None,
     dq_accum_fp32: bool = True,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
-    """Create a FlyDSL flex attention backward kernel for supported inputs."""
+) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple] | None:
+    """Create a FlyDSL backward kernel, or return None for Triton fallback."""
     if not isinstance(dq_accum_fp32, bool):
         raise ValueError("FlyDSL FLYDSL_DQ_ACCUM_FP32 must be a bool")
     if not runtime_available():
-        raise RuntimeError(_flydsl_unavailable_message())
+        return None
     if fw_subgraph is None or mask_graph is None:
         raise AssertionError("FlyDSL backward requires the original mod graphs")
 
@@ -929,9 +936,10 @@ def create_flydsl_flex_attention_backward_kernel(
         scale=scale,
         sparse_q_block_size=sparse_q_block_size,
         sparse_kv_block_size=sparse_kv_block_size,
+        dq_accum_fp32=dq_accum_fp32,
     )
     if config is None:
-        raise RuntimeError(f"FlyDSL flex backward cannot be used: {reason}")
+        return None
     if (
         kv_num_blocks is None
         or kv_indices is None
@@ -1011,7 +1019,9 @@ def create_flydsl_flex_attention_backward_kernel(
     config["DQ_ACCUM_FP32"] = dq_accum_fp32
     workspace_dtype = torch.float32 if dq_accum_fp32 else torch.bfloat16
     workspace_element_bytes = 4 if dq_accum_fp32 else 2
-    dq_partitions = choose_dq_partitions(bh, s, key_rows, workspace_element_bytes)
+    dq_partitions = choose_dq_partitions(
+        bh, s, key_rows, workspace_element_bytes, qk_head_dim=config["QK_HEAD_DIM"]
+    )
     grad_query_workspace = make_scratch(
         bh * dq_partitions * s * config["QK_HEAD_DIM"], workspace_dtype
     )
