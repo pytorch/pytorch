@@ -1,5 +1,6 @@
 #include <ATen/native/hip/ck_tile_group_gemm.h>
 #include <ATen/hip/HIPContext.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <c10/hip/HIPException.h>
 #include <c10/hip/HIPStream.h>
@@ -16,6 +17,7 @@
 namespace at::hip::detail {
 	namespace {
 		using ck_tile::index_t;
+		using ck_tile::core::arch::amdgcn_target_id;
 		using RowMajor = ck_tile::tensor_layout::gemm::RowMajor;
 		using ColMajor = ck_tile::tensor_layout::gemm::ColumnMajor;
 
@@ -99,23 +101,42 @@ namespace at::hip::detail {
 			using Kernel = ck_tile::GroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 		};
 
+		// Tile configs for one target. Deliberately undefined so an arch without configs fails to compile.
+		template <amdgcn_target_id Arch, typename DataType>
+        struct CkTileGroupGemmConfigs;
 
-		// bf16/fp16 configs from AMD Primus-Turbo (MIT), used on gfx942 and gfx950.
-		// Selected by N: N % 256 == 0, N % 128 == 0, otherwise the N-padded config.
-		using Cfg16_256x256x64      = CkTileGroupGemmConfig<256, 256, 64, 16, 16, 32, 2, 2, false, false, false>;
-		using Cfg16_256x128x64      = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>;
-		using Cfg16_256x128x64_PadN = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>;
+		// configs for bf16 and fp16 for gfx950
+		template <>
+		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t> {
+			// Forward and dX (2D x 3D, 3D x 3D): row-major A, K % 64 == 0
+			using ForwardN256      = CkTileGroupGemmConfig<256, 256, 64, 16, 16, 32, 2, 2, false, false, false>;  // N % 256 == 0
+			using ForwardN128      = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>;  // N % 128 == 0
+			using ForwardN64 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>; // N % 64 == 0  TODO: tune, placeholder = ForwardN8
+			using ForwardN32 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>; // N % 32 == 0  TODO: tune, placeholder = ForwardN8
+			using ForwardN16 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>; // N % 16 == 0  TODO: tune, placeholder = ForwardN8
+			using ForwardN8 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>;  // N % 8 == 0
+			using ForwardUnalignedN = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // N % 8 != 0  TODO: placeholder = FallbackEvenN, wrong for odd N
+			
+			// dW (2D x 2D, jagged K)
+			using WeightGradNM256 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, false, false, true>;  // M, N % 256 == 0
+			using WeightGradNM128 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>;  // M, N % 128 == 0  TODO: tune, placeholder = padded WeightGradNM256
+			using WeightGradNM64 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>;  // M, N % 64 == 0  TODO: tune, placeholder = padded WeightGradNM256
+			using WeightGradNM32 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>;  // M, N % 32 == 0  TODO: tune, placeholder = padded WeightGradNM256
+			using WeightGradNM16 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>;  // M, N % 16 == 0  TODO: tune, placeholder = padded WeightGradNM256
+			using WeightGradNM8 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>;  // M, N % 8 == 0  TODO: tune, placeholder = padded WeightGradNM256
+			using WeightGradUnaligned = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // other M, N (e.g. 2880)  TODO: placeholder = FallbackEvenN
+			
+			// Anything the classes above reject: K % 64 != 0, column-major A, jagged N (3D x 2D)
+			using FallbackEvenN          = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // even N
+			using FallbackOddN      = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // jagged or odd N, C width 1  TODO: placeholder = FallbackEvenN, wrong for odd N
+		};
 
-		// for backwards/2D x 2D
-		using Cfg16_2D2D_256x256x32 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, false, false, true>;
-
-		// Not from Primus: fallback for everything the configs above reject (K not a multiple of 64,
-		// jagged K or N, column-major A). C is stored 2 elements at a time (the narrowest ck_tile allows
-		// for 16-bit outputs) because in 3D x 2D a group's output columns can start at any even offset.
-		using Cfg16_256x128x64_Pad  = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>;
+		// fp16 has the same element size and MFMA shapes as bf16
+		template <>
+		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t>
+			: CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t> {};
 
 		using Strides = std::array<int64_t, 3>;
-
 
 		// Fills one ck_tile::GemmTransKernelArg per group on the device. 
 		// Basically extracts A, B, and output ptrs and strides for one GEMM and puts in in the corresponding entry in the group_args array.
@@ -235,9 +256,9 @@ namespace at::hip::detail {
 			C10_CUDA_KERNEL_LAUNCH_CHECK();
 		}
 
-		// Per-dtype part of group_gemm_ck_tile: fills the per-group arguments on the device, then
+		// Per-dtype and per-arch part of group_gemm_ck_tile: fills the per-group arguments on the device, then
 		// picks the layout and tile config and launches the kernel.
-		template <typename DataType>
+		template <amdgcn_target_id Arch, typename DataType>
 		void launch_ck_tile_group_gemm(
 				const at::Tensor& mat_a,             // A, already in a layout we instantiate
 				const at::Tensor& mat_b,             // B, already in a layout we instantiate
@@ -289,24 +310,49 @@ namespace at::hip::detail {
 				}
 			};
 
-			if constexpr (std::is_same_v<DataType, float>) {
-				TORCH_CHECK(false, "ck_tile group gemm: no fp32 config yet");
-			} else {
-				// Primus's configs need K % K_Tile == 0 (no K padding) and row-major A (no M padding).
-				// K < 0 or N < 0 means that dimension is jagged and unknown here.
-				const bool primus_ok = a_row_major && K > 0 && K % 64 == 0 && N > 0 && N % 8 == 0;
-				if (K < 0 && M % 256 == 0 && N % 256 == 0) {
-					// 2D x 2D (e.g. dW): K is jagged, M and N are fixed per group
-					run_with_config(Cfg16_2D2D_256x256x32{});
-				} else if (primus_ok && N % 256 == 0) {
-					run_with_config(Cfg16_256x256x64{});
-				} else if (primus_ok && N % 128 == 0) {
-					run_with_config(Cfg16_256x128x64{});
-				} else if (primus_ok) {
-					run_with_config(Cfg16_256x128x64_PadN{});
+			// TODO: add fp32 config
+			TORCH_CHECK((!std::is_same_v<DataType, float>), "ck_tile group gemm: no fp32 config yet");
+			
+			using Configs = CkTileGroupGemmConfigs<Arch, DataType>;
+			// K < 0 or N < 0 means that dimension is jagged and unknown here.
+			if (K < 0) {
+				// dW (2D x 2D): K is jagged, M and N are fixed per group
+				if (M % 256 == 0 && N % 256 == 0) {
+					run_with_config(typename Configs::WeightGradNM256{});
+				} else if (M % 128 == 0 && N % 128 == 0) {
+					run_with_config(typename Configs::WeightGradNM128{});
+				} else if (M % 64 == 0 && N % 64 == 0) {
+					run_with_config(typename Configs::WeightGradNM64{});
+				} else if (M % 32 == 0 && N % 32 == 0) {
+					run_with_config(typename Configs::WeightGradNM32{});
+				} else if (M % 16 == 0 && N % 16 == 0) {
+					run_with_config(typename Configs::WeightGradNM16{});
+				} else if (M % 8 == 0 && N % 8 == 0) {
+					run_with_config(typename Configs::WeightGradNM8{});
 				} else {
-					run_with_config(Cfg16_256x128x64_Pad{});
+					run_with_config(typename Configs::WeightGradUnaligned{});
 				}
+			} else if (a_row_major && K % 64 == 0 && N > 0) {
+				// Forward and dX (2D x 3D, 3D x 3D): no K padding and row-major A (no M padding)
+				if (N % 256 == 0) {
+					run_with_config(typename Configs::ForwardN256{});
+				} else if (N % 128 == 0) {
+					run_with_config(typename Configs::ForwardN128{});
+				} else if (N % 64 == 0) {
+					run_with_config(typename Configs::ForwardN64{});
+				} else if (N % 32 == 0) {
+					run_with_config(typename Configs::ForwardN32{});
+				} else if (N % 16 == 0) {
+					run_with_config(typename Configs::ForwardN16{});
+				} else if (N % 8 == 0) {
+					run_with_config(typename Configs::ForwardN8{});
+				} else {
+					run_with_config(typename Configs::ForwardUnalignedN{});
+				}
+			} else if (N < 0 || N % 2 != 0) {
+				run_with_config(typename Configs::FallbackOddN{});
+			} else {
+				run_with_config(typename Configs::FallbackEvenN{});
 			}
 		}
 	}
@@ -401,22 +447,29 @@ namespace at::hip::detail {
 				{group_count * static_cast<int64_t>(sizeof(ck_tile::GemmTransKernelArg<>))},
 				out.options().dtype(at::kByte));
 
-		// 5. Dtype dispatch.
-		auto launch = [&](auto dtype_tag) {
+		// 5. Arch and dtype dispatch. The arch is only known at runtime; integral_constant turns it into a template argument.
+		auto launch = [&](auto arch_tag, auto dtype_tag) {
 			using DataType = decltype(dtype_tag);
-			launch_ck_tile_group_gemm<DataType>(
+			launch_ck_tile_group_gemm<decltype(arch_tag)::value, DataType>(
 					mat_a, mat_b, offs, out, group_args, a_row_major, b_row_major,
 					static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count));
 		};
+		auto launch_for_arch = [&](auto dtype_tag) {
+			if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
+				launch(std::integral_constant<amdgcn_target_id, amdgcn_target_id::GFX950>{}, dtype_tag);
+			} else {
+				TORCH_CHECK_NOT_IMPLEMENTED(false, "ck_tile group gemm: no tile configs for ", at::cuda::getCurrentDeviceProperties()->gcnArchName);
+			}
+		};
 		switch (mat_a.scalar_type()) {
 			case at::kBFloat16:
-				launch(ck_tile::bf16_t{});
+				launch_for_arch(ck_tile::bf16_t{});
 				break;
 			case at::kHalf:
-				launch(ck_tile::half_t{});
+				launch_for_arch(ck_tile::half_t{});
 				break;
 			case at::kFloat:
-				launch(float{});
+				TORCH_CHECK(false, "ck_tile group gemm: no fp32 config yet");
 				break;
 			default:
 				TORCH_CHECK(false, "ck_tile group gemm: unsupported dtype ", mat_a.scalar_type());
