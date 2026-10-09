@@ -6,18 +6,26 @@ import sys
 os.environ["KINETO_LOG_LEVEL"] = "6"
 
 import torch
+import torch.func._random as prng
 from torch._inductor.utils import do_bench_using_profiling
 from torch.nn import functional as F
 from torch.nn.functional import SwizzleType
-from torch.testing._internal.common_quantized import mxfp8_32x32_swizzle_f, to_mxfp
+from torch.testing._internal.common_quantized import (
+    mxfp8_32x32_swizzle_f,
+    to_mxfp,
+    to_mxfp_dual,
+)
 
 
 _KERNELS = {
-    "mxfp8_dim_k_swizzle": ("dim_k", False, True),
-    "mxfp8_dim_m_swizzle": ("dim_m", False, True),
-    "mxfp8_dim_km_swizzle": ("dim_km", False, True),
-    "mxfp8_dim_k_32x32_swizzle": ("dim_k", True, True),
-    "mxfp8_dim_k": ("dim_k", False, False),
+    "mxfp8_dim_k_swizzle": ("dim_k", False, True, False),
+    "mxfp8_dim_k_swizzle_sr": ("dim_k", False, True, True),
+    "mxfp8_dim_m_swizzle": ("dim_m", False, True, False),
+    "mxfp8_dim_m_swizzle_sr": ("dim_m", False, True, True),
+    "mxfp8_dim_km_swizzle": ("dim_km", False, True, False),
+    "mxfp8_dim_km_swizzle_sr": ("dim_km", False, True, True),
+    "mxfp8_dim_k_32x32_swizzle": ("dim_k", True, True, False),
+    "mxfp8_dim_k": ("dim_k", False, False, False),
 }
 _DTYPES = {
     "bfloat16": torch.bfloat16,
@@ -44,32 +52,55 @@ def _parse_sizes(value, name):
     return sizes
 
 
-def _reference_dim_k(input, square, swizzled):
+def _reference_dim_k(input, square, swizzled, random_key):
     if square:
         return mxfp8_32x32_swizzle_f(input)
     swizzle_type = SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
-    scales, qdata = to_mxfp(input, format="mxfp8", swizzle_type=swizzle_type)
+    scales, qdata = to_mxfp(
+        input,
+        format="mxfp8",
+        swizzle_type=swizzle_type,
+        rounding_mode="stochastic" if random_key is not None else "rtne",
+        random_key=random_key,
+    )
     return qdata, scales
 
 
-def _reference(input, orientation, square, swizzled):
+def _reference(input, orientation, square, swizzled, random_key):
     if orientation == "dim_m":
-        return _reference_dim_k(input.t().contiguous(), False, True)
+        return _reference_dim_k(input.t().contiguous(), False, True, random_key)
     if orientation == "dim_km":
+        if random_key is not None:
+            scales_k, qdata_k, scales_m, qdata_m = to_mxfp_dual(
+                input,
+                swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+                rounding_mode="stochastic",
+                random_key=random_key,
+            )
+            return qdata_k, scales_k, qdata_m, scales_m
         return (
-            *_reference_dim_k(input, False, True),
-            *_reference_dim_k(input.t().contiguous(), False, True),
+            *_reference_dim_k(input, False, True, None),
+            *_reference_dim_k(input.t().contiguous(), False, True, None),
         )
-    return _reference_dim_k(input, square, swizzled)
+    return _reference_dim_k(input, square, swizzled, random_key)
 
 
 def _benchmark_one(kernel, M, K, dtype):
     torch.manual_seed(0)
     input = torch.randn(M, K, dtype=dtype, device="cuda")
-    orientation, square, swizzled = _KERNELS[kernel]
+    orientation, square, swizzled, stochastic = _KERNELS[kernel]
     api_input = input.t() if orientation == "dim_m" else input
     swizzle_type = SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
     quantize = F.quantize_tensor_dual if orientation == "dim_km" else F.quantize_tensor
+    random_key = prng.key(0, device=input.device) if stochastic else None
+    rounding_kwargs = (
+        {
+            "qdata_rounding_mode": F.RoundingMode.STOCHASTIC,
+            "random_key": random_key,
+        }
+        if stochastic
+        else {}
+    )
 
     def run():
         return quantize(
@@ -79,11 +110,12 @@ def _benchmark_one(kernel, M, K, dtype):
             scaling_type=F.ScalingType.BlockWise1x32,
             swizzle_type=swizzle_type,
             scaling_type_use_square_block_size=square,
+            **rounding_kwargs,
         )
 
     outputs = run()
     torch.cuda.synchronize()
-    expected = _reference(input, orientation, square, swizzled)
+    expected = _reference(input, orientation, square, swizzled, random_key)
     if len(outputs) != len(expected):
         raise AssertionError(f"expected {len(expected)} outputs, got {len(outputs)}")
     for index, (output, reference) in enumerate(zip(outputs, expected)):
@@ -93,6 +125,8 @@ def _benchmark_one(kernel, M, K, dtype):
             raise AssertionError(f"{kernel}: output {index} differs from reference")
 
     bytes_per_iter = input.nbytes + sum(output.nbytes for output in outputs)
+    if random_key is not None:
+        bytes_per_iter += random_key.nbytes
     for _ in range(2):
         run()
     torch.cuda.synchronize()
@@ -126,7 +160,9 @@ def _print_table(headers, rows):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark CUDA MXFP8 quantization")
+    parser = argparse.ArgumentParser(
+        description="Benchmark CUDA MXFP8 quantization; SR uses a fixed stateless key"
+    )
     parser.add_argument(
         "--kernel",
         default="mxfp8_dim_k_swizzle",
