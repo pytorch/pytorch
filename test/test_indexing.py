@@ -231,7 +231,6 @@ class TestIndexingDevice(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.double)
-    @dtypesIfMPS(torch.half)  # TODO: add bf16 there?
     def test_advancedindex(self, device, dtype):
         # Tests for Integer Array Indexing, Part I - Purely integer array
         # indexing
@@ -1966,7 +1965,6 @@ class TestIndexingDevice(TestCase):
                     self.assertEqual(dest, expected, **kwargs)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_copy(self, device, dtype):
         # We just test for num_copy <= num_dest, as otherwise there are repeated indices
         # and the behavior is undefined
@@ -2010,7 +2008,6 @@ class TestIndexingDevice(TestCase):
     # https://github.com/pytorch/pytorch/issues/53256
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
     def test_index_copy_scalars(self, device, dtype):
         # Create the 8 possible combinations of scalar sizes for target / index / source
         scalars = (
@@ -2240,7 +2237,6 @@ class TestIndexingDevice(TestCase):
         }
     )
     @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
-    @dtypesIfMPS(torch.float32, torch.half, torch.bfloat16)
     def test_index_add_fast_path(self, device, dtype):
         # Originally test added for CUDA implementation:
         # Coverage for the index_add_ TMA fast path: one eligible case + five
@@ -2362,7 +2358,6 @@ class TestIndexingDevice(TestCase):
     @serialTest()
     @onlyAccelerator
     @dtypes(torch.complex64, torch.complex128, torch.bool)
-    @dtypesIfMPS(torch.complex64, torch.bool)
     def test_index_add_excluded_dtypes(self, device, dtype):
         # Originally test added for CUDA implementation:
         # scatter_add_'s CUDA dispatch covers neither complex nor bool, so the

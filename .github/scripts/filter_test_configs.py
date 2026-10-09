@@ -51,6 +51,10 @@ BUILD_AND_TEST_JOB_NAME = "build-and-test"
 JOB_NAME_CFG_REGEX = re.compile(r"(?P<job>[\w-]+)\s+\((?P<cfg>[\w-]+)\)")
 EXCLUDED_BRANCHES = ["nightly"]
 
+# LF-fleet allowlist enforcement (ci-infra#1081)
+LF_PREFIX = "lf-"
+META_PREFIX = "mt-"
+
 
 class IssueType(Enum):
     DISABLED = "disabled"
@@ -102,6 +106,16 @@ def parse_args() -> Any:
         type=str,
         default=MAIN_BRANCH,
         help="the branch name",
+    )
+    parser.add_argument(
+        "--lf-runners",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated ARC runners allowed on LF, as resolved by "
+            "runner_determinator.py's get_lf_runners_output(). Empty string "
+            "means unrestricted."
+        ),
     )
     return parser.parse_args()
 
@@ -598,6 +612,52 @@ def perform_misc_tasks(
     set_output("reenabled-issues", ",".join(get_reenabled_issues(pr_body=pr_body)))
 
 
+def parse_lf_runners(value: str) -> frozenset[str] | None:
+    """Parse --lf-runners. Empty string -> None (unrestricted)."""
+    runners = frozenset(r.strip() for r in value.split(",") if r.strip())
+    return runners or None
+
+
+def enforce_lf_allowlist(
+    test_matrix: dict[str, list[Any]], lf_runners_arg: str
+) -> dict[str, list[Any]]:
+    """Force non-allowlisted 'lf-' matrix entries onto the Meta fleet.
+
+    Every workflow names its literal ARC pod directly in its own
+    test-matrix entries, so this is the single place that checks
+    those entries against the resolved allowlist.
+
+    lf_runners_arg must already be the resolved allowlist string from
+    runner_determinator.py's get_lf_runners_output() -- the only reader of
+    arc.yaml and the only place that honors the restrict_runners
+    kill-switch (test-infra#5132).
+    """
+    entries = test_matrix.get("include", [])
+    if not entries:
+        return test_matrix
+
+    lf_allowlist = parse_lf_runners(lf_runners_arg)
+    if lf_allowlist is not None:
+        info("LF allowlist active (%d runners)", len(lf_allowlist))
+
+    for entry in entries:
+        raw = entry.get("runner", "").strip()
+        # Callers now name their ARC pod directly, so an entry not currently
+        # on 'lf-' (already 'mt-', or some other passthrough label) needs no
+        # enforcement -- checking the entry's own literal prefix, rather than
+        # this job's runner_prefix input, is what correctly leaves alone a
+        # matrix that hardcodes 'mt-' on specific entries (e.g. H100/B200)
+        # while the job itself builds on a dynamically-resolved 'lf-'.
+        if lf_allowlist is None or not raw.startswith(LF_PREFIX):
+            continue
+        clean = raw[len(LF_PREFIX) :]
+        if clean not in lf_allowlist:
+            info("'%s' not in LF allowlist; forcing %s", clean, META_PREFIX)
+            entry["runner"] = META_PREFIX + clean
+
+    return test_matrix
+
+
 def main() -> None:
     args = parse_args()
     # Load the original test matrix set by the workflow. Its format, however,
@@ -703,6 +763,8 @@ def main() -> None:
         branch=args.branch,
         tag=tag,
     )
+
+    filtered_test_matrix = enforce_lf_allowlist(filtered_test_matrix, args.lf_runners)
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
