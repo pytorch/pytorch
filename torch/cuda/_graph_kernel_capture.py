@@ -19,6 +19,20 @@ arming late silently misses whatever already loaded. And the copy has to happen
 inside the callback, because CUPTI only guarantees the pointer for the duration of
 the call.
 
+The lifecycle that follows from that::
+
+    start()  # before any CUDA work
+    ...  # capture every graph you intend to save
+    stop()  # disarm; releases the CUPTI subscription, keeps the images
+    graph.save(...)  # still works: saving reads the retained images
+    clear()  # return the host memory
+
+``stop()`` and :func:`clear` are separate for exactly that reason. Disarming early
+is safe in the sense that it fails loudly -- a graph captured afterwards refuses to
+save, naming the kernels it could not find -- but note ``start()`` after a
+``stop()`` cannot recover what loaded in between, so capture cannot be cycled
+around the interesting parts. It is once, early, until the last save.
+
 Costs, measured on GB200 over a workload loading 31 modules / 203 MB of cubin:
 dispatch alone is ~0.5 ms in total, copying the images adds ~18 ms. Images are
 kept keyed by CUPTI module id and are not deduplicated -- in that same workload
@@ -68,9 +82,11 @@ def _on_module_loaded(_domain: int, _cbid: int, cbdata: int) -> None:
 
 
 def is_available() -> bool:
-    """True when capture can be turned on right now: cupti-python is importable
-    and CUPTI is usable. Does not create Cuspy."""
+    """True when capture can be turned on right now: cupti-python is importable,
+    CUPTI is usable, and the driver supports graph serialization. Does not create
+    Cuspy."""
     try:
+        from cuda.bindings import driver  # pyrefly: ignore[missing-import]
         from cupti import (  # noqa: F401  # pyrefly: ignore[missing-import]
             cupti as _cupti,
         )
@@ -78,7 +94,10 @@ def is_available() -> bool:
         from torch.profiler._cuspy.core import Cuspy  # noqa: F401
     except ImportError:
         return False
-    return True
+    from torch.cuda._graph_serialization import _MIN_DRIVER_VERSION
+
+    err, version = driver.cuDriverGetVersion()
+    return err == driver.CUresult.CUDA_SUCCESS and version >= _MIN_DRIVER_VERSION
 
 
 def start() -> bool:
