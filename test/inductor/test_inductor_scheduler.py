@@ -1144,6 +1144,7 @@ class TestScheduler(TestCase):
             num_stages,
             dtypes=(torch.bfloat16, torch.bfloat16),
             props=SimpleNamespace(shared_memory_per_block_optin=232448),
+            template_stored=True,
         ):
             kernel = Mock(
                 meta=meta,
@@ -1158,17 +1159,36 @@ class TestScheduler(TestCase):
             kernel.output_node.get_device.return_value = torch.device("cuda", 0)
             kernel.output_node.get_dtype.return_value = torch.bfloat16
             with patch("torch.cuda.get_device_properties", return_value=props):
-                return TritonTemplateKernel._epilogue_tma_store_budget(kernel)
+                return TritonTemplateKernel._epilogue_tma_store_budget(
+                    kernel, template_stored
+                )
 
         tile = {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64}
         # 232448 - operand ring 3 * (128 * 64 + 64 * 128) * 2 - template output
-        # 128 * 128 * 2 - margin 128 * 128 + 16 KB: one fp32 tile fits.
-        self.assertEqual(budget(tile, 3), 68608)
+        # 128 * 128 * 2 - margin 2 KB.
+        self.assertEqual(budget(tile, 3), 99328)
+        # A removed template output stages nothing.
+        self.assertEqual(budget(tile, 3, template_stored=False), 99328 + 32768)
         # fp32 operands double the ring.
-        self.assertEqual(budget(tile, 3, (torch.float32, torch.float32)), 68608 - 98304)
-        # The ring is what Triton allocates: num_stages A and B tiles, so
-        # BLOCK_K=128 overflows the budget.
-        self.assertEqual(budget({**tile, "BLOCK_K": 128}, 3), -29696)
+        self.assertEqual(budget(tile, 3, (torch.float32, torch.float32)), 99328 - 98304)
+        # A full-tile tl.store or load needs a quarter subtile per dtype byte
+        # of layout scratch, at least 8 KB, once.
+        for itemsizes, subtile, scratch in (
+            ([], 1, 0),
+            ([4], 1, 16384),
+            ([2], 1, 8192),
+            ([2, 4, 4], 1, 16384),
+            ([2], 4, 8192),
+        ):
+            subtiled = Mock(meta={**tile, "EPILOGUE_SUBTILE": subtile})
+            subtiled._staged_tile_elems = lambda k=subtiled: (
+                TritonTemplateKernel._staged_tile_elems(k)
+            )
+            self.assertEqual(
+                TritonTemplateKernel._plain_store_scratch(subtiled, itemsizes), scratch
+            )
+        # The ring is what Triton allocates: num_stages A and B tiles.
+        self.assertEqual(budget({**tile, "BLOCK_K": 128}, 3), 1024)
         # A TMA store stages one 128 x (128 / EPILOGUE_SUBTILE) subtile.
         for subtile in (2, 4):
             subtiled = {**tile, "EPILOGUE_SUBTILE": subtile}
@@ -1177,12 +1197,12 @@ class TestScheduler(TestCase):
                 128 * 128 // subtile,
             )
             self.assertEqual(
-                budget(subtiled, 3), 68608 + 128 * 128 * 2 * (subtile - 1) // subtile
+                budget(subtiled, 3), 99328 + 128 * 128 * 2 * (subtile - 1) // subtile
             )
         # ROCm reports only shared_memory_per_block.
         self.assertEqual(
             budget(tile, 3, props=SimpleNamespace(shared_memory_per_block=65536)),
-            68608 - (232448 - 65536),
+            99328 - (232448 - 65536),
         )
         # Without a shared memory size or the tile sizes, nothing is budgeted.
         self.assertLess(budget(tile, 3, props=SimpleNamespace()), 0)
@@ -1236,6 +1256,84 @@ class TestScheduler(TestCase):
             store_line(4096, "tl.int32", view=[4, 1024]),
         )
 
+    def test_tma_store_epilogue_outputs(self):
+        def kept(
+            outputs,
+            plain,
+            budget,
+            template_removed=False,
+            columns=False,
+            reads_tile=False,
+        ):
+            kernel = Mock(
+                meta={"BLOCK_M": 128, "BLOCK_N": 128},
+                input_nodes=[Mock(), Mock()],
+                prefix_args=0,
+                suffix_args=0,
+                tma_load_for_template_epilogue=False,
+            )
+            kernel._staged_tile_elems.return_value = 128 * 128
+            kernel._full_tile_epilogue_outputs.return_value = (outputs, plain)
+            kernel._epilogue_tma_store_budget = lambda stored: budget + (
+                0 if stored else 32768
+            )
+            kernel._plain_store_scratch = lambda itemsizes: 16384 if itemsizes else 0
+            graph = Mock()
+            graph.scheduler.can_buffer_be_removed_through_fusion.return_value = (
+                template_removed
+            )
+            reduction = Mock()
+            reduction.is_reduction.return_value = True
+            reduction.get_buffer_names.return_value = ["r"]
+            read = Mock(spec=MemoryDep)
+            read.name = "e"
+            read.get_numel.return_value = 128 * (128 if reads_tile else 1)
+            reduction.read_writes.reads = [read]
+            template_node = Mock()
+            template_node.node.get_size.return_value = [128, 128]
+            graph.try_get_buffer.return_value = Mock(
+                get_size=Mock(return_value=[128, 128]),
+                get_dtype=Mock(return_value=torch.bfloat16),
+            )
+            graph.sizevars = SizeVarAllocator()
+            with (
+                V.set_graph_handler(graph),
+                patch(
+                    "torch._inductor.select_algorithm.finished_after_kernel",
+                    return_value=([], []),
+                ),
+                patch(
+                    "torch._inductor.select_algorithm.template_reduction_axis",
+                    return_value=1 if columns else 0,
+                ),
+            ):
+                return list(
+                    TritonTemplateKernel._tma_store_epilogue_outputs(
+                        kernel, template_node, [reduction]
+                    )
+                )
+
+        fp32, bf16 = 65536, 32768
+        # Everything fits, so nothing pays the tl.store scratch.
+        self.assertEqual(kept([("a", fp32), ("b", bf16)], [], 98304), ["a", "b"])
+        # Once one output is plain, its layout scratch comes out of the budget,
+        # which can change what else fits.
+        self.assertEqual(kept([("a", fp32), ("b", bf16)], [], 98303), ["a"])
+        self.assertEqual(kept([("a", fp32), ("b", bf16)], [], 70000), ["b"])
+        self.assertEqual(kept([("a", fp32)], [4], 81919), [])
+        # So does reading a full-tile input in the epilogue.
+        self.assertEqual(kept([("a", fp32)], [], 81919, reads_tile=True), [])
+        self.assertEqual(kept([("a", fp32)], [], 81920, reads_tile=True), ["a"])
+        # A removed template output frees its staging, unless a column pass
+        # keeps it, and the column pass stages a transposed subtile.
+        self.assertEqual(kept([("a", fp32)], [], 40000, template_removed=True), ["a"])
+        self.assertEqual(
+            kept([("a", fp32)], [], 81920, template_removed=True, columns=True), ["a"]
+        )
+        self.assertEqual(
+            kept([("a", fp32)], [], 81919, template_removed=True, columns=True), []
+        )
+
     def test_full_tile_epilogue_outputs(self):
         m, n = 64, 32
         layouts = {
@@ -1269,9 +1367,12 @@ class TestScheduler(TestCase):
             V.set_graph_handler(graph),
             patch("torch._inductor.select_algorithm.can_use_tma", return_value=True),
         ):
-            outputs = TritonTemplateKernel._full_tile_epilogue_outputs(
+            outputs, plain = TritonTemplateKernel._full_tile_epilogue_outputs(
                 kernel, Mock(), [epilogue]
             )
+        # The transposed, gapped and [N, M] outputs hold the template output's
+        # elements, so they're plain full-tile stores.
+        self.assertEqual(plain, [2, 2, 2])
         self.assertEqual(
             outputs,
             [

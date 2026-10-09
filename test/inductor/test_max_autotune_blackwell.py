@@ -2147,6 +2147,115 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    @parametrize(
+        "case",
+        (
+            # fp32 outputs before and after a row reduction
+            "row_f32",
+            # a residual input read in the epilogue, row partials over a wide N
+            "residual",
+            # a column sum and a plain fp32 output
+            "column",
+        ),
+    )
+    @parametrize(
+        "config",
+        (
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            BlackwellGPUGemmConfig(128, 64, 64, 4, 4),
+            BlackwellGPUGemmConfig(256, 128, 64, 2, 8),
+        ),
+        name_fn=lambda c: f"{c.block_m}x{c.block_n}x{c.block_k}_s{c.num_stages}",
+    )
+    def test_blackwell_mm_reduction_epilogue_tma_store_budget_covers_smem(
+        self, case: str, config: BlackwellGPUGemmConfig
+    ):
+        """The shared memory the TMA store budget charges is never below what
+        the fused kernel allocates."""
+        from torch._inductor import select_algorithm
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        n = config.block_n * (4 if case == "residual" else 1)
+        e = torch.randint(-1, 2, (1024, n), device=GPU_TYPE).to(torch.bfloat16)
+
+        def fn(a, b):
+            c = a @ b
+            if case == "row_f32":
+                x = c.float()
+                r = torch.rsqrt((x * x).mean(-1, keepdim=True))
+                return c, x * 2, x * 3, x * r, r
+            if case == "residual":
+                y = c + e
+                x = y.float()
+                return y, (x * x).sum(-1)
+            x = c.float()
+            return c, x * 2, x.sum(0)
+
+        limit = torch.cuda.get_device_properties(GPU_TYPE).shared_memory_per_block_optin
+        charged, allocated = {}, {}
+        greedy = select_algorithm.tma_store_outputs_within_budget
+        plan = select_algorithm.TritonTemplateKernel._tma_store_epilogue_outputs
+        make_launchers = CachingAutotuner._make_launchers
+        disable_pipelining = CachingAutotuner.compile_by_disabling_pipelining
+        calls, fell_back = [], []
+
+        def record_greedy(outputs, budget):
+            kept = greedy(outputs, budget)
+            calls.append(budget - sum(b for name, b in outputs if name in kept))
+            return kept
+
+        def record_plan(self, *args):
+            calls.clear()
+            kept = plan(self, *args)
+            charged[self.num_stages] = limit - calls[-1]
+            return kept
+
+        def record_launchers(self):
+            make_launchers(self)
+            for launcher in self.launchers:
+                allocated.setdefault(self.fn.__name__, []).append(
+                    (launcher.config.num_stages, launcher.shared)
+                )
+
+        def record_fallback(self, config):
+            # An overflow retries the kernel with num_stages=1.
+            fell_back.append(self.fn.__name__)
+            return disable_pipelining(self, config)
+
+        with (
+            mock.patch.object(
+                CachingAutotuner, "compile_by_disabling_pipelining", record_fallback
+            ),
+            mock.patch.object(
+                select_algorithm, "tma_store_outputs_within_budget", record_greedy
+            ),
+            mock.patch.object(
+                select_algorithm.TritonTemplateKernel,
+                "_tma_store_epilogue_outputs",
+                record_plan,
+            ),
+            mock.patch.object(CachingAutotuner, "_make_launchers", record_launchers),
+        ):
+            kernels, _ = self._run_reduction(
+                fn,
+                1024,
+                128,
+                n,
+                config,
+                **{
+                    "triton.template_reduction_epilogue": True,
+                    "triton.enable_template_tma_store": True,
+                },
+            )
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertNotIn(kernels[0], fell_back)
+        for stages, shared in allocated[kernels[0]]:
+            self.assertLessEqual(shared, charged[stages])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     @parametrize("view_3d", (False, True))
     def test_blackwell_mm_reduction_epilogue_tma_stores_extra_output(
         self, view_3d: bool
