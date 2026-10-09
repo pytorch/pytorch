@@ -57,6 +57,7 @@ from .autotune_process import (
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
     CSEVariable,
+    DeferredLine,
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
@@ -66,10 +67,13 @@ from .codegen.common import (
 from .codegen.simd import (
     BATCH_AXIS,
     BATCH_COLUMN_AXIS,
+    BATCH_MATRIX_AXIS,
+    batch_matrix_tiles,
     batch_reduction_partials,
     codegen_reduced_buffer,
     DerivedIterationRangesRoot,
     finished_after_kernel,
+    matrix_dependents,
     PARTIAL_REDUCTION_OPS,
     reduction_output_name,
     template_output_matrix,
@@ -2414,8 +2418,9 @@ class TritonTemplateKernel(TritonKernel):
                 subgraph_name = self._get_store_output_subgraph_name(i)
                 with self.set_subgraph_body(subgraph_name):
                     nodes = self._epilogue_nodes_by_subgraph[i]
+                    partials = []
                     if any(node.is_reduction() for node in nodes):
-                        _, self._unfused_epilogues = finished_after_kernel(
+                        partials, self._unfused_epilogues = finished_after_kernel(
                             self.output_tiles[i][1], template_node.node, nodes
                         )
                         nodes = [n for n in nodes if n not in self._unfused_epilogues]
@@ -2434,19 +2439,40 @@ class TritonTemplateKernel(TritonKernel):
                     batch_columns = [
                         n for n in nodes if axes.get(n) == BATCH_COLUMN_AXIS
                     ]
+                    matrices = [n for n in nodes if axes.get(n) == BATCH_MATRIX_AXIS]
+                    matrices_in_tile = bool(matrices) and not any(
+                        n in partials for n in matrices
+                    )
                     nodes = [
-                        n for n in nodes if n not in columns + batches + batch_columns
+                        n
+                        for n in nodes
+                        if n not in columns + batches + batch_columns + matrices
                     ]
                     first_red = next(
                         (j for j, n in enumerate(nodes) if n.is_reduction()), len(nodes)
                     )
+                    # Readers of matrix reductions finished in the tile run
+                    # after them.
+                    matrix_readers = (
+                        matrix_dependents(nodes[:first_red], matrices)
+                        if matrices_in_tile
+                        else []
+                    )
                     for node in nodes[:first_red]:
-                        node.codegen(self.split_and_set_ranges(node.get_ranges()))
+                        if node not in matrix_readers:
+                            node.codegen(self.split_and_set_ranges(node.get_ranges()))
                     if batches:
                         self.codegen_batch_reduction_epilogue(batches, i)
                         # Its values have the template's symbolic shape, which
                         # the passes below restate as the concrete tile.
                         self.cse.invalidate(OrderedSet(self.cse.store_cache.values()))
+                    if matrices:
+                        self.codegen_batch_matrix_reduction_epilogue(
+                            matrices, i, matrices_in_tile
+                        )
+                        self.cse.invalidate(OrderedSet(self.cse.store_cache.values()))
+                        for node in matrix_readers:
+                            node.codegen(self.split_and_set_ranges(node.get_ranges()))
                     row_loads = {}
                     if first_red < len(nodes):
                         # Values the nodes before it computed from the stored
@@ -2587,6 +2613,110 @@ class TritonTemplateKernel(TritonKernel):
             ):
                 unsplit.codegen([index_vars, [batch]])
         # The sums are only complete after the kernel.
+        for name in stored:
+            self.cse.store_cache.pop(name, None)
+
+    def codegen_batch_matrix_reduction_epilogue(
+        self, nodes, subgraph_idx: int, in_tile: bool
+    ) -> None:
+        """Codegen reductions over the M and N dims of a (B, M, N) output, one
+        result per batch. Each (sub)tile reduces its in-range elements to one
+        fp32 value. When in_tile (a tile holds a batch's whole matrix, see
+        finished_after_kernel), that is the result: it is stored, and nodes
+        generated after it (e.g. RMSNorm's normalize) read it in place.
+        Otherwise it is a partial, stored at its tile index within the batch,
+        which the wrapper reduces after the kernel.
+        Nodes run over the stored value with the template's own indices and
+        mask, like pointwise epilogues."""
+        origin, tile_shape, _ = self.output_tiles[subgraph_idx]
+        rows, cols, _ = tile_shape
+        b, m, n = map(int, self.output_node.get_size())
+        tiles = batch_matrix_tiles(tile_shape, self.output_node)
+        batch_origin, row_origin, col_origin = origin
+        tile_index = (
+            f"(({row_origin} // {rows}) * {ceildiv(n, cols)} + {col_origin} // {cols})"
+        )
+        batch, row, col = self.output_index_symbols[subgraph_idx]
+        stored: list[str] = []
+        for node in nodes:
+            unsplit = node.unsplit_reduction()
+            _, reduced = unsplit.get_ranges()
+            index_vars = [row * n + col] if len(reduced) == 1 else [row, col]
+
+            def reduction(dtype, src_dtype, reduction_type, value):
+                # Rows past the batch's M and columns past N aren't its elements.
+                tile = self.cse.generate(
+                    self.compute,
+                    f"tl.reshape({value}.to(tl.float32), ({rows}, {cols}))",
+                    dtype=torch.float32,
+                    shape=(str(rows), str(cols)),
+                )
+                in_range = (
+                    f"(({row_origin} + tl.arange(0, {rows}))[:, None] < {m}) & "
+                    f"(({col_origin} + tl.arange(0, {cols}))[None, :] < {n})"
+                )
+                identity, combine = {
+                    "sum": ("0.0", "tl.sum"),
+                    "max": ('float("-inf")', "tl.max"),
+                    "min": ('float("inf")', "tl.min"),
+                }[reduction_type]
+                return self.cse.generate(
+                    self.compute,
+                    f"{combine}(tl.where({in_range}, {tile}, {identity}))",
+                    dtype=torch.float32,
+                    shape=(),
+                )
+
+            def store_reduction(name, index, value, node=node, unsplit=unsplit):
+                if in_tile:
+                    name = reduction_output_name(node)
+                    buffer = V.graph.get_buffer(name)
+                    dtype = buffer.get_dtype()
+                    result = self.cse.generate(
+                        self.compute,
+                        f"{value}.to({triton_type(dtype)})",
+                        dtype=dtype,
+                        shape=(),
+                    )
+                    size = buffer.get_size()
+                    offset = buffer.get_layout().make_indexer()(
+                        [batch_origin, *[sympy.S.Zero] * (len(size) - 1)]
+                    )
+                    # Subtiles past N don't hold the matrix.
+                    self.stores.writeline(
+                        DeferredLine(
+                            name,
+                            f"tl.store({self.args.output(name)} + {texpr(offset)}, "
+                            f"{result}, {col_origin} < {n})",
+                        )
+                    )
+                    self.cse.store_cache[name] = result
+                    return
+                stored.append(name)
+                ws_ptr, offset = self._reduction_workspace(
+                    tiles * b * torch.float32.itemsize
+                )
+                self.partial_reductions.append(
+                    _PartialReduction(
+                        node,
+                        reduction_output_name(node),
+                        PARTIAL_REDUCTION_OPS[unsplit.node.get_reduction_type()],
+                        offset,
+                        tiles,
+                        b,
+                    )
+                )
+                # Subtiles past N have no slot.
+                self.stores.writeline(
+                    f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
+                    f"{b} * {tile_index} + {batch_origin}, {value}, {col_origin} < {n})"
+                )
+
+            with patch.multiple(
+                self, reduction=reduction, store_reduction=store_reduction
+            ):
+                unsplit.codegen([[batch], index_vars])
+        # The results are only complete after the kernel.
         for name in stored:
             self.cse.store_cache.pop(name, None)
 

@@ -2106,6 +2106,12 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
             mock.patch.object(
                 Scheduler, "benchmark_codegened_module", return_value=(0.0, "")
             ),
+            # Unfused kernels take 1 ms, so the nodes that run after a fused
+            # kernel cost no more than the unfused epilogue they replace (real
+            # timings make those fusions flaky).
+            mock.patch.object(
+                Scheduler, "benchmark_fused_nodes", return_value=(1.0, "")
+            ),
             TestBlackwellTMALoadFusion._poison_outputs(),
         ):
             actual, code = run_and_get_code(torch.compile(fn), *args)
@@ -2148,6 +2154,19 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
             c.sum(-1),
             c.sum((0, 1)),
         ),
+        # Reductions over each batch's (M, N) matrix.
+        "matrix_sum": lambda a, b: (a @ b).float().sum((1, 2)),
+        "matrix_sum_offset": lambda a, b: ((a @ b).float() + 1).sum((1, 2)),
+        "matrix_sum_bf16": lambda a, b: (a @ b).sum((1, 2)),
+        "matrix_amax": lambda a, b: ((a @ b) - 100).amax((1, 2)),
+        "matrix_mean": lambda a, b: (a @ b).float().mean((1, 2)),
+        "matrix_sum_flat_view": lambda a, b: (a @ b).float().flatten(1).sum(1),
+        "matrix_sum_and_out": lambda a, b: ((c := a @ b), c.float().sum((1, 2))),
+        "matrix_sum_extra_input": lambda a, b, w: ((a @ b).float() * w).sum((1, 2)),
+        "matrix_and_row_sum": lambda a, b, w: (
+            (c := (a @ b).float() * w).sum((1, 2)),
+            c.sum(-1),
+        ),
     }
 
     @unittest.skipIf(
@@ -2172,13 +2191,76 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
             tol=1e-5 if "mean" in op else 0,
             **{"triton.enable_template_tma_store": tma_store},
         )
-        self.assertEqual(len(kernels), 1, kernels)
+        # The division of a matrix mean reads the per-batch result, so it runs
+        # after the kernel.
+        self.assertEqual(len(kernels), 2 if op == "matrix_mean" else 1, kernels)
         self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertTrue(all(k.startswith("triton_poi") for k in kernels[1:]), kernels)
         if "batch_sum" in op or op in ("batch_and_row_sum", "all_axes"):
             # Each program stores its accumulator once, on its last tile.
             FileCheck().check("_batch_acc0 = tl.zeros(").check("for tile_id").check(
                 "_batch_acc0 = _batch_acc0 +"
             ).check("tile_id + NUM_SMS >= num_tiles").run(code)
+        if op.startswith("matrix"):
+            FileCheck().check("for tile_id").check("tl.where(").run(code)
+            # A matrix spanning two tiles reduces from per-tile partials, as
+            # does one whose result is read only over the batches.
+            partials = shape[1] > 128 or op == "matrix_mean"
+            self.assertEqual("tl.pointer_type(tl.float32)" in code, partials)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize(
+        "shape",
+        (
+            # One and two tiles per batch, M and N tails, many batches.
+            (5139, 128, 128, 64),
+            (5139, 72, 128, 96),
+            (5139, 176, 128, 128),
+            (300, 8, 128, 128),
+        ),
+    )
+    @parametrize("tma_store", (False, True))
+    @parametrize("direction", ("fwd", "bwd"))
+    def test_blackwell_bmm_matrix_reduction_two_pass(
+        self, shape: tuple[int, int, int, int], tma_store: bool, direction: str
+    ):
+        """RMSNorm over each batch's matrix. When one tile holds a batch's
+        matrix, the statistic and the pass that reads it back fuse into one
+        kernel, so the bmm output is never stored; otherwise the statistic fuses
+        as per-tile partials and that pass runs after the kernel."""
+        B, M, _, N = shape
+
+        def fwd(a, b, w):
+            c = (a @ b).float()
+            return (c * torch.rsqrt(c.pow(2).mean((1, 2), keepdim=True) + 1e-5)) * w
+
+        def bwd(a, b, w):
+            c = (a @ b).float()
+            return c - w * (c * w).sum((1, 2), keepdim=True) / (M * N)
+
+        kernels, code = self._run_bmm_reduction(
+            fwd if direction == "fwd" else bwd,
+            *shape,
+            BlackwellBMMConfig(128, 128, 64, 3, 8),
+            extra_input=True,
+            # rsqrt and the division may round differently from eager.
+            tol=1e-5,
+            **{"triton.enable_template_tma_store": tma_store},
+        )
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertFalse(
+            any(k.startswith(("triton_red", "triton_per")) for k in kernels), kernels
+        )
+        if M <= 128 and N <= 128:
+            self.assertEqual(len(kernels), 1, kernels)
+            # The bmm output is dead: no buffer of its (B, M, N) shape is
+            # allocated.
+            self.assertNotIn(
+                f"(({B}, {M}, {N}), ({M * N}, {N}, 1), torch.bfloat16)", code
+            )
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),

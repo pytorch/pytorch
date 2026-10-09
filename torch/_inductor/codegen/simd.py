@@ -477,6 +477,10 @@ BATCH_AXIS = 2
 # template_reduction_axis of a reduction over the M dim of a (B, M, N) template
 # output, i.e. each batch's columns.
 BATCH_COLUMN_AXIS = 3
+# template_reduction_axis of a reduction over the M and N dims of a (B, M, N)
+# template output, i.e. each batch's matrix. See
+# TritonTemplateKernel.codegen_batch_matrix_reduction_epilogue.
+BATCH_MATRIX_AXIS = 4
 
 
 def template_output_matrix(template: ir.Buffer) -> tuple[sympy.Expr, sympy.Expr]:
@@ -484,6 +488,14 @@ def template_output_matrix(template: ir.Buffer) -> tuple[sympy.Expr, sympy.Expr]
     folded into M."""
     *batch, n = template.get_size()
     return sympy_product(batch), n
+
+
+def batch_matrix_tiles(tile: tuple[int, int, int], template: ir.Buffer) -> int:
+    """The number of (sub)tiles of shape tile that cover one batch's (M, N)
+    matrix of a (B, M, N) template output. A reduction over each matrix finishes
+    in the tile when this is 1, and from per-tile partials otherwise."""
+    _, m, n = map(int, template.get_size())
+    return ceildiv(m, tile[0]) * ceildiv(n, tile[1])
 
 
 def batch_reduction_partials(
@@ -544,8 +556,9 @@ def template_reduction_axis(
     """The dim of the row-major (M, N) template output that reduction node
     keeps: 0 for a row reduction, 1 for a column reduction (possibly split), or
     None. A batched (B, M, N) output is the (B * M, N) matrix here; a sum over
-    just its batch dim is BATCH_AXIS, and a reduction over just its M dim is
-    BATCH_COLUMN_AXIS. produced are the template and epilogue buffers, which
+    just its batch dim is BATCH_AXIS, a reduction over just its M dim is
+    BATCH_COLUMN_AXIS, and one over its M and N dims is BATCH_MATRIX_AXIS.
+    produced are the template and epilogue buffers, which
     node must read in place. See
     TritonTemplateKernel.codegen_tile_reduction_epilogue."""
     m, n = template_output_matrix(template)
@@ -613,6 +626,15 @@ def template_reduction_axis(
 
     pointwise, reduced = unsplit.get_ranges()
     if (
+        unsplit.group[1] == (batch, rows * n)
+        and list(pointwise) == [batch]
+        and list(reduced) in ([rows * n], [rows, n])
+        and finishes_from_partials(unsplit, m, n)
+        and reads(unsplit, functools.partial(is_row_major_read, numel=m * n))
+    ):
+        return BATCH_MATRIX_AXIS
+
+    if (
         unsplit.group[1] == (rows * n, batch)
         and list(pointwise) in ([rows * n], [rows, n])
         and list(reduced) == [batch]
@@ -633,28 +655,110 @@ def finished_after_kernel(
 ) -> tuple[list[scheduler.BaseSchedulerNode], list[scheduler.BaseSchedulerNode]]:
     """The epilogue reductions that store per-tile partials, which the wrapper
     finishes after the kernel: column reductions, and row reductions when tile
-    doesn't span the output's columns, and batch reductions. Also the epilogue
-    nodes that read their results, which run after that as separate kernels."""
+    doesn't span the output's columns, and batch reductions. Per-batch matrix
+    reductions too, unless one tile holds the matrix and their readers fit
+    there (see matrix_results_fit). Also the epilogue nodes that read their
+    results, which run after that as separate kernels."""
     m, n = template_output_matrix(template)
     produced = OrderedSet([template.get_name()]).union(
         *(node.get_buffer_names() for node in epilogue_nodes)
     )
+    axis_of = {
+        node: template_reduction_axis(node, template, produced)
+        for node in epilogue_nodes
+        if node.is_reduction()
+    }
+
+    def split(axes):
+        partials, after = [], []
+        results: OrderedSet[str] = OrderedSet()
+        for node in epilogue_nodes:
+            # A reduction reading another's partials runs after the kernel too.
+            if any(dep.name in results for dep in node.read_writes.reads):
+                after.append(node)
+            elif axis_of.get(node) in axes:
+                partials.append(node)
+            else:
+                continue
+            results |= node.get_buffer_names()
+        return partials, after
+
     axes: tuple[int, ...] = (1, BATCH_AXIS, BATCH_COLUMN_AXIS)
     if not V.graph.sizevars.statically_known_geq(tile[1] * tile[2], n):
         axes = (0, *axes)
-    partials = [
-        node
-        for node in epilogue_nodes
-        if node.is_reduction()
-        and template_reduction_axis(node, template, produced) in axes
-    ]
-    results = OrderedSet().union(*(node.get_buffer_names() for node in partials))
-    after = []
-    for node in epilogue_nodes:
-        if any(dep.name in results for dep in node.read_writes.reads):
-            after.append(node)
-            results |= node.get_buffer_names()
+    partials, after = split(axes)
+    matrices = [node for node, axis in axis_of.items() if axis == BATCH_MATRIX_AXIS]
+    if matrices and (
+        batch_matrix_tiles(tile, template) > 1
+        # Only the partials path removes a split reduction's second stage.
+        or any(scheduler.MixOrderReduction.is_split_reduction(n) for n in matrices)
+        # Readers that don't fit the tile, e.g. a matrix mean's division over
+        # the batches only. With subtiles, they stay unfused.
+        or (
+            tile[2] == 1
+            and not matrix_results_fit(
+                [node for node in epilogue_nodes if node not in after],
+                axis_of,
+                tile,
+                m,
+                n,
+            )
+        )
+    ):
+        partials, after = split((*axes, BATCH_MATRIX_AXIS))
     return partials, after
+
+
+def matrix_dependents(
+    epilogue_nodes: Sequence[scheduler.BaseSchedulerNode],
+    matrices: Sequence[scheduler.BaseSchedulerNode],
+) -> list[scheduler.BaseSchedulerNode]:
+    """The epilogue nodes that read, directly or through each other, the
+    results of matrices."""
+    results = OrderedSet().union(*(node.get_buffer_names() for node in matrices))
+    dependents = []
+    for node in epilogue_nodes:
+        if node not in matrices and any(
+            dep.name in results for dep in node.read_writes.reads
+        ):
+            dependents.append(node)
+            results |= node.get_buffer_names()
+    return dependents
+
+
+def matrix_results_fit(
+    epilogue_nodes: Sequence[scheduler.BaseSchedulerNode],
+    axis_of: dict[scheduler.BaseSchedulerNode, int | None],
+    tile: tuple[int, int, int],
+    m: sympy.Expr,
+    n: sympy.Expr,
+) -> bool:
+    """Whether per-batch matrix reductions that finish in the tile, and the
+    nodes reading their results (e.g. RMSNorm's normalize), can be generated:
+    the matrices before the row pass and their readers right after them, over
+    the template's own indices. See
+    TritonTemplateKernel.codegen_batch_matrix_reduction_epilogue."""
+    matrices = [
+        node for node in epilogue_nodes if axis_of.get(node) == BATCH_MATRIX_AXIS
+    ]
+    dependents = matrix_dependents(epilogue_nodes, matrices)
+    results = OrderedSet().union(
+        *(node.get_buffer_names() for node in (*matrices, *dependents))
+    )
+    return (
+        tile[2] == 1
+        # All matrices are generated together, before any reader.
+        and not any(
+            dep.name in results for node in matrices for dep in node.read_writes.reads
+        )
+        and all(
+            # Row reductions run after the readers and may read them.
+            axis_of.get(node) == 0
+            if node.is_reduction()
+            else node.group[1] == (m * n, sympy.S.One)
+            for node in dependents
+        )
+    )
 
 
 def tile_fits_reduction_epilogue(
@@ -679,7 +783,10 @@ def tile_fits_reduction_epilogue(
     if reductions and tile[2] > 1 and meta_ws_enabled():
         return False
     axes = [template_reduction_axis(node, template, produced) for node in reductions]
-    if any(axis not in (0, 1, BATCH_AXIS, BATCH_COLUMN_AXIS) for axis in axes):
+    if any(
+        axis not in (0, 1, BATCH_AXIS, BATCH_COLUMN_AXIS, BATCH_MATRIX_AXIS)
+        for axis in axes
+    ):
         return False
     if BATCH_AXIS in axes and batch_reduction_partials(tile, template) is None:
         return False
@@ -689,12 +796,18 @@ def tile_fits_reduction_epilogue(
     ):
         return False
     epilogue_nodes = [node for node in epilogue_nodes if node not in after]
+    axis_of = dict(zip(reductions, axes))
+    if any(
+        axis == BATCH_MATRIX_AXIS and node not in partials
+        for node, axis in axis_of.items()
+    ) and not matrix_results_fit(epilogue_nodes, axis_of, tile, m, n):
+        return False
     columns = [node for node, axis in zip(reductions, axes) if axis != 0]
     if columns:
         epilogue_nodes = [node for node in epilogue_nodes if node not in columns]
-        # Column reductions run after the row ones, and batch reductions before
-        # them, so both read only the template output and the nodes before the
-        # first row reduction.
+        # Column reductions run after the row ones, and batch and per-batch
+        # matrix reductions before them, so all read only the template output
+        # and the nodes before the first row reduction.
         first_row = next(
             (i for i, node in enumerate(epilogue_nodes) if node.is_reduction()),
             len(epilogue_nodes),
@@ -3178,7 +3291,7 @@ class SIMDScheduling(BaseScheduling):
             if any(
                 node.is_reduction()
                 and template_reduction_axis(node, template, produced)
-                in (1, BATCH_AXIS, BATCH_COLUMN_AXIS)
+                in (1, BATCH_AXIS, BATCH_COLUMN_AXIS, BATCH_MATRIX_AXIS)
                 for node in nodes
             ) and self.can_fuse_template_reduction_epilogue(node1, node2):
                 return True
