@@ -6,11 +6,7 @@ from flydsl._mlir.dialects import llvm
 from flydsl.expr import const_expr
 
 from .flex_attn_bwd_utils import make_bwd_shared_layout
-from .flex_attn_utils import (
-    make_global_view,
-    make_mask_buffers,
-    make_mask_evaluator,
-)
+from .flex_attn_utils import make_global_view, make_mask_buffers, make_mask_evaluator
 
 
 def make_pipeline_kernel(context, f32, exp2):

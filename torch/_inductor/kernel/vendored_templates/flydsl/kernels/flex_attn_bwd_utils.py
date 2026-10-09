@@ -1,30 +1,40 @@
 # mypy: allow-untyped-defs
 
-import flydsl.expr as fx
-
-
 MASK_TRAVERSAL_UNMASKED = "unmasked"
 MASK_TRAVERSAL_DIRECT_RANGE = "direct_range"
 MASK_TRAVERSAL_BLOCK_LIST = "block_list"
 
 DIRECT_RANGE_CAUSAL = "causal"
 
+MAX_DQ_WORKSPACE_BYTES = 16 << 30
 
 
-def choose_dq_partitions(batch_heads, sequence_length, key_rows, workspace_element_bytes=4):
+def choose_dq_partitions(
+    batch_heads,
+    sequence_length,
+    key_rows,
+    workspace_element_bytes=4,
+    *,
+    qk_head_dim=192,
+):
+    slot_bytes = batch_heads * sequence_length * qk_head_dim * workspace_element_bytes
+    max_partitions = MAX_DQ_WORKSPACE_BYTES // slot_bytes
+    if max_partitions == 0:
+        raise ValueError("FlyDSL backward requires a dQ workspace larger than 16 GiB")
+    max_partitions = 1 << (max_partitions.bit_length() - 1)
     owners = (sequence_length + key_rows - 1) // key_rows
     if key_rows == 128:
         # Bound sparse slot traffic and each buffer view for both supported dimensions.
         head_group = min(32, batch_heads & -batch_heads)
         max_slots = min(
             32,
-            0xFFFFFFFF // (sequence_length * 192 * head_group * workspace_element_bytes),
+            0xFFFFFFFF
+            // (sequence_length * 192 * head_group * workspace_element_bytes),
         )
-        return min(owners, 1 << (max_slots.bit_length() - 1))
+        return min(owners, max_partitions, 1 << (max_slots.bit_length() - 1))
     # Keep long owner loops distributed even when heads fill the device.
     target = max(1 if owners <= 8 else 2, (256 + batch_heads - 1) // batch_heads)
-    return min(owners, 1 << (target - 1).bit_length())
-
+    return min(owners, max_partitions, 1 << (target - 1).bit_length())
 
 
 def _canonical_mask_expression(mask_program, mask_program_output, sequence_length=None):
@@ -142,7 +152,6 @@ def _canonical_mask_expression(mask_program, mask_program_output, sequence_lengt
         return None
 
 
-
 def classify_mask_traversal(
     mask_program,
     mask_program_output,
@@ -174,8 +183,9 @@ def classify_mask_traversal(
     return MASK_TRAVERSAL_BLOCK_LIST, None
 
 
-
 def make_bwd_shared_layout(rows, columns):
+    import flydsl.expr as fx
+
     layout = fx.make_layout(
         ((16, rows // 16), (32, columns // 32)),
         ((32, 16 * columns), (1, 16 * 32)),
@@ -183,6 +193,7 @@ def make_bwd_shared_layout(rows, columns):
     return fx.make_composed_layout(fx.static(fx.SwizzleType.get(1, 4, 4)), layout)
 
 
-
 def bwd_exp2(value):
+    import flydsl.expr as fx
+
     return fx.math.exp2(fx.Float32(value), fastmath=fx.FastMathFlags.afn)

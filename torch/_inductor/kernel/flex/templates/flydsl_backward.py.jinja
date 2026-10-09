@@ -1,4 +1,3 @@
-import contextlib
 import os
 import threading
 
@@ -7,23 +6,27 @@ import torch
 from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_gfx950 import (
     build_flex_attn_bwd_module,
 )
-from torch._inductor.runtime.flydsl_cache import configure_flydsl_cache_dir
+from torch._inductor.runtime.flydsl_cache import (
+    configure_flydsl_cache_dir,
+    run_cached_flydsl,
+    temporary_env,
+)
 
 
 {{gen_defines()}}
 
 
-_launcher = None
-_launcher_lock = threading.Lock()
+_jit_launcher = None
+_jit_launcher_lock = threading.Lock()
 
 
-def _get_launcher(dispatch_args, compile_only):
-    global _launcher
-    launcher = _launcher
-    if compile_only or launcher is None:
-        with _launcher_lock:
-            launcher = _launcher
-            if compile_only or launcher is None:
+def _get_jit_launcher():
+    global _jit_launcher
+    launcher = _jit_launcher
+    if launcher is None:
+        with _jit_launcher_lock:
+            launcher = _jit_launcher
+            if launcher is None:
                 launcher = build_flex_attn_bwd_module(
                     BATCH_SIZE,
                     NUM_HEADS,
@@ -53,13 +56,7 @@ def _get_launcher(dispatch_args, compile_only):
                     lse_in_log2=True,
                     dq_accum_fp32=DQ_ACCUM_FP32,
                 )
-                compile_args = tuple(
-                    flyc.from_torch_tensor(tensor) for tensor in dispatch_args[:-1]
-                ) + (dispatch_args[-1],)
-                # This generated template fixes shapes, strides, and dtypes.
-                launcher = flyc.compile(launcher, *compile_args)
-                if not compile_only:
-                    _launcher = launcher
+                _jit_launcher = launcher
     return launcher
 
 
@@ -127,9 +124,20 @@ def _run_flydsl_backward(
             "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
             "by the FlyDSL precompile path"
         )
-    launcher = _get_launcher(dispatch_args, flydsl_compile_only)
-    if not flydsl_compile_only:
-        launcher(*dispatch_args)
+    launcher = _get_jit_launcher()
+    compile_args = tuple(
+        flyc.from_torch_tensor(tensor) for tensor in dispatch_args[:-1]
+    ) + (stream,)
+    if flydsl_compile_only:
+        flyc.compile(launcher, *compile_args)
+    else:
+        run_cached_flydsl(
+            launcher,
+            *compile_args,
+            constexpr_param=compile_args[0],
+            compiler=flyc.compile,
+            dispatch_args=dispatch_args,
+        )
     return grad_query
 
 
@@ -195,13 +203,9 @@ def {{kernel_name}}_precompile(
     if flydsl_gpu_arch is not None:
         env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
 
-    from torch._inductor.utils import _set_env
     from torch._subclasses.fake_tensor import FakeTensorMode
 
-    with contextlib.ExitStack() as stack:
-        for key, value in env_updates.items():
-            stack.enter_context(_set_env(key, value))
-
+    with temporary_env(env_updates):
         with FakeTensorMode():
             query = _fake_proxy("query")
             key = _fake_proxy("key")
