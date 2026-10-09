@@ -60,6 +60,18 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
 
 
 class _PhiloxLaunch(NamedTuple):
+    r"""Package RNG operands for the kernel's fixed launch signature.
+
+    - RTNE: no RNG state.
+    - Stateless SR: the caller's key tensor; no global generator state.
+    - Stateful eager SR: seed and offset as host scalars.
+    - Stateful CUDA graph SR: device-resident seed and offset plus an
+      intragraph offset, so replay reads the updated generator state.
+
+    This tuple organizes those operands; it does not own RNG state or implement
+    Philox.
+    """
+
     seed: torch.Tensor | None = None
     offset: torch.Tensor | None = None
     seed_scalar: int | None = None

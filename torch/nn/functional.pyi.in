@@ -714,9 +714,9 @@ def quantize_tensor(
     qdata_dtype: _dtype,
     scaling_algorithm: ScalingAlgorithm,
     swizzle_type: SwizzleType,
+    scaling_type_use_square_block_size: bool = False,
     qdata_rounding_mode: RoundingMode = RoundingMode.RTNE,
     random_key: Tensor | None = None,
-    scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor]: ...
 
 __all__ += ["quantize_tensor"]
@@ -728,9 +728,9 @@ def quantize_tensor_dual(
     qdata_dtype: _dtype,
     scaling_algorithm: ScalingAlgorithm,
     swizzle_type: SwizzleType,
+    scaling_type_use_square_block_size: bool = False,
     qdata_rounding_mode: RoundingMode = RoundingMode.RTNE,
     random_key: Tensor | None = None,
-    scaling_type_use_square_block_size: bool = False,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]: ...
 
 __all__ += ["quantize_tensor_dual"]
