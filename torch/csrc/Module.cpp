@@ -2933,6 +2933,27 @@ Call this whenever a new thread is created in order to propagate values from
         storage_impl->clear_data_ptr_access_error_msg_();
       });
 
+  py_module.def(
+      "_set_storage_access_error_msg",
+      [](const at::Tensor& t, const std::string& s) {
+        t.unsafeGetTensorImpl()
+            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
+  // Hot path of cudagraph replay (see cudagraph_trees.py check_invariants).
+  py_module.def(
+      "_tensors_data_ptrs_at_indices_equal",
+      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
+        for (auto index : indices) {
+          auto t = tensors[index].cast<at::Tensor>();
+          auto data_ptr = data_ptrs[index].cast<uintptr_t>();
+          if (reinterpret_cast<uintptr_t>(t.data_ptr()) != data_ptr) {
+            return false;
+          }
+        }
+        return true;
+      });
+
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
@@ -3258,7 +3279,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_construct_storage_from_data_pointer",
-      [](int64_t data_ptr, c10::Device device, size_t size_bytes) {
+      [](uintptr_t data_ptr, c10::Device device, size_t size_bytes) {
         return c10::Storage(
             c10::Storage::use_byte_size_t(),
             size_bytes,

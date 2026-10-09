@@ -8621,6 +8621,24 @@ class TestTorch(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
                 storage_class._new_shared_filename(0, 0, 0)
 
+    def test_storage_from_high_data_pointer(self):
+        # XPU USM addresses sit at or above 2**63, outside int64_t.
+        high_ptr = 0xFF00FFFFFFFC0000
+        s = torch._C._construct_storage_from_data_pointer(high_ptr, torch.device("cpu"), 256)
+        self.assertEqual(s.data_ptr(), high_ptr)
+
+        t = torch.empty(0, dtype=torch.uint8).set_(s)
+        self.assertEqual(t.data_ptr(), high_ptr)
+        # Entries outside indices are never read, so they may be ints and None.
+        self.assertTrue(torch._C._tensors_data_ptrs_at_indices_equal([t, 0], [high_ptr, None], [0]))
+        self.assertFalse(torch._C._tensors_data_ptrs_at_indices_equal([t], [high_ptr + 1], [0]))
+
+    def test_set_storage_access_error_msg(self):
+        x = torch.ones(4)
+        torch._C._set_storage_access_error_msg(x, "custom error msg")
+        with self.assertRaisesRegex(RuntimeError, "custom error msg"):
+            x.untyped_storage()
+
     def test_storage_casts(self):
         storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
         self.assertEqual(storage.size(), 6)
