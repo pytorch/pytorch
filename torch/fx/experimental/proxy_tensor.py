@@ -61,6 +61,7 @@ from torch._subclasses.fake_tensor import (
     is_fake_tensor,
     maybe_get_fake_mode,
     track_fake_tensor_for_export,
+    tracking_fake_tensors_for_export,
     unset_fake_temporarily,
 )
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -1506,7 +1507,8 @@ def proxy_call(
 
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
-    pytree.tree_map_only(Tensor, track_fake_tensor_for_export, out)
+    if tracking_fake_tensors_for_export():
+        pytree.tree_map_only_(Tensor, track_fake_tensor_for_export, out)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
