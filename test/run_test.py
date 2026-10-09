@@ -1997,6 +1997,7 @@ def get_selected_tests(options) -> list[str]:
             "test_ops",
             "test_mps",
             "test_metal",
+            "test_segment_reductions",
             "test_modules",
             "test_linalg",
             "test_scaled_matmul_cuda",

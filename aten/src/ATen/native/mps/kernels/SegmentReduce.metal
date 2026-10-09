@@ -1,4 +1,4 @@
-#include <SegmentReduce.h>
+#include <ATen/native/mps/kernels/SegmentReduce.h>
 #include <c10/metal/error.h>
 #include <c10/metal/reduction_utils.h>
 #include <c10/metal/utils.h>
@@ -33,28 +33,35 @@ kernel void segment_validate(
 }
 
 template <SegmentReduction R>
-inline float segment_identity() {
-  if (R == SegmentReduction::Max) {
-    return -INFINITY;
-  } else if (R == SegmentReduction::Min) {
-    return INFINITY;
-  } else if (R == SegmentReduction::Prod) {
-    return 1.0f;
+struct SegmentArithmeticOp {
+  static float identity() {
+    return R == SegmentReduction::Prod ? 1.0f : 0.0f;
   }
-  return 0.0f;
-}
+
+  static float combine(float a, float b) {
+    return R == SegmentReduction::Prod ? a * b : a + b;
+  }
+
+  static float threadgroup_reduce(
+      threadgroup float* partial,
+      float value,
+      uint tid,
+      uint width) {
+    if (R == SegmentReduction::Prod) {
+      return threadgroup_prod(partial, value, tid, width);
+    }
+    return threadgroup_sum(partial, value, tid, width);
+  }
+};
 
 template <SegmentReduction R>
-inline float segment_combine(float a, float b) {
-  if (R == SegmentReduction::Max) {
-    return c10::metal::max(a, b);
-  } else if (R == SegmentReduction::Min) {
-    return c10::metal::min(a, b);
-  } else if (R == SegmentReduction::Prod) {
-    return a * b;
-  }
-  return a + b;
-}
+using SegmentOp = conditional_t<
+    R == SegmentReduction::Max,
+    MaxOp<float>,
+    conditional_t<
+        R == SegmentReduction::Min,
+        MinOp<float>,
+        SegmentArithmeticOp<R>>>;
 
 template <SegmentReduction R>
 inline float segment_finalize(float value, ulong length, bool has_initial) {
