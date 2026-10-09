@@ -57,21 +57,6 @@ def post_already_uptodate(
     )
 
 
-def pr_runs(pr: GitHubPR, sha: str, **params: Any) -> list[dict[str, Any]]:
-    """pull_request workflow runs of the PR's commit sha."""
-    head_repo = pr.info["headRepository"]["nameWithOwner"]
-    runs = gh_fetch_json_dict(
-        f"https://api.github.com/repos/{pr.org}/{pr.project}/actions/runs",
-        {"head_sha": sha, "event": "pull_request", "per_page": 100, **params},
-    )["workflow_runs"]
-    return [
-        r
-        for r in runs
-        if r["head_branch"] == pr.head_ref()
-        and (r["head_repository"] or {}).get("full_name") == head_repo
-    ]
-
-
 def maintainer_approved_sha(pr: GitHubPR, comment_id: int | None) -> str | None:
     """PR head when comment_id was posted, if it was posted by a maintainer."""
     if comment_id is None:
@@ -86,14 +71,9 @@ def maintainer_approved_sha(pr: GitHubPR, comment_id: int | None) -> str | None:
         if perm["permission"] not in ("admin", "write"):
             print(f"@{comment.author_login} is not a maintainer, not approving CI")
             return None
-        sha = pr.get_commit_sha_at_comment(comment_id)
-        # The timeline orders commits by their author-controlled dates, so also
-        # require CI of sha to have been triggered before the comment.
-        if sha is None or not any(
-            r["created_at"] < comment.created_at for r in pr_runs(pr, sha)
-        ):
+        sha = pr.head_sha_before(comment.created_at)
+        if sha is None:
             print(f"Can't tell which commit comment {comment_id} was posted on")
-            return None
         return sha
     except Exception as e:
         print(f"Failed to check comment {comment_id}: {e}")
@@ -110,11 +90,22 @@ def approve_pending_ci(
     the timeout.
     """
     runs_url = f"https://api.github.com/repos/{pr.org}/{pr.project}/actions/runs"
+    head_repo = pr.info["headRepository"]["nameWithOwner"]
+    params = {
+        "head_sha": sha,
+        "event": "pull_request",
+        "status": "action_required",
+        "per_page": 100,
+    }
     approved: set[int] = set()
     deadline = time.monotonic() + timeout
     while True:
-        for run in pr_runs(pr, sha, status="action_required"):
-            if run["id"] in approved:
+        for run in gh_fetch_json_dict(runs_url, params)["workflow_runs"]:
+            if (
+                run["id"] in approved
+                or run["head_branch"] != pr.head_ref()
+                or (run["head_repository"] or {}).get("full_name") != head_repo
+            ):
                 continue
             approved.add(run["id"])
             print(f"Approving {run['html_url']}")

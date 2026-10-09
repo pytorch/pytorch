@@ -1208,6 +1208,33 @@ class GitHubPR:
         print(f"Did not find comment with id {comment_id} in the PR timeline")
         return None
 
+    def head_sha_before(self, timestamp: str) -> str | None:
+        """PR head before timestamp, per the PR's last pull_request workflow run.
+
+        Unlike the timeline, which orders commits by their author-controlled dates
+        and drops commits that were force-pushed away, GitHub records run creation
+        times when the head is pushed.
+        """
+        head_repo = self.info["headRepository"]["nameWithOwner"]
+        params = {
+            "event": "pull_request",
+            "branch": self.head_ref(),
+            "created": f"<{timestamp}",
+            "per_page": 100,
+        }
+        # Runs are listed newest first. Other forks may use the same branch name.
+        for page in range(1, 11):
+            runs = gh_fetch_json_dict(
+                f"https://api.github.com/repos/{self.org}/{self.project}/actions/runs",
+                {**params, "page": page},
+            )["workflow_runs"]
+            for run in runs:
+                if (run["head_repository"] or {}).get("full_name") == head_repo:
+                    return cast(str, run["head_sha"])
+            if len(runs) < 100:
+                break
+        return None
+
     def is_mergebot_rebase_of(self, sha: str) -> bool:
         """Whether the PR head is mergebot's rebase of sha, e.g. by `merge -r`."""
         rc = gh_graphql(
@@ -1735,6 +1762,8 @@ class GitHubPR:
             rebased
             and commit_to_merge != latest_commit
             and self.is_mergebot_rebase_of(commit_to_merge)
+            and self.head_sha_before(self.get_comment_by_id(comment_id).created_at)
+            == commit_to_merge
         ):
             print(f"Merging {latest_commit}, mergebot's rebase of {commit_to_merge}")
             commit_to_merge = latest_commit

@@ -327,23 +327,20 @@ class TestRebase(TestCase):
         )
 
     @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
-    @mock.patch("tryrebase.pr_runs")
     @mock.patch("tryrebase.gh_fetch_json_dict")
     def test_maintainer_approved_sha(
-        self, mocked_fetch_perm: Any, mocked_runs: Any, mocked_gql: Any
+        self, mocked_fetch_perm: Any, mocked_gql: Any
     ) -> None:
         "Tests CI is only approved for unedited merge comments from maintainers"
         pr = GitHubPR("pytorch", "pytorch", 31093)
-        for editor, permission, sha, run_created, expected in [
-            (None, "write", "sha", "t0", "sha"),
-            (None, "admin", "sha", "t0", "sha"),
-            (None, "read", "sha", "t0", None),
-            (None, "none", "sha", "t0", None),
-            ("someone", "write", "sha", "t0", None),
-            (None, "write", None, "t0", None),
-            # CI of sha was triggered after the comment, e.g. by a backdated commit
-            (None, "write", "sha", "t2", None),
-            (None, RuntimeError("404"), "sha", "t0", None),
+        for editor, permission, sha, expected in [
+            (None, "write", "sha", "sha"),
+            (None, "admin", "sha", "sha"),
+            (None, "read", "sha", None),
+            (None, "none", "sha", None),
+            ("someone", "write", "sha", None),
+            (None, RuntimeError("404"), "sha", None),
+            (None, "write", None, None),
         ]:
             comment = GitHubComment(
                 body_text="@pytorchbot merge -r",
@@ -360,17 +357,16 @@ class TestRebase(TestCase):
             else:
                 mocked_fetch_perm.side_effect = None
                 mocked_fetch_perm.return_value = {"permission": permission}
-            mocked_runs.return_value = [{"created_at": run_created}]
             with (
                 mock.patch.object(pr, "get_comment_by_id", return_value=comment),
-                mock.patch.object(pr, "get_commit_sha_at_comment", return_value=sha),
+                mock.patch.object(pr, "head_sha_before", return_value=sha) as head,
             ):
                 self.assertEqual(maintainer_approved_sha(pr, 1), expected)
+        head.assert_called_with("t1")
         self.assertIsNone(maintainer_approved_sha(pr, None))
         mocked_fetch_perm.assert_called_with(
             "https://api.github.com/repos/pytorch/pytorch/collaborators/maintainer/permission"  # @lint-ignore
         )
-        mocked_runs.assert_called_with(pr, "sha")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ class PythonWrapperMtia(PythonWrapperCodegen):
     A thin wrapper of PythonWrapperCodegen with MTIA specific logic
     """
 
+    preserve_zero_dim_tensor_args = True
+
     @override
     def write_header(self) -> None:
         super().write_header()

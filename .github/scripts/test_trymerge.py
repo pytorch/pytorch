@@ -3047,9 +3047,49 @@ class TestMergebotRebase(TestCase):
             with self._patch_push(actor, before, after):
                 self.assertEqual(self._pr().is_mergebot_rebase_of("orig"), expected)
 
+    def test_head_sha_before(self) -> None:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org, pr.project = "pytorch", "pytorch"
+        pr.info = {"headRepository": {"nameWithOwner": "fork/pytorch"}}
+        pr.head_ref.return_value = "main"
+
+        def runs(*repos: str) -> Any:
+            return {
+                "workflow_runs": [
+                    {"head_sha": f"{r} sha", "head_repository": {"full_name": r}}
+                    for r in repos
+                ]
+            }
+
+        for pages, expected in [
+            (
+                [runs("other/pytorch", "fork/pytorch", "fork/pytorch")],
+                "fork/pytorch sha",
+            ),
+            (
+                [runs(*["other/pytorch"] * 100), runs("fork/pytorch")],
+                "fork/pytorch sha",
+            ),
+            ([runs("other/pytorch")], None),
+        ]:
+            with mock.patch("trymerge.gh_fetch_json_dict", side_effect=pages) as fetch:
+                self.assertEqual(GitHubPR.head_sha_before(pr, "t"), expected)
+            self.assertEqual(fetch.call_count, len(pages))
+            fetch.assert_called_with(
+                "https://api.github.com/repos/pytorch/pytorch/actions/runs",
+                {
+                    "event": "pull_request",
+                    "branch": "main",
+                    "created": "<t",
+                    "per_page": 100,
+                    "page": len(pages),
+                },
+            )
+
     def test_merge_changes_locally_accepts_mergebot_rebase(self) -> None:
         pr = self._pr()
         pr.get_commit_sha_at_comment.return_value = "orig"
+        pr.get_comment_by_id.return_value.created_at = "t"
         pr.is_ghstack_pr.return_value = False
         pr.gen_commit_message.return_value = "msg"
         repo = mock.MagicMock(spec=GitRepo)
@@ -3057,8 +3097,14 @@ class TestMergebotRebase(TestCase):
         with self._patch_push("pytorchmergebot", "orig", "head"):
             with self.assertRaisesRegex(RuntimeError, "re-issue the merge command"):
                 GitHubPR.merge_changes_locally(pr, repo, comment_id=1)
+            # e.g. the head was force-pushed back to orig after the comment
+            pr.head_sha_before.return_value = "other"
+            with self.assertRaisesRegex(RuntimeError, "re-issue the merge command"):
+                GitHubPR.merge_changes_locally(pr, repo, comment_id=1, rebased=True)
+            pr.head_sha_before.return_value = "orig"
             with self.assertRaisesRegex(RuntimeError, "stop after check"):
                 GitHubPR.merge_changes_locally(pr, repo, comment_id=1, rebased=True)
+        pr.head_sha_before.assert_called_with("t")
         repo.fetch.assert_called_once_with("head", "__pull-request-1__init__")
 
 
