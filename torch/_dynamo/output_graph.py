@@ -2818,12 +2818,14 @@ class OutputGraph(OutputGraphCommon):
         stays differentiable and its backward into every graph input matches
         eager. The only edge dropped is the one into the source-less leaf, which
         is unobservable since the leaf itself is never let out (as an output it
-        reaches no graph input). Compiled autograd hooks on tainted tensors could
-        observe it, so they keep the graph break. This is the
+        reaches no graph input). Backward hooks on tainted tensors could observe
+        it, so they keep the graph break. This is the
         ``energy -> autograd.grad(create_graph=True) -> force`` pattern of
         force-supervised training, where the force is returned so that a loss
         on it can be backpropagated into the parameters.
         """
+        from torch._higher_order_ops.register_hook import register_hook_op
+
         from .variables.tensor import TensorVariable
 
         # Collect FX nodes for source-less requires_grad_() intermediates
@@ -2856,10 +2858,12 @@ class OutputGraph(OutputGraphCommon):
                 # Differentiable w.r.t. a graph input: AOTAutograd keeps the
                 # output differentiable and its backward reaches that input.
                 if input_edges is None:
-                    # A compiled autograd hook is arbitrary Python run from
-                    # BackwardState; it never fires if its tensor's gradient is
+                    # A hook on a tainted tensor never fires if its gradient is
                     # only on the dropped path into the source-less leaf.
-                    hooked = any(n.meta.get("has_backward_hook") for n in tainted_nodes)
+                    hooked = any(
+                        n.meta.get("has_backward_hook") or n.target is register_hook_op
+                        for n in tainted_nodes
+                    )
                     input_edges = set() if hooked else self._requires_grad_input_edges()
                 if input_edges:
                     fake_tensor = var.as_proxy().node.meta.get("example_value")

@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
 import copy
 import re
 import sys
@@ -2076,20 +2077,37 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.frame_count, 2)
         self._assert_requires_grad_leak_graph_break()
 
-    def test_requires_grad_intermediate_compiled_autograd_hook_graph_breaks(self):
-        # Under compiled autograd the hook runs from BackwardState, and the
-        # compiled backward never computes the source-less leaf's gradient.
+    @parametrize("compiled_autograd", (False, True))
+    def test_requires_grad_intermediate_hook_graph_breaks(self, compiled_autograd):
+        # The compiled backward never computes the gradient into the
+        # source-less leaf, so a hook registered on it would not fire. Without
+        # compiled autograd the hook must be side-effect free to be traced.
         mod = torch.nn.Linear(4, 1)
-        calls = []
+        hook_grads = []
+
+        def hook(g):
+            if compiled_autograd:
+                hook_grads.append(g)
+            return g * 2
 
         def fn(x):
             y = x.detach().requires_grad_()
-            y.register_hook(lambda g: calls.append(g))
+            y.register_hook(hook)
             return mod(y).sum()
 
+        def compiled_autograd_ctx():
+            if not compiled_autograd:
+                return contextlib.nullcontext()
+            return torch._dynamo.compiled_autograd._enable(
+                torch.compile(backend="aot_eager")
+            )
+
         x = torch.randn(2, 4)
-        ca_compiler = torch.compile(backend="aot_eager")
-        with torch._dynamo.compiled_autograd._enable(ca_compiler):
+        fn(x).backward()
+        eager_hook_grads = list(hook_grads)
+        eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
+
+        with compiled_autograd_ctx():
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "returning intermediate with requires_grad_\\(\\)",
@@ -2097,9 +2115,18 @@ class GraphModule(torch.nn.Module):
                 torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
         torch._dynamo.reset()
-        with torch._dynamo.compiled_autograd._enable(ca_compiler):
-            torch.compile(fn, backend="aot_eager")(x).backward()
-        self.assertEqual(len(calls), 1)
+        counters.clear()
+        hook_grads.clear()
+        mod.zero_grad()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        with compiled_autograd_ctx():
+            torch.compile(fn, backend=cnt)(x).backward()
+
+        self.assertEqual(hook_grads, eager_hook_grads)
+        for name, p in mod.named_parameters():
+            self.assertEqual(eager_grads[name], p.grad)
+        self.assertEqual(cnt.frame_count, 2)
+        self._assert_requires_grad_leak_graph_break()
 
     def test_requires_grad_setattr_graph_input_graph_breaks(self):
         def fn(x):
