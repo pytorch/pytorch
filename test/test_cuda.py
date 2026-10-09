@@ -8667,6 +8667,24 @@ print(value, end="")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
+    @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    def test_power_draw_amdsmi_milliwatts(self):
+        """power_draw() converts AMD SMI socket power from watts to milliwatts."""
+        cases = (
+            # The average reading takes precedence over the current one.
+            ({"average_socket_power": 54, "current_socket_power": 60}, 54_000),
+            ({"average_socket_power": "N/A", "current_socket_power": 29}, 29_000),
+            ({"average_socket_power": "N/A", "current_socket_power": "N/A"}, 0),
+        )
+        for power_info, expected in cases:
+            with (
+                self.subTest(power_info=power_info),
+                patch.object(torch.cuda, "amdsmi", create=True) as amdsmi,
+                patch.object(torch.cuda, "_get_amdsmi_handler"),
+            ):
+                amdsmi.amdsmi_get_power_info.return_value = power_info
+                self.assertEqual(torch.cuda.power_draw(), expected)
+
     @skipIfRocmVersionAtLeast([10, 1])  # ROCM-30651
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @skipIfRocmArch(MI350_ARCH)
