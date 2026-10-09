@@ -11,6 +11,9 @@ from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.autows_utils import has_two_ctas, meta_ws_enabled
 from torch._inductor.codegen import simd
 from torch._inductor.heuristics.registry import _HEURISTIC_CACHE, get_template_heuristic
+from torch._inductor.heuristics.template.bmm import (
+    CUDABlackwellBMMTemplateConfigHeuristic,
+)
 from torch._inductor.heuristics.template.triton import (
     _use_template_autows,
     BaseHeuristicSingleton,
@@ -22,6 +25,7 @@ from torch._inductor.heuristics.template.triton import (
     TMATemplateConfigMixin,
 )
 from torch._inductor.ir import MultiTemplateBuffer
+from torch._inductor.kernel.bmm import BlackwellBMMConfig
 from torch._inductor.kernel.mm import (
     blackwell_ws_persistent_tma_mm_template,
     persistent_tma_mm_template,
@@ -2055,6 +2059,136 @@ class TestBlackwellTMALoadFusion(TestCase):
             GemmConfig(128, 128, 128, 3, 8),
             c.bfloat16().float().sum(-1),
         )
+
+
+@instantiate_parametrized_tests
+class TestBlackwellBMMReductionEpilogue(TestCase):
+    """Reduction epilogues of the Blackwell persistent TMA BMM template."""
+
+    def _run_bmm_reduction(
+        self, fn, B, M, K, N, test_config, *, extra_input=False, tol=0, **patches
+    ):
+        """Run fn on a (B, M, K) @ (B, K, N) bmm with only test_config and its
+        num_stages - 1 twin as choices, keeping every fusion the gates allow, and
+        compare against eager. extra_input adds a third input, of shape
+        (B, M, N) or the given shape. Returns the generated kernel names and the
+        code."""
+        # Small integers make the bmm and the sums exact, so results don't
+        # depend on summation order and must match eager bitwise.
+        a = torch.randint(-1, 2, (B, M, K), device=GPU_TYPE).to(torch.bfloat16)
+        b = torch.randint(-1, 2, (B, K, N), device=GPU_TYPE).to(torch.bfloat16)
+        args = (a, b)
+        if extra_input:
+            shape = (B, M, N) if extra_input is True else extra_input
+            args += (torch.randint(-2, 3, shape, device=GPU_TYPE).float(),)
+        configs = [
+            test_config,
+            # Epilogues are only benchmarked, and so reductions only fused,
+            # when autotuning has more than one choice.
+            dataclasses.replace(test_config, num_stages=test_config.num_stages - 1),
+        ]
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.native_matmul": False,
+                    "test_configs.autotune_choice_name_regex": "blackwell_bmm",
+                    "benchmark_template_fusion": True,
+                    "triton.template_reduction_epilogue": True,
+                    **patches,
+                }
+            ),
+            mock.patch.object(
+                CUDABlackwellBMMTemplateConfigHeuristic, "bmm_configs", configs
+            ),
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", return_value=(0.0, "")
+            ),
+            TestBlackwellTMALoadFusion._poison_outputs(),
+        ):
+            actual, code = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(actual, fn(*args), atol=tol, rtol=tol)
+        return re.findall(r"def (triton_\w+)\(", code[0]), code[0]
+
+    BMM_OPS = {
+        "row_sum": lambda a, b: (a @ b).float().sum(-1),
+        # Out-of-range lanes hold f(0), here 1, so each one a mask lets through
+        # changes the sum.
+        "row_sum_offset": lambda a, b: ((a @ b).float() + 1).sum(-1),
+        # Every value is negative, so masked lanes that hold 0 rather than the
+        # max's identity would win.
+        "row_amax": lambda a, b: ((a @ b) - 100).amax(-1),
+        "row_mean": lambda a, b: (a @ b).float().mean(-1),
+        "row_sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(-1)),
+        # The pointwise output and the row sum share c.float().
+        "row_sum_shared_with_out": lambda a, b: (
+            (c := (a @ b).float()) + 1,
+            (c * 2).sum(-1),
+        ),
+        "col_sum": lambda a, b: (a @ b).float().sum((0, 1)),
+        "col_sum_offset": lambda a, b: ((a @ b).float() + 1).sum((0, 1)),
+        "batch_col_sum": lambda a, b: (a @ b).float().sum(1),
+        "batch_col_sum_offset": lambda a, b: ((a @ b).float() + 1).sum(1),
+        "batch_col_amax": lambda a, b: ((a @ b) - 100).amax(1),
+        "batch_col_sum_extra_input": lambda a, b, w: ((a @ b).float() * w).sum(1),
+        "all_axes": lambda a, b, w: (
+            (c := (a @ b).float() * w).sum(1),
+            c.sum(-1),
+            c.sum((0, 1)),
+        ),
+    }
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", tuple(BMM_OPS))
+    # M % BLOCK_M != 0, so tiles hold rows past each batch's M; N tails; one
+    # and two tiles per batch; more tiles than SMs.
+    @parametrize("shape", ((300, 96, 64, 128), (64, 176, 64, 80)))
+    @parametrize("tma_store", (False, True))
+    def test_blackwell_bmm_reduction_epilogue_fusion(
+        self, op: str, shape: tuple[int, int, int, int], tma_store: bool
+    ):
+        fn = self.BMM_OPS[op]
+        kernels, _ = self._run_bmm_reduction(
+            fn,
+            *shape,
+            BlackwellBMMConfig(128, 128, 64, 3, 8),
+            extra_input=fn.__code__.co_argcount == 3,
+            # Divisions (mean) may be reassociated.
+            tol=1e-5 if "mean" in op else 0,
+            **{"triton.enable_template_tma_store": tma_store},
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize(
+        "case",
+        (
+            ("row_sum", (5247, 128, 72, 128)),
+            ("row_sum", (5247, 256, 16, 80)),
+            ("batch_col_sum", (5247, 80, 16, 256)),
+        ),
+    )
+    def test_blackwell_bmm_reduction_epilogue_large_batch(self, case):
+        op, shape = case
+        fn = self.BMM_OPS[op]
+        kernels, _ = self._run_bmm_reduction(
+            fn,
+            *shape,
+            BlackwellBMMConfig(128, 128, 64, 3, 8),
+            extra_input=fn.__code__.co_argcount == 3,
+            **{"triton.enable_template_tma_store": True},
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
 
 
 @instantiate_parametrized_tests
