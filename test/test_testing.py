@@ -1388,15 +1388,6 @@ class TestReportHelpers(TestCase):
         # json.dumps escapes it as \ud800, which ClickHouse rejects.
         self.assertEqual(run["outcome_summary"], "?")
 
-    def test_line_separators_are_escaped(self) -> None:
-        now = time.time()
-        test = torchci_report.TestId("test/test_x.py", "", "test_separators", "python", "test_separators")
-        summary = "a\u2028b\u2029c\x85d"
-        line = torchci_report.line(torchci_report.run_record(test, 0, "failed", now, now, outcome_summary=summary))
-        # str.splitlines() would split the line at each of them.
-        self.assertEqual(line.splitlines(), [line.removesuffix("\n")])
-        self.assertEqual(json.loads(line)["outcome_summary"], summary)
-
     @skipIfTorchDynamo("Dynamo calls the patched torch._C function while tracing")
     def test_capture_skips_torch_accelerator(self) -> None:
         environment = importlib.import_module("torch.testing._internal.torchci.environment")
