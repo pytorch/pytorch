@@ -4785,8 +4785,6 @@ class FakeTensorViewCopy(TestCase):
                     _ = yf.view(-1)
 
 
-# Exercises the C++ FakeTensorMode bindings directly. No op runs under the
-# mode: running ops needs the C++ Fake fallback kernel, which is added later.
 class CppFakeTensorModeBindingsTest(TestCase):
     class Wrapper:
         pass
