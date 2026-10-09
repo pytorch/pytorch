@@ -14,6 +14,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch._logging import warning_once
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
@@ -25,7 +26,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
-from ...utils import can_use_tma
+from ...utils import can_use_tma, use_flex_tdm_descriptor
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
@@ -474,12 +475,6 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Intel GPU enables TMA by default
-        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
-
-        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = False
-
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.
         block_m, block_n = conf.block_m, conf.block_n
@@ -491,6 +486,7 @@ def flex_attention(
             block_n = min(block_n, SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("BLOCK_M", block_m)
         cur_kernel_options.setdefault("BLOCK_N", block_n)
+
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
@@ -511,6 +507,44 @@ def flex_attention(
                     SPARSE_KV_BLOCK_SIZE,
                 )
             continue
+
+        # Descriptor selection runs after the tile rejection above so a config
+        # that is about to be discarded cannot install descriptor range bounds.
+        #
+        # A default of True means "absent": omission keeps automatic selection,
+        # while any explicit falsy value (False, 0, None) forces pointer loads.
+        tdm_requested = bool(cur_kernel_options.get("USE_TMA", True))
+
+        # ROCm reports device type "cuda", so route it exclusively. The generic
+        # probe excludes HIP only in its CUDA arm, so it can read true on a ROCm
+        # host and would then enable descriptors under NVIDIA's rules, skipping
+        # the ROCm floor, the gfx1250 probe and the operand policy.
+        if torch.version.hip is not None and query.get_device().type == "cuda":
+            cur_kernel_options["USE_TMA"] = tdm_requested and use_flex_tdm_descriptor(
+                query,
+                key,
+                value,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_M"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
+            )
+        else:
+            # Intel GPU enables TMA by default
+            cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
+            if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+                cur_kernel_options["USE_TMA"] = False
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
@@ -633,6 +667,54 @@ flex_attention_backward_template = TritonTemplate(
 )
 
 
+def _fuse_nested_index_backward(joint_graph: torch.fx.GraphModule) -> None:
+    r"""Fuse the backward of table[i][j] into one scatter for table[i, j]."""
+    from torch._inductor.pattern_matcher import (
+        CallFunction,
+        KeywordArg,
+        Match,
+        PatternMatcherPass,
+        register_graph_pattern,
+    )
+
+    scatter = torch.ops.flex_lib.zeros_and_scatter.default
+    patterns = PatternMatcherPass(pass_name="flex_attention_index_backward")
+
+    def same_shape(match: Match) -> bool:
+        args = match.kwargs
+        shapes = (args["shape"][len(args["indices"]) :], args["inner_shape"])
+        remaining, inner = torch.fx.map_arg(shapes, lambda n: n.meta["val"])
+        return statically_known_true(sym_eq(remaining, inner))
+
+    @register_graph_pattern(
+        CallFunction(
+            scatter,
+            KeywordArg("shape"),
+            KeywordArg("indices"),
+            CallFunction(
+                scatter,
+                KeywordArg("inner_shape"),
+                KeywordArg("inner_indices"),
+                KeywordArg("value"),
+            ),
+        ),
+        extra_check=same_shape,
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=patterns,
+    )
+    def fuse(match: Match, shape, indices, inner_shape, inner_indices, value):
+        match.output_node().args = (shape, [*indices, *inner_indices], value)
+        match.erase_nodes()
+
+    # Matching runs backward through the graph; repeat to collapse longer chains.
+    changed = False
+    while patterns.apply(joint_graph):
+        changed = True
+    if changed:
+        joint_graph.graph.lint()
+        joint_graph.recompile()
+
+
 def validate_joint_graph(joint_graph: torch.fx.Graph):
     """We do some pre lowering graph checks in order to raise nicer error messages"""
     for node in joint_graph.nodes:
@@ -652,7 +734,10 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
                         "    bias1 = bias.clone()\n"
                         "    def score_mod(score, b, h, q_idx, kv_idx):\n"
                         "        return score + bias[q_idx] + bias1[kv_idx]\n\n"
-                        "Note that this solution will use additional memory."
+                        "Note that this solution will use additional memory.\n\n"
+                        "For chained indexing with operations in between, such as "
+                        "(table[idx] * 2)[0], apply all indices in one indexing "
+                        "expression instead: table[idx, 0] * 2."
                     )
     return
 
@@ -858,6 +943,7 @@ def flex_attention_backward(*args, **kwargs):
     ]
     # Sometimes we have weird unused nodes here
     joint_graph.graph_module.graph.eliminate_dead_code()
+    _fuse_nested_index_backward(joint_graph.graph_module)
 
     # It is hard to raise nice errors for some joint graphs during subgraph lowering
     # This lets us do some checks before attempting to lower
