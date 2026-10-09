@@ -628,9 +628,9 @@ struct AttentionBackwardKernel {
 
   struct Params {
     // Input tensors
-    const scalar_t* query_ptr = nullptr; // [Mq, nH, K]
-    const scalar_t* key_ptr = nullptr; // [Mk, nH, K]
-    const scalar_t* value_ptr = nullptr; // [Mk, nH, Kv]
+    const scalar_t* query_ptr = nullptr; // [Mq, nHq, K]
+    const scalar_t* key_ptr = nullptr; // [Mk, nHkv, K]
+    const scalar_t* value_ptr = nullptr; // [Mk, nHkv, Kv]
     const scalar_t* bias_ptr = nullptr;
     const lse_scalar_t* logsumexp_ptr = nullptr; // [nH, Mq]
     const scalar_t* output_ptr = nullptr; // [Mq, nH, Kv]
@@ -640,9 +640,9 @@ struct AttentionBackwardKernel {
     const int32_t* cu_seqlens_k_ptr = nullptr;
 
     // Output tensors
-    output_t* grad_query_ptr = nullptr; //  [Mq, nH, K]
-    output_t* grad_key_ptr = nullptr; //    [Mk, nH, K]
-    output_t* grad_value_ptr = nullptr; //  [Mk, nH, Kv]
+    output_t* grad_query_ptr = nullptr; //  [Mq, nHq, K]
+    output_t* grad_key_ptr = nullptr; //    [Mk, nHq, K]
+    output_t* grad_value_ptr = nullptr; //  [Mk, nHq, Kv]
     output_t* grad_bias_ptr = nullptr;
 
     // Accumulators
@@ -664,6 +664,7 @@ struct AttentionBackwardKernel {
     int32_t num_queries = -1;
     int32_t num_keys = -1;
     int32_t num_heads = -1;
+    int32_t q_heads_per_kv = 1;
     uint8_t custom_mask_type = NoCustomMask;
 
     int64_t q_strideM = -1;
@@ -710,6 +711,8 @@ struct AttentionBackwardKernel {
     int64_t delta_strideB = -1;
     int64_t delta_strideH = -1;
     int32_t num_batches = -1;
+    int32_t batch_offset = 0;
+    int32_t head_offset = 0;
     int16_t num_splits_key = 1; // We use `gridDim.x` inside kernel
 
     int64_t gO_strideB = 0;
@@ -739,8 +742,9 @@ struct AttentionBackwardKernel {
     }
 
     CUTLASS_DEVICE bool advance_to_block() {
-      int64_t batch_id = blockIdx.z;
-      int32_t head_id = blockIdx.y;
+      int64_t batch_id = blockIdx.z + batch_offset;
+      int32_t head_id = blockIdx.y + head_offset;
+      int32_t kv_head_id = head_id / q_heads_per_kv;
 
       if (kNeedsAccumGradQ || kNeedsAccumGradK || kNeedsAccumGradV) {
         assert(workspace_size() == 0 || workspace != nullptr);
@@ -763,9 +767,9 @@ struct AttentionBackwardKernel {
       // Advance pointers that depend on the total concatenated
       // number of queries, as `num_queries` is modified in the block
       // below
-      dropout_batch_head_rng_offset =
-          batch_id * (num_heads * num_queries * num_keys) +
-          head_id * (num_queries * num_keys);
+      // See NOTE [Mem-efficient attention dropout RNG offset]
+      dropout_batch_head_rng_offset = gemm_kernel_utils::dropout_rng_offset(
+          batch_id, head_id, num_heads, num_queries, num_keys);
       logsumexp_ptr += batch_id * lse_strideB + head_id * lse_strideH;
 
       if (cu_seqlens_q_ptr != nullptr) {
@@ -799,8 +803,8 @@ struct AttentionBackwardKernel {
       }
 
       query_ptr += batch_id * q_strideB + head_id * q_strideH;
-      key_ptr += batch_id * k_strideB + head_id * k_strideH;
-      value_ptr += batch_id * v_strideB + head_id * v_strideH;
+      key_ptr += batch_id * k_strideB + kv_head_id * k_strideH;
+      value_ptr += batch_id * v_strideB + kv_head_id * v_strideH;
       if (bias_ptr != nullptr) {
         bias_ptr += batch_id * bias_strideB + head_id * bias_strideH;
       }
@@ -885,7 +889,7 @@ struct AttentionBackwardKernel {
     }
     CUTLASS_HOST_DEVICE int64_t workspace_size() const {
       // Returns size of buffer we need to run this kernel
-      return num_batches * num_heads * workspace_strideBH() * sizeof(float);
+      return int64_t(num_batches) * num_heads * workspace_strideBH() * sizeof(float);
     }
     CUTLASS_HOST_DEVICE bool should_zero_workspace() const {
       return num_splits_key > 1 || window_size > 0;
@@ -1263,6 +1267,7 @@ struct AttentionBackwardKernel {
     TORCH_CHECK(p.num_queries > 0, "Invalid value for `num_queries`");
     TORCH_CHECK(p.num_keys > 0, "Invalid value for `num_keys`");
     TORCH_CHECK(p.num_heads > 0, "Invalid value for `num_heads`");
+    TORCH_CHECK(p.q_heads_per_kv > 0, "Invalid GQA group size");
     TORCH_CHECK(p.num_batches > 0, "Invalid value for `num_batches`");
     TORCH_CHECK(p.head_dim <= kMaxK, "kMaxK: Expected `head_dim < kMaxK`");
     TORCH_CHECK(
@@ -1587,6 +1592,7 @@ struct AttentionBackwardKernel {
       mma.set_prologue_done(kPrologueQK);
       mma.set_zero_outside_bounds(!skipBoundsChecks);
       mma(gemm_k_iterations, accum, iterator_A, iterator_B, accum);
+      Mma::drain_cp_asyncs();
       accum = cutlass::multiplies<typename Mma::FragmentC>()(scale, accum);
 
       // Epilogue: add LSE + exp and store that to our shared memory buffer
@@ -1653,6 +1659,9 @@ struct AttentionBackwardKernel {
         auto lane_offset = MatmulQK::AccumLambdaIterator::get_lane_offset(
             lane_id, warp_id, output_tile_coords);
         int shift = query_start - key_start - p.window_size;
+        if (p.custom_mask_type == CausalFromBottomRight) {
+          shift += p.num_keys - p.num_queries;
+        }
         // current_key = key_start + accum_m
         // current_query = query_start + accum_n
         // mask if: `current_key < current_query - window_size`
@@ -1838,7 +1847,7 @@ struct AttentionBackwardKernel {
           output_frags.gradV,
           iterator_B,
           output_frags.gradV);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       if (kPrologueGV && !kSingleIterationGradV &&
           col + MatmulGradV::ThreadblockShape::kN < p.head_dim_value) {
         prologueGradV(col + MatmulGradV::ThreadblockShape::kN);
@@ -1894,7 +1903,7 @@ struct AttentionBackwardKernel {
 
       // Compute threadblock-scoped matrix multiply-add
       mma(gemm_k_iterations, accum, iterator_A, iterator_B, accum);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       if (kPrologueGQ) {
         prologueGradQ(0);
       }
@@ -2086,7 +2095,7 @@ struct AttentionBackwardKernel {
       __syncthreads();
       mma.set_prologue_done(kPrologueGQ);
       mma(gemm_k_iterations, accum, iterator_B, accum);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       bool isLastColumn = kSingleIterationGradQ ||
           (col + MatmulGradQ::ThreadblockShape::kN >= p.head_dim);
       if (kPrologueGQ && !isLastColumn) {
@@ -2224,7 +2233,7 @@ struct AttentionBackwardKernel {
           output_frags.gradK,
           iterator_B,
           output_frags.gradK);
-      __syncthreads();
+      Mma::drain_cp_asyncs();
       bool isLastColumn = kSingleIterationGradK ||
           col + MatmulGradK::ThreadblockShape::kN >= p.head_dim;
       if (kPrologueGK && !isLastColumn) {

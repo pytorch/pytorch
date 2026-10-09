@@ -14,14 +14,13 @@ if defined PYTORCH_BUILD_VERSION (
 :: Set BLAS type
 if %ENABLE_APL% == 1 (
     set BLAS=APL
-    set USE_LAPACK=1
 ) else if %ENABLE_OPENBLAS% == 1 (
     set BLAS=OpenBLAS
     set OpenBLAS_HOME=%DEPENDENCIES_DIR%\OpenBLAS\install
 )
 
 :: activate visual studio
-call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64
+for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -find VC\Auxiliary\Build\vcvarsall.bat`) do call "%%i" arm64
 where cl.exe
 
 :: change to source directory

@@ -453,7 +453,11 @@ class InductorProfilerTraceTests(TestCase):
                     compiled_fn(x)
                     torch.get_device_module(GPU_TYPE).synchronize()
 
-                trace_files = os.listdir(trace_dir)
+                trace_files = [
+                    filename
+                    for filename in os.listdir(trace_dir)
+                    if filename.endswith(".pt.trace.json")
+                ]
                 self.assertEqual(len(trace_files), 1)
                 with open(os.path.join(trace_dir, trace_files[0])) as f:
                     trace = json.load(f)

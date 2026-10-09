@@ -15,7 +15,10 @@ from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.autotune_process import (
+    BenchmarkRequest,
+    CUTLASSBenchmarkRequest,
     ExternKernelGPUBenchmarkRequest,
+    GPUDeviceBenchmarkMixin,
     TensorMeta,
     TritonBenchmarkRequest,
 )
@@ -36,13 +39,12 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_code, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
-    MI200_ARCH,
+    MI300_ARCH,
     skipIfRocmArch,
-    skipIfXpu,
-    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import (
@@ -84,6 +86,16 @@ def patches(fn):
 
 
 class TestAlgorithmSelectorChoiceTypes(TestCase):
+    @staticmethod
+    def _tensor_meta(device):
+        return TensorMeta(
+            device=torch.device(device),
+            dtype=torch.float32,
+            sizes=(1,),
+            strides=(1,),
+            offset=0,
+        )
+
     def _extern_kernel_caller(self, name):
         choice = ExternKernelChoice.lookup(name)
         if choice is None:
@@ -117,6 +129,21 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
                     expected,
                 )
 
+    def test_extern_kernel_caller_hash_includes_benchmark_policy(self):
+        choice = ExternKernelChoice.lookup("mm")
+        self.assertIsNotNone(choice)
+        with config.patch(autotune_cudagraph_benchmarking_iters=7):
+            default = choice.bind(input_nodes=[], layout=None)
+        unrolled = choice.bind(
+            input_nodes=[],
+            layout=None,
+            benchmark_request_kwargs={"cudagraph_unroll": 4},
+        )
+
+        self.assertEqual(default.bmreq.cudagraph_unroll, 7)
+        self.assertEqual(unrolled.bmreq.cudagraph_unroll, 4)
+        self.assertNotEqual(default.hash_key(), unrolled.hash_key())
+
     def test_realize_inputs_preserves_shape_constant(self):
         import sympy
 
@@ -124,6 +151,222 @@ class TestAlgorithmSelectorChoiceTypes(TestCase):
 
         self.assertIsInstance(out, ShapeAsConstantBuffer)
         self.assertEqual(out.expr, sympy.Integer(2048))
+
+    def test_benchmark_cache_key_includes_measurement_policy(self):
+        inputs_key = "inputs"
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=False,
+        ):
+            eager = select_algorithm.create_benchmark_cache_key(
+                inputs_key, "cuda", False
+            )
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+            autotune_cudagraph_benchmarking_iters=4,
+        ):
+            automatic = select_algorithm.create_benchmark_cache_key(
+                inputs_key, "cuda", False
+            )
+            required = select_algorithm.create_benchmark_cache_key(
+                inputs_key, "cuda", True
+            )
+            cpu = select_algorithm.create_benchmark_cache_key(inputs_key, "cpu", False)
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+            autotune_cudagraph_benchmarking_iters=8,
+        ):
+            differently_unrolled = select_algorithm.create_benchmark_cache_key(
+                inputs_key, "cuda", False
+            )
+
+        self.assertEqual(len({eager, automatic, required, differently_unrolled}), 4)
+        self.assertEqual(cpu, eager)
+
+    def test_benchmark_request_restores_serialized_cudagraph_policy(self):
+        import pickle
+
+        tensor_meta = self._tensor_meta(GPU_TYPE)
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+        ):
+            request = BenchmarkRequest("kernel", [tensor_meta], tensor_meta, ())
+        request = pickle.loads(pickle.dumps(request))
+
+        with config.patch(
+            max_autotune=False,
+            autotune_cudagraph_benchmarking=False,
+        ):
+            with request.apply_benchmark_config():
+                self.assertTrue(config.max_autotune)
+                self.assertTrue(config.autotune_cudagraph_benchmarking)
+
+            self.assertFalse(config.max_autotune)
+            self.assertFalse(config.autotune_cudagraph_benchmarking)
+
+    def test_benchmark_request_finds_gpu_after_cpu_auxiliary_input(self):
+        cpu_meta = self._tensor_meta("cpu")
+        gpu_meta = self._tensor_meta(GPU_TYPE)
+
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+        ):
+            request = BenchmarkRequest("kernel", [cpu_meta], gpu_meta, ())
+
+        self.assertEqual(request.config_cudagraph_benchmarking, GPU_TYPE == "cuda")
+
+    def test_benchmark_request_preserves_explicit_device_without_metadata(self):
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+        ):
+            request = ExternKernelGPUBenchmarkRequest(
+                kernel_name="mm",
+                input_tensor_meta=[],
+                output_tensor_meta=[],
+                extra_args=[],
+                callable_path="extern_kernels.mm",
+                benchmark_device_type="cuda",
+            )
+
+        self.assertTrue(request.config_cudagraph_benchmarking)
+
+    def test_benchmark_request_uses_automatic_cudagraph_policy(self):
+        class FakeBenchmarkRequest(BenchmarkRequest):
+            def do_bench(self, fn, *input_tensors, out=None):
+                return 2.0
+
+            def do_bench_with_cudagraphs(self, fn, *input_tensors, out=None):
+                return 1.0
+
+        tensor_meta = self._tensor_meta(GPU_TYPE)
+        with config.patch(
+            max_autotune=True,
+            autotune_cudagraph_benchmarking=True,
+        ):
+            request = FakeBenchmarkRequest("kernel", [tensor_meta], tensor_meta, ())
+
+        request.do_bench = unittest.mock.MagicMock(wraps=request.do_bench)
+        request.do_bench_with_cudagraphs = unittest.mock.MagicMock(
+            wraps=request.do_bench_with_cudagraphs
+        )
+
+        self.assertEqual(request.benchmark_run_fn(lambda: None), 1.0)
+        request.do_bench_with_cudagraphs.assert_called_once()
+        request.do_bench.assert_not_called()
+
+    def test_gpu_benchmark_device_uses_output_tensor_type(self):
+        request = GPUDeviceBenchmarkMixin()
+        out = torch.empty(1, device="meta")
+        device_interface = unittest.mock.MagicMock()
+        device_interface.current_device.return_value = 3
+
+        with (
+            patch(
+                "torch._inductor.autotune_process.is_gpu",
+                side_effect=lambda device_type: device_type == "meta",
+            ),
+            patch(
+                "torch._inductor.autotune_process.get_interface_for_device",
+                return_value=device_interface,
+            ) as get_interface,
+        ):
+            interface, device_type, device_idx = request._get_benchmark_device(out=out)
+
+        self.assertIs(interface, device_interface)
+        self.assertEqual(device_type, "meta")
+        self.assertEqual(device_idx, 3)
+        get_interface.assert_called_once_with("meta")
+
+    def test_automatic_cudagraph_policy_takes_precedence_over_profiler(self):
+        from torch._inductor.codegen.cutlass import kernel as cutlass_kernel
+
+        cases = (
+            ("triton", select_algorithm.TritonTemplateCaller, select_algorithm),
+            ("cutlass", cutlass_kernel.CUTLASSTemplateCaller, cutlass_kernel),
+            ("subgraph", select_algorithm.SubgraphChoiceCaller, None),
+        )
+        for kind, caller_type, profiler_module in cases:
+            with self.subTest(kind=kind):
+                caller = object.__new__(caller_type)
+                caller._benchmark_with_cudagraphs = False
+                if kind == "subgraph":
+                    caller._compiled_module = unittest.mock.MagicMock()
+                    caller._ensure_compiled = unittest.mock.MagicMock()
+                    caller.sym_input_values = []
+                    caller.layout = unittest.mock.MagicMock()
+                    caller.layout.device.type = "cuda"
+                    caller._bmreq = unittest.mock.MagicMock()
+                    caller._bmreq.config_cudagraph_benchmarking = True
+                    caller._bmreq.benchmark_run_fn.return_value = 1.25
+                    profiler_target = (
+                        "torch._inductor.codegen.subgraph.do_bench_using_profiling"
+                    )
+                else:
+                    caller.bmreq = unittest.mock.MagicMock()
+                    caller.bmreq.config_cudagraph_benchmarking = True
+                    caller.bmreq.benchmark.return_value = 1.25
+                    profiler_target = (
+                        f"{profiler_module.__name__}.do_bench_using_profiling"
+                    )
+
+                with (
+                    config.patch(profile_bandwidth_with_do_bench_using_profiling=True),
+                    patch(profiler_target) as profiler_bench,
+                ):
+                    result = caller.benchmark("input", out="output")
+
+                self.assertEqual(result, 1.25)
+                profiler_bench.assert_not_called()
+                if kind == "subgraph":
+                    caller._ensure_compiled.assert_called_once_with()
+                    caller._bmreq.benchmark_run_fn.assert_called_once()
+                    (run_fn,) = caller._bmreq.benchmark_run_fn.call_args.args
+                    self.assertTrue(callable(run_fn))
+                    self.assertEqual(
+                        caller._bmreq.benchmark_run_fn.call_args.kwargs,
+                        {"out": "output"},
+                    )
+                    self.assertFalse(caller._bmreq.benchmark_with_cudagraphs)
+                else:
+                    caller.bmreq.benchmark.assert_called_once_with(
+                        "input", out="output"
+                    )
+                if kind == "cutlass":
+                    self.assertFalse(caller.bmreq.benchmark_with_cudagraphs)
+
+    def test_cutlass_benchmark_resolves_stream_at_invocation(self):
+        request = object.__new__(CUTLASSBenchmarkRequest)
+        request.kernel_name = "kernel"
+        request.source_file = "source.cu"
+        request.hash_key = "hash"
+        request.extra_args = []
+        request.workspace_size = 0
+        request.workspace = None
+        request.ensure_dll_loaded = unittest.mock.Mock()
+        request.update_workspace_size = unittest.mock.Mock()
+        request.device_interface = unittest.mock.Mock()
+        request.device_interface.current_device.return_value = 0
+        request.device_interface.get_raw_stream.side_effect = [11, 22]
+
+        run_method = unittest.mock.Mock()
+        request.DLL = unittest.mock.Mock(kernel=run_method)
+        input_tensor = unittest.mock.Mock()
+        input_tensor.data_ptr.return_value = 1
+        out = unittest.mock.Mock()
+        out.data_ptr.return_value = 2
+        out.device = torch.device("cuda")
+
+        run_fn = request.make_run_fn(input_tensor, out=out)
+        run_fn()
+
+        self.assertEqual(run_method.call_count, 2)
+        self.assertEqual(run_method.call_args_list[0].args[-1].value, 11)
+        self.assertEqual(run_method.call_args_list[1].args[-1].value, 22)
 
 
 class TestSelectAlgorithm(TestCase):
@@ -322,7 +565,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/184490")
     @patches
     def test_mm_plus_mm(self):
         @torch.compile
@@ -339,8 +581,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    # TODO: fix accuracy failure of the triton template on XPU.
-    # and enable this test case.
     @patches
     def test_mm_plus_mm2(self):
         @torch.compile
@@ -372,6 +612,43 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @unittest.skipIf(GPU_TYPE != "xpu", "XPU only")
+    @patches
+    @inductor_config.patch(max_autotune_gemm_backends="TRITON")
+    def test_mm_plus_mm_xpu_ascending_k_loop(self):
+        # Regression: triton-xpu miscompiles descending-K loops
+        # (range(K1, 0, -BLOCK_K)) when the K loop runs more than one iteration,
+        # so XPU must render both mm_plus_mm K loops ascending.
+        def foo(a, b, c, d):
+            return (a @ b) + (c @ d)
+
+        a = torch.randn(512, 512, device=GPU_TYPE)
+        b = torch.randn(512, 512, device=GPU_TYPE)
+        c = torch.randn(512, 512, device=GPU_TYPE)
+        d = torch.randn(512, 512, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(foo), a, b, c, d)
+        code = code[0]
+        # K1 is the mm_plus_mm template's K variable (plain mm uses K), so its
+        # presence proves the fused template was selected and that it ascended.
+        self.assertIn("tl.cdiv(K1, BLOCK_K)", code)
+        FileCheck().check_not("range(K1, 0, -").run(code)
+
+    @unittest.skipIf(GPU_TYPE != "xpu", "XPU only")
+    @patches
+    @inductor_config.patch(max_autotune_gemm_backends="TRITON")
+    def test_bmm_xpu_ascending_k_loop(self):
+        # Same regression guard for bmm (also used by baddbmm). K=512 keeps the
+        # K loop multi-iteration for every admissible BLOCK_K (< 128).
+        def foo(a, b):
+            return torch.bmm(a, b)
+
+        a = torch.randn(2, 128, 512, device=GPU_TYPE)
+        b = torch.randn(2, 512, 128, device=GPU_TYPE)
+        _, code = run_and_get_code(torch.compile(foo), a, b)
+        code = code[0]
+        self.assertIn("triton_tem_fused_bmm", code)
+        FileCheck().check_not("range(K, 0, -").run(code)
 
     @patches
     def test_mm_dup_args(self):
@@ -789,6 +1066,65 @@ class TestSelectAlgorithmCleanup(TestCase):
 
 
 class TestExternKernelCaller(TestCase):
+    def test_extern_cudagraph_benchmark_rotates_selected_inputs(self):
+        from torch._inductor.runtime.benchmarking import benchmarker
+
+        input_meta, output_meta = self._mm_tensor_metas()
+        request = ExternKernelGPUBenchmarkRequest(
+            kernel_name="mm",
+            input_tensor_meta=input_meta,
+            output_tensor_meta=output_meta,
+            extra_args=[],
+            callable_path="extern_kernels.mm",
+            cudagraph_unroll=4,
+            cudagraph_cold_cache_input_indices=(1,),
+        )
+        inputs = tuple(torch.randn(64, 64) for _ in range(2))
+        out = torch.empty(64, 64)
+        run_fns = [unittest.mock.Mock(), unittest.mock.Mock()]
+        make_run_fn = unittest.mock.Mock(return_value=run_fns[1])
+        device_interface = unittest.mock.Mock()
+        device_interface.device.return_value = contextlib.nullcontext()
+        device_interface.get_device_properties.return_value.L2_cache_size = 1
+
+        def run_cudagraph_benchmark(fn, *, device_type, cudagraph_unroll):
+            self.assertEqual(device_type, "cuda")
+            self.assertEqual(cudagraph_unroll, 4)
+            for _ in range(cudagraph_unroll):
+                fn()
+            return 1.25
+
+        with (
+            patch.object(
+                request,
+                "_get_benchmark_device",
+                return_value=(device_interface, "cuda", 0),
+            ),
+            patch.object(request, "make_run_fn", new=make_run_fn),
+            patch.object(
+                benchmarker,
+                "benchmark_gpu_with_cuda_graph",
+                side_effect=run_cudagraph_benchmark,
+            ),
+        ):
+            self.assertEqual(
+                request.do_bench_with_cudagraphs(run_fns[0], *inputs, out=out),
+                1.25,
+            )
+
+        make_run_fn.assert_called_once()
+        rotated_inputs = make_run_fn.call_args.args
+        self.assertIs(rotated_inputs[0], inputs[0])
+        self.assertIsNot(rotated_inputs[1], inputs[1])
+        self.assertEqual(rotated_inputs[1], inputs[1])
+        rotated_out = make_run_fn.call_args.kwargs["out"]
+        self.assertIsNot(rotated_out, out)
+        self.assertEqual(rotated_out.size(), out.size())
+        self.assertEqual(rotated_out.stride(), out.stride())
+        for run_fn in run_fns:
+            self.assertEqual(run_fn.call_count, 2)
+        device_interface.synchronize.assert_called_once()
+
     @requires_gpu()
     @patches
     @torch._inductor.config.patch(max_autotune_gemm_backends="ATEN")
@@ -804,9 +1140,22 @@ class TestExternKernelCaller(TestCase):
 
         a = torch.randn(64, 64, device=GPU_TYPE)
         b = torch.randn(64, 64, device=GPU_TYPE)
+        benchmark_device_types = []
+        original_init = ExternKernelGPUBenchmarkRequest.__init__
 
-        with patch.object(
-            TensorMeta, "from_irnodes", side_effect=ValueError("Mocked failure")
+        def capture_request(request, *args, **kwargs):
+            benchmark_device_types.append(kwargs.get("benchmark_device_type"))
+            original_init(request, *args, **kwargs)
+
+        with (
+            patch.object(
+                TensorMeta, "from_irnodes", side_effect=ValueError("Mocked failure")
+            ),
+            patch.object(
+                ExternKernelGPUBenchmarkRequest,
+                "__init__",
+                capture_request,
+            ),
         ):
             with self.assertLogs(
                 "torch._inductor.select_algorithm", level="WARNING"
@@ -825,8 +1174,11 @@ class TestExternKernelCaller(TestCase):
 
         expected = torch.mm(a, b)
         torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+        self.assertTrue(benchmark_device_types)
+        self.assertTrue(
+            all(device_type == a.device.type for device_type in benchmark_device_types)
+        )
 
-    @skipIfRocmArch(MI200_ARCH)
     @patches
     def test_extern_kernel_caller_hash_key_deduplication(self):
         def fn(a, b, c, d):
@@ -853,7 +1205,12 @@ class TestExternKernelCaller(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocmArch(MI200_ARCH)
+    # gfx942: the 128x128x64 / 8-warp Triton candidate is miscompiled by the AMD
+    # block-pingpong schedule (LDS race, stale-by-one-BLOCK_K A operands), so the
+    # autotune correctness check fails intermittently; the compile-worker pool
+    # does not forward TRITON_HIP_USE_BLOCK_PINGPONG, so it cannot be disabled
+    # per test. https://github.com/triton-lang/triton/issues/11696
+    @skipIfRocmArch(MI300_ARCH)
     @patches
     def test_extern_kernel_benchmark_valid_timing(self):
         def fn(a, b):
@@ -872,17 +1229,7 @@ class TestExternKernelCaller(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @requires_gpu()
-    def test_extern_kernel_benchmark_request_variations(self):
-        """
-        Test that ExternKernelBenchmarkRequest.benchmark behaves correctly across
-        different configurations:
-        - With has_out_variant=True
-        - When out is None (tensors created from metadata)
-        - With profile_bandwidth_with_do_bench_using_profiling enabled
-        - When len(args) is 0
-        """
-
+    def _mm_tensor_metas(self):
         input_meta = [
             TensorMeta(
                 device=torch.device(GPU_TYPE),
@@ -906,6 +1253,21 @@ class TestExternKernelCaller(TestCase):
             strides=(64, 1),
             offset=0,
         )
+        return input_meta, output_meta
+
+    @requires_gpu()
+    def test_extern_kernel_benchmark_request_variations(self):
+        """
+        Test that ExternKernelBenchmarkRequest.benchmark behaves correctly across
+        different configurations:
+        - With has_out_variant=True
+        - When out is None (tensors created from metadata)
+        - When len(args) is 0
+
+        The profile_bandwidth_with_do_bench_using_profiling variation lives in
+        test_extern_kernel_benchmark_request_with_profiling, which needs Kineto.
+        """
+        input_meta, output_meta = self._mm_tensor_metas()
 
         # Test 1: has_out_variant=True with out=None and len(args)==0
         # This should call super().benchmark() which creates tensors from metadata
@@ -956,8 +1318,20 @@ class TestExternKernelCaller(TestCase):
         expected = torch.mm(a, b)
         torch.testing.assert_close(out, expected, atol=1e-4, rtol=1e-4)
 
-        # Test 4: profile_bandwidth_with_do_bench_using_profiling enabled
-        # with has_out_variant=False and len(args) > 0
+    @requires_gpu()
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_extern_kernel_benchmark_request_with_profiling(self):
+        """
+        ExternKernelBenchmarkRequest.benchmark with
+        profile_bandwidth_with_do_bench_using_profiling enabled, has_out_variant=False
+        and len(args) > 0.
+
+        do_bench_using_profiling times the kernel by capturing device events through
+        the profiler, so a build without Kineto falls back to the legacy profiler and
+        cannot run this path.
+        """
+        input_meta, output_meta = self._mm_tensor_metas()
+
         with config.patch(profile_bandwidth_with_do_bench_using_profiling=True):
             a = torch.randn(64, 64, device=GPU_TYPE)
             b = torch.randn(64, 64, device=GPU_TYPE)
@@ -1147,6 +1521,82 @@ class TestGetInputsStorageSizeCheck(TestCase):
             self.assertEqual(extern_inputs[0].shape, torch.Size(node_size))
 
 
+class TestGetInputsAddmmBias(TestCase):
+    """
+    Aten addmm benchmarks the original 1D bias while the Triton template
+    benchmarks the bias expanded to [M, N], so get_inputs recovers the former
+    from row 0 of the latter.  These drive that path directly: an M whose hint
+    is 0 has no row 0 to recover from.
+    """
+
+    N = 8
+    K = 4
+
+    def _get_inputs(self, m):
+        from torch._inductor import ir
+
+        device = torch.device("cpu")
+        dtype = torch.float32
+
+        mock_graph = unittest.mock.MagicMock()
+        mock_graph.sizevars.optimization_hints_with_override = (
+            lambda exprs, hint_override=None: tuple(int(e) for e in exprs)
+        )
+        mock_graph.sizevars.optimization_hint_with_override = (
+            lambda expr, hint_override=None: int(expr)
+        )
+        mock_graph.sizevars.optimization_hint = (
+            lambda expr, fallback=None: int(expr) if expr is not None else fallback
+        )
+        mock_graph.buffer_layout_constraints = {}
+        mock_graph.get_allocation_size = lambda node: node.get_size()
+
+        def buf(name, size, stride):
+            return ir.Buffer(
+                name=name,
+                layout=ir.FixedLayout(
+                    device=device, dtype=dtype, size=size, stride=stride
+                ),
+            )
+
+        with V.set_graph_handler(mock_graph):
+            # The expanded bias and the 1D bias are distinct buffers, which is
+            # what makes get_inputs reconcile the two.
+            bias_2d = buf("bias_expanded", [m, self.N], [0, 1])
+            bias_1d = buf("bias", [self.N], [1])
+            mat1 = buf("mat1", [m, self.K], [self.K, 1])
+            mat2 = buf("mat2", [self.K, self.N], [self.N, 1])
+
+            extern_choice = unittest.mock.create_autospec(
+                select_algorithm.ExternKernelCaller, instance=True
+            )
+            extern_choice.name = "addmm"
+            extern_choice.input_nodes = [bias_1d, mat1, mat2]
+
+            return select_algorithm.AlgorithmSelectorCache.get_inputs(
+                choices=[extern_choice],
+                input_nodes=[bias_2d, mat1, mat2],
+                layout=ir.FixedLayout(
+                    device=device, dtype=dtype, size=[m, self.N], stride=[self.N, 1]
+                ),
+                input_gen_fns=None,
+            )
+
+    def test_addmm_1d_bias(self):
+        args = self._get_inputs(m=4)
+        triton_bias = args.triton.input_tensors[0]
+        extern_bias = args.extern.input_tensors[0]
+        self.assertEqual(triton_bias.shape, torch.Size([4, self.N]))
+        self.assertEqual(extern_bias.shape, torch.Size([self.N]))
+        # Both choices must benchmark the same bias values.
+        self.assertEqual(extern_bias, triton_bias[0])
+
+    def test_addmm_1d_bias_zero_rows(self):
+        args = self._get_inputs(m=0)
+        self.assertEqual(args.triton.input_tensors[0].shape, torch.Size([0, self.N]))
+        self.assertEqual(args.extern.input_tensors[0].shape, torch.Size([self.N]))
+
+
 class TestTemplateRender(TestCase):
     @staticmethod
     def _template_kernel_has_atomic_add(code):
@@ -1155,6 +1605,44 @@ class TestTemplateRender(TestCase):
             kernel.startswith("def triton_tem")
             and "tl.atomic_add" in kernel.split("'''", 1)[0]
             for kernel in template_kernels
+        )
+
+    @requires_triton()
+    def test_jit_lines_preserves_hip_options(self):
+        kernel = unittest.mock.MagicMock()
+        kernel.use_jit = False
+        kernel.args.python_argdefs.return_value = ([], [], [], [])
+        kernel.index_dtype = "tl.int32"
+        kernel.output_node.get_device.return_value = torch.device("cuda")
+        kernel.meta = {
+            "matrix_instr_nonkdim": 16,
+            "waves_per_eu": 0,
+            "kpack": 1,
+        }
+        kernel.triton_meta = None
+        kernel.inductor_meta_common.return_value = {}
+        kernel.num_stages = 1
+        kernel.num_warps = 4
+        kernel.num_consumer_groups = 0
+        kernel.num_buffers_warp_spec = 0
+
+        with patch.object(
+            select_algorithm,
+            "triton_meta_device_props",
+            return_value=unittest.mock.MagicMock(),
+        ):
+            TritonTemplateKernel.jit_lines(kernel)
+
+        self.assertEqual(
+            {
+                key: kernel.triton_meta[key]
+                for key in ("matrix_instr_nonkdim", "waves_per_eu", "kpack")
+            },
+            {
+                "matrix_instr_nonkdim": 16,
+                "waves_per_eu": 0,
+                "kpack": 1,
+            },
         )
 
     @requires_gpu()
@@ -1289,12 +1777,10 @@ class TestTemplateRender(TestCase):
                 (large_capture,),
             )
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM or TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959"
-    )
     @requires_gpu()
     @requires_triton()
     @config.patch(cuda_backend="triton")
+    @unittest.skipIf(TEST_XPU, "https://github.com/pytorch/pytorch/issues/179959")
     def test_external_template_prologue_epilogue_fusion(self):
         """
         Tests prologue fusion, epilogue fusion, and extra inputs through the

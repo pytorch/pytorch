@@ -14,6 +14,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 class TestSACEstimator(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 

@@ -15,14 +15,20 @@ static PyObject* THPMPSStream_pynew(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
 
+  int64_t stream_id = -1;
+
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  constexpr const char* kwlist[] = {nullptr};
+  constexpr const char* kwlist[] = {
+      "stream_id",
+      nullptr,
+  };
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "",
+          "|L",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-          const_cast<char**>(kwlist))) {
+          const_cast<char**>(kwlist),
+          &stream_id)) {
     return nullptr;
   }
 
@@ -31,7 +37,9 @@ static PyObject* THPMPSStream_pynew(
     return nullptr;
   }
 
-  at::mps::MPSStream* stream = at::mps::getStreamFromPool();
+  at::mps::MPSStream* stream = (stream_id == -1)
+      ? at::mps::getStreamFromPool()
+      : at::mps::getStreamByID(stream_id);
   c10::Stream unwrapped = stream->unwrap();
 
   THPMPSStream* self = (THPMPSStream*)ptr.get();
@@ -55,7 +63,23 @@ static PyObject* THPMPSStream_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
     auto self = (THPMPSStream*)_self;
-    self->mps_stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
+    // Synchronize on the stream's serial queue to avoid racing with other
+    // threads that are encoding on it.
+    struct Context {
+      at::mps::MPSStream* stream;
+      std::exception_ptr exception;
+    } ctx{self->mps_stream, nullptr};
+    dispatch_sync_f(self->mps_stream->queue(), &ctx, [](void* arg) {
+      auto ctx = static_cast<Context*>(arg);
+      try {
+        ctx->stream->synchronize(at::mps::SyncType::COMMIT_AND_WAIT);
+      } catch (...) {
+        ctx->exception = std::current_exception();
+      }
+    });
+    if (ctx.exception) {
+      std::rethrow_exception(ctx.exception);
+    }
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -117,14 +141,11 @@ void THPMPSStream_init(PyObject* module) {
   Py_INCREF(THPStreamClass);
   THPMPSStreamType.tp_base = THPStreamClass;
   THPMPSStreamClass = (PyObject*)&THPMPSStreamType;
-  if (PyType_Ready(&THPMPSStreamType) < 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THPMPSStreamType) >= 0);
   Py_INCREF(&THPMPSStreamType);
-  if (PyModule_AddObject(
-          module, "_MPSStreamBase", (PyObject*)&THPMPSStreamType) < 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
+          module, "_MPSStreamBase", (PyObject*)&THPMPSStreamType) >= 0);
 }
 
 #endif // USE_MPS

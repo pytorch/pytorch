@@ -132,7 +132,8 @@ class CeluOperator(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype in FLOAT_DTYPES
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         self._alpha = round(random.uniform(0.01, 5.0), 4)
         return [
             TensorSpec(
@@ -178,7 +179,8 @@ class SoftshrinkOperator(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype in FLOAT_DTYPES
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         self._lambd = round(random.uniform(0.0, 2.0), 4)
         return [
             TensorSpec(
@@ -225,7 +227,8 @@ class HardtanhOperator(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype in FLOAT_DTYPES
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         a = round(random.uniform(-3.0, 3.0), 4)
         b = round(random.uniform(-3.0, 3.0), 4)
         lo, hi = (a, b) if a < b else (b, a)
@@ -278,7 +281,8 @@ class SoftplusOperator(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype in FLOAT_DTYPES
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         self._beta = round(random.uniform(0.1, 5.0), 4)
         self._threshold = round(random.uniform(5.0, 30.0), 4)
         return [
@@ -325,7 +329,8 @@ class ThresholdOperator(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype in FLOAT_DTYPES
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         self._threshold = round(random.uniform(-3.0, 3.0), 4)
         self._value = round(random.uniform(-3.0, 3.0), 4)
         return [
@@ -375,7 +380,8 @@ class PreluOperator(Operator):
         return isinstance(output_spec, TensorSpec) and output_spec.dtype in FLOAT_DTYPES
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
-        assert isinstance(output_spec, TensorSpec)  # noqa: S101
+        if not isinstance(output_spec, TensorSpec):
+            raise AssertionError(f"expected TensorSpec, got {type(output_spec)}")
         input_spec = TensorSpec(
             size=output_spec.size,
             stride=output_spec.stride,

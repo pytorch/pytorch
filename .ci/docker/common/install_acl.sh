@@ -3,8 +3,13 @@
 
 set -eux
 
-ACL_VERSION=${ACL_VERSION:-"v52.6.0"}
+ACL_VERSION=${ACL_VERSION:-"v53.2.0"}
 ACL_INSTALL_DIR="/acl"
+
+if [[ -n "${CLANG_VERSION:-}" ]]; then
+  export CXX="clang++-${CLANG_VERSION}"
+  export CC="clang-${CLANG_VERSION}"
+fi
 
 # Clone ACL
 git clone https://github.com/ARM-software/ComputeLibrary.git -b "${ACL_VERSION}" --depth 1 --shallow-submodules

@@ -59,15 +59,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu-s390x"
-            docker_image: "manylinuxs390x-builder"
-            docker_image_tag_prefix: "cpu-s390x"
-            build_name: "manywheel-py3_10-cpu-s390x"
-            timeout_minutes: 420
-            pytorch_extra_install_requirements: ""
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -120,10 +111,8 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      # ROCm/XPU are excluded from the content-addressed ECR path: their test
-      # runners have no ECR pull credentials, so they stay on the Docker Hub
-      # image (this matrix only carries rocm/xpu; cpu/cuda build inline above).
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DOCKER_IMAGE_REGISTRY_HOST: ""
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: ""
       runs_on: linux.s390x
@@ -145,14 +134,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu-s390x"
-            docker_image: "manylinuxs390x-builder"
-            docker_image_tag_prefix: "cpu-s390x"
-            build_name: "manywheel-py3_10-cpu-s390x"
-            runs_on: "linux.s390x"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
@@ -214,7 +195,7 @@ jobs:
 
   manywheel-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !cancelled() && github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
@@ -224,13 +205,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - desired_python: "3.10"
-            desired_cuda: "cpu"
-            gpu_arch_version: ""
-            gpu_arch_type: "cpu-s390x"
-            docker_image: "manylinuxs390x-builder"
-            docker_image_tag_prefix: "cpu-s390x"
-            build_name: "manywheel-py3_10-cpu-s390x"
           - desired_python: "3.11"
             desired_cuda: "cpu"
             gpu_arch_version: ""
