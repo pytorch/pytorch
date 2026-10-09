@@ -102,6 +102,7 @@ def remove_no_ops(
     gm: torch.fx.GraphModule,
     zeros: OrderedSet[torch.fx.Node],
     ones: OrderedSet[torch.fx.Node],
+    mutated_storages: OrderedSet[int] | None = None,
 ):
     """
     Fold identities over an otherwise unobserved matrix-multiply allocation.
@@ -167,7 +168,6 @@ def remove_no_ops(
             )
 
         mm_targets = (aten.mm.default, aten.bmm.default, aten.addmm.default)
-        mutated_storages = None
 
         def view_source(node):
             if (
@@ -374,7 +374,7 @@ class UniformValueConstantFolder(ConstantFolder):
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: dict[torch.fx.Node, StorageWeakRef] = {}
-        self.mutated_storages = self._collect_mutated_storages()
+        self.mutated_storages = get_mutated_storages(gm)
         # we may constant fold a tensor which in the graph has a sym size
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: dict[torch.fx.Node, list[int]] = {}
@@ -447,37 +447,6 @@ class UniformValueConstantFolder(ConstantFolder):
                 pin_memory=False,
             )
             self.add_node_replacement(op, t)
-
-    def _collect_mutated_storages(self) -> OrderedSet[int]:
-        mutated_storages: OrderedSet[int] = OrderedSet()
-
-        def add_mutated_storage(arg: torch.fx.Node) -> None:
-            storage = get_node_storage(arg)
-            if storage is not None:
-                mutated_storages.add(storage)
-
-        graph = typing.cast(torch.fx.Graph, self.module.graph)
-        for op, target in graph._find_nodes_lookup_table.table:
-            if (
-                op != "call_function"
-                or not isinstance(target, torch._ops.OpOverload)
-                or not target._schema.is_mutable
-            ):
-                continue
-
-            for node in graph.find_nodes(op=op, target=target, sort=False):
-                for schema_arg, arg in zip_schema(
-                    target._schema, node.args, node.kwargs
-                ):
-                    if (
-                        schema_arg.alias_info is None
-                        or not schema_arg.alias_info.is_write
-                    ):
-                        continue
-
-                    pytree.tree_map_only(torch.fx.Node, add_mutated_storage, arg)
-
-        return mutated_storages
 
     def _aliases_mutated_storage(self, node: torch.fx.Node) -> bool:
         storage = get_node_storage(node)
@@ -764,7 +733,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 elif value == 1:
                     ones.add(new_node)
 
-        remove_no_ops(gm, zeros, ones)
+        remove_no_ops(gm, zeros, ones, cf.mutated_storages)
         remove_redundant_views(gm)
 
 

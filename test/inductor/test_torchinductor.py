@@ -9312,29 +9312,47 @@ for dtype in (torch.int32, torch.int64):
 
         foo_opt = torch.compile(matmul_with_op)
 
-        # test no-op
+        # Floating-point add/sub by zero can change the sign of zero, so only
+        # multiplication and division by one should be kernel-free.
         fns = (
-            lambda x: x + torch.zeros([256, 256], dtype=torch.float32, device=x.device),
-            lambda x: x - torch.zeros([256, 256], dtype=torch.float32, device=x.device),
-            lambda x: x * torch.ones([256, 256], dtype=torch.float32, device=x.device),
-            lambda x: x / torch.ones([256, 256], dtype=torch.float32, device=x.device),
-            lambda x: x + 0,
-            lambda x: x - 0,
-            lambda x: x * 1,
-            lambda x: x / 1,
+            (
+                lambda x: x
+                + torch.zeros([256, 256], dtype=torch.float32, device=x.device),
+                False,
+            ),
+            (
+                lambda x: x
+                - torch.zeros([256, 256], dtype=torch.float32, device=x.device),
+                False,
+            ),
+            (
+                lambda x: x
+                * torch.ones([256, 256], dtype=torch.float32, device=x.device),
+                True,
+            ),
+            (
+                lambda x: x
+                / torch.ones([256, 256], dtype=torch.float32, device=x.device),
+                True,
+            ),
+            (lambda x: x + 0, False),
+            (lambda x: x - 0, False),
+            (lambda x: x * 1, True),
+            (lambda x: x / 1, True),
         )
 
         inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]
 
-        for fn in fns:
+        for fn, should_eliminate in fns:
             out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
             atol, rtol = None, None
-            if self.device == "cpu":
-                FileCheck().check_not("cpp_fused").run(source_codes[0])
-            else:
-                FileCheck().check_not("triton.jit").run(source_codes[0])
+            if should_eliminate:
+                if self.device == "cpu":
+                    FileCheck().check_not("cpp_fused").run(source_codes[0])
+                else:
+                    FileCheck().check_not("triton.jit").run(source_codes[0])
 
         # test dtype conversion
         for lowp_dtype in [torch.float16, torch.bfloat16]:
@@ -9344,7 +9362,7 @@ for dtype in (torch.int32, torch.int64):
                 torch.rand([256, 256], device=self.device, dtype=lowp_dtype)
                 for _ in range(2)
             ]
-            for fn in fns:
+            for fn, _ in fns:
                 out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
                 self.assertEqual(
                     out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
