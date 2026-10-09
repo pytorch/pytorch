@@ -704,6 +704,8 @@ aten::adaptive_max_pool3d_backward
 aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
 aten::addbmm.out
+aten::addmm.compute_mode
+aten::addmm.compute_mode_out
 aten::addr_
 aten::allclose
 aten::angle
@@ -723,6 +725,8 @@ aten::avg_pool3d
 aten::avg_pool3d.out
 aten::avg_pool3d_backward
 aten::avg_pool3d_backward.grad_input
+aten::baddbmm.compute_mode
+aten::baddbmm.compute_mode_out
 aten::bartlett_window
 aten::bartlett_window.out
 aten::bartlett_window.periodic
@@ -757,6 +761,8 @@ aten::blackman_window.out
 aten::blackman_window.periodic
 aten::blackman_window.periodic_out
 aten::bmm
+aten::bmm.compute_mode
+aten::bmm.compute_mode_out
 aten::bmm.dtype
 aten::bmm.dtype_out
 aten::bmm.out
@@ -1023,6 +1029,8 @@ aten::mkldnn_rnn_layer.out
 aten::mkldnn_rnn_layer_backward
 aten::mkldnn_rnn_layer_backward.out
 aten::mm
+aten::mm.compute_mode
+aten::mm.compute_mode_out
 aten::mm.dtype
 aten::mm.dtype_out
 aten::mm.out

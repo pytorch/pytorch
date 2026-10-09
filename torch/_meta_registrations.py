@@ -2655,7 +2655,9 @@ def meta__fused_moving_avg_obs_fq_helper(
     return (torch.empty_like(self), mask)
 
 
-@register_meta(aten.mm)
+# Not registered on the aten.mm packet: the compute_mode overloads use their
+# C++ CompositeExplicitAutograd kernel, which forwards to mm.
+@register_meta([aten.mm.default, aten.mm.out, aten.mm.dtype, aten.mm.dtype_out])
 @out_wrapper(exact_dtype=True)
 def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
