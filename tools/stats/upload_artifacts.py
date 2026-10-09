@@ -10,6 +10,7 @@ ARTIFACTS = [
     "sccache-stats",
     "test-jsons",
     "test-reports",
+    "torchci-reports",
     "usage-log",
 ]
 BUCKET_NAME = "gha-artifacts"
