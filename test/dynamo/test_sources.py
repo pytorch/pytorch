@@ -1,11 +1,15 @@
 # Owner(s): ["module: dynamo"]
 
+from unittest import mock
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch.nn as nn
 from torch._dynamo.source import (
     AttrSource,
+    FrozenDictItemsSource,
+    GetItemSource,
     GlobalSource,
     is_from_local_source,
     LocalSource,
@@ -17,6 +21,24 @@ class CausalLMOutputWithPast:
 
 
 class SourceTests(torch._dynamo.test_case.TestCase):
+    def test_frozendict_items_source(self):
+        mapping, key, value = object(), object(), torch.randn(2)
+        source = FrozenDictItemsSource(LocalSource("mapping"))
+        globals = {"L": {"mapping": mapping}}
+        cache = {}
+        # Exercise source resolution on Python versions without frozendict.
+        with mock.patch(
+            "torch._dynamo.source.utils.frozendict_items", return_value=[(key, value)]
+        ):
+            item_source = GetItemSource(source, 0)
+            self.assertIs(
+                GetItemSource(item_source, 0).get_value(globals, {}, cache), key
+            )
+            self.assertIs(
+                GetItemSource(item_source, 1).get_value(globals, {}, cache), value
+            )
+            self.assertIs(source.get_value(globals, {}, cache), cache[source])
+
     def test_is_local(self):
         x_src = LocalSource("x")
         y_src = GlobalSource("y")
