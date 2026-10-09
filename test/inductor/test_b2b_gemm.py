@@ -200,35 +200,48 @@ class B2BGEMMTest(TestCase):
 
     @torch._inductor.config.patch(
         b2b_gemm_pass=True,
-        **{"test_configs.autotune_choice_name_regex": r"^triton_b2b_gemm_left_"},
+        **{
+            "test_configs.autotune_choice_name_regex": r"^triton_b2b_gemm_(left|right)_"
+        },
     )
     def test_b2b_gemm_good_shape_dynamic_shapes(self):
         """Backed SymInts must not crash or specialize the compiled graph."""
 
-        def f(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
-            return torch.mm(torch.mm(m1, m2), m3)
+        for is_left_assoc in (True, False):
+            with self.subTest(associativity="left" if is_left_assoc else "right"):
 
-        def f_32(m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor) -> torch.Tensor:
-            return f(m1.float(), m2.float(), m3.float()).half()
+                def f(
+                    m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor
+                ) -> torch.Tensor:
+                    if is_left_assoc:
+                        return torch.mm(torch.mm(m1, m2), m3)
+                    return torch.mm(m1, torch.mm(m2, m3))
 
-        backend = CompileCounterWithBackend("inductor")
-        f_opt = torch.compile(f, backend=backend, dynamic=True)
-        for i, (M, N, O, P) in enumerate(((256, 32, 256, 32), (128, 16, 128, 16))):
-            A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
-            B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
-            C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
-            # The original bug hard-errors in ceildiv via load_ratio_left with
-            # an AssertionError for SymInt versus int; this must not be weakened
-            # to only check that shapes do not specialize.
-            if i == 0:
-                actual, codes = run_and_get_code(f_opt, A, B, C)
-                self.assertIn("B2B_GEMM_LEFT_TRITON_ENTRANCE", "\n".join(codes))
-            else:
-                actual = f_opt(A, B, C)
-            self.assertEqual(f_32(A, B, C), actual, atol=0.1, rtol=0.01)
+                def f_32(
+                    m1: torch.Tensor, m2: torch.Tensor, m3: torch.Tensor
+                ) -> torch.Tensor:
+                    return f(m1.float(), m2.float(), m3.float()).half()
 
-        self.assertEqual(backend.frame_count, 1)
-        self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
+                backend = CompileCounterWithBackend("inductor")
+                f_opt = torch.compile(f, backend=backend, dynamic=True)
+                for i, (M, N, O, P) in enumerate(
+                    ((256, 32, 256, 32), (128, 16, 128, 16))
+                ):
+                    A = torch.randn((M, N), device=GPU_TYPE, dtype=torch.float16)
+                    B = torch.randn((N, O), device=GPU_TYPE, dtype=torch.float16)
+                    C = torch.randn((O, P), device=GPU_TYPE, dtype=torch.float16)
+                    if i == 0:
+                        actual, codes = run_and_get_code(f_opt, A, B, C)
+                        entrance = "LEFT" if is_left_assoc else "RIGHT"
+                        self.assertIn(
+                            f"B2B_GEMM_{entrance}_TRITON_ENTRANCE", "\n".join(codes)
+                        )
+                    else:
+                        actual = f_opt(A, B, C)
+                    self.assertEqual(f_32(A, B, C), actual, atol=0.1, rtol=0.01)
+
+                self.assertEqual(backend.frame_count, 1)
+                self.assertGreater(counters["inductor"]["b2b_gemm"], 0)
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._inductor.config.patch(b2b_gemm_pass=True)
@@ -242,7 +255,6 @@ class B2BGEMMTest(TestCase):
         C = torch.randn((128, 16), device=GPU_TYPE)
         mask = torch.arange(128, device=GPU_TYPE) % 2 == 0
 
-        counters.clear()
         actual = torch.compile(f, dynamic=True, fullgraph=True)(A, B, C, mask)
         self.assertEqual(actual, f(A, B, C, mask))
         self.assertEqual(counters["inductor"]["b2b_gemm"], 0)
