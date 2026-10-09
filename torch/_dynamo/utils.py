@@ -6207,7 +6207,8 @@ def is_pybind11_enum_member(value: object) -> bool:
 
 
 def _make_inlined(
-    tx: InstructionTranslatorBase, f: Callable[..., Any]
+    tx: InstructionTranslatorBase,
+    f: types.FunctionType | torch.jit.ScriptFunction,  # type: ignore[type-arg]
 ) -> Callable[..., VariableTracker]:
     if not callable(f):
         raise AssertionError("Expect f to be a python callable.")
@@ -6216,11 +6217,11 @@ def _make_inlined(
         *args: VariableTracker, **kwargs: VariableTracker
     ) -> VariableTracker:
         from torch._dynamo.trace_rules import _force_inline
-        from torch._dynamo.variables.functions import UserFunctionVariable
+        from torch._dynamo.variables.builder import SourcelessBuilder
 
         with _force_inline():
             return tx.inline_user_function_return(
-                UserFunctionVariable(f),
+                SourcelessBuilder.create_internal_user_function(f),
                 list(args),
                 dict(kwargs),
             )

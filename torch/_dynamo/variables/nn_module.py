@@ -549,27 +549,30 @@ class NNModuleVariable(VariableTracker):
                     source = AttrSource(AttrSource(self.source, "__class__"), name)
                     # Get the getter function
                     source = AttrSource(source, "fget")
+                # A builder would eagerly resolve this source through the metaclass.
                 return variables.UserFunctionVariable(
                     subobj.fget,  # pyrefly: ignore[bad-argument-type]
                     source=source,
-                ).call_function(tx, [(self)], {})
+                ).call_function(tx, [self], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
                     variables.UserFunctionVariable(
                         subobj.__func__,
                         source=source and AttrSource(source, "__func__"),
                     ),
-                    variables.UserDefinedObjectVariable(type(base)),
+                    VariableTracker.build(tx, type(base)),
                     source=source,
                 )
             elif istype(subobj, staticmethod):
-                return variables.UserFunctionVariable(
-                    subobj.__get__(base), source=source
+                return VariableTracker.build(
+                    tx, subobj.__get__(base), source=source, realize=True
                 )
             elif istype(subobj, types.FunctionType):
                 if inspect.getattr_static(subobj, "_torchdynamo_inline", False):
+                    from .builder import VariableBuilder
+
                     func_source = source and AttrSource(source, "__func__")
-                    fn_vt = variables.WrapperUserFunctionVariable(
+                    fn_vt = VariableBuilder.create_internal_wrapper_user_function(
                         subobj, "_torchdynamo_inline", source=func_source
                     )
                     return variables.WrapperUserMethodVariable(

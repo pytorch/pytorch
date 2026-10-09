@@ -27,6 +27,7 @@ from torch._dynamo.package import (
     DynamoCache,
 )
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._dynamo.replay_record import DummyModule, ExecutionRecorder
 from torch._dynamo.symbolic_convert import _import_module
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
@@ -1106,6 +1107,57 @@ def add(x, y):
             # The memo outlives the sys.modules entry: a same-process rerun would
             # otherwise resolve this run's module from it.
             _import_module.cache_clear()
+            torch._dynamo.reset()
+
+    def test_imported_module_attribute_mutation(self):
+        name = "torch_test_package_imported_module_attribute_mutation"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 1
+
+        def fn(x):
+            import torch_test_package_imported_module_attribute_mutation as imported
+
+            imported.VALUE = 42
+            return x + imported.VALUE
+
+        try:
+            sys.modules[name] = module
+            x = torch.randn(3, 2)
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            result = compiled(x)
+            self.assertEqual(result, x + 42)
+            self.assertEqual(module.VALUE, 42)
+
+            module.VALUE = 1
+            with torch.compiler.set_stance("fail_on_recompile"):
+                result = compiled(x)
+            self.assertEqual(result, x + 42)
+            self.assertEqual(module.VALUE, 42)
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            _import_module.cache_clear()
+            torch._dynamo.reset()
+
+    def test_import_name_replay_dummy_module(self):
+        name = "torch_test_package_replay_dummy_module"
+        recorded_name = f"{ExecutionRecorder.LOCAL_MOD_PREFIX}_0_None_{name}"
+        dummy_module = DummyModule(name)
+        dummy_module.VALUE = 3
+
+        def fn(x):
+            import torch_test_package_replay_dummy_module as imported
+
+            return x + imported.VALUE
+
+        fn.__globals__[recorded_name] = dummy_module
+        try:
+            x = torch.randn(3, 2)
+            result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(result, x + 3)
+        finally:
+            fn.__globals__.pop(recorded_name, None)
             torch._dynamo.reset()
 
     @parametrize("device", ("cpu", "cuda", "xpu"))

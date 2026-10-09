@@ -165,7 +165,12 @@ from .variables.base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
+from .variables.builder import (
+    FrameStateSizeEntry,
+    SourcelessBuilder,
+    VariableBuilder,
+    wrap_fx_proxy,
+)
 from .variables.builtin import BuiltinVariable, DictBuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
@@ -200,12 +205,7 @@ from .variables.lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .variables.misc import (
-    CellVariable,
-    NullVariable,
-    PythonModuleVariable,
-    UnknownVariable,
-)
+from .variables.misc import CellVariable, NullVariable, UnknownVariable
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.object_protocol import (
     generic_delitem,
@@ -251,10 +251,13 @@ trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 trace_bytecode_log = torch._logging.getArtifactLogger(__name__, "trace_bytecode")
 tls = threading.local()
 compare_op_handlers: dict[str, Any] = {
-    k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
+    k: SourcelessBuilder.create_internal_builtin(v).call_function
+    for k, v in supported_comparison_ops.items()
 }
-handle_contains = BuiltinVariable(operator.contains).call_function
-handle_not = BuiltinVariable(operator.not_).call_function
+handle_contains = SourcelessBuilder.create_internal_builtin(
+    operator.contains
+).call_function
+handle_not = SourcelessBuilder.create_internal_builtin(operator.not_).call_function
 compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
     tx, [*reversed(args)], {}
 )
@@ -545,7 +548,7 @@ class YieldValueOp(Exception):
 
 def stack_op(fn: Callable[..., object]) -> Callable[..., Any]:
     nargs = len(inspect.signature(fn).parameters)
-    fn_var = BuiltinVariable(fn)
+    fn_var = SourcelessBuilder.create_internal_builtin(fn)
 
     @functools.wraps(fn)
     def impl(self: InstructionTranslator, inst: Instruction) -> None:
@@ -2293,7 +2296,7 @@ class InstructionTranslatorBase(
         if val.source_location is None:
             inst = self.current_instruction
             if inst.positions is not None and inst.positions.lineno is not None:
-                val.set_source_location(
+                val = val.with_source_location(
                     SourceLocation(
                         filename=self.f_code.co_filename,
                         lineno=inst.positions.lineno,
@@ -2303,7 +2306,7 @@ class InstructionTranslatorBase(
                     )
                 )
             elif inst.starts_line is not None:
-                val.set_source_location(
+                val = val.with_source_location(
                     SourceLocation(
                         filename=self.f_code.co_filename,
                         lineno=inst.starts_line,
@@ -2682,8 +2685,8 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name, bad-argument-type]
-        self.push(PythonModuleVariable(value, source=source))
+        # pyrefly: ignore [unbound-name]
+        self.push(VariableTracker.build(self, value, source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
@@ -3023,7 +3026,9 @@ class InstructionTranslatorBase(
                 raise AssertionError(
                     "expected _exception_instance_check(val) to be true"
                 )
-            typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
+            typ = SourcelessBuilder.create_internal_builtin(
+                val.exc_type  # type: ignore[attr-defined, union-attr]
+            )
             tb = val.tp_getattro_impl(
                 # pyrefly: ignore[bad-argument-type]
                 self,
@@ -3041,7 +3046,9 @@ class InstructionTranslatorBase(
                 raise AssertionError(
                     "expected _exception_instance_check(val) to be true"
                 )
-            typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
+            typ = SourcelessBuilder.create_internal_builtin(
+                val.exc_type  # type: ignore[attr-defined]
+            )
 
             tb = val.tp_getattro_impl(self, "__traceback__")
 
@@ -3183,7 +3190,11 @@ class InstructionTranslatorBase(
                         self.push(variables.UnknownVariable())
                         self.push(old_exception)
 
-                        self.push(variables.BuiltinVariable(old_exception.exc_type))
+                        self.push(
+                            SourcelessBuilder.create_internal_builtin(
+                                old_exception.exc_type
+                            )
+                        )
                     else:
                         # Push empty exception tb, value, type
                         self.push(ConstantVariable.create(None))
@@ -3195,7 +3206,11 @@ class InstructionTranslatorBase(
                     self.push(variables.UnknownVariable())
                     self.push(exception_var)
 
-                    self.push(variables.BuiltinVariable(exception_var.exc_type))
+                    self.push(
+                        SourcelessBuilder.create_internal_builtin(
+                            exception_var.exc_type
+                        )
+                    )
 
                     # Jump to target
                     self.jump(block_stack_entry)
@@ -4602,7 +4617,8 @@ class InstructionTranslatorBase(
             self, "{:" + fmt_spec.as_python_constant() + "}"
         )
 
-        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
+        format_fn = VariableTracker.build(self, str.format)
+        self.call_function(format_fn, [fmt_var, value], {})
 
     @break_graph_if_unsupported(
         push=True,
@@ -5146,7 +5162,7 @@ class InstructionTranslatorBase(
         elif inst.argval == 7:
             # INTRINSIC_TYPEVAR
             v = self.pop().as_python_constant()
-            tv = variables.TypingVariable(TypeVar(v))
+            tv = VariableTracker.build(self, TypeVar(v))
             self.push(tv)
         else:
             unimplemented(
@@ -5738,7 +5754,7 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 11):
             push_types |= CO_GENERATOR
         if f_code.co_flags & (push_types):
-            self.push(BuiltinVariable(None))
+            self.push(VariableTracker.build(self, None))
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
