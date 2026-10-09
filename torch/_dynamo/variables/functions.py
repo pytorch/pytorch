@@ -2998,6 +2998,33 @@ class SkipFunctionVariable(VariableTracker):
 
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
+    _cpython_type = types.FunctionType
+
+    def _get_copied_attr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        if not hasattr(self.value, name):
+            return None
+        return self.wrapped.tp_getattro_impl(tx, name)
+
+    # functools.wraps copies these attributes, not the function's backing object.
+    tp_getset = {
+        "__name__": GetSet(
+            lambda s, tx: s._get_copied_attr(tx, "__name__"), unmodeled_setter
+        ),
+        "__qualname__": GetSet(
+            lambda s, tx: s._get_copied_attr(tx, "__qualname__"), unmodeled_setter
+        ),
+    }
+    tp_members = {
+        "__module__": Member(
+            lambda s, tx: s._get_copied_attr(tx, "__module__"), unmodeled_setter
+        ),
+        "__doc__": Member(
+            lambda s, tx: s._get_copied_attr(tx, "__doc__"), unmodeled_setter
+        ),
+    }
+
     def __init__(
         self,
         wrapped: SkipFunctionVariable,
@@ -3022,6 +3049,24 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
 
     def get_real_python_backed_value(self) -> object:
         return NO_SUCH_SUBOBJ
+
+    def as_python_constant(self) -> Never:
+        raise AsPythonConstantNotImplementedError(self)
+
+    def python_type(self) -> type:
+        return types.FunctionType
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "__dict__":
+            unimplemented(
+                gb_type="Skipped function wrapper __dict__ access",
+                context=f"{self}",
+                explanation="Dynamo does not model the copied dictionary of this function wrapper.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().tp_getattro_impl(tx, name)
 
     def call_function(
         self,
