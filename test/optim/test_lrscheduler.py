@@ -2820,6 +2820,344 @@ class TestLRScheduler(TestCase):
         self.assertEqual(resumed_lrs[0], reference_lrs[resume_step])
         self.assertEqual(resumed_lrs, reference_lrs[resume_step:])
 
+    def _repr_cases(self):
+        """(scheduler, settings its repr must name) for every public scheduler.
+
+        Each case gets a fresh optimizer because attaching a scheduler writes
+        ``initial_lr`` into the param groups, so a shared one would let earlier
+        cases change what later ones report.
+        """
+
+        def sgd(**kwargs):
+            return SGD(self.SchedulerTestNet().parameters(), lr=0.05, **kwargs)
+
+        def pair(opt):
+            return [
+                ConstantLR(opt, factor=0.1, total_iters=2),
+                ExponentialLR(opt, gamma=0.9),
+            ]
+
+        seq_opt, chained_opt = sgd(), sgd()
+        return [
+            (LambdaLR(sgd(), lr_lambda=lambda epoch: 0.95**epoch), ["lr_lambdas"]),
+            (MultiplicativeLR(sgd(), lr_lambda=lambda epoch: 0.95), ["lr_lambdas"]),
+            (StepLR(sgd(), step_size=30, gamma=0.1), ["step_size", "gamma"]),
+            (
+                MultiStepLR(sgd(), milestones=[30, 80], gamma=0.1),
+                ["milestones", "gamma"],
+            ),
+            (ConstantLR(sgd(), factor=0.5, total_iters=10), ["factor", "total_iters"]),
+            (
+                LinearLR(sgd(), start_factor=0.1, end_factor=1.0, total_iters=10),
+                ["start_factor", "end_factor", "total_iters"],
+            ),
+            (ExponentialLR(sgd(), gamma=0.9), ["gamma"]),
+            (
+                PolynomialLR(sgd(), total_iters=10, power=2.0),
+                ["total_iters", "power"],
+            ),
+            (
+                CosineAnnealingLR(sgd(), T_max=10, eta_min=0.001),
+                ["T_max", "eta_min"],
+            ),
+            (
+                CosineAnnealingWarmRestarts(sgd(), T_0=10, T_mult=2),
+                ["T_0", "T_mult", "eta_min"],
+            ),
+            (
+                CyclicLR(sgd(), base_lr=0.01, max_lr=0.1, cycle_momentum=False),
+                ["max_lrs", "total_size", "step_ratio", "mode", "cycle_momentum"],
+            ),
+            (
+                CyclicLR(
+                    sgd(),
+                    base_lr=0.01,
+                    max_lr=0.1,
+                    scale_fn=lambda x: 0.5,
+                    cycle_momentum=False,
+                ),
+                ["max_lrs", "scale_fn", "scale_mode"],
+            ),
+            (
+                OneCycleLR(sgd(), max_lr=0.1, total_steps=100, cycle_momentum=False),
+                [
+                    "max_lrs",
+                    "total_steps",
+                    "pct_start",
+                    "anneal_strategy",
+                    "three_phase",
+                    "cycle_momentum",
+                ],
+            ),
+            (
+                OneCycleLR(
+                    sgd(),
+                    max_lr=0.1,
+                    total_steps=100,
+                    three_phase=True,
+                    cycle_momentum=False,
+                ),
+                ["max_lrs", "three_phase"],
+            ),
+            (
+                ReduceLROnPlateau(sgd(), mode="min", factor=0.5, patience=5),
+                ["mode", "factor", "patience", "threshold", "cooldown", "eps"],
+            ),
+            (
+                SequentialLR(seq_opt, schedulers=pair(seq_opt), milestones=[2]),
+                ["milestones", "schedulers"],
+            ),
+            (ChainedScheduler(pair(chained_opt)), ["schedulers"]),
+            (
+                SWALR(sgd(), swa_lr=0.01, anneal_epochs=5),
+                ["swa_lrs", "anneal_epochs", "anneal_strategy"],
+            ),
+        ]
+
+    def test_lr_scheduler_repr_names_class_and_settings(self):
+        for scheduler, keys in self._repr_cases():
+            with self.subTest(scheduler=type(scheduler).__name__):
+                actual = repr(scheduler)
+                # The point of the change is that nothing prints as an address.
+                # Matching on "at 0x" rather than "object at 0x" is deliberate:
+                # a function reprs as "<function <lambda> at 0x...>", which the
+                # narrower pattern misses.
+                self.assertNotIn("at 0x", actual)
+                self.assertTrue(
+                    actual.startswith(f"{type(scheduler).__name__} (\n"), actual
+                )
+                self.assertTrue(actual.endswith("\n)"), actual)
+                for key in keys:
+                    self.assertIn(f"{key}: ", actual)
+
+    def test_lr_scheduler_repr_reports_last_epoch_and_base_lrs(self):
+        # ``self.opt`` carries a tensor lr in its second param group, so this
+        # also covers rendering base_lrs that are tensors rather than floats.
+        scheduler = StepLR(self.opt, step_size=5, gamma=0.1)
+        self.assertIn("last_epoch: 0", repr(scheduler))
+        self.assertIn("base_lrs: [0.05, 0.5]", repr(scheduler))
+
+        for _ in range(2):
+            self.opt.step()
+            scheduler.step()
+        self.assertIn("last_epoch: 2", repr(scheduler))
+
+    def test_lr_scheduler_repr_names_lambdas(self):
+        # A list of functions renders through ``function.__repr__``, which is
+        # the address this whole change exists to remove.
+        def decay(epoch):
+            return 0.95**epoch
+
+        for cls in (LambdaLR, MultiplicativeLR):
+            with self.subTest(scheduler=cls.__name__):
+                opt = SGD(self.SchedulerTestNet().parameters(), lr=0.05)
+                actual = repr(cls(opt, lr_lambda=decay))
+                self.assertIn(f"lr_lambdas: [{decay.__qualname__}]", actual)
+                self.assertNotIn("at 0x", actual)
+
+    def test_lr_scheduler_repr_names_callable_lambdas(self):
+        # A callable object has no ``__qualname__`` of its own; falling through
+        # to ``repr`` would put the address back.
+        class Decay:
+            def __call__(self, epoch):
+                return 0.95**epoch
+
+        opt = SGD(self.SchedulerTestNet().parameters(), lr=0.05)
+        actual = repr(LambdaLR(opt, lr_lambda=Decay()))
+        self.assertIn(f"lr_lambdas: [{Decay.__qualname__}]", actual)
+        self.assertNotIn("at 0x", actual)
+
+    def test_lr_scheduler_repr_nests_composite_schedulers(self):
+        # A fresh optimizer and a fresh child list per composite: SequentialLR's
+        # ``recursive_undo`` mutates the children it is given, so reusing one
+        # list would let the first composite change what the second reports.
+        def children(opt):
+            return [
+                ConstantLR(opt, factor=0.1, total_iters=2),
+                ExponentialLR(opt, gamma=0.9),
+            ]
+
+        seq_opt = SGD(self.SchedulerTestNet().parameters(), lr=0.05)
+        self.assertEqual(
+            repr(SequentialLR(seq_opt, schedulers=children(seq_opt), milestones=[2])),
+            """SequentialLR (
+    milestones: [2]
+    schedulers: [
+        ConstantLR (
+            factor: 0.1
+            total_iters: 2
+            last_epoch: 0
+            base_lrs: [0.05]
+        )
+        ExponentialLR (
+            gamma: 0.9
+            last_epoch: -1
+            base_lrs: [0.05]
+        )
+    ]
+    last_epoch: 0
+)""",
+        )
+
+        # ChainedScheduler sets neither last_epoch nor base_lrs, so the base
+        # __repr__ has to leave both lines out rather than raise.
+        chained_opt = SGD(self.SchedulerTestNet().parameters(), lr=0.05)
+        self.assertEqual(
+            repr(ChainedScheduler(children(chained_opt))),
+            """ChainedScheduler (
+    schedulers: [
+        ConstantLR (
+            factor: 0.1
+            total_iters: 2
+            last_epoch: 0
+            base_lrs: [0.05]
+        )
+        ExponentialLR (
+            gamma: 0.9
+            last_epoch: 0
+            base_lrs: [0.05]
+        )
+    ]
+)""",
+        )
+
+    def test_lr_scheduler_repr_nesting_compounds_with_depth(self):
+        opt = SGD(self.SchedulerTestNet().parameters(), lr=0.05)
+        inner = ChainedScheduler([ConstantLR(opt, factor=0.1, total_iters=2)])
+        self.assertEqual(
+            repr(ChainedScheduler([inner], optimizer=opt)),
+            """ChainedScheduler (
+    schedulers: [
+        ChainedScheduler (
+            schedulers: [
+                ConstantLR (
+                    factor: 0.1
+                    total_iters: 2
+                    last_epoch: 0
+                    base_lrs: [0.05]
+                )
+            ]
+        )
+    ]
+)""",
+        )
+
+    def test_lr_scheduler_repr_cyclic_momentum(self):
+        with_momentum = CyclicLR(
+            SGD(self.SchedulerTestNet().parameters(), lr=0.05, momentum=0.9),
+            base_lr=0.01,
+            max_lr=0.1,
+            cycle_momentum=True,
+        )
+        actual = repr(with_momentum)
+        self.assertIn("base_momentums: ", actual)
+        self.assertIn("max_momentums: ", actual)
+
+        without_momentum = CyclicLR(
+            SGD(self.SchedulerTestNet().parameters(), lr=0.05),
+            base_lr=0.01,
+            max_lr=0.1,
+            cycle_momentum=False,
+        )
+        actual = repr(without_momentum)
+        self.assertNotIn("base_momentums: ", actual)
+        self.assertNotIn("max_momentums: ", actual)
+
+    def test_lr_scheduler_repr_cyclic_custom_scale_fn(self):
+        # ``mode`` is not validated and ``gamma`` is never consulted once a
+        # custom scale_fn is supplied, so reporting either would describe a
+        # schedule the scheduler does not follow.
+        def flat(x):
+            return 0.5
+
+        scheduler = CyclicLR(
+            SGD(self.SchedulerTestNet().parameters(), lr=0.05),
+            base_lr=0.01,
+            max_lr=0.1,
+            scale_fn=flat,
+            mode="triangular",
+            gamma=0.5,
+            cycle_momentum=False,
+        )
+        actual = repr(scheduler)
+        self.assertIn(f"scale_fn: {flat.__qualname__}", actual)
+        # Leading spaces so this does not match the "scale_mode: " line.
+        self.assertNotIn("    mode: ", actual)
+        self.assertNotIn("    gamma: ", actual)
+        self.assertIn("    scale_mode: ", actual)
+
+    def test_lr_scheduler_repr_one_cycle_reports_max_lr(self):
+        # OneCycleLR keeps max_lr on the param groups, and sets initial_lr --
+        # which the base __repr__ reports as base_lrs -- to max_lr/div_factor.
+        # Without max_lrs the value the caller passed appears nowhere.
+        scheduler = OneCycleLR(
+            SGD(self.SchedulerTestNet().parameters(), lr=0.05),
+            max_lr=0.1,
+            total_steps=100,
+            pct_start=0.3,
+            anneal_strategy="linear",
+            cycle_momentum=False,
+        )
+        actual = repr(scheduler)
+        self.assertIn("max_lrs: [0.1]", actual)
+        self.assertIn("base_lrs: [0.004]", actual)
+        self.assertIn("pct_start: 0.3", actual)
+        self.assertIn("anneal_strategy: linear", actual)
+        self.assertIn("three_phase: False", actual)
+
+    def test_lr_scheduler_repr_one_cycle_without_anneal_func_type(self):
+        # ``_anneal_func`` guards this attribute for schedulers rehydrated from
+        # checkpoints written before it existed; __repr__ has to do the same
+        # rather than raise AttributeError.
+        scheduler = OneCycleLR(
+            SGD(self.SchedulerTestNet().parameters(), lr=0.05),
+            max_lr=0.1,
+            total_steps=100,
+            cycle_momentum=False,
+        )
+        del scheduler._anneal_func_type
+        actual = repr(scheduler)
+        self.assertNotIn("anneal_strategy: ", actual)
+        self.assertIn("max_lrs: [0.1]", actual)
+
+    def test_lr_scheduler_repr_after_load_state_dict(self):
+        for scheduler, _ in self._repr_cases():
+            with self.subTest(scheduler=type(scheduler).__name__):
+                restored = copy.deepcopy(scheduler)
+                restored.load_state_dict(scheduler.state_dict())
+                # Mainly a guard that repr() cannot raise on a rehydrated
+                # scheduler, whatever its state_dict restores.
+                self.assertTrue(repr(restored).startswith(type(scheduler).__name__))
+
+    def test_lr_scheduler_repr_swa(self):
+        scheduler = SWALR(
+            SGD(self.SchedulerTestNet().parameters(), lr=0.05),
+            swa_lr=0.01,
+            anneal_epochs=5,
+            anneal_strategy="linear",
+        )
+        self.assertEqual(
+            repr(scheduler),
+            "SWALR (\n"
+            "    swa_lrs: [0.01]\n"
+            "    anneal_epochs: 5\n"
+            "    anneal_strategy: linear\n"
+            "    last_epoch: 0\n"
+            "    base_lrs: [0.05]\n"
+            ")",
+        )
+
+    def test_lr_scheduler_repr_custom_subclass(self):
+        class MyScheduler(LRScheduler):
+            def get_lr(self):
+                return [group["lr"] for group in self.optimizer.param_groups]
+
+        scheduler = MyScheduler(SGD(self.SchedulerTestNet().parameters(), lr=0.05))
+        self.assertEqual(
+            repr(scheduler),
+            "MyScheduler (\n    last_epoch: 0\n    base_lrs: [0.05]\n)",
+        )
+
 
 instantiate_parametrized_tests(TestLRScheduler)
 
