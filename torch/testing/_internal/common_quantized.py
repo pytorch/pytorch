@@ -958,6 +958,71 @@ def to_mxfp(
     return scale_e8m0_biased, data_lp
 
 
+def to_mxfp_dual(
+    data_hp: torch.Tensor,
+    block_size: int = 32,
+    format: str = "mxfp8",
+    swizzle_type: SwizzleType = SwizzleType.NO_SWIZZLE,
+    *,
+    rounding_mode: str = "rtne",
+    random_key: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    if format != "mxfp8" or block_size != 32 or rounding_mode != "stochastic":
+        raise NotImplementedError("to_mxfp_dual is not implemented for this recipe")
+    if swizzle_type not in (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4):
+        raise ValueError(f"unsupported MXFP swizzle type: {swizzle_type}")
+    if random_key is None:
+        if data_hp.device.type != "cuda":
+            raise ValueError("stateful stochastic rounding requires a CUDA tensor")
+    elif random_key.dtype != torch.uint64 or random_key.shape != (2,):
+        raise ValueError("random_key must be a two-element uint64 tensor")
+    elif random_key.device != data_hp.device:
+        raise ValueError("random_key and data_hp must be on the same device")
+    if data_hp.dtype not in (torch.bfloat16, torch.float16, torch.float):
+        raise AssertionError(f"{data_hp.dtype} is not supported yet")
+    if data_hp.dim() != 2:
+        raise ValueError("dual MXFP8 requires a 2D input")
+    if not data_hp.is_contiguous():
+        raise ValueError("dual MXFP8 requires a contiguous input")
+    M, K = data_hp.shape
+    if M % 32 != 0 or K % 32 != 0:
+        raise ValueError("dual MXFP8 requires both dimensions divisible by 32")
+
+    transposed = data_hp.t().contiguous()
+    data_k = data_hp.reshape(M, K // block_size, block_size)
+    max_abs_k = torch.amax(torch.abs(data_k), -1).unsqueeze(-1)
+    data_m = transposed.reshape(K, M // block_size, block_size)
+    max_abs_m = torch.amax(torch.abs(data_m), -1).unsqueeze(-1)
+    max_pos = torch.finfo(torch.float8_e4m3fn).max
+    scale_k, scaled_k = _to_mx_rceil(
+        data_k.to(torch.float32), max_abs_k.to(torch.float32), max_pos
+    )
+    scale_m, scaled_m = _to_mx_rceil(
+        data_m.to(torch.float32), max_abs_m.to(torch.float32), max_pos
+    )
+
+    word_count = data_hp.numel() // 4
+    if random_key is None:
+        generator = torch.cuda.default_generators[data_hp.get_device()]
+        seed, offset_words, intragraph_offset_words = generator.philox_state(4)
+        words = _philox4x32_10_stateful_words(
+            seed, offset_words, intragraph_offset_words, 2 * word_count, data_hp.device
+        )
+    else:
+        # Both dimensions are multiples of 32, so each half ends on a Philox counter boundary.
+        words = prng.bits(random_key, 2 * word_count, dtype=torch.uint32)
+    words_k, words_m = words[:word_count], words[word_count:]
+
+    qdata_k = _f32_to_fp8_nvidia_sr_with_words(scaled_k, words_k).reshape(M, K)
+    qdata_m = _f32_to_fp8_nvidia_sr_with_words(scaled_m, words_m).reshape(K, M)
+    scales_k = scale_k.view(torch.float8_e8m0fnu).squeeze(-1)
+    scales_m = scale_m.view(torch.float8_e8m0fnu).squeeze(-1)
+    if swizzle_type == SwizzleType.SWIZZLE_32_4_4:
+        scales_k = to_blocked(scales_k)
+        scales_m = to_blocked(scales_m)
+    return scales_k, qdata_k, scales_m, qdata_m
+
+
 def mxfp8_32x32_swizzle_f(x):
     *lead, d1, d2 = x.shape
     n1, n2 = d1 // 32, d2 // 32
