@@ -223,6 +223,7 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
     Max,
+    Mod,
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -2309,8 +2310,8 @@ def _bytes_aligned(expr_bytes: _IntLike, alignment: int = TMA_ALIGNMENT) -> bool
 def tma_inner_dim(strides: Sequence[_IntLike]) -> int | None:
     """Index of the single stride-1 ("inner") dim, or None if there is not
     exactly one. TMA requires exactly one contiguous dim, so None means the
-    tensor is not TMA-compatible. `strides` must already be resolved to ints or
-    hinted symbols by the caller.
+    tensor is not TMA-compatible. A symbolic stride only counts as inner when
+    it is statically 1.
     """
     from .virtualized import V
 
@@ -2343,7 +2344,13 @@ def can_use_tma(
 
     from .virtualized import V
 
-    _aligned = _bytes_aligned
+    def _aligned(expr_bytes: _IntLike, add_guards: bool) -> bool:
+        sizevars = V.graph.sizevars
+        if add_guards:
+            return sizevars.guard_or_false(sympy.Eq(Mod(expr_bytes, TMA_ALIGNMENT), 0))
+        return sizevars.statically_known_multiple_of(
+            sizevars.replace_backed_symbols_with_hints(expr_bytes), TMA_ALIGNMENT
+        )
 
     def _is_tma_compatible_layout(layout: Layout | None) -> bool:
         if layout is None:
@@ -2353,7 +2360,7 @@ def can_use_tma(
         dtype = layout.dtype
 
         # Verify the output is 16-byte aligned
-        if not _aligned(layout.offset):
+        if not _aligned(layout.offset, add_guards):
             return False
 
         return _is_tma_compatible(sizes, strides, dtype)
@@ -2386,35 +2393,30 @@ def can_use_tma(
         if dtype not in _TMA_SUPPORTED_DTYPES:
             return False
 
-        if add_guards:
-            sizes_i = V.graph.sizevars.guard_int_seq(sizes)
-            strides_i = V.graph.sizevars.guard_int_seq(strides)
-        else:
-            sizes_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(s) for s in sizes
-            ]
-            strides_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
-            ]
-
-        inner_idx = tma_inner_dim(strides_i)
+        inner_idx = tma_inner_dim(strides)
         if inner_idx is None:
             return False
 
         # All "outer" dims must have 16-byte aligned strides
-        for i, st in enumerate(strides_i):
+        for i, st in enumerate(strides):
             if i == inner_idx:
                 continue
-            if not _aligned(st * itemsize):
+            if not _aligned(st * itemsize, add_guards):
                 return False
 
         # Inner dim byte width must be a multiple of 16 B
-        inner_dim = sizes_i[inner_idx]
-        if not _aligned(inner_dim * itemsize):
+        inner_dim = sizes[inner_idx]
+        if not _aligned(inner_dim * itemsize, add_guards):
             return False
 
         # 1-byte dtypes (FP8 etc.) need inner dim ≥ 32 for tensor core alignment
-        if itemsize == 1 and not V.graph.sizevars.statically_known_geq(inner_dim, 32):
+        if itemsize == 1 and not (
+            V.graph.sizevars.guard_or_false(sympy.Ge(inner_dim, 32))
+            if add_guards
+            else V.graph.sizevars.statically_known_geq(
+                V.graph.sizevars.replace_backed_symbols_with_hints(inner_dim), 32
+            )
+        ):
             return False
 
         return True
