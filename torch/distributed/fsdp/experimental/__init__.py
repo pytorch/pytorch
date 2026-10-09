@@ -29,8 +29,6 @@ import torch
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
-    AllGatherOutputFn,
-    PrepareReduceScatterInputsFn,
 )
 
 
@@ -72,7 +70,7 @@ def reduce_scatter_input_fn_with_native_copy(
     unsharded_grads: list[torch.Tensor],
     shard_dims: list[int],
     world_size: int,
-) -> Callable[[torch.Tensor], None]:
+) -> Callable:
     r"""Prepare gradients for a native copy into the reduce-scatter buffer.
 
     Register with
