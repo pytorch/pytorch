@@ -5,6 +5,7 @@
 #include <ATen/native/ResizeCommon.h>
 #include <c10/util/irange.h>
 
+#include <numeric>
 #include <utility>
 
 namespace at {
@@ -300,6 +301,94 @@ Tensor squeeze_dims_batching_rule(const Tensor& self, IntArrayRef dims) {
   auto dims_physical = self_physical.getPhysicalDims(dims);
   auto result = self_physical.tensor().squeeze(dims_physical);
   return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
+// NOTE: [In-place view batching rules]
+// In-place view operations (squeeze_, unsqueeze_, transpose_) change the
+// metadata of `self` instead of returning a new tensor. Their batching rules
+// compute the corresponding view of the physical tensor, adjust the batch dims
+// to match it, and make that view the new physical tensor of `self`.
+// Without these rules, the ops would go through the in-place fallback, which
+// runs them on per-example slices and leaves the shape of `self` unchanged.
+Tensor& squeeze_dims__batching_rule(Tensor& self, IntArrayRef dims) {
+  if (/*logical*/self.dim() == 0) {
+    // squeeze_ on a scalar tensor accepts dims 0 and -1 and is a no-op.
+    for (const auto dim : dims) {
+      maybe_wrap_dim(dim, /*dim_post_expr=*/0);
+    }
+    return self;
+  }
+  auto* self_batched = unsafeGetBatchedImpl(self);
+  const auto& physical = self_batched->value();
+  DimVector dims_physical;
+  dims_physical.reserve(dims.size());
+  std::bitset<kVmapMaxTensorDims> is_squeezed;
+  for (const auto dim : dims) {
+    const auto dim_physical = self_batched->actualDim(dim);
+    dims_physical.push_back(dim_physical);
+    if (physical.sym_size(dim_physical) == 1) {
+      is_squeezed.set(dim_physical);
+    }
+  }
+  // Every squeezed dim in front of a batch dim moves that batch dim left by one.
+  BatchDims new_bdims;
+  for (const auto& bdim : self_batched->bdims()) {
+    int64_t num_squeezed_before = 0;
+    for (const auto d : c10::irange(bdim.dim())) {
+      num_squeezed_before += is_squeezed[d];
+    }
+    new_bdims.emplace_back(bdim.level(), bdim.dim() - num_squeezed_before);
+  }
+  self_batched->unsafe_set_value(
+      physical.squeeze(dims_physical), std::move(new_bdims));
+  return self;
+}
+
+Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
+  return squeeze_dims__batching_rule(self, dim);
+}
+
+Tensor& squeeze__batching_rule(Tensor& self) {
+  // Squeeze every logical dim, but never the batch dims.
+  DimVector dims(self.dim());
+  std::iota(dims.begin(), dims.end(), 0);
+  return squeeze_dims__batching_rule(self, dims);
+}
+
+Tensor& unsqueeze__batching_rule(Tensor& self, int64_t dim) {
+  auto* self_batched = unsafeGetBatchedImpl(self);
+  const auto& physical = self_batched->value();
+  // As in unsqueeze_batching_rule, `dim` is wrapped to (the logical dimension) + 1.
+  const auto logical_dim = self.dim();
+  const auto dim_wrapped = maybe_wrap_dim(dim, logical_dim + 1);
+  // The new dim goes right in front of the physical dim that corresponds to
+  // logical dim `dim`, or at the end if it becomes the last logical dim.
+  const auto dim_physical = dim_wrapped == logical_dim
+      ? physical.dim()
+      : self_batched->actualDim(dim_wrapped);
+  BatchDims new_bdims;
+  for (const auto& bdim : self_batched->bdims()) {
+    new_bdims.emplace_back(
+        bdim.level(), bdim.dim() < dim_physical ? bdim.dim() : bdim.dim() + 1);
+  }
+  self_batched->unsafe_set_value(
+      physical.unsqueeze(dim_physical), std::move(new_bdims));
+  return self;
+}
+
+Tensor& transpose__batching_rule(Tensor& self, int64_t dim0, int64_t dim1) {
+  // See the note in transpose_int_batching_rule about scalar tensors.
+  if (/*logical*/self.dim() == 0 && is_allowed_dim_on_scalar_tensor(dim0) &&
+      is_allowed_dim_on_scalar_tensor(dim1)) {
+    return self;
+  }
+  auto* self_batched = unsafeGetBatchedImpl(self);
+  auto result = self_batched->value().transpose(
+      self_batched->actualDim(dim0), self_batched->actualDim(dim1));
+  // Only logical dims are swapped, so the batch dims stay where they are.
+  BatchDims bdims(self_batched->bdims().begin(), self_batched->bdims().end());
+  self_batched->unsafe_set_value(std::move(result), std::move(bdims));
+  return self;
 }
 
 Tensor trace_batching_rule(const Tensor& self) {
@@ -1093,6 +1182,13 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
   m.impl("fill_.Tensor", fill_inplace_tensor_batching_rule);
   m.impl("zero_", zero_inplace_batching_rule);
+
+  // inplace view operations, see NOTE: [In-place view batching rules]
+  m.impl("squeeze_", squeeze__batching_rule);
+  m.impl("squeeze_.dim", squeeze_dim__batching_rule);
+  m.impl("squeeze_.dims", squeeze_dims__batching_rule);
+  m.impl("unsqueeze_", unsqueeze__batching_rule);
+  m.impl("transpose_", transpose__batching_rule);
 
   // view operations
   m.impl("as_strided", as_strided_batching_rule);
