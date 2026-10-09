@@ -341,6 +341,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.celu,
             aten.celu_,
             aten.channel_shuffle,
+            aten._clamp_backward_tensor,
             aten.clamp_max,
             aten.clamp_min,
             aten.col2im,
