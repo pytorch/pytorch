@@ -3830,6 +3830,15 @@ make_fallback(aten._addmm_activation, warn=False)
 
 make_fallback(aten._grouped_mm, require_dense)
 
+# The compute_mode overloads run the eager kernel, which applies the requested
+# fp32 matmul precision at runtime. These must be registered before the
+# kernel/ modules register lowerings on the mm/addmm/bmm/baddbmm packets, which
+# would otherwise claim these overloads too.
+make_fallback(aten.mm.compute_mode)
+make_fallback(aten.addmm.compute_mode)
+make_fallback(aten.bmm.compute_mode)
+make_fallback(aten.baddbmm.compute_mode)
+
 # Need templated kernel. Probably impossible to write efficiently
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)

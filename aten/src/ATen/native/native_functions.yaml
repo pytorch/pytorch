@@ -1071,6 +1071,20 @@
     CUDA: _baddbmm_out_dtype_cuda
     XPU: _baddbmm_out_dtype_xpu
 
+- func: baddbmm.compute_mode(Tensor self, Tensor batch1, Tensor batch2, *, str compute_mode, Scalar beta=1, Scalar alpha=1) -> Tensor
+  # Without this, at::baddbmm(..., 0, 1) would be ambiguous: 0 converts to string_view.
+  cpp_no_default_args: ['beta', 'alpha']
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: baddbmm_compute_mode
+
+- func: baddbmm.compute_mode_out(Tensor self, Tensor batch1, Tensor batch2, *, str compute_mode, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  # Without this, at::baddbmm(..., 0, 1) would be ambiguous: 0 converts to string_view.
+  cpp_no_default_args: ['beta', 'alpha']
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: baddbmm_compute_mode_out
+
 - func: bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: bartlett_window
@@ -1388,6 +1402,16 @@
   dispatch:
     CUDA: _bmm_out_dtype_cuda
     XPU: _bmm_out_dtype_xpu
+
+- func: bmm.compute_mode(Tensor self, Tensor mat2, *, str compute_mode) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: bmm_compute_mode
+
+- func: bmm.compute_mode_out(Tensor self, Tensor mat2, *, str compute_mode, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: bmm_compute_mode_out
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_check: NoCheck
@@ -4164,6 +4188,14 @@
   dispatch:
     CUDA: _mm_dtype_out_cuda
     XPU: _mm_dtype_out_xpu
+
+- func: mm.compute_mode(Tensor self, Tensor mat2, *, str compute_mode) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: mm_compute_mode
+
+- func: mm.compute_mode_out(Tensor self, Tensor mat2, *, str compute_mode, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: mm_compute_mode_out
 
 - func: _int_mm(Tensor self, Tensor mat2) -> Tensor
   dispatch:
@@ -7094,6 +7126,18 @@
   dispatch:
     CUDA: _addmm_dtype_out_cuda
     XPU: _addmm_dtype_out_xpu
+
+- func: addmm.compute_mode(Tensor self, Tensor mat1, Tensor mat2, *, str compute_mode, Scalar beta=1, Scalar alpha=1) -> Tensor
+  # Without this, at::addmm(..., 0, 1) would be ambiguous: 0 converts to string_view.
+  cpp_no_default_args: ['beta', 'alpha']
+  dispatch:
+    CompositeExplicitAutograd: addmm_compute_mode
+
+- func: addmm.compute_mode_out(Tensor self, Tensor mat1, Tensor mat2, *, str compute_mode, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  # Without this, at::addmm(..., 0, 1) would be ambiguous: 0 converts to string_view.
+  cpp_no_default_args: ['beta', 'alpha']
+  dispatch:
+    CompositeExplicitAutograd: addmm_compute_mode_out
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   structured_delegate: addmm.out
