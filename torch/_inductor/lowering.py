@@ -2423,7 +2423,16 @@ def cat(inputs, dim=0):
         # them in case we want to fuse
         if ir.is_storage_and_layout(x):
             storage, _ = ir.as_storage_and_layout(x, freeze=False)
-            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
+            if ir.ConcatKernel.can_realize_into_without_copy(storage):
+                return False
+            # Copying all of a buffer Inductor computes can fuse into its
+            # producer, which is cheaper than re-reading it in a pointwise cat.
+            return not (
+                isinstance(storage.data, ir.ComputedBuffer)
+                and V.graph.sizevars.statically_known_equals(
+                    x.get_numel(), storage.get_numel()
+                )
+            )
 
         if isinstance(x, (TensorBox, ir.StorageBox)):
             return should_lower_cat_input(unwrap_tensor(x))
