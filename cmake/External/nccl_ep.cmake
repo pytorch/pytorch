@@ -4,7 +4,7 @@ if(NOT __NCCL_EP_INCLUDED)
   # NCCL is built (Makefile) into this tree by cmake/External/nccl.cmake.
   set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
 
-  # Build contrib/nccl_ep as its own CMake project against that prebuilt NCCL
+  # Build NCCL EP as its own CMake project against that prebuilt NCCL
   # (headers + libnccl in __NCCL_BUILD_DIR). NCCL_EP_BUILDDIR == NCCL_HOME so
   # nccl_ep's artifacts (libnccl_ep.a, headers) land in the same tree, leaving
   # the core NCCL build untouched.
@@ -75,7 +75,7 @@ if(NOT __NCCL_EP_INCLUDED)
       ${__NCCL_EP_ARCH_ARG}
       -DNCCL_HOME=${__NCCL_EP_NCCL_HOME}
       -DNCCL_EP_BUILDDIR=${__NCCL_BUILD_DIR}
-      -DNCCL_EP_SOURCE_DIR=${PROJECT_SOURCE_DIR}/third_party/nccl/contrib/nccl_ep
+      -DNCCL_EP_SOURCE_DIR=${PROJECT_SOURCE_DIR}/third_party/nccl_ep
     BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/${__NCCL_EP_LIB}"
     INSTALL_COMMAND ""
     # In the static path NCCL (Makefile) must finish first; in the system path

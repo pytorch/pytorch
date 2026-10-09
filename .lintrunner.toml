@@ -600,6 +600,7 @@ exclude_patterns = [
     'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
     'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
+    'third_party/nccl_ep/**',
     'third_party/perfetto/sdk/**',  # amalgamated perfetto SDK
     # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
     # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
