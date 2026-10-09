@@ -34,9 +34,9 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     _restore_fp32_precision,
     _snapshot_fp32_precision,
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
