@@ -6,6 +6,14 @@ from cutlass._mlir import ir
 from cutlass._mlir.dialects import arith, llvm, nvvm, vector
 from cutlass.cutlass_dsl import dsl_user_op, T
 
+from .blockscaled_tma_config import RoundingVariant
+
+
+_PHILOX_M0 = 0xD2511F53
+_PHILOX_M1 = 0xCD9E8D57
+_PHILOX_W0 = 0x9E3779B9
+_PHILOX_W1 = 0xBB67AE85
+
 
 def _ceil_div(
     num: int | cutlass.Int32 | cutlass.Int64,
@@ -189,6 +197,203 @@ def _e8m0(amax: cutlass.Float32) -> tuple[cutlass.Float32, cutlass.Uint8]:
     return rcp, view_as(scale_e8m0, cutlass.Uint8)
 
 
+@dsl_user_op
+def _cvt_rs_satfinite_e4m3x4_f32(
+    v0: cutlass.Float32,
+    v1: cutlass.Float32,
+    v2: cutlass.Float32,
+    v3: cutlass.Float32,
+    rbits: cutlass.Uint32,
+    *,
+    loc: ir.Location | None = None,
+    ip: ir.InsertionPoint | None = None,
+) -> cutlass.Uint32:
+    """Stochastically round four FP32 values to four packed E4M3 bytes."""
+    # PTX packs its first source into the high byte; reverse them for little-endian order.
+    args = [
+        cutlass.Float32(value).ir_value(loc=loc, ip=ip) for value in (v3, v2, v1, v0)
+    ]
+    args.append(cutlass.Uint32(rbits).ir_value(loc=loc, ip=ip))
+    return cutlass.Uint32(
+        llvm.inline_asm(
+            T.i32(),
+            args,
+            "cvt.rs.satfinite.e4m3x4.f32 $0, {$1, $2, $3, $4}, $5;",
+            "=r,f,f,f,f,r",
+            has_side_effects=False,
+            is_align_stack=False,
+            asm_dialect=llvm.AsmDialect.AD_ATT,
+        )
+    )
+
+
+@cute.jit
+def _philox_4x32(c0, c1, c2, c3, k0, k1):
+    """Philox4x32-10, matching CUDA's counter-based generator."""
+    for _ in cutlass.range_constexpr(10):
+        p0 = cutlass.Uint64(c0) * cutlass.Uint64(_PHILOX_M0)
+        p1 = cutlass.Uint64(c2) * cutlass.Uint64(_PHILOX_M1)
+        hi0 = cutlass.Uint32(p0 >> 32)
+        lo0 = cutlass.Uint32(p0 & cutlass.Uint64(0xFFFFFFFF))
+        hi1 = cutlass.Uint32(p1 >> 32)
+        lo1 = cutlass.Uint32(p1 & cutlass.Uint64(0xFFFFFFFF))
+        c0 = hi1 ^ c1 ^ k0
+        c1 = lo1
+        c2 = hi0 ^ c3 ^ k1
+        c3 = lo0
+        k0 = k0 + cutlass.Uint32(_PHILOX_W0)
+        k1 = k1 + cutlass.Uint32(_PHILOX_W1)
+    return c0, c1, c2, c3
+
+
+@cute.jit
+def _philox_counter_words(
+    rounding_variant: cutlass.Constexpr,
+    operation_block: cutlass.Uint64,
+    logical_block: cutlass.Uint64,
+) -> tuple[cutlass.Uint32, cutlass.Uint32, cutlass.Uint32, cutlass.Uint32]:
+    if cutlass.const_expr(rounding_variant == RoundingVariant.STATELESS_SR):
+        counter = operation_block + logical_block
+        subsequence = cutlass.Uint64(0)
+    else:
+        counter = operation_block
+        subsequence = logical_block
+    return (
+        cutlass.Uint32(counter & cutlass.Uint64(0xFFFFFFFF)),
+        cutlass.Uint32(counter >> 32),
+        cutlass.Uint32(subsequence & cutlass.Uint64(0xFFFFFFFF)),
+        cutlass.Uint32(subsequence >> 32),
+    )
+
+
+@cute.jit
+def _mxfp8_quantize_stochastic_x32(
+    values: cute.TensorSSA,
+    reciprocal: cutlass.Float32,
+    operation_block: cutlass.Uint64,
+    logical_block_start: cutlass.Uint64,
+    philox_k0: cutlass.Uint32,
+    philox_k1: cutlass.Uint32,
+    rounding_variant: cutlass.Constexpr,
+) -> cute.TensorSSA:
+    scaled = values * reciprocal
+    qwords = cute.make_rmem_tensor(cute.make_layout(8), cutlass.Uint32)
+    for half in cutlass.range_constexpr(2):
+        c0, c1, c2, c3 = _philox_counter_words(
+            rounding_variant,
+            operation_block,
+            logical_block_start + cutlass.Uint64(half),
+        )
+        r0, r1, r2, r3 = _philox_4x32(c0, c1, c2, c3, philox_k0, philox_k1)
+        value = half * 16
+        word = half * 4
+        qwords[word + 0] = _cvt_rs_satfinite_e4m3x4_f32(
+            scaled[value + 0],
+            scaled[value + 1],
+            scaled[value + 2],
+            scaled[value + 3],
+            r0,
+        )
+        qwords[word + 1] = _cvt_rs_satfinite_e4m3x4_f32(
+            scaled[value + 4],
+            scaled[value + 5],
+            scaled[value + 6],
+            scaled[value + 7],
+            r1,
+        )
+        qwords[word + 2] = _cvt_rs_satfinite_e4m3x4_f32(
+            scaled[value + 8],
+            scaled[value + 9],
+            scaled[value + 10],
+            scaled[value + 11],
+            r2,
+        )
+        qwords[word + 3] = _cvt_rs_satfinite_e4m3x4_f32(
+            scaled[value + 12],
+            scaled[value + 13],
+            scaled[value + 14],
+            scaled[value + 15],
+            r3,
+        )
+    return cute.recast_tensor(qwords, dtype=cutlass.Float8E4M3FN).load()
+
+
+@cute.jit
+def _load_philox_key_and_counter(
+    mSeed: cute.Tensor,
+) -> tuple[cutlass.Uint32, cutlass.Uint32, cutlass.Uint64]:
+    frgKey = cute.make_rmem_tensor(cute.make_layout(2), mSeed.element_type)
+    cute.copy(
+        cute.make_copy_atom(cute.nvgpu.CopyUniversalOp(), mSeed.element_type),
+        mSeed,
+        frgKey,
+    )
+    key64 = cute.recast_tensor(frgKey, dtype=cutlass.Uint64)
+    return (
+        cutlass.Uint32(key64[0] & cutlass.Uint64(0xFFFFFFFF)),
+        cutlass.Uint32(key64[0] >> 32),
+        key64[1],
+    )
+
+
+@cute.jit
+def _stateful_philox_seed_and_counter(
+    seed64: cutlass.Uint64,
+    offset_words64: cutlass.Uint64,
+) -> tuple[cutlass.Uint32, cutlass.Uint32, cutlass.Uint64]:
+    return (
+        cutlass.Uint32(seed64 & cutlass.Uint64(0xFFFFFFFF)),
+        cutlass.Uint32(seed64 >> 32),
+        offset_words64 >> 2,
+    )
+
+
+@cute.jit
+def _load_stateful_philox_device_state(
+    mSeed: cute.Tensor,
+    mOffset: cute.Tensor,
+    intragraph_offset_words: cutlass.Int64,
+) -> tuple[cutlass.Uint32, cutlass.Uint32, cutlass.Uint64]:
+    frgSeed = cute.make_rmem_tensor(cute.make_layout(1), mSeed.element_type)
+    frgOffset = cute.make_rmem_tensor(cute.make_layout(1), mOffset.element_type)
+    cute.copy(
+        cute.make_copy_atom(cute.nvgpu.CopyUniversalOp(), mSeed.element_type),
+        mSeed,
+        frgSeed,
+    )
+    cute.copy(
+        cute.make_copy_atom(cute.nvgpu.CopyUniversalOp(), mOffset.element_type),
+        mOffset,
+        frgOffset,
+    )
+    seed64 = cute.recast_tensor(frgSeed, dtype=cutlass.Uint64)[0]
+    offset_words64 = cute.recast_tensor(frgOffset, dtype=cutlass.Uint64)[0]
+    return _stateful_philox_seed_and_counter(
+        seed64, offset_words64 + view_as(intragraph_offset_words, cutlass.Uint64)
+    )
+
+
+@cute.jit
+def _resolve_philox_state(
+    rounding_variant: cutlass.Constexpr,
+    mSeed: cute.Tensor | None,
+    mOffset: cute.Tensor | None,
+    seed_scalar: cutlass.Int64 | None,
+    offset_words_scalar: cutlass.Int64 | None,
+    intragraph_offset_words: cutlass.Int64 | None,
+) -> tuple[cutlass.Uint32, cutlass.Uint32, cutlass.Uint64]:
+    if cutlass.const_expr(rounding_variant == RoundingVariant.STATELESS_SR):
+        return _load_philox_key_and_counter(mSeed)
+    if cutlass.const_expr(rounding_variant == RoundingVariant.STATEFUL_SR_CAPTURE):
+        return _load_stateful_philox_device_state(
+            mSeed, mOffset, intragraph_offset_words
+        )
+    return _stateful_philox_seed_and_counter(
+        view_as(seed_scalar, cutlass.Uint64),
+        view_as(offset_words_scalar, cutlass.Uint64),
+    )
+
+
 @cute.jit
 def _store_scale_bytes_as_uint(
     mScaleLogical: cute.Tensor,
@@ -276,6 +481,11 @@ def _blockscaled_quantize_group(
     values: cute.TensorSSA,
     value_count: cutlass.Constexpr,
     is_square_scaling: cutlass.Constexpr,
+    rounding_variant: cutlass.Constexpr,
+    sr_operation_block: cutlass.Uint64 | None,
+    sr_logical_block: cutlass.Uint64 | None,
+    philox_k0: cutlass.Uint32 | None,
+    philox_k1: cutlass.Uint32 | None,
 ):
     """Calculate one block scale and quantize the values that share it."""
     amax = cute.math.absf(values).reduce(cute.ReductionOp.MAX, cutlass.Float32(0.0), 0)
@@ -288,7 +498,18 @@ def _blockscaled_quantize_group(
 
     reciprocal, scale = _e8m0(amax)
 
-    qdata = (values * reciprocal).to(cutlass.Float8E4M3FN)
+    if cutlass.const_expr(rounding_variant == RoundingVariant.RTNE):
+        qdata = (values * reciprocal).to(cutlass.Float8E4M3FN)
+    else:
+        qdata = _mxfp8_quantize_stochastic_x32(
+            values,
+            reciprocal,
+            sr_operation_block,
+            sr_logical_block,
+            philox_k0,
+            philox_k1,
+            rounding_variant,
+        )
     return qdata, scale
 
 

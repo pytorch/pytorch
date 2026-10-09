@@ -58,6 +58,10 @@ _MXFP8_IMPLEMENTATIONS = (
     subtest(_quantize_mxfp8_reference, name="reference"),
     subtest(F.quantize_tensor, name="public", decorators=[skipIfNoCuteDSL]),
 )
+_MXFP8_SR_IMPLEMENTATIONS = (
+    subtest("reference", name="reference"),
+    subtest("kernel", name="kernel", decorators=[skipIfNoCuteDSL]),
+)
 _MXFP8_KWARGS = {
     "qdata_dtype": torch.float8_e4m3fn,
     "scaling_algorithm": F.ScalingAlgorithm.MXFP_E8M0_RU,
@@ -66,6 +70,10 @@ _MXFP8_KWARGS = {
 _MXFP8_NO_SWIZZLE_KWARGS = {
     **_MXFP8_KWARGS,
     "swizzle_type": SwizzleType.NO_SWIZZLE,
+}
+_MXFP8_SWIZZLED_KWARGS = {
+    **_MXFP8_KWARGS,
+    "swizzle_type": SwizzleType.SWIZZLE_32_4_4,
 }
 
 
@@ -444,8 +452,45 @@ class TestQuantizeTensorMeta(TestCase):
         outputs = quantize_fn(input, **kwargs)
         self.assertTrue(all(output.requires_grad for output in outputs))
 
+    @parametrize("quantize_fn", (F.quantize_tensor, F.quantize_tensor_dual))
+    def test_meta_stochastic_rounding(self, quantize_fn):
+        input = torch.empty((32, 32), dtype=torch.bfloat16, device="meta")
+        key = torch.empty((2,), dtype=torch.uint64, device="meta")
+        kwargs = _MXFP8_SWIZZLED_KWARGS
+        with self.assertRaisesRegex(ValueError, "RTNE does not use random_key"):
+            quantize_fn(input, **kwargs, random_key=key)
+        with self.assertRaisesRegex(ValueError, "unsupported qdata_rounding_mode"):
+            quantize_fn(input, **kwargs, qdata_rounding_mode=7)
+        with self.assertRaisesRegex(ValueError, "two-element uint64"):
+            quantize_fn(
+                input,
+                **kwargs,
+                qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+                random_key=key.to(torch.int64),
+            )
+        with self.assertRaisesRegex(ValueError, "same device"):
+            quantize_fn(
+                input,
+                **kwargs,
+                qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+                random_key=torch.zeros(2, dtype=torch.uint64),
+            )
+        outputs = quantize_fn(
+            input,
+            **kwargs,
+            qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+            random_key=key,
+        )
+        self.assertEqual(len(outputs), 2 if quantize_fn is F.quantize_tensor else 4)
+        outputs_stateful = quantize_fn(
+            input, **kwargs, qdata_rounding_mode=F.RoundingMode.STOCHASTIC
+        )
+        self.assertEqual(len(outputs_stateful), len(outputs))
+
     def test_quantize_tensor_argument_names(self):
         self.assertEqual(F.ScalingAlgorithm.MXFP_E8M0_RU.value, 0)
+        self.assertEqual(F.RoundingMode.RTNE.value, 0)
+        self.assertEqual(F.RoundingMode.STOCHASTIC.value, 1)
         public_names = tuple(inspect.signature(F.quantize_tensor).parameters)
         dual_names = tuple(inspect.signature(F.quantize_tensor_dual).parameters)
         native = torch.ops.aten._quantize_tensor.default._schema.arguments
@@ -459,6 +504,8 @@ class TestQuantizeTensorMeta(TestCase):
                 "scaling_algorithm",
                 "swizzle_type",
                 "scaling_type_use_square_block_size",
+                "qdata_rounding_mode",
+                "random_key",
             ),
         )
         self.assertEqual(public_names, dual_names)
@@ -471,12 +518,18 @@ class TestQuantizeTensorMeta(TestCase):
             for param in params[1:]:
                 self.assertEqual(param.kind, inspect.Parameter.KEYWORD_ONLY)
             self.assertEqual(params[4].default, inspect.Parameter.empty)
+            self.assertFalse(params[5].default)
+            self.assertEqual(params[6].default, F.RoundingMode.RTNE)
+            self.assertIsNone(params[7].default)
         for schema_args in (native, native_dual):
             self.assertEqual(str(schema_args[3].type), "int")
             self.assertFalse(schema_args[0].kwarg_only)
             for arg in schema_args[1:]:
                 self.assertTrue(arg.kwarg_only)
             self.assertFalse(schema_args[4].has_default_value())
+            self.assertFalse(schema_args[5].default_value)
+            self.assertEqual(schema_args[6].default_value, F.RoundingMode.RTNE.value)
+            self.assertIsNone(schema_args[7].default_value)
 
     @parametrize(
         "shape,transposed,square,swizzle",
@@ -567,11 +620,16 @@ class TestQuantizeTensorMeta(TestCase):
 
 class TestMXFP8StochasticReferenceNumerics(TestCase):
     @parametrize("orientation", ("dim_k", "dim_km"))
+    @skipIfNoCuteDSL
     def test_stateless_round_trip(self, orientation, device):
-        # * calculate a = mxfp8_with_sr(input)
-        # * calculate b = mxfp8(input)
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        # * calculate a = mxfp8_with_sr_reference(input)
+        # * calculate b = mxfp8_with_sr_kernel(input)
+        # * calculate c = mxfp8(input)
         # * verify that input and a are close
-        # * verify that a and b are very close
+        # * verify that a and b are bitwise equivalent
+        # * verify that a and c are very close
         input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
         key = prng.key(7, device=device)
         swizzle_type = SwizzleType.SWIZZLE_32_4_4
@@ -581,6 +639,16 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                 swizzle_type=swizzle_type,
                 rounding_mode="stochastic",
                 random_key=key,
+            )
+            qdata_kernel, scales_kernel = F.quantize_tensor(
+                input,
+                **_MXFP8_SWIZZLED_KWARGS,
+                qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+                random_key=key,
+            )
+            self.assertEqual(qdata_kernel.view(torch.uint8), qdata.view(torch.uint8))
+            self.assertEqual(
+                scales_kernel.view(torch.uint8).flatten(), scales.view(torch.uint8)
             )
             rtne_scales, rtne_qdata = to_mxfp8_reference(
                 input, swizzle_type=swizzle_type
@@ -602,6 +670,26 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                 swizzle_type=swizzle_type,
                 rounding_mode="stochastic",
                 random_key=key,
+            )
+            qdata_k_kernel, scales_k_kernel, qdata_m_kernel, scales_m_kernel = (
+                F.quantize_tensor_dual(
+                    input,
+                    **_MXFP8_SWIZZLED_KWARGS,
+                    qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+                    random_key=key,
+                )
+            )
+            self.assertEqual(
+                qdata_k_kernel.view(torch.uint8), qdata_k.view(torch.uint8)
+            )
+            self.assertEqual(
+                scales_k_kernel.view(torch.uint8).flatten(), scales_k.view(torch.uint8)
+            )
+            self.assertEqual(
+                qdata_m_kernel.view(torch.uint8), qdata_m.view(torch.uint8)
+            )
+            self.assertEqual(
+                scales_m_kernel.view(torch.uint8).flatten(), scales_m.view(torch.uint8)
             )
             rtne_scales_k, rtne_qdata_k = to_mxfp8_reference(
                 input, swizzle_type=swizzle_type
@@ -641,8 +729,13 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             )
 
     @parametrize("orientation", ("dim_k", "dim_km"))
+    @skipIfNoCuteDSL
     def test_stateless_nonfinite_groups(self, orientation, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         # Verify that MXFP8 with SR handles special values in each orientation.
+        # Checks ^ for both reference and kernel, and ensures bitwise equivalence
+        # between reference and kernel.
         input = torch.zeros((32, 32), device=device, dtype=torch.bfloat16)
         input[0, 0] = float("nan")
         input[1, 1] = float("inf")
@@ -661,6 +754,16 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                 rounding_mode="stochastic",
                 random_key=key,
             )
+            qdata_kernel, scales_kernel = F.quantize_tensor(
+                input,
+                **_MXFP8_SWIZZLED_KWARGS,
+                qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+                random_key=key,
+            )
+            self.assertEqual(qdata_kernel.view(torch.uint8), qdata.view(torch.uint8))
+            self.assertEqual(
+                scales_kernel.view(torch.uint8).flatten(), scales.view(torch.uint8)
+            )
             qbytes = qdata.view(torch.uint8)
             self.assertEqual(qbytes[:3], expected_nan)
             self.assertEqual(qbytes[3:], expected_zero)
@@ -672,6 +775,26 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                 swizzle_type=SwizzleType.SWIZZLE_32_4_4,
                 rounding_mode="stochastic",
                 random_key=key,
+            )
+            qdata_k_kernel, scales_k_kernel, qdata_m_kernel, scales_m_kernel = (
+                F.quantize_tensor_dual(
+                    input,
+                    **_MXFP8_SWIZZLED_KWARGS,
+                    qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+                    random_key=key,
+                )
+            )
+            self.assertEqual(
+                qdata_k_kernel.view(torch.uint8), qdata_k.view(torch.uint8)
+            )
+            self.assertEqual(
+                scales_k_kernel.view(torch.uint8).flatten(), scales_k.view(torch.uint8)
+            )
+            self.assertEqual(
+                qdata_m_kernel.view(torch.uint8), qdata_m.view(torch.uint8)
+            )
+            self.assertEqual(
+                scales_m_kernel.view(torch.uint8).flatten(), scales_m.view(torch.uint8)
             )
             qbytes_k = qdata_k.view(torch.uint8)
             self.assertEqual(qbytes_k[:3], expected_nan)
@@ -686,7 +809,10 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             self.assertEqual(scale_bytes_m[:3], expected_scale)
 
     @parametrize("key_offset", (0, 2**32 - 1))
+    @skipIfNoCuteDSL
     def test_stateless_dual_counter_ranges(self, key_offset, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
         key = prng.key(7, device=device)
         key[1] = key_offset
@@ -694,8 +820,35 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
         outputs = to_mxfp_dual(
             input, swizzle_type=swizzle, rounding_mode="stochastic", random_key=key
         )
+        qdata_k, scales_k, qdata_m, scales_m = F.quantize_tensor_dual(
+            input,
+            **_MXFP8_SWIZZLED_KWARGS,
+            qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+            random_key=key,
+        )
+        ref_scales_k, ref_qdata_k, ref_scales_m, ref_qdata_m = outputs
+        self.assertEqual(qdata_k.view(torch.uint8), ref_qdata_k.view(torch.uint8))
+        self.assertEqual(
+            scales_k.view(torch.uint8).flatten(), ref_scales_k.view(torch.uint8)
+        )
+        self.assertEqual(qdata_m.view(torch.uint8), ref_qdata_m.view(torch.uint8))
+        self.assertEqual(
+            scales_m.view(torch.uint8).flatten(), ref_scales_m.view(torch.uint8)
+        )
         expected_k = to_mxfp8_reference(
             input, swizzle_type=swizzle, rounding_mode="stochastic", random_key=key
+        )
+        qdata_k_single, scales_k_single = F.quantize_tensor(
+            input,
+            **_MXFP8_SWIZZLED_KWARGS,
+            qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+            random_key=key,
+        )
+        self.assertEqual(
+            qdata_k_single.view(torch.uint8), expected_k[1].view(torch.uint8)
+        )
+        self.assertEqual(
+            scales_k_single.view(torch.uint8).flatten(), expected_k[0].view(torch.uint8)
         )
         key_i64 = key.view(torch.int64)
         word_offset = input.numel() // 16
@@ -706,40 +859,63 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             rounding_mode="stochastic",
             random_key=key_m,
         )
+        qdata_m_single, scales_m_single = F.quantize_tensor(
+            input.t().contiguous(),
+            **_MXFP8_SWIZZLED_KWARGS,
+            qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+            random_key=key_m,
+        )
+        self.assertEqual(
+            qdata_m_single.view(torch.uint8), expected_m[1].view(torch.uint8)
+        )
+        self.assertEqual(
+            scales_m_single.view(torch.uint8).flatten(), expected_m[0].view(torch.uint8)
+        )
         for actual, reference in zip(outputs, (*expected_k, *expected_m), strict=True):
             self.assertEqual(actual.view(torch.uint8), reference.view(torch.uint8))
 
+    @parametrize("implementation", _MXFP8_SR_IMPLEMENTATIONS)
     @parametrize("orientation", ("dim_k", "dim_km"))
     @parametrize("num_ops", (1, 2))
-    def test_stateful_cuda_graph(self, orientation, num_ops, device):
+    def test_stateful_cuda_graph(self, implementation, orientation, num_ops, device):
         # verifies that:
         # * cuda graph capture + replay matches eager
         # * ^ holds for chains of 1 to 2 quantizations in each orientation
         if torch.device(device).type != "cuda" or torch.version.rocm is not None:
             self.skipTest("stateful NVIDIA Philox rounding requires CUDA")
+        if implementation == "kernel" and not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
         generator = torch.cuda.default_generators[input.get_device()]
         with torch.random.fork_rng(devices=[input.get_device()]):
+            if implementation == "kernel":
+                quantize_fn = (
+                    F.quantize_tensor_dual
+                    if orientation == "dim_km"
+                    else F.quantize_tensor
+                )
+                kwargs = {
+                    **_MXFP8_SWIZZLED_KWARGS,
+                    "qdata_rounding_mode": F.RoundingMode.STOCHASTIC,
+                }
+                quantize_fn(input, **kwargs)  # Compile before CUDA graph capture.
+            else:
+                quantize_fn = (
+                    to_mxfp_dual if orientation == "dim_km" else to_mxfp8_reference
+                )
+                kwargs = {
+                    "swizzle_type": SwizzleType.SWIZZLE_32_4_4,
+                    "rounding_mode": "stochastic",
+                }
             if orientation == "dim_k":
                 torch.manual_seed(123)
-                expected = [
-                    to_mxfp8_reference(
-                        input,
-                        swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-                        rounding_mode="stochastic",
-                    )
-                    for _ in range(2 * num_ops)
-                ]
+                expected = [quantize_fn(input, **kwargs) for _ in range(2 * num_ops)]
                 graph = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(graph):
-                    captured = [
-                        to_mxfp8_reference(
-                            input,
-                            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-                            rounding_mode="stochastic",
-                        )
-                        for _ in range(num_ops)
-                    ]
+                    captured = [quantize_fn(input, **kwargs) for _ in range(num_ops)]
+                if implementation == "kernel":
+                    expected = [(scales, qdata) for qdata, scales in expected]
+                    captured = [(scales, qdata) for qdata, scales in captured]
 
                 torch.manual_seed(123)
                 replays = []
@@ -749,12 +925,14 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                     self.assertEqual(generator.get_offset(), offset + 4 * num_ops)
                     outputs = []
                     for op, (scales, qdata) in enumerate(captured):
-                        scale_bytes = scales.view(torch.uint8).clone()
+                        scale_bytes = scales.view(torch.uint8).flatten().clone()
                         qdata_bytes = qdata.view(torch.uint8).clone()
                         ref_scales, ref_qdata = expected[replay * num_ops + op]
-                        self.assertEqual(scale_bytes, ref_scales.view(torch.uint8))
+                        self.assertEqual(
+                            scale_bytes, ref_scales.view(torch.uint8).flatten()
+                        )
                         self.assertEqual(qdata_bytes, ref_qdata.view(torch.uint8))
-                        unswizzled = from_blocked(qdata, scales, 32)
+                        unswizzled = from_blocked(qdata, scales.flatten(), 32)
                         reconstructed = from_blocked_format(qdata, unswizzled)
                         self.assertGreater(
                             compute_error(input.float(), reconstructed.float()).item(),
@@ -771,24 +949,13 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             else:
                 source_m = input.t().float()
                 torch.manual_seed(123)
-                expected = [
-                    to_mxfp_dual(
-                        input,
-                        swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-                        rounding_mode="stochastic",
-                    )
-                    for _ in range(2 * num_ops)
-                ]
+                expected = [quantize_fn(input, **kwargs) for _ in range(2 * num_ops)]
                 graph = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(graph):
-                    captured = [
-                        to_mxfp_dual(
-                            input,
-                            swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-                            rounding_mode="stochastic",
-                        )
-                        for _ in range(num_ops)
-                    ]
+                    captured = [quantize_fn(input, **kwargs) for _ in range(num_ops)]
+                if implementation == "kernel":
+                    expected = [(sk, qk, sm, qm) for qk, sk, qm, sm in expected]
+                    captured = [(sk, qk, sm, qm) for qk, sk, qm, sm in captured]
 
                 torch.manual_seed(123)
                 replays = []
@@ -799,21 +966,25 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                     outputs = []
                     for op, result in enumerate(captured):
                         scales_k, qdata_k, scales_m, qdata_m = result
-                        scale_bytes_k = scales_k.view(torch.uint8).clone()
+                        scale_bytes_k = scales_k.view(torch.uint8).flatten().clone()
                         qdata_bytes_k = qdata_k.view(torch.uint8).clone()
-                        scale_bytes_m = scales_m.view(torch.uint8).clone()
+                        scale_bytes_m = scales_m.view(torch.uint8).flatten().clone()
                         qdata_bytes_m = qdata_m.view(torch.uint8).clone()
                         ref_sk, ref_qk, ref_sm, ref_qm = expected[replay * num_ops + op]
-                        self.assertEqual(scale_bytes_k, ref_sk.view(torch.uint8))
+                        self.assertEqual(
+                            scale_bytes_k, ref_sk.view(torch.uint8).flatten()
+                        )
                         self.assertEqual(qdata_bytes_k, ref_qk.view(torch.uint8))
-                        self.assertEqual(scale_bytes_m, ref_sm.view(torch.uint8))
+                        self.assertEqual(
+                            scale_bytes_m, ref_sm.view(torch.uint8).flatten()
+                        )
                         self.assertEqual(qdata_bytes_m, ref_qm.view(torch.uint8))
 
-                        unswizzled_k = from_blocked(qdata_k, scales_k, 32)
+                        unswizzled_k = from_blocked(qdata_k, scales_k.flatten(), 32)
                         reconstructed_k = from_blocked_format(qdata_k, unswizzled_k)
                         sqnr_k = compute_error(input.float(), reconstructed_k.float())
                         self.assertGreater(sqnr_k.item(), 15.0)
-                        unswizzled_m = from_blocked(qdata_m, scales_m, 32)
+                        unswizzled_m = from_blocked(qdata_m, scales_m.flatten(), 32)
                         reconstructed_m = from_blocked_format(qdata_m, unswizzled_m)
                         sqnr_m = compute_error(source_m, reconstructed_m.float())
                         self.assertGreater(sqnr_m.item(), 15.0)
@@ -831,25 +1002,43 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                     self.assertFalse(torch.equal(replays[0][0][1], replays[0][1][1]))
                     self.assertFalse(torch.equal(replays[0][0][3], replays[0][1][3]))
 
+    @parametrize("implementation", _MXFP8_SR_IMPLEMENTATIONS)
     @parametrize("orientation", ("dim_k", "dim_km"))
-    def test_stateless_cuda_graph(self, orientation, device):
+    def test_stateless_cuda_graph(self, implementation, orientation, device):
         # verifies that:
-        # * cuda graph replay of to_mxfp8_reference with unchanged random_key
+        # * cuda graph replay with unchanged random_key
         #   leads to results bitwise equivalent to original
-        # * cuda graph replay of to_mxfp8_reference with changed random_key
+        # * cuda graph replay with changed random_key
         #   leads to a fresh random draw + different (and still valid) results
 
         if torch.device(device).type != "cuda" or torch.version.rocm is not None:
             self.skipTest("NVIDIA Philox rounding requires CUDA")
+        if implementation == "kernel" and not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
         original_key = prng.key(7, device=device)
         changed_key = prng.fold_in(original_key, 1)
-        quantize_fn = to_mxfp_dual if orientation == "dim_km" else to_mxfp8_reference
+        if implementation == "kernel":
+            quantize_fn = (
+                F.quantize_tensor_dual if orientation == "dim_km" else F.quantize_tensor
+            )
+            kwargs = {
+                **_MXFP8_SWIZZLED_KWARGS,
+                "qdata_rounding_mode": F.RoundingMode.STOCHASTIC,
+            }
+            quantize_fn(input, **kwargs, random_key=original_key)
+        else:
+            quantize_fn = (
+                to_mxfp_dual if orientation == "dim_km" else to_mxfp8_reference
+            )
+            kwargs = {
+                "swizzle_type": SwizzleType.SWIZZLE_32_4_4,
+                "rounding_mode": "stochastic",
+            }
         expected = [
             quantize_fn(
                 input,
-                swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-                rounding_mode="stochastic",
+                **kwargs,
                 random_key=trial_key,
             )
             for trial_key in (original_key, changed_key)
@@ -861,10 +1050,18 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
         with torch.cuda.graph(graph):
             captured = quantize_fn(
                 input,
-                swizzle_type=SwizzleType.SWIZZLE_32_4_4,
-                rounding_mode="stochastic",
+                **kwargs,
                 random_key=key_for_cuda_graph,
             )
+        if implementation == "kernel":
+            if orientation == "dim_km":
+                expected = [(sk, qk, sm, qm) for qk, sk, qm, sm in expected]
+                qk, sk, qm, sm = captured
+                captured = (sk, qk, sm, qm)
+            else:
+                expected = [(scales, qdata) for qdata, scales in expected]
+                qdata, scales = captured
+                captured = (scales, qdata)
 
         # fetch global RNG (to make sure later that it does not change)
         generator = torch.cuda.default_generators[input.get_device()]
@@ -897,11 +1094,11 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                 )
 
             for source, scales, qdata, ref_scales, ref_qdata in quantizations:
-                scale_bytes = scales.view(torch.uint8).clone()
+                scale_bytes = scales.view(torch.uint8).flatten().clone()
                 qdata_bytes = qdata.view(torch.uint8).clone()
-                self.assertEqual(scale_bytes, ref_scales.view(torch.uint8))
+                self.assertEqual(scale_bytes, ref_scales.view(torch.uint8).flatten())
                 self.assertEqual(qdata_bytes, ref_qdata.view(torch.uint8))
-                unswizzled = from_blocked(qdata, scales, 32)
+                unswizzled = from_blocked(qdata, scales.flatten(), 32)
                 reconstructed = from_blocked_format(qdata, unswizzled)
                 self.assertGreater(
                     compute_error(source.float(), reconstructed.float()).item(), 15.0
@@ -914,8 +1111,11 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             self.assertFalse(torch.equal(replays[0][pair][1], replays[2][pair][1]))
         self.assertEqual(replays[0], replays[3])
 
+    @skipIfNoCuteDSL
     def test_mean_preservation(self, device):
         # test that E(dequant(mxfp8_with_sr(X))) ~= X
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         generator = torch.Generator(device=device).manual_seed(1234)
         input = torch.randn(
             (8, 32), device=device, dtype=torch.bfloat16, generator=generator
@@ -923,12 +1123,25 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
         key = prng.key(7, device=device)
         reconstructed_trials = []
         for trial in range(256):
-            scales, qdata = to_mxfp8_reference(
+            trial_key = prng.fold_in(key, trial)
+            scales_ref, qdata_ref = to_mxfp8_reference(
                 input,
+                swizzle_type=SwizzleType.SWIZZLE_32_4_4,
                 rounding_mode="stochastic",
-                random_key=prng.fold_in(key, trial),
+                random_key=trial_key,
             )
-            reconstructed_trials.append(from_blocked_format(qdata, scales).float())
+            qdata, scales = F.quantize_tensor(
+                input,
+                **_MXFP8_SWIZZLED_KWARGS,
+                qdata_rounding_mode=F.RoundingMode.STOCHASTIC,
+                random_key=trial_key,
+            )
+            self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
+            self.assertEqual(
+                scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8)
+            )
+            unswizzled = from_blocked(qdata, scales.flatten(), 32)
+            reconstructed_trials.append(from_blocked_format(qdata, unswizzled).float())
 
         self.assertEqual(
             torch.stack(reconstructed_trials).mean(dim=0),
