@@ -11,6 +11,7 @@ from torch._inductor.heuristics.registry import (
     get_template_heuristic,
     override_template_heuristics,
 )
+from torch._inductor.heuristics.template import bmm as bmm_heuristics
 from torch._inductor.heuristics.template.bmm import (
     CUDABlackwellBMMTemplateConfigHeuristic,
 )
@@ -22,7 +23,10 @@ from torch._inductor.heuristics.template.triton import (
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
     TMATemplateConfigMixin,
 )
-from torch._inductor.kernel.bmm import blackwell_ws_persistent_tma_bmm_template
+from torch._inductor.kernel.bmm import (
+    blackwell_ws_persistent_tma_bmm_template,
+    BlackwellBMMConfig,
+)
 from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.kernel_inputs import MMKernelInputs
@@ -1367,6 +1371,39 @@ class TestBlackwellBMMTemplate(TestCase):
         self.assertNotIn("two_ctas=True", code)
         self.assertIn(f"EPILOGUE_SUBTILE : tl.constexpr = {epilogue_subtile}", code)
         self.assertIn("ALLOW_TF32 : tl.constexpr = False", code)
+        if meta_ws_enabled():
+            self.assertIn("DATA_PARTITION_FACTOR : tl.constexpr = 1", code)
+            self.assertIn("SEPARATE_EPILOGUE_STORE : tl.constexpr = True", code)
+        else:
+            self.assertNotIn("data_partition_factor", code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("broadcast_a", (False, True))
+    def test_blackwell_bmm_template_data_partition_needs_broadcast_a(
+        self, broadcast_a: bool
+    ):
+        # Data partitioning mis-slices rank-3 A loads, so a DPF > 1 config is
+        # only offered when A is batch-broadcast (rank-2 descriptor).
+        a = torch.randn(256, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        a = a.expand(4, -1, -1) if broadcast_a else a.repeat(4, 1, 1)
+        b = torch.randn(4, 256, 128, device=GPU_TYPE, dtype=torch.bfloat16)
+        configs = (BlackwellBMMConfig(128, 128, 64, 4, 8, data_partition_factor=2),)
+        with mock.patch.object(
+            bmm_heuristics, "BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS", configs
+        ):
+            if not broadcast_a:
+                with self.assertRaisesRegex(
+                    BackendCompilerFailed, "rejected the input"
+                ):
+                    self._compile_blackwell_bmm(
+                        blackwell_bmm, a, b, expect_choice=False
+                    )
+                return
+            actual, _ = self._compile_blackwell_bmm(blackwell_bmm, a, b)
+        torch.testing.assert_close(actual, torch.bmm(a, b), atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),

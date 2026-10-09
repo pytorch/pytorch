@@ -31,12 +31,10 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
-    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
-    TEST_CUDA,
 )
 from torch.utils._traceback import report_compile_source_on_error
 from torch.utils._triton import has_triton
@@ -626,8 +624,8 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         result = _get_compile_args(gm, args)
         # Should NOT be the same object — metadata was extracted
         self.assertIsNot(result, args)
-        # First element should be a fake tensor (not a concrete tensor)
-        self.assertTrue(torch._subclasses.fake_tensor.is_fake_tensor(result[0]))
+        # First element should be a FakeTensor (not a concrete tensor)
+        self.assertIsInstance(result[0], torch._subclasses.FakeTensor)
         # Second element should be a SymInt (not a concrete int)
         self.assertIsInstance(result[1], torch.SymInt)
 
@@ -699,8 +697,9 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
 
     def test_get_compile_args_e2e_real_no_fake_mode_mismatch(self):
         """E2E: compile_fx_inner fails when given FakeTensors from
-        real-mode traced graph placeholder metadata but succeeds with
-        _get_compile_args which returns concrete args for real-mode tracing.
+        different FakeTensorModes (extracted from real-mode traced graph
+        placeholder metadata) but succeeds with _get_compile_args which
+        returns concrete args for real-mode tracing.
 
         This is the minimal repro for the FakeTensorMode mismatch
         AssertionError that affected 85/126 graphs in the model extractor.
@@ -713,22 +712,19 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         args = [torch.randn(4), torch.randn(4)]
         gm = make_fx(f, tracing_mode="real")(*args)
 
-        # Verify that real-mode tracing creates fake tensors in placeholder
-        # metadata.
+        # Verify that real-mode tracing creates FakeTensors with
+        # different FakeTensorModes in placeholder metadata
         placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
-        self.assertTrue(
-            all(
-                torch._subclasses.fake_tensor.is_fake_tensor(n.meta.get("val"))
-                for n in placeholders
-            )
-        )
+        fake_modes = set()
+        for n in placeholders:
+            val = n.meta.get("val")
+            if isinstance(val, torch._subclasses.FakeTensor):
+                fake_modes.add(id(val.fake_mode))
+        self.assertGreater(len(fake_modes), 1, "Expected different FakeTensorModes")
 
         # BUG: manually extracting FakeTensors causes mode mismatch
         fake_args = [n.meta["val"] for n in placeholders]
-        error_message = expectedIfCppFakeTensor(
-            "Mixing fake modes", "fake mode.*doesn't match"
-        )
-        with self.assertRaisesRegex(Exception, error_message):
+        with self.assertRaisesRegex(Exception, "fake mode.*doesn't match"):
             compile_fx_inner(gm, fake_args)
 
         # FIX: _get_compile_args returns concrete args for real mode

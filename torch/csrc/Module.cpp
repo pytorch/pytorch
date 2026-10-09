@@ -2777,23 +2777,10 @@ PyObject* initModule() {
         "_fake_dispatch_register_prim_meta",
         add_for(FakeDispatchCategory::PrimMeta));
     py_module.def(
-        "_fake_dispatch_register_python_cia",
-        add_for(FakeDispatchCategory::PythonCIA));
-    py_module.def(
-        "_fake_dispatch_register_custom_op_impl",
-        add_for(FakeDispatchCategory::CustomOpImpl));
-    py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {
           at::impl::fakeDispatchTableRemove(
               FakeDispatchCategory::OpImpl, c10::OperatorName(name, overload));
-        });
-    py_module.def(
-        "_fake_dispatch_deregister_custom_op_impl",
-        [](const std::string& name, const std::string& overload) {
-          at::impl::fakeDispatchTableRemove(
-              FakeDispatchCategory::CustomOpImpl,
-              c10::OperatorName(name, overload));
         });
   }
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
@@ -3498,9 +3485,8 @@ Call this whenever a new thread is created in order to propagate values from
       "_is_cow_tensor",
       [](const at::Tensor& tensor) {
         TORCH_CHECK(
-            !tensor.is_fake() &&
-                !tensor.key_set().has(c10::DispatchKey::Python),
-            "_is_cow_tensor is not defined for Python tensor subclasses or FakeTensors");
+            !tensor.key_set().has(c10::DispatchKey::Python),
+            "_is_cow_tensor is not defined for Python tensor subclasses");
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");

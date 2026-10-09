@@ -1103,8 +1103,7 @@ print("RECOVERED")
                     archs.append("gfx950")
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
-                if ROCM_VERSION >= (7, 14):
-                    archs.append("gfx1250")
+                archs.append("gfx1250")
                 # blasDefaultBackend() only prefers hipblaslt when every visible
                 # device matches, so device 0 alone is not enough.
                 gcn_arch_names = [
@@ -6790,6 +6789,267 @@ print("OK")
             .strip()
         )
         self.assertEqual(r, "OK")
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(TEST_WITH_ROCM, "expandable segment bases are CUDA-only")
+@unittest.skipIf(TEST_CUDAMALLOCASYNC, "not using the native caching allocator")
+class TestExpandableSegmentBase(TestCase):
+    """Each snapshot entry reports the base of the reservation it lives in, which
+    is what a later process asks for to get the same addresses back.
+    See Note [Expandable Segment Reserved Address].
+    """
+
+    def test_runs_in_one_segment_share_a_base(self):
+        # Freeing the middle allocation leaves a hole, so one reservation is
+        # reported as several runs -- all of them naming the same base.
+        script = """
+import json, torch
+# The large pool maps with 20 MiB granularity, so freeing the middle 40 MiB
+# allocation really unmaps and leaves a hole.
+keep = [torch.empty(40 << 20, dtype=torch.uint8, device="cuda") for _ in range(3)]
+del keep[1]
+torch.cuda.empty_cache()
+torch.cuda.synchronize()
+print(json.dumps([
+    {k: s[k] for k in ("address", "expandable_segment_base")}
+    for s in torch.cuda.memory_snapshot()
+    if s["is_expandable"] and s["segment_type"] == "large"
+]))
+"""
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        out = subprocess.check_output([sys.executable, "-c", script], env=env)
+        runs = json.loads(out.decode().strip().splitlines()[-1])
+        self.assertGreater(len(runs), 1)
+        bases = {r["expandable_segment_base"] for r in runs}
+        self.assertEqual(len(bases), 1)
+        self.assertEqual(min(r["address"] for r in runs), bases.pop())
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(TEST_WITH_ROCM, "restoring at a fixed address is CUDA-only")
+@unittest.skipIf(TEST_CUDAMALLOCASYNC, "not using the native caching allocator")
+class TestExpandableSegmentRestore(TestCase):
+    """A segment's virtual address, and the tensors inside it, can be brought
+    back in a fresh process. See Note [Expandable Segment Reserved Address].
+    """
+
+    # The large pool maps with 20 MiB granularity, so freeing the middle of
+    # three 20 MiB tensors unmaps it, and the large segment comes back as two
+    # runs around a hole. The default pool is used because empty_cache does not
+    # release blocks of a live MemPool.
+    _SAVE = """
+import json, torch
+a, hole, c = (torch.empty(5 << 20, dtype=torch.float32, device="cuda") for _ in range(3))
+b = torch.empty(1 << 18, dtype=torch.float32, device="cuda")
+del hole
+torch.cuda.empty_cache()
+torch.cuda.synchronize()
+print(json.dumps({
+    "segments": torch.cuda.memory_snapshot(include_traces=False),
+    "tensors": [
+        {"addr": t.data_ptr(), "nbytes": t.numel() * t.element_size(), "numel": t.numel()}
+        for t in (a, c, b)
+    ],
+}))
+"""
+
+    # Restores the segments, then places tensors back at their recorded
+    # addresses and round-trips a pattern through them.
+    _RESTORE = """
+import json, sys, torch
+spec = json.load(open(sys.argv[1]))
+pool = torch.cuda.MemPool()
+torch.cuda.memory._restore_expandable_segments(spec["segments"], pool.id)
+result = []
+with torch.cuda.use_mem_pool(pool):
+    for i, t in enumerate(spec["tensors"]):
+        x = torch.empty(0, dtype=torch.float32, device="cuda")
+        x.untyped_storage()._resize_with_addr_(t["nbytes"], t["addr"])
+        x.resize_(t["numel"])
+        x.fill_(i + 1)
+        result.append({"addr": x.data_ptr(), "sum": x.sum().item(), "numel": x.numel()})
+torch.cuda.synchronize()
+print(json.dumps({
+    "tensors": result,
+    "segments": torch.cuda.memory_snapshot(mempool_id=pool.id, include_traces=False),
+}))
+"""
+
+    def _run(self, script, *args, conf="expandable_segments:True"):
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = conf
+        out = subprocess.check_output([sys.executable, "-c", script, *args], env=env)
+        return json.loads(out.decode().strip().splitlines()[-1])
+
+    def test_tensors_come_back_at_their_original_addresses(self):
+        saved = self._run(self._SAVE)
+        large = [s for s in saved["segments"] if s["segment_type"] == "large"]
+        self.assertEqual(len(large), 2)
+        self.assertEqual(len({s["expandable_segment_base"] for s in large}), 1)
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump(saved, f)
+            f.flush()
+            restored = self._run(self._RESTORE, f.name)["tensors"]
+
+        self.assertEqual(len(restored), len(saved["tensors"]))
+        for i, (want, got) in enumerate(zip(saved["tensors"], restored)):
+            self.assertEqual(got["addr"], want["addr"])
+            self.assertEqual(got["numel"], want["numel"])
+            # the memory is usable, not just addressable
+            self.assertEqual(got["sum"], (i + 1) * want["numel"])
+
+    def test_restore_fails_loudly_when_the_address_is_taken(self):
+        # cuMemAddressReserve reports success while placing the reservation
+        # somewhere else, so restoring onto an address this process already holds
+        # has to raise rather than hand back the wrong memory -- and free the
+        # stray reservation, which a restore at that address then gets.
+        script = """
+import json, re, torch
+t = torch.empty(1 << 22, device="cuda")
+torch.cuda.synchronize()
+seg = dict(next(s for s in torch.cuda.memory_snapshot() if s["is_expandable"]))
+pool = torch.cuda.MemPool()
+try:
+    torch.cuda.memory._restore_expandable_segments([seg], pool.id)
+    print(json.dumps(["no error"]))
+except RuntimeError as e:
+    placed = int(re.search(r"placed the reservation at (\\d+)", str(e)).group(1))
+    delta = placed - seg["expandable_segment_base"]
+    moved = {**seg, "address": seg["address"] + delta, "expandable_segment_base": placed}
+    torch.cuda.memory._restore_expandable_segments([moved], pool.id)
+    print(json.dumps([str(e), "restored at the stray address"]))
+"""
+        out = self._run(script)
+        self.assertIn("could not reserve", out[0])
+        self.assertEqual(out[1:], ["restored at the stray address"])
+
+    def test_restore_retries_after_running_out_of_memory(self):
+        # A restore that cannot map its first range must give the address back,
+        # so the same restore succeeds once memory is freed. Unmapped physical
+        # allocations use up the memory without taking any address space.
+        script = """
+import json, sys, torch
+from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+spec = json.load(open(sys.argv[1]))
+# Allocating once runs the fabric-handle probe, which needs free memory and caches
+# its answer; empty_cache then gives the address back.
+torch.empty(1, device="cuda")
+torch.cuda.empty_cache()
+prop = drv.CUmemAllocationProp()
+prop.type = drv.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
+prop.location.type = drv.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
+prop.location.id = torch.cuda.current_device()
+granularity = _check_cuda_bindings(drv.cuMemGetAllocationGranularity(
+    prop, drv.CUmemAllocationGranularity_flags.CU_MEM_ALLOC_GRANULARITY_MINIMUM))
+hog = []
+for size in (1 << 30, granularity):
+    while (r := drv.cuMemCreate(size, prop, 0))[0] == drv.CUresult.CUDA_SUCCESS:
+        hog.append(r[1])
+pool = torch.cuda.MemPool()
+try:
+    torch.cuda.memory._restore_expandable_segments(spec["segments"], pool.id)
+    first = "no error"
+except torch.OutOfMemoryError:
+    first = "out of memory"
+for h in hog:
+    _check_cuda_bindings(drv.cuMemRelease(h))
+torch.cuda.memory._restore_expandable_segments(spec["segments"], pool.id)
+print(json.dumps([first, torch.cuda.memory_snapshot(include_traces=False)]))
+"""
+        saved = self._run(self._SAVE)
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump(saved, f)
+            f.flush()
+            first, restored = self._run(script, f.name)
+        self.assertEqual(first, "out of memory")
+
+        def runs(segments):
+            return sorted((s["address"], s["total_size"]) for s in segments)
+
+        self.assertEqual(runs(restored), runs(saved["segments"]))
+
+    def test_restores_the_saved_reservation_settings(self):
+        # Reserve settings can shrink a reservation below 1 1/8 of device memory,
+        # and large_segment_size_mb changes the segment size it maps in. Restoring
+        # under default settings must recreate both as saved.
+        conf = "expandable_segments:True,expandable_segments_reserve:0.05,large_segment_size_mb:40"
+        saved = self._run(self._SAVE, conf=conf)
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump(saved, f)
+            f.flush()
+            restored = self._run(self._RESTORE, f.name)["segments"]
+
+        def reservations(segments):
+            return {
+                (
+                    s["expandable_segment_base"],
+                    s["expandable_reservation_size"],
+                    s["expandable_segment_size"],
+                    s["expandable_segment_handle_type"],
+                )
+                for s in segments
+            }
+
+        full = torch.cuda.get_device_properties(0).total_memory * 9 // 8
+        for s in saved["segments"]:
+            self.assertLess(s["expandable_reservation_size"], full)
+            # the small pool always maps 2 MB segments
+            small = s["segment_type"] == "small"
+            want = (2 if small else 40) * 1024 * 1024
+            self.assertEqual(s["expandable_segment_size"], want)
+        self.assertEqual(reservations(restored), reservations(saved["segments"]))
+
+    def test_restore_requires_the_saved_handle_type(self):
+        # Memory saved shareable must come back shareable, or a peer importing it
+        # later fails far from the cause.
+        saved = self._run(self._SAVE)
+        if not any(s["expandable_segment_handle_type"] for s in saved["segments"]):
+            self.skipTest("expandable segment IPC handles are off in this build")
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        env["TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC"] = "0"
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump(saved, f)
+            f.flush()
+            proc = subprocess.run(
+                [sys.executable, "-c", self._RESTORE, f.name],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("saved with shareable handles", proc.stderr)
+
+    def test_restore_rejects_malformed_input(self):
+        # Runs sharing a base must agree on the reservation's layout, and a
+        # reservation with nothing mapped is refused since nothing would free it.
+        script = """
+import json, torch
+G = 20 << 20
+seg = {
+    "is_expandable": True, "segment_type": "large", "address": 1 << 40, "total_size": G,
+    "expandable_segment_base": 1 << 40, "expandable_reservation_size": 64 * G,
+    "expandable_segment_size": G, "expandable_segment_handle_type": 0,
+}
+other = {**seg, "address": seg["address"] + 2 * G, "expandable_reservation_size": 32 * G}
+pool = torch.cuda.MemPool()
+errors = []
+for call in (
+    lambda: torch.cuda.memory._restore_expandable_segments([seg, other], pool.id),
+    lambda: torch._C._cuda_restoreExpandableSegment(0, pool.id, False, 1 << 40, 64 * G, G, 0, []),
+):
+    try:
+        call()
+        errors.append("no error")
+    except (ValueError, RuntimeError) as e:
+        errors.append(str(e))
+print(json.dumps(errors))
+"""
+        out = self._run(script)
+        self.assertIn("disagree on its layout", out[0])
+        self.assertIn("at least one mapped range", out[1])
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
