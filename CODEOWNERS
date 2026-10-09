@@ -542,6 +542,7 @@
 # /test/test_function_schema.py
 # /test/test_functionalization.py
 # /test/test_futures.py
+# /test/test_gpu_trace.py
 # /test/test_hub.py
 # /test/test_img/
 # /test/test_import_stats.py
@@ -642,7 +643,6 @@
 # /test/test_cuda_nvml_based_avail.py
 # /test/test_cuda_primary_ctx.py
 # /test/test_cuda_sanitizer.py
-# /test/test_cuda_trace.py
 /torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
 # /torch/backends/cusparselt/
 /torch/csrc/cuda/ @eqy @syed-ahmed @Aidyn-A
@@ -1075,6 +1075,7 @@
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 /torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
 # label: oncall: distributed, module: fsdp
+/torch/csrc/distributed/fsdp/ @weifengpy
 /torch/distributed/_composable/fsdp/ @weifengpy
 /torch/distributed/_composable/replicate_with_fsdp.py @weifengpy
 /torch/distributed/fsdp/ @weifengpy
