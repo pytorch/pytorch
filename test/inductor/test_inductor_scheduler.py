@@ -916,31 +916,26 @@ class TestScheduler(TestCase):
             ]
         )
         cases = [
-            (None, [row], False, False),
+            (None, [row], False),
             # Across epilogue subtiles.
-            ((128, 32, 2), [row], False, True),
-            # Meta automatic warp specialization rejects subtiled reductions.
-            ((128, 32, 2), [row], True, False),
+            ((128, 32, 2), [row], True),
             # A row result is only complete after the last subtile.
-            ((128, 32, 2), [row, reader], False, False),
-            ((128, N, 1), [row, reader], False, True),
+            ((128, 32, 2), [row, reader], False),
+            ((128, N, 1), [row, reader], True),
             # Across column tiles, only reductions that finish from partials fit.
-            ((128, 32, 1), [row], False, False),
+            ((128, 32, 1), [row], False),
             # A column read: (M, N) matches (N, M), but the read isn't row-major.
-            ((128, N, 1), [reduction(x + N * r)], False, False),
-            ((128, N, 1), [reduction(N * x + r, group=(M * N, 1))], False, False),
-            ((128, N, 1), [row], False, True),
+            ((128, N, 1), [reduction(x + N * r)], False),
+            ((128, N, 1), [reduction(N * x + r, group=(M * N, 1))], False),
+            ((128, N, 1), [row], True),
         ]
         with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
-            for tile, nodes, meta_ws, expected in cases:
-                with patch(
-                    "torch._inductor.codegen.simd.meta_ws_enabled", return_value=meta_ws
-                ):
-                    self.assertEqual(
-                        tile_fits_reduction_epilogue(tile, template, nodes),
-                        expected,
-                        (tile, [node.read_writes.reads for node in nodes], meta_ws),
-                    )
+            for tile, nodes, expected in cases:
+                self.assertEqual(
+                    tile_fits_reduction_epilogue(tile, template, nodes),
+                    expected,
+                    (tile, [node.read_writes.reads for node in nodes]),
+                )
 
     def _mock_reduction_epilogue_snode(self, name, reads, group, reduction=False):
         node = Mock(spec=SchedulerNode)
