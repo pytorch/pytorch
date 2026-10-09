@@ -73,4 +73,8 @@ def line(record: dict[str, Any]) -> str:
     # ensure_ascii would write a lone surrogate as a \ud800 escape, which ClickHouse
     # rejects as invalid JSON, so write UTF-8 and replace lone surrogates with "?".
     text = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+    # str.splitlines() also breaks lines at these, so escape them, as ensure_ascii
+    # would. They only occur inside strings, so the JSON is the same.
+    for separator in ("\u2028", "\u2029", "\x85"):
+        text = text.replace(separator, f"\\u{ord(separator):04x}")
     return text.encode("utf-8", "replace").decode() + "\n"
