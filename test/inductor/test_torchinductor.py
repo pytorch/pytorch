@@ -9353,6 +9353,10 @@ for dtype in (torch.int32, torch.int64):
                     FileCheck().check_not("cpp_fused").run(source_codes[0])
                 else:
                     FileCheck().check_not("triton.jit").run(source_codes[0])
+            elif self.device == "cpu":
+                FileCheck().check("cpp_fused").run(source_codes[0])
+            else:
+                FileCheck().check("triton.jit").run(source_codes[0])
 
         # test dtype conversion
         for lowp_dtype in [torch.float16, torch.bfloat16]:
