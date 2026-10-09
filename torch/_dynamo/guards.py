@@ -1052,6 +1052,15 @@ def _guard_device_index_is_current(
     return acc is not None and value.device.type == acc.type
 
 
+def _stream_is_current(stream: torch.Stream) -> bool:
+    # Identity only: the stream's type is guarded separately, while subclasses such
+    # as torch.cuda.Stream override __eq__ to compare types too.
+    acc = torch.accelerator.current_accelerator()
+    if acc is None or stream.device.type != acc.type:
+        return False
+    return torch.Stream.__eq__(stream, get_current_stream(torch.device(acc.type)))
+
+
 def get_tensor_guard_code_part(
     value: torch.Tensor,
     name: str,
@@ -3093,6 +3102,33 @@ class GuardBuilder(GuardBuilderBase):
         return
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            value.device.type,
+            _stream_is_current(value),
+        ),
+        eval_fn=lambda value, metadata: value.device.type == metadata[0]
+        and _stream_is_current(value) == metadata[1],
+    )
+    def CURRENT_STREAM_MATCH(self, guard: Guard) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        device_type = value.device.type
+        expected = _stream_is_current(value)
+
+        def guard_fn(stream: torch.Stream) -> bool:
+            return (
+                stream.device.type == device_type
+                and _stream_is_current(stream) == expected
+            )
+
+        relation = "==" if expected else "!="
+        code = f"{ref} {relation} ___get_current_stream(torch.device('{device_type}'))"
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+        self._set_guard_export_info(guard, [code])
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: constants_identical(value, metadata),
     )
@@ -3551,6 +3587,28 @@ class GuardBuilder(GuardBuilderBase):
             self.check_fn_manager.torch_function_mode_stack,
             ["___check_torch_function_mode_stack()"],
             guard.user_stack,
+        )
+
+    # Global state guard — not source-specific, checked separately at runtime.
+    @skip_guard_check_spec
+    def FX_ANNOTATION(self, guard: Guard) -> None:
+        """Guard on the torch.fx.traceback annotation active at frame entry."""
+        output_graph = self.check_fn_manager.output_graph
+        if output_graph is None:
+            raise AssertionError("check_fn_manager.output_graph must not be None")
+        annotation = output_graph.fx_annotation
+        code = [f"torch.fx.traceback._get_current_annotation() == {annotation!r}"]
+        self._set_guard_export_info(guard, code)
+
+        get_annotation = torch.fx.traceback._get_current_annotation
+
+        # If == raises (e.g. multi-element tensor values), LAMBDA_GUARD treats it
+        # as a guard failure, so the frame recompiles.
+        def fn(x: object) -> bool:
+            return get_annotation() == annotation
+
+        self.guard_manager.root.add_lambda_guard(
+            fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     # Global state guard — not source-specific, checked separately at runtime.
