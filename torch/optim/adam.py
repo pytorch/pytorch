@@ -505,21 +505,33 @@ def _single_tensor_adam(
                 # Maintains the maximum of all 2nd moment running avg. till now
                 if differentiable:
                     max_exp_avg_sq = max_exp_avg_sqs[i].clone()
+                    max_exp_avg_sqs[i].copy_(torch.maximum(max_exp_avg_sq, exp_avg_sq))
                 else:
-                    max_exp_avg_sq = max_exp_avg_sqs[i]
-
-                max_exp_avg_sqs[i].copy_(torch.maximum(max_exp_avg_sq, exp_avg_sq))
+                    torch.maximum(
+                        max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i]
+                    )
 
                 # Uses the max. for normalizing running avg. of gradient
                 # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
                 # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
-                denom = (
-                    max_exp_avg_sqs[i].sqrt() / (bias_correction2_sqrt * step_size_neg)
-                ).add_(eps / step_size_neg)
+                if differentiable:
+                    denom = (
+                        max_exp_avg_sqs[i].sqrt()
+                        / (bias_correction2_sqrt * step_size_neg)
+                    ).add_(eps / step_size_neg)
+                else:
+                    denom = max_exp_avg_sqs[i].sqrt()
+                    denom.div_(bias_correction2_sqrt * step_size_neg)
+                    denom.add_(eps / step_size_neg)
             else:
-                denom = (
-                    exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)
-                ).add_(eps / step_size_neg)
+                if differentiable:
+                    denom = (
+                        exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)
+                    ).add_(eps / step_size_neg)
+                else:
+                    denom = exp_avg_sq.sqrt()
+                    denom.div_(bias_correction2_sqrt * step_size_neg)
+                    denom.add_(eps / step_size_neg)
 
             if differentiable:
                 param.addcdiv_(exp_avg.clone(), denom)
