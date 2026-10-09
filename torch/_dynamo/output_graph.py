@@ -2784,11 +2784,11 @@ class OutputGraph(OutputGraphCommon):
             )
 
     def _requires_grad_input_edges(self) -> set[torch.autograd.graph.Node]:
-        """Gradient edges of the graph inputs that require grad.
+        """Autograd nodes of the graph inputs that require grad.
 
-        A graph input is a placeholder or a get_attr tensor (parameters and
-        buffers). For a leaf input the edge is its AccumulateGrad node, for a
-        non-leaf input it is the external grad_fn. These are the autograd
+        A graph input is a placeholder or a get_attr tensor (e.g. parameters
+        installed with install_free_tensors). For a leaf input the node is its
+        AccumulateGrad, for a non-leaf input it is its grad_fn. These are the
         nodes AOTAutograd differentiates the compiled function against.
         """
         edges: set[torch.autograd.graph.Node] = set()
@@ -2796,14 +2796,8 @@ class OutputGraph(OutputGraphCommon):
             if node.op not in ("placeholder", "get_attr"):
                 continue
             example_value = node.meta.get("example_value")
-            if not isinstance(example_value, torch.Tensor):
-                continue
-            if not example_value.requires_grad:
-                continue
-            try:
-                edges.add(torch.autograd.graph.get_gradient_edge(example_value).node)
-            except RuntimeError:
-                continue
+            if isinstance(example_value, torch.Tensor) and example_value.requires_grad:
+                edges.add(torch.autograd.graph._get_grad_fn_or_grad_acc(example_value))
         return edges
 
     def _check_requires_grad_intermediate_outputs(
@@ -2811,17 +2805,21 @@ class OutputGraph(OutputGraphCommon):
     ) -> None:
         """Skip frame if a source-less requires_grad_() intermediate leaks as output.
 
-        AOTAutograd's functionalization drops requires_grad_() on intermediates,
-        so returning them (or tensors derived from them) produces wrong results.
-        We detect this via FX graph reachability: find the requires_grad_() nodes
+        AOTAutograd's functionalization drops requires_grad_() on intermediates:
+        at runtime an output is differentiable only if the compiled joint reaches
+        a graph input that requires grad. An output whose only autograd ancestry
+        is a source-less requires_grad_() leaf is marked non-differentiable and
+        comes back with requires_grad=False, where eager returns True. We find
+        candidates via FX graph reachability: find the requires_grad_() nodes
         for source-less intermediates, then check if any output is downstream.
 
-        A downstream output is still safe when its autograd graph also reaches
-        a graph input that requires grad (see _requires_grad_input_edges).
-        AOTAutograd then returns a differentiable output whose backward is the
-        eager backward restricted to the graph inputs; the only autograd state
-        lost is the AccumulateGrad edge into the source-less intermediate, and
-        that intermediate never escapes the compiled region. This is the
+        A downstream output is allowed when its autograd graph also reaches a
+        graph input that requires grad (see _requires_grad_input_edges): it
+        stays differentiable and its backward into every graph input matches
+        eager. The only edge dropped is the one into the source-less leaf, which
+        is unobservable since the leaf itself is never let out (as an output it
+        reaches no graph input). Compiled autograd hooks on tainted tensors could
+        observe it, so they keep the graph break. This is the
         ``energy -> autograd.grad(create_graph=True) -> force`` pattern of
         force-supervised training, where the force is returned so that a loss
         on it can be backpropagated into the parameters.
@@ -2858,7 +2856,11 @@ class OutputGraph(OutputGraphCommon):
                 # Differentiable w.r.t. a graph input: AOTAutograd keeps the
                 # output differentiable and its backward reaches that input.
                 if input_edges is None:
-                    input_edges = self._requires_grad_input_edges()
+                    # A compiled autograd hook is arbitrary Python run from
+                    # BackwardState; it never fires if its tensor's gradient is
+                    # only on the dropped path into the source-less leaf.
+                    hooked = any(n.meta.get("has_backward_hook") for n in tainted_nodes)
+                    input_edges = set() if hooked else self._requires_grad_input_edges()
                 if input_edges:
                     fake_tensor = var.as_proxy().node.meta.get("example_value")
                     if isinstance(fake_tensor, torch.Tensor):
