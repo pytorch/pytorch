@@ -52,7 +52,10 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
         # It must cover the devices of the response tensors so that wait() syncs
         # the caller's current streams with the streams that received them.
         agent = _get_current_rpc_agent()
-        devices = [d for d in agent._get_device_map(rref.owner()) if d.type != "cpu"]
+        device_map = agent._get_device_map(rref.owner())
+        devices: list[torch.device | int | str] = [
+            d for d in device_map if d.type != "cpu"
+        ]
         result: Future = Future(devices=devices)
 
         def _wrap_rref_type_cont(fut):
