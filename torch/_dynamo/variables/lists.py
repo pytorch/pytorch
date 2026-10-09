@@ -692,6 +692,8 @@ class BaseListVariable(VariableTracker):
         saved = list(self.items)
         self.items.clear()
 
+        from .builder import SourcelessBuilder
+
         class _TracedKey:
             # Compares through Dynamo so user-defined __lt__ (e.g. from
             # functools.cmp_to_key) is traced like CPython's timsort,
@@ -700,9 +702,9 @@ class BaseListVariable(VariableTracker):
                 self.key = key
 
             def __lt__(self, other: "_TracedKey") -> bool:
-                result = variables.BuiltinVariable(operator.lt).call_function(
-                    tx, [self.key, other.key], {}
-                )
+                result = SourcelessBuilder.create_internal_builtin(
+                    operator.lt
+                ).call_function(tx, [self.key, other.key], {})
                 if not result.is_python_constant():
                     unimplemented(
                         gb_type="sort with non-constant keys",
@@ -1305,7 +1307,7 @@ class ListVariable(BaseListVariable):
                 i += len(self.items)
             # Explicit unbound dispatch
             return ListVariable.sq_ass_item_impl(
-                self, tx, ConstantVariable.create(i), value
+                self, tx, VariableTracker.build(tx, i), value
             )
         elif pyslice_check(key):
             # CPython runs PySlice_Unpack first, which raises ValueError on
@@ -2665,7 +2667,7 @@ class SizeVariable(TupleVariable):
         #    4. left.sq_concat(right)
         #  Hence, to support tuple + size -> size, we need to implement nb_add
         if not pytuple_check(other):
-            return ConstantVariable(NotImplemented)
+            return ConstantVariable.create(NotImplemented)
         self_, other_ = (other, self) if reverse else (self, other)
         a, b = unpack_iterable(tx, self_), unpack_iterable(tx, other_)
         return SizeVariable(list(a) + list(b), mutation_type=ValueMutationNew())

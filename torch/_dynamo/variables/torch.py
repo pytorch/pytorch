@@ -2680,11 +2680,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             tx: "InstructionTranslatorBase",
             *args: VariableTracker,
             **kwargs: VariableTracker,
-        ) -> UserDefinedObjectVariable:
+        ) -> VariableTracker:
             # Wrap C++ interpreter (torch._C._functorch.CInterpreter) as UserDefinedObjectVariable,
             # but Python interpreter (torch._functorch.pyfunctorch.FuncTorchInterpreter) as FuncTorchInterpreterVariable.
-            return UserDefinedObjectVariable(
-                torch._C._functorch.peek_interpreter_stack()
+            return VariableTracker.build(
+                tx, torch._C._functorch.peek_interpreter_stack()
             )
 
         @register(torch._functorch.pyfunctorch.coerce_cinterpreter)
@@ -3717,6 +3717,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if isinstance(
             member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
+            if source is not None:
+                return TorchInGraphFunctionVariable.create_with_source(member, source)
             return TorchInGraphFunctionVariable(member, source=source)
         return variables.GetAttrVariable(self, name, source=source)
 
