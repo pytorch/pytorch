@@ -8,7 +8,6 @@ import contextlib
 import inspect
 import os
 import sys
-import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass
@@ -92,7 +91,6 @@ def _failure_summary(test_report: TestReport) -> str:
 @dataclass
 class _Run:
     started: float
-    # None on an xdist controller until the worker's setup report brings it.
     test: report.TestId | None
     ended: float = 0.0
     failed_phase: str = ""
@@ -113,7 +111,10 @@ class ReportWriter:
         self.path = path
         self.report_uuid = report_uuid
         self.file: IO[str] | None = None
-        self.runs: dict[str, _Run] = {}
+        # By node id and xdist worker (report.node, None without xdist), as junitxml
+        # keys its test cases: flakefinder's copies of a test share a node id and can
+        # run on two workers at once.
+        self.runs: dict[tuple[str, Any], _Run] = {}
         self.rerun_numbers: Counter[str] = Counter()
         self.tests: dict[str, report.TestId | None] = {}
 
@@ -134,12 +135,6 @@ class ReportWriter:
             # Empty on an xdist controller; workers send identities via makereport.
             self.tests = {item.nodeid: identity(item) for item in session.items}
 
-    def pytest_runtest_logstart(self, nodeid: str, location: Any) -> None:
-        if _disabled:
-            return
-        with _guard():
-            self.runs[nodeid] = _Run(time.time(), self.tests.get(nodeid))
-
     # Before test/conftest.py's LogXMLReruns rewrites skip longreprs.
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_logreport(self, report: TestReport) -> None:
@@ -149,13 +144,15 @@ class ReportWriter:
             self._logreport(report)
 
     def _logreport(self, test_report: TestReport) -> None:
-        run = self.runs.get(test_report.nodeid)
+        nodeid = test_report.nodeid
+        key = (nodeid, getattr(test_report, "node", None))
+        if test_report.when == "setup":
+            test_id = getattr(test_report, _TEST_ID, None)
+            test = report.TestId(**test_id) if test_id else self.tests.get(nodeid)
+            self.runs[key] = _Run(test_report.start, test)
+        run = self.runs.get(key)
         if run is None or test_report.when not in ("setup", "call", "teardown"):
             return
-        if test_report.when == "setup":
-            run.started = test_report.start
-            if test_id := getattr(test_report, _TEST_ID, None):
-                run.test = report.TestId(**test_id)
         run.ended = test_report.stop
         # A failing pytest-subtests subtest fails the run.
         subtest = getattr(test_report, "context", None) is not None
@@ -173,10 +170,11 @@ class ReportWriter:
             run.wasxfail = hasattr(test_report, "wasxfail")
         # A rerun attempt ends at its "rerun" report; others end at teardown.
         if test_report.outcome == "rerun" or test_report.when == "teardown":
-            self._finish(test_report.nodeid, run)
+            self._finish(key, run)
 
-    def _finish(self, nodeid: str, run: _Run) -> None:
-        del self.runs[nodeid]
+    def _finish(self, key: tuple[str, Any], run: _Run) -> None:
+        del self.runs[key]
+        nodeid = key[0]
         # No identity: the item isn't a Python test function, or, under xdist, the
         # worker's writer turned itself off and its setup report came without one.
         if self.file is not None and run.test is not None:

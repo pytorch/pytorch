@@ -6,6 +6,7 @@ import doctest
 import functools
 import importlib
 import importlib.metadata
+import importlib.util
 import inspect
 import itertools
 import json
@@ -1115,6 +1116,31 @@ def test_fails_then_skips(skips_in_teardown):
         # The skip in teardown doesn't replace the failure's message.
         self.assertEqual([(run["outcome"], run["outcome_summary"]) for run in runs], [("failed", "AssertionError: the real failure")])
 
+    CONCURRENT_COPIES_SOURCE = """
+import time
+import unittest
+
+
+class TestSleep(unittest.TestCase):
+    def test_sleep(self):
+        time.sleep(0.3)
+"""
+
+    @unittest.skipIf(
+        not all(importlib.util.find_spec(name) for name in ("xdist", "pytest_flakefinder")),
+        "needs pytest-xdist and pytest-flakefinder",
+    )
+    def test_concurrent_copies(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
+            (Path(tmp) / "copies_report.py").write_text(textwrap.dedent(self.CONCURRENT_COPIES_SOURCE))
+            args = ["copies_report.py", "-n", "2", "--flake-finder", "--flake-runs=4"]
+            _, report = _run_plugin(tmp, args, Path(tmp) / "copies")
+            runs = _runs(report)
+        # flakefinder's copies of a unittest test share its node id, and the two
+        # workers run them at the same time; each copy still gets its own run line.
+        self.assertEqual(sorted(run["rerun_number"] for run in runs), [0, 1, 2, 3])
+        self.assertTrue(all(run["ended_at"] - run["started_at"] >= 300 for run in runs), runs)
+
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
 @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
@@ -1250,6 +1276,15 @@ class TestReportHelpers(TestCase):
         _assert_run_line(self, run, int(now * 1000), int(now * 1000))
         # json.dumps escapes it as \ud800, which ClickHouse rejects.
         self.assertEqual(run["outcome_summary"], "?")
+
+    def test_line_separators_are_escaped(self) -> None:
+        now = time.time()
+        test = torchci_report.TestId("test/test_x.py", "", "test_separators", "python", "test_separators")
+        summary = "a\u2028b\u2029c\x85d"
+        line = torchci_report.line(torchci_report.run_record(test, 0, "failed", now, now, outcome_summary=summary))
+        # str.splitlines() would split the line at each of them.
+        self.assertEqual(line.splitlines(), [line.removesuffix("\n")])
+        self.assertEqual(json.loads(line)["outcome_summary"], summary)
 
     @skipIfTorchDynamo("Dynamo calls the patched torch._C function while tracing")
     def test_capture_skips_torch_accelerator(self) -> None:
