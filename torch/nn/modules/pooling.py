@@ -1139,9 +1139,13 @@ class LPPool1d(_LPPoolNd):
               not defined. This implementation will set the gradient to zero in this case.
 
     Args:
-        kernel_size: a single int, the size of the window
-        stride: a single int, the stride of the window. Default value is :attr:`kernel_size`
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int): the size of the window.
+        stride (int or tuple of int, optional): the stride of the window.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
 
     Note:
         When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
@@ -1192,9 +1196,13 @@ class LPPool2d(_LPPoolNd):
               not defined. This implementation will set the gradient to zero in this case.
 
     Args:
-        kernel_size: the size of the window
-        stride: the stride of the window. Default value is :attr:`kernel_size`
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the window.
+        stride (int or tuple of int, optional): the stride of the window.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
 
     Note:
         When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
@@ -1252,9 +1260,13 @@ class LPPool3d(_LPPoolNd):
               not defined. This implementation will set the gradient to zero in this case.
 
     Args:
-        kernel_size: the size of the window
-        stride: the stride of the window. Default value is :attr:`kernel_size`
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the window.
+        stride (int or tuple of int, optional): the stride of the window.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
 
     Note:
         When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
