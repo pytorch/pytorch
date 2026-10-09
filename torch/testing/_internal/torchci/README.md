@@ -78,6 +78,9 @@ Pytest reruns and flakefinder repeats within one process count up
 it. For gtest value-parameterized tests, `declared_case_name` drops the `/N`
 suffix, and a gtest whose process crashed is `crashed`.
 
+A test aliased under a longer name (`test_x_dynamic = TestX.test_x`) reports the
+original's `declared_case_name`, `test_x`.
+
 ## Crash recording
 
 A process that dies can't record the test it was running, so whoever sees it die

@@ -99,7 +99,6 @@ def _failure_summary(test_report: TestReport) -> str:
 @dataclass
 class _Run:
     started: float
-    # None on an xdist controller until the worker's setup report brings it.
     test: report.TestId | None
     ended: float = 0.0
     failed_phase: str = ""
@@ -125,13 +124,18 @@ class ReportWriter:
         self.report_uuid = report_uuid
         self.config = config
         self.file: IO[str] | None = None
-        self.runs: dict[str, _Run] = {}
+        # By node id and xdist worker (report.node, None without xdist), as junitxml
+        # keys its test cases: flakefinder's copies of a test share a node id and can
+        # run on two workers at once.
+        self.runs: dict[tuple[str, Any], _Run] = {}
         self.rerun_numbers: Counter[str] = Counter()
         self.tests: dict[str, report.TestId] = {}
         # Only run_test.py's retries read what's published, and they never use xdist.
         self.xdist = bool(config.getoption("numprocesses", default=None))
         self.cache: Any = None
         self.cache_dir = ""
+        # The test published as in flight, until its run line is written.
+        self.inflight_nodeid: str | None = None
 
     def _publish(self, name: str, value: Any) -> None:
         if self.cache is not None:
@@ -164,17 +168,17 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
+            # Before setup, so run_test.py can record the test if the process dies.
             test = self.tests.get(nodeid)
-            started = time.time()
-            self.runs[nodeid] = _Run(started, test)
             inflight = None
             if test is not None:
                 inflight = {
                     "test": test._asdict(),
-                    "started_at": started,
+                    "started_at": time.time(),
                     "rerun_number": self.rerun_numbers[nodeid],
                 }
             self._publish("report_inflight", inflight)
+            self.inflight_nodeid = nodeid
 
     # Before test/conftest.py's LogXMLReruns rewrites skip longreprs.
     @pytest.hookimpl(tryfirst=True)
@@ -186,24 +190,25 @@ class ReportWriter:
 
     def _logreport(self, test_report: TestReport) -> None:
         nodeid = test_report.nodeid
+        key = (nodeid, getattr(test_report, "node", None))
         if test_report.when not in ("setup", "call", "teardown"):
             # xdist's report for a test whose worker crashed: when "???", no times,
-            # and nothing else follows for this run.
-            run = self.runs.setdefault(nodeid, _Run(time.time(), None))
-            # A worker that died before its setup report never sent the identity.
+            # and nothing else follows for this run. A worker that died before its
+            # setup report sent no identity or start time.
+            run = self.runs.setdefault(key, _Run(time.time(), None))
             run.test = run.test or report.nodeid_identity(nodeid)
             run.ended = time.time()
             run.crashed = True
             run.outcome_summary = str(test_report.longrepr)
-            self._finish(nodeid, run)
-            return
-        run = self.runs.get(nodeid)
-        if run is None:
+            self._finish(key, run)
             return
         if test_report.when == "setup":
-            run.started = test_report.start
-            if test_id := getattr(test_report, _TEST_ID, None):
-                run.test = report.TestId(**test_id)
+            test_id = getattr(test_report, _TEST_ID, None)
+            test = report.TestId(**test_id) if test_id else self.tests.get(nodeid)
+            self.runs[key] = _Run(test_report.start, test)
+        run = self.runs.get(key)
+        if run is None:
+            return
         run.ended = test_report.stop
         # A failing pytest-subtests subtest fails the run.
         subtest = getattr(test_report, "context", None) is not None
@@ -224,10 +229,12 @@ class ReportWriter:
             run.wasxfail = hasattr(test_report, "wasxfail")
         # A rerun attempt ends at its "rerun" report; others end at teardown.
         if test_report.outcome == "rerun" or test_report.when == "teardown":
-            self._finish(nodeid, run)
+            self._finish(key, run)
 
-    def _finish(self, nodeid: str, run: _Run) -> None:
-        del self.runs[nodeid]
+    def _finish(self, key: tuple[str, Any], run: _Run) -> None:
+        del self.runs[key]
+        self.inflight_nodeid = None
+        nodeid = key[0]
         # No identity: under xdist, the worker's writer turned itself off and its
         # setup report came without one.
         if self.file is not None and run.test is not None:
@@ -249,14 +256,15 @@ class ReportWriter:
         with _guard():
             # xdist stops at -x/--maxfail right after the failing report, so that
             # run's teardown never arrives; its outcome is already known.
-            for nodeid, run in list(self.runs.items()):
+            for key, run in list(self.runs.items()):
                 if run.failed_phase:
-                    self._finish(nodeid, run)
+                    self._finish(key, run)
             if self.file is not None:
                 self.file.close()
                 self.file = None
-            # A run still open was interrupted; run_test.py records it.
-            if not self.runs:
+            # A test still in flight was interrupted, maybe before its setup report;
+            # run_test.py records it.
+            if self.inflight_nodeid is None:
                 self._publish("report_inflight", None)
 
 
