@@ -15,7 +15,7 @@ from torch._inductor.utils import get_free_symbols
 from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils._sympy.symbol import make_symbol, SymT
+from ..utils._sympy.symbol import make_symbol, symbol_is_type, SymT
 from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler
 from .utils import (
@@ -335,6 +335,33 @@ class MemoryDep(Dep):
         if isinstance(self.index, sympy.Integer):
             return True
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
+
+    def is_non_overlapping(self) -> bool:
+        """Prove disjoint affine accesses, allowing gaps in storage."""
+        # An indirect offset varies per iteration, so it is not a constant shift.
+        if any(
+            symbol_is_type(s, (SymT.TMP, SymT.INDIRECT))
+            for s in self.index.free_symbols
+        ):
+            return False
+        sizevars = V.graph.sizevars
+        strides = sizevars.stride_vars(self.index, self.var_names)
+        affine = self.get_offset() + sum(
+            stride * var for stride, var in zip(strides, self.var_names)
+        )
+        if not sizevars.statically_known_equals(self.index, affine):
+            return False
+        # Hints choose an order; symbolic inequalities establish its safety.
+        hints = [sizevars.optimization_hint(stride, fallback=1) for stride in strides]
+        span = sympy.S.One
+        for axis in sorted(range(len(strides)), key=hints.__getitem__):
+            stride, size = strides[axis], self.size[axis]
+            if not sizevars.statically_known_gt(size, 0) or not (
+                sizevars.statically_known_geq(stride, span)
+            ):
+                return False
+            span += (size - 1) * stride
+        return True
 
     def stride1_for_last_dim(self, result_for_complex_expression: bool = True) -> bool:
         """
