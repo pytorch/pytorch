@@ -2683,6 +2683,22 @@ class _NestedReductionBase:
         expected_kernels = 1 if self.force_persistent_outer_reduction is False else 2
         self.check_fusion(expected_kernels)
 
+    def test_half_grouped_reduction_bitcast_epilogue(self):
+        # The grouped amin over fp16 reduces in fp32; a bitcast of its result
+        # must see the fp16 value, not the fp32 tile.
+        group = 8
+
+        def f(x):
+            total = x.sum(-1, keepdim=True)
+            peak = x.abs().amax(-1, keepdim=True)
+            value = (x * x.shape[1] - total) * 2.0**-8 + peak * 0.25
+            value = torch.ops._inductor_test.realize(value.to(torch.float16))
+            return value.view(x.shape[0], -1, group).amin(-1).view(torch.int16) + 1
+
+        x = torch.randint(-64, 64, (37, 48 * group), device=GPU_TYPE).float() / 8
+        self.check_nested_matches_unnested(f, (x,), tol=0)
+        self.check_fusion(expected_kernels=None)
+
 
 @inductor_config.patch("force_disable_caches", True)
 class NestedReductionTest(_NestedReductionBase, TestBase):
