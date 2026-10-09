@@ -792,10 +792,12 @@ class TestJunitXml(TestCase):
         self._assert_matches_golden("pytest_sanitized", normalized)
 
 
-# Generated test files go below test/ so pytest loads test/conftest.py, as in CI.
 _TEST_DIR = Path(__file__).resolve().parent
 # TestJunitXml's fixture suite, which covers every outcome the pytest path reports.
 _PYTEST_SUITE = _JUNIT_TESTDATA / "pytest_suite.py"
+# The report tests' fixtures run from here, below test/ so pytest loads
+# test/conftest.py as in CI; their reports and caches go to temporary directories.
+_REPORT_TESTDATA = _TEST_DIR / "torchci_reports_testdata"
 
 # The fixture's run context, which the report records, without the job's device
 # filter (XPU and CUDA jobs set PYTORCH_TESTING_DEVICE_ONLY_FOR).
@@ -860,6 +862,13 @@ def _runs(report: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in report.read_text().splitlines()[1:]]
 
 
+def _table(header: tuple[str, ...], rows: list[tuple[Any, ...]]) -> str:
+    """Rows as aligned columns under a header, for assertExpectedInline."""
+    lines = [header, *(tuple(str(cell) for cell in row) for row in rows)]
+    widths = [max(len(line[i]) for line in lines) for i in range(len(header))]
+    return "\n".join(" | ".join(cell.ljust(width) for cell, width in zip(line, widths)).rstrip() for line in lines)
+
+
 # torchci test run reports, on TestJunitXml's fixture suite.
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
 @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
@@ -886,29 +895,26 @@ class TestReportJsonl(TestCase):
 
     def test_runs(self) -> None:
         _, *runs = (json.loads(line) for line in self.raw.splitlines())
-        rendered = "\n".join(
-            f"{run['case_name']} {run['rerun_number']} {run['outcome']}"
-            + (f": {run['outcome_summary']}" if run["outcome_summary"] else "")
-            for run in runs
-        )
-        self.assertExpectedInline(rendered, """\
-test_pass 0 passed
-test_assert_failure 0 failed: AssertionError: values differ
-test_raises_non_assertion 0 failed: RuntimeError: runtime error!
-test_error_in_setup 0 error: RuntimeError: setup error
-test_error_in_teardown 0 error: RuntimeError: teardown error
-test_skipped 0 skipped: skipped unconditionally
-test_skipif 0 skipped: skipped conditionally
-test_xfail 0 xfailed: known bad
-test_xpass_non_strict 0 xpassed
-test_xpass_strict 0 failed: [XPASS(strict)] strictly expected to fail
-test_rerun_then_pass 0 failed: AssertionError: attempt 1 fails
-test_rerun_then_pass 1 failed: AssertionError: attempt 2 fails
-test_rerun_then_pass 2 passed
-test_rerun_then_fail 0 failed: AssertionError: attempt 1 fails
-test_rerun_then_fail 1 failed: AssertionError: attempt 2 fails
-test_rerun_then_fail 2 failed: AssertionError: attempt 3 fails
-test_no_rerun_needed 0 passed""")
+        columns = ("case_name", "rerun_number", "outcome", "outcome_summary")
+        self.assertExpectedInline(_table(columns, [tuple(run[column] for column in columns) for run in runs]), """\
+case_name                 | rerun_number | outcome | outcome_summary
+test_pass                 | 0            | passed  |
+test_assert_failure       | 0            | failed  | AssertionError: values differ
+test_raises_non_assertion | 0            | failed  | RuntimeError: runtime error!
+test_error_in_setup       | 0            | error   | RuntimeError: setup error
+test_error_in_teardown    | 0            | error   | RuntimeError: teardown error
+test_skipped              | 0            | skipped | skipped unconditionally
+test_skipif               | 0            | skipped | skipped conditionally
+test_xfail                | 0            | xfailed | known bad
+test_xpass_non_strict     | 0            | xpassed |
+test_xpass_strict         | 0            | failed  | [XPASS(strict)] strictly expected to fail
+test_rerun_then_pass      | 0            | failed  | AssertionError: attempt 1 fails
+test_rerun_then_pass      | 1            | failed  | AssertionError: attempt 2 fails
+test_rerun_then_pass      | 2            | passed  |
+test_rerun_then_fail      | 0            | failed  | AssertionError: attempt 1 fails
+test_rerun_then_fail      | 1            | failed  | AssertionError: attempt 2 fails
+test_rerun_then_fail      | 2            | failed  | AssertionError: attempt 3 fails
+test_no_rerun_needed      | 0            | passed  |""")
 
     def test_schema(self) -> None:
         report, *runs = (json.loads(line) for line in self.raw.splitlines())
@@ -937,204 +943,67 @@ test_no_rerun_needed 0 passed""")
             _assert_run_line(self, run, self.t0_ms, self.t1_ms)
             self.assertEqual(run["language"], "python")
 
-    # Each kind of test name the writer reads from a pytest item. TestImported is
-    # defined in another module, like the jit/ classes test_jit.py imports.
-    IDENTITY_SOURCE = """
-import functools
-import unittest
-
-import pytest
-from identity_helpers import TestImported  # noqa: F401
-
-import torch
-from torch.testing._internal.common_device_type import dtypes, instantiate_device_type_tests
-from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize, TestCase
-
-
-def test_module_function():
-    pass
-
-
-@pytest.mark.parametrize("value", [1, 2], ids=["a::b", "c[d]"])
-def test_pytest_ids(value):
-    pass
-
-
-class TestOuter:
-    class TestInner:
-        def test_nested(self):
-            pass
-
-
-class TestUnittest(unittest.TestCase):
-    def test_unittest(self):
-        pass
-
-
-class TestDevice(TestCase):
-    def test_device(self, device):
-        pass
-
-    @dtypes(torch.float32, torch.float64)
-    def test_dtype(self, device, dtype):
-        pass
-
-
-instantiate_device_type_tests(TestDevice, globals(), only_for="cpu")
-
-
-@instantiate_parametrized_tests
-class TestParametrize(TestCase):
-    @parametrize("value", [1])
-    def test_parametrize(self, value):
-        pass
-
-
-def wrapped(test):
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        return test(*args, **kwargs)
-
-    return wrapper
-
-
-class TestDecorated(TestCase):
-    @wrapped
-    def test_decorated(self):
-        pass
-
-
-class TestSetattr:
-    pass
-
-
-setattr(TestSetattr, "test_added", lambda self: None)
-
-
-def create_test_func():
-    def test(self, device):
-        pass
-
-    return test
-
-
-class TestFactory(TestCase):
-    test_made = create_test_func()
-
-
-instantiate_device_type_tests(TestFactory, globals(), only_for="cpu")
-"""
-    IDENTITY_HELPERS = """
-from torch.testing._internal.common_utils import TestCase
-
-
-class TestImported(TestCase):
-    def test_imported(self):
-        pass
-"""
-
     def test_identities(self) -> None:
         rendered = {}
-        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
-            (Path(tmp) / "identity_report.py").write_text(textwrap.dedent(self.IDENTITY_SOURCE))
-            (Path(tmp) / "identity_helpers.py").write_text(textwrap.dedent(self.IDENTITY_HELPERS))
-            # file is the launched module's node id, relative to the repo root; the
-            # table drops the temporary directory.
-            tmp_nodeid = Path(tmp).resolve().relative_to(_TEST_DIR.parent).as_posix()
+        columns = ("suite", "case_name", "declared_case_name")
+        with tempfile.TemporaryDirectory() as tmp:
             # In process, identities come from collection; under xdist, from the
             # worker's setup reports.
             for mode, args in (("in_process", []), ("xdist", ["-n", "1"])):
                 t0_ms = int(time.time() * 1000)
-                proc, report = _run_plugin(tmp, ["identity_report.py", *args], Path(tmp) / mode)
+                proc, report = _run_plugin(str(_REPORT_TESTDATA), ["identity_report.py", *args], Path(tmp) / mode)
                 t1_ms = int(time.time() * 1000)
                 self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
                 runs = _runs(report)
-                rows = []
                 for run in runs:
                     _assert_run_line(self, run, t0_ms, t1_ms)
-                    file = run["file"].removeprefix(f"{tmp_nodeid}/")
-                    rows.append((file, run["suite"], run["case_name"], run["language"], run["declared_case_name"]))
-                rendered[mode] = "\n".join(" | ".join(row) for row in sorted(rows))
+                    # The launched module's node id, relative to the repo root, also
+                    # for TestImported, which identity_helpers.py defines.
+                    self.assertEqual(run["file"], "test/torchci_reports_testdata/identity_report.py")
+                    self.assertEqual(run["language"], "python")
+                rendered[mode] = _table(columns, sorted(tuple(run[column] for column in columns) for run in runs))
         self.assertEqual(rendered["xdist"], rendered["in_process"])
-        # Rows are file | suite | case_name | language | declared_case_name.
         # test_added is a lambda and test_made_cpu a factory's inner function named
         # test, so both keep their collected name.
         self.assertExpectedInline(rendered["in_process"], """\
-identity_report.py |  | test_module_function | python | test_module_function
-identity_report.py |  | test_pytest_ids[a::b] | python | test_pytest_ids
-identity_report.py |  | test_pytest_ids[c[d]] | python | test_pytest_ids
-identity_report.py | TestDecorated | test_decorated | python | test_decorated
-identity_report.py | TestDeviceCPU | test_device_cpu | python | test_device
-identity_report.py | TestDeviceCPU | test_dtype_cpu_float32 | python | test_dtype
-identity_report.py | TestDeviceCPU | test_dtype_cpu_float64 | python | test_dtype
-identity_report.py | TestFactoryCPU | test_made_cpu | python | test_made_cpu
-identity_report.py | TestImported | test_imported | python | test_imported
-identity_report.py | TestInner | test_nested | python | test_nested
-identity_report.py | TestParametrize | test_parametrize_value_1 | python | test_parametrize
-identity_report.py | TestSetattr | test_added | python | test_added
-identity_report.py | TestUnittest | test_unittest | python | test_unittest""")
-
-    SUBTESTS_SOURCE = """
-import unittest
-
-
-class TestSubtests(unittest.TestCase):
-    def test_failing_subtest(self):
-        for i in range(2):
-            with self.subTest(i=i):
-                self.assertEqual(i, 0)
-"""
+suite           | case_name                | declared_case_name
+                | test_module_function     | test_module_function
+                | test_pytest_ids[a::b]    | test_pytest_ids
+                | test_pytest_ids[c[d]]    | test_pytest_ids
+TestDecorated   | test_decorated           | test_decorated
+TestDeviceCPU   | test_device_cpu          | test_device
+TestDeviceCPU   | test_dtype_cpu_float32   | test_dtype
+TestDeviceCPU   | test_dtype_cpu_float64   | test_dtype
+TestFactoryCPU  | test_made_cpu            | test_made_cpu
+TestImported    | test_imported            | test_imported
+TestInner       | test_nested              | test_nested
+TestParametrize | test_parametrize_value_1 | test_parametrize
+TestSetattr     | test_added               | test_added
+TestUnittest    | test_unittest            | test_unittest""")
 
     def test_subtests(self) -> None:
-        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
-            (Path(tmp) / "subtests_report.py").write_text(textwrap.dedent(self.SUBTESTS_SOURCE))
-            _, report = _run_plugin(tmp, ["subtests_report.py"], Path(tmp) / "subtests")
+        with tempfile.TemporaryDirectory() as tmp:
+            _, report = _run_plugin(str(_REPORT_TESTDATA), ["subtests_report.py"], Path(tmp) / "subtests")
             runs = _runs(report)
         # One run per test, however many subtests it has.
         self.assertEqual([(run["case_name"], run["outcome"]) for run in runs], [("test_failing_subtest", "failed")])
         self.assertIn("1 != 0", runs[0]["outcome_summary"])
 
-    SKIP_AFTER_FAILURE_SOURCE = """
-import pytest
-
-
-@pytest.fixture
-def skips_in_teardown():
-    yield
-    pytest.skip("skip in teardown")
-
-
-def test_fails_then_skips(skips_in_teardown):
-    raise AssertionError("the real failure")
-"""
-
     def test_skip_after_failure(self) -> None:
-        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
-            (Path(tmp) / "skip_report.py").write_text(textwrap.dedent(self.SKIP_AFTER_FAILURE_SOURCE))
-            _, report = _run_plugin(tmp, ["skip_report.py"], Path(tmp) / "skip")
+        with tempfile.TemporaryDirectory() as tmp:
+            _, report = _run_plugin(str(_REPORT_TESTDATA), ["skip_after_failure_report.py"], Path(tmp) / "skip")
             runs = _runs(report)
         # The skip in teardown doesn't replace the failure's message.
         self.assertEqual([(run["outcome"], run["outcome_summary"]) for run in runs], [("failed", "AssertionError: the real failure")])
-
-    CONCURRENT_COPIES_SOURCE = """
-import time
-import unittest
-
-
-class TestSleep(unittest.TestCase):
-    def test_sleep(self):
-        time.sleep(0.3)
-"""
 
     @unittest.skipIf(
         not all(importlib.util.find_spec(name) for name in ("xdist", "pytest_flakefinder")),
         "needs pytest-xdist and pytest-flakefinder",
     )
     def test_concurrent_copies(self) -> None:
-        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
-            (Path(tmp) / "copies_report.py").write_text(textwrap.dedent(self.CONCURRENT_COPIES_SOURCE))
-            args = ["copies_report.py", "-n", "2", "--flake-finder", "--flake-runs=4"]
-            _, report = _run_plugin(tmp, args, Path(tmp) / "copies")
+        with tempfile.TemporaryDirectory() as tmp:
+            args = ["concurrent_copies_report.py", "-n", "2", "--flake-finder", "--flake-runs=4"]
+            _, report = _run_plugin(str(_REPORT_TESTDATA), args, Path(tmp) / "copies")
             runs = _runs(report)
         # flakefinder's copies of a unittest test share its node id, and the two
         # workers run them at the same time; each copy still gets its own run line.
@@ -1148,61 +1017,16 @@ class TestSleep(unittest.TestCase):
 @unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
 @unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "report failures don't need GPU coverage")
 class TestReportFailureIsolation(TestCase):
-    """A failing writer must not change outcomes or the exit code, and warns once."""
-
-    SOURCE = """
-def test_pass():
-    pass
-
-
-def test_fail():
-    raise RuntimeError("expected failure")
-"""
-    # Breaks the writer at the point FAIL_MODE names.
-    CONFTEST = """
-import os
-import pytest
-
-from torch.testing._internal.torchci import environment, plugin
-
-
-def boom(*args, **kwargs):
-    raise RuntimeError(os.environ["FAIL_MODE"] + " failed")
-
-
-class FailingFile:
-    def write(self, value):
-        raise OSError("write failed")
-
-    def flush(self):
-        pass
-
-    def close(self):
-        pass
-
-
-@pytest.hookimpl(trylast=True)
-def pytest_configure(config):
-    mode = os.environ.get("FAIL_MODE")
-    if mode == "capture":
-        environment.capture = boom
-    elif mode == "write":
-        plugin.open = lambda *args, **kwargs: FailingFile()
-    elif mode == "name":
-        plugin.identity = boom
-    elif mode == "finish":
-        plugin.ReportWriter._finish = boom
-    elif mode == "worker" and hasattr(config, "workerinput"):
-        plugin.identity = boom
-"""
+    """A failing writer must not change outcomes or the exit code, and warns once.
+    The fixture directory's conftest.py breaks the writer at the point FAIL_MODE
+    names."""
 
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls.tmp = tempfile.TemporaryDirectory(dir=_TEST_DIR)
+        # For the junit XML, reports and caches.
+        cls.tmp = tempfile.TemporaryDirectory()
         cls.dir = Path(cls.tmp.name)
-        (cls.dir / "failure_isolation.py").write_text(textwrap.dedent(cls.SOURCE))
-        (cls.dir / "conftest.py").write_text(textwrap.dedent(cls.CONFTEST))
         cls.baseline = cls._run("baseline", ["-p", "no:cacheprovider"])
 
     @classmethod
@@ -1215,7 +1039,7 @@ def pytest_configure(config):
         xml = cls.dir / f"{name}.xml"
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", "failure_isolation.py", "-q", f"--junitxml={xml}", *args],
-            cwd=cls.dir,
+            cwd=_REPORT_TESTDATA / "failure_isolation",
             env=_JUNIT_CHILD_ENV | (env or {}),
             capture_output=True,
             text=True,
@@ -1255,24 +1079,10 @@ instantiate_parametrized_tests(TestReportFailureIsolation)
 @unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
 @unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "report enablement doesn't need GPU coverage")
 class TestReportEnablement(TestCase):
-    SOURCE = """
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-
-class TestOne(TestCase):
-    def test_pass(self):
-        pass
-
-
-if __name__ == "__main__":
-    run_tests()
-"""
-
-    def _run_one(self, tmp: str, args: list[str]) -> subprocess.CompletedProcess:
-        (Path(tmp) / "one.py").write_text(textwrap.dedent(self.SOURCE))
+    def _run_script(self, args: list[str]) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "one.py", "--use-pytest", "-p", "no:cacheprovider", *args],
-            cwd=tmp,
+            [sys.executable, "enablement_report.py", "--use-pytest", "-p", "no:cacheprovider", *args],
+            cwd=_REPORT_TESTDATA,
             env=_REPORT_CHILD_ENV,
             capture_output=True,
             text=True,
@@ -1280,25 +1090,26 @@ if __name__ == "__main__":
         )
 
     def test_basic(self) -> None:
-        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             report_dir = Path(tmp) / "reports"
             t0_ms = int(time.time() * 1000)
-            proc = self._run_one(tmp, [f"--save-torchci-reports={report_dir}"])
+            proc = self._run_script([f"--save-torchci-reports={report_dir}"])
             t1_ms = int(time.time() * 1000)
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-            reports = _report_files(report_dir / "one")
+            reports = _report_files(report_dir / "enablement_report")
             self.assertEqual(len(reports), 1)
-            self.assertRegex(reports[0].name, r"^one-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.report\.jsonl$")
+            self.assertRegex(reports[0].name, r"^enablement_report-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.report\.jsonl$")
             records = [json.loads(line) for line in reports[0].read_text().splitlines()]
         self.assertEqual([record["type"] for record in records], ["report", "run"])
         _assert_run_line(self, records[1], t0_ms, t1_ms)
         self.assertEqual(records[1]["outcome"], "passed")
 
     def test_off_is_noop(self) -> None:
-        with tempfile.TemporaryDirectory(dir=_TEST_DIR) as tmp:
-            proc = self._run_one(tmp, [])
-            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-            self.assertEqual([path.name for path in Path(tmp).iterdir()], ["one.py"])
+        before = sorted(_REPORT_TESTDATA.iterdir())
+        proc = self._run_script([])
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        # Nothing is written, such as a default torchci-reports directory.
+        self.assertEqual(sorted(_REPORT_TESTDATA.iterdir()), before)
 
     def test_common_utils_parsing(self) -> None:
         source = """
