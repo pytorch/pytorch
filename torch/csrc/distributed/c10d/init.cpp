@@ -1451,6 +1451,7 @@ Example:
           &::c10d::symmetric_memory::get_mempool_allocator)
       .def_property_readonly("rank", &SymmetricMemory::get_rank)
       .def_property_readonly("world_size", &SymmetricMemory::get_world_size)
+      .def_property_readonly("group_name", &SymmetricMemory::get_group_name)
       .def_property_readonly(
           "buffer_ptrs",
           [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
@@ -3267,7 +3268,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "Collectively create a one-sided communication window; all ranks must call in the same order")
           .def_property_readonly(
               "supports_abort_hooks",
-              &::c10d::Backend::supportsAbortHooks,
+              BACKEND_VIRTUAL_PROPERTY(supportsAbortHooks),
               "(test whether the backend supports abort hooks)")
           .def(
               "register_abort_hook",
@@ -4148,6 +4149,11 @@ Attributes:
             available parameters in the config. See
             https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
             for details.
+    lazy_init (bool): nccl2 only. Create the communicator on the first
+            operation instead of when the group is bound to a device, so a
+            group that never communicates allocates no NCCL resources. Such a
+            group can't be split from until its first operation. Default is
+            False.
 
 Example::
     >>> import torch.distributed as dist
@@ -4170,6 +4176,7 @@ Example::
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
+      .def_readwrite("lazy_init", &::c10d::ProcessGroupNCCL::Options::lazy_init)
       .def_readwrite(
           "use_pg_for_symm_mem_rendezvous",
           &::c10d::ProcessGroupNCCL::Options::use_pg_for_symm_mem_rendezvous)
