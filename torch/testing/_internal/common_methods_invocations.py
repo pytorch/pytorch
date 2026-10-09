@@ -12245,7 +12245,7 @@ op_db: list[OpInfo] = [
             ),
            ),
     OpInfo('arange',
-           dtypes=all_types_and(torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
            supports_out=True,
            supports_autograd=False,
@@ -12276,7 +12276,7 @@ op_db: list[OpInfo] = [
                # g: graph():
                #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
                #   return (%25)
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64, torch.complex128)),
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
@@ -12284,6 +12284,10 @@ op_db: list[OpInfo] = [
                # torch-xpu-ops/issues/4321
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
                             dtypes=(torch.int64,)),
+
+               # MPS arange does not support complex dtypes yet
+               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
+                            dtypes=(torch.complex64, torch.complex128)),
            )),
     OpInfo('cauchy',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.cauchy_, inp, *args, **kwargs),
@@ -14232,12 +14236,7 @@ op_db: list[OpInfo] = [
                    supports_sparse_bsr=True,
                    supports_sparse_bsc=True,
                    assert_autodiffed=True,
-                   promotes_int_to_float=True,
-                   skips=(
-                       # https://github.com/pytorch/pytorch/issues/180040
-                       DecorateInfo(skipIfRocm, "TestOpInfoProperties", "test_determinism", dtypes=(torch.float32,)),
-                   ),
-    ),
+                   promotes_int_to_float=True),
     BinaryUfuncInfo('ge',
                     ref=np.greater_equal,
                     aliases=('greater_equal',),
@@ -16567,6 +16566,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
            dtypes=floating_types_and(torch.half, torch.bfloat16),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'linear'),
            skips=(
                # RuntimeError: false
@@ -18737,11 +18737,6 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # MTIA does not support integer remainder
-                        DecorateInfo(
-                            unittest.skip("MTIA does not support integer remainder"),
-                            None, None, dtypes=integral_types(), device_type='mtia',
-                        ),
                     ),
                     # Support autograd after torch.remainder(Tensor, Tensor) supports
                     # autograd of the second argument.
@@ -23745,6 +23740,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+            DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps', dtypes=(torch.complex64, torch.complex128)),
         ),
     ),
     PythonRefInfo(
