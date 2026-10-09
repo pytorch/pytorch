@@ -198,18 +198,17 @@ bool is_finalizing() {
 void register_allocator(
     c10::DeviceType device_type,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
-  return AllocatorMap::get().register_allocator(
-      device_type, std::move(allocator));
+  AllocatorMap::get().register_allocator(device_type, std::move(allocator));
 }
 
 void register_availability(
     const std::string& name,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
-  return AllocatorMap::get().register_availability(name, std::move(allocator));
+  AllocatorMap::get().register_availability(name, std::move(allocator));
 }
 
 void set_backend(const std::string& name) {
-  return AllocatorMap::get().set_backend(name);
+  AllocatorMap::get().set_backend(name);
 }
 
 std::optional<std::string> get_backend(c10::Device device) {
@@ -359,7 +358,7 @@ class MemPoolAllocatorMap {
 C10_EXPORT void register_mempool_allocator(
     c10::DeviceType device_type,
     std::shared_ptr<c10::Allocator> allocator) {
-  return MemPoolAllocatorMap::get().register_mempool_allocator(
+  MemPoolAllocatorMap::get().register_mempool_allocator(
       device_type, std::move(allocator));
 }
 
@@ -559,12 +558,14 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
   m.def(
       "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
-  m.def("nccl_put(Tensor(a!) tensor, int peer) -> ()");
-  m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def("nccl_put(Tensor(a!) tensor, int peer, str? group_name=None) -> ()");
+  m.def("nccl_get(Tensor(a!) tensor, int peer, str? group_name=None) -> ()");
   m.def(
       "nccl_get_out(Tensor(a!) dst, __torch__.torch.classes.c10d.SymmetricMemory hdl, int offset, int size, int peer) -> ()");
-  m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
-  m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
+  m.def(
+      "nccl_wait_for_signal(Tensor sigpad, int signal, str? group_name=None) -> ()");
+  m.def(
+      "nccl_put_with_signal(Tensor(a) tensor, int signal, int peer, str? group_name=None) -> ()");
   m.def(
       "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
   m.def(
