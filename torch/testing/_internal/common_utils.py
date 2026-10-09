@@ -1155,9 +1155,6 @@ def _get_test_report_path():
     test_source = override if override is not None else 'python-unittest'
     return os.path.join('test-reports', test_source)
 
-# torchci test run reports; relative to the cwd like the junit path.
-TORCHCI_REPORTS_DIR = 'torchci-reports'
-
 def parse_cmd_line_args():
     global DISABLED_TESTS_FILE
     global GRAPH_EXECUTOR
@@ -1189,10 +1186,7 @@ def parse_cmd_line_args():
     parser.add_argument('--save-xml', nargs='?', type=str,
                         const=_get_test_report_path(),
                         default=_get_test_report_path() if IS_CI else None)
-    parser.add_argument('--save-torchci-reports', nargs='?', type=str,
-                        const=TORCHCI_REPORTS_DIR, default=None)
-    parser.add_argument('--no-save-torchci-reports', dest='save_torchci_reports',
-                        action='store_const', const=None, default=argparse.SUPPRESS)
+    parser.add_argument('--save-torchci-reports', type=str)
     parser.add_argument('--discover-tests', action='store_true')
     parser.add_argument('--log-suffix', type=str, default="")
     parser.add_argument('--run-parallel', type=int, default=1)
