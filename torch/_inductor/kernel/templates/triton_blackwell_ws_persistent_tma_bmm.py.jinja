@@ -67,7 +67,7 @@
     {%- endif %}
         batch = tile_id // num_tiles_per_batch
         batch_tile_id = tile_id % num_tiles_per_batch
-        pid_m, pid_n = _blackwell_bmm_pid(
+        pid_m, pid_n = _compute_pid(
             batch_tile_id, num_pid_in_group, grid_m, GROUP_M
         )
         offs_am = (pid_m * BLOCK_M).to(tl.int32)
@@ -107,7 +107,7 @@
 
         batch = tile_id // num_tiles_per_batch
         batch_tile_id = tile_id % num_tiles_per_batch
-        pid_m, pid_n = _blackwell_bmm_pid(
+        pid_m, pid_n = _compute_pid(
             batch_tile_id, num_pid_in_group, grid_m, GROUP_M
         )
         offs_cm = pid_m * BLOCK_M
@@ -150,42 +150,3 @@
                 val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE")
             )}}
             {%- endif %}
-
-
-@triton.jit
-def _blackwell_bmm_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr):
-    group_id = tile_id // num_pid_in_group
-    first_pid_m = group_id * GROUP_M
-    group_m = min(grid_m - first_pid_m, GROUP_M)
-    pid_m = first_pid_m + tile_id % group_m
-    pid_n = (tile_id % num_pid_in_group) // group_m
-    return pid_m, pid_n
-
-
-@triton.jit
-def _subtile_accumulator(
-    acc,
-    BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-    SUBTILE_FACTOR: tl.constexpr,
-):
-    tl.static_assert(SUBTILE_FACTOR > 0, "SUBTILE_FACTOR must be positive")
-    tl.static_assert(
-        (SUBTILE_FACTOR & (SUBTILE_FACTOR - 1)) == 0,
-        "SUBTILE_FACTOR must be a power of 2",
-    )
-
-    if SUBTILE_FACTOR == 1:
-        return (acc,)
-    else:
-        tl.static_assert(BLOCK_N % 2 == 0)
-        acc = tl.reshape(acc, (BLOCK_M, 2, BLOCK_N // 2))
-        acc = tl.permute(acc, (0, 2, 1))
-        left, right = tl.split(acc)
-        left_subtiles = _subtile_accumulator(
-            left, BLOCK_M, BLOCK_N // 2, SUBTILE_FACTOR // 2
-        )
-        right_subtiles = _subtile_accumulator(
-            right, BLOCK_M, BLOCK_N // 2, SUBTILE_FACTOR // 2
-        )
-        return left_subtiles + right_subtiles
