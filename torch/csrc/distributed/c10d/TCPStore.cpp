@@ -8,8 +8,10 @@
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -103,7 +105,8 @@ class TCPClient {
     try {
       tcputil::sendBytes(socket_.handle(), data, length);
     } catch (const std::exception& e) {
-      C10D_WARNING("sendBytes failed on {}: {}", socket_.repr(), e.what());
+      C10D_WARNING("sendBytes failed on {}: {}", socketRepr_, e.what());
+      markBroken();
       throw;
     }
   }
@@ -112,7 +115,8 @@ class TCPClient {
     try {
       return tcputil::recvVector<std::uint8_t>(socket_.handle());
     } catch (const std::exception& e) {
-      C10D_WARNING("recvVector failed on {}: {}", socket_.repr(), e.what());
+      C10D_WARNING("recvVector failed on {}: {}", socketRepr_, e.what());
+      markBroken();
       throw;
     }
   }
@@ -122,12 +126,15 @@ class TCPClient {
     try {
       return tcputil::recvValue<T>(socket_.handle());
     } catch (const std::exception& e) {
-      C10D_WARNING("recvValue failed on {}: {}", socket_.repr(), e.what());
+      C10D_WARNING("recvValue failed on {}: {}", socketRepr_, e.what());
+      markBroken();
       throw;
     }
   }
   template <typename T>
   std::optional<T> receiveValueWithTimeout(std::chrono::milliseconds timeout) {
+    TORCH_CHECK_WITH(
+        DistNetworkError, !broken_, "connection is broken: ", socketRepr_);
     if (!socket_.waitForInput(timeout)) {
       return {};
     }
@@ -136,20 +143,39 @@ class TCPClient {
       return tcputil::recvValue<T>(socket_.handle());
     } catch (const std::exception& e) {
       C10D_WARNING(
-          "recvValueWithTimeout failed on {}: {}", socket_.repr(), e.what());
+          "recvValueWithTimeout failed on {}: {}", socketRepr_, e.what());
+      markBroken();
       throw;
     }
   }
+  // Bounds every send and recv. Zero means no timeout.
   void setTimeout(std::chrono::milliseconds value);
 
-  explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
+  // A failed operation leaves the stream at an unknown offset, so the
+  // connection must not be reused. Closing it immediately frees a server
+  // blocked on it, such as the single-threaded legacy server.
+  bool broken() const noexcept {
+    return broken_;
+  }
+  void markBroken() noexcept {
+    broken_ = true;
+    // Closed when this goes out of scope.
+    auto closed = std::move(socket_);
+  }
 
+  explicit TCPClient(Socket&& socket)
+      : socket_{std::move(socket)}, socketRepr_{socket_.repr()} {}
+
+  // Cached, so it does not race with markBroken().
   std::string repr() const {
-    return fmt::format("TCPClient({})", socket_.repr());
+    return fmt::format("TCPClient({})", socketRepr_);
   }
 
  private:
   Socket socket_;
+  std::string socketRepr_;
+  std::optional<std::chrono::milliseconds> timeout_;
+  bool broken_ = false;
 };
 
 std::unique_ptr<TCPClient> TCPClient::connect(
@@ -163,30 +189,37 @@ std::unique_ptr<TCPClient> TCPClient::connect(
           .connect_timeout(opts.timeout)
           .connect_backoff(std::move(backoff)));
 
-  return std::make_unique<TCPClient>(std::move(socket));
+  auto client = std::make_unique<TCPClient>(std::move(socket));
+  client->setTimeout(opts.timeout);
+  return client;
 }
 
 void TCPClient::setTimeout(std::chrono::milliseconds value) {
-  if (value == std::chrono::milliseconds::zero()) {
+  if (value == timeout_) {
     return;
   }
 
+  // Zero disables the timeout, so an expired (negative) one becomes 1ms.
+  auto ms = value.count() < 0 ? 1 : value.count();
 #ifdef _WIN32
-  struct timeval timeoutTV = {
-      static_cast<long>(value.count() / 1000),
-      static_cast<long>((value.count() % 1000) * 1000)};
+  // Windows takes the timeout in milliseconds.
+  DWORD timeoutTV = static_cast<DWORD>(
+      std::min<int64_t>(ms, std::numeric_limits<DWORD>::max()));
 #else
   struct timeval timeoutTV = {
-      .tv_sec = value.count() / 1000,
-      .tv_usec = static_cast<suseconds_t>((value.count() % 1000) * 1000),
+      .tv_sec = ms / 1000,
+      .tv_usec = static_cast<suseconds_t>((ms % 1000) * 1000),
   };
 #endif
-  SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
-      socket_.handle(),
-      SOL_SOCKET,
-      SO_RCVTIMEO,
-      reinterpret_cast<char*>(&timeoutTV),
-      sizeof(timeoutTV)));
+  for (int opt : {SO_RCVTIMEO, SO_SNDTIMEO}) {
+    SYSCHECK_ERR_RETURN_NEG1(::setsockopt(
+        socket_.handle(),
+        SOL_SOCKET,
+        opt,
+        reinterpret_cast<char*>(&timeoutTV),
+        sizeof(timeoutTV)));
+  }
+  timeout_ = value;
 }
 
 class SendBuffer {
@@ -409,6 +442,10 @@ void TCPStore::waitForWorkers() {
 
 void TCPStore::validate() {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  doValidate();
+}
+
+void TCPStore::doValidate() {
   detail::SendBuffer buffer(*client_, detail::QueryType::VALIDATE);
   buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
   buffer.flush();
@@ -416,6 +453,10 @@ void TCPStore::validate() {
 
 void TCPStore::ping() {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  doPing();
+}
+
+void TCPStore::doPing() {
   detail::SendBuffer buffer(*client_, detail::QueryType::PING);
 
   uint32_t nonce = getpid();
@@ -424,6 +465,7 @@ void TCPStore::ping() {
 
   uint32_t returnedNonce = client_->receiveValue<std::uint32_t>();
   if (nonce != returnedNonce) {
+    client_->markBroken();
     C10_THROW_ERROR(
         DistNetworkError,
         fmt::format(
@@ -433,10 +475,63 @@ void TCPStore::ping() {
   }
 }
 
+void TCPStore::prepareClient() {
+  if (client_->broken()) {
+    C10D_WARNING(
+        "TCPStore connection to {}:{} failed; reconnecting",
+        addr_.host,
+        addr_.port);
+    TCPStoreOptions opts;
+    opts.port = addr_.port;
+    // Connecting needs a deadline even with no store timeout.
+    opts.timeout = timeout_ == kNoTimeout ? kDefaultTimeout : timeout_;
+    // A backoff as long as the timeout allows a single attempt, so ops fail
+    // fast once the server refuses connections instead of each retrying until
+    // the timeout. If packets are dropped, each op still blocks up to the
+    // timeout.
+    // The protocol does not identify the server instance, so this may reach a
+    // different server on the same host:port (e.g. a restarted job's store).
+    const auto start = std::chrono::steady_clock::now();
+    try {
+      auto client = detail::TCPClient::connect(
+          addr_, opts, std::make_shared<FixedBackoff>(opts.timeout));
+      {
+        const std::lock_guard<std::mutex> lock(clientLock_);
+        client_ = std::move(client);
+      }
+      doValidate();
+      doPing();
+    } catch (const DistNetworkError& e) {
+      client_->markBroken();
+      // A refused, reset or unresolved attempt is also reported as a connect
+      // timeout of the full deadline, so report the actual elapsed time.
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - start);
+      const std::string reason = dynamic_cast<const TimeoutError*>(&e)
+          ? "connection refused, reset, unresolved or timed out"
+          : e.what_without_backtrace();
+      C10_THROW_ERROR(
+          DistNetworkError,
+          fmt::format(
+              "TCPStore reconnect to {}:{} failed after {}ms: {}",
+              addr_.host,
+              addr_.port,
+              elapsed.count(),
+              reason));
+    } catch (...) {
+      client_->markBroken();
+      throw;
+    }
+  }
+  client_->setTimeout(timeout_);
+}
+
 void TCPStore::_splitSet(
     const std::string& key,
     const std::vector<uint8_t>& data) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   detail::SendBuffer buffer(*client_, detail::QueryType::SET);
   buffer.appendString(keyPrefix_ + key);
   buffer.flush();
@@ -448,6 +543,7 @@ void TCPStore::_splitSet(
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__set);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   detail::SendBuffer buffer(*client_, detail::QueryType::SET);
   buffer.appendString(keyPrefix_ + key);
   buffer.appendBytes(data);
@@ -460,6 +556,7 @@ std::vector<uint8_t> TCPStore::compareSet(
     const std::vector<uint8_t>& desiredValue) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__compareSet);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   detail::SendBuffer buffer(*client_, detail::QueryType::COMPARE_SET);
   buffer.appendString(keyPrefix_ + key);
   buffer.appendBytes(expectedValue);
@@ -472,6 +569,7 @@ std::vector<uint8_t> TCPStore::compareSet(
 std::vector<uint8_t> TCPStore::get(const std::string& key) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__get);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   return doGet(keyPrefix_ + key);
 }
 
@@ -487,12 +585,14 @@ std::vector<uint8_t> TCPStore::doGet(const std::string& key) {
 int64_t TCPStore::add(const std::string& key, int64_t value) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__add);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   return incrementValueBy(keyPrefix_ + key, value);
 }
 
 bool TCPStore::deleteKey(const std::string& key) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__delete);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   detail::SendBuffer buffer(*client_, detail::QueryType::DELETE_KEY);
   buffer.appendString(keyPrefix_ + key);
   buffer.flush();
@@ -512,6 +612,7 @@ int64_t TCPStore::incrementValueBy(const std::string& key, int64_t delta) {
 
 int64_t TCPStore::getNumKeys() {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   detail::SendBuffer buffer(*client_, detail::QueryType::GETNUMKEYS);
   buffer.flush();
 
@@ -521,6 +622,7 @@ int64_t TCPStore::getNumKeys() {
 bool TCPStore::check(const std::vector<std::string>& keys) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__check);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   detail::SendBuffer buffer(*client_, detail::QueryType::CHECK);
   buffer.appendValue(keys.size());
 
@@ -536,6 +638,7 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   if (response == detail::CheckResponseType::NOT_READY) {
     return false;
   }
+  client_->markBroken();
   TORCH_CHECK_WITH(
       DistStoreError, false, "ready or not_ready response expected");
 }
@@ -549,6 +652,7 @@ void TCPStore::wait(
     const std::chrono::milliseconds& timeout) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__wait);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   std::vector<std::string> prefixedKeys{};
   prefixedKeys.reserve(keys.size());
   for (const std::string& key : keys) {
@@ -574,6 +678,7 @@ void TCPStore::doWait(
       client_->receiveValueWithTimeout<detail::WaitResponseType>(timeout);
   if (response_opt.has_value()) {
     if (response_opt != detail::WaitResponseType::STOP_WAITING) {
+      client_->markBroken();
       TORCH_CHECK_WITH(
           DistStoreError, false, "Stop_waiting response is expected");
     }
@@ -590,12 +695,14 @@ void TCPStore::doWait(
   // this can happen if the server responds before we cancel, just ignore it
   if (response != detail::WaitResponseType::WAIT_CANCELED) {
     if (response != detail::WaitResponseType::STOP_WAITING) {
+      client_->markBroken();
       TORCH_CHECK_WITH(
           DistStoreError, false, "Stop_waiting response is expected");
     }
 
     response = client_->receiveValue<detail::WaitResponseType>(); // ignore
     if (response != detail::WaitResponseType::WAIT_CANCELED) {
+      client_->markBroken();
       TORCH_CHECK_WITH(
           DistStoreError, false, "wait_canceled response is expected");
     }
@@ -613,6 +720,7 @@ void TCPStore::append(
     const std::vector<uint8_t>& data) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__append);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   detail::SendBuffer buffer(*client_, detail::QueryType::APPEND);
   buffer.appendString(keyPrefix_ + key);
   buffer.appendBytes(data);
@@ -623,6 +731,7 @@ std::vector<std::vector<uint8_t>> TCPStore::multiGet(
     const std::vector<std::string>& keys) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__multiGet);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
   std::vector<std::string> prefixedKeys;
   prefixedKeys.reserve(keys.size());
   for (const std::string& key : keys) {
@@ -654,6 +763,7 @@ void TCPStore::multiSet(
       keys.size() == values.size(),
       "multiSet keys and values vectors must be of same size");
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
 
   detail::SendBuffer buffer(*client_, detail::QueryType::MULTI_SET);
   buffer.appendValue<std::int64_t>(static_cast<int64_t>(keys.size()));
@@ -675,6 +785,7 @@ void TCPStore::queuePush(
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queuePush);
 
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
 
   detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_PUSH);
   buffer.appendString(keyPrefix_ + key);
@@ -691,6 +802,7 @@ std::vector<uint8_t> TCPStore::queuePop(const std::string& key, bool block) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queuePop);
 
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
 
   if (block) {
     doWait(keyPrefix_ + key, timeout_);
@@ -715,6 +827,7 @@ int64_t TCPStore::queueLen(const std::string& key) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queueLen);
 
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
 
   detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_LEN);
   buffer.appendString(keyPrefix_ + key);
@@ -727,6 +840,7 @@ std::vector<std::string> TCPStore::listKeys() {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__list);
 
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
 
   detail::SendBuffer buffer(*client_, detail::QueryType::LIST_KEYS);
   buffer.flush();
@@ -753,6 +867,7 @@ void TCPStore::barrier(
     const std::chrono::milliseconds& timeout) {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__barrier);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
+  prepareClient();
 
   detail::SendBuffer buffer(*client_, detail::QueryType::BARRIER);
   buffer.appendString(keyPrefix_ + key);
@@ -763,6 +878,7 @@ void TCPStore::barrier(
       client_->receiveValueWithTimeout<detail::WaitResponseType>(timeout);
   if (response_opt.has_value()) {
     if (response_opt != detail::WaitResponseType::STOP_WAITING) {
+      client_->markBroken();
       TORCH_CHECK_WITH(
           DistStoreError, false, "Stop_waiting response is expected");
     }
@@ -779,12 +895,14 @@ void TCPStore::barrier(
   // This can happen if the server responds before we cancel
   if (response != detail::WaitResponseType::WAIT_CANCELED) {
     if (response != detail::WaitResponseType::STOP_WAITING) {
+      client_->markBroken();
       TORCH_CHECK_WITH(
           DistStoreError, false, "Stop_waiting response is expected");
     }
     // Wait for the cancel acknowledgment
     response = client_->receiveValue<detail::WaitResponseType>();
     if (response != detail::WaitResponseType::WAIT_CANCELED) {
+      client_->markBroken();
       TORCH_CHECK_WITH(
           DistStoreError, false, "wait_canceled response is expected");
     }
@@ -800,6 +918,7 @@ bool TCPStore::hasExtendedApi() const {
 }
 
 std::string TCPStore::repr() const {
+  const std::lock_guard<std::mutex> lock(clientLock_);
   auto clientRepr = client_ ? client_->repr() : "<nullptr>";
   auto serverRepr = server_ ? server_->repr() : "<nullptr>";
   return fmt::format("TCPStore(client={}, server={})", clientRepr, serverRepr);
