@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA,
+    HardwareClassification,
     TestCase,
 )
 from torch.testing._internal.common_quantized import (
@@ -760,6 +761,9 @@ class _TestFP8MatmulMixin:
 
 
 class TestFP8Matmul(TestCase):
+
+    hw_classification = HardwareClassification.GENERIC
+
     def test_pack_uint4(self):
         """
         Verify that given a tensor with high precision values [val0, val1],
@@ -776,6 +780,8 @@ class TestFP8Matmul(TestCase):
 
 
 class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
@@ -3328,6 +3334,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
 class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
+
+    hw_classification = HardwareClassification.CUDA
 
     @skipIfRocm
     @unittest.skipIf(not IS_SM90, "cuBLASLt accumulation requires SM90")
