@@ -10,7 +10,6 @@ from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    run_tests,
     runWithoutCompiledAutograd,
     subtest,
 )
@@ -357,4 +356,4 @@ if torch._has_frozendict:
 
 
 if __name__ == "__main__":
-    run_tests()
+    torch._dynamo.test_case.run_tests()
