@@ -158,8 +158,22 @@ class TestScheduler(TestCase):
         def fn(x):
             return x.t() + x
 
+        # Record the cache size after each codegen, before it is cleared, to
+        # check that the tiling analysis actually ran in this compile.
+        sizes_before_clear = []
+        orig_codegen = Scheduler._codegen
+
+        def codegen(self, *args, **kwargs):
+            out = orig_codegen(self, *args, **kwargs)
+            info = SIMDScheduling.candidate_tilings.cache_info()
+            sizes_before_clear.append(info.currsize)
+            return out
+
         torch._dynamo.reset()
-        torch.compile(fn)(torch.randn(64, 64, device=GPU_TYPE))
+        # A warm FX graph cache would skip scheduler codegen entirely.
+        with fresh_inductor_cache(), patch.object(Scheduler, "_codegen", codegen):
+            torch.compile(fn)(torch.randn(64, 64, device=GPU_TYPE))
+        self.assertGreater(max(sizes_before_clear, default=0), 0)
         self.assertEqual(SIMDScheduling.candidate_tilings.cache_info().currsize, 0)
 
     def test_stable_topological_sort_schedule(self):
