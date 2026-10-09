@@ -504,21 +504,84 @@ class NVUniversalGemmCaller(ChoiceCaller):
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         return self.bmreq.benchmark(*args, out=out)
 
-    def _guard_dynamic_shape_constraints(self) -> None:
-        if self.variant != GemmVariant.GEMM:
-            return
+    @staticmethod
+    def _guard_tensor_constraint(size, stride, constraint) -> None:
+        expected_stride = constraint.stride
+        if expected_stride is None:
+            hinted_size = V.graph.sizevars.optimization_hints(size)
+            hinted_stride = V.graph.sizevars.optimization_hints(stride)
+            major_dim = next(
+                (
+                    dim
+                    for dim, (extent, step) in enumerate(
+                        zip(hinted_size, hinted_stride, strict=True)
+                    )
+                    if extent > 1 and step == 1
+                ),
+                len(size) - 1 if all(extent == 1 for extent in hinted_size) else None,
+            )
+            if major_dim is None:
+                raise AssertionError("selected NVGEMM operand has no contiguous mode")
+        else:
+            if len(expected_stride) == len(stride):
+                normalized_stride = expected_stride
+            elif len(expected_stride) - 1 == len(stride):
+                normalized_stride = expected_stride[1:]
+            else:
+                raise AssertionError(
+                    "selected NVGEMM operand constraint has incompatible rank"
+                )
+            major_dim = normalized_stride.index(1)
 
-        input_sizes = [node.get_size() for node in self.input_nodes[:2]]
-        if self.swap_ab:
-            input_sizes = [input_sizes[1][::-1], input_sizes[0][::-1]]
+        V.graph.sizevars.check(sympy.Eq(stride[major_dim], 1))
+        if constraint.divisibility > 1:
+            for dim, step in enumerate(stride):
+                if dim != major_dim:
+                    V.graph.sizevars.check(
+                        sympy.Eq(sympy.Mod(step, constraint.divisibility), 0)
+                    )
+
+    @staticmethod
+    def _tensor_geometry(node, transpose: bool = False):
+        size = list(node.get_size())
+        stride = list(node.get_stride())
+        if transpose:
+            size[-2:] = reversed(size[-2:])
+            stride[-2:] = reversed(stride[-2:])
+        return size, stride
+
+    def _guard_dynamic_shape_constraints(self) -> None:
         operands = self.kernel.metadata.operands
-        constraints = (operands.A, operands.B, operands.out)
-        sizes = (*input_sizes, self._kernel_layout.size)
-        for constraint, size in zip(constraints, sizes, strict=True):
-            matrix_stride = constraint.stride[-2:]
-            major_dim = matrix_stride.index(1) - 2
-            divisor = constraint.divisibility
-            V.graph.sizevars.check(sympy.Eq(sympy.Mod(size[major_dim], divisor), 0))
+
+        def guard(node, constraint, transpose: bool = False) -> None:
+            size, stride = self._tensor_geometry(node, transpose)
+            self._guard_tensor_constraint(size, stride, constraint)
+
+        if self.variant == GemmVariant.GROUPED_GEMM:
+            guard(self.input_nodes[0], operands.A)
+            guard(self.input_nodes[1], operands.B)
+            guard(self.input_nodes[2], operands.offsets)
+        else:
+            a_idx, b_idx = (1, 0) if self.swap_ab else (0, 1)
+            scaled = self.variant == GemmVariant.SCALED_GEMM
+            guard(
+                self.input_nodes[a_idx],
+                operands.A.quantized if scaled else operands.A,
+                self.swap_ab,
+            )
+            guard(
+                self.input_nodes[b_idx],
+                operands.B.quantized if scaled else operands.B,
+                self.swap_ab,
+            )
+            if scaled:
+                scale_a_idx, scale_b_idx = (3, 2) if self.swap_ab else (2, 3)
+                guard(self.input_nodes[scale_a_idx], operands.A.scale)
+                guard(self.input_nodes[scale_b_idx], operands.B.scale)
+
+        self._guard_tensor_constraint(
+            self._kernel_layout.size, self._kernel_layout.stride, operands.out
+        )
 
     def output_node(self) -> TensorBox:
         from torch._inductor.ir import NVUniversalGemmBuffer
