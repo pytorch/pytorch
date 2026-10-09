@@ -886,6 +886,7 @@ class InputReader:
                     )
                 self.store = ContentStoreReader(
                     store_root,
+                    cache=False,
                     storage_metadata=storage_manifest["storages"],
                 )
                 self.strict_storage = True
@@ -908,7 +909,7 @@ class InputReader:
         dtype_hint = _dtype_or_default(dtype_hint)
         if self.store is not None and storage_hash is not None:
             try:
-                storage = self.store.read_storage(storage_hash)
+                storage = self.store.read_storage(storage_hash, device=device)
             except FileNotFoundError:
                 if self.strict_storage:
                     raise
