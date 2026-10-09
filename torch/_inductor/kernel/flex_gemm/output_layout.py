@@ -91,7 +91,7 @@ def blocked_128x4_validate_carrier(tensor: Any) -> None:
 
 def blocked_128x4_supports_config(config: Any, axis: int, group: int) -> bool:
     """Return whether a GEMM tile composes with the blocked layout atoms."""
-    if axis != 1 or config.device_capacity != 10 or config.tile_m % config.cluster_m:
+    if axis != 1 or config.device_capacity not in (10, 11) or config.tile_m % config.cluster_m:
         return False
     cta_tile_m = config.tile_m // config.cluster_m
     if config.swap_ab:
