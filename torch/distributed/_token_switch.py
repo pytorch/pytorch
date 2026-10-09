@@ -216,9 +216,10 @@ class TokenSwitch(abc.ABC):
     - Calls on different Routings may be interleaved in any order, e.g. two
       dispatches before either combine.
     - Flat layout: a token is received once per destination rank, however many of
-      its top-k experts live there. ``out_topk_idx`` holds that rank's local expert
-      ids in ascending order, packed to the front, padded with -1;
-      ``out_topk_weights`` is aligned with it and padded with 0.
+      its top-k experts live there. Each ``out_topk_idx`` row holds the local ids of
+      that rank's experts among the token's top-k, and -1 in its other entries;
+      ``out_topk_weights`` holds the matching weights, and 0 where the id is -1.
+      The order of the entries within a row is up to the backend.
     - Expert-major layout: one receive slot per (token, local expert).
     - :meth:`combine` sums, without weights, one row per receive slot that came
       from the token. Callers apply ``topk_weights`` and reduce over their local

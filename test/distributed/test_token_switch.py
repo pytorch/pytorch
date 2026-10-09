@@ -74,14 +74,11 @@ CONTRACT_TOP_K = 2
 CONTRACT_EXPERTS_PER_RANK = 2
 
 
-def _to_local_packed(idx, weights, first_expert, experts_per_rank):
-    """Flat-layout convention: local expert ids ascending, packed, -1 / 0 padding."""
+def _to_local(idx, weights, first_expert, experts_per_rank):
+    """Local expert ids in the token's top-k positions, -1 / weight 0 elsewhere."""
     local = idx - first_expert
-    in_range = (local >= 0) & (local < experts_per_rank)
-    key = torch.where(in_range, local, experts_per_rank)
-    key, perm = key.sort(dim=1)
-    routed = key < experts_per_rank
-    return torch.where(routed, key, -1), torch.where(routed, weights.gather(1, perm), 0)
+    mine = (local >= 0) & (local < experts_per_rank)
+    return torch.where(mine, local, -1), torch.where(mine, weights, 0)
 
 
 @dataclass
@@ -167,7 +164,7 @@ class _ReferenceTokenSwitch(TokenSwitch):
         epr = self._experts_per_rank
         w_all = self._all_gather(topk_weights)
         first = self._rank * epr
-        idx, w = _to_local_packed(h.topk_idx_all[r, t], w_all[r, t], first, epr)
+        idx, w = _to_local(h.topk_idx_all[r, t], w_all[r, t], first, epr)
         out_topk_idx[:n].copy_(idx)
         out_topk_weights[:n].copy_(w)
 
@@ -254,20 +251,21 @@ class _TokenSwitchContractTests:
         srcs = self._sources(out_tokens[:n].cpu())
         # one row per (source token, destination rank), carrying that token's payload
         self.assertEqual(sorted(srcs), expected)
+        # each row: this rank's (local expert, weight) pairs from the source token's
+        # top-k, in any order, and -1 with weight 0 in the remaining entries
         lo = self.rank * CONTRACT_EXPERTS_PER_RANK
-        want_idx = torch.full((n, CONTRACT_TOP_K), -1, dtype=torch.int64)
-        want_w = torch.zeros(n, CONTRACT_TOP_K)
+        got_idx, got_w = out_idx[:n].tolist(), out_w[:n].tolist()
         for row, (r, t) in enumerate(srcs):
-            mine = sorted(
-                (int(e) - lo, k)
+            want = sorted(
+                (int(e) - lo, round(0.1 * (k + 1), 4))
                 for k, e in enumerate(all_idx[r][t])
                 if 0 <= int(e) - lo < CONTRACT_EXPERTS_PER_RANK
             )
-            for j, (e, k) in enumerate(mine):
-                want_idx[row, j] = e
-                want_w[row, j] = 0.1 * (k + 1)
-        self.assertEqual(out_idx[:n].cpu(), want_idx)
-        self.assertEqual(out_w[:n].cpu(), want_w)
+            pairs = list(zip(got_idx[row], got_w[row]))
+            got = sorted((i, round(w, 4)) for i, w in pairs if i != -1)
+            self.assertEqual(got, want)
+            pad = [w for i, w in pairs if i == -1]
+            self.assertEqual(pad, [0.0] * (CONTRACT_TOP_K - len(want)))
 
     def test_contract_flat_combine_sums_per_destination_rank(self):
         self._init()
