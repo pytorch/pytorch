@@ -3493,6 +3493,37 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: [
+            id(key) for key in collections.OrderedDict.keys(value)
+        ],
+        eval_fn=lambda value, metadata: [
+            id(key) for key in collections.OrderedDict.keys(value)
+        ]
+        == metadata,
+    )
+    def ORDERED_DICT_KEYS_MATCH(self, guard: Guard) -> None:
+        key_ids = [
+            self.id_ref(key, guard.name)
+            for key in collections.OrderedDict.keys(self.get(guard))
+        ]
+
+        def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
+            return collections.OrderedDict.__len__(value) == len(key_ids) and all(
+                id(current) == expected
+                for current, expected in zip(
+                    collections.OrderedDict.keys(value), key_ids
+                )
+            )
+
+        code = [f"___check_order({self.arg_ref(guard)})"]
+        self.add_python_lambda_leaf_guard_to_root(
+            code,
+            get_verbose_code_parts(code, guard),
+            _get_closure_vars() | {"___check_order": guard_fn},
+        )
+        self._set_guard_export_info(guard, code)
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
         eval_fn=lambda value, metadata: constants_identical(
             list(dict.keys(value)), metadata
