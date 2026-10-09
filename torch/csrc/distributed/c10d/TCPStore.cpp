@@ -8,8 +8,10 @@
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -103,8 +105,8 @@ class TCPClient {
     try {
       tcputil::sendBytes(socket_.handle(), data, length);
     } catch (const std::exception& e) {
-      broken_ = true;
-      C10D_WARNING("sendBytes failed on {}: {}", socket_.repr(), e.what());
+      C10D_WARNING("sendBytes failed on {}: {}", socketRepr_, e.what());
+      markBroken();
       throw;
     }
   }
@@ -113,8 +115,8 @@ class TCPClient {
     try {
       return tcputil::recvVector<std::uint8_t>(socket_.handle());
     } catch (const std::exception& e) {
-      broken_ = true;
-      C10D_WARNING("recvVector failed on {}: {}", socket_.repr(), e.what());
+      C10D_WARNING("recvVector failed on {}: {}", socketRepr_, e.what());
+      markBroken();
       throw;
     }
   }
@@ -124,13 +126,15 @@ class TCPClient {
     try {
       return tcputil::recvValue<T>(socket_.handle());
     } catch (const std::exception& e) {
-      broken_ = true;
-      C10D_WARNING("recvValue failed on {}: {}", socket_.repr(), e.what());
+      C10D_WARNING("recvValue failed on {}: {}", socketRepr_, e.what());
+      markBroken();
       throw;
     }
   }
   template <typename T>
   std::optional<T> receiveValueWithTimeout(std::chrono::milliseconds timeout) {
+    TORCH_CHECK_WITH(
+        DistNetworkError, !broken_, "connection is broken: ", socketRepr_);
     if (!socket_.waitForInput(timeout)) {
       return {};
     }
@@ -138,9 +142,9 @@ class TCPClient {
     try {
       return tcputil::recvValue<T>(socket_.handle());
     } catch (const std::exception& e) {
-      broken_ = true;
       C10D_WARNING(
-          "recvValueWithTimeout failed on {}: {}", socket_.repr(), e.what());
+          "recvValueWithTimeout failed on {}: {}", socketRepr_, e.what());
+      markBroken();
       throw;
     }
   }
@@ -148,23 +152,29 @@ class TCPClient {
   void setTimeout(std::chrono::milliseconds value);
 
   // A failed operation leaves the stream at an unknown offset, so the
-  // connection must not be reused.
+  // connection must not be reused. Closing it immediately frees a server
+  // blocked on it, such as the single-threaded legacy server.
   bool broken() const noexcept {
     return broken_;
   }
   void markBroken() noexcept {
     broken_ = true;
+    // Closed when this goes out of scope.
+    auto closed = std::move(socket_);
   }
 
-  explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
+  explicit TCPClient(Socket&& socket)
+      : socket_{std::move(socket)}, socketRepr_{socket_.repr()} {}
 
+  // Cached, so it does not race with markBroken().
   std::string repr() const {
-    return fmt::format("TCPClient({})", socket_.repr());
+    return fmt::format("TCPClient({})", socketRepr_);
   }
 
  private:
   Socket socket_;
-  std::chrono::milliseconds timeout_{-1};
+  std::string socketRepr_;
+  std::optional<std::chrono::milliseconds> timeout_;
   bool broken_ = false;
 };
 
@@ -189,13 +199,16 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
     return;
   }
 
+  // Zero disables the timeout, so an expired (negative) one becomes 1ms.
+  auto ms = value.count() < 0 ? 1 : value.count();
 #ifdef _WIN32
   // Windows takes the timeout in milliseconds.
-  DWORD timeoutTV = static_cast<DWORD>(value.count());
+  DWORD timeoutTV = static_cast<DWORD>(
+      std::min<int64_t>(ms, std::numeric_limits<DWORD>::max()));
 #else
   struct timeval timeoutTV = {
-      .tv_sec = value.count() / 1000,
-      .tv_usec = static_cast<suseconds_t>((value.count() % 1000) * 1000),
+      .tv_sec = ms / 1000,
+      .tv_usec = static_cast<suseconds_t>((ms % 1000) * 1000),
   };
 #endif
   for (int opt : {SO_RCVTIMEO, SO_SNDTIMEO}) {
@@ -470,19 +483,42 @@ void TCPStore::prepareClient() {
         addr_.port);
     TCPStoreOptions opts;
     opts.port = addr_.port;
-    opts.timeout = timeout_;
+    // Connecting needs a deadline even with no store timeout.
+    opts.timeout = timeout_ == kNoTimeout ? kDefaultTimeout : timeout_;
     // A backoff as long as the timeout allows a single attempt, so ops fail
-    // fast once the server is gone instead of each retrying until the
+    // fast once the server refuses connections instead of each retrying until
+    // the timeout. If packets are dropped, each op still blocks up to the
     // timeout.
-    auto client = detail::TCPClient::connect(
-        addr_, opts, std::make_shared<FixedBackoff>(timeout_));
-    {
-      const std::lock_guard<std::mutex> lock(clientLock_);
-      client_ = std::move(client);
-    }
+    // The protocol does not identify the server instance, so this may reach a
+    // different server on the same host:port (e.g. a restarted job's store).
+    const auto start = std::chrono::steady_clock::now();
     try {
+      auto client = detail::TCPClient::connect(
+          addr_, opts, std::make_shared<FixedBackoff>(opts.timeout));
+      {
+        const std::lock_guard<std::mutex> lock(clientLock_);
+        client_ = std::move(client);
+      }
       doValidate();
       doPing();
+    } catch (const DistNetworkError& e) {
+      client_->markBroken();
+      // A refused, reset or unresolved attempt is also reported as a connect
+      // timeout of the full deadline, so report the actual elapsed time.
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - start);
+      const std::string reason = dynamic_cast<const TimeoutError*>(&e)
+          ? "connection refused, reset, unresolved or timed out"
+          : e.what_without_backtrace();
+      C10_THROW_ERROR(
+          DistNetworkError,
+          fmt::format(
+              "TCPStore reconnect to {}:{} failed after {}ms: {}",
+              addr_.host,
+              addr_.port,
+              elapsed.count(),
+              reason));
     } catch (...) {
       client_->markBroken();
       throw;
@@ -602,6 +638,7 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   if (response == detail::CheckResponseType::NOT_READY) {
     return false;
   }
+  client_->markBroken();
   TORCH_CHECK_WITH(
       DistStoreError, false, "ready or not_ready response expected");
 }

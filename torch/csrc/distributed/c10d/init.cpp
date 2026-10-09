@@ -1846,6 +1846,8 @@ Example::
               R"(
 Sets the store's default timeout. This timeout is used during initialization and in
 :meth:`~torch.distributed.store.wait` and :meth:`~torch.distributed.store.get`.
+For ``TCPStore`` it also bounds each client send and recv. Calls concurrent with
+in-flight operations are not synchronized.
 
 Arguments:
     timeout (timedelta): timeout to be set in the store.
@@ -2162,7 +2164,7 @@ Arguments:
     port (int): The port on which the server store should listen for incoming requests.
     world_size (int, optional): The total number of store users (number of clients + 1 for the server). Default is None (None indicates a non-fixed number of store users).
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
-    timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
+    timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. On clients it also bounds each send and recv, so operations with several recvs can take longer. After a network or protocol error the operation raises and the next one reconnects; a ``wait``/``barrier`` timeout or empty queue leaves the connection usable. A failed non-idempotent operation (``add``, ``compare_set``, ``append``, ``queue_push``, ``queue_pop``, ``barrier``) may still have been applied, and ordering is not guaranteed across a reconnect. The reconnect may reach a different server on the same host and port, such as a restarted job's store. Default is timedelta(seconds=300)
     wait_for_workers (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
