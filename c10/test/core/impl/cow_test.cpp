@@ -269,6 +269,59 @@ TEST(lazy_clone_storage_test, sets_materializer) {
   ASSERT_TRUE(new_storage->has_materializer());
 }
 
+class FailingAllocator final : public Allocator {
+ public:
+  DataPtr allocate(size_t n) override {
+    TORCH_CHECK(!fail, "injected allocation failure");
+    return GetDefaultCPUAllocator()->allocate(n);
+  }
+
+  void copy_data(void* dest, const void* src, size_t count) const override {
+    default_copy_data(dest, src, count);
+  }
+
+  bool fail = false;
+};
+
+TEST(materialize_test, allocation_failure_keeps_storage_valid) {
+  FailingAllocator allocator;
+  StorageImpl source({}, 4, &allocator, false);
+  std::memcpy(source.mutable_data(), "abcd", 4);
+  auto clone = cow::lazy_clone_storage(source);
+
+  allocator.fail = true;
+  ASSERT_ANY_THROW(clone->mutable_data());
+  ASSERT_THAT(*clone, is_copy_on_write());
+  ASSERT_THAT(source, is_copy_on_write());
+  ASSERT_EQ(clone->data(), source.data());
+
+  allocator.fail = false;
+  ASSERT_NE(clone->mutable_data(), source.data());
+  ASSERT_TRUE(buffers_are_equal(clone->data(), source.data(), 4));
+  allocator.fail = true;
+  const auto* ptr = source.data();
+  ASSERT_EQ(source.mutable_data(), ptr);
+}
+
+TEST(lazy_clone_storage_test, cuda_without_allocator_is_rejected) {
+  auto* bytes = new std::byte[4];
+  StorageImpl storage(
+      {},
+      4,
+      DataPtr(
+          bytes,
+          bytes,
+          +[](void* ptr) { delete[] static_cast<std::byte*>(ptr); },
+          Device(DeviceType::CUDA, 0)),
+      nullptr,
+      false);
+  EXPECT_THAT(
+      [&] { cow::lazy_clone_storage(storage); },
+      testing::ThrowsMessage<c10::Error>(
+          testing::HasSubstr("without an allocator")));
+  EXPECT_FALSE(storage.has_materializer());
+}
+
 TEST(materialize_test, one_shot_materializer) {
   StorageImpl original_storage(
       {}, /*size_bytes=*/4, GetCPUAllocator(), /*resizable=*/false);

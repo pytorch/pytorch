@@ -12,6 +12,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
 namespace c10 {
 
@@ -23,10 +24,16 @@ C10_API void warnDeprecatedDataPtr();
 // used when throwing an exception when data_ptr is accessed.
 struct C10_API StorageExtraMeta {
   std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
+  // Pointer extraction may materialize without ordering previous readers.
+  // Keep their CUDA backing allocations until the logical storage is released.
+  std::vector<DataPtr> cow_retired_data;
+  uint64_t cow_capture_id = 0;
 };
 
 namespace impl::cow {
 C10_API void materialize_cow(StorageImpl* storage);
+C10_API void check_cow_read(const StorageImpl* storage);
+C10_API intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage);
 } // namespace impl::cow
 
 // A storage represents the underlying backing data buffer for a
@@ -98,6 +105,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   void reset() {
     data_ptr_.clear();
+    if (extra_meta_) {
+      extra_meta_->cow_retired_data.clear();
+    }
     size_bytes_ = 0;
     size_bytes_is_heap_allocated_ = false;
   }
@@ -106,6 +116,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     data_ptr_.clear();
+    if (extra_meta_) {
+      extra_meta_->cow_retired_data.clear();
+    }
   }
 
   void incref_pyobject() const noexcept final;
@@ -144,6 +157,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   const at::DataPtr& data_ptr() const {
     if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
       throw_data_ptr_access_error();
+    }
+    if (C10_UNLIKELY(materialize_fn_ == &impl::cow::materialize_cow)) {
+      impl::cow::check_cow_read(this);
     }
     return data_ptr_;
   }
@@ -203,6 +219,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   const void* data() const {
     if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
       throw_data_ptr_access_error();
+    }
+    if (C10_UNLIKELY(materialize_fn_ == &impl::cow::materialize_cow)) {
+      impl::cow::check_cow_read(this);
     }
     return data_ptr_.get();
   }
@@ -364,6 +383,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
  protected:
   friend void c10::impl::cow::materialize_cow(StorageImpl*);
+  friend void c10::impl::cow::check_cow_read(const StorageImpl*);
+  friend intrusive_ptr<StorageImpl> c10::impl::cow::lazy_clone_storage(
+      StorageImpl&);
 
   // Returns the previous data_ptr. Bypasses materialization —
   // only for use by materializer implementations.

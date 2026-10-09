@@ -35,7 +35,7 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_GRAPH, run_tests, IS_JETSON,
+    MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA, TEST_CUDA_GRAPH, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
@@ -56,7 +56,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
-    get_all_device_types, skipXLA, onlyAccelerator)
+    get_all_device_types, skipXLA, onlyAccelerator, skipCUDAIf)
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
@@ -86,6 +86,7 @@ if torch.get_default_dtype() is not torch.float32:
 load_tests = load_tests  # noqa: PLW0127
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
+TEST_CUDAMALLOCASYNC = TEST_CUDA and torch.cuda.get_allocator_backend() == "cudaMallocAsync"
 
 
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
@@ -5090,6 +5091,7 @@ class TestTorchDeviceType(TestCase):
     # that they have to materialize in the expected order.
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
     def test_const_data_ptr(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
 
@@ -5111,6 +5113,7 @@ class TestTorchDeviceType(TestCase):
     # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
     def test_lazy_clone(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
         t_orig_storage_addr = torch._C._storage_address(t)
@@ -5133,6 +5136,7 @@ class TestTorchDeviceType(TestCase):
     # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
     def test_lazy_clone_view(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
         t_orig_storage_addr = torch._C._storage_address(t)
@@ -5160,6 +5164,7 @@ class TestTorchDeviceType(TestCase):
     # See Note [lazy_clone_ tests with inductor enabled]
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
     def test_lazy_clone_view_materialize(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
         t_orig_storage_addr = torch._C._storage_address(t)
@@ -5186,11 +5191,8 @@ class TestTorchDeviceType(TestCase):
 
         clone += torch.ones(1, device=device, dtype=dtype)
 
-        # Writing to `clone` should materialize it, so it should no longer
-        # be COW. However, since `clone`'s storage is the only COW storage
-        # left that holds a reference to the original data pointer, this
-        # materialization should not actually cause a copy--it should
-        # just reuse the original data pointer.
+        # CUDA retains the old allocation for reads submitted before t's
+        # materialization. CPU copies finish synchronously and can release it.
 
         self.assertFalse(torch._C._is_cow_tensor(t))
         self.assertFalse(torch._C._is_cow_tensor(view))
@@ -5202,10 +5204,14 @@ class TestTorchDeviceType(TestCase):
 
         self.assertTrue(torch._C._data_address(t) == t_new_data_addr)
         self.assertTrue(torch._C._data_address(view) == t_new_data_addr)
-        self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
+        if self.device_type == "cuda":
+            self.assertNotEqual(torch._C._data_address(clone), orig_data_ptr)
+        else:
+            self.assertEqual(torch._C._data_address(clone), orig_data_ptr)
 
     @skipXLA
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
     def test_lazy_clone_binary_op_no_materialize(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
         clone = t._lazy_clone()
@@ -5220,6 +5226,7 @@ class TestTorchDeviceType(TestCase):
     @skipXLA
     @skipIfTorchDynamo("Torchdynamo fails and we do not need to test it here anyway")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @skipCUDAIf(TEST_CUDAMALLOCASYNC, "COW requires allocation stream metadata")
     def test_parallel_cow_materialize_error(self, device, dtype):
 
         def run(num_threads, num_parallel, skip_first, should_error):

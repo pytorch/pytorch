@@ -5,10 +5,12 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
 #include <c10/core/alignment.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
@@ -20,6 +22,12 @@
 namespace c10 {
 
 using CaptureId_t = unsigned long long;
+
+struct AllocationStreamInfo {
+  Stream stream;
+  CaptureId_t capture_id;
+  bool private_pool;
+};
 // first is set if the instance is created by CUDAGraph::capture_begin.
 // second is set if the instance is created by at::cuda::graph_pool_handle.
 using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
@@ -222,8 +230,17 @@ struct C10_API Allocator {
   //
   // Requires: src and dest were allocated by this allocator
   // Requires: src and dest both have length >= count
+  // CUDA implementations enqueue the copy on the current stream, including
+  // during capture. The caller is responsible for both allocations' lifetimes.
   virtual void copy_data(void* dest, const void* src, std::size_t count)
       const = 0;
+
+  // The allocation's reuse stream and capture of origin (zero for eager).
+  // Unknown backends cannot safely defer CUDA copies using stream ordering.
+  virtual std::optional<AllocationStreamInfo> allocation_stream_info(
+      const void* /*ptr*/) const {
+    return std::nullopt;
+  }
 
  protected:
   // Uses `std::memcpy` to copy data.

@@ -9,6 +9,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 
 #include <c10/core/Device.h>
@@ -236,6 +237,18 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   bool isStreamCapturing(const Stream& stream) const override {
     CUDAStream cuda_stream{stream};
     return cuda_stream.is_capturing();
+  }
+
+  uint64_t getStreamCaptureId(const Stream& stream) const override {
+    const auto info = captureInfoMayInitCtx(CUDAStream(stream));
+    TORCH_CHECK(
+        info.status != CaptureStatus::Invalidated,
+        "Cannot query the capture ID of an invalidated CUDA graph capture");
+    return info.status == CaptureStatus::Active ? info.id : 0;
+  }
+
+  void waitStream(const Stream& waiter, const Stream& source) const override {
+    stream_wait_stream(CUDAStream(waiter), CUDAStream(source));
   }
 
   void synchronizeEvent(void* event) const override {
