@@ -23377,7 +23377,7 @@ class NoOpFoldingTests(InductorTestCase):
     @parametrize("mutation", ["direct", "view", "unbind"])
     def test_identity_before_mm_preserves_mutated_replacement(self, mutation):
         def fn(x, y):
-            value = x + 0
+            value = x * 1
             if mutation == "view":
                 x.view(-1).add_(10)
             elif mutation == "unbind":
@@ -23392,14 +23392,14 @@ class NoOpFoldingTests(InductorTestCase):
         remove_no_ops(gm, OrderedSet(), OrderedSet())
         gm.recompile()
         self.assertEqual(
-            len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 1
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
         )
         self.assertEqual(gm(x.clone(), y), fn(x.clone(), y))
 
     def test_identity_of_view_before_mm_preserves_base_mutation(self):
         def fn(x, y):
             view = x.view(2, 2)
-            value = view + 0
+            value = view * 1
             x.add_(10)
             return torch.mm(value, y)
 
@@ -23409,7 +23409,7 @@ class NoOpFoldingTests(InductorTestCase):
         remove_no_ops(gm, OrderedSet(), OrderedSet())
         gm.recompile()
         self.assertEqual(
-            len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 1
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
         )
         self.assertEqual(gm(x.clone(), y), fn(x.clone(), y))
 
