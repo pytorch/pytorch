@@ -1012,7 +1012,7 @@ TEST_F(RocmActivityProfilerTest, JsonGPUIDSortTest) {
     }
   }
 
-  // Expect atleast 16 GPU nodes, and 1 or more CPU nodes.
+  // Expect at least 16 GPU nodes, and 1 or more CPU nodes.
   EXPECT_LE(16, sortLabel.size());
   for (int i = 0; i < 16; i++) {
     // Check there are 16 GPU sorts (0-15) with expected sort_index.
