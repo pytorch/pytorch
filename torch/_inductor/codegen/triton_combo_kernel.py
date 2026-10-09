@@ -370,6 +370,7 @@ class ComboKernel(Kernel):
         all_partitions = []
 
         for node in subkernel_nodes:
+            node_features = node_info_map[node].features
             tiled_groups = node_info_map[node].tiling
             node_info = node
 
@@ -379,6 +380,13 @@ class ComboKernel(Kernel):
             ndim = len(tiled_groups)
             if ndim < 2:
                 raise AssertionError(f"Combokernel not support tile {tiled_groups}")
+
+            # Grid-split reductions use program_id(0) as the reduction split.
+            # Combo kernels remap that program id for dispatch, so emit these as
+            # standalone kernels instead.
+            if node_features.get_grid_split() is not None:
+                all_partitions.append([node_info])
+                continue
 
             # Skip multi-axis reductions and 3D pointwise kernels from combo.
             keys = tiled_groups.keys()
