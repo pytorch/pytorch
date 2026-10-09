@@ -393,14 +393,23 @@ class _DDPSink(Function):
     @staticmethod
     def backward(ctx, *grad_outputs):
         # Enqueue delay allreduce for static graph training on the first
-        # iteration.
+        # gradient-syncing iteration.
         ddp_weakref = ctx.ddp_weakref()
         reducer = ddp_weakref.reducer
         static_graph = ddp_weakref.static_graph
         delay_ar_enqueued = (
             static_graph and ddp_weakref._static_graph_delay_allreduce_enqueued
         )
-        if static_graph and not delay_ar_enqueued:
+        # Only enqueue on a syncing backward. Under no_sync() _post_forward skips
+        # prepare_for_backward, so expect_autograd_hooks_ is never set and
+        # enqueueing here would trip its assert in finalize_backward(). Deferring
+        # to the first syncing backward also keeps accumulation correct: the
+        # no_sync backwards accumulate .grad locally and it is all-reduced then.
+        if (
+            static_graph
+            and not delay_ar_enqueued
+            and ddp_weakref.require_backward_grad_sync
+        ):
             Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
                 reducer._delay_all_reduce
             )
