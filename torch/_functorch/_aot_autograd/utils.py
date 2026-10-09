@@ -45,6 +45,7 @@ KNOWN_TYPES = [
     torch.ScriptObject,
 ]
 
+log = logging.getLogger(__name__)
 aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
 annotation_log = getArtifactLogger(__name__, "annotation")
 
@@ -110,6 +111,62 @@ def _get_autocast_states() -> list[Any]:
         torch.get_autocast_dtype("cpu"),
         torch.is_autocast_cache_enabled(),
     ]
+
+
+_compiled_graph_wrapper_init_done = False
+
+
+def _maybe_init_compiled_graph_wrapper() -> None:
+    """Give the fb-only real-input capture one chance to set the hook.
+
+    The module decides for itself whether to register -- it is gated on an env
+    var and declines by default. If it declines, or raises, the hook stays unset
+    and `maybe_wrap_compiled_graph` returns the graph untouched.
+
+    This runs here rather than being left to each job because the point of the
+    env var is that no job should need a code change to become capturable.
+    """
+    global _compiled_graph_wrapper_init_done
+    if _compiled_graph_wrapper_init_done:
+        return
+    _compiled_graph_wrapper_init_done = True
+
+    from torch._environment import is_fbcode
+
+    if not is_fbcode():
+        return
+    try:
+        from torch._inductor.fb.real_input_capture import maybe_install_from_env
+    except ImportError:
+        # ImportError, not ModuleNotFoundError: the module can be present while
+        # the name is not, and a missing name raises the base class. This runs
+        # on the compile path of every fbcode job, so a rename on the consumer
+        # side must degrade to "no capture" rather than break every compile.
+        return
+    try:
+        maybe_install_from_env()
+    except Exception:
+        # Registration must never break a compile.
+        log.debug("real_input_capture install failed", exc_info=True)
+
+
+def maybe_wrap_compiled_graph(compiled: Any, graph_role: str) -> Any:
+    """Apply `config.compiled_graph_wrapper` to a freshly compiled AOT graph.
+
+    Must be called inside `track_graph_compiling`, which is the only scope where
+    `get_aot_graph_name()` is populated. No-op when the hook is unset, which is
+    the default -- a caller opts in by setting the config or the env var.
+    """
+    _maybe_init_compiled_graph_wrapper()
+
+    from torch._functorch import config
+
+    wrapper = config.compiled_graph_wrapper
+    if wrapper is None:
+        return compiled
+    from torch._functorch._aot_autograd.logging_utils import get_aot_graph_name
+
+    return wrapper(compiled, get_aot_graph_name(), graph_role=graph_role)
 
 
 def make_boxed_func(f: Callable[..., Any]) -> Callable[[list[Any]], Any]:
