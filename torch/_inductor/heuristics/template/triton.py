@@ -7,7 +7,7 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 
@@ -18,7 +18,7 @@ from torch.utils._sympy.functions import Min, Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from ... import config
-from ...autows_utils import meta_ws_enabled
+from ...autows_utils import has_two_ctas, meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_tma_mm_template,
@@ -41,6 +41,8 @@ from ...utils import (
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    kpack_supported,
+    mfma_kdim,
     rocm_gfx_arch,
     tdm_descriptor_row_major,
     TMA_DESCRIPTOR_SIZE,
@@ -275,6 +277,7 @@ class BlackwellGPUGemmConfig(GemmConfig):
     use_meta_ws: bool = dataclasses.field(kw_only=True, default=False)
     data_partition_factor: int = dataclasses.field(kw_only=True, default=1)
     separate_epilogue_store: bool = dataclasses.field(kw_only=True, default=False)
+    two_ctas: bool = dataclasses.field(kw_only=True, default=False)
 
 
 # FlexAttention Configs
@@ -960,6 +963,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
@@ -996,6 +1000,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     conf.use_meta_ws,
                     conf.data_partition_factor,
                     conf.separate_epilogue_store,
+                    conf.two_ctas,
                 )
 
             extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
@@ -1022,6 +1027,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["USE_META_WS"] = conf.use_meta_ws
                     kwargs["DATA_PARTITION_FACTOR"] = conf.data_partition_factor
                     kwargs["SEPARATE_EPILOGUE_STORE"] = conf.separate_epilogue_store
+                    kwargs["TWO_CTAS"] = conf.two_ctas
 
                 kwargs.update(extra_kwargs)
 
@@ -1268,7 +1274,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
             scaled_configs = self._prune_reg_spill_configs(scaled_configs)
-        return self._finalize_mm_configs(scaled_configs)
+        return self._finalize_mm_configs(scaled_configs, dtype_size=dtype_size)
 
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
@@ -1680,6 +1686,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         self.default_num_stages = get_backend_num_stages()
 
+        kpack_choices = [1, 2] if kpack_supported() else [1]
+
         self.mm_configs: list[BaseConfig] = [
             ROCmGemmConfig(
                 16, 16, 256, self.default_num_stages, 4, group_m=4, waves_per_eu=2
@@ -1759,7 +1767,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]
             for waves_per_eu in [0, 2]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
         ]
 
         # Architecture-aware default kpack for flex configs
@@ -1879,7 +1887,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
         ]
 
         self.exhaustive_flex_attn_bwd_configs: list[FlexBwDConfig] = [
@@ -1903,7 +1911,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
             if BLOCK_N1 % BLOCK_M1 == 0
             and BLOCK_M2 % BLOCK_N2 == 0  # kernel static assertions
         ]
@@ -2020,25 +2028,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 b_row_major,
             )
 
-    def _prune_exhaustive_configs(
-        self,
-        configs: list[BaseConfig],
-        dtype_size: int,
-    ) -> list[BaseConfig]:
-        # these cause AMD compile to crash
-        pruned_configs = [
-            c
-            for c in configs
-            if not (
-                (
-                    getattr(c, "matrix_instr_nonkdim", 0) == 2
-                    and getattr(c, "kpack", 0) == 2
-                )
-                or (c.block_k <= 16 and getattr(c, "kpack", 0) == 2)
-            )
-        ]
-        return pruned_configs
-
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         ROCm specific filtering
@@ -2050,6 +2039,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
@@ -2067,13 +2057,35 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             waves_per_eu: int = getattr(conf, "waves_per_eu", 0)
             # Use explicit kpack if set, otherwise determine optimal value based on
             # architecture and BLOCK_K
-            kpack: int = getattr(conf, "kpack", get_default_kpack(conf.block_k))
+            explicit_kpack = getattr(conf, "kpack", None)
+            kpack: int = explicit_kpack or get_default_kpack(conf.block_k)
+            kdim = mfma_kdim(dtype_size, matrix_instr_nonkdim)
+
+            # Policy: mfma_kdim returns None for a dtype not in the CDNA MFMA
+            # table (e.g. fp64, or an unspecified dtype_size=0). Without the true
+            # MFMA K-extent we cannot decide whether a kpack pack underfills the
+            # operand, so we skip the kpack underfill check rather than guessing
+            # from matrix_instr_nonkdim (which over-prunes small-kdim dtypes).
+            if kdim is None:
+                underfills_mfma = False
+            else:
+                underfills_mfma = kpack > 1 and conf.block_k < kpack * kdim
+
+            # A default kpack that would underfill is dropped to 1
+            # so a valid config is emitted instead of being pruned. An explicitly
+            # requested kpack that underfills is left to be pruned below.
+            if explicit_kpack is None and underfills_mfma:
+                kpack = 1
+                underfills_mfma = False
 
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
                 or conf.block_n % matrix_instr_nonkdim != 0
+                or underfills_mfma
             ):
                 #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                #  an explicitly requested kpack > 1 must supply kpack whole MFMA
+                #  K-steps (kpack * kdim) or packing miscompiles
                 continue
 
             # Construct key for finding duplicate configs
@@ -2356,13 +2368,6 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         return flex_decode_configs
 
-    def _prune_exhaustive_configs(
-        self,
-        configs: list[BaseConfig],
-        dtype_size: int,
-    ) -> list[BaseConfig]:
-        return configs
-
 
 class MTIAConfigHeuristic(BaseConfigHeuristic):
     """
@@ -2391,6 +2396,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     default_num_stages: int
     exhaustive_configs: list[BaseConfig]
     uses_tdm_configs: bool
+    blackwell_persistent_mm_configs: list[BaseConfig]
     _get_exceeding_shared_memory_checker: Callable[
         [bool, int], Callable[[BaseConfig, int], bool] | None
     ]
@@ -2987,6 +2993,11 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            raise AssertionError("Blackwell GEMM requires MMKernelInputs")
+        _, mat2 = kernel_inputs.mat1mat2()
+        element_size = mat2.get_dtype().itemsize
+
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
@@ -2996,7 +3007,9 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             use_meta_ws = template_kwargs.get("USE_META_WS", False)
             # autoWS configs come from a full sweep; drop combos the lowering
             # does not support so no invalid config reaches codegen.
-            if use_meta_ws and not self._autows_constraints_ok(template_kwargs):
+            if use_meta_ws and not self._autows_constraints_ok(
+                template_kwargs, element_size=element_size
+            ):
                 continue
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
@@ -3008,75 +3021,109 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 template_kwargs.get("WARP_SPECIALIZE", True)
                 and not constraints_violated
             )
-            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True
+            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True.
+            # The Meta WS knob is global in Triton, so it rewrites every WS kernel,
+            # not just the use_meta_ws configs.
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and not use_meta_ws
+                and not (use_meta_ws or USE_META_WS)
             )
-            yield {
+            two_ctas = template_kwargs.get("TWO_CTAS", False)
+            out = {
                 **template_kwargs,
-                "NUM_SMS": get_num_sms(),
+                "NUM_SMS": get_num_sms(two_ctas=two_ctas),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
                 "HOST_SIDE_TMA": config.triton.enable_host_side_tma,
             }
+            if two_ctas:
+                out["ctas_per_cga"] = (2, 1, 1)
+            yield out
 
     @staticmethod
-    def _autows_constraints_ok(template_kwargs: dict[str, Any]) -> bool:
+    def _autows_constraints_ok(
+        template_kwargs: dict[str, Any], *, element_size: int
+    ) -> bool:
         """autoWS lowering constraints; swept configs violating these are pruned."""
         block_m = template_kwargs["BLOCK_M"]
         block_n = template_kwargs["BLOCK_N"]
         subtile = template_kwargs.get("EPILOGUE_SUBTILE", 1)
+        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
         # each epilogue subtile is BLOCK_N // EPILOGUE_SUBTILE wide
         if block_n // subtile < 32:
             return False
         # dp=2 splits the row tile into two MMA partitions; BLOCK_M=64 fails in
         # the fb-triton WS pass pipeline, so keep the tile at 128 or 256
-        dp = template_kwargs.get("DATA_PARTITION_FACTOR", 1)
         if dp == 2 and block_m not in (128, 256):
             return False
+        if template_kwargs.get("TWO_CTAS", False):
+            # This MetaWS 2CTA template currently requires TMA epilogue stores.
+            if not (has_two_ctas() and config.triton.enable_template_tma_store):
+                return False
+            # 2CTA halves B along N. Each CTA's slice must still span at least
+            # 128 bytes to use the required swizzle.
+            if block_m < 128 or (block_n // 2) * element_size < 128:
+                return False
         return True
 
-    def _get_config_generator(
-        self,
-    ) -> partial[Generator[TritonConfig, None, None]]:
-        # No curated autoWS set yet: sweep the full autoWS space for both default
-        # and exhaustive search, and let _get_template_configs_impl prune it.
+    def _get_config_generator(self) -> partial[Generator[TritonConfig, None, None]]:
         if _use_template_autows():
-            return partial(
-                self.preprocess_mm_configs, configs=self._generate_autows_configs()
+            configs = (
+                self._generate_autows_exhaustive_configs()
+                if config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+                else self._generate_autows_configs()
             )
+            return partial(self.preprocess_mm_configs, configs=configs)
         return super()._get_config_generator()
 
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        """The Blackwell persistent set crossed with the autoWS-specific knobs."""
+        base = cast(list[BlackwellGPUGemmConfig], self.blackwell_persistent_mm_configs)
+        return [
+            dataclasses.replace(
+                cfg,
+                use_meta_ws=True,
+                flatten=False,
+                separate_epilogue_store=True,
+                data_partition_factor=data_partition_factor,
+                two_ctas=two_ctas,
+            )
+            for cfg in base
+            for data_partition_factor in [1, 2]
+            for two_ctas in [False, True]
+        ]
+
     @staticmethod
-    def _generate_autows_configs() -> list[BaseConfig]:
+    def _generate_autows_exhaustive_configs() -> list[BaseConfig]:
         configs: list[BaseConfig] = []
         for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
             [32, 64, 128, 256], repeat=3
         ):
-            for num_stages in [2, 3, 4, 5, 6]:
+            for num_stages in [2, 3, 4, 5, 6, 7, 8]:
                 # AutoWS doesn't work with num_warps < 4
                 for num_warps in [4, 8]:
                     for epilogue_subtile in [1, 2, 4, 8]:
                         for data_partition_factor in [1, 2]:
                             for separate_epilogue_store in [False, True]:
-                                configs.append(
-                                    BlackwellGPUGemmConfig(
-                                        block_m=BLOCK_M,
-                                        block_n=BLOCK_N,
-                                        block_k=BLOCK_K,
-                                        num_stages=num_stages,
-                                        num_warps=num_warps,
-                                        group_m=8,
-                                        epilogue_subtile=epilogue_subtile,
-                                        use_meta_ws=True,
-                                        data_partition_factor=data_partition_factor,
-                                        separate_epilogue_store=separate_epilogue_store,
-                                        warp_specialize=True,
-                                        flatten=False,
+                                for two_ctas in [False, True]:
+                                    configs.append(
+                                        BlackwellGPUGemmConfig(
+                                            block_m=BLOCK_M,
+                                            block_n=BLOCK_N,
+                                            block_k=BLOCK_K,
+                                            num_stages=num_stages,
+                                            num_warps=num_warps,
+                                            group_m=8,
+                                            epilogue_subtile=epilogue_subtile,
+                                            use_meta_ws=True,
+                                            data_partition_factor=data_partition_factor,
+                                            separate_epilogue_store=separate_epilogue_store,
+                                            two_ctas=two_ctas,
+                                            warp_specialize=True,
+                                            flatten=False,
+                                        )
                                     )
-                                )
         return configs
 
     @staticmethod
@@ -3537,6 +3584,53 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
         self.mm_configs = self.blackwell_persistent_mm_configs
         self.exhaustive_configs = self._generate_exhaustive_configs()
 
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        return [
+            BlackwellGPUGemmConfig(
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile=epilogue_subtile,
+                data_partition_factor=data_partition_factor,
+                separate_epilogue_store=separate_epilogue_store,
+                two_ctas=two_ctas,
+                use_meta_ws=True,
+                flatten=False,
+            )
+            for (
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile,
+                data_partition_factor,
+                separate_epilogue_store,
+                two_ctas,
+            ) in [
+                (64, 32, 256, 4, 4, 1, 1, True, False),
+                (128, 64, 64, 8, 4, 1, 1, True, False),
+                (128, 256, 64, 7, 8, 8, 1, False, True),
+                (128, 64, 64, 8, 4, 2, 1, False, False),
+                (128, 256, 64, 6, 8, 8, 2, False, True),
+                (32, 32, 256, 2, 4, 1, 1, True, False),
+                (32, 32, 256, 4, 4, 1, 1, True, False),
+                (128, 128, 128, 4, 4, 4, 2, True, True),
+                (128, 256, 128, 3, 4, 8, 2, False, True),
+                (64, 128, 128, 3, 4, 2, 1, True, False),
+                (128, 256, 128, 3, 4, 8, 1, False, True),
+                (128, 256, 64, 7, 4, 8, 1, False, True),
+                (128, 256, 64, 5, 4, 4, 2, False, True),
+                (128, 256, 128, 2, 4, 4, 1, False, True),
+                (256, 256, 64, 5, 4, 8, 2, False, False),
+                (128, 256, 64, 6, 8, 8, 1, False, True),
+                (64, 64, 256, 4, 4, 1, 1, True, False),
+                (256, 128, 64, 4, 4, 4, 2, True, False),
+            ]
+        ]
+
 
 @register_template_heuristic(
     persistent_tma_mm_template.uid,
@@ -3569,6 +3663,53 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
             + self.blackwell_persistent_addmm_configs
         )
         self.exhaustive_configs = self._generate_exhaustive_configs()
+
+    def _generate_autows_configs(self) -> list[BaseConfig]:
+        return [
+            BlackwellGPUGemmConfig(
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile=epilogue_subtile,
+                data_partition_factor=data_partition_factor,
+                separate_epilogue_store=separate_epilogue_store,
+                two_ctas=two_ctas,
+                use_meta_ws=True,
+                flatten=False,
+            )
+            for (
+                block_m,
+                block_n,
+                block_k,
+                num_stages,
+                num_warps,
+                epilogue_subtile,
+                data_partition_factor,
+                separate_epilogue_store,
+                two_ctas,
+            ) in [
+                (64, 32, 256, 4, 4, 1, 1, True, False),
+                (256, 128, 64, 4, 4, 4, 2, True, False),
+                (256, 256, 64, 2, 8, 2, 2, True, True),
+                (128, 64, 64, 8, 4, 1, 1, True, False),
+                (128, 256, 64, 7, 4, 8, 1, True, True),
+                (32, 32, 256, 2, 4, 1, 1, True, False),
+                (32, 32, 64, 2, 4, 1, 1, True, False),
+                (128, 256, 64, 7, 4, 8, 2, False, True),
+                (128, 256, 64, 7, 4, 8, 2, True, True),
+                (256, 256, 64, 6, 4, 8, 2, False, True),
+                (128, 128, 128, 4, 4, 4, 2, True, True),
+                (32, 64, 32, 2, 4, 1, 1, True, False),
+                (256, 128, 64, 4, 4, 2, 2, True, False),
+                (64, 32, 256, 5, 4, 1, 1, True, False),
+                (128, 256, 64, 5, 4, 4, 1, False, True),
+                (128, 256, 64, 7, 4, 8, 1, False, True),
+                (128, 128, 64, 8, 4, 1, 1, True, False),
+                (64, 64, 256, 7, 4, 1, 1, True, False),
+            ]
+        ]
 
 
 @register_template_heuristic(
