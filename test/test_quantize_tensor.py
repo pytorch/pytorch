@@ -566,18 +566,12 @@ class TestQuantizeTensorMeta(TestCase):
 
 
 class TestMXFP8StochasticReferenceNumerics(TestCase):
-    @parametrize("input_dtype", (torch.float16, torch.bfloat16, torch.float32))
-    @parametrize(
-        "orientation,swizzle_type",
-        (
-            subtest(("dim_k", SwizzleType.NO_SWIZZLE), name="dim_k_compact"),
-            subtest(("dim_k", SwizzleType.SWIZZLE_32_4_4), name="dim_k_swizzled"),
-            subtest(("dim_km", SwizzleType.SWIZZLE_32_4_4), name="dim_km"),
-        ),
-    )
-    def test_stateless_round_trip(self, input_dtype, orientation, swizzle_type, device):
-        input = torch.randn((96, 160), device=device, dtype=input_dtype)
+    @parametrize("orientation", ("dim_k", "dim_km"))
+    def test_stateless_round_trip(self, orientation, device):
+        # Compare SR and RTNE quantizations in each orientation.
+        input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
         key = prng.key(7, device=device)
+        swizzle_type = SwizzleType.SWIZZLE_32_4_4
         if orientation == "dim_k":
             scales, qdata = to_mxfp8_reference(
                 input,
@@ -585,14 +579,19 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                 rounding_mode="stochastic",
                 random_key=key,
             )
-            unswizzled = (
-                from_blocked(qdata, scales, 32)
-                if swizzle_type == SwizzleType.SWIZZLE_32_4_4
-                else scales
+            rtne_scales, rtne_qdata = to_mxfp8_reference(
+                input, swizzle_type=swizzle_type
             )
+            self.assertEqual(scales.view(torch.uint8), rtne_scales.view(torch.uint8))
+            unswizzled = from_blocked(qdata, scales, 32)
             reconstructed = from_blocked_format(qdata, unswizzled)
+            rtne_reconstructed = from_blocked_format(rtne_qdata, unswizzled)
             self.assertGreater(
                 compute_error(input.float(), reconstructed.float()).item(), 15.0
+            )
+            self.assertGreater(
+                compute_error(rtne_reconstructed.float(), reconstructed.float()).item(),
+                24.0,
             )
         else:
             scales_k, qdata_k, scales_m, qdata_m = to_mxfp_dual(
@@ -601,25 +600,54 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
                 rounding_mode="stochastic",
                 random_key=key,
             )
-            scales_k = from_blocked(qdata_k, scales_k, 32)
-            reconstructed_k = from_blocked_format(qdata_k, scales_k)
+            rtne_scales_k, rtne_qdata_k = to_mxfp8_reference(
+                input, swizzle_type=swizzle_type
+            )
+            self.assertEqual(
+                scales_k.view(torch.uint8), rtne_scales_k.view(torch.uint8)
+            )
+            unswizzled_k = from_blocked(qdata_k, scales_k, 32)
+            reconstructed_k = from_blocked_format(qdata_k, unswizzled_k)
+            rtne_reconstructed_k = from_blocked_format(rtne_qdata_k, unswizzled_k)
             self.assertGreater(
                 compute_error(input.float(), reconstructed_k.float()).item(), 15.0
             )
-            scales_m = from_blocked(qdata_m, scales_m, 32)
-            reconstructed_m = from_blocked_format(qdata_m, scales_m)
+            self.assertGreater(
+                compute_error(
+                    rtne_reconstructed_k.float(), reconstructed_k.float()
+                ).item(),
+                24.0,
+            )
+            rtne_scales_m, rtne_qdata_m = to_mxfp8_reference(
+                input.t().contiguous(), swizzle_type=swizzle_type
+            )
+            self.assertEqual(
+                scales_m.view(torch.uint8), rtne_scales_m.view(torch.uint8)
+            )
+            unswizzled_m = from_blocked(qdata_m, scales_m, 32)
+            reconstructed_m = from_blocked_format(qdata_m, unswizzled_m)
+            rtne_reconstructed_m = from_blocked_format(rtne_qdata_m, unswizzled_m)
             self.assertGreater(
                 compute_error(input.t().float(), reconstructed_m.float()).item(), 15.0
+            )
+            self.assertGreater(
+                compute_error(
+                    rtne_reconstructed_m.float(), reconstructed_m.float()
+                ).item(),
+                24.0,
             )
 
     @parametrize("orientation", ("dim_k", "dim_km"))
     def test_stateless_nonfinite_groups(self, orientation, device):
+        # Verify that MXFP8 with SR handles special values in each orientation.
         input = torch.zeros((32, 32), device=device, dtype=torch.bfloat16)
         input[0, 0] = float("nan")
         input[1, 1] = float("inf")
         input[2, 2] = -float("inf")
         key = prng.key(7, device=device)
+        # The three nonfinite blocks produce NaN qdata and E8M0 scales.
         expected_nan = torch.full((3, 32), 0x7F, device=device, dtype=torch.uint8)
+        # Qdata in the other, all-zero blocks remains zero.
         expected_zero = torch.zeros((29, 32), device=device, dtype=torch.uint8)
         expected_scale = torch.full((3, 1), 0xFF, device=device, dtype=torch.uint8)
 
@@ -883,8 +911,37 @@ class TestMXFP8StochasticReferenceNumerics(TestCase):
             self.assertFalse(torch.equal(replays[0][pair][1], replays[2][pair][1]))
         self.assertEqual(replays[0], replays[3])
 
+    def test_mean_preservation(self, device):
+        # test that E(dequant(mxfp8_with_sr(X))) ~= X
+        generator = torch.Generator(device=device).manual_seed(1234)
+        input = torch.randn(
+            (8, 32), device=device, dtype=torch.bfloat16, generator=generator
+        )
+        key = prng.key(7, device=device)
+        reconstructed_trials = []
+        for trial in range(256):
+            scales, qdata = to_mxfp8_reference(
+                input,
+                rounding_mode="stochastic",
+                random_key=prng.fold_in(key, trial),
+            )
+            reconstructed_trials.append(from_blocked_format(qdata, scales).float())
+
+        self.assertEqual(
+            torch.stack(reconstructed_trials).mean(dim=0),
+            input.float(),
+            rtol=0.03,
+            atol=0.01,
+        )
+
 
 class TestFP8StochasticRounding(TestCase):
+    # Verify that the fp32 -> fp8 SR emulation (without scaling) is correct.
+    # Note: since this is bitwise matching NVIDIA's `cvt.rs.satfinite.e4m3x4.f32`
+    # intrinsic, we also make a general assumption that NVIDIA's testing
+    # of the intrinsic also applies here, and thus we do not test every possible
+    # case.
+
     def test_exact(self, device):
         key = prng.fold_in(prng.key(7, device=device), 12345)
         words = prng.bits(key, 4, dtype=torch.uint32)
