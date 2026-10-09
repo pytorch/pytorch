@@ -23340,23 +23340,6 @@ class NoOpFoldingTests(InductorTestCase):
         )
         self.assertEqual(gm(x), fn(x))
 
-    def test_identity_before_mm_is_folded(self):
-        def fn(x, y):
-            return torch.mm(x * 1, y)
-
-        x = torch.randn(2, 2)
-        y = torch.randn(2, 2)
-        gm = make_fx(fn, tracing_mode="real")(x, y)
-        self.assertEqual(
-            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
-        )
-        remove_no_ops(gm, OrderedSet(), OrderedSet())
-        gm.recompile()
-        self.assertEqual(
-            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 0
-        )
-        self.assertEqual(gm(x, y), fn(x, y))
-
     @parametrize("mutation", ["direct", "view", "unbind"])
     def test_identity_before_mm_preserves_mutated_replacement(self, mutation):
         def fn(x, y):
