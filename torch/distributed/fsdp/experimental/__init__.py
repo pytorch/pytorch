@@ -29,7 +29,6 @@ import torch
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
-    _default_reduce_scatter_input_fn,
     AllGatherOutputFn,
     PrepareReduceScatterInputsFn,
 )
@@ -82,10 +81,7 @@ def reduce_scatter_input_fn_with_native_copy(
 
     Contiguous nonzero-dimension shards copy directly into the collective buffer.
     Noncontiguous gradients use the existing chunk-and-concatenate reorder.
-    Groups with mixed gradient dtypes use the default copy-in.
     """
-    if len({grad.dtype for grad in unsharded_grads}) > 1:
-        return _default_reduce_scatter_input_fn(unsharded_grads, shard_dims, world_size)
     num_leading_dims = [0] * len(unsharded_grads)
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
@@ -98,11 +94,12 @@ def reduce_scatter_input_fn_with_native_copy(
                 unsharded_grads[i] = torch.cat(chunks, dim=0)
 
     def copy_in(output: torch.Tensor) -> None:
-        torch.ops.fsdp._reduce_scatter_copy_in_(
-            output.view(world_size, -1),
+        torch.ops.fsdp.chunk_cat_mixed_dtype(
             unsharded_grads,
-            num_leading_dims,
-            world_size,
+            dim=0,
+            num_chunks=world_size,
+            out=output.view(world_size, -1),
+            num_leading_dims=num_leading_dims,
         )
 
     return copy_in
