@@ -11,6 +11,7 @@ import itertools
 import keyword
 import math
 import operator
+import os
 import random
 import sys
 import types
@@ -27,6 +28,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
+from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
@@ -223,6 +225,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = inline_ignore(x)
         x = inline_unused(x)
         return
+
+    def test_script_function_graph_break(self):
+        @torch.jit.script
+        def scripted():
+            if torch.jit.is_scripting():
+                return 1
+            print("unreachable")
+            return 2
+
+        def fn():
+            return scripted()
+
+        self.assertEqual(torch.compile(fn, backend="eager")(), 1)
 
     @make_test
     def test_inline_script_if_tracing_fn_with_default_args(a, b):
@@ -2350,6 +2365,150 @@ partial_fn = functools.partial(fn, scale=2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    @parametrize("wrapped", (False, True))
+    def test_inspect_signature_skip_function(self, wrapped):
+        def fn(x):
+            target = torch.fx.Node.__init__
+            if wrapped:
+                target = torch.no_grad()(target)
+            return x + 1, str(inspect.signature(target))
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(1)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        with patch.object(
+            torch.fx.Node.__init__, "__signature__", inspect.Signature(), create=True
+        ):
+            self.assertEqual(fn(x), opt_fn(x))
+
+        if wrapped:
+
+            def user_fn(x):
+                return x
+
+            def identity_fn(x):
+                target = torch.no_grad()(torch.fx.Node.__init__)
+                alias = target
+                other = torch.no_grad()(torch.fx.Node.__init__)
+                user_target = torch.no_grad()(user_fn)
+                return x + 1, (
+                    target is alias,
+                    target.__wrapped__ is torch.fx.Node.__init__,
+                    target.__wrapped__ is target,
+                    target is target.__wrapped__,
+                    target is other,
+                    target is user_target,
+                    user_target is target,
+                )
+
+            opt_identity_fn = torch.compile(
+                identity_fn, backend="eager", fullgraph=True
+            )
+            self.assertEqual(identity_fn(x), opt_identity_fn(x))
+
+    @parametrize(
+        "target",
+        (torch.fx.Node.__init__, os.getpid, str.join, int.__add__),
+        name_fn=lambda target: type(target).__name__,
+    )
+    def test_skip_function_missing_attr_error(self, target):
+        def fn(x):
+            try:
+                target.__missing_attribute__
+            except AttributeError as exc:
+                return x + 1, exc.args, exc.name, exc.obj
+
+        x = torch.ones(1)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(expected[:3], actual[:3])
+        self.assertIs(expected[3], actual[3])
+
+    @parametrize(
+        "target",
+        (torch.fx.Node.__init__, os.getpid, str.join, int.__add__),
+        name_fn=lambda target: type(target).__name__,
+    )
+    def test_wrapped_skip_function_metadata(self, target):
+        def fn(x):
+            wrapped = torch.no_grad()(target)
+            return (
+                x + 1,
+                wrapped.__qualname__.upper(),
+                wrapped.__module__.split("."),
+                wrapped.__name__.startswith("__"),
+                len(wrapped.__doc__),
+            )
+
+        counter = CompileCounterWithBackend("eager")
+        fullgraph = hasattr(target, "__module__")
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=fullgraph)
+        x = torch.ones(1)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x + 1), opt_fn(x + 1))
+        if fullgraph:
+            self.assertEqual(counter.frame_count, 1)
+
+    @parametrize(
+        "target",
+        (torch.fx.Node.__init__, os.getpid, str.join, int.__add__),
+        name_fn=lambda target: type(target).__name__,
+    )
+    def test_wrapped_skip_function_defaultdict(self, target):
+        def fn(x):
+            wrapped = torch.no_grad()(target)
+            try:
+                dd = collections.defaultdict(wrapped)
+                result = len(dd), dd.default_factory is wrapped
+            except TypeError:
+                result = "TypeError"
+            return x + 1, result
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
+
+    @parametrize("consumer", ("dict", "vars", "closure", "instancecheck"))
+    def test_wrapped_skip_function_runtime_attributes(self, consumer):
+        target = torch.fx.Node.__init__
+
+        class Meta(type):
+            def __instancecheck__(cls, obj):
+                return obj is target
+
+        class Marker(metaclass=Meta):
+            pass
+
+        def fn(x):
+            result = x + 1
+            wrapped = torch.no_grad()(target)
+            if consumer in ("dict", "vars"):
+                attributes = wrapped.__dict__ if consumer == "dict" else vars(wrapped)
+                return result, len(attributes), "__wrapped__" in attributes
+            if consumer == "closure":
+                return result, wrapped.__closure__ is target.__closure__
+            return result, isinstance(wrapped, Marker)
+
+        counter = CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(
+            fn, backend=counter, fullgraph=consumer == "instancecheck"
+        )
+        x = torch.ones(1)
+        self.assertEqual(fn(x), opt_fn(x))
+        if consumer == "instancecheck":
+            self.assertEqual(counter.frame_count, 1)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_wrapped_skip_function_metadata_in_helper(self):
+        def helper(x, target):
+            return x + 1 if target.__name__.startswith("__") else x - 1
+
+        def fn(x):
+            return helper(x, torch.no_grad()(torch.fx.Node.__init__))
+
+        x = torch.ones(1)
+        self.assertEqual(fn(x), torch.compile(fn, backend="eager", fullgraph=True)(x))
 
     def test_default_dict_constr(self):
         param = torch.nn.Parameter(torch.ones([2, 2]))
@@ -7615,6 +7774,109 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
         x = torch.randn(1)
         self.assertEqual(opt_mod(x), x + 1)
+
+    def test_type_dynamic_class_creation(self):
+        def fn(x):
+            cls = type("Generated", (), {"value": 1})
+            return x + 1, cls
+
+        def fullgraph_fn(x):
+            cls = type("Generated", (), {"value": 1})
+            return x + 1, cls
+
+        def invalid_fn(x):
+            try:
+                type(comptime, (), {})
+            except TypeError:
+                return x + 1
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(Unsupported, "Dynamic class creation with type"):
+            torch.compile(invalid_fn, backend="eager", fullgraph=True)(x)
+
+        invalid_counter = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(
+            torch.compile(invalid_fn, backend=invalid_counter)(x),
+            x + 1,
+        )
+        self.assertEqual(invalid_counter.frame_count, 0)
+
+        with self.assertRaisesRegex(Unsupported, "Dynamic class creation with type"):
+            torch.compile(fullgraph_fn, backend="eager", fullgraph=True)(x)
+
+        eager_cls = fn(x)[1]
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        num_calls = torch._dynamo.config.recompile_limit + 1
+        classes = [opt_fn(x)[1] for _ in range(num_calls)]
+
+        self.assertEqual(len(set(classes)), num_calls)
+        self.assertEqual(counter.frame_count, 0)
+        self.assertEqual(classes[0].__module__, eager_cls.__module__)
+        self.assertEqual(classes[0].__qualname__, eager_cls.__qualname__)
+
+    @parametrize("variant", ("name", "bases", "namespace", "keyword"))
+    def test_type_dynamic_class_creation_subclasses_and_kwargs(self, variant):
+        calls = []
+
+        class Base:
+            def __init_subclass__(cls, *, flag=None):
+                calls.append(flag)
+                cls.flag = flag
+
+        class Name(str):
+            __slots__ = ()
+
+        class Bases(tuple):
+            __slots__ = ()
+
+        class Namespace(dict):
+            pass
+
+        name = Name("Generated") if variant == "name" else "Generated"
+        bases = Bases((Base,)) if variant == "bases" else (Base,)
+        namespace = Namespace(value=1) if variant == "namespace" else {"value": 1}
+        kwargs = {"flag": True} if variant == "keyword" else {}
+
+        def fn(x):
+            return x + 1, type(name, bases, namespace, **kwargs)
+
+        def fullgraph_fn(x):
+            return x + 1, type(name, bases, namespace, **kwargs)
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(Unsupported, "Dynamic class creation with type"):
+            torch.compile(fullgraph_fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(calls, [])
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        results = [opt_fn(x) for _ in range(2)]
+        classes = [result[1] for result in results]
+        self.assertEqual([result[0] for result in results], [x + 1, x + 1])
+        self.assertIsNot(classes[0], classes[1])
+        self.assertEqual(counter.frame_count, 0)
+        expected_flag = True if variant == "keyword" else None
+        self.assertEqual(calls, [expected_flag, expected_flag])
+        self.assertEqual([cls.flag for cls in classes], [expected_flag, expected_flag])
+
+    def test_type_dynamic_class_creation_inlined(self):
+        def fn(module, x):
+            torch.nn.utils.parametrize._inject_new_class(module)
+            return x + 1, type(module)
+
+        x = torch.ones(1)
+        eager_module = torch.nn.Linear(1, 1)
+        fn(eager_module, x)
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        num_calls = torch._dynamo.config.recompile_limit + 1
+        results = [opt_fn(torch.nn.Linear(1, 1), x) for _ in range(num_calls)]
+        classes = [result[1] for result in results]
+        self.assertEqual([result[0] for result in results], [x + 1] * num_calls)
+        self.assertEqual(len(set(classes)), num_calls)
+        self.assertEqual(counter.frame_count, 0)
+        self.assertEqual(classes[0].__module__, type(eager_module).__module__)
 
     def test_property_functools_partial(self):
         def p_getter(obj, *, delta: int):

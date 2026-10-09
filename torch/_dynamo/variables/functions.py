@@ -2661,6 +2661,41 @@ class SkipFunctionVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
+    def get_source(self) -> Source | None:
+        return self.source
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        if not isinstance(self.value, types.FunctionType):
+            return None
+        fn_dict = self.value.__dict__
+        if name not in fn_dict:
+            return None
+        source = self.get_source()
+        source = AttrSource(source, name) if source is not None else None
+        if source is not None:
+            return variables.LazyVariableTracker.create(fn_dict[name], source, tx=tx)
+        return VariableTracker.build(tx, fn_dict[name])
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        if not is_function(self.value):
+            return None
+        source = self.get_source()
+        if source is not None:
+            install_guard(
+                source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+            )
+        msg = f"'{type(self.value).__name__}' object has no attribute '{name}'"
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[msg],
+            kwargs={"name": ConstantVariable.create(name), "obj": self},
+        )
+
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "SkipFunctionVariable":
         # Use closure match guard (i.e. guard on __code__ object instead of
@@ -2963,6 +2998,33 @@ class SkipFunctionVariable(VariableTracker):
 
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
+    _cpython_type = types.FunctionType
+
+    def _get_copied_attr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        if not hasattr(self.value, name):
+            return None
+        return self.wrapped.tp_getattro_impl(tx, name)
+
+    # functools.wraps copies these attributes, not the function's backing object.
+    tp_getset = {
+        "__name__": GetSet(
+            lambda s, tx: s._get_copied_attr(tx, "__name__"), unmodeled_setter
+        ),
+        "__qualname__": GetSet(
+            lambda s, tx: s._get_copied_attr(tx, "__qualname__"), unmodeled_setter
+        ),
+    }
+    tp_members = {
+        "__module__": Member(
+            lambda s, tx: s._get_copied_attr(tx, "__module__"), unmodeled_setter
+        ),
+        "__doc__": Member(
+            lambda s, tx: s._get_copied_attr(tx, "__doc__"), unmodeled_setter
+        ),
+    }
+
     def __init__(
         self,
         wrapped: SkipFunctionVariable,
@@ -2974,6 +3036,37 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
         super().__init__(wrapped.value, reason=wrapped.reason, **kwargs)
         self.wrapped = wrapped
         self.context = context
+
+    def get_source(self) -> Source | None:
+        return self.wrapped.get_source()
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        if name == "__wrapped__":
+            return self.wrapped
+        return super().lookup_instance_dict(tx, name)
+
+    def get_real_python_backed_value(self) -> object:
+        return NO_SUCH_SUBOBJ
+
+    def as_python_constant(self) -> Never:
+        raise AsPythonConstantNotImplementedError(self)
+
+    def python_type(self) -> type:
+        return types.FunctionType
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "__dict__":
+            unimplemented(
+                gb_type="Skipped function wrapper __dict__ access",
+                context=f"{self}",
+                explanation="Dynamo does not model the copied dictionary of this function wrapper.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().tp_getattro_impl(tx, name)
 
     def call_function(
         self,
@@ -3109,10 +3202,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
-        # Inner torch.compile wrapper: disable nested graph breaks to
-        # preserve the inner compile's semantics (e.g. fullgraph=True).
-        # Graph breaks inside the inner function should raise Unsupported
-        # so they're handled by the outer frame, not as nested breaks.
+        # Do not resume inside _torchdynamo_inline when the wrapper changes call
+        # semantics. Inner torch.compile preserves options such as fullgraph,
+        # while ScriptFunction must preserve TorchScript semantics.
         # Skip this for recursive calls to the same compiled function
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
@@ -3129,7 +3221,10 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         )
         polyfill = (
             polyfills.getattr_and_trace_no_nested_graph_breaks
-            if is_inner_torch_compile
+            if (
+                is_inner_torch_compile
+                or isinstance(self.wrapper_obj, torch.jit.ScriptFunction)
+            )
             else polyfills.getattr_and_trace
         )
         return VariableTracker.build(

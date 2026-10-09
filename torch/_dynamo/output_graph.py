@@ -3776,6 +3776,37 @@ err_epilogue = (
 )
 
 
+def resolve_op_overload(
+    output_graph: OutputGraph,
+    target: torch._ops.OpOverloadPacket,
+    args: Any,
+    kwargs: Any,
+) -> torch._ops.OpOverload:
+    overloads = tuple(target.overloads())
+    if len(overloads) == 1:
+        return getattr(target, overloads[0])
+
+    args, kwargs = torch.fx.node.map_aggregate(
+        (args, kwargs),
+        lambda arg: arg.node if isinstance(arg, torch.fx.Proxy) else arg,
+    )
+    args, kwargs = torch._dynamo.utils.get_fake_values_from_nodes(
+        output_graph.current_tx, (args, kwargs), False
+    )
+    try:
+        overload = torch._C._jit_resolve_packet(
+            target._qualified_op_name, *args, **kwargs
+        )
+    except RuntimeError as e:
+        unimplemented(
+            gb_type="Error when attempting to resolve op packet",
+            context="",
+            explanation=str(e),
+            hints=[],
+        )
+    return getattr(target, overload)
+
+
 def check_pt2_compliant_op(
     output_graph: OutputGraph, kind: str, target: Any, args: Any, kwargs: Any
 ) -> None:
@@ -3809,10 +3840,8 @@ def check_pt2_compliant_op(
 
     if isinstance(target, torch._ops.OpOverloadPacket):
         overloads = tuple(target.overloads())
-        # Optimization: Overload resolution is expensive.
-        # If there's only one overload, we know what it will resolve to.
+        op = resolve_op_overload(output_graph, target, args, kwargs)
         if len(overloads) == 1:
-            op = getattr(target, overloads[0])
             if torch.Tag.pt2_compliant_tag in op.tags:
                 encountered_compliant_op(op)
                 return
@@ -3824,29 +3853,13 @@ def check_pt2_compliant_op(
             )
             return
 
-        args, kwargs = torch._dynamo.utils.get_fake_values_from_nodes(
-            output_graph.current_tx, (args, kwargs), False
-        )
-        try:
-            overload = torch._C._jit_resolve_packet(
-                target._qualified_op_name, *args, **kwargs
-            )
-        except RuntimeError as e:
-            unimplemented(
-                gb_type="Error when attempting to resolve op packet",
-                context="",
-                explanation=str(e),
-                hints=[],
-            )
-
-        op = getattr(target, overload)
         if torch.Tag.pt2_compliant_tag in op.tags:
             encountered_compliant_op(op)
         else:
             encountered_non_compliant_op(
                 op,
                 f"Encountered the torch.ops.OpOverloadPacket {target} "
-                f"which resolves to the overload ({overload}) that is "
+                f"which resolves to the overload ({op._overloadname}) that is "
                 f"not PT2 compliant.",
             )
 
