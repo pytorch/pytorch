@@ -568,7 +568,10 @@ class TestQuantizeTensorMeta(TestCase):
 class TestMXFP8StochasticReferenceNumerics(TestCase):
     @parametrize("orientation", ("dim_k", "dim_km"))
     def test_stateless_round_trip(self, orientation, device):
-        # Compare SR and RTNE quantizations in each orientation.
+        # * calculate a = mxfp8_with_sr(input)
+        # * calculate b = mxfp8(input)
+        # * verify that input and a are close
+        # * verify that a and b are very close
         input = torch.randn((96, 160), device=device, dtype=torch.bfloat16)
         key = prng.key(7, device=device)
         swizzle_type = SwizzleType.SWIZZLE_32_4_4
