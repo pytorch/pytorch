@@ -1407,6 +1407,7 @@ class TestScheduler(TestCase):
         consumer.unmet_dependencies = OrderedSet([read])
         relation = SubParentAccessRelation((planned_write,), planned_read, None, True)
         plan = Mock(
+            requires_persistent=False,
             nested_stage=None,
             sub_parent_stages=(
                 Mock(access_relations=(relation,), epilogue_nodes=(consumer,)),
@@ -1464,6 +1465,7 @@ class TestScheduler(TestCase):
         consumer.read_writes.reads = OrderedSet([read])
         consumer.unmet_dependencies = OrderedSet([read])
         plan = Mock(
+            requires_persistent=False,
             nested_stage=Mock(grouped_nodes=(consumer,), lane_accesses=())
             if ownership != "none"
             else None,
@@ -1540,6 +1542,7 @@ class TestScheduler(TestCase):
         consumer.read_writes.reads = OrderedSet([read])
         consumer.unmet_dependencies = OrderedSet([read])
         plan = Mock(
+            requires_persistent=False,
             nested_stage=None,
             sub_parent_stages=(Mock(access_relations=(), epilogue_nodes=(consumer,)),),
         )

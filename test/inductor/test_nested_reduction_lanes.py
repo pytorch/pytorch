@@ -372,6 +372,50 @@ class TestNestedAsmLaneInputs(NestedLaneTestCase):
         self.assertEqual(metrics.codegen_nested_reduction, 1)
         self.assertEqual(metrics.generated_kernel_count, 1)
 
+    @parametrize("rows", [128, 256])
+    @config.patch(
+        {
+            "triton.nested_reduction": True,
+            "loop_ordering_after_fusion": True,
+            "emulate_precision_casts": True,
+            "triton.multi_kernel": 0,
+            "force_disable_caches": True,
+        }
+    )
+    def test_tiled_group_axes(self, device, rows):
+        # With 128 rows the first axis of the GEMM scale tile has size 1.
+        asm, constraints = combine_inputs_asm(3)
+        width, padded = 1056, 1152
+
+        def fn(x, y, native=True):
+            value = (x + (x.float() * y.float()).to(torch.float16)).to(torch.bfloat16)
+            value = torch.nn.functional.pad(value, (0, padded - width))
+            groups = (x.shape[0] // 128, 4, 32, padded // 192, 3, 2)
+            maximum = value.float().view(*groups, 32).abs().amax(-1)
+            bits = (value.view(torch.int16).int() & 65535).view(*groups, 16, 2)
+            pairs = bits[..., 0] | (bits[..., 1] << 16)
+            scale = maximum.view(torch.int32)
+            if native:
+                words = inline_asm_elementwise(
+                    *pairs.unbind(-1),
+                    scale,
+                    asm_str=asm,
+                    constraints=constraints,
+                    dtype=(torch.int32,) * 3,
+                )
+            else:
+                words = xor_words(pairs, scale, 3)
+            return torch.stack(words, -1).view(x.shape[0], -1), maximum
+
+        x = torch.randn(rows, width, device=device, dtype=torch.float16)
+        y = torch.randn_like(x)
+        metrics.reset()
+        compiled = torch.compile(fn, fullgraph=True)
+        actual, kernels = run_and_get_kernels(compiled, x, y)
+        self.assertEqual(actual, fn(x, y, False), atol=0, rtol=0)
+        self.assertEqual(metrics.codegen_nested_reduction, 1)
+        self.assertEqual(len([k for k in kernels if "tl.load(" in k]), 1)
+
     @parametrize("rows", [128, 1024])
     @config.patch(
         {
