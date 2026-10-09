@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import inspect
+import threading
 import time
 from collections.abc import Callable, Iterator
 from functools import cached_property, wraps
@@ -359,6 +360,7 @@ class Benchmarker:
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark a GPU callable using CUDA graph capture and replay.
@@ -373,7 +375,15 @@ class Benchmarker:
                 for x in grad_to_none:
                     x.grad = None
 
-        n_iters = max(1, inductor_config.autotune_cudagraph_benchmarking_iters)
+        if cudagraph_unroll is None:
+            # Preserve the historical config behavior: invalid global values
+            # fall back to one replay. Per-call overrides are a stricter API
+            # and reject invalid values below.
+            n_iters = max(1, inductor_config.autotune_cudagraph_benchmarking_iters)
+        else:
+            n_iters = cudagraph_unroll
+            if n_iters < 1:
+                raise ValueError("cudagraph_unroll must be at least 1")
 
         # Warmup
         torch.cuda.synchronize()
@@ -569,7 +579,11 @@ class TritonBenchmarker(Benchmarker):
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     def __init__(self: Self) -> None:
         super().__init__()
-        self._in_cudagraph_benchmark = False
+        self._cudagraph_benchmark_state = threading.local()
+
+    @property
+    def _in_cudagraph_benchmark(self: Self) -> bool:
+        return getattr(self._cudagraph_benchmark_state, "depth", 0) > 0
 
     @cached_property
     def L2_cache_size(self: Self) -> int:
@@ -624,17 +638,22 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         self: Self,
         _callable: Callable[[], Any],
         grad_to_none: list[torch.Tensor] | None = None,
+        cudagraph_unroll: int | None = None,
         **kwargs: Any,
     ) -> float:
         # Prevent benchmark_gpu from re-entering this method
         # when autotune_cudagraph_benchmarking is enabled.
-        self._in_cudagraph_benchmark = True
+        previous_depth = getattr(self._cudagraph_benchmark_state, "depth", 0)
+        self._cudagraph_benchmark_state.depth = previous_depth + 1
         try:
             result = super().benchmark_gpu_with_cuda_graph(
-                _callable, grad_to_none=grad_to_none, **kwargs
+                _callable,
+                grad_to_none=grad_to_none,
+                cudagraph_unroll=cudagraph_unroll,
+                **kwargs,
             )
         finally:
-            self._in_cudagraph_benchmark = False
+            self._cudagraph_benchmark_state.depth = previous_depth
         return result
 
     @may_distort_benchmarking_result

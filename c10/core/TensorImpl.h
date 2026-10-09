@@ -236,11 +236,16 @@ struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
 
+  // when false, disallow a fake tensor from having a 'meta' device
+  bool allow_meta_ = true;
+
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
-      std::shared_ptr<c10::SafePyObject> converter)
+      std::shared_ptr<c10::SafePyObject> converter,
+      bool allow_meta = true)
       : shape_env_(std::move(shape_env)),
-        fake_tensor_converter_(std::move(converter)) {}
+        fake_tensor_converter_(std::move(converter)),
+        allow_meta_(allow_meta) {}
 
   // record the real constant a fake tensor was created from; the constant is
   // stored on the fake's ExtraMeta so it dies with the tensor
@@ -276,6 +281,8 @@ struct C10_API ExtraMeta {
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
   std::optional<c10::Device> fake_device_ = std::nullopt;
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
+  // The real tensor this fake shadows, when propagate_real_tensors is on.
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
@@ -294,6 +301,7 @@ struct C10_API ExtraMeta {
     custom_storage_error_msg_ = other.custom_storage_error_msg_;
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
+    real_tensor_ = other.real_tensor_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
   ExtraMeta(ExtraMeta&& other) = delete;
@@ -1471,13 +1479,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * to DispatchKeySet
    */
 
-  // this is the fast path: caller guarantees fake_device already has a valid
-  // index
+  // Caller guarantees fake_device is normalized.
   void set_fake_device(c10::Device fake_device);
-
-  // Normalizes the device index then calls set_fake_device.
-  // use when the device might lack an index ("cuda" vs "cuda:0").
-  void set_and_normalize_fake_device(c10::Device fake_device);
 
   // the fake device recorded for this tensor, or nullopt if none
   std::optional<c10::Device> fake_device() const {
@@ -1488,7 +1491,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
-    get_extra_meta().fake_tensor_mode_ = std::move(mode);
+    auto& extra_meta = get_extra_meta();
+    // python validates allow_meta against the mode that owns the tensor, which
+    // is only known here: set_fake_device may run before the mode is attached
+    // (and outside its scope), so its ambient-TLS check can pass vacuously.
+    if (mode && extra_meta.fake_device_.has_value() &&
+        extra_meta.fake_device_->type() == c10::DeviceType::Meta) {
+      TORCH_CHECK(
+          mode->allow_meta_,
+          "device.type must not be 'meta' when allow_meta is False");
+    }
+    extra_meta.fake_tensor_mode_ = std::move(mode);
   }
 
   std::shared_ptr<FakeTensorMode> fake_tensor_mode() const {
@@ -1496,6 +1509,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return extra_meta_->fake_tensor_mode_;
+  }
+
+  // The real tensor this fake shadows under propagate_real_tensors, or nullptr.
+  void set_real_tensor(c10::intrusive_ptr<c10::TensorImpl> real) {
+    get_extra_meta().real_tensor_ = std::move(real);
+  }
+
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->real_tensor_;
   }
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
