@@ -1,4 +1,7 @@
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/core/Formatting.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
+#include <ATen/functorch/TensorWrapper.h>
 #include <c10/util/irange.h>
 #include <fmt/compile.h>
 #include <fmt/format.h>
@@ -9,6 +12,23 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+
+static const at::Tensor& unwrap_all(at::Tensor&&) = delete;
+static const at::Tensor& unwrap_all(const at::Tensor& t) {
+  if (!t.defined()) {
+    return t;
+  }
+  if (auto* tw = at::functorch::maybeGetTensorWrapper(t)) {
+    return unwrap_all(tw->value());
+  }
+  if (auto* bt = at::functorch::maybeGetBatchedImpl(t)) {
+    return unwrap_all(bt->value());
+  }
+  if (at::functionalization::impl::isFunctionalTensor(t)) {
+    return unwrap_all(at::functionalization::impl::from_functional_tensor(t));
+  }
+  return t;
+}
 
 namespace c10 {
 std::ostream& operator<<(std::ostream& out, Backend b) {
@@ -184,9 +204,10 @@ static void printValue(std::ostream& stream, double v, const PrintFormat& pf) {
 
 static void __printMatrix(
     std::ostream& stream,
-    const Tensor& self,
+    const Tensor& self_,
     int64_t linesize,
     int64_t indent) {
+  const Tensor& self = unwrap_all(self_);
   auto printFmt = __printFormat(self);
 
   int64_t nColumnPerLine = (linesize - indent) / (printFmt.width + 1);
@@ -219,7 +240,8 @@ static void __printMatrix(
     }
 
     for (const auto l : c10::irange(self.size(0))) {
-      Tensor row = self.select(0, l);
+      Tensor row_ = self.select(0, l);
+      const Tensor& row = unwrap_all(row_);
       const double* row_ptr = row.const_data_ptr<double>();
 
       for (const auto c : c10::irange(firstColumn, lastColumn + 1)) {
@@ -333,12 +355,13 @@ std::ostream& print(
         tensor_.toString());
   } else if (tensor.ndimension() == 1) {
     if (tensor.numel() > 0) {
-      auto printFmt = __printFormat(tensor);
+      const Tensor& tensor_unwrapped = unwrap_all(tensor);
+      auto printFmt = __printFormat(tensor_unwrapped);
       if (printFmt.scale != 1) {
         fmt::print(stream, "{} *\n", printFmt.scale);
       }
-      const double* tensor_p = tensor.const_data_ptr<double>();
-      for (const auto i : c10::irange(tensor.size(0))) {
+      const double* tensor_p = tensor_unwrapped.const_data_ptr<double>();
+      for (const auto i : c10::irange(tensor_unwrapped.size(0))) {
         printValue(stream, tensor_p[i], printFmt);
         stream.put('\n');
       }
