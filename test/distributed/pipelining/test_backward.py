@@ -161,6 +161,56 @@ class StageBackwardTests(TestCase):
         for name, p in mod.named_parameters():
             torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
 
+    def test_stage_backward_weight_custom_autograd_function(self, device):
+        # Split dI/dW must keep custom autograd.Function nodes alive after
+        # stage outputs are detached. See https://github.com/pytorch/pytorch/issues/166577
+        class CustomMatmul(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return torch.matmul(a, b)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                a, b = ctx.saved_tensors
+                grad_a = grad_b = None
+                if ctx.needs_input_grad[0]:
+                    grad_a = torch.matmul(grad_output, b.transpose(-1, -2))
+                if ctx.needs_input_grad[1]:
+                    grad_b = torch.matmul(a.transpose(-1, -2), grad_output)
+                return grad_a, grad_b
+
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+
+            def forward(self, x):
+                return CustomMatmul.apply(x, self.weight)
+
+        mod = TestModel().to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        output_grad = torch.randn(batch_size, d_hid, device=device)
+
+        ref_mod = copy.deepcopy(mod)
+        ref_x = x.detach().clone().requires_grad_(True)
+
+        out = mod(x)
+        dinputs, param_groups = stage_backward_input(
+            stage_outputs_or_loss=(out,),
+            output_grads=[output_grad],
+            input_values=[x],
+            weights=mod.parameters(),
+        )
+        for param_group in param_groups:
+            self.assertTrue(param_group.get("ownership_tokens"))
+        stage_backward_weight(mod.parameters(), param_groups)
+
+        ref_mod(ref_x).backward(output_grad)
+        torch.testing.assert_close(dinputs[0], ref_x.grad)
+        for name, p in mod.named_parameters():
+            torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
+
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight(self, device):
         # MLP as a stage module
