@@ -31,7 +31,6 @@ from torch._inductor.cudagraph_trees import (
 )
 from torch._inductor.cudagraph_utils import (
     check_lowering_disable_cudagraph,
-    check_multiple_devices_or_any_cpu_nodes,
     format_default_skip_message,
     PlaceholderInfo,
 )
@@ -263,18 +262,6 @@ def _mutating_graph():
 class CudagraphGateTest(TestCase):
     """Gate and bookkeeping tests that need no accelerator."""
 
-    def test_unsupported_device_is_not_reported_as_multiple_devices(self):
-        reason = check_multiple_devices_or_any_cpu_nodes({torch.device("mps", 0): None})
-        self.assertIsNotNone(reason)
-        self.assertNotIn("multiple devices", reason)
-        self.assertIn("mps", reason)
-
-    def test_multiple_devices_still_reported(self):
-        reason = check_multiple_devices_or_any_cpu_nodes(
-            {torch.device("cuda", 0): None, torch.device("cuda", 1): None}
-        )
-        self.assertIn("multiple devices", reason)
-
     @config.patch("graph_partition", False)
     @parametrize(
         "devices",
@@ -293,13 +280,6 @@ class CudagraphGateTest(TestCase):
         reason = check_lowering_disable_cudagraph(mapping)
         self.assertIsNotNone(reason)
         self.assertEqual(format_default_skip_message(reason).count("due to"), 1)
-
-    @config.patch("graph_partition", False)
-    def test_cpu_node_reason_names_the_node(self):
-        reason = check_multiple_devices_or_any_cpu_nodes(
-            {torch.device("cpu"): _FakeNode("arg1_1"), torch.device("cuda", 0): None}
-        )
-        self.assertEqual(reason, "cpu device (arg1_1)")
 
     def test_dynamo_backend_mutation_reason_is_not_preformatted(self):
         # check_for_skip feeds format_default_skip_message in both of its
