@@ -2638,9 +2638,9 @@ def skipIfRocmVersionAtLeast(version=None):
     else:
         rocm_version_tuple = getRocmVersion()
         should_skip = (
-            rocm_version_tuple is None
-            or version is None
-            or rocm_version_tuple >= tuple(version)
+            rocm_version_tuple is not None
+            and version is not None
+            and rocm_version_tuple >= tuple(version)
         )
     return unittest.skipIf(should_skip, f"ROCm version at least {version}: known failure")
 
