@@ -378,10 +378,10 @@ class XPUGraphTreeAllocatorInterface(GraphTreeAllocatorInterface):
         )
 
     def has_standard_deleter(self, storage: StorageImplHandle) -> bool:
-        return torch._C.has_xpu_standard_deleter(storage)
+        return torch._C._xpu_has_standard_deleter(storage)
 
     def free_and_remove_deleter(self, storage: StorageImplHandle) -> None:
-        torch._C.xpu_free_and_remove_deleter(storage)
+        torch._C._xpu_free_and_remove_deleter(storage)
 
     def check_pool_live_allocations(
         self,
