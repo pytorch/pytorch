@@ -103,7 +103,6 @@ from torch.testing._internal.common_utils import (
     recover_orig_fp32_precision,
     scoped_load_inline,
     set_default_dtype,
-    skipCUDAMemoryLeakCheckIf,
     skipIfCppFakeTensor,
     skipIfHpu,
     skipIfNNModuleInlined,
