@@ -1932,6 +1932,15 @@ def dispatch_trace(
         if is_accessor_node(n):
             return False
 
+        # Views only compute metadata, so they are OK to DCE unless they bind
+        # unbacked symbols
+        if (
+            isinstance(n.target, OpOverload)
+            and n.target.is_view
+            and "unbacked_bindings" not in n.meta
+        ):
+            return False
+
         # If the operator in question takes SymInt args to SymInt output,
         # we assume it's pure and OK to DCE
         if (
