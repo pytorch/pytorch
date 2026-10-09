@@ -405,7 +405,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Applies the cleanup/process-teardown action selected by
   // TORCH_NCCL_ASYNC_ERROR_HANDLING. Reconfigurable communicators are revoked
   // instead, independent of the selected mode.
-  void handleWatchdogFailure(const std::string& reason);
+  void handleWatchdogFailure(
+      const std::string& reason,
+      bool from_watchdog = false);
+  void publishFailure();
+  bool checkRemoteFailure();
+  bool coordinateShutdown(std::chrono::steady_clock::time_point deadline);
   // Blocking wait has no watchdog, so the waiting thread tears down a failed
   // communicator before surfacing the exception.
   void handleBlockingWaitFailure(
@@ -643,12 +648,21 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   enum class InitializationState {
     UNINITIALIZED,
     INITIALIZED,
+    FINALIZING,
     FINALIZED,
-  } init_state_{InitializationState::UNINITIALIZED};
+  };
+  std::atomic<InitializationState> init_state_{
+      InitializationState::UNINITIALIZED};
   std::mutex reconfigure_mutex_;
+  std::mutex finalize_mutex_;
+  std::mutex nccl_teardown_mutex_;
 
   c10::intrusive_ptr<::c10d::Store> store_;
+  c10::intrusive_ptr<::c10d::Store> lifecycle_store_;
   uint64_t bootstrap_generation_{0};
+  // Child communicators can share their parent's Store and Options.
+  uint64_t split_generation_{0};
+  std::unordered_map<std::string, uint64_t> shrink_generations_;
   uint64_t sequence_number_{0};
 
   std::shared_ptr<NcclApi> nccl_api_;
@@ -659,6 +673,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   WorkNCCLQueue workq_;
 
   std::thread timeout_thread_;
+  std::mutex watchdog_join_mutex_;
   std::atomic<bool> shutdown_{false};
   std::condition_variable timeout_cv_;
   std::mutex timeout_mutex_;

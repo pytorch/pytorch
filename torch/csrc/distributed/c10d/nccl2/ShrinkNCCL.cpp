@@ -8,6 +8,7 @@
 #include <unordered_set>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 namespace c10d::nccl2 {
 
@@ -77,6 +78,17 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
 
   c10::cuda::CUDAGuard guard(device_);
   ncclComm_t childComm = nullptr;
+  auto sortedExcluded = excluded;
+  std::ranges::sort(sortedExcluded);
+  auto childPrefix =
+      c10::str("nccl2_shrink/", name_, "/", bootstrap_generation_);
+  for (int rank : sortedExcluded) {
+    childPrefix += c10::str("/", rank);
+  }
+  // Only survivors call shrink, so count generations separately per membership
+  // and independently of splits, which every parent rank participates in.
+  const auto childGeneration = shrink_generations_[childPrefix]++;
+  childPrefix += c10::str("/generation/", childGeneration);
   auto shrinkStatus = nccl_api_->commShrink(
       nccl_comm_,
       excluded.data(),
@@ -102,7 +114,7 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::shrink(
   auto excludedBeforeRank = static_cast<int>(std::ranges::count_if(
       excluded, [this](int rank) { return rank < getRank(); }));
   auto child = c10::make_intrusive<ProcessGroupNCCL>(
-      store_->clone(),
+      c10::make_intrusive<PrefixStore>(childPrefix, store_->clone()),
       getRank() - excludedBeforeRank,
       getSize() - static_cast<int>(excluded.size()),
       childOptions);
