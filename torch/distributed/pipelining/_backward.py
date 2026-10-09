@@ -56,8 +56,7 @@ def _graph_ownership_tokens(
             if stage_output.ownership_token is not None:
                 tokens.append(stage_output.ownership_token)
         elif (
-            isinstance(stage_output, torch.Tensor)
-            and stage_output.grad_fn is not None
+            isinstance(stage_output, torch.Tensor) and stage_output.grad_fn is not None
         ):
             with torch.enable_grad():
                 token = stage_output.view_as(stage_output).grad_fn
