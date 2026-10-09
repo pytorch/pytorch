@@ -3114,7 +3114,6 @@ def use_nv_universal_gemm_template(
     mat_b: IRNode,
     offs: IRNode | None = None,
     g: _IntLike | None = None,
-    allow_symbolic_shapes: bool = False,
 ) -> bool:
     """
     Return True if we can use the NVIDIA Universal GEMM Template.
@@ -3126,7 +3125,7 @@ def use_nv_universal_gemm_template(
         4. Max autotune or max autotune gemm is enabled
         5. Not in AOT Inductor mode (requires runtime JIT compilation)
         6. Base pointers are 16-byte aligned
-        7. Shape dimensions are static, or backed symbols accepted by the caller
+        7. Shape dimensions do not contain unbacked symbols
 
     Note:
         - Shape and stride constraints are handled internally by
@@ -3158,8 +3157,6 @@ def use_nv_universal_gemm_template(
     if g is not None:
         dims_to_check.append(g)
     if any(free_unbacked_symbols(dim) for dim in dims_to_check):
-        return False
-    if not allow_symbolic_shapes and has_free_symbols(dims_to_check):
         return False
 
     # Base pointer must be 16-byte aligned. cutlass.operators can't check this at

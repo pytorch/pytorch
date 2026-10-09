@@ -796,9 +796,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     if (
         out_dtype is None
         and is_nonzero
-        and use_nv_universal_gemm_template(
-            layout, m, n, k, mat1, mat2, allow_symbolic_shapes=True
-        )
+        and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2)
     ):
         from ..codegen.nv_universal_gemm import add_nv_universal_gemm_choices
 

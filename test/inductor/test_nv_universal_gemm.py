@@ -4247,7 +4247,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             ):
                 compiled_fn(x, w)
 
-    def test_dynamic_shapes(self):
+    def test_dynamic_mm(self):
         """Test NVGEMM across backed symbolic shapes."""
 
         def matmul(a, b):
@@ -4279,6 +4279,123 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
                         compiled_fn(a, b)
                 else:
                     self.assertEqual(compiled_fn(a, b), a @ b)
+
+    def test_dynamic_addmm(self):
+        def addmm(bias, a, b):
+            return torch.addmm(bias, a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(addmm, dynamic=True)
+            for m, n, k in ((64, 128, 256), (128, 256, 512), (64, 128, 256)):
+                bias = torch.randn(n, dtype=torch.bfloat16, device="cuda")
+                a = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
+                b = torch.randn(k, n, dtype=torch.bfloat16, device="cuda")
+                self.assertEqual(
+                    compiled_fn(bias, a, b),
+                    addmm(bias, a, b),
+                    atol=1e-2,
+                    rtol=1.6e-2,
+                )
+
+    def test_dynamic_bmm(self):
+        def bmm(a, b):
+            return torch.bmm(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(bmm, dynamic=True)
+            for batch, m, n, k in (
+                (2, 64, 128, 256),
+                (4, 128, 256, 512),
+                (2, 64, 128, 256),
+            ):
+                a = torch.randn(batch, m, k, dtype=torch.bfloat16, device="cuda")
+                b = torch.randn(batch, k, n, dtype=torch.bfloat16, device="cuda")
+                self.assertEqual(compiled_fn(a, b), bmm(a, b))
+
+    def test_dynamic_scaled_mm(self):
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(_nvfp4_scaled_mm, dynamic=True)
+            for m, n, k in (
+                (128, 384, 512),
+                (512, 384, 512),
+                (128, 640, 512),
+                (128, 384, 1024),
+                (128, 384, 512),
+            ):
+                inputs = _make_nvfp4_scaled_mm_inputs(m, n, k)
+                self.assertEqual(
+                    compiled_fn(*inputs),
+                    _nvfp4_scaled_mm(*inputs),
+                    equal_nan=True,
+                )
+
+    def test_dynamic_scaled_mm_mxfp8(self):
+        def scaled_mm(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.float32,
+            )
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(scaled_mm, dynamic=True)
+            for m, n, k in (
+                (128, 384, 512),
+                (256, 384, 512),
+                (128, 640, 512),
+                (128, 384, 1024),
+                (128, 384, 512),
+            ):
+                a = torch.randint(-1, 2, (m, k), device="cuda").to(torch.float8_e4m3fn)
+                b = (
+                    torch.randint(-1, 2, (n, k), device="cuda")
+                    .to(torch.float8_e4m3fn)
+                    .T
+                )
+                scale_k = _prep_k(k, 32)
+                scale_a = torch.rand(m, scale_k, device="cuda").to(torch.float8_e8m0fnu)
+                scale_b = torch.rand(scale_k, n, device="cuda").to(torch.float8_e8m0fnu)
+                self.assertEqual(
+                    compiled_fn(a, b, scale_a, scale_b),
+                    scaled_mm(a, b, scale_a, scale_b),
+                )
+
+    def test_dynamic_grouped_mm(self):
+        def grouped_mm(a, b, offsets):
+            return torch._grouped_mm(a, b, offs=offsets)
+
+        torch._dynamo.reset()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(grouped_mm, dynamic=True)
+            cases = (
+                ((64, 64), 256, 512),
+                ((32, 96, 128, 128), 128, 256),
+                ((64, 64), 256, 512),
+            )
+            for group_ms, n, k in cases:
+                g = len(group_ms)
+                total_m = sum(group_ms)
+                a = torch.randn(total_m, k, dtype=torch.bfloat16, device="cuda")
+                b = torch.randn(g, n, k, dtype=torch.bfloat16, device="cuda").permute(
+                    0, 2, 1
+                )
+                offsets = torch.tensor(
+                    [sum(group_ms[: index + 1]) for index in range(g)],
+                    dtype=torch.int32,
+                    device="cuda",
+                )
+                self.assertEqual(compiled_fn(a, b, offsets), grouped_mm(a, b, offsets))
 
 
 @unittest.skipIf(
