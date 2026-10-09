@@ -30,11 +30,11 @@ void FakeTensorModeTLS::reset_state() {
 
 static thread_local bool fakeInKernelInvocation = false;
 
-bool in_kernel_invocation() {
+bool FakeTensorModeTLS::in_kernel_invocation() {
   return fakeInKernelInvocation;
 }
 
-void set_in_kernel_invocation(bool value) {
+void FakeTensorModeTLS::set_in_kernel_invocation(bool value) {
   fakeInKernelInvocation = value;
 }
 

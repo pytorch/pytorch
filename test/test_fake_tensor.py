@@ -1123,9 +1123,9 @@ class FakeTensorTest(TestCase):
         with torch._C._ExcludeDispatchKeyGuard(fake_key):
             self.assertEqual(t.device, torch.device("cpu"))
         with torch._C._FakeInKernelInvocation():
-            self.assertTrue(torch._C._in_kernel_invocation())
+            self.assertTrue(torch._C._cpp_fake_in_kernel_invocation())
             self.assertEqual(t.device, torch.device("meta"))
-        self.assertFalse(torch._C._in_kernel_invocation())
+        self.assertFalse(torch._C._cpp_fake_in_kernel_invocation())
         self.assertEqual(t.device, torch.device("cpu"))
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")

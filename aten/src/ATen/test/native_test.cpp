@@ -305,12 +305,12 @@ TEST(TestNative, FakeInKernelInvocationReportsMetaDevice) {
     at::ThreadLocalState state;
     std::thread worker([&] {
       at::ThreadLocalStateGuard guard(state);
-      EXPECT_TRUE(c10::impl::in_kernel_invocation());
+      EXPECT_TRUE(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
       EXPECT_EQ(t.device(), c10::Device(c10::kMeta));
     });
     worker.join();
   }
-  EXPECT_FALSE(c10::impl::in_kernel_invocation());
+  EXPECT_FALSE(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
   EXPECT_EQ(t.device(), c10::Device(c10::kCPU));
 
   EXPECT_THROW(
@@ -319,7 +319,7 @@ TEST(TestNative, FakeInKernelInvocationReportsMetaDevice) {
         TORCH_CHECK(false, "meta kernel failed");
       },
       c10::Error);
-  EXPECT_FALSE(c10::impl::in_kernel_invocation());
+  EXPECT_FALSE(c10::impl::FakeTensorModeTLS::in_kernel_invocation());
 }
 
 TEST(TestNative, NativeTestGPU) {

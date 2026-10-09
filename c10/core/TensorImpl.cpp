@@ -207,7 +207,8 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   // but since we have an extra field for fake_device_,
   // we can just set it upon FakeTensor creation
   // and determine in device_custom() which device to return
-  // (based on in_kernel_invocation(), see Note [in_kernel_invocation])
+  // (based on FakeTensorModeTLS::in_kernel_invocation(), see
+  // Note [in_kernel_invocation])
   get_extra_meta().fake_device_ = fake_device;
   key_set_ = key_set_.add(DispatchKey::Fake);
 
@@ -430,7 +431,7 @@ c10::Device TensorImpl::device_custom() const {
     return (*c10::impl::getGlobalPyInterpreter())->device(this);
   }
   if (C10_UNLIKELY(extra_meta_ && extra_meta_->fake_device_.has_value())) {
-    if (c10::impl::in_kernel_invocation()) {
+    if (c10::impl::FakeTensorModeTLS::in_kernel_invocation()) {
       return device_default();
     }
     // has_value() is checked above; the dataflow check misses it here.

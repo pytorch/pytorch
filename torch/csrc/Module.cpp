@@ -3455,8 +3455,8 @@ Call this whenever a new thread is created in order to propagate values from
   torch::impl::py_context_manager<c10::impl::FakeInKernelInvocationGuard>(
       py_module, "_FakeInKernelInvocation");
 
-  py_module.def("_in_kernel_invocation", []() {
-    return c10::impl::in_kernel_invocation();
+  py_module.def("_cpp_fake_in_kernel_invocation", []() {
+    return c10::impl::FakeTensorModeTLS::in_kernel_invocation();
   });
 
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
