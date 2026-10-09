@@ -8,7 +8,6 @@ namespace {
 bool compute_cpp_stack_traces_enabled() {
   return c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES") == true;
 }
-
 } // namespace
 
 bool get_cpp_stacktraces_enabled() {
@@ -34,7 +33,7 @@ static torch::unwind::Mode compute_symbolize_mode() {
   }
   // The in-process symbolizer is the default. TORCH_DISABLE_ADDR2LINE is kept
   // for backwards compatibility: =1 falls back to dladdr, =0 opts into the
-  // external addr2line process (previously the default).
+  // external addr2line process.
   auto disable_addr2line = c10::utils::check_env("TORCH_DISABLE_ADDR2LINE");
   if (disable_addr2line == true) {
     return unwind::Mode::dladdr;

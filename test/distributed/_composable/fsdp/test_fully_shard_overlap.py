@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
     run_tests,
+    skipIfRocmVersionAtLeast,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -73,7 +74,9 @@ class TestFullyShardOverlap(FSDPTest):
     def world_size(self) -> int:
         return min(2, torch.get_device_module(device_type).device_count())
 
-    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
+    # ROCm 10.1 removes high priority queue, which reduces the total number of queues
+    # from 8 (4 high + 4 normal) to 4 (4 normal), causing some streams can't overlap
+    @skipIfRocmVersionAtLeast((10, 1))
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
         not hasattr(torch.get_device_module(device_type), "_sleep"),
@@ -192,7 +195,6 @@ class TestFullyShardOverlap(FSDPTest):
         # )
         self.assertLessEqual(fwd_bwd_time, ref_fwd_bwd_time)
 
-    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_backward_comm_overlap(self):
         """Exercise backward with reduce-scatter sharing the shard process
@@ -485,6 +487,11 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             dist.barrier()
             _pg_mod.foreach_reduce = orig
 
+    # Hangs on MI200: RCCL deadlocks when three communicators make
+    # progress concurrently (https://github.com/ROCm/rccl/issues/2191).
+    # ROCm 10.1 removes high priority queue, which reduces the total number of queues
+    # from 8 (4 high + 4 normal) to 4 (4 normal), causing some streams can't overlap
+    @skipIfRocmVersionAtLeast((10, 1))
     @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(4)
     @unittest.skipIf(
@@ -494,6 +501,11 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
     def test_fully_shard_per_param_mesh_training_overlap(self):
         self._test_per_param_mesh_overlap(simulate_no_grad_input=False)
 
+    # Hangs on MI200: RCCL deadlocks when three communicators make
+    # progress concurrently (https://github.com/ROCm/rccl/issues/2191).
+    # ROCm 10.1 removes high priority queue, which reduces the total number of queues
+    # from 8 (4 high + 4 normal) to 4 (4 normal), causing some streams can't overlap
+    @skipIfRocmVersionAtLeast((10, 1))
     @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(4)
     @unittest.skipIf(

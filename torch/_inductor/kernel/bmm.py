@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import itertools
 import logging
 from typing import TYPE_CHECKING
@@ -20,6 +21,7 @@ from ..select_algorithm import (
 )
 from ..utils import (
     _use_cutlass_for_op,
+    is_bf16x9_matmul,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -34,6 +36,7 @@ from .mm_common import (
     is_batch_stride_largest_or_zero,
     mm_args,
     use_native_matmul,
+    zero_addmm_input,
 )
 
 
@@ -133,6 +136,39 @@ def _bmm_shared_a_configs(dtype):
         }
 
 
+@SymbolicGridFn
+def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
+    # Flatten batch and matrix tiles into one global persistent work queue.
+    grid_m = cdiv(m, meta["BLOCK_M"])
+    tiles = b * grid_m * cdiv(n, meta["BLOCK_N"])
+    grid_x = min(meta["NUM_SMS"], tiles)
+    return (grid_x, 1, 1)
+
+
+blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
+    name="blackwell_bmm",
+    grid=blackwell_bmm_grid,
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_bmm"),
+    cache_codegen_enabled_for_template=True,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class BlackwellBMMConfig:
+    block_m: int
+    block_n: int
+    block_k: int
+    num_stages: int
+    num_warps: int
+    epilogue_subtile: int = 1
+
+
+BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
+    BlackwellBMMConfig(64, 64, 128, 5, 4),
+    BlackwellBMMConfig(128, 128, 128, 3, 8),
+    BlackwellBMMConfig(128, 256, 64, 4, 8),
+)
+
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
@@ -165,6 +201,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     sizevars = V.graph.sizevars
     dtype = mat1.get_dtype()
     device_type = mat1.get_device().type
+    use_bf16x9 = is_bf16x9_matmul(device_type, dtype)
 
     def dim_is_one_or_hint(dim):
         # The mul+sum decomposition is valid for any M/N. The size-1 hint is
@@ -177,7 +214,8 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         return not sizevars.statically_known_gt(dim, threshold)
 
     if (
-        out_dtype is None
+        not use_bf16x9
+        and out_dtype is None
         and device_type in ("cuda", "xpu")
         and device_type == mat2.get_device().type
         and dtype == mat2.get_dtype()
@@ -197,7 +235,10 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
             mat1 = L.unsqueeze(mat1, -1)
             mat2 = L.unsqueeze(mat2, 1)
-            return L.sum_(L.mul(mat1, mat2), axis=2)
+            # L.sum_ promotes integers to int64 (mirroring torch.sum), but
+            # aten.bmm promises the input dtype (or out_dtype when one is
+            # given), so cast back to whichever the op promised.
+            return L.to_dtype(L.sum_(L.mul(mat1, mat2), axis=2), out_dtype or dtype)
 
         def is_valid_to_require_contiguous(t):
             if not ir.is_storage_and_layout(t):
@@ -287,6 +328,20 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
     choices: list[ChoiceCaller] = []
+    if use_bf16x9:
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        choices.extend(
+            V.choices.get_template_configs(
+                kernel_inputs,
+                [aten_handler],
+                name,
+                kwarg_overrides={aten_handler.uid: aten_extra_kwargs},
+            )
+        )
+        node, _ = autotune_select_algorithm(
+            name, choices, kernel_inputs.nodes(), layout
+        )
+        return node
 
     # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
@@ -369,6 +424,11 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+    template_inp = inp
+    if not use_bf16x9 and beta == 0:
+        template_inp = zero_addmm_input(inp, mat1, mat2)
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
             arg1 = 0
@@ -407,6 +467,19 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     name = "baddbmm"
     # options to tune from
     choices: list[ChoiceCaller] = []
+    if use_bf16x9:
+        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
+        choices.extend(
+            V.choices.get_template_configs(
+                kernel_inputs,
+                [aten_baddbmm],
+                name,
+            )
+        )
+        node, _ = autotune_select_algorithm(
+            name, choices, kernel_inputs.nodes(), layout
+        )
+        return node
 
     # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
@@ -415,6 +488,13 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+        if beta == 0:
+            # bmm_template reads inp, and autotuning benchmarks every baddbmm
+            # choice on the same inputs, so ATen gets the zeros too.
+            *_, inp = mm_args(mat1, mat2, template_inp, layout=layout)
+            kernel_inputs = MMKernelInputs(
+                [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
+            )
 
     # Single unified call for all templates
     choices.extend(

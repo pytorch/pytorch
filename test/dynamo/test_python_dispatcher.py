@@ -103,6 +103,69 @@ class GraphModule(torch.nn.Module):
         # No recompile
         self.assertEqual(counter.frame_count, 1)
 
+    def test_functorch_interpreter_vmap_attrs(self):
+        counter = CompileCounter()
+
+        def inner(y):
+            interpreter = (
+                torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
+            )
+            if interpreter.randomness() != "error":
+                return y * 0
+            return y + interpreter.batch_size() + interpreter.level()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.vmap(inner)(x)
+
+        x = torch.tensor([1, 2, 3, 4])
+        self.assertEqual(fn(x), torch.tensor([6, 7, 8, 9]))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_functorch_interpreter_lower(self):
+        counter = CompileCounter()
+
+        def inner(y):
+            interpreter = (
+                torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
+            )
+            # Tensor ops must happen before lower(); after pop the batched
+            # tensor is no longer in a vmap interpreter.
+            out = y + interpreter.level()
+            with interpreter.lower():
+                pass
+            return out
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.vmap(inner)(x)
+
+        x = torch.tensor([1, 2, 3, 4])
+        self.assertEqual(fn(x), torch.tensor([2, 3, 4, 5]))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_functorch_interpreter_process(self):
+        counter = CompileCounter()
+
+        class FakeOp:
+            functorch_table = {
+                torch._C._functorch.TransformType.Vmap: lambda interpreter, t: t * t
+            }
+
+        def inner(y):
+            interpreter = (
+                torch._functorch.pyfunctorch.retrieve_current_functorch_interpreter()
+            )
+            return interpreter.process(FakeOp(), (y,), {})
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.vmap(inner)(x)
+
+        x = torch.tensor([1, 2, 3, 4])
+        self.assertEqual(fn(x), torch.tensor([1, 4, 9, 16]))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_graph_break_recovers_missing_python_tls_snapshot(self):
         @torch.compile(backend="eager_noexcept")
         def fn(x):
@@ -131,6 +194,25 @@ class GraphModule(torch.nn.Module):
             torch._C._dispatch_tls_set_dispatch_key_included(
                 torch._C.DispatchKey.PythonTLSSnapshot, saved_python_tls_snapshot
             )
+
+    def test_dispatch_key_set_guard_sees_fake(self):
+        # Tensor guards mask Fake, but an explicit DispatchKeySet argument must
+        # keep it since the program can branch on it.
+        def fn(x, dks):
+            if dks.has(torch._C.DispatchKey.Fake):
+                return x + 1
+            return x - 1
+
+        cpu = torch._C.DispatchKeySet(torch._C.DispatchKey.CPU)
+        with_fake = cpu | torch._C.DispatchKeySet(torch._C.DispatchKey.Fake)
+        x = torch.randn(2, 3)
+        for order in ((cpu, with_fake), (with_fake, cpu)):
+            torch._dynamo.reset()
+            counter = CompileCounter()
+            compiled = torch.compile(fn, backend=counter, fullgraph=True)
+            for dks in order:
+                self.assertEqual(compiled(x, dks), fn(x, dks))
+            self.assertEqual(counter.frame_count, 2)
 
 
 class PythonDispatcherTestsDevice(torch._dynamo.test_case.TestCase):

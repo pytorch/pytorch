@@ -72,7 +72,7 @@ export PYTORCH_BUILD_NUMBER=1
 
 # Set triton version as part of PYTORCH_EXTRA_INSTALL_REQUIREMENTS
 TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
-TRITON_CONSTRAINT="platform_system == 'Linux' and python_version < '3.15'"
+TRITON_CONSTRAINT="platform_system == 'Linux' and python_version < '3.16'"
 
 # Opt-in only: torchTLX needs FBTriton, but the default stays upstream triton /
 # triton-rocm. One FBTriton wheel carries both the nvidia and amd backends, so
@@ -118,10 +118,9 @@ fi
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton xpu package
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
     TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_xpu_version.txt)
-    # triton-xpu has no cp315 wheel yet; gate it to Python < 3.15 (matching the
-    # CUDA/ROCm triton requirements above) so 3.15 xpu wheels don't pull an
-    # unavailable triton-xpu. Applies to both Linux and Windows xpu.
-    XPU_TRITON_CONSTRAINT="python_version < '3.15'"
+    # Matches the CUDA/ROCm triton requirements above. Applies to both Linux and
+    # Windows xpu.
+    XPU_TRITON_CONSTRAINT="python_version < '3.16'"
     TRITON_REQUIREMENT="triton-xpu~=${TRITON_VERSION}; ${XPU_TRITON_CONSTRAINT}"
     if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
         TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton-xpu.txt)
@@ -196,6 +195,12 @@ if [[ "$(uname)" != Darwin ]]; then
   cat >>"$envfile" <<EOL
   export MAX_JOBS="${MAX_JOBS}"
 EOL
+fi
+
+if [[ "${OS:-}" == windows && "$DESIRED_CUDA" == cu* ]]; then
+  # FlashAttention TUs are compiled once per arch in TORCH_CUDA_ARCH_LIST and each
+  # nvcc invocation is memory-hungry, so bound this target instead of MAX_JOBS.
+  echo "export FLASH_ATTENTION_MAX_JOBS=\"${FLASH_ATTENTION_MAX_JOBS:-4}\"" >> "$envfile"
 fi
 
 echo 'retry () {' >> "$envfile"

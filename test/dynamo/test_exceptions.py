@@ -2,6 +2,7 @@
 
 import contextlib
 import dataclasses
+import gc
 import operator
 import sys
 import unittest
@@ -13,10 +14,11 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import get_dynamo_observed_exception, Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
+    disable_gc,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
@@ -44,6 +46,33 @@ class CustomExceptionWithArgs(Exception):
 
 class MyException(OSError):
     pass
+
+
+# The writable BaseException attributes live on the wrapped ExceptionVariable
+# rather than in the instance __dict__, so both the in-region read and the
+# object escaping the compiled region need explicit handling.
+WRITABLE_BASE_EXCEPTION_ATTRS = [
+    "args",
+    "__cause__",
+    "__context__",
+    "__suppress_context__",
+]
+
+
+def exception_attr_value(attr):
+    """A value valid for *attr*, built inside the traced region."""
+    if attr == "args":
+        return ("y",)
+    if attr == "__suppress_context__":
+        return True
+    return ValueError("inner")
+
+
+def comparable(value):
+    """Exceptions compare by identity, so compare type and args instead."""
+    if isinstance(value, BaseException):
+        return type(value), value.args
+    return value
 
 
 class ExceptionTests(torch._dynamo.test_case.TestCase):
@@ -101,6 +130,58 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_exception_target_cleanup_double_delete(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                del exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+            return x
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup_graph_break(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            x = x * 2
+            torch._dynamo.graph_break()
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_exception4(self):
         def fn(x):
@@ -206,6 +287,65 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             try:
                 raise ValueError("v") from dict
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_scalar_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except 42:  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_tuple_with_bad_member_type_error(self):
+        # The raised exception deliberately does not match the tuple's valid
+        # member (ValueError), so the bad member (42) is reached regardless
+        # of match order.
+        def fn(x):
+            try:
+                try:
+                    raise RuntimeError("v")
+                except (ValueError, 42):  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_instance_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except object():
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_string_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except "string":  # noqa: B030
+                    pass
             except TypeError as e:
                 return x.sin(), str(e)
 
@@ -391,6 +531,18 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         inp = torch.ones(3)
         out = f(inp)
         self.assertTrue(torch.equal(out, inp + 1))
+
+    def test_observed_exception_with_non_string_args(self):
+        def fn(x):
+            try:
+                type("A", (), {"__doc__": "x\udcdcy"})
+            except UnicodeEncodeError:
+                return x + 1
+            return x
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     @make_dynamo_test
     def test_isinstance_CustomException(self):
@@ -1436,6 +1588,50 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(s, str(("hello", 42)))
         self.assertEqual(r, "ValueError('hello', 42)")
 
+    @parametrize(
+        "args", [(), ("k",), ("",), ("it's a key",), (42,), (("k", 1),), ("k", 1)]
+    )
+    def test_str_keyerror(self, args):
+        def fn(t):
+            try:
+                raise KeyError(*args)
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}", repr(e), e.args
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
+    @parametrize("key", ["missing", "", "it's a key", 42, ("k", 1)])
+    def test_str_keyerror_dict_lookup(self, key):
+        def fn(t):
+            try:
+                {}[key]
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}", repr(e), e.args
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
+    def test_str_keyerror_custom_key(self):
+        class Key:
+            def __str__(self):
+                return "key str"
+
+            def __repr__(self):
+                return "key repr"
+
+        def fn(t):
+            try:
+                raise KeyError(Key())
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}"
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
     def test_frozen_dataclass_setattr_raises(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
@@ -1782,6 +1978,133 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         opt_fn(x)  # diverges: Dynamo does not raise
+
+    @parametrize("attr", WRITABLE_BASE_EXCEPTION_ATTRS)
+    def test_exception_attr_read_after_write(self, attr):
+        def fn(x):
+            e = CustomException("x")
+            setattr(e, attr, exception_attr_value(attr))
+            return getattr(e, attr), x + 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(comparable(opt_fn(x)[0]), comparable(fn(x)[0]))
+
+    @parametrize(
+        "attr",
+        [a for a in WRITABLE_BASE_EXCEPTION_ATTRS if a != "__suppress_context__"],
+    )
+    def test_exception_attr_write_survives_escape(self, attr):
+        def fn(x):
+            e = CustomException("x")
+            setattr(e, attr, exception_attr_value(attr))
+            return e
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        got, expected = getattr(opt_fn(x), attr), getattr(fn(x), attr)
+        self.assertEqual(comparable(got), comparable(expected))
+
+    @unittest.expectedFailure
+    def test_exception_store_attr_survives_escape(self):
+        # STORE_ATTR rather than the setattr builtin, and several writes at once.
+        def fn(x):
+            e = CustomException("x")
+            e.args = ("y",)
+            e.__suppress_context__ = True
+            return e
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        self.assertEqual(got.args, expected.args)
+        self.assertEqual(got.__suppress_context__, expected.__suppress_context__)
+
+    # ExceptionVariable.reconstruct skips any ConstantVariable-valued attribute,
+    # so a deliberate write is indistinguishable from the untouched default.
+    @unittest.expectedFailure
+    def test_builtin_exception_constant_attr_survives_escape(self):
+        def fn(x):
+            e = ValueError("x")
+            e.__suppress_context__ = True
+            return e
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(got.__suppress_context__, fn(x).__suppress_context__)
+
+    def test_escaping_exception_defaults_unchanged(self):
+        def fn(x):
+            return CustomException("x")
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        self.assertEqual(got.args, expected.args)
+        self.assertEqual(got.__suppress_context__, expected.__suppress_context__)
+        self.assertIsNone(got.__cause__)
+        self.assertIsNone(got.__context__)
+
+    def test_observed_exception_no_reference_cycle(self):
+        # An ObservedException unwinding out of an inlined frame owns a
+        # traceback spanning the whole Python stack, so a cycle through it pins
+        # arbitrary user frames (and everything they reference) until the next
+        # gc pass. Refcounting alone must be enough to reclaim it.
+        class Boom(Exception):
+            pass
+
+        def inner():
+            raise Boom
+
+        def fn(x):
+            inner()
+            return x + 1
+
+        observed_cls = get_dynamo_observed_exception(Boom)
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+
+        torch._dynamo.reset()
+        gc.collect()
+        with disable_gc():
+            with self.assertRaises(Boom):
+                opt_fn(x)
+            alive = sum(type(o) is observed_cls for o in gc.get_objects())
+        self.assertEqual(alive, 0)
+
+    def test_exception_subclass_super_init_with_kwargs(self):
+        class MyError(RuntimeError):
+            def __init__(self, msg, *, context=None):
+                super().__init__(msg)
+                self.context = context
+
+        def fn(x):
+            try:
+                raise MyError("bad", context="ctx")
+            except MyError as e:
+                return x + 1, e.args, e.context, str(e)
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_exception_subclass_specialized_super_init_unsupported(self):
+        class MyError(OSError):
+            def __init__(self, *args):
+                super().__init__(*args)
+
+        def fn(x):
+            try:
+                raise MyError(2, "nope", "/tmp/x")
+            except MyError as e:
+                return x + 1, e.args, e.errno, e.filename
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Unsupported,
+            "Attempted to call a super\\(\\) attribute that is not a function or method",
+        ):
+            opt_fn(torch.ones(2))
 
 
 instantiate_parametrized_tests(ExceptionTests)
