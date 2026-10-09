@@ -1467,14 +1467,14 @@ class TestSortAndSelectCUDA(TestCase):
             lo, hi = torch.iinfo(dtype).min, torch.iinfo(dtype).max
             tie_values = (lo, hi)
 
-        def check_topk(x_dev, x, k, msg):
+        def check_topk(x_dev, x, k, msg, dim=1):
             # Compared unsorted (sorted on the CPU) so that GPU sort behavior for NaN does not enter.
             for largest in (True, False):
-                got = torch.topk(x_dev, k, dim=1, largest=largest, sorted=False).values
-                want = torch.topk(x, k, dim=1, largest=largest).values
+                got = torch.topk(x_dev, k, dim, largest, sorted=False).values
+                want = torch.topk(x, k, dim, largest).values
                 self.assertEqual(
-                    got.cpu().sort(dim=1).values,
-                    want.sort(dim=1).values,
+                    got.cpu().sort(dim=dim).values,
+                    want.sort(dim=dim).values,
                     atol=0,
                     rtol=0,
                     msg=f"{msg} {largest=}",
@@ -1529,6 +1529,60 @@ class TestSortAndSelectCUDA(TestCase):
                     rtol=0,
                     msg=f"few values {n=} {k=}",
                 )
+        # Strided slices (dim 0 of an (n, 3) tensor) load row by row instead of through loadChunks. Lengths
+        # at rows per thread 4, 10 and REGS_MAX_E (20480 is past 14 * 1024, so the general path on wave32).
+        for n in (4096, 4097, 10241, 20480):
+            if dtype.is_floating_point:
+                x = torch.randn(n, 3, generator=g).to(dtype)
+            else:
+                x = torch.randint(
+                    max(lo, -1000), min(hi, 1000), (n, 3), generator=g
+                ).to(dtype)
+            for col, value in zip(range(3), tie_values * 2):
+                x[torch.randperm(n, generator=g)[:5], col] = value
+            x_dev = x.to(device)
+            for k in (1, 2, 16, 17, n // 2, n - 16, n - 15, n):
+                msg = f"strided {n=} {k=}"
+                self.assertEqual(
+                    torch.kthvalue(x_dev, k, dim=0).values,
+                    torch.kthvalue(x, k, dim=0).values,
+                    atol=0,
+                    rtol=0,
+                    msg=msg,
+                )
+                if n < 20000:
+                    check_topk(x_dev, x, k, msg, dim=0)
+            for op in (torch.median, torch.nanmedian):
+                self.assertEqual(
+                    op(x_dev, dim=0).values,
+                    op(x, dim=0).values,
+                    atol=0,
+                    rtol=0,
+                    msg=f"strided {op.__name__} {n=}",
+                )
+        # Step 3 ranks the `total` keys at or above T, the kEff-th largest wave maximum, by one of three
+        # methods (total <= 16, <= 64, <= CAP), else the walk decides. CAP is 192 with 10 rows per thread on
+        # wave64 and 160 on wave32. h distinct values in elements 0 to h - 1 (wave 0 in every load layout)
+        # above c spread copies of 60 make T = 60 for kEff = 2, so total = h + c. Row 1 mirrors row 0, so
+        # each end of the order takes step 3 in one row. (1-D slices this long take the sort path in topk.)
+        n = 10240
+        for h, c in [(16, 1)] + [(32, c) for c in (32, 33, 128, 129, 160, 161)]:
+            x = torch.randint(0, 51, (n,), generator=g)
+            x[:h] = torch.arange(92, 92 - h, -1)
+            x[n - 1 - torch.arange(c) * ((n - h) // c)] = 60
+            y = torch.stack((x, 100 - x)).to(dtype)
+            y_dev = y.to(device)
+            for k in (2, 16):
+                msg = f"step 3 {h=} {c=} {k=}"
+                check_topk(y_dev, y, k, msg)
+                for kk in (k, n + 1 - k):
+                    self.assertEqual(
+                        torch.kthvalue(y_dev, kk, dim=1).values,
+                        torch.kthvalue(y, kk, dim=1).values,
+                        atol=0,
+                        rtol=0,
+                        msg=f"{msg} {kk=}",
+                    )
         if dtype in (torch.uint8, torch.int8):
             # Seeded 8-bit input from randomized testing: ties at the maximum, with k = n - 15 reaching the
             # small-k threshold from the low end. 1-byte keys take the register path only on GFX9.

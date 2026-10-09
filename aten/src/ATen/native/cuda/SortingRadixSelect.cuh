@@ -936,8 +936,9 @@ __device__ __forceinline__ void fillDataSmem(
 // is exact since integers have no payload.)
 //
 // Tests: test_select_ties_at_dtype_extremes (test_sort_and_select.py) targets the step boundaries (k in
-// 1, 2, 16, 17 and their mirrors), each register-path size (n = 1023 to 20480), ties at the dtype minimum,
-// maximum and NaN, and tie-heavy rows that overflow step 3 into the walk.
+// 1, 2, 16, 17 and their mirrors), each register-path size (n = 1023 to 20480, contiguous and strided), ties
+// at the dtype minimum, maximum and NaN, step 3 candidate counts at each end of its three ranking methods,
+// and tie-heavy rows that overflow step 3 into the walk.
 
 // Wave ballot of a bool. HIP's __ballot takes an int, which makes the compiler materialize the
 // predicate as 0/1 and compare it again before every ballot; the builtins take the mask directly.
