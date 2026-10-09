@@ -684,6 +684,86 @@ class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
 
+    @unittest.skipIf(IS_WINDOWS, "Creating symlinks may require privileges on Windows")
+    def test_canonicalize_hip_source(self):
+        # `_canonicalize_hip_source` must leave a source that already lives under
+        # the build dir untouched (return its abspath), so a source symlinked
+        # *into* the build dir keeps its generated .hip under the build dir. A
+        # source outside the build dir must be realpath-resolved so the Windows
+        # `subst` drive / symlinked-path spelling matches the form hipify records.
+        from torch.utils.cpp_extension import _canonicalize_hip_source
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_real = os.path.realpath(tmp)
+            build_dir = os.path.join(tmp_real, "build")
+            real_dir = os.path.join(tmp_real, "real")
+            os.makedirs(build_dir)
+            os.makedirs(real_dir)
+
+            # Source that resolves under the build dir (via a symlink into it) is
+            # returned as its in-build-dir abspath, not the symlink target.
+            real_source = os.path.join(real_dir, "kernel.cu")
+            with open(real_source, "w"):
+                pass
+            linked_source = os.path.join(build_dir, "kernel.cu")
+            os.symlink(real_source, linked_source)
+            self.assertEqual(
+                _canonicalize_hip_source(linked_source, build_dir),
+                os.path.abspath(linked_source),
+            )
+
+            # Source outside the build dir reached via a symlinked directory is
+            # realpath-resolved to its true location on Windows only; POSIX keeps
+            # the abspath so includes still resolve next to the symlink.
+            link_dir = os.path.join(tmp_real, "link")
+            os.symlink(real_dir, link_dir)
+            outside_source = os.path.join(link_dir, "kernel.cu")
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", True):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    real_source,
+                )
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", False):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    os.path.abspath(outside_source),
+                )
+
+    def test_hipify_processes_relative_extra_files(self):
+        # A relative `extra_files` entry must still be hipified. Previously the
+        # normalization loop rebound a local variable but the preprocessing loop
+        # iterated the raw (relative) `extra_files`, so the relative spelling
+        # never matched the normalized `all_files` set and the source was
+        # silently skipped (never hipified).
+        from torch.utils.hipify import hipify_python
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = os.path.realpath(tmp)
+            source_name = "kernel.cu"
+            with open(os.path.join(build_dir, source_name), "w") as f:
+                f.write(
+                    "#include <cuda_runtime.h>\n"
+                    "__global__ void my_kernel() {}\n"
+                    "void launch() { cudaDeviceSynchronize(); }\n"
+                )
+
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                includes=[os.path.join(build_dir, "*")],
+                extra_files=[source_name],  # relative entry
+                hipify_extra_files_only=True,
+                is_pytorch_extension=True,
+            )
+
+            key = os.path.abspath(os.path.join(build_dir, source_name))
+            self.assertIn(key, result)
+            self.assertIsNotNone(
+                result[key].hipified_path,
+                "relative extra_files source was silently skipped by hipify",
+            )
+            self.assertTrue(result[key].hipified_path.endswith(".hip"))
+
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
@@ -1269,7 +1349,7 @@ class TestUtilsInternal(TestCase):
             torch._utils_internal.max_clock_rate.cache_clear()
 
     def test_max_clock_rate_uses_current_rocm_device(self):
-        properties = types.SimpleNamespace(gcnArchName="gfx90a:sramecc+")
+        properties = types.SimpleNamespace(clock_rate=1_700_000)
         torch._utils_internal.max_clock_rate.cache_clear()
         try:
             with (
