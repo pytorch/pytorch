@@ -2056,8 +2056,10 @@ class TestFullyShardAllocFromPG(FSDPTest):
         torch.distributed.barrier()
         torch.cuda.synchronize()
 
-        with open(self.nccl_log_dir.name + "/nccl_log") as f:
-            self.assertNotRegex(f.read(), self.MEMORY_REGISTER_RE)
+        # Every allocation so far comes from the default caching allocator
+        # pool. NCCL registration logs cannot show this: nccl2 registers all
+        # default-pool segments with NCCL regardless of this setting.
+        self.assertEqual(self._non_default_pool_segments(), [])
 
         for module in model.modules():
             if isinstance(module, TransformerBlock):
@@ -2070,8 +2072,18 @@ class TestFullyShardAllocFromPG(FSDPTest):
         torch.distributed.barrier()
         torch.cuda.synchronize()
 
+        # FSDP comm buffers now come from the process group's memory pool,
+        # and that pool's segments are registered with NCCL.
+        self.assertNotEqual(self._non_default_pool_segments(), [])
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
+
+    def _non_default_pool_segments(self) -> list[dict]:
+        return [
+            s
+            for s in torch.cuda.memory_snapshot()
+            if s["device"] == self.rank and s["segment_pool_id"] != (0, 0)
+        ]
 
     @skip_if_lt_x_gpu(2)
     def test_exception_when_used_together_with_comm_hooks(self):
