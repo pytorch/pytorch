@@ -560,7 +560,8 @@ void ProcessGroupNCCL::finalize() {
   stopWatchdog();
   drainRetiredGraphWork();
 
-  const auto deadline = std::chrono::steady_clock::now() + options_c10d_->timeout;
+  const auto deadline =
+      std::chrono::steady_clock::now() + options_c10d_->timeout;
   while (comm_state_ == CommState::NORMAL) {
     auto status = workq_.garbageCollect();
     if (status == WorkNCCL::WorkStatus::TIMEDOUT ||
