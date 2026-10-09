@@ -1241,8 +1241,11 @@ class CUDAGraphNode:
 
         # if an output aliases a static, persistent input then the corresponding Tensor will
         # be set here. These are different than cached tensors, because they are tensors that
-        # are aliases of parameters that are always live.
-        self.static_output_tensors: OutputList[Tensor | None] = []
+        # are aliases of parameters that are always live. If the output *is* one of the
+        # static inputs, the index of that input is stored instead and replay returns the
+        # current input: holding the Tensor would keep it (e.g. a parameter) alive for as
+        # long as this node exists, even after its module is gone.
+        self.static_output_tensors: OutputList[Tensor | int | None] = []
 
         # Cleared after recording
         with dynamo_timed_cudagraph("CUDAGraphNode.record", compile_id, mode):
@@ -1349,7 +1352,7 @@ class CUDAGraphNode:
 
         self.run_graph()
 
-        outputs = self.reconstruct_outputs()
+        outputs = self.reconstruct_outputs(new_inputs)
         new_inputs.clear()
 
         if config.triton.fast_path_cudagraph_asserts:
@@ -1363,7 +1366,7 @@ class CUDAGraphNode:
 
         return outputs
 
-    def reconstruct_outputs(self) -> OutputType:
+    def reconstruct_outputs(self, new_inputs: list[InputType]) -> OutputType:
         "Reconstruct output tensors according to their saved metadata and alias information"
 
         # Cached tensors will not yet be set on the first execution
@@ -1402,7 +1405,11 @@ class CUDAGraphNode:
             if static_t is not None:
                 if self.outputs_weakrefs[i] is not None:
                     raise AssertionError(f"expected outputs_weakrefs[{i}] to be None")
-                outputs.append(static_t)
+                outputs.append(
+                    cast(torch.Tensor, new_inputs[static_t])
+                    if isinstance(static_t, int)
+                    else static_t
+                )
                 continue
 
             storage = self.prepare_alias_info_for_tensor_construction(
@@ -1518,6 +1525,12 @@ class CUDAGraphNode:
                 static_input_iter(), self.wrapped_function.constants
             )
         }
+        # The inputs list is consumed by the model; remember which static input is which.
+        static_inputs_by_id: dict[int, tuple[int, torch.Tensor]] = {
+            id(inp): (i, inp)
+            for i in self.non_managed_static_input_idxs
+            if isinstance(inp := inputs[i], torch.Tensor)
+        }
 
         if self.wrapped_function.kernel_free_cudagraph:
             with (
@@ -1542,7 +1555,9 @@ class CUDAGraphNode:
                 static_outputs = list(static_outputs)
             static_outputs = cast(OutputType, static_outputs)
             self._add_first_outputs(
-                static_outputs, static_input_persistent_storage_ptrs
+                static_outputs,
+                static_input_persistent_storage_ptrs,
+                static_inputs_by_id,
             )
             return static_outputs
 
@@ -1587,8 +1602,11 @@ class CUDAGraphNode:
         if not isinstance(static_outputs, (list, tuple)):
             static_outputs = (static_outputs,)
 
-        # pyrefly: ignore [bad-argument-type]
-        self._add_first_outputs(static_outputs, static_input_persistent_storage_ptrs)
+        self._add_first_outputs(
+            static_outputs,  # pyrefly: ignore [bad-argument-type]
+            static_input_persistent_storage_ptrs,
+            static_inputs_by_id,
+        )
 
         # pyrefly: ignore [bad-return]
         return static_outputs
@@ -1597,6 +1615,7 @@ class CUDAGraphNode:
         self,
         outputs: OutputType,
         static_input_persistent_storage_ptrs: dict[int, StorageWeakRefWrapper],
+        static_inputs_by_id: dict[int, tuple[int, torch.Tensor]],
     ) -> None:
         "Add the outputs from the first invocation of the node and set up metadata"
 
@@ -1639,7 +1658,11 @@ class CUDAGraphNode:
             is_empty_storage = o.untyped_storage().data_ptr() == 0
             if (ref and ref() is not None) or is_empty_storage:
                 self.output_storage_alias.append(None)
-                self.static_output_tensors[i] = o
+                static_input = static_inputs_by_id.get(id(o))
+                if static_input is not None and static_input[1] is o:
+                    self.static_output_tensors[i] = static_input[0]
+                else:
+                    self.static_output_tensors[i] = o
                 continue
 
             path_ref = self._is_alias_of_live_recorded_tensor(o)
