@@ -146,6 +146,14 @@ T = TypeVar("T")
 log = logging.getLogger(__name__)
 
 
+def _create_internal_torch_function(
+    value: Callable[..., Any], kind: "AllowInGraphKind | None" = None
+) -> "TorchInGraphFunctionVariable":
+    from .builder import SourcelessBuilder
+
+    return SourcelessBuilder.create_internal_torch_function(value, kind)
+
+
 def _is_supported_out_tensor_layout(
     fake_out: torch.Tensor, *, false_if_dde: bool
 ) -> bool:
@@ -1312,7 +1320,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 if all(arg.is_tensor() for arg in args):
                     x, y, z = args
-                    addcmul_fn = TorchInGraphFunctionVariable(torch.addcmul)
+                    addcmul_fn = _create_internal_torch_function(torch.addcmul)
                     return addcmul_fn.call_function(tx, [z, x, y], {})
 
                 # Use math.fma if constants
@@ -2014,13 +2022,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if len(args) == 3 and "value" in kwargs and len(kwargs) == 1:
                 # decompose addcdiv into constituent ops, prevents a graph break due to converting
                 # value to a scalar
-                result = TorchInGraphFunctionVariable(torch.div).call_function(
+                result = _create_internal_torch_function(torch.div).call_function(
                     tx, [*args[1:]], {}
                 )
-                result = TorchInGraphFunctionVariable(torch.mul).call_function(
+                result = _create_internal_torch_function(torch.mul).call_function(
                     tx, [result, kwargs["value"]], {}
                 )
-                return TorchInGraphFunctionVariable(torch.add).call_function(
+                return _create_internal_torch_function(torch.add).call_function(
                     tx, [args[0], result], {}
                 )
             return None
@@ -2038,9 +2046,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
-                empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(
-                    tx, [size], kwargs
-                )
+                empty_result = _create_internal_torch_function(
+                    torch.empty
+                ).call_function(tx, [size], kwargs)
                 # Call fill_ method on the empty tensor
                 return empty_result.call_method(tx, "fill_", [fill_value], {})
             return None
@@ -2082,7 +2090,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 args = (args[0], sections_vt, *args[2:])
             else:
                 kwargs["indices_or_sections"] = sections_vt
-            return TorchInGraphFunctionVariable(torch.tensor_split).call_function(
+            return _create_internal_torch_function(torch.tensor_split).call_function(
                 tx, list(args), kwargs
             )
 
@@ -2670,7 +2678,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             from ..tensor_version_op import _unsafe_set_version_counter
 
-            return TorchInGraphFunctionVariable(
+            return _create_internal_torch_function(
                 _unsafe_set_version_counter
             ).call_function(tx, [*args], kwargs)
 
@@ -2732,9 +2740,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 # This is slower and less canonical, so only use it if we
                 # have to
-                return TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
-                    tx, [*args], kwargs
-                )
+                return _create_internal_torch_function(
+                    torch._refs.tensor
+                ).call_function(tx, [*args], kwargs)
             else:
                 return None
 
@@ -3719,7 +3727,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
             if source is not None:
                 return TorchInGraphFunctionVariable.create_with_source(member, source)
-            return TorchInGraphFunctionVariable(member, source=source)
+            return _create_internal_torch_function(member)
         return variables.GetAttrVariable(self, name, source=source)
 
     def call_function(

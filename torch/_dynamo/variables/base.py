@@ -626,11 +626,12 @@ def _wrap_hashfunc(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 0:
         raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
-    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
+    from .builder import SourcelessBuilder
+    from .constant import ConstantVariable, FakeValueKind
 
     h, is_fake = func(self, tx)
     if is_fake:
-        return FakeIdVariable(h, kind=FakeValueKind.HASH)
+        return SourcelessBuilder.create_internal_fake_id(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
 
 

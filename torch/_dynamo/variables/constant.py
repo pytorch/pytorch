@@ -971,6 +971,12 @@ class FakeIdVariable(VariableTracker):
         self.value = value
         self.kind = kind
 
+    @staticmethod
+    def _create(value: int, kind: FakeValueKind = FakeValueKind.ID) -> FakeIdVariable:
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create_internal_fake_id(value, kind)
+
     def as_python_constant(self) -> int:
         return self.value
 
@@ -1049,7 +1055,7 @@ class FakeIdVariable(VariableTracker):
             result = op(lhs, rhs)
         except (TypeError, ValueError, OverflowError, ZeroDivisionError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
-        return FakeIdVariable(result)
+        return self._create(result)
 
     def nb_add_impl(self, tx, other, reverse=False):  # type: ignore[no-untyped-def]
         return self._nb_binary_impl(tx, other, operator.add, reverse)
@@ -1082,22 +1088,22 @@ class FakeIdVariable(VariableTracker):
         return self._nb_binary_impl(tx, other, operator.rshift, reverse)
 
     def nb_negative_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(-self.value)
+        return self._create(-self.value)
 
     def nb_positive_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(+self.value)
+        return self._create(+self.value)
 
     def nb_absolute_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(abs(self.value))
+        return self._create(abs(self.value))
 
     def nb_invert_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(~self.value)
+        return self._create(~self.value)
 
     def nb_int_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(int(self.value), kind=self.kind)
+        return self._create(int(self.value), kind=self.kind)
 
     def nb_index_impl(self, tx):  # type: ignore[no-untyped-def]
-        return FakeIdVariable(self.value, kind=self.kind)
+        return self._create(self.value, kind=self.kind)
 
     def reconstruct(self, codegen: Any) -> None:
         unimplemented(

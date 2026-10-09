@@ -993,6 +993,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return variables.ConstantVariable.create(None)
         # Handle a `nonstrict_trace(fn)` call
         elif self.fn is torch._dynamo.nonstrict_trace:
+            from .builder import SourcelessBuilder
+
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
             fn_var = bound.args[0]
             if not isinstance(fn_var, BaseUserFunctionVariable):
@@ -1021,7 +1023,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 # handed, and nothing guards type(obj).m, so rebinding the
                 # method on the class is not detected. guard_as_python_constant
                 # does install ID_MATCH on the receiver itself.
-                return variables.TorchInGraphFunctionVariable(
+                return SourcelessBuilder.create_internal_torch_function(
                     fn_var.guard_as_python_constant(),
                     kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE,
                 )
@@ -1040,7 +1042,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 )
 
             fn = fn_var.fn
-            return variables.TorchInGraphFunctionVariable(
+            return SourcelessBuilder.create_internal_torch_function(
                 fn, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
             )
 
@@ -1999,19 +2001,20 @@ class UserMethodVariable(BaseUserFunctionVariable):
         # We might be able to simplify this away by canonicalizing the
         # function/method wrapping code paths.
         from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
+        from .builder import SourcelessBuilder
 
         func = self.get_function()
 
         if is_nonstrict_trace_callable(func):
             call_args = [*self.self_args(), *args]
-            var = variables.TorchInGraphFunctionVariable(
+            var = SourcelessBuilder.create_internal_torch_function(
                 func, kind=variables.torch.AllowInGraphKind.NONSTRICT_TRACE
             )
             return var.call_function(tx, call_args, kwargs)
 
         if is_leaf_function(func):
             call_args = [*self.self_args(), *args]
-            var = variables.TorchInGraphFunctionVariable(
+            var = SourcelessBuilder.create_internal_torch_function(
                 func, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
             )
             return var.call_function(tx, call_args, kwargs)
@@ -2046,9 +2049,9 @@ class UserMethodVariable(BaseUserFunctionVariable):
             _fsdp_param_group is not None
             and func is _fsdp_param_group.FSDPParamGroup.use_training_state  # type: ignore[attr-defined]
         ):
-            return variables.TorchCtxManagerClassVariable(func).call_function(
-                tx, [self.im_self, *args], kwargs
-            )
+            return SourcelessBuilder.create_internal_torch_ctx_manager(
+                func
+            ).call_function(tx, [self.im_self, *args], kwargs)
         if self.is_constant:
             fn = getattr(self.im_self.value, func.__name__)  # type: ignore[attr-defined]
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
@@ -5572,12 +5575,12 @@ class PropertyVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker:
         from ..polyfills import property_isabstractmethod
+        from .builder import SourcelessBuilder
 
         # Trace truth testing so user-defined __bool__ methods and their
         # exceptions are handled within the traced program.
-        return UserFunctionVariable(property_isabstractmethod).call_function(
-            tx, [self], {}
-        )
+        fn = SourcelessBuilder.create_internal_user_function(property_isabstractmethod)
+        return fn.call_function(tx, [self], {})
 
     tp_getset = {
         "__name__": GetSet(_name_getter, getset_set("__name__")),
