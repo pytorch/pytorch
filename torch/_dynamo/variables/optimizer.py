@@ -67,8 +67,9 @@ perf_hint_log = getArtifactLogger(__name__, "perf_hints")
 
 def _is_static_for_cudagraphs(x: torch.Tensor) -> bool:
     from torch._inductor.cudagraph_trees import get_manager
+    from torch._inductor.cudagraph_utils import _CUDAGRAPH_SUPPORTED_DEVICE_TYPES
 
-    if x.is_cuda:
+    if x.device.type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES:
         manager = get_manager(x.device, False)
         is_static_address = torch._dynamo.utils.get_static_address_type(x) is not None
         if manager:
@@ -81,7 +82,7 @@ def _is_static_for_cudagraphs(x: torch.Tensor) -> bool:
         else:
             return is_static_address
     else:
-        # Don't print a warning for non-cuda tensors
+        # Don't print a warning for tensors that cudagraphs cannot manage
         return True
 
 
