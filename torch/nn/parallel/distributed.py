@@ -792,6 +792,11 @@ class DistributedDataParallel(Module, Joinable):
                     ``gradient_as_bucket_view`` alone cannot avoid copies because
                     the bucket view alias is destroyed every iteration.
                     (default: ``False``)
+        lazy_bucket_allocation (bool): When set to ``True``, DDP allocates dense
+                    gradient buckets as their gradients become ready during
+                    backward and releases reducer-owned bucket storage after
+                    backward finishes. This reduces bucket and activation memory
+                    overlap. (default: ``False``)
         forward_sync_buffers (bool or None): Flag that enables syncing
                     (broadcasting) buffers of the module at runtime, including
                     at the beginning of ``forward`` and after uneven-input
@@ -837,6 +842,7 @@ class DistributedDataParallel(Module, Joinable):
         bucket_cap_mb_list: list[int] | None = None,
         batched_grad_copy=False,
         forward_sync_buffers: bool | None = None,
+        lazy_bucket_allocation=False,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -998,6 +1004,7 @@ class DistributedDataParallel(Module, Joinable):
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
         self.batched_grad_copy = batched_grad_copy
+        self.lazy_bucket_allocation = lazy_bucket_allocation
         self.mixed_precision = mixed_precision
         if self.mixed_precision is not None:
             logger.warning("Received mixed precision config %s", self.mixed_precision)
@@ -1462,6 +1469,7 @@ class DistributedDataParallel(Module, Joinable):
             self._use_python_reducer,
             bucket_size_limits_for_rebuilding,
             self.batched_grad_copy,
+            self.lazy_bucket_allocation,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1505,6 +1513,8 @@ class DistributedDataParallel(Module, Joinable):
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         self.__dict__.setdefault("_require_manual_backward_finalization", False)
+        self.__dict__.setdefault("batched_grad_copy", False)
+        self.__dict__.setdefault("lazy_bucket_allocation", False)
         # broadcast_buffers is now a property; pop it so it doesn't shadow.
         # Old pickles may only have broadcast_buffers; use it to seed forward_sync_buffers.
         old_broadcast = self.__dict__.pop("broadcast_buffers", True)

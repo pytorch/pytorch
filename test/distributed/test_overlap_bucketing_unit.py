@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from unittest.mock import patch
 
 import torch._dynamo
@@ -1743,6 +1744,77 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         super().tearDownClass()
         dist.destroy_process_group()
 
+    @torch._inductor.config.patch(
+        {"aten_distributed_optimizations.overlap_scheduling_autofix_cycles": False}
+    )
+    def test_restore_failed_bucket_probe_timeline_edges(self, device):
+        """A rejected bucket probe must restore edges through merged node aliases."""
+
+        def func(a, b, c):
+            group_name = dist.distributed_c10d._get_default_group().group_name
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(a, 16, group_name)
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(b, 16, group_name)
+            ag3 = torch.ops._c10d_functional.all_gather_into_tensor(c, 16, group_name)
+            wait1 = torch.ops._c10d_functional.wait_tensor(ag1)
+            wait2 = torch.ops._c10d_functional.wait_tensor(ag2)
+            wait3 = torch.ops._c10d_functional.wait_tensor(ag3)
+            return wait1 + wait2 + wait3
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=device)
+            b = torch.ones(4, 4, device=device)
+            c = torch.ones(4, 4, device=device)
+            traced = make_fx(func)(a, b, c)
+
+        ag1, ag2, ag3 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        collective_info = build_collective_info(traced.graph, {})
+
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+        from torch._inductor.fx_passes.overlap_scheduling import get_group_name
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            OrderedSet(traced.graph.nodes),
+            collective_bucketing=False,
+        )
+        bucketer._populate_node_to_event(get_group_name(ag2))
+
+        prev_event, next_event = bucketer.remove_from_event(ag2)
+        if prev_event is None or next_event is None:
+            self.fail("the middle collective must have two timeline neighbors")
+        bucketer.restore_to_event(ag2, prev_event, next_event)
+        bucketer._apply_deps_and_effect_tokens()
+
+        self.assertIn(ag2, bucketer.aug_graph.extra_deps[next_event.node])
+        self.assertIs(bucketer.node_to_event[ag2].prev.node, ag1)
+        self.assertIs(bucketer.node_to_event[ag2].next.node, ag3)
+
+        first_prev, first_next = bucketer.remove_from_event(ag1)
+        self.assertIsNone(first_prev)
+        if first_next is None:
+            self.fail("the first collective must have a successor")
+        self.assertIs(first_next.node, ag2)
+        bucketer.aug_graph.merge_to_set(ag1, ag2)
+        bucketer.node_to_event[ag1] = bucketer.node_to_event[ag2]
+
+        alias_prev, alias_next = bucketer.remove_from_event(ag1)
+        self.assertIsNone(alias_prev)
+        if alias_next is None:
+            self.fail("the merged event must have a successor")
+        self.assertIs(alias_next.node, ag3)
+        self.assertNotIn(ag2, bucketer.aug_graph.extra_deps[ag3])
+
+        bucketer.restore_to_event(ag1, alias_prev, alias_next)
+        bucketer._apply_deps_and_effect_tokens()
+        self.assertIn(ag2, bucketer.aug_graph.extra_deps[ag3])
+        self.assertNotIn(ag1, bucketer.aug_graph.extra_deps[ag3])
+
     def test_no_self_dependency_cycle_with_dtype_conversion(self, device):
         """
         Test that bucketing collectives with dtype conversion doesn't create
@@ -2046,6 +2118,205 @@ instantiate_device_type_tests(
 
 class TestManualOverlapSchedulingUnit(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @staticmethod
+    def _wait_for(graph: fx.Graph, start: fx.Node) -> fx.Node:
+        return next(
+            node
+            for node in graph.find_nodes(
+                op="call_function",
+                target=torch.ops._c10d_functional.wait_tensor.default,
+            )
+            if node.args[0] is start
+        )
+
+    @staticmethod
+    def _count_stable_sorts(fn: Callable[[], None]) -> int:
+        from torch._dynamo import graph_deduplication
+
+        with patch.object(
+            graph_deduplication,
+            "_stable_topological_sort",
+            wraps=graph_deduplication._stable_topological_sort,
+        ) as stable_sort:
+            fn()
+        return stable_sort.call_count
+
+    def test_move_overlap_nodes_repairs_multistage_collective_chain(self):
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            _move_overlap_nodes,
+        )
+
+        def func(grad0, grad1, side_input):
+            reduce_scatter = torch.ops._c10d_functional.reduce_scatter_tensor
+            all_reduce = torch.ops._c10d_functional.all_reduce
+            wait = torch.ops._c10d_functional.wait_tensor
+
+            rs0 = reduce_scatter(grad0, "sum", 2, "shard_pg")
+            wait0 = wait(rs0)
+            ar0 = all_reduce(wait0, "sum", "replicate_pg")
+            ar_wait0 = wait(ar0)
+            consumer = ar_wait0 + side_input
+            rs1 = reduce_scatter(grad1, "sum", 2, "shard_pg")
+            wait1 = wait(rs1)
+            return consumer, wait1
+
+        with FakeTensorMode():
+            inputs = [torch.ones(8, 4), torch.ones(8, 4), torch.ones(4, 4)]
+            traced = make_fx(func)(*inputs)
+
+        rs0, rs1 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        ar0 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )[0]
+        wait0 = self._wait_for(traced.graph, rs0)
+        ar_wait0 = self._wait_for(traced.graph, ar0)
+        consumer = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.add.Tensor
+        )[0]
+
+        initial_positions = {node: i for i, node in enumerate(traced.graph.nodes)}
+        self.assertLess(initial_positions[consumer], initial_positions[rs1])
+
+        self.assertEqual(
+            self._count_stable_sorts(
+                lambda: _move_overlap_nodes(
+                    traced.graph,
+                    {wait0: OrderedSet([rs1])},
+                    {rs1: "bucketed_reduce_scatter"},
+                )
+            ),
+            1,
+        )
+        traced.graph.lint()
+
+        positions = {node: i for i, node in enumerate(traced.graph.nodes)}
+        self.assertLess(positions[rs1], positions[wait0])
+        self.assertLess(positions[wait0], positions[ar0])
+        self.assertLess(positions[ar0], positions[ar_wait0])
+        self.assertLess(positions[ar_wait0], positions[consumer])
+
+    def test_move_overlap_nodes_preserves_ordinary_moves(self):
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            _move_overlap_nodes,
+        )
+
+        def reduce_scatter_func(input0, input1):
+            reduce_scatter = torch.ops._c10d_functional.reduce_scatter_tensor
+            wait = torch.ops._c10d_functional.wait_tensor
+            wait0 = wait(reduce_scatter(input0, "sum", 2, "shard_pg"))
+            wait0_user = -wait0
+            wait1 = wait(reduce_scatter(input1, "sum", 2, "shard_pg"))
+            return wait0_user, wait1
+
+        def all_gather_func(input0, input1):
+            all_gather = torch.ops._c10d_functional.all_gather_into_tensor
+            wait = torch.ops._c10d_functional.wait_tensor
+            ag0 = all_gather(input0, 2, "shard_pg")
+            input1 = -input1
+            input1_user = input1 + input0
+            wait0 = wait(ag0)
+            wait0_user = -wait0
+            wait1 = wait(all_gather(input1, 2, "shard_pg"))
+            return input1_user, wait0_user, wait1
+
+        with FakeTensorMode():
+            inputs = [torch.ones(8, 4) for _ in range(2)]
+            rs_graph = make_fx(reduce_scatter_func)(*inputs).graph
+            ag_graph = make_fx(all_gather_func)(*inputs).graph
+
+        rs0, rs1 = rs_graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        rs_wait0 = self._wait_for(rs_graph, rs0)
+        rs_wait0_user = next(iter(rs_wait0.users))
+        stable_sort_count = self._count_stable_sorts(
+            lambda: _move_overlap_nodes(
+                rs_graph,
+                {rs_wait0: OrderedSet([rs1])},
+                {rs1: "bucketed_reduce_scatter"},
+            )
+        )
+        rs_graph.lint()
+        rs_positions = {node: i for i, node in enumerate(rs_graph.nodes)}
+        self.assertLess(rs_positions[rs1], rs_positions[rs_wait0])
+        self.assertLess(rs_positions[rs_wait0], rs_positions[rs_wait0_user])
+        self.assertEqual(stable_sort_count, 0)
+
+        ag0, ag1 = ag_graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        ag_wait0 = self._wait_for(ag_graph, ag0)
+        ag1_input = ag1.args[0]
+        if not isinstance(ag1_input, fx.Node):
+            raise AssertionError(f"expected Node input, got {type(ag1_input)}")
+        ag1_input_user = next(user for user in ag1_input.users if user is not ag1)
+        initial_positions = {node: i for i, node in enumerate(ag_graph.nodes)}
+        self.assertLess(initial_positions[ag1_input_user], initial_positions[ag_wait0])
+        self.assertLess(initial_positions[ag_wait0], initial_positions[ag1])
+        stable_sort_count = self._count_stable_sorts(
+            lambda: _move_overlap_nodes(
+                ag_graph,
+                {ag_wait0: OrderedSet([ag1])},
+                {ag1: "bucketed_all_gather"},
+            )
+        )
+        self.assertEqual(stable_sort_count, 0)
+        ag_graph.lint()
+        ag_positions = {node: i for i, node in enumerate(ag_graph.nodes)}
+        self.assertLess(ag_positions[ag1_input], ag_positions[ag1])
+        self.assertLess(ag_positions[ag1_input_user], ag_positions[ag1])
+        self.assertLess(ag_positions[ag1], ag_positions[ag_wait0])
+
+    def test_bucket_wait_user_repair_skips_sort_when_ordered(self):
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            ManualOverlapPreservingBucketer,
+        )
+        from torch._inductor.fx_passes.overlap_scheduling import CollectiveInfo
+
+        def func(a, b):
+            all_reduce = torch.ops._c10d_functional.all_reduce
+            wait = torch.ops._c10d_functional.wait_tensor
+            first = wait(all_reduce(a, "sum", "pg"))
+            second = wait(all_reduce(b, "sum", "pg"))
+            return first + second
+
+        with FakeTensorMode():
+            traced = make_fx(func)(torch.ones(4), torch.ones(4))
+
+        collective_info = {}
+        for wait in traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.wait_tensor.default,
+        ):
+            start = wait.args[0]
+            if isinstance(start, fx.Node):
+                collective_info[start] = CollectiveInfo(start, wait, 0, 0, 0)
+
+        bucketer = ManualOverlapPreservingBucketer(
+            traced.graph, collective_info, OrderedSet(traced.graph.nodes)
+        )
+        stable_sort_count = self._count_stable_sorts(
+            lambda: bucketer.manual_bucket_collectives(list(traced.graph.nodes))
+        )
+
+        self.assertEqual(stable_sort_count, 0)
+        self.assertEqual(
+            len(
+                traced.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops._c10d_functional.all_reduce.default,
+                )
+            ),
+            1,
+        )
+        traced.graph.lint()
 
     def _run_reordered_hsdp_manual_bucketing(self, dependent: bool) -> fx.Graph:
         from torch._inductor.fx_passes.overlap_manual_scheduling import (

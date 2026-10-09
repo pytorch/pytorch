@@ -70,7 +70,7 @@ class AbstractConfig {
   // Throw std::invalid_argument if val is invalid.
   virtual bool handleOption(const std::string& name, std::string& val);
 
-  // Perform post-validation checks, typically conditons involving
+  // Perform post-validation checks, typically conditions involving
   // multiple options.
   // Throw std::invalid_argument if automatic correction can not be made.
   //
