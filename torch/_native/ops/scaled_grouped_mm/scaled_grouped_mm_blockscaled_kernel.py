@@ -427,6 +427,8 @@ class Sm100GroupedBlockScaledGemmKernel:
         total_num_clusters: cute.Tensor,
         tensormap_cute_tensor: cute.Tensor,
         offs: cute.Tensor,
+        group_offsets: cute.Tensor,
+        sf_act_rows: cutlass.Int32,
         dims_mnk: tuple[cutlass.Int32, cutlass.Int32, cutlass.Int32],
         base_ptrs: _BasePtrs,
         strides: _MetadataStrides,
@@ -455,14 +457,22 @@ class Sm100GroupedBlockScaledGemmKernel:
 
         self._setup_attributes()
 
-        # Keep blocked MKL scale pointers while reusing A/B shapes.
+        # Keep blocked MKL scale pointers while reusing A/B shapes; 2d/3d
+        # activation scales pad every group to 128 rows.
+        sfa_shape = tensor_a.shape
+        sfb_shape = tensor_b.shape
+        if cutlass.const_expr(not self.uniform_mn_groups):
+            if cutlass.const_expr(self.transpose_ab):
+                sfb_shape = (sf_act_rows, tensor_b.shape[1], 1)
+            else:
+                sfa_shape = (sf_act_rows, tensor_a.shape[1], 1)
         sfa_layout = blockscaled_utils.tile_atom_to_shape_SF(
-            tensor_a.shape, self.sf_vec_size
+            sfa_shape, self.sf_vec_size
         )
         tensor_sfa = cute.make_tensor(tensor_sfa.iterator, sfa_layout)
 
         sfb_layout = blockscaled_utils.tile_atom_to_shape_SF(
-            tensor_b.shape, self.sf_vec_size
+            sfb_shape, self.sf_vec_size
         )
         tensor_sfb = cute.make_tensor(tensor_sfb.iterator, sfb_layout)
 
@@ -670,6 +680,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             problem_shape_mnkl,
             total_num_clusters,
             tensormap_cute_tensor,
+            group_offsets,
         ).launch(grid=(group_count, 1, 1), block=[32, 1, 1], stream=stream)
 
         self.kernel(
@@ -698,6 +709,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             group_count,
             problem_shape_mnkl,
             tensormap_cute_tensor,
+            group_offsets,
             direct_problem_shape_mnl,
         ).launch(
             grid=grid,
@@ -738,6 +750,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         group_count: cutlass.Int32,
         problem_sizes_mnkl: cute.Tensor,
         tensormaps: cute.Tensor,
+        group_offsets: cute.Tensor,
         direct_problem_shape_mnl,
     ):
         warp_idx = cute.arch.warp_idx()
@@ -1087,20 +1100,33 @@ class Sm100GroupedBlockScaledGemmKernel:
                         meta[3] = cur_k_tile_cnt
                     tile_meta_pipeline.producer_commit(tile_meta_producer_state)
                     tile_meta_producer_state.advance()
-                tma_desc_a = self.group_tma_desc(tensormaps, cur_group_idx, 0)
-                tma_desc_b = self.group_tma_desc(tensormaps, cur_group_idx, 1)
-                tma_desc_sfa = self.group_tma_desc(tensormaps, cur_group_idx, 2)
-                tma_desc_sfb = self.group_tma_desc(tensormaps, cur_group_idx, 3)
-                is_group_changed = cur_group_idx != last_group_idx
-                last_group_idx = cur_group_idx
-                if is_group_changed:
-                    for tma_desc in (
-                        tma_desc_a,
-                        tma_desc_b,
-                        tma_desc_sfa,
-                        tma_desc_sfb,
-                    ):
-                        cute.nvgpu.cpasync.fence_tma_desc_acquire(tma_desc)
+                # 2d/3d reads whole-tensor descriptors: weights index the group
+                # through L, activations are offset by the group's first row.
+                tma_desc_a = None
+                tma_desc_b = None
+                tma_desc_sfa = None
+                tma_desc_sfb = None
+                a_l = cutlass.Int32(0)
+                b_l = cutlass.Int32(0)
+                if cutlass.const_expr(self.uniform_mn_groups):
+                    tma_desc_a = self.group_tma_desc(tensormaps, cur_group_idx, 0)
+                    tma_desc_b = self.group_tma_desc(tensormaps, cur_group_idx, 1)
+                    tma_desc_sfa = self.group_tma_desc(tensormaps, cur_group_idx, 2)
+                    tma_desc_sfb = self.group_tma_desc(tensormaps, cur_group_idx, 3)
+                    is_group_changed = cur_group_idx != last_group_idx
+                    last_group_idx = cur_group_idx
+                    if is_group_changed:
+                        for tma_desc in (
+                            tma_desc_a,
+                            tma_desc_b,
+                            tma_desc_sfa,
+                            tma_desc_sfb,
+                        ):
+                            cute.nvgpu.cpasync.fence_tma_desc_acquire(tma_desc)
+                elif cutlass.const_expr(self.transpose_ab):
+                    a_l = cur_group_idx
+                else:
+                    b_l = cur_group_idx
 
                 mma_tile_coord_mnl = (
                     grouped_gemm_cta_tile_info.cta_tile_idx_m
@@ -1110,23 +1136,30 @@ class Sm100GroupedBlockScaledGemmKernel:
                 )
 
                 # ((atom_v, rest_v), RestK)
-                tAgA_slice = tAgA[
-                    (None, mma_tile_coord_mnl[0], None, mma_tile_coord_mnl[2])
-                ]
+                tAgA_slice = tAgA[(None, mma_tile_coord_mnl[0], None, a_l)]
                 # ((atom_v, rest_v), RestK)
-                tBgB_slice = tBgB[
-                    (None, mma_tile_coord_mnl[1], None, mma_tile_coord_mnl[2])
-                ]
+                tBgB_slice = tBgB[(None, mma_tile_coord_mnl[1], None, b_l)]
                 # ((atom_v, rest_v), RestK)
-                tAgSFA_slice = tAgSFA[
-                    (None, mma_tile_coord_mnl[0], None, mma_tile_coord_mnl[2])
-                ]
+                tAgSFA_slice = tAgSFA[(None, mma_tile_coord_mnl[0], None, a_l)]
                 # A 128-wide SFB block covers two 64-wide N tiles.
                 sfb_tile_n = mma_tile_coord_mnl[1]
                 if cutlass.const_expr(self.cta_tile_shape_mnk[1] == 64):
                     sfb_tile_n = mma_tile_coord_mnl[1] // 2
                 # ((atom_v, rest_v), RestK)
-                tBgSFB_slice = tBgSFB[(None, sfb_tile_n, None, mma_tile_coord_mnl[2])]
+                tBgSFB_slice = tBgSFB[(None, sfb_tile_n, None, b_l)]
+                if cutlass.const_expr(not self.uniform_mn_groups):
+                    row_start = group_offsets[cur_group_idx, 0]
+                    sf_row_start = group_offsets[cur_group_idx, 1]
+                    if cutlass.const_expr(self.transpose_ab):
+                        tBgB_slice = self._offset_rows(tBgB_slice, mB_nkl, row_start)
+                        tBgSFB_slice = self._offset_rows(
+                            tBgSFB_slice, mSFB_nkl, sf_row_start
+                        )
+                    else:
+                        tAgA_slice = self._offset_rows(tAgA_slice, mA_mkl, row_start)
+                        tAgSFA_slice = self._offset_rows(
+                            tAgSFA_slice, mSFA_mkl, sf_row_start
+                        )
 
                 ab_producer_state.reset_count()
                 peek_ab_empty_status = cutlass.Boolean(1)
@@ -1477,6 +1510,13 @@ class Sm100GroupedBlockScaledGemmKernel:
                     cute.arch.fence_acq_rel_cta()
                     tile_meta_pipeline.consumer_release(tile_meta_consumer_state)
                     tile_meta_consumer_state.advance()
+                # Load before the descriptor acquire, which invalidates the
+                # constant cache that global loads take their descriptor from.
+                global_scale = cutlass.Float32(1.0)
+                if cutlass.const_expr(self.has_global_scale):
+                    global_scale = self.load_global_scale_for_group(
+                        cur_group_idx, global_scale_ptrs
+                    )
                 tma_desc_c = self.group_tma_desc(tensormaps, cur_group_idx, 4)
                 is_group_changed = cur_group_idx != last_group_idx
                 last_group_idx = cur_group_idx
@@ -1516,11 +1556,6 @@ class Sm100GroupedBlockScaledGemmKernel:
 
                 subtile_cnt = cute.size(tTR_tAcc.shape, mode=[3])
                 num_prev_subtiles = epilog_tile_count * subtile_cnt
-                global_scale = cutlass.Float32(1.0)
-                if cutlass.const_expr(self.has_global_scale):
-                    global_scale = self.load_global_scale_for_group(
-                        cur_group_idx, global_scale_ptrs
-                    )
                 for subtile_idx in cutlass.range(subtile_cnt, unroll_full=True):
                     acc_subtile_idx = subtile_idx
                     if cutlass.const_expr(self.overlapping_accum):
@@ -1612,6 +1647,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         problem_sizes_mnkl: cute.Tensor,
         total_num_clusters: cute.Tensor,
         tensormaps: cute.Tensor,
+        group_offsets: cute.Tensor,
     ):
         # One warp per group. Every lane computes the group's metadata, so the
         # descriptors are built from registers; lane 0 stores what the GEMM reads.
@@ -1700,6 +1736,9 @@ class Sm100GroupedBlockScaledGemmKernel:
             problem_sizes_mnkl[g, 1] = problem_n
             problem_sizes_mnkl[g, 2] = depth_k
             problem_sizes_mnkl[g, 3] = cutlass.Int32(1)
+            if cutlass.const_expr(not self.uniform_mn_groups):
+                group_offsets[g, 0] = off_start
+                group_offsets[g, 1] = scale_blocks_before
 
         if g == 0:
             cluster_tile_m, cluster_tile_n = self.cluster_tile_shape_mnk[:2]
@@ -1727,12 +1766,13 @@ class Sm100GroupedBlockScaledGemmKernel:
             utils.TensorMapUpdateMode.GMEM,
             Sm100GroupedBlockScaledGemmKernel.bytes_per_tensormap,
         )
-        tma_atoms = (tma_atom_a, tma_atom_b, tma_atom_sfa, tma_atom_sfb, tma_atom_c)
+        # 2d/3d needs only the per-group C descriptor (slot 4).
+        slots = (0, 1, 2, 3, 4) if cutlass.const_expr(self.uniform_mn_groups) else (4,)
+        all_atoms = (tma_atom_a, tma_atom_b, tma_atom_sfa, tma_atom_sfb, tma_atom_c)
+        tma_atoms = tuple(all_atoms[slot] for slot in slots)
         tensormap_ptrs = tuple(
-            tensormap_manager.get_tensormap_ptr(
-                tensormaps[(g, tensor_idx, None)].iterator
-            )
-            for tensor_idx in range(len(tma_atoms))
+            tensormap_manager.get_tensormap_ptr(tensormaps[(g, slot, None)].iterator)
+            for slot in slots
         )
         for tma_atom, tensormap_ptr in zip(tma_atoms, tensormap_ptrs):
             tensormap_manager.init_tensormap_from_atom(tma_atom, tensormap_ptr, 0)
@@ -1742,7 +1782,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         no_stride = cutlass.Int64(0)
         shape_a = (problem_m, depth_k, unit)
         shape_b = (problem_n, depth_k, unit)
-        real_tensors = (
+        all_tensors = (
             self._gmem_tensor(
                 self.a_dtype,
                 ptr_a,
@@ -1771,6 +1811,7 @@ class Sm100GroupedBlockScaledGemmKernel:
                 ),
             ),
         )
+        real_tensors = tuple(all_tensors[slot] for slot in slots)
         tensormap_manager.update_tensormap(
             real_tensors, tma_atoms, tensormap_ptrs, 0, tensormap_ptrs
         )
@@ -1778,12 +1819,17 @@ class Sm100GroupedBlockScaledGemmKernel:
         # 128 KiB or more, and it survives tensormap.replace shrinking the
         # descriptor to a group, letting out-of-bounds TMA loads fault.
         if lane == 0:
-            for tensor_idx in range(len(tma_atoms)):
-                tensormaps[g, tensor_idx, 1] = tensormaps[
-                    g, tensor_idx, 1
-                ] & cutlass.Int64(~(1 << 21))
+            for slot in slots:
+                tensormaps[g, slot, 1] = tensormaps[g, slot, 1] & cutlass.Int64(
+                    ~(1 << 21)
+                )
         cute.arch.sync_warp()
         cute.nvgpu.cpasync.fence_tma_desc_release()
+
+    def _offset_rows(self, coord_slice, global_coords, rows):
+        anchored = cute.make_tensor(coord_slice.iterator, global_coords.layout)
+        shifted = cute.domain_offset((rows, 0, 0), anchored)
+        return cute.make_tensor(shifted.iterator, coord_slice.layout)
 
     def _gmem_tensor(self, dtype, ptr_i64, layout):
         ptr = cute.make_ptr(dtype, ptr_i64, cute.AddressSpace.gmem, assumed_align=16)

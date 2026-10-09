@@ -4,13 +4,8 @@ from typing import cast, NamedTuple
 
 import torch
 from torch import Tensor
-from torch._C import (
-    _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
-    _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
-)
 from torch._native.instrumentation import instrumented_cutedsl_cache
-
-from ._compile_with_safe_names import _compile_with_safe_names
+from torch.nn.functional import ScalingType, SwizzleType
 
 
 class _KernelConfig(NamedTuple):
@@ -621,11 +616,14 @@ def _compile_scaled_grouped_mm_blockscaled(
         (m, k, 1),
         stride=(a_stride_m, 1, 0),
     )
-    fake_b = make_fake_tensor(
-        ab_dtype,
-        (n, k, 1),
-        stride=(b_stride_n, 1, 0),
-    )
+    if uniform_mn_groups:
+        fake_b = make_fake_tensor(ab_dtype, (n, k, 1), stride=(b_stride_n, 1, 0))
+    else:
+        fake_b = make_fake_tensor(
+            ab_dtype,
+            (n, k, cute.sym_int()),
+            stride=(b_stride_n, 1, cute.sym_int(divisibility=16)),
+        )
     if transpose_ab:
         # In transpose mode, C is passed as (N, M, 1) with transpose strides.
         fake_c = make_fake_tensor(
@@ -668,6 +666,7 @@ def _compile_scaled_grouped_mm_blockscaled(
         stride=(tensormap_stride0, tensormap_stride1, 1),
     )
     fake_offs = make_fake_tensor(cutlass.Int32, (g,), stride=(1,))
+    fake_group_offsets = make_fake_tensor(cutlass.Int32, (g, 2), stride=(2, 1))
     fake_stream = make_fake_stream(use_tvm_ffi_env_stream=True)
 
     grouped_gemm = Sm100GroupedBlockScaledGemmKernel(
@@ -678,30 +677,30 @@ def _compile_scaled_grouped_mm_blockscaled(
         uniform_mn_groups=uniform_mn_groups,
     )
 
-    compiled = _compile_with_safe_names(
-        lambda: cute.compile(
-            grouped_gemm,
-            initial_a=fake_a,
-            initial_b=fake_b,
-            initial_c=fake_c,
-            initial_sfa=fake_scale_a,
-            initial_sfb=fake_scale_b,
-            group_count=0,
-            problem_shape_mnkl=fake_problem,
-            estimate_total_num_clusters=cutlass.Int32(1),
-            total_num_clusters=fake_total_clusters,
-            tensormap_cute_tensor=fake_tensormap,
-            offs=fake_offs,
-            dims_mnk=(cute.sym_int(32), cute.sym_int(32), cute.sym_int(32)),
-            base_ptrs=tuple(cute.sym_int(64) for _ in range(7)),
-            strides=tuple(
-                tuple(cute.sym_int(64) for _ in range(rank))
-                for rank in (2, 3, 2, 3, 2, 2, 2)
-            ),
-            max_active_clusters=max_active_clusters,
-            stream=fake_stream,
-            options="--enable-assertions --enable-tvm-ffi",
-        )
+    compiled = cute.compile(
+        grouped_gemm,
+        initial_a=fake_a,
+        initial_b=fake_b,
+        initial_c=fake_c,
+        initial_sfa=fake_scale_a,
+        initial_sfb=fake_scale_b,
+        group_count=0,
+        problem_shape_mnkl=fake_problem,
+        estimate_total_num_clusters=cutlass.Int32(1),
+        total_num_clusters=fake_total_clusters,
+        tensormap_cute_tensor=fake_tensormap,
+        offs=fake_offs,
+        group_offsets=fake_group_offsets,
+        sf_act_rows=cutlass.Int32(1),
+        dims_mnk=(cute.sym_int(32), cute.sym_int(32), cute.sym_int(32)),
+        base_ptrs=tuple(cute.sym_int(64) for _ in range(7)),
+        strides=tuple(
+            tuple(cute.sym_int(64) for _ in range(rank))
+            for rank in (2, 3, 2, 3, 2, 2, 2)
+        ),
+        max_active_clusters=max_active_clusters,
+        stream=fake_stream,
+        options="--enable-assertions --enable-tvm-ffi",
     )
     return compiled
 
@@ -773,7 +772,9 @@ def _estimate_total_clusters_for_launch(
 
 
 @functools.cache
-def _alloc_aux_tensors(device_index: int, cap: int) -> tuple[Tensor, Tensor, Tensor]:
+def _alloc_aux_tensors(
+    device_index: int, cap: int
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     from .scaled_grouped_mm_blockscaled_kernel import Sm100GroupedBlockScaledGemmKernel
 
     device = torch.device("cuda", device_index)
@@ -788,18 +789,26 @@ def _alloc_aux_tensors(device_index: int, cap: int) -> tuple[Tensor, Tensor, Ten
         device=device,
         dtype=torch.int64,
     )
-    return problem_sizes, total_num_clusters, tensormaps
+    group_offsets = torch.empty((cap, 2), device=device, dtype=torch.int32)
+    return problem_sizes, total_num_clusters, tensormaps, group_offsets
 
 
 @functools.cache
-def _get_aux_tensors(ngroups: int, device_index: int) -> tuple[Tensor, Tensor, Tensor]:
+def _get_aux_tensors(
+    ngroups: int, device_index: int
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     # Re-allocated when ngroups exceeds current capacity (rounded to
     # next power of 2).
     cap = max(64, 1 << (ngroups - 1).bit_length())
-    problem_sizes, total_num_clusters, tensormaps = _alloc_aux_tensors(
+    problem_sizes, total_num_clusters, tensormaps, group_offsets = _alloc_aux_tensors(
         device_index, cap
     )
-    return problem_sizes[:ngroups], total_num_clusters, tensormaps[:ngroups]
+    return (
+        problem_sizes[:ngroups],
+        total_num_clusters,
+        tensormaps[:ngroups],
+        group_offsets[:ngroups],
+    )
 
 
 def _validated_blockscaled_format(mat_a: Tensor, scale_a: list[Tensor]):
@@ -921,7 +930,9 @@ def scaled_grouped_mm_blockscaled(
         _TORCH_TO_CUTLASS_DTYPE_NAME[requested_out_dtype],
     )
 
-    problem_sizes, total_num_clusters, tensormaps = _get_aux_tensors(ngroups, device_id)
+    problem_sizes, total_num_clusters, tensormaps, group_offsets = _get_aux_tensors(
+        ngroups, device_id
+    )
 
     scale_a0 = scale_a[0]
     scale_b0 = scale_b[0]
@@ -966,7 +977,7 @@ def scaled_grouped_mm_blockscaled(
 
     scaled_grouped_mm_blockscaled_compiled(
         _with_l_dim(mat_a),
-        _with_l_dim(mat_b.transpose(0, 1) if b_is_2d else mat_b[0].transpose(0, 1)),
+        _with_l_dim(mat_b.transpose(0, 1)) if b_is_2d else mat_b.permute(2, 1, 0),
         _with_l_dim(
             (out[0].transpose(0, 1) if config.transpose_ab else out[0])
             if b_is_2d
@@ -980,6 +991,8 @@ def scaled_grouped_mm_blockscaled(
         total_num_clusters,
         tensormaps,
         offs,
+        group_offsets,
+        scale_a0.numel() // _round_up(logical_k_a // fmt.scale_ab_vec_size, 4),
         (mat_a_m, mat_b_n, logical_k_a),
         (
             mat_a_ptr,

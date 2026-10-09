@@ -1092,9 +1092,11 @@ class TestFP8Matmul(TestCase):
         # Groups with no K rows must produce zeros, also when the CTA ran a
         # non-empty tile before, so there are more tiles than SMs.
         offs = torch.tensor([128, 128, 256, 256, 384, 384, 512, 512], dtype=torch.int32, device=device)
-        self._run_scaled_grouped_mm_2d_2d(8, 2048, 2048, 512, format, False, device, offs)
+        self._run_scaled_grouped_mm_2d_2d(8, 2048, 2048, 512, format, False, device, offs, poison_output=True)
 
-    def _run_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_out, device, input_group_end_offsets):
+    def _run_scaled_grouped_mm_2d_2d(
+        self, G, M, N, K, format, use_out, device, input_group_end_offsets, poison_output=False
+    ):
         torch.manual_seed(42)
 
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
@@ -1137,6 +1139,10 @@ class TestFP8Matmul(TestCase):
             kwargs["out"] = torch.empty(
                 (G, M, N), dtype=torch.bfloat16, device=device
             )
+        if poison_output:
+            # Freed right away, so the output reuses this NaN-filled block and
+            # any group left unwritten fails the NaN check below.
+            torch.full((G, M, N), float("nan"), dtype=torch.bfloat16, device=device)
 
         # Compute mxfp8 grouped mm output
         y_lp = scaled_grouped_mm_wrap(
@@ -1202,8 +1208,7 @@ class TestFP8Matmul(TestCase):
     ):
         from torch._native import registry
 
-        if "_scaled_grouped_mm_v2" not in registry.get_dsl_operations("cutedsl"):
-            raise unittest.SkipTest("CuTeDSL scaled_grouped_mm override not registered")
+        self.assertIn("_scaled_grouped_mm_v2", registry.get_dsl_operations("cutedsl"))
 
         torch.manual_seed(42)
 
