@@ -2367,8 +2367,9 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         self.check_numeric(f, (x,))
-        self.check_no_fusion()
-        self.assertGreater(metrics.generated_kernel_count, 1)
+        # A persistent tile can fuse the fixed-lane side output, but the
+        # incompatible even/odd consumers must retain a separate kernel.
+        self.check_non_leaf_epilogue_fallback()
 
     def test_standalone_sub_parent_rejects_shifted_reduction_output(self):
         B, D = 4, 512
