@@ -58,11 +58,16 @@ from ..create_parameter_op import (
     new_parameter_placeholder,
     tracable_create_parameter,
 )
-from ..device_interface import get_registered_device_interfaces
+from ..device_interface import (
+    DeviceInterface,
+    get_device_type_for_current_stream,
+    get_registered_device_interfaces,
+)
 from ..exc import (
     raise_observed_exception,
     raise_type_error,
     unimplemented,
+    Unsupported,
     UserError,
     UserErrorType,
 )
@@ -2882,13 +2887,52 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         *graph_break_hints.USER_ERROR,
                     ],
                 )
+
+            # `except Unsupported` passes the mismatch check below through
+            # rather than re-wrapping it as a bad-argument break. The check is
+            # best-effort: reverse lookup by function identity misses wrapper
+            # implementations (None -> skipped rather than false-break).
             try:
                 if kwargs:
-                    device = torch.device(as_python_device(kwargs["device"]))
+                    arg = as_python_device(kwargs["device"])
                 elif args:
-                    device = torch.device(as_python_device(args[0]))
+                    arg = as_python_device(args[0])
                 else:
-                    device = None
+                    arg = None
+                device = torch.device(arg) if arg is not None else None
+
+                # Fail loudly rather than silently return the tracked stream
+                # of a different device. The check compares against the top
+                # of the tracked stack only: a cross-device call breaks even
+                # when an explicit device argument could still be resolved
+                # deeper in the stack (cur_stream searches all entries);
+                # erroring on the type mismatch is the chosen, conservative
+                # trade-off.
+                if isinstance(arg, (str, torch.device)):
+                    requested_type = torch.device(arg).type
+                elif self.value is torch.accelerator.current_stream:
+                    # torch.accelerator dispatches dynamically; the reverse
+                    # lookup cannot resolve it.
+                    acc = torch.accelerator.current_accelerator()
+                    requested_type = acc.type if acc is not None else None
+                else:
+                    # no-arg call or int device index: the device type of the
+                    # module whose current_stream was called
+                    requested_type = get_device_type_for_current_stream(self.value)
+                tracked_type = tx.symbolic_stream_state.tracked_device_type()
+                if requested_type and tracked_type and requested_type != tracked_type:
+                    unimplemented(
+                        gb_type="current_stream device mismatch",
+                        context=f"requested={requested_type}, tracking={tracked_type}",
+                        explanation=(
+                            f"Dynamo stream mismatch: Requested '{requested_type}' stream, "
+                            f"but SymbolicStreamState is tracking '{tracked_type}'. "
+                            "Dynamo only tracks streams of the default accelerator "
+                            "(plus stream contexts entered during tracing). "
+                            "Please ensure you are using the default accelerator."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
 
                 stream_var = tx.symbolic_stream_state.cur_stream(device)
                 stream_variable_cls = _get_stream_variable_cls(self.value)
@@ -2902,6 +2946,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         source=stream_var.source,
                     )
                 return stream_var
+            except Unsupported:
+                raise
             except Exception as e:
                 unimplemented(
                     gb_type="bad device argument to torch.accelerator.current_stream",
@@ -3681,6 +3727,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                 ],
                             )
             return None
+
+        # Register current_stream for third-party PrivateUse1 backends (e.g.
+        # torch_npu) that register a DeviceInterface at import time. Runs last
+        # so the explicit @register entries above always win. _get_handlers is
+        # @functools.cache'd (register before the first torch.compile(); only
+        # _get_handlers.cache_clear() clears it), and backends must also route
+        # their current_stream to TorchInGraphFunctionVariable via trace rules
+        # or Dynamo inlines it and this handler is bypassed.
+        for _, device_interface in get_registered_device_interfaces():
+            # Skip undefined current_stream, the abstract base stub, and
+            # backends already covered by an explicit @register above.
+            current_stream_fn = getattr(device_interface, "current_stream", None)
+            if (
+                current_stream_fn is not None
+                and current_stream_fn is not DeviceInterface.current_stream
+                and current_stream_fn not in handlers
+            ):
+                handlers[current_stream_fn] = handle_current_stream
 
         return handlers
 

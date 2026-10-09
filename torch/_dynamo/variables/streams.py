@@ -319,6 +319,17 @@ class SymbolicStreamState:
 
         return self.cur_stream_stack[-1]
 
+    def tracked_device_type(self) -> str | None:
+        """Device type of the tracked current stream, or None if no stream is
+        tracked.  Peeks the value so LazyVariableTrackers on the stack are not
+        realized (same pattern as cur_stream_id)."""
+        if not self.cur_stream_stack:
+            return None
+        stream = self.cur_stream_stack[-1]
+        if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
+            return stream.peek_value().device.type
+        return stream.value.device.type
+
     def in_stream_context(self) -> bool:
         return len(self.cur_stream_stack) > 0
 
