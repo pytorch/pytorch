@@ -1062,7 +1062,7 @@
 # /test/test_utils.py
 # /test/test_utils_config_module.py
 # /test/test_utils_filelock.py
-# /test/torchci_reports_testdata/
+# /test/torchci/
 # /tools/test/
 # /tools/testing/
 # /torch/_logging/
