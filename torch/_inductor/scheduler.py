@@ -3503,25 +3503,30 @@ class BaseSchedulerNode:
         dtype = buf.node.maybe_get_dtype()
         if dtype is None:
             return 0
+
+        # Count flops before any device query so the inductor flop_count counter
+        # does not depend on knowing the device's bandwidth or peak FLOPS.
+        flops_est = self.estimate_flops()
+
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
-            gpu_flops = get_device_tflops(dtype) * 10**12
-            # If cudaGetDeviceProperties returns 0 for gpu_memory_bandwidth or gpu_flops
-            # there is a chance to continue execution successfully. Otherwise, it would fail with
-            # ZeroDivisionError below.
+            # Both estimates below divide by gpu_memory_bandwidth, so bail out if
+            # the device reports 0 rather than hit ZeroDivisionError.
             if gpu_memory_bandwidth <= 0:
                 raise AssertionError(
                     f"gpu_memory_bandwidth cannot be <= 0, but got {gpu_memory_bandwidth}"
                 )
-            if gpu_flops <= 0:
-                raise AssertionError(f"gpu_flops cannot be <= 0, but got {gpu_flops}")
         except Exception:
             return 0
 
-        flops_est = self.estimate_flops()
+        # Peak FLOPS is unknown when the device or dtype has no datasheet entry
+        # and no Triton fallback; estimate from memory bandwidth alone then.
+        try:
+            gpu_flops = get_device_tflops(dtype) * 10**12
+        except Exception:
+            gpu_flops = 0.0
 
-        if flops_est == 0 or flops_est is None:
-            # no flops estimate, so fall back to memory estimate
+        if flops_est == 0 or flops_est is None or gpu_flops <= 0:
             ns = self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
             ms = ns / 1e6
             return ms
