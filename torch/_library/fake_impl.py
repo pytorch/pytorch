@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing_extensions import deprecated
 
 import torch
-from torch._library.utils import Kernel, RegistrationHandle
+from torch._library.utils import Kernel, lookup_op, RegistrationHandle
 
 
 log = logging.getLogger(__name__)
@@ -75,16 +75,24 @@ class FakeImplHolder:
                     f"can have fake impls defined on them."
                 )
 
+        schema = lookup_op(self.qualname)._schema
         # Store the kernel in this holder
         kernel = Kernel(func, source)
         self.kernels.append(kernel)
 
         def deregister_fake_kernel():
             self.kernels.remove(kernel)
+            if not self.kernels:
+                torch._C._fake_dispatch_deregister_custom_op_impl(
+                    schema.name, schema.overload_name
+                )
 
         meta_kernel = construct_meta_kernel(self.qualname, self)
         try:
             lib.impl(self.qualname, meta_kernel, "Meta", allow_override=allow_override)
+            torch._C._fake_dispatch_register_custom_op_impl(
+                schema.name, schema.overload_name
+            )
         except Exception:
             log.info(
                 "Failed to register fake_impl '%s':",
@@ -123,6 +131,32 @@ def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Ca
             return fake_impl_holder.kernel(*args, **kwargs)
 
     return meta_kernel
+
+
+def run_fake_impl(fake_mode, func, args, kwargs, real=None):
+    # Runs func's register_fake kernel, or returns NotImplemented if it has none.
+    # real: the RealOpResult from run_real_op under propagate_real_tensors, used
+    # when a profile-generated fake kernel has no profile for these inputs.
+    from torch._library.fake_profile import MissingOpProfile
+
+    fake_impl = torch._library.simple_registry.singleton.find(
+        func.name()
+    ).fake_impl.kernel
+    if fake_impl is None:
+        return NotImplemented
+    ctx = FakeImplCtx(fake_mode, func)
+    try:
+        with set_ctx_getter(lambda: ctx), fake_mode:
+            return fake_impl(*args, **kwargs)
+    except MissingOpProfile:
+        from torch._subclasses.fake_tensor import (
+            can_infer_fake_from_real_out,
+            infer_fake_from_real_out,
+        )
+
+        if real is None or not can_infer_fake_from_real_out(fake_mode, func):
+            raise
+        return infer_fake_from_real_out(fake_mode, func, real)
 
 
 def get_none():
