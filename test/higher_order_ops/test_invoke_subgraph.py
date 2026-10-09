@@ -5314,6 +5314,91 @@ class GraphModule(torch.nn.Module):
         # second call should reuse the first trace.
         self.assertEqual(count(), 1)
 
+    def test_subgraph_reuse_nested_region_guards(self):
+        """Outer nested_compile_region must inherit guards from inner nested_compile_region."""
+
+        class Layer(torch.nn.Module):
+            def __init__(self, flag: bool):
+                super().__init__()
+                self.flag = flag
+                self.w = torch.nn.Parameter(torch.ones(4, 4))
+
+        @nested_compile_region
+        def inner(layer, x):
+            if layer.flag:
+                return x @ layer.w
+            return x + 1.0
+
+        @nested_compile_region
+        def outer(layer, x):
+            return inner(layer, x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.ModuleList([Layer(True), Layer(False)])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = outer(layer, x)
+                return x
+
+        m = M()
+        x = torch.randn(4, 4)
+        ref = m(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(m, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+        # layer[0] (flag=True) and layer[1] (flag=False) must both trace
+        # both outer and inner (2 * 2 = 4 speculate calls).
+        self.assertEqual(count(), 4)
+
+    def test_subgraph_reuse_nested_region_stamped_out_inner_guards(self):
+        """Outer nested_compile_region must inherit guards even when inner hits reuse cache."""
+
+        class Layer(torch.nn.Module):
+            def __init__(self, flag: bool):
+                super().__init__()
+                self.flag = flag
+                self.w = torch.nn.Parameter(torch.ones(4, 4))
+
+        @nested_compile_region
+        def inner(layer, x):
+            if layer.flag:
+                return x @ layer.w
+            return x + 1.0
+
+        @nested_compile_region
+        def outer(layer, x):
+            return inner(layer, x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.pre_layer = Layer(True)
+                self.layers = torch.nn.ModuleList([Layer(True), Layer(False)])
+
+            def forward(self, x):
+                # Warm up inner's reuse cache before outer is ever traced.
+                x = inner(self.pre_layer, x)
+                for layer in self.layers:
+                    x = outer(layer, x)
+                return x
+
+        m = M()
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = m(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(m, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref, res)
+        # 1 trace for inner(pre_layer), 1 trace for outer(layers[0]) (which stamps out inner),
+        # and 2 traces for outer(layers[1]) + inner(layers[1]) = 4 total traces.
+        self.assertEqual(count(), 4)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @parameterized_class(
