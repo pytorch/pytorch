@@ -1427,10 +1427,7 @@ c10::intrusive_ptr<c10::TensorImpl> ConcretePyInterpreterVTable::to_meta_tensor(
   at::Tensor fake_tensor;
   {
     // Exclude Fake so from_real_tensor's meta conversion doesn't re-enter the
-    // fake fallback (the meta factory ops it runs are otherwise plain). Safe
-    // even when re-fakeifying an already-fake input (e.g. adopting a fake from
-    // another mode): suspending the fake layer does not change what device a
-    // fake reports, see [in_kernel_invocation].
+    // fake fallback (the meta factory ops it runs are otherwise plain).
     c10::impl::ExcludeDispatchKeyGuard exclude_fake(
         {c10::DispatchKeySet(c10::DispatchKey::Fake)});
     auto obj = converter.attr("from_real_tensor")(active.py_fake_mode, real);
