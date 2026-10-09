@@ -27,7 +27,11 @@ TEST(SourceRangeTest, test_find) {
     auto x = view.find("rldni", 0);
     EXPECT_EQ(x, 8) << view.str();
     EXPECT_EQ(view.find("ello", 0), 1);
+    EXPECT_EQ(view.find("hello", 1), std::string::npos);
   }
+
+  StringCordView view({"ab", "ab", "c"}, {});
+  EXPECT_EQ(view.find("abc", 0), 2);
 }
 
 TEST(SourceRangeTest, test_substr) {
@@ -74,4 +78,13 @@ TEST(SourceRangeTest, SimpleString) {
   EXPECT_EQ(src.num_lines(), 1);
   EXPECT_EQ(src.get_line(0), "hello");
   EXPECT_EQ(src.text_str().str(), "hello");
+}
+
+TEST(SourceRangeTest, MultilineSource) {
+  Source src("first\nsecond\n");
+
+  EXPECT_EQ(src.num_lines(), 3);
+  EXPECT_EQ(src.offset_for_line(1), 6);
+  EXPECT_EQ(src.lineno_for_offset(12), 1);
+  EXPECT_EQ(src.get_line(1), "second\n");
 }
