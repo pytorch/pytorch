@@ -24,6 +24,7 @@
 #include <ATen/ops/nll_loss_forward_native.h>
 #include <ATen/ops/smooth_l1_loss_backward_native.h>
 #include <ATen/ops/smooth_l1_loss_native.h>
+#include <ATen/ops/sum.h>
 #include <ATen/ops/tensor.h>
 #endif
 
@@ -303,6 +304,20 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 } // namespace BCELoss
 
 // NLLLoss
+// `t` is the tensor the kernel indexes by class: input for forward, grad_input for backward
+static NLLLossForwardParams<> nllnd_loss_params(const Tensor& t, int64_t ignore_index, bool has_weight, bool is2D) {
+  const auto class_dim = t.dim() == 1 ? 0 : 1;
+  return {
+      .n_classes = t.size(class_dim),
+      .map_size = is2D ? t.size(2) * t.size(3) : 1,
+      .batch_stride = t.dim() == 1 ? 0 : t.stride(0),
+      .class_stride = t.stride(class_dim),
+      .ignore_index = ignore_index,
+      .tid_offset = 0,
+      .has_weight = has_weight,
+  };
+}
+
 static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                      const Tensor& grad_output_arg,
                                      const Tensor& input_arg,
@@ -347,23 +362,10 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
       (total_weight.scalar_type() == input_arg.scalar_type() ? total_weight : total_weight.to(input_arg.scalar_type()))
           .contiguous();
 
-  const auto class_dim = input_arg.dim() == 1 ? 0 : 1;
-  const auto map_size = is2D ? input_arg.size(2) * input_arg.size(3) : 1;
   const NLLLossBackwardParams<> params{
-      .n_classes = input_arg.size(class_dim),
-      .map_size = map_size,
-      .batch_stride = input_arg.dim() == 1 ? 0 : grad_input_arg.stride(0),
-      .class_stride = grad_input_arg.stride(class_dim),
-      .grad_input_offset = grad_input_arg.storage_offset(),
-      .grad_output_offset = grad_output.storage_offset(),
-      .target_offset = target.storage_offset(),
-      .weight_offset = has_weight ? weight.storage_offset() : 0,
-      .total_weight_offset = total_weight_cast.storage_offset(),
-      .ignore_index = ignore_index,
-      .tid_offset = 0,
+      .forward = nllnd_loss_params(grad_input_arg, ignore_index, has_weight, is2D),
       .is_reduction = reduction != Reduction::None,
       .is_mean = reduction == Reduction::Mean,
-      .has_weight = has_weight,
   };
 
   MPSStream* stream = getCurrentMPSStream();
@@ -372,12 +374,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
       auto pso = lib.getPipelineStateForFunc("nllnd_loss_backward_" + scalarToMetalTypeString(input_arg));
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder,
-                  getMTLBufferStorage(grad_input_arg),
-                  getMTLBufferStorage(grad_output),
-                  getMTLBufferStorage(target),
-                  getMTLBufferStorage(weight),
-                  getMTLBufferStorage(total_weight_cast));
+      mtl_setArgs(encoder, grad_input_arg, grad_output, target, weight, total_weight_cast);
       // For 1D (no batch dim) input the loss has a single element and only
       // target[0] is used; dispatching target.numel() threads would read
       // grad_output (a single element) out of bounds and scatter garbage into
@@ -387,7 +384,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
       constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
       auto dispatch_params = params;
       for (auto offset = int64_t{0}; offset < num_outputs; offset += max_threads) {
-        dispatch_params.tid_offset = offset;
+        dispatch_params.forward.tid_offset = offset;
         mtl_setArgs<5>(encoder, dispatch_params, stream->getErrorBuffer());
         mtl_dispatch1DJob(encoder, pso, std::min(max_threads, num_outputs - offset));
       }
@@ -399,46 +396,37 @@ static void nllnd_loss_forward_impl(Tensor& output,
                                     Tensor& total_weight,
                                     const Tensor& input_arg,
                                     const Tensor& target_arg,
-                                    const Tensor& weight,
+                                    const Tensor& weight_arg,
                                     int64_t reduction,
                                     int64_t ignore_index,
                                     bool is2D) {
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(output.scalar_type()),
-                              "nlld_loss for complex is not supported for MPS");
-  if (weight.defined()) {
-    TORCH_CHECK(input_arg.scalar_type() == weight.scalar_type(),
-                "expected scalar type ",
-                input_arg.scalar_type(),
-                " but found ",
-                weight.scalar_type());
-  }
-  std::vector<long long> reshapedTarget(target_arg.sizes().begin(), target_arg.sizes().end());
-  reshapedTarget.push_back(1);
+  TORCH_CHECK(input_arg.is_mps(), "input must be an MPS tensor");
+  TORCH_CHECK(target_arg.is_mps(), "target must be an MPS tensor");
+  TORCH_CHECK(!weight_arg.defined() || weight_arg.is_mps(), "weight must be an MPS tensor");
+  TORCH_CHECK(output.is_mps(), "output must be an MPS tensor");
+  TORCH_CHECK(total_weight.is_mps(), "total_weight must be an MPS tensor");
 
-  Tensor batchSizeTensor = at::empty_like(input_arg).resize_(IntArrayRef(1));
-  float batchVal = 1.0f;
-  for (size_t i = 0; i < reshapedTarget.size(); ++i)
-    batchVal *= reshapedTarget[i];
-  batchSizeTensor[0] = batchVal;
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(input_arg.scalar_type()),
+                              "nll_loss is not implemented for ",
+                              input_arg.scalar_type(),
+                              " on MPS");
 
-  if (reduction == Reduction::None)
+  TORCH_CHECK(!weight_arg.defined() || input_arg.scalar_type() == weight_arg.scalar_type(),
+              "expected scalar type ",
+              input_arg.scalar_type(),
+              " but found ",
+              weight_arg.scalar_type());
+  const bool has_weight = weight_arg.defined() && weight_arg.numel() > 0;
+
+  if (reduction == Reduction::None) {
     output.resize_(target_arg.sizes());
-  if (reduction == Reduction::Sum)
+  } else {
     output.resize_({});
-  if (reduction == Reduction::Mean)
-    output.resize_({});
+  }
+  total_weight.resize_({});
 
-  TORCH_CHECK(output.is_mps());
-
-  // Empty output
-  if (output.numel() == 0)
-    return;
-
-  // https://github.com/pytorch/pytorch/blob/042f2f7746a064f1527d95d1f1d712b4f0b34186/aten/src/ATen/native/cuda/Loss.cu#L335-L346
-  if (target_arg.numel() == 0) {
-    // Here target (and input) have zero elements
-    // Mean reduction on empty tensors produces NaN. See the discussion in
-    // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+  // Empty input or target
+  if (target_arg.numel() == 0 || input_arg.numel() == 0) {
     if (reduction == Reduction::Mean) {
       output.fill_(std::numeric_limits<double>::quiet_NaN());
     } else {
@@ -448,151 +436,51 @@ static void nllnd_loss_forward_impl(Tensor& output,
     return;
   }
 
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* targetTensor_ = nil;
-    MPSGraphTensor* weightTensor_ = nil;
-    MPSGraphTensor* batchSizeTensor_ = nil;
-    MPSGraphTensor* totalWeightTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
+  const Tensor target =
+      (target_arg.scalar_type() == ScalarType::Long ? target_arg : target_arg.to(ScalarType::Long)).contiguous();
+  const Tensor input = input_arg.contiguous();
+  const Tensor weight = has_weight ? weight_arg.contiguous() : input;
 
-  MPSStream* stream = getCurrentMPSStream();
+  const int64_t num_outputs = input_arg.dim() == 1 ? 1 : target.numel();
 
-  auto input = input_arg.dim() == 1 ? input_arg.view({1, input_arg.size(0)}) : input_arg;
-  auto target = target_arg.dim() == 0 ? target_arg.view({1}) : target_arg;
-
-  @autoreleasepool {
-    bool isWeightsArrayValid = (weight.numel() > 0);
-    bool isTargetCasted = target.scalar_type() != ScalarType::Long;
-
-    MPSShape* input_shape = getMPSShape(input);
-    MPSShape* target_shape = getMPSShape(target);
-    MPSShape* weight_shape = getMPSShape(weight);
-
-    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-
-    // TODO: Make the key
-    std::string key = "nllnd_loss_forward_impl:" + std::to_string(ignore_index) + ":" +
-        std::to_string(isWeightsArrayValid) + ":" + reductionToString(reduction) + ":" + [ns_shape_key UTF8String] +
-        ":" + getMPSTypeString(input) + ":" + getMPSTypeString(target) + ":" + std::to_string(isTargetCasted) + ":" +
-        getMPSTypeString(weight);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
-      MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target), target_shape);
-      MPSGraphTensor* castedTargetTensor =
-          isTargetCasted ? castMPSTensor(mpsGraph, targetTensor, MPSDataTypeInt64) : targetTensor;
-      MPSGraphTensor* weightTensor = nil;
-      if (isWeightsArrayValid)
-        weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(weight), weight_shape);
-      MPSGraphTensor* mps_batchSizeTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batchSizeTensor));
-
-      MPSGraphTensor* mpsGraphBatchSizeTensor = mps_batchSizeTensor;
-
-      // The transposes are needed to get the class dimension (dim 1) to the inner most dim for gather op.
-      // The transpose become nop in the 2D case.
-      MPSGraphTensor* mpsTransposeTensor = inputTensor;
-      int classDim = 1;
-      int lastDim = input.sizes().size() - 1;
-      mpsTransposeTensor = [mpsGraph transposeTensor:inputTensor dimension:classDim withDimension:lastDim name:nil];
-      for (int i = 0; i < lastDim - 2; ++i) {
-        mpsTransposeTensor = [mpsGraph transposeTensor:mpsTransposeTensor
-                                             dimension:classDim + i
-                                         withDimension:classDim + i + 1
-                                                  name:nil];
-      }
-
-      MPSGraphTensor* mpsGatherTensor = [mpsGraph gatherWithUpdatesTensor:mpsTransposeTensor
-                                                            indicesTensor:castedTargetTensor
-                                                                     axis:lastDim
-                                                          batchDimensions:lastDim
-                                                                     name:@"gatherTensor"];
-
-      MPSGraphTensor* mpsGraphZeroTensor = [mpsGraph constantWithScalar:0.0 dataType:mpsGatherTensor.dataType];
-      MPSGraphTensor* mpsGraphOneTensor = [mpsGraph constantWithScalar:1.0 dataType:mpsGatherTensor.dataType];
-      MPSGraphTensor* mpsGraphIndexTensor = [mpsGraph constantWithScalar:ignore_index dataType:MPSDataTypeInt64];
-      MPSGraphTensor* mpsGraphIsEqualTensor = [mpsGraph equalWithPrimaryTensor:castedTargetTensor
-                                                               secondaryTensor:mpsGraphIndexTensor
-                                                                          name:@"isEqualTensor"];
-      // Zero out loss
-      mpsGatherTensor = [mpsGraph selectWithPredicateTensor:mpsGraphIsEqualTensor
-                                        truePredicateTensor:mpsGraphZeroTensor
-                                       falsePredicateTensor:mpsGatherTensor
-                                                       name:@"predicateTensor"];
-
-      if (isWeightsArrayValid) {
-        MPSGraphTensor* weightGatherTensor = [mpsGraph gatherWithUpdatesTensor:weightTensor
-                                                                 indicesTensor:castedTargetTensor
-                                                                          axis:0
-                                                               batchDimensions:0
-                                                                          name:@"weightGatherTensor"];
-        mpsGatherTensor = [mpsGraph multiplicationWithPrimaryTensor:weightGatherTensor
-                                                    secondaryTensor:mpsGatherTensor
-                                                               name:@"scaledLossTensor"];
-        mpsGraphOneTensor = weightGatherTensor;
-      }
-
-      // Compute new batch size
-      MPSGraphTensor* mpsSelectOneTensor = [mpsGraph selectWithPredicateTensor:mpsGraphIsEqualTensor
-                                                           truePredicateTensor:mpsGraphZeroTensor
-                                                          falsePredicateTensor:mpsGraphOneTensor
-                                                                          name:@"predicateOneTensor"];
-
-      MPSGraphTensor* mpsGraphNegTensor = [mpsGraph negativeWithTensor:mpsGatherTensor name:@"negativeTensor"];
-
-      MPSGraphTensor* mpsGraphReducedTensor = mpsGraphNegTensor;
-
-      if (!(reduction == Reduction::None)) {
-        mpsGraphReducedTensor = [mpsGraph reductionSumWithTensor:mpsGraphNegTensor axes:nil name:@"reductionSumTensor"];
-        if (reduction == Reduction::Mean) {
-          mpsGraphBatchSizeTensor = [mpsGraph reductionSumWithTensor:mpsSelectOneTensor
-                                                                axes:nil
-                                                                name:@"batchSizeReductionTensor"];
-          mpsGraphReducedTensor = [mpsGraph divisionWithPrimaryTensor:mpsGraphReducedTensor
-                                                      secondaryTensor:mpsGraphBatchSizeTensor
-                                                                 name:@"divisionTensor"];
-        }
-      }
-
-      mpsGraphReducedTensor = [mpsGraph reshapeTensor:mpsGraphReducedTensor withShape:getMPSShape(output) name:nil];
-
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->targetTensor_ = targetTensor;
-      newCachedGraph->weightTensor_ = weightTensor;
-      newCachedGraph->batchSizeTensor_ = mps_batchSizeTensor;
-      newCachedGraph->totalWeightTensor_ = mpsGraphBatchSizeTensor;
-      newCachedGraph->outputTensor_ = mpsGraphReducedTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, input, nil, true, MPSDataTypeInvalid, false);
-    Placeholder targetPlaceholder =
-        Placeholder(cachedGraph->targetTensor_, target, nil, true, MPSDataTypeInvalid, false);
-    Placeholder weightPlaceholder = Placeholder();
-    if (isWeightsArrayValid)
-      weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight, nil, true, MPSDataTypeInvalid, false);
-    Placeholder batchSizePlaceholder =
-        Placeholder(cachedGraph->batchSizeTensor_, batchSizeTensor, nil, true, MPSDataTypeInvalid, false);
-    Placeholder outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor_, output, nil, true, MPSDataTypeInvalid, false);
-    Placeholder totalWeightsPlaceholder =
-        Placeholder(cachedGraph->totalWeightTensor_, total_weight, nil, true, MPSDataTypeInvalid, false);
-
-    // Create dictionary of inputs and outputs
-    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        [[[NSMutableDictionary alloc] initWithCapacity:4] autorelease];
-    feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
-    feeds[targetPlaceholder.getMPSGraphTensor()] = targetPlaceholder.getMPSGraphTensorData();
-    feeds[batchSizePlaceholder.getMPSGraphTensor()] = batchSizePlaceholder.getMPSGraphTensorData();
-
-    if (isWeightsArrayValid)
-      feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
-
-    auto results = dictionaryFromPlaceholders(outputPlaceholder, totalWeightsPlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  Tensor unreduced_loss;
+  if (reduction == Reduction::None) {
+    unreduced_loss = output;
+  } else {
+    unreduced_loss = at::empty(target_arg.sizes(), input.options());
   }
 
-  return;
+  Tensor sample_weights = at::empty(target_arg.sizes(), input.options());
+
+  const auto params = nllnd_loss_params(input, ignore_index, has_weight, is2D);
+
+  MPSStream* stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("nllnd_loss_forward_" + scalarToMetalTypeString(input_arg));
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, input, target, weight, unreduced_loss, sample_weights);
+
+      constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
+      auto dispatch_params = params;
+      for (auto offset = int64_t{0}; offset < num_outputs; offset += max_threads) {
+        dispatch_params.tid_offset = offset;
+        mtl_setArgs<5>(encoder, dispatch_params, stream->getErrorBuffer());
+        mtl_dispatch1DJob(encoder, pso, std::min(max_threads, num_outputs - offset));
+      }
+    }
+  });
+
+  total_weight.copy_(at::sum(sample_weights));
+
+  if (reduction == Reduction::None) {
+    // output already holds unreduced_loss
+  } else if (reduction == Reduction::Sum) {
+    output.copy_(at::sum(unreduced_loss));
+  } else if (reduction == Reduction::Mean) {
+    output.copy_(at::sum(unreduced_loss).div(total_weight));
+  }
 }
 
 static void smooth_l1_loss_impl(const Tensor& input,
@@ -1024,19 +912,13 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 }
 
 // MSELoss
-TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output_) {
+TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output) {
   std::string op_name = "mse_loss_out_mps";
   using namespace mps;
   if ((input.numel() == 0) || (target.numel() == 0)) {
-    reduction == Reduction::Mean ? output_.fill_(std::numeric_limits<float>::quiet_NaN()) : output_.zero_();
+    reduction == Reduction::Mean ? output.fill_(std::numeric_limits<float>::quiet_NaN()) : output.zero_();
     return;
   }
-  bool contiguousOutput = !needsGather(output_);
-  Tensor output = output_;
-  if (!contiguousOutput) {
-    output = output_.contiguous();
-  }
-
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
   TORCH_CHECK(c10::isFloatingType(input.scalar_type()) && c10::isFloatingType(target.scalar_type()),
               op_name + ": only defined for floating types");
@@ -1069,14 +951,10 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
     });
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, contiguousOutput ? output_ : output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
 
     auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder);
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  if (!contiguousOutput) {
-    output_.copy_(output);
   }
 }
 
@@ -1326,7 +1204,7 @@ std::string_view get_index_type_str() {
   } else if constexpr (std::is_same_v<index_t, int64_t>) {
     return "int64_t";
   } else {
-    static_assert(false);
+    static_assert(false && sizeof(index_t), "unsupported index type");
   }
 }
 
