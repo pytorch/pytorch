@@ -10,7 +10,6 @@ import torch
 import torch._library.utils as utils
 from torch import ops
 from torch.testing._internal.common_utils import (
-    expectedIfCppFakeTensor,
     HardwareClassification,
     IS_WINDOWS,
     run_tests,
@@ -66,11 +65,9 @@ class TestCustomOperators(TestCase):
         x = torch.randn(3)
         self.assertNotIn("my_custom_ops", sys.modules.keys())
 
-        unsupported_error = expectedIfCppFakeTensor(
-            RuntimeError,
-            torch._subclasses.fake_tensor.UnsupportedOperatorException,
-        )
-        with self.assertRaises(unsupported_error):
+        with self.assertRaises(
+            torch._subclasses.fake_tensor.UnsupportedOperatorException
+        ):
             gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
 
         torch.ops.import_module("my_custom_ops")

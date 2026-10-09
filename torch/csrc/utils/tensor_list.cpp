@@ -25,14 +25,12 @@ PyObject* fake_tensor_to_list(const Tensor& tensor) {
   }
   auto n = tensor.size(0);
   auto list = THPObjectPtr(PyList_New(n));
-  if (!list)
-    throw python_error();
+  TORCH_CHECK_PYTHON(list);
   for (const auto i : c10::irange(n)) {
     Tensor elem = tensor.select(0, i);
     PyObject* obj = tensor.dim() == 1 ? py::cast(elem.item()).release().ptr()
                                       : fake_tensor_to_list(elem);
-    if (!obj)
-      throw python_error();
+    TORCH_CHECK_PYTHON(obj);
     PyList_SET_ITEM(list.get(), i, obj);
   }
   return list.release();

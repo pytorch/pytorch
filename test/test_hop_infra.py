@@ -129,17 +129,13 @@ class TestHOPInfra(TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_functional,
         )
-        from torch._subclasses.fake_tensor import (
-            FakeTensorMode,
-            is_fake_tensor,
-            maybe_get_fake_mode,
-        )
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
         mode = FakeTensorMode()
         with mode:
             fake_output = torch.empty_strided((2, 3), (3, 1))
 
-        self.assertTrue(is_fake_tensor(fake_output))
+        self.assertIsInstance(fake_output, FakeTensor)
 
         out = triton_kernel_wrapper_functional(
             kernel_idx=0,
@@ -151,8 +147,8 @@ class TestHOPInfra(TestCase):
         )
 
         self.assertEqual(set(out.keys()), {"out_ptr"})
-        self.assertTrue(is_fake_tensor(out["out_ptr"]))
-        self.assertIs(maybe_get_fake_mode(out["out_ptr"]), mode)
+        self.assertIsInstance(out["out_ptr"], FakeTensor)
+        self.assertIs(out["out_ptr"].fake_mode, mode)
         self.assertEqual(out["out_ptr"].size(), fake_output.size())
         self.assertEqual(out["out_ptr"].stride(), fake_output.stride())
 
@@ -160,13 +156,13 @@ class TestHOPInfra(TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_mutation,
         )
-        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
         mode = FakeTensorMode()
         with mode:
             fake_output = torch.empty_strided((2, 3), (3, 1))
 
-        self.assertTrue(is_fake_tensor(fake_output))
+        self.assertIsInstance(fake_output, FakeTensor)
 
         out = triton_kernel_wrapper_mutation(
             kernel_idx=0,
