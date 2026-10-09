@@ -6,7 +6,7 @@ from typing_extensions import Self
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import active_fake_mode
-from torch._subclasses.fake_tensor import FakeTensorMode, maybe_get_fake_device
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -135,13 +135,10 @@ class RuntimeEstimator(TorchDispatchMode):
 
             def to_real_tensor(e):  # type: ignore[no-untyped-def]
                 if cls.fake_mode.is_our_fake(e):
-                    fake_device = maybe_get_fake_device(e)
-                    if fake_device is None:
-                        raise AssertionError("Expected a fake tensor device")
                     if e.dtype in _FLOAT_TYPES:
-                        out = torch.rand_like(e, device=fake_device)
+                        out = torch.rand_like(e, device=e.fake_device)
                     else:
-                        out = torch.ones_like(e, device=fake_device)
+                        out = torch.ones_like(e, device=e.fake_device)
                     if e.is_sparse:
                         out._coalesced_(e.is_coalesced())
                     inp_impls[id(out)] = e
@@ -211,7 +208,7 @@ class RuntimeEstimator(TorchDispatchMode):
             Tuple[Any, float]: A tuple containing the result of the function and
                 the mean operation time in milliseconds.
         """
-        if cls.fake_mode is None:
+        if not isinstance(cls.fake_mode, FakeTensorMode):
             raise AssertionError(
                 "Initialize/Assign FakeTensorMode before using this function"
             )
@@ -376,7 +373,7 @@ class RuntimeEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:
         fake_mode = active_fake_mode()
-        if fake_mode is None:
+        if not isinstance(fake_mode, FakeTensorMode):
             raise AssertionError(
                 "No FakeTensorMode found, designed to be used under FakeTensorMode"
             )

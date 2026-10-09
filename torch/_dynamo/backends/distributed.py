@@ -21,6 +21,7 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
+from unittest import mock
 
 import torch
 from torch import fx
@@ -28,7 +29,6 @@ from torch._dynamo.backends.registry import CompiledFn, CompilerFn
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
-from torch._subclasses.fake_tensor import allow_non_fake_inputs_temporarily
 from torch.fx.node import Node
 
 
@@ -353,7 +353,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # Because parameters are not fake we patch fake tensor mode to allow non fake inputs
             with (
                 self.fake_mode,
-                allow_non_fake_inputs_temporarily(self.fake_mode),
+                mock.patch.object(self.fake_mode, "allow_non_fake_inputs", True),
             ):
                 if has_tracing_context and invoked_aot_autograd:
                     tracing_ctx = torch._guards.TracingContext.try_get()
