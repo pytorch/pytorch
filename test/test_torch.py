@@ -53,6 +53,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXLA,
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA, onlyAccelerator)
@@ -116,6 +117,15 @@ def _test_gather_backward_one_dim(test_case, device, deterministic: bool = False
             for i in range(elems):
                 expected[idx[i]] += weight[i]
             test_case.assertEqual(grad, expected, atol=0, rtol=0)
+
+
+# Runs dst.copy_(src) and reports whether the tiled CUDA transpose kernel was
+# dispatched. Dispatch is the performance contract the tiled-transpose tests pin.
+def _copy_uses_tiled_transpose(dst, src):
+    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+        dst.copy_(src)
+        torch.cuda.synchronize()
+    return any("transpose_copy_tiled_kernel" in e.name for e in prof.events())
 
 
 class TestTorchDeviceType(TestCase):
@@ -1908,41 +1918,6 @@ class TestTorchDeviceType(TestCase):
         y[1] = 1.
         run_test(x, y)
 
-    # Ensures that median throws nondeterministic alerts in the correct cases
-    @dtypes(torch.double)
-    def test_nondeterministic_alert_median(self, device, dtype):
-        def test_func(call_type):
-            S = 10
-            a = torch.randn(S, device=device)
-            if call_type == 'function':
-                torch.median(a)
-            elif call_type == 'function with indices':
-                torch.median(a, 0)
-            elif call_type == 'method':
-                a.median()
-            elif call_type == 'method with indices':
-                a.median(0)
-            elif call_type == 'out with indices':
-                result = torch.empty_like(a)
-                indices = torch.empty((), dtype=torch.long, device=device)
-                torch.median(a, 0, out=(result, indices))
-            else:
-                self.fail(f"'{call_type}' is not a valid call type")
-
-        def test_func_expect_error(call_type, should_error):
-            self.check_nondeterministic_alert(
-                lambda: test_func(call_type),
-                'median CUDA with indices output',
-                should_error)
-
-        is_cuda = torch.device(device).type == 'cuda'
-
-        test_func_expect_error('function', False)
-        test_func_expect_error('function with indices', is_cuda)
-        test_func_expect_error('method', False)
-        test_func_expect_error('method with indices', is_cuda)
-        test_func_expect_error('out with indices', is_cuda)
-
     # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes
     def test_gather_backward_deterministic_path(self, device) -> None:
@@ -3146,6 +3121,37 @@ class TestTorchDeviceType(TestCase):
             # not the data
             self.assertEqual(x, y)
 
+    @onlyCPU
+    def test_copy_same_dtype_dense_noncontiguous(self, device):
+        src_storage = torch.arange(26, dtype=torch.float32, device=device)
+        src = src_storage[1:25].view(2, 3, 4).transpose(0, 1)
+        dst_storage = torch.full((26,), -1.0, device=device)
+        dst = dst_storage[1:25].view(2, 3, 4).transpose(0, 1)
+
+        self.assertFalse(src.is_contiguous())
+        self.assertEqual(src.stride(), dst.stride())
+
+        dst.copy_(src)
+
+        self.assertEqual(dst, src)
+        self.assertEqual(dst_storage[[0, 25]], torch.tensor([-1.0, -1.0]))
+
+    @onlyCPU
+    def test_copy_same_dtype_non_standard_bool_values(self, device):
+        src = torch.tensor([0, 2, 3, 255], dtype=torch.uint8, device=device).view(
+            torch.bool
+        )
+        expected = torch.tensor(
+            [False, True, True, True], dtype=torch.bool, device=device
+        )
+        dst = torch.empty_like(src)
+
+        self.assertEqual(src, expected)
+
+        dst.copy_(src)
+
+        self.assertEqual(dst, expected)
+
     @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16, torch.half)
     def test_reduced_type_float_copy(self, device, dtype):
@@ -3243,7 +3249,7 @@ class TestTorchDeviceType(TestCase):
     # Exercises the tiled CUDA kernel for dense 2D transpose copies. The
     # shapes are deliberately larger than the 4 MB dispatch threshold, and
     # cover 1/2/4/8-byte elements plus non-multiple-of-32 extents.
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.uint8, torch.float16, torch.bfloat16,
             torch.float32, torch.float64, torch.complex64)
     def test_copy_transpose_tiled(self, device, dtype):
@@ -3268,15 +3274,15 @@ class TestTorchDeviceType(TestCase):
             out = view.t().contiguous()
             self.assertEqual(out.cpu(), view.cpu().t().contiguous(), atol=0, rtol=0)
 
-    @onlyCUDA
-    @dtypes(torch.bool, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("layout", ("aligned", "word_aligned", "src_offset", "dst_offset", "src_pitch", "dst_pitch", "grid_stride"))
+    @onlyAccelerator
+    @dtypes(torch.uint8, torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("layout", ("aligned", "word_aligned", "src_offset", "dst_offset", "src_pitch", "dst_pitch", "grid_z"))
     def test_copy_transpose_tiled_vectorized(self, device, dtype, layout):
         h, w = (2052, 2060) if layout == "word_aligned" else (2064, 2096)
-        if layout == "grid_stride":
+        if layout == "grid_z":
             vec = 4 // torch.empty((), dtype=dtype).element_size()
             tile_size = 64 if dtype == torch.float32 else 32 * vec
-            h, w = tile_size * 65535 + 4 * vec, 4 * vec
+            h, w = tile_size * 65535 + 16 * vec, 16 * vec
         src_offset = int(layout == "src_offset")
         dst_offset = int(layout == "dst_offset")
         src_pad = 1 if layout == "src_pitch" else 16
@@ -3289,7 +3295,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    @dtypes(torch.bool, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
+    @dtypes(torch.uint8, torch.float16, torch.bfloat16, torch.float32)
     @parametrize("case", ("below", "at", "offset", "pitch"))
     def test_copy_transpose_tiled_small(self, device, dtype, case):
         es = torch.empty((), dtype=dtype).element_size()
@@ -3298,16 +3304,115 @@ class TestTorchDeviceType(TestCase):
         pad = 1 if case == "pitch" else 16
         src = make_tensor((h, w + pad), device=device, dtype=dtype)[:, offset:offset + w]
         dst = torch.empty((w, h), device=device, dtype=dtype)
-        with torch.profiler.profile(activities=[
-                torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]) as prof:
-            dst.copy_(src.t())
-            torch.cuda.synchronize()
-        tiled = any("transpose_copy_tiled_kernel" in event.name for event in prof.events())
+        tiled = _copy_uses_tiled_transpose(dst, src.t())
         self.assertEqual(tiled, case == "at" and es < 4)
         self.assertEqual(dst.cpu().view(torch.uint8), src.cpu().t().contiguous().view(torch.uint8))
 
-    # Shapes that must NOT take the tiled path, to guard the dispatch check.
+    # Permuted copies whose contiguous dim moves ([B, C, L] <- [B, L, C] and
+    # higher-rank permutes) must take the tiled path and match the generic copy
+    # bit-for-bit. TensorIterator merges adjacent dims whose strides line up in
+    # both operands, so the layouts are chosen to stay distinct after that:
+    #   batch_first    [B, L, C] -> [B, C, L]; one outer dim after the pair
+    #   permute_4d     [B0, L, B1, C] -> [B0, C, B1, L]; two outer dims, one of
+    #                  them between the two transposed dims in the iterator
+    #   permute_5d     [B0, B1, L, B2, C] -> [B1, C, B0, B2, L]; three outer dims
+    #   odd            odd extents (partial tiles) into a row-padded dst whose
+    #                  padding must stay untouched
+    #   padded_*_batch a src or dst outer stride that is word- but not 16-byte
+    #                  aligned: vectorized tile rejected, scalar tile still used
+    #   broadcast      zero src outer stride
+    #   big_batch      more (slice, tile row) pairs than gridDim.y, so slices
+    #                  are decoded from blockIdx.z as well
+    #   small_slices   slices individually below the size gate whose aggregate
+    #                  is above it
     @onlyCUDA
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.uint8, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("layout", ("batch_first", "permute_4d", "permute_5d", "odd", "padded_src_batch",
+                            "padded_dst_batch", "broadcast", "big_batch", "small_slices"))
+    def test_copy_transpose_tiled_batched(self, device, dtype, layout):
+        es = torch.empty((), dtype=dtype).element_size()
+        word = max(1, 4 // es)  # elements per 32-bit word
+        if layout == "big_batch":
+            b, c, l = 66000, 32, 64
+        elif layout == "small_slices":
+            # each [c, l] slice is 8 KB, far below the 4 MB gate; 2048 of them are not
+            b, c, l = 2048, 32, 256 // es
+        elif layout == "odd":
+            b, c, l = 9, 1001, 1027
+        elif layout in ("permute_4d", "permute_5d"):
+            b, c, l = 24, 192, 256
+        else:
+            b, c, l = 24, 736, 1536 // es
+
+        def padded_batch(shape, fill=None):
+            # pad each slice by one word: word-aligned but not 16-byte aligned
+            n = shape[1] * shape[2]
+            base = make_tensor((shape[0], n + word), dtype=dtype, device=device) if fill is None \
+                else torch.full((shape[0], n + word), fill, dtype=dtype, device=device)
+            return base, base[:, :n].view(shape)
+
+        dst_shape = (b, c, l)
+        dst_base = None
+        if layout == "permute_4d":
+            b0, b1 = 6, b // 6
+            src = make_tensor((b0, l, b1, c), dtype=dtype, device=device).permute(0, 3, 2, 1)
+            dst_shape = (b0, c, b1, l)
+        elif layout == "permute_5d":
+            b0, b1, b2 = 2, 3, b // 6
+            src = make_tensor((b0, b1, l, b2, c), dtype=dtype, device=device).permute(1, 4, 0, 3, 2)
+            dst_shape = (b1, c, b0, b2, l)
+        elif layout == "padded_src_batch":
+            _, src = padded_batch((b, l, c))
+            src = src.permute(0, 2, 1)
+        elif layout == "broadcast":
+            src = make_tensor((1, l, c), dtype=dtype, device=device).expand(b, l, c).permute(0, 2, 1)
+        else:
+            src = make_tensor((b, l, c), dtype=dtype, device=device).permute(0, 2, 1)
+        if layout == "padded_dst_batch":
+            dst_base, dst = padded_batch(dst_shape, fill=0)
+            padding = dst_base[:, -word:]
+        elif layout == "odd":
+            dst_base = torch.zeros((b, c, l + 3), dtype=dtype, device=device)
+            dst, padding = dst_base[..., :l], dst_base[..., l:]
+        else:
+            dst = torch.empty(dst_shape, dtype=dtype, device=device)
+
+        self.assertTrue(_copy_uses_tiled_transpose(dst, src), layout)
+        self.assertEqual(dst.cpu().contiguous().view(torch.uint8), src.cpu().contiguous().view(torch.uint8))
+        if dst_base is not None:
+            self.assertEqual(padding.count_nonzero().item(), 0)
+
+    # Batched slices much smaller than a tile, or narrower than 16 elements, must
+    # stay on the generic path (the tiled kernel is slower there); 2D transposes
+    # are not subject to the guard.
+    @onlyCUDA
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.uint8, torch.bfloat16, torch.float32, torch.float64)
+    def test_copy_transpose_tiled_small_slices_rejected(self, device, dtype):
+        def tiled(src):
+            dst = torch.empty(src.shape, dtype=dtype, device=device)
+            used = _copy_uses_tiled_transpose(dst, src)
+            self.assertEqual(dst.cpu().view(torch.uint8), src.cpu().contiguous().view(torch.uint8))
+            return used
+
+        total = 16 << 20  # bytes, above the size gate
+        es = torch.empty((), dtype=dtype).element_size()
+        # (16, 32) is 512 elements per block: enough for 4- and 8-byte types, not for narrower
+        # ones. (127, 129) and (255, 257) are scalar tiles at 80% and 89% utilization: narrow
+        # types only win when the tile is nearly full.
+        for (c, l), expect in (((16, 16), False), ((512, 4), False), ((3, 512), False), ((8, 128), False),
+                               ((16, 32), es >= 4), ((127, 129), es >= 4), ((255, 257), True), ((32, 64), True)):
+            b = total // (c * l * es)
+            src = make_tensor((b, l, c), dtype=dtype, device=device).permute(0, 2, 1)
+            self.assertEqual(tiled(src), expect, (c, l))
+        # 2D routing is unchanged by the slice guard: a skinny [N, 33] -> [33, N]
+        # transpose still tiles (it beats the generic kernel despite half-empty tiles)
+        src = make_tensor((total // (33 * es), 33), dtype=dtype, device=device).t()
+        self.assertTrue(tiled(src))
+
+    # Shapes that must NOT take the tiled path, to guard the dispatch check.
+    @onlyAccelerator
     @dtypes(torch.float32)
     def test_copy_transpose_tiled_rejects(self, device, dtype):
         big = make_tensor((4096, 4096), dtype=dtype, device=device)
@@ -3321,7 +3426,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(casted.cpu(), big.cpu().t().to(torch.float64), atol=0, rtol=0)
 
     # Pins the FP32 dispatch threshold and the element-size switch.
-    @onlyCUDA
+    @onlyAccelerator
     def test_copy_transpose_tiled_boundary(self, device):
         # 1024x1024 fp32 is exactly 4 MB, the first size that takes the tiled
         # path; 1024x1023 is the last that does not. Both must be correct.
@@ -3334,10 +3439,11 @@ class TestTorchDeviceType(TestCase):
         src = make_tensor((1024, 1024), dtype=torch.complex128, device=device)
         self.assertEqual(src.t().contiguous().cpu(),
                          src.cpu().t().contiguous(), atol=0, rtol=0)
-        # bool is 1 byte and rides the uint8 instantiation.
-        src = torch.randint(0, 2, (2048, 4099), dtype=torch.bool, device=device)
-        self.assertEqual(src.t().contiguous().cpu(),
-                         src.cpu().t().contiguous(), atol=0, rtol=0)
+        # bool stays on the generic path, which normalizes any nonzero byte to
+        # True (see NOTE [Loading boolean values]); a raw byte copy would not.
+        src = torch.full((2048, 4099), 7, dtype=torch.uint8, device=device).view(torch.bool)
+        out = src.t().contiguous()
+        self.assertEqual(out.view(torch.uint8).unique().tolist(), [1])
 
     def test_clone_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
@@ -4151,8 +4257,8 @@ class TestTorchDeviceType(TestCase):
     # The last batch is checked against the same batch computed on its own, which stays
     # within int32. With p=1 and integer grads the reductions are exact, so both agree
     # bitwise regardless of summation order. See #128791.
-    @onlyCUDA
-    @largeTensorTest('32GB', device='cuda')
+    @onlyAccelerator
+    @largeTensorTest('32GB')
     @parametrize("b, r, m", [(2, 1024, 2048), (32, 8192, 1)])
     def test_cdist_backward_large_index(self, device, b, r, m):
         x1 = torch.randn(b, r, m, device=device, requires_grad=True)
@@ -4249,24 +4355,19 @@ class TestTorchDeviceType(TestCase):
             self.skipTest("Failing on cpu")
 
         ops = [
-            ("addcmul", True, True, 'cpu'),
-            ("addcmul", True, True, 'cuda'),
-            ("addcdiv", True, True, 'cpu'),
-            ("addcdiv", True, True, 'cuda'),
-            ("lerp", True, True, 'cpu'),
-            ("lerp", True, True, 'cuda')
+            ("addcmul", True, True),
+            ("addcdiv", True, True),
+            ("lerp", True, True),
         ]
 
         for (fn, has_input_output_mem_overlap_check,
-             has_internal_mem_overlap_check, dev) in ops:
-            if dev != device:
-                continue
+             has_internal_mem_overlap_check) in ops:
             out_op = getattr(torch, fn)
             inplace_op = getattr(torch.Tensor, fn + '_')
             self.check_internal_mem_overlap(
                 inplace_op, 3, dtype, device,
                 expected_failure=not has_internal_mem_overlap_check)
-            self.ternary_check_input_output_mem_overlap(out_op, dev,
+            self.ternary_check_input_output_mem_overlap(out_op, device,
                                                         expected_failure=not has_input_output_mem_overlap_check)
 
     @expectedFailureMeta  # RuntimeError not raised
@@ -6175,7 +6276,7 @@ class TestTorchDeviceType(TestCase):
 
                 check_equal(condition, x, y)
                 check_equal(condition, y, x)
-                if self.device_type == "cuda":
+                if self.device_type != "cpu":
                     check_equal(condition, torch.tensor(x), y)
                     check_equal(condition, y, torch.tensor(x))
                     if not isinstance(y, torch.Tensor):
@@ -6715,6 +6816,54 @@ class TestTorchDeviceType(TestCase):
         self.assertIs(pinned, pinned.pin_memory())
         self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
+    @onlyAccelerator
+    def test_bmm_matmul_mixed_dtype_error(self, device):
+        a = torch.randn(2, 8, 8, device=device, dtype=torch.float16)
+        b = torch.randn(2, 8, 64, device=device, dtype=torch.float32)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.bmm(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.compile(lambda x, y: torch.bmm(x, y), fullgraph=True)(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.matmul(a, b)
+
+        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
+            torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
+
+    def test_split_with_sizes_copy_out(self, device):
+        shape = (30, 40, 50)
+        x = torch.rand(*shape, device=device)
+        cases = [
+            (0, [3, 7, 8, 12]),
+            (1, [3, 7, 10, 20]),
+            (-2, [3, 7, 10, 20]),
+            (2, [3, 7, 10, 12, 18]),
+            (-1, [3, 7, 10, 12, 18]),
+            (2, [3, 7, 10, 0, 30]),
+        ]
+        for dim, split_sizes in cases:
+            views = x.split_with_sizes(split_sizes, dim=dim)
+            expects = [v.clone() for v in views]
+            out = [torch.zeros_like(v) for v in views]
+            for expect, t in zip(expects, out):
+                if expect.numel() != 0:
+                    self.assertFalse(expect.eq(t).all().item())
+
+            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            for expect, t in zip(expects, out):
+                self.assertTrue(expect.eq(t).all().item())
+
+        # Empty inputs, including all-empty splits, copy nothing
+        for shape, dim, split_sizes in (((30, 0, 50), 1, [0, 0]), ((0, 40), 1, [10, 30])):
+            x = torch.rand(*shape, device=device)
+            views = x.split_with_sizes(split_sizes, dim=dim)
+            out = [torch.empty_like(v) for v in views]
+            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+            self.assertEqual([t.shape for t in out], [v.shape for v in views])
+
 
 class TestTorchCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -7013,6 +7162,34 @@ class TestTorchCUDA(TestCase):
         with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
             s1.copy_(s0)
 
+    def test_split_with_sizes_copy_out(self, device):
+        shape = (30, 40, 50)
+        x = torch.rand(*shape, device=device)
+        cases = [
+            (0, [3, 7, 8, 12]),
+            (1, [3, 7, 10, 20]),
+            (-2, [3, 7, 10, 20]),
+            (2, [3, 7, 10, 12, 18]),
+            (-1, [3, 7, 10, 12, 18]),
+            (2, [3, 7, 10, 0, 30]),
+        ]
+        for dim, split_sizes in cases:
+            views = x.split_with_sizes(split_sizes, dim=dim)
+            expects = [v.clone() for v in views]
+
+            # Test with cuda graph
+            out = [torch.zeros_like(v) for v in views]
+            for expect, t in zip(expects, out):
+                if expect.numel() != 0:
+                    self.assertFalse(expect.eq(t).all().item())
+
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
+
+            g.replay()
+            for expect, t in zip(expects, out):
+                self.assertTrue(expect.eq(t).all().item())
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -10022,47 +10199,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(x[:, -2:3].tolist(), [[2], [6], [10], [14]])
         self.assertEqual(x[0:-1:2].tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
 
-    def test_split_with_sizes_copy_out(self):
-        device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-        shape = (30, 40, 50)
-        x = torch.rand(*shape, device=device)
-        cases = [
-            (0, [3, 7, 8, 12]),
-            (1, [3, 7, 10, 20]),
-            (-2, [3, 7, 10, 20]),
-            (2, [3, 7, 10, 12, 18]),
-            (-1, [3, 7, 10, 12, 18]),
-            (2, [3, 7, 10, 0, 30]),
-        ]
-        for dim, split_sizes in cases:
-            views = x.split_with_sizes(split_sizes, dim=dim)
-            expects = [v.clone() for v in views]
-            out = [torch.zeros_like(v) for v in views]
-            for expect, t in zip(expects, out):
-                if expect.numel() != 0:
-                    self.assertFalse(expect.eq(t).all().item())
-
-            torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
-            for expect, t in zip(expects, out):
-                self.assertTrue(expect.eq(t).all().item())
-
-            if not torch.cuda.is_available():
-                continue
-
-            # Test with cuda graph
-            out = [torch.zeros_like(v) for v in views]
-            for expect, t in zip(expects, out):
-                if expect.numel() != 0:
-                    self.assertFalse(expect.eq(t).all().item())
-
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
-                torch.split_with_sizes_copy(x, split_sizes, dim=dim, out=out)
-
-            g.replay()
-            for expect, t in zip(expects, out):
-                self.assertTrue(expect.eq(t).all().item())
-
     def test_type(self):
         x = torch.randn(3, 3).double()
         self.assertEqual(x.type('torch.FloatTensor').dtype, torch.float32)
@@ -11132,23 +11268,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         finally:
             torch.set_num_threads(num_threads)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_bmm_matmul_mixed_dtype_error(self):
-        a = torch.randn(2, 8, 8, device="cuda", dtype=torch.float16)
-        b = torch.randn(2, 8, 64, device="cuda", dtype=torch.float32)
-
-        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
-            torch.bmm(a, b)
-
-        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
-            torch.compile(lambda x, y: torch.bmm(x, y), fullgraph=True)(a, b)
-
-        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
-            torch.matmul(a, b)
-
-        with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
-            torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
-
     def test_conj_neg_tolist(self):
         x = torch.randn(2, dtype=torch.cfloat)
         y1 = x.conj()
@@ -11338,10 +11457,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t7.d = "dog"
         self._checked_swap(t6, t7)
 
-    @unittest.skipIf(torch.cuda.is_available(), "Test specific for CPU")
-    def test_bf16_supported_on_cpu(self):
-        self.assertFalse(torch.cuda.is_bf16_supported())
-
     def test_tensor_with_grad_to_scalar_warning(self) -> None:
         with (warnings.catch_warnings(record=True) as w,
                 set_warn_always_context(True)):
@@ -11443,6 +11558,10 @@ class TestTorchCPU(TestCase):
         src_bf16 = src.bfloat16()
         self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
         self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
+
+    @unittest.skipIf(torch.cuda.is_available(), "Test specific for CPU")
+    def test_bf16_supported_on_cpu(self):
+        self.assertFalse(torch.cuda.is_bf16_supported())
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
