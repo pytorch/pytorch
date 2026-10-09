@@ -261,14 +261,15 @@ class AllGatherInput:
 
     Return these in the ``inputs`` of ``fsdp_pre_all_gather``. FSDP concatenates
     each rank's ``tensor`` along ``dim``, independently of the parameter's shard
-    dim, and passes the result to ``fsdp_post_all_gather``. For example,
-    ``(2, F, D)`` with ``dim=1`` gathers to ``(2, world_size * F, D)``.
+    dim, and passes the result to ``fsdp_post_all_gather``. For example, over a
+    shard mesh of size ``N``, ``(2, F, D)`` with ``dim=1`` gathers to
+    ``(2, N * F, D)``.
 
-    Payloads must be contiguous. Their number, element counts, and dtypes must
-    stay fixed across calls so FSDP can reuse outputs. Every rank must return the
-    same shapes and dtypes, which FSDP cannot check locally: a mismatch hangs or
-    corrupts the collective. Extensions own any padding, since ``local_tensor``
-    is unpadded on ranks with a smaller shard.
+    The number of payloads and their element counts and dtypes must stay fixed
+    across calls so FSDP can reuse outputs. Every rank must return the same shapes
+    and dtypes, which FSDP cannot check locally: a mismatch hangs or corrupts the
+    collective. Extensions own any padding, since the sharded tensor that
+    ``fsdp_pre_all_gather`` is called on is unpadded on ranks with a smaller shard.
 
     Attributes:
         tensor (Tensor): Local payload. Scalars count as shape ``(1,)``.
