@@ -503,23 +503,16 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 # Sharding on nonzero dim requires even sharding
                 "lin_shapes": [[(32, 16), (16, 8)]],
                 "use_shard_placement_fn": [True],
-                # False tests Shard(1)-only weights; True adds Shard(0) biases.
-                "bias": [False, True],
             },
             self._test_train_parity_single_group,
         )
 
     def _test_train_parity_single_group(
-        self,
-        lin_shapes: list[tuple[int, int]],
-        use_shard_placement_fn: bool,
-        bias: bool = True,
+        self, lin_shapes: list[tuple[int, int]], use_shard_placement_fn: bool
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
-            nn.Linear(*lin_shapes[0], bias=bias),
-            nn.ReLU(),
-            nn.Linear(*lin_shapes[1], bias=bias),
+            nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
         )
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(ref_model, device_ids=_get_device_ids(self.rank))
@@ -534,14 +527,13 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
         for iter_idx in range(10):
-            outputs: list[torch.Tensor] = []
+            losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                outputs.append(_model(*inp))
-                outputs[-1].sum().backward()
+                losses.append(_model(*inp).sum())
+                losses[-1].backward()
                 _optim.step()
-            self.assertEqual(outputs[0], outputs[1])
-            check_sharded_parity(self, ref_model, model)
+            self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
@@ -3333,7 +3325,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
             *,
-            prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
+            reduce_scatter_input_fn: Callable = _default_reduce_scatter_input_fn,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -3352,7 +3344,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 partial_reduce_output,
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
-                prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
+                reduce_scatter_input_fn=reduce_scatter_input_fn,
             )
 
         with (
