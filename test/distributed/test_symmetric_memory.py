@@ -3424,6 +3424,10 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
             capture_output=True,
             text=True,
             timeout=120,
+            # Run outside the repo root: `python -c` resolves sys.path[0] to
+            # the CWD, and a source checkout's own "torch/" directory (no
+            # generated torch/version.py) would shadow the installed package.
+            cwd=tempfile.gettempdir(),
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
