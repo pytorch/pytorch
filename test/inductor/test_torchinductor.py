@@ -23327,6 +23327,21 @@ def _run_and_get_stripped_kernels(
 
 @instantiate_parametrized_tests
 class NoOpFoldingTests(InductorTestCase):
+    def _trace_and_fold(self, fn, *args, identity_target=None, zero_target=None):
+        gm = make_fx(fn, tracing_mode="real")(*args)
+        if identity_target is not None:
+            self.assertEqual(
+                len(gm.graph.find_nodes(op="call_function", target=identity_target)), 1
+            )
+        zeros = OrderedSet()
+        if zero_target is not None:
+            zero_nodes = gm.graph.find_nodes(op="call_function", target=zero_target)
+            self.assertEqual(len(zero_nodes), 1)
+            zeros = OrderedSet(zero_nodes)
+        remove_no_ops(gm, zeros, OrderedSet())
+        gm.recompile()
+        return gm
+
     def test_identity_before_multiple_mm_consumers_is_folded(self):
         def fn(x, a, b):
             value = x * 1
@@ -23335,12 +23350,7 @@ class NoOpFoldingTests(InductorTestCase):
         x = torch.randn(2, 2)
         a = torch.randn(2, 2)
         b = torch.randn(2, 2)
-        gm = make_fx(fn, tracing_mode="real")(x, a, b)
-        self.assertEqual(
-            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
-        )
-        remove_no_ops(gm, OrderedSet(), OrderedSet())
-        gm.recompile()
+        gm = self._trace_and_fold(fn, x, a, b, identity_target=aten.mul.Tensor)
         self.assertEqual(
             len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 0
         )
@@ -23351,12 +23361,7 @@ class NoOpFoldingTests(InductorTestCase):
             return torch.sin(x[:, 1:] * 1)
 
         x = torch.randn(3, 4)
-        gm = make_fx(fn, tracing_mode="real")(x)
-        self.assertEqual(
-            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
-        )
-        remove_no_ops(gm, OrderedSet(), OrderedSet())
-        gm.recompile()
+        gm = self._trace_and_fold(fn, x, identity_target=aten.mul.Tensor)
         self.assertEqual(
             len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 0
         )
@@ -23376,9 +23381,7 @@ class NoOpFoldingTests(InductorTestCase):
 
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
-        gm = make_fx(fn, tracing_mode="real")(x, y)
-        remove_no_ops(gm, OrderedSet(), OrderedSet())
-        gm.recompile()
+        gm = self._trace_and_fold(fn, x, y)
         self.assertEqual(
             len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
         )
@@ -23393,9 +23396,7 @@ class NoOpFoldingTests(InductorTestCase):
 
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
-        gm = make_fx(fn, tracing_mode="real")(x, y)
-        remove_no_ops(gm, OrderedSet(), OrderedSet())
-        gm.recompile()
+        gm = self._trace_and_fold(fn, x, y)
         self.assertEqual(
             len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
         )
@@ -23415,9 +23416,7 @@ class NoOpFoldingTests(InductorTestCase):
             def fn(x):
                 return torch.sin(x + 0)
 
-        gm = make_fx(fn, tracing_mode="real")(x)
-        remove_no_ops(gm, OrderedSet(), OrderedSet())
-        gm.recompile()
+        gm = self._trace_and_fold(fn, x)
         self.assertEqual(
             len(gm.graph.find_nodes(op="call_function", target=aten.add.Tensor)), 1
         )
@@ -23428,11 +23427,7 @@ class NoOpFoldingTests(InductorTestCase):
             return torch.sin(x - torch.full_like(x, -0.0))
 
         x = torch.tensor([-0.0])
-        gm = make_fx(fn, tracing_mode="real")(x)
-        zero = gm.graph.find_nodes(op="call_function", target=aten.full_like.default)
-        self.assertEqual(len(zero), 1)
-        remove_no_ops(gm, OrderedSet(zero), OrderedSet())
-        gm.recompile()
+        gm = self._trace_and_fold(fn, x, zero_target=aten.full_like.default)
         self.assertEqual(
             len(gm.graph.find_nodes(op="call_function", target=aten.sub.Tensor)), 1
         )
@@ -23451,9 +23446,7 @@ class NoOpFoldingTests(InductorTestCase):
             return getattr(torch, consumer)(op(x, identity))
 
         x = torch.ones(2)
-        gm = make_fx(fn, tracing_mode="real")(x)
-        remove_no_ops(gm, OrderedSet(), OrderedSet())
-        gm.recompile()
+        gm = self._trace_and_fold(fn, x)
         # Floating-point addition/subtraction by zero can change its sign.
         self.assertEqual(
             len(gm.graph.find_nodes(op="call_function", target=op)),
