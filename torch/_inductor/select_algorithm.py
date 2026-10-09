@@ -2200,8 +2200,11 @@ class TritonTemplateKernel(TritonKernel):
         tile_index = index.xreplace(
             {s: e.expr for s, e in self.range_tree_nodes.items()}
         )
-        # Descriptor shapes and coordinates are int32.
-        if tile_index != layout.stride[0] * x + r or max(layout.size) >= 2**31:
+        # The descriptor sees the output as [M, N], also when it's a row-major
+        # view such as [B, S, N]. Its shapes and coordinates are int32.
+        shape = [sympy_product(layout.size[:-1]), layout.size[-1]]
+        strides = [layout.stride[-2], layout.stride[-1]]
+        if tile_index != strides[0] * x + r or max(shape) >= 2**31:
             return False
         offsets = [
             texpr(o) if self.index_dtype == "tl.int32" else f"({texpr(o)}).to(tl.int32)"
@@ -2215,7 +2218,7 @@ class TritonTemplateKernel(TritonKernel):
                 DeferredLine(
                     name,
                     f"{desc} = tl.make_tensor_descriptor({var}, "
-                    f"shape={list(layout.size)}, strides={list(layout.stride)}, "
+                    f"shape={shape}, strides={strides}, "
                     f"block_shape=[{rows}, {cols}])",
                 )
             )
@@ -2262,10 +2265,10 @@ class TritonTemplateKernel(TritonKernel):
         elem = max(node.get_dtype().itemsize for node in operands)
         ring = self.num_stages * (bm * bk + bk * bn) * elem
         template_out = staged * self.output_node.get_dtype().itemsize
-        # Err toward tl.store: an overflow fails the fused choice outright. The
-        # margin covers the epilogue's layout-conversion and reduction scratch
-        # and the barriers, measured at under BM * BN / EPILOGUE_SUBTILE bytes
-        # plus 1 KB on B200.
+        # Err toward tl.store: an overflow drops the fused choice to
+        # num_stages=1, or fails it outright. The margin covers the epilogue's
+        # layout-conversion and reduction scratch and the barriers, measured at
+        # under BM * BN / EPILOGUE_SUBTILE bytes plus 1 KB on B200.
         margin = bm * bn + 16 * 1024
         return limit - ring - template_out - margin
 
@@ -2273,9 +2276,9 @@ class TritonTemplateKernel(TritonKernel):
         self, template_node, epilogue_nodes
     ) -> list[tuple[str, int]]:
         """The epilogue outputs a TMA store can write whole, with the bytes of
-        their staged (sub)tile: materialized, the template output's shape,
-        row-major and 16-byte aligned. Smaller or irregular outputs use
-        tl.store."""
+        their staged (sub)tile: materialized, the template output's shape or
+        a row-major view of it, and 16-byte aligned. Smaller or irregular
+        outputs use tl.store."""
         staged = self._staged_tile_elems()
         scheduler = V.graph.scheduler
         if staged is None or scheduler is None:
@@ -2297,9 +2300,15 @@ class TritonTemplateKernel(TritonKernel):
                         isinstance(x, (int, sympy.Integer))
                         for x in (*layout.size, *layout.stride, layout.offset)
                     )  # dynamic layout
-                    or list(layout.size) != list(size)  # not full-tile
+                    # [M, N] or a row-major view of it, e.g. [B, S, N]
+                    or sympy_product(layout.size) != sympy_product(size)
+                    or layout.size[-1] != size[-1]  # not full-tile
                     or layout.offset != 0  # irregular output
                     or layout.stride[-1] != 1  # irregular output
+                    or any(  # irregular output
+                        layout.stride[i] != layout.stride[i + 1] * layout.size[i + 1]
+                        for i in range(len(layout.size) - 2)
+                    )
                     or not can_use_tma(output_layout=layout)
                 ):
                     continue
