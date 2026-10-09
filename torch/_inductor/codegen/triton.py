@@ -7770,6 +7770,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "dynamic_disable_pipelining": config.triton.dynamic_disable_pipelining,
         }
 
+        if config.incremental_autotune:
+            inductor_meta["incremental_autotune_max_dispatches"] = (
+                config.incremental_autotune_max_dispatches
+            )
+
         if config.write_are_deterministic_algorithms_enabled:
             inductor_meta["are_deterministic_algorithms_enabled"] = (
                 torch.are_deterministic_algorithms_enabled()
