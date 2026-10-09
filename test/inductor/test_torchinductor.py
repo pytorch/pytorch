@@ -127,7 +127,6 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocm,
     skipIfRocmArch,
-    skipIfRocmVersionAtLeast,
     skipIfTorchInductor,
     skipIfWindows,
     skipIfXpu,
@@ -4337,6 +4336,30 @@ class CommonTemplate:
             b_neg = torch.full_like(a, -divisor)
             self.common(fn, (a, b_neg))
 
+    @skip_if_halide  # floordiv goes through floats, inexact for large values
+    def test_floordiv_int_min_negative_divisor(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/198545
+        def fn(a, b):
+            return a // b
+
+        for dtype in [torch.int32, torch.int64]:
+            info = torch.iinfo(dtype)
+            a = torch.tensor(
+                [info.min, info.min, info.min, info.min, info.min + 1, 5, -5, 0],
+                dtype=dtype,
+                device=self.device,
+            )
+            self.common(lambda x: x // -3, (a,))
+            for divisor in [-2, -3, -7, info.min]:
+                b = torch.full_like(a, divisor)
+                self.common(fn, (a, b))
+            b = torch.tensor(
+                [-2, -5, info.min, -(2**30), info.min, info.min, info.min, -1],
+                dtype=dtype,
+                device=self.device,
+            )
+            self.common(fn, (a, b))
+
     def test_floordiv_int_min_neg_one_cpu(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/184406
         if not is_cpp_backend(self.device):
@@ -6597,9 +6620,6 @@ for dtype in (torch.int32, torch.int64):
     @parametrize("nhwc_weight", (False, True))
     @parametrize("nhwc_input", (False, True))
     @with_tf32_off
-    @skipIfRocmVersionAtLeast(
-        [7, 14]
-    )  # ROCm 7.14+ Triton conv2d backward accuracy issue in this UT family
     def test_conv2d_backward_input_layout(self, nhwc_weight: bool, nhwc_input: bool):
         in_channels, out_channels, groups = 3, 4, 1
         stride, dilation, padding, kernel = 1, 1, 1, 3
@@ -9884,6 +9904,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 2, 6, 6]),))
 
+    @parametrize("dtype", test_int_dtypes)
+    def test_sign_int_dtypes(self, dtype):
+        vals = [-3, -1, 0, 2, 7] if dtype.is_signed else [0, 1, 2, 7]
+        x = torch.tensor(vals, dtype=dtype, device=self.device)
+        self.common(torch.sign, [x], check_lowp=False)
+
     def test_frac_signed_zero(self):
         def fn(x):
             y = torch.frac(x)
@@ -11797,9 +11823,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             y.index_put_((mask,), torch.tensor(7.0, device=x.device))
             return y
 
-        # Integer values keep the mm, and so the mask, exact in low precision.
-        x = torch.randint(-2, 3, (8, 8)).float()
-        w = torch.randint(-2, 3, (8, 8)).float()
+        # Keep the mm exact and bounded away from zero in low precision, so the
+        # mask does not change when check_model_gpu downcasts the inputs.
+        x = torch.tensor([-2, 0, 1, 2]).repeat(16).view(8, 8).float()
+        w = 2 * torch.eye(8)
         self.common(fn, (x, w))
 
     @skip_if_halide  # won't fuse a read of the buffer it writes in place
@@ -18996,6 +19023,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled_f = torch.compile(f)
         compiled_out = compiled_f(*inps)
         torch.testing.assert_close(eager_out, compiled_out)
+
+    def test_return_input_mutated_by_fallback(self):
+        # Complex copy_ falls back to ATen, so the graph output is an op mutating a
+        # graph input, whose name is freed before the return.
+        def fn(x):
+            x += 1
+            return x
+
+        x = torch.randn(4, dtype=torch.complex64, device=self.device)
+        expected = x + 1
+        self.assertEqual(torch.compile(fn)(x), expected)
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_arange1(self):
