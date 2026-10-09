@@ -2002,7 +2002,7 @@ class _InProcessFxCompile(FxCompile):
                     if (
                         cudagraphs
                         and config.triton.cudagraph_skip_dynamic_graphs
-                        and not config.graph_partition
+                        and not V.graph.partition_handles_cudagraph_unsafe_ops
                         and not V.graph.disable_cudagraphs_reason
                         and torch._inductor.utils.any_is_symbolic(*example_inputs)
                     ):
@@ -2031,7 +2031,7 @@ class _InProcessFxCompile(FxCompile):
                     if (
                         cudagraphs
                         # pyrefly: ignore [unbound-name]
-                        and not config.graph_partition
+                        and not V.graph.partition_handles_cudagraph_unsafe_ops
                         # pyrefly: ignore [unbound-name]
                         and not V.graph.disable_cudagraphs_reason
                     ):
@@ -2070,7 +2070,11 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
+                                V.graph.device_node_mapping,
+                                use_cudagraph_partition=(
+                                    # pyrefly: ignore [unbound-name]
+                                    V.graph.partition_handles_cudagraph_unsafe_ops
+                                ),
                             )
                         )
 
