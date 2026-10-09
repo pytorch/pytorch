@@ -1758,7 +1758,8 @@ if torch._has_frozendict:
             self.assertEqual(pytree.treespec_loads(pytree.treespec_dumps(spec)), spec)
 
         @parametrize_pytree_module
-        def test_map_and_flatten_up_to(self, pytree):
+        @parametrize("match_type", [dict, OrderedDict, builtins.frozendict])
+        def test_map_and_flatten_up_to(self, pytree, match_type):
             tree = builtins.frozendict(b=[1, 2], a=3)
             result = pytree.tree_map(lambda x: x + 1, tree)
             self.assertIs(type(result), builtins.frozendict)
@@ -1767,25 +1768,9 @@ if torch._has_frozendict:
             self.assertEqual(
                 spec.flatten_up_to(builtins.frozendict(b=[4, 5], a=6)), [4, 5, 6]
             )
-            if pytree is cxx_pytree and not IS_FBCODE:
-                handler = cxx_pytree.optree.register_pytree_node.get(
-                    builtins.frozendict
-                )
-                if (
-                    handler is None
-                    or handler.kind == cxx_pytree.optree.PyTreeKind.CUSTOM
-                ):
-                    with self.assertRaisesRegex(ValueError, "[Tt]ype mismatch"):
-                        spec.flatten_up_to({"a": 6, "b": [4, 5]})
-                    with self.assertRaisesRegex(
-                        ValueError, "Mismatch custom node data|Node context mismatch"
-                    ):
-                        spec.flatten_up_to(builtins.frozendict(a=6, b=[4, 5]))
-                    return
-            for other in ({"a": 6, "b": [4, 5]}, builtins.frozendict(a=6, b=[4, 5])):
-                self.assertEqual(spec.flatten_up_to(other), [4, 5, 6])
+            self.assertEqual(spec.flatten_up_to(match_type(a=6, b=[4, 5])), [4, 5, 6])
             with self.assertRaisesRegex(ValueError, "[Kk]eys? mismatch"):
-                spec.flatten_up_to({"a": 6, "c": [4, 5]})
+                spec.flatten_up_to(match_type(a=6, c=[4, 5]))
 
         def test_key_paths_and_fx_spec(self):
             tree = builtins.frozendict(b=[1, 2], a=3)
@@ -1803,7 +1788,7 @@ if torch._has_frozendict:
             )
 
         @unittest.skipIf(IS_FBCODE, "Optree is not available in fbcode")
-        @parametrize("match_type", [dict, builtins.frozendict])
+        @parametrize("match_type", [dict, OrderedDict, builtins.frozendict])
         def test_optree_spec_polyfill(self, match_type):
             tree = builtins.frozendict(b=[1, 2], a=3)
             leaves, spec = cxx_pytree.tree_flatten(tree)
@@ -1823,15 +1808,8 @@ if torch._has_frozendict:
             self.assertEqual(repr(polyfill_spec), repr(spec))
             self.assertEqual(polyfill_spec.flatten_up_to(tree), leaves)
             other = match_type(a=6, b=[4, 5])
-            try:
-                expected = spec.flatten_up_to(other)
-            except ValueError:
-                with self.assertRaisesRegex(
-                    ValueError, "Type mismatch|Node context mismatch"
-                ):
-                    polyfill_spec.flatten_up_to(other)
-            else:
-                self.assertEqual(polyfill_spec.flatten_up_to(other), expected)
+            self.assertEqual(spec.flatten_up_to(other), [4, 5, 6])
+            self.assertEqual(polyfill_spec.flatten_up_to(other), [4, 5, 6])
 
         @parametrize_pytree_module
         def test_tensor_leaves(self, pytree):
