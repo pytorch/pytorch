@@ -4831,18 +4831,18 @@ class CppFakeTensorModeBindingsTest(TestCase):
         try:
             self.assertEqual(state(), (wrapper, True))
             torch._C._push_cpp_fake_tensor_mode(mode)
-            torch._C._pop_cpp_fake_tensor_mode()
+            torch._C._pop_cpp_fake_tensor_mode(mode)
             self.assertEqual(state(), (wrapper, True))
             # Pushing None suspends the mode until the matching pop.
             torch._C._push_cpp_fake_tensor_mode(None)
             self.assertEqual(state(), (None, False))
-            torch._C._pop_cpp_fake_tensor_mode()
+            torch._C._pop_cpp_fake_tensor_mode(None)
             self.assertEqual(state(), (wrapper, True))
         finally:
-            torch._C._pop_cpp_fake_tensor_mode()
+            torch._C._pop_cpp_fake_tensor_mode(mode)
         self.assertEqual(state(), (None, False))
         with self.assertRaisesRegex(RuntimeError, "without a matching"):
-            torch._C._pop_cpp_fake_tensor_mode()
+            torch._C._pop_cpp_fake_tensor_mode(mode)
 
     def test_from_meta_and_device(self):
         mode, wrapper = self._make_mode()

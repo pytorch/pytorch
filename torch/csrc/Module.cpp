@@ -2524,13 +2524,11 @@ void _initCrashHandler() {
   *_getOldHandler(SIGSEGV) = std::signal(SIGSEGV, _signalHandler);
 }
 
-// The (mode, Fake key included) state each _push_cpp_fake_tensor_mode
-// displaced, so the matching _pop restores it exactly, including for nested
-// scopes on the same mode. Thread-local like FakeTensorModeTLS.
-std::vector<std::pair<std::shared_ptr<c10::FakeTensorMode>, bool>>&
-cpp_fake_mode_save_stack() {
+// One guard per open _push_cpp_fake_tensor_mode scope on this thread.
+std::vector<std::unique_ptr<c10::impl::FakeTensorModeGuard>>&
+cpp_fake_mode_guard_stack() {
   static thread_local std::vector<
-      std::pair<std::shared_ptr<c10::FakeTensorMode>, bool>>
+      std::unique_ptr<c10::impl::FakeTensorModeGuard>>
       stack;
   return stack;
 }
@@ -2955,19 +2953,18 @@ Call this whenever a new thread is created in order to propagate values from
                 functorch_config
                     .attr("fake_tensor_allow_unsafe_data_ptr_access")
                     .cast<bool>();
-            if (!wrapper.is_none()) {
-              PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
-              if (weakref == nullptr) {
-                throw py::error_already_set();
-              }
-              mode->fake_mode_pyobj_ = std::make_shared<c10::SafePyObject>(
-                  weakref, getPyInterpreter());
+            TORCH_CHECK(!wrapper.is_none(), "Expected a Python wrapper");
+            PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
+            if (weakref == nullptr) {
+              throw py::error_already_set();
             }
+            mode->fake_mode_pyobj_ = std::make_shared<c10::SafePyObject>(
+                weakref, getPyInterpreter());
             return mode;
           }),
           py::arg("converter"),
-          py::arg("shape_env") = py::none(),
-          py::arg("wrapper") = py::none())
+          py::arg("shape_env"),
+          py::arg("wrapper"))
       .def_readonly("allow_meta", &c10::FakeTensorMode::allow_meta_)
       .def_readwrite("epoch", &c10::FakeTensorMode::epoch_)
       .def_readwrite(
@@ -2979,30 +2976,29 @@ Call this whenever a new thread is created in order to propagate values from
           "allow_unsafe_data_ptr_access",
           &c10::FakeTensorMode::allow_unsafe_data_ptr_access_);
 
-  // Install mode (or no mode, for None) in TLS with the Fake key to match, for
-  // the duration of a `with cpp_mode:` scope; _pop restores what _push
-  // displaced.
+  // Install mode (or no mode, for None) in TLS for the duration of a
+  // `with cpp_mode:` scope; the matching _pop must exit the same mode.
   py_module.def(
       "_push_cpp_fake_tensor_mode",
       [](const std::shared_ptr<c10::FakeTensorMode>& mode) {
-        cpp_fake_mode_save_stack().emplace_back(
-            c10::impl::FakeTensorModeTLS::get_state(),
-            c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Fake));
-        c10::impl::FakeTensorModeTLS::set_state(mode);
+        cpp_fake_mode_guard_stack().push_back(
+            std::make_unique<c10::impl::FakeTensorModeGuard>(mode));
       },
       py::arg("mode"));
 
-  py_module.def("_pop_cpp_fake_tensor_mode", []() {
-    auto& stack = cpp_fake_mode_save_stack();
-    TORCH_CHECK(
-        !stack.empty(),
-        "_pop_cpp_fake_tensor_mode without a matching _push_cpp_fake_tensor_mode");
-    auto [prev_mode, prev_fake_included] = std::move(stack.back());
-    stack.pop_back();
-    c10::impl::FakeTensorModeTLS::create_state(std::move(prev_mode));
-    c10::impl::tls_set_dispatch_key_included(
-        c10::DispatchKey::Fake, prev_fake_included);
-  });
+  py_module.def(
+      "_pop_cpp_fake_tensor_mode",
+      [](const std::shared_ptr<c10::FakeTensorMode>& mode) {
+        auto& stack = cpp_fake_mode_guard_stack();
+        TORCH_CHECK(
+            !stack.empty(),
+            "_pop_cpp_fake_tensor_mode without a matching _push_cpp_fake_tensor_mode");
+        TORCH_CHECK(
+            c10::impl::FakeTensorModeTLS::get_state() == mode,
+            "_pop_cpp_fake_tensor_mode exited a mode that is not the innermost one");
+        stack.pop_back();
+      },
+      py::arg("mode"));
 
   // The Python wrapper of the C++ mode installed in TLS, or None.
   py_module.def("_current_cpp_fake_tensor_mode", []() {
@@ -3024,6 +3020,13 @@ Call this whenever a new thread is created in order to propagate values from
             meta.key_set().has_backend(c10::BackendComponent::MetaBit),
             "Expected a meta tensor");
         auto* impl = meta.unsafeGetTensorImpl();
+        TORCH_CHECK(
+            !impl->is_fake() || impl->fake_tensor_mode() == mode,
+            "Expected a meta tensor or a fake of the given mode");
+        // Check before mutating meta, so a failure leaves it untouched.
+        TORCH_CHECK(
+            device.type() != c10::DeviceType::Meta || mode->allow_meta_,
+            "device.type must not be 'meta' when allow_meta is False");
         at::set_and_normalize_fake_device(impl, device);
         impl->set_fake_tensor_mode(mode);
         // Like a fresh Python FakeTensor, the result shadows no real tensor.
