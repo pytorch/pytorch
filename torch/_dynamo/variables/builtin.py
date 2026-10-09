@@ -3509,6 +3509,11 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if len(args) == 1 and isinstance(args[0], variables.FrozenDictVariable):
+            # dict() preserves stored hashes when copying a frozendict.
+            result = ConstDictVariable({}, mutation_type=ValueMutationNew())
+            result.dict_update(tx, args, kwargs)
+            return result
         return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
     def fromkeys(
@@ -4137,7 +4142,14 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     install_guard(
                         obj.source.make_guard(GuardBuilder.MAPPING_KEYS_CHECK)
                     )
-                elif not isinstance(obj, variables.UnspecializedNNModuleVariable):
+                # Frozendict keys and length are guarded through its items snapshot.
+                elif not isinstance(
+                    obj,
+                    (
+                        variables.UnspecializedNNModuleVariable,
+                        variables.FrozenDictVariable,
+                    ),
+                ):
                     install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
         lst = ListVariable([], mutation_type=ValueMutationNew())

@@ -5,21 +5,30 @@ import operator
 
 import torch
 import torch._dynamo.test_case
-import torch.utils._pytree as pytree
+import torch.utils._pytree as python_pytree
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_FBCODE,
     parametrize,
     run_tests,
+    runWithoutCompiledAutograd,
+    subtest,
 )
 
 
-pytree_backends = [pytree]
-if not IS_FBCODE:
+pytree_modules = {
+    "python": python_pytree,
+}
+if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
 
-    pytree_backends.append(cxx_pytree)
+    pytree_modules["cxx"] = cxx_pytree
+    pytree_modules["native_optree"] = cxx_pytree.optree
+
+parametrize_pytree_module = parametrize(
+    "pytree",
+    [subtest(module, name=name) for name, module in pytree_modules.items()],
+)
 
 
 if torch._has_frozendict:
@@ -67,9 +76,9 @@ if torch._has_frozendict:
                 lambda key: key,
                 lambda key: (key,),
                 lambda key: frozenset([key]),
-                pytree.MappingKey,
-                pytree.SequenceKey,
-                pytree.GetAttrKey,
+                python_pytree.MappingKey,
+                python_pytree.SequenceKey,
+                python_pytree.GetAttrKey,
             ],
         )
         def test_preexisting_custom_key_hash(self, wrap):
@@ -118,7 +127,8 @@ if torch._has_frozendict:
                 torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x)
             )
 
-        def test_conversion_preserves_stored_key_hashes(self):
+        @parametrize("with_kwargs", [False, True])
+        def test_conversion_preserves_stored_key_hashes(self, with_kwargs):
             class Key:
                 def __init__(self):
                     self.value = 1
@@ -132,7 +142,7 @@ if torch._has_frozendict:
                 key = Key()
                 mapping = builtins.frozendict([(key, x)])
                 key.value = 2
-                copied = dict(mapping)
+                copied = dict(mapping, extra=x + 1) if with_kwargs else dict(mapping)
                 unpacked = {**mapping}
                 rebuilt = builtins.frozendict(mapping, extra=x + 1)
                 return (
@@ -192,7 +202,7 @@ if torch._has_frozendict:
             counter = CompileCounter()
 
             def fn(mapping):
-                return next(iter(mapping.values())) + len(mapping)
+                return next(iter(mapping.values())) + len(mapping), list(mapping)
 
             compiled = torch.compile(fn, backend=counter, fullgraph=True)
             for items in (
@@ -270,12 +280,16 @@ if torch._has_frozendict:
             self.assertIs(next(iter(view)), mapping["a"])
             self.assertEqual(value, (x + 1) * 2)
 
-        @parametrize("backend", pytree_backends)
-        def test_pytree_roundtrip(self, backend):
+        @parametrize_pytree_module
+        def test_pytree_roundtrip(self, pytree):
             def fn(x):
                 tree = builtins.frozendict(b=[x + 1], a=x * 2)
-                leaves, spec = backend.tree_flatten(tree)
-                return backend.tree_unflatten([v.sin() for v in leaves], spec)
+                kwargs = {"namespace": "torch"} if pytree.__name__ == "optree" else {}
+                leaves, spec = pytree.tree_flatten(tree, **kwargs)
+                leaves = [v.sin() for v in leaves]
+                if pytree.__name__ == "optree":
+                    return pytree.tree_unflatten(spec, leaves)
+                return pytree.tree_unflatten(leaves, spec)
 
             x = torch.randn(3)
             result = torch.compile(fn, backend="eager", fullgraph=True)(x)
@@ -320,6 +334,7 @@ if torch._has_frozendict:
             self.assertEqual(y.grad, torch.full_like(y, 3))
 
         @torch._dynamo.config.patch(trace_autograd_ops=True)
+        @runWithoutCompiledAutograd("Test external GradientEdge validation")
         def test_empty_and_invalid_autograd_inputs(self):
             x = torch.randn(3, requires_grad=True)
             with self.assertRaisesRegex(RuntimeError, "cannot be empty"):
