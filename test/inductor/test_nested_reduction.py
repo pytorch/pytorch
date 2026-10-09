@@ -469,6 +469,31 @@ class _NestedReductionBase:
         """D/G need not be a power of 2."""
         self._norm_block_reduce(_layernorm, "amax", 16, 6144, 128)
 
+    @parametrize("norm", ["layernorm", "rmsnorm"])
+    def test_norm_block_scale_contiguous_epilogue(self, norm):
+        """Affine row norm materialized in bf16, per-group amax, and a
+        full-domain epilogue with a contiguous scale layout: the MX group
+        quantization shape. Nested reductions assume loop_ordering_after_fusion,
+        which this suite enables; without it the grouped reduction's iteration
+        dims are merged before planning and the pipeline is not formed.
+        """
+        G = 32
+        norm_fn = {"layernorm": _layernorm, "rmsnorm": _rmsnorm}[norm]
+
+        def f(x, w, b):
+            normed = (norm_fn(x) * w + b).to(torch.bfloat16).float()
+            blocks = normed.reshape(x.shape[0], x.shape[1] // G, G)
+            # A smooth scale keeps the check tolerant; the fusion shape is the
+            # same as an E8M0 block scale.
+            scale = blocks.abs().amax(dim=-1).clamp_min(1e-30) / 448.0
+            return (blocks / scale.unsqueeze(-1)).reshape(x.shape), scale
+
+        x = torch.randn(1024, 4096, device=GPU_TYPE)
+        w = torch.randn(4096, device=GPU_TYPE)
+        b = torch.randn(4096, device=GPU_TYPE)
+        self.check_numeric(f, (x, w, b))
+        self.check_fusion()
+
     # ---- Epilogue dtype conversion ----
 
     def test_weighted_rmsnorm_reduce_k_bf16_epilogue(self):
@@ -3235,6 +3260,7 @@ class _InternalsBase:
 
     def setUp(self):
         super().setUp()
+        self.enterContext(inductor_config.patch("loop_ordering_after_fusion", True))
         metrics.reset()
         torch._dynamo.utils.clear_compilation_metrics()
 
