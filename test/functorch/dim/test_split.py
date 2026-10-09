@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
 
 class TestSplit(TestCase):
     """Comprehensive tests for first-class dimension split operations."""
+
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
