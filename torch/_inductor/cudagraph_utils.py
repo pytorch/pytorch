@@ -297,9 +297,7 @@ def get_mutation_stack_trace(
         if stack_trace := get_mutating_use_stack_trace(placeholder):
             break
 
-    msg = format_default_skip_message(
-        f"mutated inputs ({len(mutation_indices)} instances)"
-    )
+    msg = f"mutated inputs ({len(mutation_indices)} instances)"
     if stack_trace:
         return f"{msg}. Found from : \n {stack_trace}"
 
@@ -347,6 +345,7 @@ def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
 ) -> str | None:
+    "Returns a bare skip reason; callers apply format_default_skip_message."
     # meta tensors are supported since there is no compute
     device_node_mapping.pop(torch.device("meta"), None)
 
@@ -358,18 +357,18 @@ def check_multiple_devices_or_any_cpu_nodes(
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
         msg = f"cpu device ({cpu_node.name})"
         if stack_trace := _get_use_stack_trace(cpu_node):
-            return format_default_skip_message(f"{msg}. Found from : \n {stack_trace}")
+            return f"{msg}. Found from : \n {stack_trace}"
 
-        return format_default_skip_message(msg)
+        return msg
 
-    if (
-        len(device_node_mapping) == 1
-        and next(iter(device_node_mapping)).type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES
-    ):
-        return None
+    if len(device_node_mapping) == 1:
+        (device,) = device_node_mapping
+        if device.type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES:
+            return None
+        return f"device type without cudagraph support: {device.type}"
 
     keys_repr = (repr(key) for key in device_node_mapping)
-    return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
+    return f"multiple devices: {', '.join(keys_repr)}"
 
 
 def check_caching_allocator_for_cudagraphs() -> str | None:
@@ -385,7 +384,7 @@ def check_caching_allocator_for_cudagraphs() -> str | None:
         # pyrefly: ignore [missing-attribute]
         and not torch._C._cuda_cudaCachingAllocator_is_enabled()
     ):
-        return format_default_skip_message(
+        return (
             "cudagraph capture requires the caching allocator; "
             "current allocator is uncached"
         )
@@ -431,7 +430,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
     mutated_input_idxs: OrderedSet[int],
     static_input_idxs: Sequence[int],
 ) -> str | None:
-    default_msg = format_default_skip_message("mutated inputs")
+    default_msg = "mutated inputs"
 
     # doesn't work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
