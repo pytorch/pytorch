@@ -222,6 +222,27 @@ class TestCacheKeyStrategy(TestCase):
             ).hexdigest(),
         )
 
+    def test_cache_base_get_system_keys_meta_ws(self):
+        """Kernels compiled with Meta Triton autoWS on don't share a system
+        key with those compiled with it off."""
+        hashes = []
+        for enabled in (False, True):
+            CacheBase.get_system.cache_clear()
+            try:
+                with (
+                    mock.patch(
+                        "torch._inductor.codecache.triton_key", return_value="triton"
+                    ),
+                    mock.patch(
+                        "torch._inductor.codecache.meta_ws_enabled",
+                        return_value=enabled,
+                    ),
+                ):
+                    hashes.append(CacheBase.get_system()["hash"])
+            finally:
+                CacheBase.get_system.cache_clear()
+        self.assertNotEqual(hashes[0], hashes[1])
+
     def test_cache_base_get_system_uses_system_strategy(self):
         class FakeStrategy:
             value = None
