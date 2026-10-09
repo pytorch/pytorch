@@ -51,7 +51,7 @@ jobs:
           set -x
           if [ -n "${REBASE}" ]; then
             # attempt to rebase, if it fails then comment on the PR that it failed
-            if ! python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"; then
+            if ! python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}" ${COMMENT_ID:+--comment-id "${COMMENT_ID}"}; then
               python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
               exit 0
             fi
@@ -69,11 +69,11 @@ jobs:
           fi
 
           if [ -n "${FORCE}" ]; then
-            python3 .github/scripts/trymerge.py --force --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            python3 .github/scripts/trymerge.py ${REBASE:+--rebased} --force --comment-id "${COMMENT_ID}" "${PR_NUM}"
           elif [ -n "${IGNORE_CURRENT}" ]; then
-            python3 .github/scripts/trymerge.py --ignore-current --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            python3 .github/scripts/trymerge.py ${REBASE:+--rebased} --ignore-current --comment-id "${COMMENT_ID}" "${PR_NUM}"
           else
-            python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            python3 .github/scripts/trymerge.py ${REBASE:+--rebased} --comment-id "${COMMENT_ID}" "${PR_NUM}"
           fi
       - name: Comment on Canceled
         if: ${{ cancelled() && steps.checkout.outcome == 'success' }}
