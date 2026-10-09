@@ -97,7 +97,8 @@ Reducer::Reducer(
     bool skip_all_reduce_unused_params,
     bool use_python_reducer,
     std::vector<int64_t> bucket_bytes_cap_list,
-    bool batched_grad_copy)
+    bool batched_grad_copy,
+    bool lazy_bucket_allocation)
     : params_(std::move(params)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -108,6 +109,7 @@ Reducer::Reducer(
       find_unused_parameters_(find_unused_parameters),
       gradient_as_bucket_view_(gradient_as_bucket_view),
       batched_grad_copy_(batched_grad_copy),
+      lazy_bucket_allocation_(lazy_bucket_allocation),
       local_used_map_reduced_(false),
       num_iterations_(0),
       num_bwd_calls_(0),
@@ -356,6 +358,7 @@ void Reducer::check_grad_layout(
 void Reducer::mark_variable_ready_dense(size_t variable_index) {
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
+  initialize_bucket_storage(bucket);
   auto& variable = bucket.variables[bucket_index.intra_bucket_index];
   auto& bucket_view = bucket.bucket_views_in[bucket_index.intra_bucket_index];
 
@@ -511,11 +514,32 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
   for (const auto i : c10::irange(buckets_.size())) {
     auto& bucket = buckets_[i];
     auto variables_for_bucket = get_variables_for_bucket(i, bucket);
+    at::Tensor tensor;
+    if (bucket.gradients.defined()) {
+      tensor = return_zero_tensors ? at::zeros_like(bucket.gradients)
+                                   : bucket.gradients;
+    } else {
+      REDUCER_CHECK(
+          return_zero_tensors,
+          logger_,
+          "Gradient bucket storage has not been allocated yet.");
+      TORCH_INTERNAL_ASSERT(!bucket.variables.empty());
+      TORCH_INTERNAL_ASSERT(!bucket.lengths.empty());
+      auto options = bucket.variables.front().options();
+      if (mixed_precision_param_dtype_.has_value()) {
+        options = options.dtype(mixed_precision_param_dtype_);
+      }
+      const auto bucket_size =
+          static_cast<long>(bucket.offsets.back() + bucket.lengths.back());
+      tensor = at::zeros({bucket_size}, options);
+      if (bucket.is_complex_bucket) {
+        tensor = at::view_as_real(tensor).reshape({-1});
+      }
+    }
     gradBuckets.emplace_back(
         i,
         buckets_.size(),
-        return_zero_tensors ? at::zeros_like(bucket.gradients)
-                            : bucket.gradients,
+        std::move(tensor),
         bucket.offsets,
         bucket.lengths,
         bucket.sizes_vec,
@@ -579,7 +603,9 @@ void Reducer::set_divide_factor() {
 void Reducer::set_mixed_precision_param_dtype(c10::ScalarType dtype) {
   mixed_precision_param_dtype_ = dtype;
   for (auto& bucket : buckets_) {
-    bucket.gradients = bucket.gradients.to(dtype);
+    if (bucket.gradients.defined()) {
+      bucket.gradients = bucket.gradients.to(dtype);
+    }
   }
 }
 
@@ -994,7 +1020,23 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.sizes_vec,
       variables_for_bucket,
       bucket.sparse_tensor_indices);
-  bucket.future_work = run_comm_hook(grad_bucket);
+  if (lazy_bucket_allocation_ && comm_hook_ == nullptr) {
+    std::vector<at::Tensor> tensors = {grad_bucket.getBufferRef()};
+#ifdef IS_NCCLX
+    if (grad_bucket.getSparseGradIndices().has_value()) {
+      AllreduceOptions opts;
+      opts.sparseIndices = grad_bucket.getSparseGradIndices().value();
+      bucket.allreduce_work = process_group_->allreduce(tensors, opts);
+    } else {
+      bucket.allreduce_work = process_group_->allreduce(tensors);
+    }
+#else
+    bucket.allreduce_work = process_group_->allreduce(tensors);
+#endif
+    bucket.future_work = bucket.allreduce_work->getFuture();
+  } else {
+    bucket.future_work = run_comm_hook(grad_bucket);
+  }
 }
 
 std::vector<at::Tensor> Reducer::get_variables_for_bucket(
@@ -1189,87 +1231,9 @@ void Reducer::initialize_buckets(
         offset += length;
       }
 
-      // Make gradient type in the reduced precision if mixed precision is
-      // enabled. This ensures that the type is correct when e.g. rebuilding
-      // buckets.
-      if (mixed_precision_param_dtype_.has_value()) {
-        options = options.dtype(mixed_precision_param_dtype_);
+      if (!lazy_bucket_allocation_) {
+        initialize_bucket_storage(bucket);
       }
-
-      // Allocate the bucket's flattened `gradients` tensor.
-      auto bucketSize = static_cast<long>(offset);
-      // Check if we can use comm-optimized memory pool to allocate tensor
-      c10::intrusive_ptr<Backend> backend = nullptr;
-      // An environment variable to disable comm-optimized memory pool.
-      // Default is 1 for now (disabled).
-      // TODO: turn it on by default once we have more confidence on it.
-      bool ddpDisableCommMem =
-          (getCvarString({"DDP_DISABLE_COMM_MEM"}, "1") == "1");
-      try {
-        backend = process_group_->getDefaultBackend();
-      } catch (...) {
-        // Sometimes the backend type can be `UNDEFINED` rather than `NCCL` or
-        // `GLOO`. In this case, we just fall back to the regular way of
-        // creating tensor
-        LOG(INFO)
-            << "Reducer: default comm backend not found, skipping bucket memory optimization";
-      }
-      if (ddpDisableCommMem == 0 && backend != nullptr &&
-          backend->supportsTensorAlloc(options.device().index())) {
-        // Comm-optimized memory pool is available, use it to allocate tensor
-        LOG(INFO)
-            << "Reducer: found comm-optimized memory allocator, using it to create bucket";
-        bucket.gradients = backend->allocateTensor(bucketSize, options);
-      } else {
-        // Plain creation of tensor
-        LOG(INFO)
-            << "Reducer: comm-optimized memory allocator not found, using regular one";
-        bucket.gradients = at::empty({bucketSize}, options);
-
-        if (bucket.is_complex_bucket) {
-          bucket.gradients = at::view_as_real(bucket.gradients).reshape({-1});
-        }
-      }
-
-      // Note:  "Gradient Layout Contract"
-      //
-      // Here, create views into the `gradients` tensor for each variable's
-      // grad. Views serve as entry points to `copy_()` each grad's data in/out
-      // of the flattened `gradients` tensor.
-      //
-      // Gradients may have dense memory but non-row-major-contiguous strides
-      // (e.g. channels_last or channels_last_3d). For coalesced accesses
-      // during copy_s, it's beneficial for each view's layout to match its
-      // grad's layout.
-      //
-      // Specifically, we expect torch/csrc/autograd/functions/accumulate_grad.h
-      // produces grads that obey the "Gradient Layout Contract":
-      //   (1) if variable.is_non_overlapping_and_dense(), the stashed grad's
-      //       strides match variable.
-      //   (2) else, stashed grad is rowmajor contiguous.
-      // and create views to match.
-      //
-      // If AccumulateGrad breaks the contract, and produces a grad with an
-      // unexpected layout, performance will degrade due to poor memory access
-      // patterns when copy_ing grad data in and out of its bucket view.
-      // However, numerics remain correct, because the bucket view is the same
-      // on either end of the raw allreduce.  bucket_view_in.copy(grad)
-      // transposes
-      // (+ densifies) to the bucket view's layout, the data is allreduced,
-      // then grad.copy_(bucket_view_out) transposes it back to grad's layout.
-      //
-      // The only way the numerics can go haywire is if the bucket views
-      // themselves have different layouts across processes.
-      // Bucket views' sizes and strides are set based on param layouts, using
-      // the same logic that (we expect) AccumulateGrad uses for their grads.
-      // Therefore, the only way a bucket view could have different layouts in
-      // different processes is if its param has a different layout in
-      // different processes. We can check that param layouts match across
-      // processes in Reducer's constructor by allreducing some metadata.
-      // Checking just once won't catch if someone messes with
-      // param layouts over time, but not messing with params after DDP
-      // construction is already a documented constraint.
-      initialize_bucket_views(bucket);
     }
 
     // Map participating variables to this bucket.
@@ -1287,7 +1251,62 @@ void Reducer::initialize_buckets(
   }
 }
 
-// (see Note:  "Gradient Layout Contract" in initialize_buckets).
+void Reducer::initialize_bucket_storage(Reducer::Bucket& bucket) {
+  if (bucket.expect_sparse_gradient || bucket.gradients.defined()) {
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(!bucket.variables.empty());
+  TORCH_INTERNAL_ASSERT(!bucket.lengths.empty());
+  TORCH_INTERNAL_ASSERT(bucket.bucket_views_in.empty());
+  TORCH_INTERNAL_ASSERT(bucket.bucket_views_out.empty());
+
+  auto options = bucket.variables.front().options();
+  if (mixed_precision_param_dtype_.has_value()) {
+    options = options.dtype(mixed_precision_param_dtype_);
+  }
+  const auto bucket_size =
+      static_cast<long>(bucket.offsets.back() + bucket.lengths.back());
+
+  c10::intrusive_ptr<Backend> backend = nullptr;
+  const bool disable_comm_mem =
+      getCvarString({"DDP_DISABLE_COMM_MEM"}, "1") == "1";
+  try {
+    backend = process_group_->getDefaultBackend();
+  } catch (...) {
+    backend = nullptr;
+  }
+  const bool use_comm_allocator = !disable_comm_mem && backend != nullptr &&
+      backend->supportsTensorAlloc(options.device().index());
+  if (!has_logged_bucket_allocator_) {
+    LOG(INFO) << "Reducer: using "
+              << (use_comm_allocator ? "comm-optimized" : "regular")
+              << " allocator for bucket storage";
+    has_logged_bucket_allocator_ = true;
+  }
+  if (use_comm_allocator) {
+    bucket.gradients = backend->allocateTensor(bucket_size, options);
+  } else {
+    bucket.gradients = at::empty({bucket_size}, options);
+    if (bucket.is_complex_bucket) {
+      bucket.gradients = at::view_as_real(bucket.gradients).reshape({-1});
+    }
+  }
+
+  initialize_bucket_views(bucket);
+}
+
+void Reducer::release_bucket_storage() {
+  for (auto& bucket : buckets_) {
+    bucket.allreduce_work.reset();
+    bucket.future_work.reset();
+    bucket.bucket_views_out.clear();
+    bucket.bucket_views_in.clear();
+    bucket.gradients = at::Tensor();
+  }
+}
+
+// Creates views matching each parameter's expected gradient layout.
 void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
   const auto& gradients = bucket.gradients;
   for (const auto i : c10::irange(bucket.variables.size())) {
@@ -1345,10 +1364,6 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
                                              .view(v.sizes()));
       }
     }
-    // By default `bucket_views_out` and `bucket_views_in` are
-    // essentially the same thing.
-    bucket.bucket_views_out = bucket.bucket_views_in;
-
     // If gradient_as_bucket_view_ is set as true, then there are two cases to
     // handle: initialize_bucket_views could be called inside initialize_buckets
     // when rebuild_buckets, if grad has already been defined/calculated in
@@ -1372,6 +1387,10 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
       });
     }
   }
+
+  // By default `bucket_views_out` and `bucket_views_in` are essentially the
+  // same thing.
+  bucket.bucket_views_out = bucket.bucket_views_in;
 }
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
@@ -1803,6 +1822,9 @@ void Reducer::finalize_backward() {
     }
 
     bucket.future_work->wait();
+    if (bucket.allreduce_work != nullptr) {
+      bucket.allreduce_work->wait();
+    }
     auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
@@ -1868,6 +1890,10 @@ void Reducer::finalize_backward() {
 
   if (should_collect_runtime_stats()) {
     record_backward_comm_end_time();
+  }
+
+  if (lazy_bucket_allocation_) {
+    release_bucket_storage();
   }
 
   sparse_metadata_.reset();
