@@ -4337,6 +4337,30 @@ class CommonTemplate:
             b_neg = torch.full_like(a, -divisor)
             self.common(fn, (a, b_neg))
 
+    @skip_if_halide  # floordiv goes through floats, inexact for large values
+    def test_floordiv_int_min_negative_divisor(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/198545
+        def fn(a, b):
+            return a // b
+
+        for dtype in [torch.int32, torch.int64]:
+            info = torch.iinfo(dtype)
+            a = torch.tensor(
+                [info.min, info.min, info.min, info.min, info.min + 1, 5, -5, 0],
+                dtype=dtype,
+                device=self.device,
+            )
+            self.common(lambda x: x // -3, (a,))
+            for divisor in [-2, -3, -7, info.min]:
+                b = torch.full_like(a, divisor)
+                self.common(fn, (a, b))
+            b = torch.tensor(
+                [-2, -5, info.min, -(2**30), info.min, info.min, info.min, -1],
+                dtype=dtype,
+                device=self.device,
+            )
+            self.common(fn, (a, b))
+
     def test_floordiv_int_min_neg_one_cpu(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/184406
         if not is_cpp_backend(self.device):
@@ -9884,6 +9908,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([1, 2, 6, 6]),))
 
+    @parametrize("dtype", test_int_dtypes)
+    def test_sign_int_dtypes(self, dtype):
+        vals = [-3, -1, 0, 2, 7] if dtype.is_signed else [0, 1, 2, 7]
+        x = torch.tensor(vals, dtype=dtype, device=self.device)
+        self.common(torch.sign, [x], check_lowp=False)
+
     def test_frac_signed_zero(self):
         def fn(x):
             y = torch.frac(x)
@@ -11191,6 +11221,35 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 self.assertEqual(a1, a2)
                 self.assertEqual(b1, b2)
 
+    def test_input_mutation_after_dtype_view_consumer(self):
+        # x and a dtype view of it (a fallback aten.view.dtype kernel whose
+        # output aliases x) share memory. A pending pointwise user of either one
+        # must be realized before a mutation of the other; Inductor used to
+        # materialize it *after* the mutation, i.e. from the mutated memory.
+        idx = torch.tensor([0, 2], device=self.device)
+        vals = torch.full((2, 12), 7, dtype=torch.int32, device=self.device)
+
+        def mutate_base(x):
+            y = x.view(torch.int32) * 2
+            y.sub_(-4)
+            x[:, 2:5] = 2
+            return y.view(torch.int64)
+
+        def mutate_alias(x):
+            y = x * 2
+            y.sub_(-4)
+            x.view(torch.int32).index_put_((idx,), vals)
+            return y.view(torch.int32)
+
+        x = torch.arange(-12, 12, dtype=torch.int64, device=self.device).reshape(4, 6)
+        for fn in (mutate_base, mutate_alias):
+            torch._dynamo.reset()
+            ref_x, opt_x = x.clone(), x.clone()
+            ref = fn(ref_x)
+            res = torch.compile(fn)(opt_x)
+            self.assertEqual(ref, res)
+            self.assertEqual(ref_x, opt_x)
+
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
@@ -11485,6 +11544,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
+    @parametrize("reduction", ["any", "amax"])
+    def test_bool_reduction_bitwise_op(self, reduction):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199745
+        def fn(x, y):
+            r = getattr(x, reduction)(dim=1)
+            return r & y, r | y, r ^ y
+
+        x = torch.zeros(4, 64, dtype=torch.bool)
+        x[1, 7] = x[3, 63] = True
+        y = torch.tensor([True, True, False, False])
+        self.common(fn, (x, y))
+
     @skip_if_gpu_halide
     def test_multilayer_any(self):
         def fn(x):
@@ -11756,9 +11827,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             y.index_put_((mask,), torch.tensor(7.0, device=x.device))
             return y
 
-        # Integer values keep the mm, and so the mask, exact in low precision.
-        x = torch.randint(-2, 3, (8, 8)).float()
-        w = torch.randint(-2, 3, (8, 8)).float()
+        # Keep the mm exact and bounded away from zero in low precision, so the
+        # mask does not change when check_model_gpu downcasts the inputs.
+        x = torch.tensor([-2, 0, 1, 2]).repeat(16).view(8, 8).float()
+        w = 2 * torch.eye(8)
         self.common(fn, (x, w))
 
     @skip_if_halide  # won't fuse a read of the buffer it writes in place
@@ -12027,6 +12099,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
+
+        # SM90+ CUDA accumulates with BF16 atomics, which round after every update.
+        if self.device == "cuda" and (
+            torch.version.hip or torch.cuda.get_device_capability() < (9, 0)
+        ):
+
+            def bf16_fn(x):
+                idx = torch.zeros(1000, device=x.device, dtype=torch.int64)
+                vals = torch.ones(1000, device=x.device, dtype=x.dtype)
+                x.index_put_((idx,), vals, accumulate=True)
+                return x
+
+            self.common(bf16_fn, (torch.zeros(1, dtype=torch.bfloat16),))
 
     @skipCPUIf(True, "requires Triton atomic_or on tl.int1")
     @skip_if_pallas
@@ -20919,6 +21004,17 @@ if RUN_GPU or HAS_MPS:
                         bad_decomp_bias, bad_decomp_x, bad_decomp_weight
                     )
 
+            def baddbmm_beta_zero(bias, x, weight):
+                return torch.baddbmm(bias, x, weight, beta=0.0)
+
+            cpu_bias = torch.tensor(0.0)
+            with self.assertRaisesRegex(RuntimeError, "same device"):
+                baddbmm_beta_zero(cpu_bias, bad_x[None], bad_weight[None])
+            with self.assertRaisesRegex(Exception, "must be on the same device"):
+                torch.compile(baddbmm_beta_zero, fullgraph=True)(
+                    cpu_bias, bad_x[None], bad_weight[None]
+                )
+
             with config.patch({"shape_padding": False, "triton.native_matmul": True}):
                 with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
                     torch.compile(addmm_dtype_mismatch, fullgraph=True)(
@@ -20949,6 +21045,15 @@ if RUN_GPU or HAS_MPS:
                         zero_weight,
                     ),
                 )
+                # alpha == 0 zero-fills without autotuning; this case needs
+                # Triton GEMM choices, which only big GPUs get.
+                if IS_BIG_GPU:
+                    check(
+                        lambda bias, x, weight: torch.addmm(
+                            bias, x, weight.t(), beta=0.0, alpha=0.1
+                        ),
+                        (torch.full((8,), float("nan"), device=self.device), x, weight),
+                    )
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
@@ -22635,11 +22740,11 @@ if RUN_GPU:
             output = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
 
             result, code = run_and_get_code(torch.compile(fn), output, indices, values)
-            if output.device.type == "xpu":
-                # xpu fallback bf16 atomic add for better performance
+            if output.device.type == "xpu" or torch.version.hip:
+                # xpu and ROCm fall back for bf16 atomic add
                 self.assertFalse(
                     "tl.atomic_add" in code[0],
-                    "bf16 should not generate tl.atomic_add on xpu",
+                    "bf16 should not generate tl.atomic_add on xpu or ROCm",
                 )
             else:
                 self.assertTrue(

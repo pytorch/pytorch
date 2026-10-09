@@ -233,6 +233,7 @@ from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
+    ClassMethodDescriptorVariable,
     CollectionsNamedTupleFunction,
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
@@ -1972,6 +1973,8 @@ class VariableBuilder:
                 cv_obj=value,
                 source=self.source,
             )
+        elif isinstance(value, types.ClassMethodDescriptorType):
+            return ClassMethodDescriptorVariable(value, source=self.source)
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
