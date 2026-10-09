@@ -450,37 +450,6 @@ void fused_chunk_cat(
   }
 }
 
-// Same-dtype groups take the composite, which forwards them to _chunk_cat.
-// dim != 0, which FSDP doesn't use, also takes the composite.
-void chunk_cat_mixed_dtype_cuda(
-    at::TensorList tensors,
-    int64_t dim,
-    int64_t num_chunks,
-    at::Tensor& out) {
-  const auto out_dtype = out.scalar_type();
-  const bool mixed_dtypes =
-      std::any_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
-        return t.scalar_type() != tensors[0].scalar_type();
-      });
-  // TODO: Also cast fp16 inputs into an fp32 out here, uniform groups included.
-  // fp16 + fp32 groups take the composite's copies, and uniform fp16 takes
-  // _chunk_cat's copy per input; only bf16 compute is a known use case so far.
-  const bool use_fused_kernel =
-      mixed_dtypes && dim == 0 && num_chunks >= 1 && out.is_contiguous() &&
-      std::all_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
-        return t.dim() > 0 && t.numel() > 0 && t.device() == out.device() &&
-            t.is_contiguous() &&
-            (t.scalar_type() == out_dtype ||
-             (t.scalar_type() == at::kBFloat16 && out_dtype == at::kFloat));
-      });
-  if (!use_fused_kernel) {
-    chunk_cat_mixed_dtype(tensors, dim, num_chunks, out);
-    return;
-  }
-  fused_chunk_cat(
-      tensors, /*num_leading_dims=*/{}, num_chunks, at::kBFloat16, out);
-}
-
 // The fused kernels copy raw bytes of contiguous tensors on one device, so
 // other tensors, conj or neg views, and overlapping memory take the composite.
 bool use_composite(at::TensorList tensors, const at::Tensor& other) {
@@ -584,30 +553,65 @@ void all_gather_copy_out_cuda(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-at::Tensor& reduce_scatter_copy_in_cuda(
-    at::Tensor& out,
+// Uniform groups without leading dims take the composite, which forwards them
+// to _chunk_cat. So do dim != 0, which FSDP doesn't use, and dtypes the fused
+// kernel can't cast.
+void chunk_cat_mixed_dtype_cuda(
     at::TensorList tensors,
-    at::IntArrayRef num_leading_dims,
-    int64_t num_chunks) {
+    int64_t dim,
+    int64_t num_chunks,
+    at::Tensor& out,
+    at::OptionalIntArrayRef num_leading_dims) {
+  const bool leading_dims = has_leading_dims(num_leading_dims);
   const auto out_dtype = out.scalar_type();
-  const auto dtype = tensors.empty() ? out_dtype : tensors[0].scalar_type();
-  const bool fused_dtypes = dtype == out_dtype ||
-      (out_dtype == at::kFloat &&
-       (dtype == at::kBFloat16 || dtype == at::kHalf));
-  if (!fused_dtypes || use_composite(tensors, out)) {
-    return reduce_scatter_copy_in(out, tensors, num_leading_dims, num_chunks);
+  const bool mixed_dtypes =
+      std::any_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
+        return t.scalar_type() != tensors[0].scalar_type();
+      });
+  // The fused kernel copies inputs of out's dtype and casts at most one other
+  // dtype, bf16 or fp16, into an fp32 out.
+  std::optional<at::ScalarType> cast_dtype;
+  const bool fused_dtypes =
+      std::all_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
+        const auto dtype = t.scalar_type();
+        if (dtype == out_dtype) {
+          return true;
+        }
+        if (out_dtype != at::kFloat ||
+            (dtype != at::kBFloat16 && dtype != at::kHalf) ||
+            cast_dtype.value_or(dtype) != dtype) {
+          return false;
+        }
+        cast_dtype = dtype;
+        return true;
+      });
+  const bool use_fused_kernel = (mixed_dtypes || leading_dims) &&
+      fused_dtypes && dim == 0 && num_chunks >= 1 &&
+      std::all_of(tensors.begin(),
+                  tensors.end(),
+                  [](const at::Tensor& t) {
+                    return t.dim() > 0 && t.numel() > 0;
+                  }) &&
+      !use_composite(tensors, out);
+  if (!use_fused_kernel) {
+    chunk_cat_mixed_dtype(tensors, dim, num_chunks, out, num_leading_dims);
+    return;
   }
-  check_reduce_scatter_copy_in_inputs(
-      out, tensors, num_leading_dims, num_chunks);
+  const auto fused_cast_dtype = cast_dtype.value_or(at::kBFloat16);
+  if (!leading_dims) {
+    fused_chunk_cat(tensors, {}, num_chunks, fused_cast_dtype, out);
+    return;
+  }
+  check_chunk_cat_leading_dims_inputs(
+      tensors, *num_leading_dims, num_chunks, out);
   auto chunks = out.view({num_chunks, -1});
-  fused_chunk_cat(tensors, num_leading_dims, num_chunks, dtype, chunks);
-  return out;
+  fused_chunk_cat(
+      tensors, *num_leading_dims, num_chunks, fused_cast_dtype, chunks);
 }
 
 TORCH_LIBRARY_IMPL(fsdp, CUDA, m) {
   m.impl("chunk_cat_mixed_dtype", TORCH_FN(chunk_cat_mixed_dtype_cuda));
   m.impl("_all_gather_copy_out_", TORCH_FN(all_gather_copy_out_cuda));
-  m.impl("_reduce_scatter_copy_in_", TORCH_FN(reduce_scatter_copy_in_cuda));
 }
 
 } // namespace

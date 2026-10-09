@@ -16,6 +16,7 @@
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -103,6 +104,15 @@ void _fill_indices(const TensorBase &indices, int64_t dim) {
   auto ndim = indices.dim();
   assert(0 <= dim && dim < ndim);
   auto dim_size = indices.size(dim);
+  if (indices.scalar_type() == at::kLong && indices.is_contiguous() &&
+      c10::multiply_integers(indices.sizes().slice(dim + 1)) == 1) {
+    auto* data = indices.mutable_data_ptr<int64_t>();
+    auto* const end = data + indices.numel();
+    for (; data != end; data += dim_size) {
+      std::iota(data, data + dim_size, int64_t{0});
+    }
+    return;
+  }
   auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
   auto idx_dim_sizes = std::vector<int64_t>(ndim, 1);
   auto idx_dim_strides = std::vector<int64_t>(ndim, 0);
