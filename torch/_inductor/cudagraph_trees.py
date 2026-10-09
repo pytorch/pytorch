@@ -63,6 +63,7 @@ from torch._dynamo.graph_bytecode_inputs import (
 )
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
+from torch._functorch._aot_autograd.runtime_wrappers import current_autograd_invocation
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
     ControlFlowOpWarmupDispatchMode,
     CUDAGraphCaptureControlFlowOpDispatchMode,
@@ -2535,6 +2536,13 @@ class CUDAGraphTreeManager:
 
         self.id_to_mode: dict[FunctionID, CompilationMode] = {}
         self.id_to_compile_id: dict[FunctionID, CompileId | None] = {}
+        # Autograd invocations whose forward call set holds_tree_memory. An
+        # uncaptured backward only transitions the generation if its own
+        # invocation is here (see maybe_handle_backward_generation); a fallback
+        # that ran while the generation was already pending leaves that to the
+        # call that made it pending. Held weakly, because a call whose backward
+        # is captured, or never runs, is never removed.
+        self.pending_invocations: weakref.WeakSet[Any] = weakref.WeakSet()
         # Whether the current run() holds memory the tree owns that its backward
         # may still read: it ran in the tree (warmup, recording or replay), or it
         # fell back to the eager model with inputs the tree owns, which it may
@@ -2894,6 +2902,9 @@ class CUDAGraphTreeManager:
 
     def _note_holds_tree_memory(self) -> None:
         self.holds_tree_memory = True
+        invocation = current_autograd_invocation()
+        if self.mode == CompilationMode.FORWARD and invocation is not None:
+            self.pending_invocations.add(invocation)
 
     def _run_fallback(
         self, new_inputs: list[InputType], function_id: FunctionID
