@@ -563,9 +563,6 @@ def create_flex_flash_attention_kernel(
 
     if not choices:
         raise RuntimeError(f"CuteDSL template failed: {error}")
-    # Drop the last exception: its traceback holds this frame (and, via f_back,
-    # the calling stack) in a reference cycle while it is bound here.
-    del error
 
     input_gen_fns: dict[int, Callable] | None = None
     if needs_block_mask:
@@ -916,9 +913,6 @@ def create_flex_flash_attention_backward_kernel(
 
     if not choices:
         raise RuntimeError(f"CuteDSL template failed: {error}")
-    # Drop the last exception: its traceback holds this frame (and, via f_back,
-    # the calling stack) in a reference cycle while it is bound here.
-    del error
 
     input_gen_fns: dict[int, Callable] | None = None
     if has_block_mask:
