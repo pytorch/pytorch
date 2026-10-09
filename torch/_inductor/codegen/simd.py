@@ -4730,6 +4730,15 @@ class SIMDScheduling(BaseScheduling):
         """
         Helper method to codegen a single template kernel variant
         """
+        fused_schedule = [*prologue_nodes, *epilogue_nodes]
+        if fused_schedule:
+            fused_features = SIMDKernelFeatures(
+                fused_schedule,
+                sympy_product(kernel.output_node.get_size()),
+            )
+            if fused_features.select_index_dtype() == torch.int64:
+                kernel._index_dtype_override = "tl.int64"
+
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prologue_group = []
