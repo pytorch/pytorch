@@ -156,11 +156,19 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 | Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
 | Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet pre-conditions (detailed below) are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
 | Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review, by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
-| In progress | `in progress` | Author | Iterate until the automated review passes; `in progress` is then replaced by `ready for review`. With the `no automated review` label, this step is skipped. |
+| In progress | `in progress` | Author | Iterate until the PR meets the `ready for review` criteria below. With the `no automated review` label, this step is skipped. |
 | Ready for review | `ready for review` | Assigned reviewers | An assigned reviewer does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`. |
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
 
 The `in progress` and `ready for review` labels are managed by bots: authors should not add them by hand.
+
+**When does my PR become `ready for review`?** The bot replaces `in progress` with `ready for review` once all of the following hold:
+
+- The automated review ([pr-review skill](.agents/skills/pr-review/SKILL.md)) does not flag anything blocking. You can run the skill locally to check your PR before pushing.
+- All CI has finished and Dr. CI classified every failure as unrelated to your PR. Fix the failures it attributes to your PR. Workflows waiting for a maintainer to approve their run do not block this.
+- Every comment from a maintainer has been addressed, either with a code change that fixes the specific problem or with a reply explaining why no change is needed. If you reply without pushing, comment `@pytorchbot review` to run the automated review again.
+
+With the `no automated review` label, your PR skips these checks and moves directly to `ready for review`.
 
 **Pre-conditions**:
 
@@ -200,12 +208,8 @@ This workflow is being rolled out. The following parts are still in progress:
 | In progress | Until it lands |
 |---|---|
 | The `no automated triage` label on issues | The label exists, but the issue triage bot does not act on it yet. |
-| Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels, for any label, and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
-| PR triage: a bot assigns one reviewer per module and adds `triaged` | Reviewers are requested through [CODEOWNERS](CODEOWNERS) and manual reviewer assignment. |
-| Automated review | It runs on PRs labeled `in progress` and replaces that label with `ready for review` when it passes, but it does not post its findings on the PR yet. Run the [pr-review skill](.claude/skills/pr-review/SKILL.md) locally to see what it checks. A "Request changes" review does not move the PR back to `in progress` automatically yet. |
-| [GreenLight](#greenlight) | It only approves PRs for a small set of authors. |
-| Closing PRs without an actionable issue or maintainer sponsor | These PRs are labeled `missing actionable issue` today. Maintainers can add these PRs back to their usual workflow by removing this label. |
-| Bots closing issues and PRs with a comment giving the reason | Maintainers close issues and PRs that do not meet the pre-conditions manually, with a reason. The stale bot closes PRs without a comment. |
+| Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
+| PR triage: a bot assigns one reviewer per module and adds `triaged` | The bot only triages PRs labeled `open source` and only assigns reviewers for a few modules. Other reviewers are requested through [CODEOWNERS](CODEOWNERS) and manual reviewer assignment. |
 
 ### Why was my issue or PR closed?
 

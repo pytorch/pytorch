@@ -49,7 +49,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.4": "9",
 }
 
-ROCM_ARCHES = ["7.14", "10.0"]
+ROCM_ARCHES = ["10.0", "10.1"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -69,7 +69,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     "13.2": (
@@ -77,7 +77,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     "13.4": (
@@ -89,12 +89,12 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cupti-python==13.4.0; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     # dependency on latest patch version for (major, minor)
-    "7.14": ("rocm[libraries,device-all]==7.14.*"),
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
+    "10.1": ("rocm[libraries,device-all]==10.1.*"),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.2 | "
         "intel-cmplr-lib-ur==2026.1.2 | "

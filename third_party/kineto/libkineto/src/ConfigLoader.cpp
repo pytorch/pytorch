@@ -243,7 +243,7 @@ void ConfigLoader::updateConfigThread() {
   // that moves it backwards would otherwise hold off the next reload for the
   // size of the jump.
   //
-  // initialze with some time buffer in the past
+  // initialize with some time buffer in the past
   auto prev_config_load_time =
       steady_clock::now() - configUpdateIntervalSecs_ * 2;
   auto prev_on_demand_load_time = prev_config_load_time;
