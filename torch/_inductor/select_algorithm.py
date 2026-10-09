@@ -64,10 +64,12 @@ from .codegen.common import (
     WorkspaceZeroMode,
 )
 from .codegen.simd import (
+    BATCH_COLUMN_AXIS,
     codegen_reduced_buffer,
     DerivedIterationRangesRoot,
     finished_after_kernel,
     PARTIAL_REDUCTION_OPS,
+    template_output_matrix,
     template_reduction_axis,
 )
 from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -1764,6 +1766,17 @@ class TritonTemplateKernel(TritonKernel):
         """
         return f"{output_name} = {index_name} < {shape_val}"
 
+    def _config_supports_reduction_epilogue(self) -> bool:
+        """Whether this config may host a reduction epilogue."""
+        return not (
+            # Automatic warp specialization's data partitioning and 2CTA are
+            # untested with reduction epilogues.
+            self.meta.get("DATA_PARTITION_FACTOR", 1) > 1
+            or self.meta.get("TWO_CTAS", False)
+            # The bmm template's rank-2 output path; untested.
+            or self.meta.get("FLATTEN_OUTPUT", False)
+        )
+
     def store_output(
         self,
         indices: list[Any] | tuple[Any],
@@ -1773,6 +1786,7 @@ class TritonTemplateKernel(TritonKernel):
         val_shape: tuple[str] | None = None,
         block_indexing: bool = False,
         subtile_loop: tuple[str, str] | None = None,
+        tile_origin: tuple[str, ...] | None = None,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -1789,6 +1803,9 @@ class TritonTemplateKernel(TritonKernel):
             subtile_loop (Optional[Tuple[str, str]]): (index, count) of an enclosing unrolled
                 `tl.static_range` loop in which this call stores subtile `index` of `count`
                 subtiles that split the output tile's columns.
+            tile_origin (Optional[Tuple[str, ...]]): Scalar offsets of the output tile, one per
+                output dim, so reduction epilogues can fuse over the tile. For a batched output,
+                (batch, row, col): the tile is one batch's rows and columns.
         """
         subgraph_idx = next(self.store_output_ctr)
         subgraph_name = self._get_store_output_subgraph_name(subgraph_idx)
@@ -1825,6 +1842,34 @@ class TritonTemplateKernel(TritonKernel):
 
             output_layout = self.output_node.get_layout()
             self.template_out = val
+            if val_shape and (tile_origin or (block_indexing and len(val_shape) == 2)):
+                meta = {
+                    sympy.Symbol(k): v
+                    for k, v in self.meta.items()
+                    if isinstance(v, int)
+                }
+                subtile_index, subtiles = subtile_loop or (None, "1")
+                tile = [
+                    sympy.sympify(s).subs(meta) for s in (*val_shape[-2:], subtiles)
+                ]
+                if (
+                    all(isinstance(t, sympy.Integer) for t in tile)
+                    and self._config_supports_reduction_epilogue()
+                ):
+                    origin = index_symbols
+                    if tile_origin:
+                        if len(tile_origin) != len(lengths):
+                            raise AssertionError(
+                                "tile_origin needs one offset per output dimension"
+                            )
+                        origin = [
+                            sympy.Symbol(f"({x})", integer=True) for x in tile_origin
+                        ]
+                    self.output_tiles[subgraph_idx] = (
+                        origin,
+                        (int(tile[0]), int(tile[1]), int(tile[2])),
+                        subtile_index,
+                    )
             if block_indexing:
                 if not val_shape:
                     raise AssertionError(
@@ -1837,25 +1882,6 @@ class TritonTemplateKernel(TritonKernel):
                     )
                 if mask:
                     raise AssertionError("Mask is not supported with blocking indexing")
-                meta = {
-                    sympy.Symbol(k): v
-                    for k, v in self.meta.items()
-                    if isinstance(v, int)
-                }
-                subtile_index, subtiles = subtile_loop or (None, "1")
-                tile = [sympy.sympify(s).subs(meta) for s in (*val_shape, subtiles)]
-                if (
-                    all(isinstance(t, sympy.Integer) for t in tile)
-                    # Automatic warp specialization's data partitioning and
-                    # 2CTA are untested with reduction epilogues.
-                    and self.meta.get("DATA_PARTITION_FACTOR", 1) == 1
-                    and not self.meta.get("TWO_CTAS", False)
-                ):
-                    self.output_tiles[subgraph_idx] = (
-                        index_symbols,
-                        (int(tile[0]), int(tile[1]), int(tile[2])),
-                        subtile_index,
-                    )
                 intermediate_lines: list[str] = []
                 epilogue_index_symbols: list[sympy.Symbol] = []
                 if self.tma_store or self.tma_load_for_template_epilogue:
@@ -2363,14 +2389,18 @@ class TritonTemplateKernel(TritonKernel):
                     produced = template_node.get_buffer_names().union(
                         *(node.get_buffer_names() for node in nodes)
                     )
-                    columns = [
-                        node
+                    axes = {
+                        node: template_reduction_axis(
+                            node, template_node.node, produced
+                        )
                         for node in nodes
                         if node.is_reduction()
-                        and template_reduction_axis(node, template_node.node, produced)
-                        == 1
+                    }
+                    columns = [n for n in nodes if axes.get(n) == 1]
+                    batch_columns = [
+                        n for n in nodes if axes.get(n) == BATCH_COLUMN_AXIS
                     ]
-                    nodes = [n for n in nodes if n not in columns]
+                    nodes = [n for n in nodes if n not in columns + batch_columns]
                     first_red = next(
                         (j for j, n in enumerate(nodes) if n.is_reduction()), len(nodes)
                     )
@@ -2378,14 +2408,27 @@ class TritonTemplateKernel(TritonKernel):
                         node.codegen(self.split_and_set_ranges(node.get_ranges()))
                     row_loads = {}
                     if first_red < len(nodes):
+                        # Values the nodes before it computed from the stored
+                        # tile have the template's symbolic shape, which the
+                        # row pass restates as the concrete tile.
+                        self.cse.invalidate(OrderedSet(self.cse.store_cache.values()))
                         row_loads = self.codegen_tile_reduction_epilogue(
                             nodes[first_red:], i
                         )
-                    if columns:
-                        # Nothing reads a column result, so they go last, in a
-                        # pass whose range trees reuse the row pass's names.
-                        self.cse.invalidate(OrderedSet(self.cse.store_cache.values()))
-                        self.codegen_tile_reduction_epilogue(columns, i, row_loads)
+                    # Nothing reads a column result, so they go last, in
+                    # passes whose range trees reuse the row pass's names.
+                    for per_batch, column_nodes in enumerate((columns, batch_columns)):
+                        if column_nodes:
+                            self.cse.invalidate(
+                                OrderedSet(self.cse.store_cache.values())
+                            )
+                            # Per-batch columns index loads differently.
+                            self.codegen_tile_reduction_epilogue(
+                                column_nodes,
+                                i,
+                                {} if per_batch else row_loads,
+                                per_batch=bool(per_batch),
+                            )
                     self.cse.invalidate(OrderedSet())
 
             self.codegen_prologues_in_subgraphs(
@@ -2427,11 +2470,28 @@ class TritonTemplateKernel(TritonKernel):
 
         return src_code
 
+    def _reduction_workspace(self, nbytes: int) -> tuple[str, int]:
+        """Allocate nbytes of the kernel's workspace for fp32 partials, 16-byte
+        aligned. Returns the workspace pointer name and the byte offset."""
+        ws = next(
+            (w for w in self.args.workspace_args if w.inner_name == "ws_ptr"), None
+        )
+        # Partials share ws_ptr with the template's workspace (e.g. TMA
+        # descriptors): align them to 16 bytes, and rebind workspace_arg to the
+        # joined arg so the wrapper allocates both.
+        pad = -int(ws.count) % 16 if ws is not None else 0
+        ws_ptr, ws_name, offset = self.args.workspace(pad + nbytes, False)
+        self.workspace_arg = next(
+            w for w in self.args.workspace_args if w.outer_name == ws_name
+        )
+        return ws_ptr, offset + pad
+
     def codegen_tile_reduction_epilogue(
         self,
         nodes,
         subgraph_idx: int,
         row_loads: dict[tuple[str, sympy.Expr], CSEVariable] | None = None,
+        per_batch: bool = False,
     ) -> dict[tuple[str, sympy.Expr], CSEVariable]:
         """Codegen row reductions of the output, and the nodes after them, as a
         reduction over the output tile: x spans the tile's rows and r0_ its
@@ -2448,18 +2508,47 @@ class TritonTemplateKernel(TritonKernel):
         span the output's columns.
 
         A row pass returns its loads keyed by buffer and tile position; the
-        column pass takes them as row_loads and reuses them transposed."""
+        column pass takes them as row_loads and reuses them transposed.
+
+        A batched (B, M, N) output is the (B * M, N) matrix, except that a
+        per_batch column pass reduces each batch's M rows: x spans the (B, N)
+        columns and partials are per row tile of a batch."""
         columns = row_loads is not None
-        m, n = self.output_node.get_size()
+        m, n = template_output_matrix(self.output_node)
         origin, (rows, cols, subtiles), subtile_index = self.output_tiles[subgraph_idx]
         spans = V.graph.sizevars.statically_known_geq(cols * subtiles, n)
         partial = columns or not spans
+        col = origin[-1]
+        if len(origin) == 3:
+            # A batched output is the (B * M, N) matrix. A tile is one batch's
+            # rows, so rows past M are masked rather than read as the next
+            # batch's, and a row tile's partial index counts tiles per batch.
+            batch, row = origin[:2]
+            batches, rows_per_batch = map(int, self.output_node.get_size()[:2])
+            row_tiles = ceildiv(rows_per_batch, rows)
+            row = batch * rows_per_batch + row
+            row_bound = (batch + 1) * rows_per_batch
+            row_tile = f"({batch} * {row_tiles} + {origin[1]} // {rows})"
+            row_tiles *= batches
+        else:
+            row = origin[0]
+            row_bound = m
+            row_tile = f"({row} // {rows})"
+            row_tiles = ceildiv(int(m), rows)
         numels = {"x": m, "r0_": n}
-        sizes, offsets = (rows, cols), origin
+        sizes, offsets, bounds = (rows, cols), (row, col), (row_bound, n)
         persistent = subtiles == 1 or partial
         if columns:
             numels = {"x": n, "r0_": m}
-            sizes, offsets = (cols, rows), origin[::-1]
+            sizes, offsets, bounds = (cols, rows), (col, row), (n, row_bound)
+        if per_batch:
+            batch, row = origin[:2]
+            batches, rows_per_batch = map(int, self.output_node.get_size()[:2])
+            numels = {"x": batches * n, "r0_": rows_per_batch}
+            offsets = (batch * n + col, row)
+            bounds = ((batch + 1) * n, rows_per_batch)
+            row_tile = f"({row} // {rows})"
+            row_tiles = ceildiv(rows_per_batch, rows)
         with patch.object(self, "persistent_reduction", persistent):
             roots = self.construct_range_trees(None, True, True, numels, False)
         range_trees = [
@@ -2469,34 +2558,38 @@ class TritonTemplateKernel(TritonKernel):
                 block_size=sympy.Integer(size),
                 block_offset=offset,
                 name_suffix="tile",
+                mask_bound=bound,
             )
-            for root, size, offset in zip(roots, sizes, offsets)
+            for root, size, offset, bound in zip(roots, sizes, offsets, bounds)
         ]
+        # The epilogue nodes before the first reduction are still buffered;
+        # flush them so the restated values below follow their definitions.
+        for buf in (self.indexing_code, self.loads, self.compute, self.stores):
+            self.body.splice(buf)
+            buf.clear()
         # Stored tile values carry the template's symbolic shape; restate it as
         # the concrete tile so they broadcast against loads in the tile space.
-        if columns:
-            # The transposes below read values that the nodes before them may
-            # have left in these buffers, so emit those first.
-            for buf in (self.indexing_code, self.loads, self.compute, self.stores):
-                self.body.splice(buf)
-                buf.clear()
-            read_names = OrderedSet(
-                dep.name for node in nodes for dep in node.read_writes.reads
-            )
-            store_cache = {}
-            for name, v in self.cse.store_cache.items():
-                if name in read_names:
-                    store_cache[name] = self.cse.newvar(
-                        v.bounds, v.dtype, (str(cols), str(rows))
-                    )
-                    self.body.writeline(f"{store_cache[name]} = tl.trans({v})")
-        else:
-            store_cache = {
-                name: self.create_cse_var(
+        read_names = OrderedSet(
+            dep.name for node in nodes for dep in node.read_writes.reads
+        )
+        store_cache = {}
+        for name, v in self.cse.store_cache.items():
+            if columns and name not in read_names:
+                continue
+            if v.shape is not None and len(v.shape) == 3:
+                # A rank-3 TMA store's (1, rows, cols) block.
+                reshaped = self.cse.newvar(v.bounds, v.dtype, (str(rows), str(cols)))
+                self.body.writeline(f"{reshaped} = tl.reshape({v}, ({rows}, {cols}))")
+                v = reshaped
+            if columns:
+                store_cache[name] = self.cse.newvar(
+                    v.bounds, v.dtype, (str(cols), str(rows))
+                )
+                self.body.writeline(f"{store_cache[name]} = tl.trans({v})")
+            else:
+                store_cache[name] = self.create_cse_var(
                     str(v), v.bounds, v.dtype, (str(rows), str(cols))
                 )
-                for name, v in self.cse.store_cache.items()
-            }
 
         def store_partials(reduction_node, reduction_type, name, index, value):
             if reduction_node.node._split_size is not None:
@@ -2505,24 +2598,13 @@ class TritonTemplateKernel(TritonKernel):
                 name = stage2.get_outputs()[0].node.get_name()
             # One partial per tile along the reduced dim.
             if columns:
-                tiles, size = ceildiv(int(m), rows), int(n)
-                tile_idx = f"{origin[0]} // {rows}"
+                tiles, size, tile_idx = row_tiles, int(numels["x"]), row_tile
             else:
                 tiles, size = ceildiv(int(n), cols), int(m)
-                tile_idx = f"{origin[1]} // {cols}"
-            nbytes = tiles * size * torch.float32.itemsize
-            ws = next(
-                (w for w in self.args.workspace_args if w.inner_name == "ws_ptr"), None
+                tile_idx = f"({col} // {cols})"
+            ws_ptr, offset = self._reduction_workspace(
+                tiles * size * torch.float32.itemsize
             )
-            # Partials share ws_ptr with the template's workspace (e.g. TMA
-            # descriptors): align them to 16 bytes, and rebind workspace_arg to
-            # the joined arg so the wrapper allocates both.
-            pad = -int(ws.count) % 16 if ws is not None else 0
-            ws_ptr, ws_name, offset = self.args.workspace(pad + nbytes, False)
-            self.workspace_arg = next(
-                w for w in self.args.workspace_args if w.outer_name == ws_name
-            )
-            offset += pad
             self.partial_reductions.append(
                 _PartialReduction(
                     reduction_node,
@@ -2538,11 +2620,11 @@ class TritonTemplateKernel(TritonKernel):
             if not columns and subtiles > 1:
                 # A trailing subtile can start past the last column; its slot
                 # would be past this partial's region in the workspace.
-                in_bounds = f"({origin[1]} < {n})"
+                in_bounds = f"({col} < {n})"
                 mask = in_bounds if mask == "None" else f"{mask} & {in_bounds}"
             self.post_loop_store.writeline(
                 f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
-                f"{size} * ({tile_idx}) + {indexing.index_str}, "
+                f"{size} * {tile_idx} + {indexing.index_str}, "
                 f"{value}, {mask})"
             )
 
@@ -2598,7 +2680,7 @@ class TritonTemplateKernel(TritonKernel):
             header.writeline(f"rindex = {range_trees[1].name}")
             if not persistent:
                 # The tile spans all columns, so its column origin is the reduction offset.
-                header.writeline(f"roffset = {origin[1]}")
+                header.writeline(f"roffset = {col}")
             # Looped reductions emit accumulator inits into self.body.
             with patch.object(self, "body", init):
                 for original, node in zip(nodes, codegen_nodes):
