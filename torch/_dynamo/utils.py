@@ -4389,6 +4389,8 @@ def _get_fake_value_impl(
             and "Unsupported operator for C++ FakeTensor" in str(cause)
         ):
             op = getattr(cause, "func", node.target)  # type: ignore[assignment]
+            if isinstance(op, torch._ops.OpOverloadPacket):
+                op = op.default
             import_suggestion = ""
             if isinstance(op, torch._ops.OpOverload):
                 maybe_pystub = torch._C._dispatch_pystub(
