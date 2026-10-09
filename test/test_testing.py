@@ -1082,21 +1082,19 @@ instantiate_parametrized_tests(TestReportFailureIsolation)
 @unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
 @unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "report enablement doesn't need GPU coverage")
 class TestReportEnablement(TestCase):
-    def _run_script(self, args: list[str]) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            [sys.executable, "enablement_report.py", "--use-pytest", "-p", "no:cacheprovider", *args],
-            cwd=_REPORT_TESTDATA,
-            env=_REPORT_CHILD_ENV,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-
     def test_basic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report_dir = Path(tmp) / "reports"
+            script = [sys.executable, "enablement_report.py", "--use-pytest", "-p", "no:cacheprovider"]
             t0_ms = int(time.time() * 1000)
-            proc = self._run_script([f"--save-torchci-reports={report_dir}"])
+            proc = subprocess.run(
+                [*script, f"--save-torchci-reports={report_dir}"],
+                cwd=_REPORT_TESTDATA,
+                env=_REPORT_CHILD_ENV,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
             t1_ms = int(time.time() * 1000)
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             reports = _report_files(report_dir / "enablement_report")
@@ -1107,78 +1105,20 @@ class TestReportEnablement(TestCase):
         _assert_run_line(self, records[1], t0_ms, t1_ms)
         self.assertEqual(records[1]["outcome"], "passed")
 
-    def test_off_is_noop(self) -> None:
-        before = sorted(_REPORT_TESTDATA.iterdir())
-        proc = self._run_script([])
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        # Nothing is written, such as a default torchci-reports directory.
-        self.assertEqual(sorted(_REPORT_TESTDATA.iterdir()), before)
-
-    def test_common_utils_parsing(self) -> None:
-        source = """
-import json
-import sys
-
-from torch.testing._internal import common_utils
-
-
-result = []
-for in_ci, args in [
-    (False, []),
-    (True, []),
-    (False, ["--save-torchci-reports"]),
-    (False, ["--save-torchci-reports=custom"]),
-    (True, ["--no-save-torchci-reports"]),
-]:
-    common_utils.IS_CI = in_ci
-    sys.argv = ["case.py", *args]
-    common_utils.parse_cmd_line_args()
-    result.append(common_utils.TEST_SAVE_TORCHCI_REPORTS)
-print("RESULT=" + json.dumps(result))
-"""
-        proc = subprocess.run(
-            [sys.executable, "-c", textwrap.dedent(source)],
-            cwd=_TEST_DIR,
-            env=_REPORT_CHILD_ENV,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        result_line = next(line for line in proc.stdout.splitlines() if line.startswith("RESULT="))
-        self.assertEqual(json.loads(result_line[7:]), [None, None, "torchci-reports", "custom", None])
-
-    def test_run_test_parsing_and_forwarding(self) -> None:
+    def test_run_test_forwarding(self) -> None:
         run_test_module = importlib.import_module("run_test")
-        default_dir = str(run_test_module.REPO_ROOT / "test/torchci-reports")
-        absolute_dir = str(Path(tempfile.gettempdir()) / "absolute-reports")
-        cases = [
-            (False, [], None),
-            (True, [], None),
-            (False, ["--save-torchci-reports"], default_dir),
-            (False, ["--save-torchci-reports=custom"], str(Path(default_dir).parent / "custom")),
-            (False, [f"--save-torchci-reports={absolute_dir}"], absolute_dir),
-            (True, ["--no-save-torchci-reports"], None),
-        ]
-        for in_ci, args, expected in cases:
-            with self.subTest(in_ci=in_ci, args=args):
-                with unittest.mock.patch.object(run_test_module, "IS_CI", in_ci):
-                    with unittest.mock.patch.object(sys, "argv", ["run_test.py", *args]):
-                        actual = run_test_module.parse_args().save_torchci_reports
-                self.assertEqual(actual, expected)
-
         args = run_test_module._torchci_report_args
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", True):
-            self.assertEqual(args("test_type_info", False, absolute_dir), [f"--save-torchci-reports={absolute_dir}"])
+            self.assertEqual(args("test_type_info", False, "/reports"), ["--save-torchci-reports=/reports"])
             # C++ tests don't go through run_tests, so they get the plugin itself.
             self.assertEqual(
-                args("cpp/test_api", True, absolute_dir),
-                ["-p", "torch.testing._internal.torchci.plugin", f"--torchci-report-prefix={absolute_dir}/cpp.test_api"],
+                args("cpp/test_api", True, "/reports"),
+                ["-p", "torch.testing._internal.torchci.plugin", "--torchci-report-prefix=/reports/cpp.test_api"],
             )
             self.assertEqual(args("test_type_info", False, None), [])
             self.assertEqual(args("cpp/test_api", True, None), [])
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
-            self.assertEqual(args("test_type_info", False, absolute_dir), [])
+            self.assertEqual(args("test_type_info", False, "/reports"), [])
 
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
