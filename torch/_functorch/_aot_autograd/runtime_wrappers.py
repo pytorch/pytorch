@@ -8,6 +8,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 
 import collections
 import contextlib
+import contextvars
 import copy
 import functools
 import itertools
@@ -113,6 +114,19 @@ from .utils import (
 
 if typing.TYPE_CHECKING:
     from .codegen import PySourceBuilder
+
+
+# The ctx of the CompiledFunction call whose forward or backward is running. The
+# forward and backward of one call see the same ctx, which lets compiled code
+# pair per-call state across them.
+_current_autograd_invocation: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "_current_autograd_invocation", default=None
+)
+
+
+def current_autograd_invocation() -> Any:
+    """The ctx of the compiled autograd.Function call now running, or None."""
+    return _current_autograd_invocation.get()
 
 
 def _snapshot_external_objects(ctx: Any) -> None:
@@ -3538,14 +3552,18 @@ class _AOTDispatchAutogradFunctionFactory:
             @staticmethod
             # pyrefly: ignore [bad-override]
             def forward(ctx: Any, *deduped_flat_tensor_args: Any) -> Any:
-                return CompiledFunction._fwd_fn(
-                    ctx,
-                    deduped_flat_tensor_args,
-                    rng_state.add_forward_args,
-                    saved_state.save_from_forward,
-                    forward_epilogue.finalize,
-                    CompiledFunction.compiled_fw,
-                )
+                token = _current_autograd_invocation.set(ctx)
+                try:
+                    return CompiledFunction._fwd_fn(
+                        ctx,
+                        deduped_flat_tensor_args,
+                        rng_state.add_forward_args,
+                        saved_state.save_from_forward,
+                        forward_epilogue.finalize,
+                        CompiledFunction.compiled_fw,
+                    )
+                finally:
+                    _current_autograd_invocation.reset(token)
 
             @staticmethod
             def backward(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
@@ -3630,12 +3648,18 @@ class _AOTDispatchAutogradFunctionFactory:
                 for idx, obj in getattr(ctx, "_external_objects", {}).items():
                     set_external_object_by_index(idx, obj)
 
-                return call_func_at_runtime_with_args(
-                    compiled_bw,
-                    all_args,
-                    steal_args=True,
-                    disable_amp=disable_amp,
-                )
+                # Set here, not in backward(): the generated backward runs this in
+                # a copy of the context captured when .backward() was called.
+                token = _current_autograd_invocation.set(ctx)
+                try:
+                    return call_func_at_runtime_with_args(
+                        compiled_bw,
+                        all_args,
+                        steal_args=True,
+                        disable_amp=disable_amp,
+                    )
+                finally:
+                    _current_autograd_invocation.reset(token)
 
         return CompiledFunction
 
