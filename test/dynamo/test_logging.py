@@ -226,13 +226,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 199, in outmost_fn
+    -   File [file_path], line 200, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 202, in outer_fn
+    -   File [file_path], line 203, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 205, in fn
+    -   File [file_path], line 206, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 208, in inner
+    -   File [file_path], line 209, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
