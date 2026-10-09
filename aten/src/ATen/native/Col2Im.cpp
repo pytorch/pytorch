@@ -11,7 +11,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/col2im_native.h>
-#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty.h>
 #endif
 
 // Note [im2col/col2im output padding]
@@ -142,10 +142,20 @@ void col2im_out_cpu_template(
 
   output.resize_({batch_size, n_output_plane, output_height, output_width});
 
+  int64_t batch_count = batch_size;
+  int64_t channels = n_output_plane;
+  if (output.is_contiguous() && batch_size > 0) {
+    channels *= batch_size;
+    batch_count = 1;
+  }
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kBFloat16, kHalf, kBool,
       input.scalar_type(), "col2im_out_cpu", [&] {
-        Tensor input_n = Tensor();
-        Tensor output_n = Tensor();
+        if (batch_size == 0) {
+          return;
+        }
+        const auto* input_data = input.const_data_ptr<scalar_t>();
+        auto* output_data = output.mutable_data_ptr<scalar_t>();
 
         int64_t height_col = (output_height + 2 * pad_height -
                               (dilation_height * (kernel_height - 1) + 1)) /
@@ -156,13 +166,10 @@ void col2im_out_cpu_template(
                 stride_width +
             1;
 
-        for (const auto elt : c10::irange(batch_size)) {
-          input_n = input.select(0, elt);
-          output_n = output.select(0, elt);
-
+        for (const auto elt : c10::irange(batch_count)) {
           col2im<scalar_t>(
-              input_n.const_data_ptr<scalar_t>(),
-              n_output_plane,
+              input_data + elt * input.stride(0),
+              channels,
               output_height,
               output_width,
               height_col,
@@ -175,7 +182,7 @@ void col2im_out_cpu_template(
               stride_width,
               dilation_height,
               dilation_width,
-              output_n.mutable_data_ptr<scalar_t>());
+              output_data + elt * output.stride(0));
         }
 
         if (!batched_input) {
@@ -205,7 +212,7 @@ Tensor col2im_cpu(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor output = at::empty({0}, input.options());
 
   col2im_out_cpu_template(
       output, input, output_size, kernel_size, dilation, padding, stride);
