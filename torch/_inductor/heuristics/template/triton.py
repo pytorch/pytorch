@@ -2375,6 +2375,19 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
     """
 
 
+class NPUConfigHeuristic(BaseConfigHeuristic):
+    """
+    Placeholder child class for NPU (e.g. Ascend) specific overrides.
+
+    Registering NPU as its own heuristic class (rather than letting it fall
+    through to the generic ``BaseConfigHeuristic``) makes it a first-class
+    device type alongside CUDA/ROCm, XPU, CPU and MTIA. The defaults are
+    inherited unchanged today; this is the seam where NPU-specific configs
+    can be added later without touching the dispatch in
+    ``InductorChoices.get_config_heuristics``.
+    """
+
+
 # Template-specific mixin classes
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     """

@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from unittest.mock import patch
 
+import torch
+
 from torch._inductor import config
 from torch._inductor.choices import (
     create_inductor_choices,
@@ -13,6 +15,15 @@ from torch._inductor.choices import (
     register_inductor_choices,
     registered_inductor_choices,
     unregister_inductor_choices,
+)
+from torch._inductor.heuristics.template.triton import (
+    BaseConfigHeuristic,
+    CPUConfigHeuristic,
+    CUDAConfigHeuristic,
+    MTIAConfigHeuristic,
+    NPUConfigHeuristic,
+    ROCmConfigHeuristic,
+    XPUConfigHeuristic,
 )
 from torch._inductor.virtualized import _choices, threadlocal, V
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -48,7 +59,7 @@ class BetaChoices(InductorChoices):
     def uuid(self) -> str:
         return "beta"
 
-    def get_config_heuristics(self, device_type: str | None = "cuda") -> Any:
+    def get_config_heuristics(self, device_type: str | None = None) -> Any:
         return self.heuristics
 
 
@@ -188,7 +199,7 @@ class ChoicesCompositionTest(TestCase):
         self.assertEqual(
             handler.customize_fused_kernel_name("kernel", ""), "kernel_alpha:99"
         )
-        self.assertEqual(handler.get_conv_configs(), "beta")
+        self.assertEqual(handler.get_conv_configs("cuda"), "beta")
         expected_uuid = (
             "composed_inductor_choices",
             ("alpha:_alpha:99", "beta"),
@@ -433,6 +444,61 @@ class ChoicesCompositionTest(TestCase):
             V.choices.uuid(),
             ("composed_inductor_choices", ("alpha:_alpha:2", "beta")),
         )
+
+
+class ConfigHeuristicDispatchTest(TestCase):
+    """``InductorChoices.get_config_heuristics`` device dispatch.
+
+    NPU must be a first-class device type (explicit branch, dedicated class),
+    and a missing ``device_type`` must fail loudly instead of silently
+    selecting the CUDA heuristic.
+    """
+
+    def test_npu_is_first_class(self) -> None:
+        handler = InductorChoices()
+        self.assertIsInstance(handler.get_config_heuristics("npu"), NPUConfigHeuristic)
+        # The dedicated class is a BaseConfigHeuristic subclass, so all config
+        # accessors keep working unchanged.
+        self.assertIsInstance(handler.get_config_heuristics("npu"), BaseConfigHeuristic)
+
+    def test_dispatch_per_device(self) -> None:
+        handler = InductorChoices()
+        cuda_cls = (
+            CUDAConfigHeuristic if torch.version.hip is None else ROCmConfigHeuristic
+        )
+        expected = {
+            "cuda": cuda_cls,
+            "xpu": XPUConfigHeuristic,
+            "cpu": CPUConfigHeuristic,
+            "mtia": MTIAConfigHeuristic,
+            "npu": NPUConfigHeuristic,
+        }
+        for device_type, cls in expected.items():
+            with self.subTest(device_type=device_type):
+                self.assertIs(type(handler.get_config_heuristics(device_type)), cls)
+
+    def test_unknown_device_falls_back_to_base(self) -> None:
+        # Out-of-tree accelerators (HPU, ...) still get the generic base class.
+        handler = InductorChoices()
+        self.assertIs(type(handler.get_config_heuristics("hpu")), BaseConfigHeuristic)
+
+    def test_missing_device_type_raises(self) -> None:
+        handler = InductorChoices()
+        with self.assertRaisesRegex(AssertionError, "requires a valid device type"):
+            handler.get_config_heuristics()
+        with self.assertRaisesRegex(AssertionError, "requires a valid device type"):
+            handler.get_config_heuristics(None)
+
+    def test_accessors_require_device_type(self) -> None:
+        # Regression guard: these used to default to "cuda", silently selecting
+        # the CUDA heuristic when the argument was omitted.
+        handler = InductorChoices()
+        with self.assertRaisesRegex(AssertionError, "requires a valid device type"):
+            handler.get_conv_configs()
+        with self.assertRaisesRegex(AssertionError, "requires a valid device type"):
+            handler.get_depthwise_conv_configs()
+        with self.assertRaisesRegex(AssertionError, "requires a valid device type"):
+            handler.get_flex_attention_fwd_configs(128, 1024, torch.float32)
 
 
 def _as_choices(obj: Any) -> InductorChoices:
