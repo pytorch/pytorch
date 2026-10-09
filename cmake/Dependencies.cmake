@@ -87,9 +87,7 @@ if(USE_XPU)
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
   endif()
-  foreach(flag ${XPU_HOST_CXX_FLAGS})
-    add_definitions(${flag})
-  endforeach()
+  add_compile_definitions(${XPU_HOST_CXX_DEFINITIONS})
 endif()
 
 # ---[ Custom Protobuf
@@ -714,6 +712,18 @@ if(USE_FBGEMM)
     endif()
     target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     target_compile_options_if_supported(asmjit -Wno-unused-variable)
+
+    # fbgemm passes "/arch:AVX512 /arch:AVX2" to fbgemm_avx512, and clang-cl
+    # honors the last /arch. Its AVX512 kernels also use AVX512-BF16, which
+    # clang-cl's /arch:AVX512 doesn't enable. MSVC accepts the intrinsics as is.
+    if(MSVC AND TARGET fbgemm_avx512)
+      get_target_property(FBGEMM_AVX512_OPTIONS fbgemm_avx512 COMPILE_OPTIONS)
+      list(REMOVE_ITEM FBGEMM_AVX512_OPTIONS ${CXX_AVX2_FLAGS})
+      set_property(TARGET fbgemm_avx512 PROPERTY COMPILE_OPTIONS ${FBGEMM_AVX512_OPTIONS})
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(fbgemm_avx512 PRIVATE -mavx512bf16)
+      endif()
+    endif()
 
     # fbgemm's cpp_library() gives source-less aggregate targets (like fbgemm
     # itself) a placeholder .cc named via STRING(RANDOM) and rewritten with
@@ -1737,12 +1747,35 @@ if(USE_KINETO)
 
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
   set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
-  set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
   set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
+
+  # Kineto's unit tests need gtest, which only exists when BUILD_TEST is on.
+  # The xpu backend is excluded because its tests compile SYCL device code
+  # through an ExternalProject, which does not fit inside this build.
+  if(BUILD_TEST AND NOT KINETO_BACKEND STREQUAL "xpu")
+    set(KINETO_BUILD_TESTS ON CACHE BOOL "" FORCE)
+  else()
+    set(KINETO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  endif()
+  # Install alongside PyTorch's own test binaries, where the Windows CI
+  # runner looks for C++ tests.
+  set(KINETO_INSTALL_TESTS ${INSTALL_TEST} CACHE BOOL "" FORCE)
+  set(KINETO_TEST_INSTALL_DIR "test" CACHE STRING "" FORCE)
+
+  # Kineto's tests link nlohmann_json. Create the target from PyTorch's copy
+  # so Kineto skips adding its own; both pin the same version. This mirrors
+  # how fmt is already shared with Kineto above.
+  if(KINETO_BUILD_TESTS AND NOT TARGET nlohmann_json)
+    set(JSON_BuildTests OFF CACHE INTERNAL "")
+    set(JSON_Install OFF CACHE INTERNAL "")
+    add_subdirectory("${CAFFE2_THIRD_PARTY_ROOT}/nlohmann"
+                     "${CMAKE_BINARY_DIR}/third_party/nlohmann")
+  endif()
 
   message(STATUS "Configuring Kineto dependency:")
   message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
   message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
+  message(STATUS "  KINETO_INSTALL_TESTS = ${KINETO_INSTALL_TESTS}")
   message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
   message(STATUS "  KINETO_BACKEND = ${KINETO_BACKEND}")
 
@@ -1753,7 +1786,23 @@ if(USE_KINETO)
   endif()
 
   if(NOT TARGET kineto)
+    # Send Kineto's test binaries to their own subdirectory of build/bin so
+    # the CI runner can glob them without sweeping up PyTorch's tests too.
+    set(_kineto_saved_runtime_output_dir "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/kineto")
+    # Kineto registers its tests with gtest_discover_tests, which defaults to
+    # running every test binary during the build to enumerate its cases. Those
+    # binaries link CUPTI, whose DLL is not on PATH while a Windows build runs,
+    # so each one fails to start and takes the build down with it. Defer
+    # discovery to test time instead. Nothing is lost: PyTorch finds these
+    # tests by listing the built binaries rather than through CTest.
+    set(_kineto_saved_discovery_mode "${CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE PRE_TEST)
     add_subdirectory("${KINETO_SOURCE_DIR}")
+    set(CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE "${_kineto_saved_discovery_mode}")
+    unset(_kineto_saved_discovery_mode)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${_kineto_saved_runtime_output_dir}")
+    unset(_kineto_saved_runtime_output_dir)
     set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
