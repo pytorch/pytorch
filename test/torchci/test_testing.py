@@ -2,26 +2,479 @@
 
 import functools
 import importlib
+import importlib.util
+import json
 import os
 import platform
+import subprocess
 import sys
 import sysconfig
+import tempfile
+import time
 import unittest.mock
+import uuid
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Any
 
 import torch
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
     subtest,
+    TEST_CUDA,
+    TEST_WITH_CROSSREF,
+    TEST_WITH_ROCM,
     TestCase,
     TestEnvironment,
 )
+from torch.testing._internal.torchci import report as torchci_report
+
+
+_TEST_DIR = Path(__file__).resolve().parent.parent
+# test/test_testing.py's TestJunitXml fixture suite, which covers every outcome the
+# pytest path reports.
+_PYTEST_SUITE = _TEST_DIR / "junit_xml_testdata/pytest_suite.py"
+# The report tests' fixtures run from here, below test/ so pytest loads
+# test/conftest.py as in CI; their reports and caches go to temporary directories.
+_REPORT_TESTDATA = Path(__file__).resolve().parent / "testdata"
+# Run the fixture as the default config: drop the job's CI / PYTORCH_TEST_* /
+# PYTEST_ADDOPTS settings and a PYTHONPATH whose repo root would shadow the
+# installed torch, and don't write bytecode into test/.
+_CHILD_ENV = {
+    k: v
+    for k, v in os.environ.items()
+    if k not in ("PYTHONPATH", "CI", "PYTEST_ADDOPTS")
+    and not k.startswith("PYTORCH_TEST_")
+} | {"PYTHONDONTWRITEBYTECODE": "1"}
+
+# The fixture's run context, which the report records, without the job's device
+# filter (XPU and CUDA jobs set PYTORCH_TESTING_DEVICE_ONLY_FOR).
+_REPORT_CHILD_ENV = {
+    k: v for k, v in _CHILD_ENV.items() if not k.startswith("PYTORCH_TESTING_DEVICE_")
+} | {
+    "GITHUB_REPOSITORY": "pytorch/pytorch",
+    "JOB_ID": "123456789",
+    "BUILD_ENVIRONMENT": "report-build",
+    "TEST_CONFIG": "report-config",
+    "RUNNER_NAME": "report-runner",
+}
+
+
+# Each run line's keys, in order, and their types.
+_RUN_TYPES = {
+    "type": str,
+    "schema_version": str,
+    "file": str,
+    "suite": str,
+    "case_name": str,
+    "language": str,
+    "declared_case_name": str,
+    "rerun_number": int,
+    "outcome": str,
+    "outcome_summary": str,
+    "started_at": int,
+    "ended_at": int,
+    "properties": dict,
+}
+_RUN_OUTCOMES = {
+    "passed",
+    "failed",
+    "error",
+    "skipped",
+    "xfailed",
+    "xpassed",
+    "crashed",
+    "timed_out",
+}
+
+
+def _assert_run_line(
+    test: TestCase, run: dict[str, Any], t0_ms: int, t1_ms: int
+) -> None:
+    test.assertEqual([(k, type(v)) for k, v in run.items()], list(_RUN_TYPES.items()))
+    test.assertEqual(
+        (run["type"], run["schema_version"], run["properties"]), ("run", "0.1", {})
+    )
+    test.assertIn(run["language"], ("python", "cpp"))
+    test.assertIn(run["outcome"], _RUN_OUTCOMES)
+    test.assertTrue(t0_ms <= run["started_at"] <= run["ended_at"] <= t1_ms, run)
+
+
+def _report_files(prefix: Path) -> list[Path]:
+    return sorted(prefix.parent.glob(f"{prefix.name}-*{torchci_report.REPORT_SUFFIX}"))
+
+
+def _run_plugin(
+    cwd: str, args: list[str], prefix: Path, env: dict[str, str] | None = None
+) -> tuple[subprocess.CompletedProcess, Path]:
+    """Runs pytest with the report plugin; returns the process and its one report."""
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            *args,
+            "-p",
+            "torch.testing._internal.torchci.plugin",
+            f"--torchci-report-prefix={prefix}",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+        ],
+        cwd=cwd,
+        env=_REPORT_CHILD_ENV | (env or {}),
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    reports = _report_files(prefix)
+    if len(reports) != 1:
+        raise RuntimeError(
+            f"pytest produced {len(reports)} reports\n{proc.stdout}\n{proc.stderr}"
+        )
+    return proc, reports[0]
+
+
+def _runs(report: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in report.read_text().splitlines()[1:]]
+
+
+def _table(header: tuple[str, ...], rows: list[tuple[Any, ...]]) -> str:
+    """Rows as aligned columns under a header, for assertExpectedInline."""
+    lines = [header, *(tuple(str(cell) for cell in row) for row in rows)]
+    widths = [max(len(line[i]) for line in lines) for i in range(len(header))]
+    return "\n".join(
+        " | ".join(cell.ljust(width) for cell, width in zip(line, widths)).rstrip()
+        for line in lines
+    )
+
+
+# torchci test run reports, on TestJunitXml's fixture suite.
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(
+    TEST_CUDA or TEST_WITH_ROCM, "report shape doesn't depend on the device"
+)
+class TestReportJsonl(TestCase):
+    raw: str
+    report_name: str
+    t0_ms: int
+    t1_ms: int
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cls.t0_ms = int(time.time() * 1000)
+            # Non-default settings, to show up in flags.
+            env = {
+                "PYTORCH_TEST_WITH_SLOW": "1",
+                "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+                "OPINFO_RESTRICT_TO_DSL": "triton",
+            }
+            _, report = _run_plugin(
+                str(_TEST_DIR), [str(_PYTEST_SUITE)], Path(tmp) / "suite", env
+            )
+            cls.t1_ms = int(time.time() * 1000)
+            cls.raw = report.read_text()
+            cls.report_name = report.name
+        super().setUpClass()
+
+    def test_runs(self) -> None:
+        _, *runs = (json.loads(line) for line in self.raw.splitlines())
+        columns = ("case_name", "rerun_number", "outcome", "outcome_summary")
+        self.assertExpectedInline(
+            _table(columns, [tuple(run[column] for column in columns) for run in runs]),
+            """\
+case_name                 | rerun_number | outcome | outcome_summary
+test_pass                 | 0            | passed  |
+test_assert_failure       | 0            | failed  | AssertionError: values differ
+test_raises_non_assertion | 0            | failed  | RuntimeError: runtime error!
+test_error_in_setup       | 0            | error   | RuntimeError: setup error
+test_error_in_teardown    | 0            | error   | RuntimeError: teardown error
+test_skipped              | 0            | skipped | skipped unconditionally
+test_skipif               | 0            | skipped | skipped conditionally
+test_xfail                | 0            | xfailed | known bad
+test_xpass_non_strict     | 0            | xpassed |
+test_xpass_strict         | 0            | failed  | [XPASS(strict)] strictly expected to fail
+test_rerun_then_pass      | 0            | failed  | AssertionError: attempt 1 fails
+test_rerun_then_pass      | 1            | failed  | AssertionError: attempt 2 fails
+test_rerun_then_pass      | 2            | passed  |
+test_rerun_then_fail      | 0            | failed  | AssertionError: attempt 1 fails
+test_rerun_then_fail      | 1            | failed  | AssertionError: attempt 2 fails
+test_rerun_then_fail      | 2            | failed  | AssertionError: attempt 3 fails
+test_no_rerun_needed      | 0            | passed  |""",
+        )
+
+    def test_schema(self) -> None:
+        report, *runs = (json.loads(line) for line in self.raw.splitlines())
+        self.assertEqual(
+            list(report),
+            [
+                "type",
+                "schema_version",
+                "repo",
+                "github_workflow_job_id",
+                "report_uuid",
+                "environment",
+                "flags",
+                "properties",
+            ],
+        )
+        self.assertEqual(report["type"], "report")
+        self.assertEqual(report["schema_version"], "0.1")
+        self.assertEqual(report["repo"], "pytorch/pytorch")
+        self.assertEqual(report["github_workflow_job_id"], 123456789)
+        self.assertEqual(str(uuid.UUID(report["report_uuid"])), report["report_uuid"])
+        self.assertEqual(
+            self.report_name, f"suite-{report['report_uuid']}.report.jsonl"
+        )
+        flags = report["flags"]
+        self.assertEqual(list(flags), sorted(TestEnvironment.env_var_values))
+        self.assertTrue(all(isinstance(value, str) for value in flags.values()))
+        self.assertEqual(flags["PYTORCH_TEST_WITH_SLOW"], "1")
+        self.assertEqual(flags["PYTORCH_CUDA_ALLOC_CONF"], "expandable_segments:True")
+        self.assertEqual(flags["OPINFO_RESTRICT_TO_DSL"], "triton")
+        self.assertEqual(flags["PYTORCH_TEST_WITH_INDUCTOR"], "")
+        self.assertEqual(report["properties"]["build_environment"], "report-build")
+        self.assertEqual(report["properties"]["test_config"], "report-config")
+        self.assertEqual(report["properties"]["runner_name"], "report-runner")
+        for run in runs:
+            _assert_run_line(self, run, self.t0_ms, self.t1_ms)
+            self.assertEqual(run["language"], "python")
+
+    def test_identities(self) -> None:
+        rendered = {}
+        columns = ("suite", "case_name", "declared_case_name")
+        with tempfile.TemporaryDirectory() as tmp:
+            # In process, identities come from collection; under xdist, from the
+            # worker's setup reports.
+            for mode, args in (("in_process", []), ("xdist", ["-n", "1"])):
+                t0_ms = int(time.time() * 1000)
+                proc, report = _run_plugin(
+                    str(_REPORT_TESTDATA),
+                    ["identity_report.py", *args],
+                    Path(tmp) / mode,
+                )
+                t1_ms = int(time.time() * 1000)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                runs = _runs(report)
+                for run in runs:
+                    _assert_run_line(self, run, t0_ms, t1_ms)
+                    # The launched module's node id, relative to the repo root, also
+                    # for TestImported, which identity_helpers.py defines.
+                    self.assertEqual(
+                        run["file"], "test/torchci/testdata/identity_report.py"
+                    )
+                    self.assertEqual(run["language"], "python")
+                rendered[mode] = _table(
+                    columns,
+                    sorted(tuple(run[column] for column in columns) for run in runs),
+                )
+        self.assertEqual(rendered["xdist"], rendered["in_process"])
+        # test_added is a lambda and test_made_cpu a factory's inner function named
+        # test, so both keep their collected name.
+        self.assertExpectedInline(
+            rendered["in_process"],
+            """\
+suite           | case_name                | declared_case_name
+                | test_module_function     | test_module_function
+                | test_pytest_ids[a::b]    | test_pytest_ids
+                | test_pytest_ids[c[d]]    | test_pytest_ids
+TestDecorated   | test_decorated           | test_decorated
+TestDeviceCPU   | test_device_cpu          | test_device
+TestDeviceCPU   | test_dtype_cpu_float32   | test_dtype
+TestDeviceCPU   | test_dtype_cpu_float64   | test_dtype
+TestFactoryCPU  | test_made_cpu            | test_made_cpu
+TestImported    | test_imported            | test_imported
+TestInner       | test_nested              | test_nested
+TestParametrize | test_parametrize_value_1 | test_parametrize
+TestSetattr     | test_added               | test_added
+TestUnittest    | test_unittest            | test_unittest""",
+        )
+
+    def test_subtests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _, report = _run_plugin(
+                str(_REPORT_TESTDATA), ["subtests_report.py"], Path(tmp) / "subtests"
+            )
+            runs = _runs(report)
+        # One run per test, however many subtests it has.
+        self.assertEqual(
+            [(run["case_name"], run["outcome"]) for run in runs],
+            [("test_failing_subtest", "failed")],
+        )
+        self.assertIn("1 != 0", runs[0]["outcome_summary"])
+
+    def test_skip_after_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _, report = _run_plugin(
+                str(_REPORT_TESTDATA),
+                ["skip_after_failure_report.py"],
+                Path(tmp) / "skip",
+            )
+            runs = _runs(report)
+        # The skip in teardown doesn't replace the failure's message.
+        self.assertEqual(
+            [(run["outcome"], run["outcome_summary"]) for run in runs],
+            [("failed", "AssertionError: the real failure")],
+        )
+
+    @unittest.skipIf(
+        not all(
+            importlib.util.find_spec(name) for name in ("xdist", "pytest_flakefinder")
+        ),
+        "needs pytest-xdist and pytest-flakefinder",
+    )
+    def test_concurrent_copies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = [
+                "concurrent_copies_report.py",
+                "-n",
+                "2",
+                "--flake-finder",
+                "--flake-runs=4",
+            ]
+            _, report = _run_plugin(str(_REPORT_TESTDATA), args, Path(tmp) / "copies")
+            runs = _runs(report)
+        # flakefinder's copies of a unittest test share its node id, and the two
+        # workers run them at the same time; each copy still gets its own run line.
+        self.assertEqual(sorted(run["rerun_number"] for run in runs), [0, 1, 2, 3])
+        self.assertTrue(
+            all(run["ended_at"] - run["started_at"] >= 300 for run in runs), runs
+        )
+
+
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(TEST_CUDA or TEST_WITH_ROCM, "report failures don't need GPU coverage")
+class TestReportFailureIsolation(TestCase):
+    """A failing writer must not change outcomes or the exit code, and warns once.
+    The fixture directory's conftest.py breaks the writer at the point FAIL_MODE
+    names."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        # For the junit XML, reports and caches.
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.dir = Path(cls.tmp.name)
+        cls.baseline = cls._run("baseline", ["-p", "no:cacheprovider"])
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.tmp.cleanup()
+        super().tearDownClass()
+
+    @classmethod
+    def _run(cls, name: str, args: list[str], env: dict[str, str] | None = None):
+        xml = cls.dir / f"{name}.xml"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "failure_isolation.py",
+                "-q",
+                f"--junitxml={xml}",
+                *args,
+            ],
+            cwd=_REPORT_TESTDATA / "failure_isolation",
+            env=_CHILD_ENV | (env or {}),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        outcomes = []
+        for case in ET.parse(xml).iter("testcase"):
+            child = next(iter(case), None)
+            outcomes.append(
+                (case.attrib["name"], "passed" if child is None else child.tag)
+            )
+        return proc, outcomes
+
+    @parametrize(
+        "mode",
+        [
+            subtest(mode, name=mode)
+            for mode in ("capture", "write", "name", "finish", "worker")
+        ],
+    )
+    def test_writer_error_does_not_change_tests(self, mode) -> None:
+        args = [
+            "-p",
+            "torch.testing._internal.torchci.plugin",
+            f"--torchci-report-prefix={self.dir / mode}",
+            "-p",
+            "no:cacheprovider",
+        ]
+        if mode == "worker":
+            # The writer runs on the controller; break the worker's makereport.
+            args += ["-n", "1"]
+        proc, outcomes = self._run(mode, args, {"FAIL_MODE": mode})
+        baseline_proc, baseline_outcomes = self.baseline
+        self.assertEqual(
+            proc.returncode, baseline_proc.returncode, proc.stdout + proc.stderr
+        )
+        self.assertEqual(outcomes, baseline_outcomes)
+        self.assertEqual(
+            proc.stderr.count("torchci: report disabled after error:"), 1, proc.stderr
+        )
+
+
+instantiate_parametrized_tests(TestReportFailureIsolation)
 
 
 class TestReportHelpers(TestCase):
+    def test_identity_survives_unwrap_errors(self):
+        import pytest
+
+        plugin = importlib.import_module("torch.testing._internal.torchci.plugin")
+
+        def test_case(self):
+            pass
+
+        # inspect.unwrap raises on a wrapper loop.
+        test_case.__wrapped__ = test_case
+        module = unittest.mock.Mock(nodeid="test/test_x.py")
+        item = unittest.mock.Mock(
+            spec=pytest.Function, obj=test_case, originalname="test_case_cpu"
+        )
+        item.name = "test_case_cpu"
+        item.getparent.side_effect = (
+            lambda cls: module if cls is pytest.Module else None
+        )
+        # The declared name stays pytest's originalname.
+        self.assertEqual(
+            plugin.identity(item),
+            ("test/test_x.py", "", "test_case_cpu", "python", "test_case_cpu"),
+        )
+
+    def test_lone_surrogate_is_replaced(self) -> None:
+        now = time.time()
+        test = torchci_report.TestId(
+            "test/test_x.py", "", "test_surrogate", "python", "test_surrogate"
+        )
+        line = torchci_report.line(
+            torchci_report.run_record(
+                test, 0, "failed", now, now, outcome_summary="\ud800"
+            )
+        )
+        line.encode("utf-8")
+        run = json.loads(line)
+        _assert_run_line(self, run, int(now * 1000), int(now * 1000))
+        # json.dumps escapes it as \ud800, which ClickHouse rejects.
+        self.assertEqual(run["outcome_summary"], "?")
+
     @skipIfTorchDynamo("Dynamo calls the patched torch._C function while tracing")
     def test_capture_skips_torch_accelerator(self) -> None:
         environment = importlib.import_module(
