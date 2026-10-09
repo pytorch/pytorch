@@ -2499,18 +2499,18 @@ class InstructionTranslatorBase(
         if self.exec_recorder:
             if name in self.f_globals:
                 self.exec_recorder.add_global_var(name, self.f_globals[name])
-            else:
+            elif name not in self.symbolic_globals:
                 if name not in self.f_builtins:
                     raise AssertionError("expected name in self.f_builtins to be true")
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
-
-        if name not in self.f_globals:
-            return self.load_builtin(inst)
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
             self.push(self.output.side_effects.load_global(variable, name))
             return
+
+        if name not in self.f_globals:
+            return self.load_builtin(inst)
 
         value = self.f_globals[name]
         self.push(VariableTracker.build(self, value, GlobalSource(name)))

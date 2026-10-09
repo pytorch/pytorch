@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
 import importlib.util
 import os
 import sys
@@ -95,6 +96,59 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         self.assertTrue(same(res1, x + x + 1))
+
+    def test_store_global_new_shadows_builtin(self):
+        def fn_input(x):
+            global input
+            input = x
+            return torch.conj(input)
+
+        def fn_list(x):
+            global list
+            list = x
+            return torch.conj(list)
+
+        def fn_type(x):
+            global type
+            type = x
+            return torch.conj(type)
+
+        try:
+            for name, fn in (
+                ("input", fn_input),
+                ("list", fn_list),
+                ("type", fn_type),
+            ):
+                with self.subTest(name=name):
+                    self.assertNotIn(name, globals())
+                    x = torch.randn(4, 4)
+                    result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+                    self.assertTrue(same(result, torch.conj(x)))
+                    self.assertIs(globals()[name], x)
+        finally:
+            for name in ("input", "list", "type"):
+                globals().pop(name, None)
+
+    def test_load_builtin_without_global(self):
+        def fn_input():
+            return input
+
+        def fn_list(x):
+            return list((x,))[0]
+
+        def fn_type(x):
+            return type(x)
+
+        for name in ("input", "list", "type"):
+            self.assertNotIn(name, globals())
+        self.assertIs(
+            torch.compile(fn_input, backend="eager", fullgraph=True)(), builtins.input
+        )
+        x = torch.randn(4, 4)
+        self.assertIs(torch.compile(fn_list, backend="eager", fullgraph=True)(x), x)
+        self.assertIs(
+            torch.compile(fn_type, backend="eager", fullgraph=True)(x), torch.Tensor
+        )
 
     def test_store_global_list(self):
         def fn(x):
