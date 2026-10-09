@@ -2792,11 +2792,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         also owns guard installation for that classification. Thus, ``source``
         must reproduce the exact value without changing its lookup semantics.
         Values without a source are unguarded and should be compiler-created or
-        otherwise ephemeral. Compiler-selected callables that must bypass
-        normal classification use the corresponding
+        otherwise ephemeral. Compiler-selected values that must bypass normal
+        classification use a narrow ``VariableBuilder.create_internal_*`` or
         ``SourcelessBuilder.create_internal_*`` entry point.
-        Other direct construction requires a local rationale for why builder
-        classification or guarding cannot preserve the intended semantics.
+        Other direct construction requires an explicit reviewed exception because
+        builder classification or guarding cannot preserve the intended semantics.
         """
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)

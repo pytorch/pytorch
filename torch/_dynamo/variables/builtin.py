@@ -1329,13 +1329,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 args: list[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
-                if fn is StopIteration:
-                    return variables.StopIterationVariable(fn, args, kwargs)
-                elif fn is AttributeError:
-                    return variables.AttributeErrorVariable(fn, args, kwargs)
-                elif fn is NameError:
-                    return variables.NameErrorVariable(fn, args, kwargs)
-                return variables.ExceptionVariable(fn, args, kwargs)
+                return variables.ExceptionVariable.create(fn, args, kwargs)
 
             return create_exception_class_object
 
@@ -2578,15 +2572,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     f"{len(kwargs)} kwargs",
                 )
         strict = kwargs.pop("strict", ConstantVariable.create(False))
-        items = []
-        for arg in args:
-            items.append(generic_getiter(tx, arg))
-        iter_args = TupleVariable(items, mutation_type=ValueMutationNew())
-        return variables.ZipVariable(
-            iter_args,
-            strict=strict.as_python_constant(),
-            mutation_type=ValueMutationNew(),
-        )
+        return variables.ZipVariable.create(tx, args, strict=strict)
 
     def call_len(
         self,
@@ -2932,17 +2918,17 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_super(
         self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
-        return variables.SuperVariable(a, b)
+        return variables.SuperVariable.create(a, b)
 
     def call_classmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker
     ) -> VariableTracker:
-        return variables.ClassMethodVariable(func)
+        return variables.ClassMethodVariable.create(func)
 
     def call_staticmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker
     ) -> VariableTracker:
-        return variables.StaticMethodVariable(func)
+        return variables.StaticMethodVariable.create(func)
 
     def call_next(
         self,
@@ -3001,23 +2987,12 @@ class BuiltinVariable(BaseBuiltinVariable):
                     f"{len(kwargs)} kwargs",
                 )
 
-        iterables = [generic_getiter(tx, seq) for seq in seqs]
-        iter_args = TupleVariable(iterables, mutation_type=ValueMutationNew())
-        return variables.MapVariable(
-            fn,
-            iter_args,
-            strict=strict.as_python_constant(),
-            mutation_type=ValueMutationNew(),
-        )
+        return variables.MapVariable.create(tx, fn, seqs, strict=strict)
 
     def call_filter(
         self, tx: "InstructionTranslatorBase", fn: VariableTracker, seq: VariableTracker
     ) -> VariableTracker:
-        return variables.FilterVariable(
-            fn,
-            generic_getiter(tx, seq),
-            mutation_type=ValueMutationNew(),
-        )
+        return variables.FilterVariable.create(tx, fn, seq)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str

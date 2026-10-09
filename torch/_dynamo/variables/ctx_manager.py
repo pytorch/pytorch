@@ -29,7 +29,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch._C
 from torch._dynamo import config
-from torch._guards import Guard
+from torch._guards import Guard, Source
 from torch._logging import warning_once
 
 from .. import graph_break_hints, variables
@@ -151,14 +151,18 @@ class ContextWrappingVariable(VariableTracker):
         ):
             raise AssertionError(f"expected a function variable, got {type(args[0])}")
 
-        if isinstance(args[0], NestedUserFunctionVariable):
-            return WrappedNestedUserFunctionVariable(args[0], self)
-        elif isinstance(args[0], SkipFunctionVariable):
-            return WrappedSkipFunctionVariable(args[0], self)
-        elif isinstance(args[0], UserMethodVariable):
-            return WrappedUserMethodVariable(args[0], self)
-        elif isinstance(args[0], UserFunctionVariable):
-            return WrappedUserFunctionVariable(args[0], self)
+        return self._wrap_function(args[0])
+
+    # noqa: RAW_VT_CONSTRUCTION
+    def _wrap_function(self, fn: VariableTracker) -> VariableTracker:
+        if isinstance(fn, NestedUserFunctionVariable):
+            return WrappedNestedUserFunctionVariable(fn, self)
+        elif isinstance(fn, SkipFunctionVariable):
+            return WrappedSkipFunctionVariable(fn, self)
+        elif isinstance(fn, UserMethodVariable):
+            return WrappedUserMethodVariable(fn, self)
+        elif isinstance(fn, UserFunctionVariable):
+            return WrappedUserFunctionVariable(fn, self)
         else:
             raise AssertionError("Unexpected arg type")
 
@@ -199,9 +203,11 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         return type(self.cm_obj).__name__
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .builder import VariableBuilder
+
         source = None if self.source is None else AttrSource(self.source, "__enter__")
         return variables.UserMethodVariable(
-            variables.UserFunctionVariable(  # type: ignore[attr-defined]
+            VariableBuilder.create_internal_user_function(
                 self.cm_obj.__enter__.__func__,
                 source=source and AttrSource(source, "__func__"),
             ),
@@ -212,9 +218,11 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
     def exit(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         source = None if self.source is None else AttrSource(self.source, "__exit__")
         x = variables.UserMethodVariable(
-            variables.UserFunctionVariable(  # type: ignore[attr-defined]
+            VariableBuilder.create_internal_user_function(
                 self.cm_obj.__exit__.__func__,
                 source=source and AttrSource(source, "__func__"),
             ),
@@ -1407,7 +1415,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     """
 
     @staticmethod
-    def _create_lambda_from_tensors(
+    def create(
         tx: "InstructionTranslatorBase",
         tensors: VariableTracker,
     ) -> "PreserveVersionContextVariable":
@@ -1430,9 +1438,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
     @staticmethod
     def constructor(tx: "InstructionTranslatorBase") -> VariableTracker:
         return variables.LambdaVariable(
-            lambda tensors: PreserveVersionContextVariable._create_lambda_from_tensors(
-                tx, tensors
-            )
+            lambda tensors: PreserveVersionContextVariable.create(tx, tensors)
         )
 
     def __init__(
@@ -1667,6 +1673,12 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         "annotation",
         *ContextWrappingVariable._nonvar_fields,
     }
+
+    @staticmethod
+    def create(
+        annotation: dict[str, Any], *, source: Source | None = None
+    ) -> "FxTracebackAnnotateVariable":
+        return FxTracebackAnnotateVariable(annotation, source=source)
 
     def __init__(
         self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
@@ -1910,6 +1922,12 @@ class WithExitFunctionVariable(VariableTracker):
         "target",
         *VariableTracker._nonvar_fields,
     }
+
+    @staticmethod
+    def create(
+        ctx: ContextWrappingVariable | GenericContextWrappingVariable, target: Any
+    ) -> "WithExitFunctionVariable":
+        return WithExitFunctionVariable(ctx, target)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str

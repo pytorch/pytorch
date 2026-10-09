@@ -1000,7 +1000,7 @@ class SideEffects:
         return variable
 
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
-        variable = variables.NewGlobalVariable(
+        variable = variables.NewGlobalVariable(  # noqa: RAW_VT_CONSTRUCTION
             mutation_type=AttributeMutationExisting(),
             source=source,
         )

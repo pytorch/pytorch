@@ -2382,15 +2382,17 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         if self.source is None:
             raise AssertionError("source must not be None")
         call_source = AttrSource(self.source, "__call__")
         return torch._dynamo.variables.UserMethodVariable(
-            torch._dynamo.variables.UserFunctionVariable(
+            VariableBuilder.create_internal_user_function(
                 self.value.__call__.__func__,
                 source=AttrSource(call_source, "__func__"),
             ),
-            torch._dynamo.variables.UserDefinedObjectVariable(
+            VariableBuilder.create_internal_user_defined_object(
                 self.value, source=self.source
             ),
             source=call_source,
@@ -3808,6 +3810,7 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         ctx_manager_vt = super().call_function(tx, args, kwargs)
+        # noqa: RAW_VT_CONSTRUCTION
         return RepararametrizeModuleContextVariable(ctx_manager_vt, args[0])  # type: ignore[arg-type]
 
 
@@ -6048,6 +6051,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         args: list[VariableTracker],
     ) -> tuple[VariableTracker, list[VariableTracker]]:
         from . import UserMethodVariable
+        from .builder import VariableBuilder
 
         source = None
         if self.parent_source:
@@ -6065,7 +6069,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         elif isinstance(fn, types.MethodType):
             cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
-                torch._dynamo.variables.UserFunctionVariable(
+                VariableBuilder.create_internal_user_function(
                     fn.__func__,
                     source=source and AttrSource(source, "__func__"),
                 ),

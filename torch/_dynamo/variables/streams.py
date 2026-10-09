@@ -335,6 +335,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     """This represents torch.cuda.StreamContext"""
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def create(
         tx: "InstructionTranslatorBase",
         stream_to_enter: "StreamVariable",

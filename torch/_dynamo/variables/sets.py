@@ -427,7 +427,7 @@ class BaseSetVariable(VariableTracker):
 
         if self.source and not is_constant_source(self.source):
             tx.output.guard_on_key_order.add(self.source)
-        return SetIterator(self.items)
+        return SetIterator.create(self.items)
 
     def nb_or_impl(
         self,
@@ -554,7 +554,7 @@ class BaseSetVariable(VariableTracker):
     }
 
 
-class SetVariable(BaseSetVariable):
+class SetVariable(BaseSetVariable):  # noqa: RAW_VT_CONSTRUCTION
     """Represents a Python set during symbolic execution."""
 
     # PySet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2436
@@ -873,7 +873,7 @@ class OrderedSetClassVariable(VariableTracker):
         return var
 
 
-class OrderedSetVariable(BaseSetVariable):
+class OrderedSetVariable(BaseSetVariable):  # noqa: RAW_VT_CONSTRUCTION
     """``torch.utils._ordered_set.OrderedSet``, an insertion-ordered set.
 
     OrderedSet is a pure-Python ``collections.abc.MutableSet``, not a subclass
@@ -918,7 +918,7 @@ class OrderedSetVariable(BaseSetVariable):
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import SetIterator
 
-        return SetIterator(self.items)
+        return SetIterator.create(self.items)
 
     def debug_repr(self) -> str:
         if not self.items:
@@ -1137,7 +1137,7 @@ class OrderedSetVariable(BaseSetVariable):
     }
 
 
-class FrozensetVariable(BaseSetVariable):
+class FrozensetVariable(BaseSetVariable):  # noqa: RAW_VT_CONSTRUCTION
     # PyFrozenSet_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/setobject.c#L2526
     _cpython_type = frozenset
 
