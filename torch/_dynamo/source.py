@@ -1285,6 +1285,26 @@ class FrozenDictItemsSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(create_call_function(1, False))
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        try:
+            value = utils.frozendict_items(base_value)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        cache[self] = value
+        return value
+
 
 @dataclass_with_cached_hash(frozen=True)
 class NumpyTensorSource(ChainedSource):
