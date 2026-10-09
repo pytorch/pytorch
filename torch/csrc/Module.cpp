@@ -2948,7 +2948,6 @@ Call this whenever a new thread is created in order to propagate values from
                 std::make_shared<c10::SafePyObject>(
                     converter.inc_ref().ptr(), getPyInterpreter()),
                 functorch_config.attr("fake_tensor_allow_meta").cast<bool>());
-            mode->static_shapes_ = shape_env.is_none();
             mode->allow_unsafe_data_ptr_access_ =
                 functorch_config
                     .attr("fake_tensor_allow_unsafe_data_ptr_access")
