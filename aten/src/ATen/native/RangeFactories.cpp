@@ -12,10 +12,11 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/linspace.h>
-#include <ATen/ops/logspace.h>
 #include <ATen/ops/arange_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/linspace.h>
 #include <ATen/ops/linspace_native.h>
+#include <ATen/ops/logspace.h>
 #include <ATen/ops/logspace_native.h>
 #include <ATen/ops/range_native.h>
 #endif
@@ -190,7 +191,7 @@ Tensor& range_out_no_step(const Scalar& start, const Scalar& end, Tensor& result
 }
 
 Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
     int64_t size = compute_arange_size<scalar_t>(start, end, step);
     int64_t numel = result.numel();
 
@@ -210,13 +211,125 @@ Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, T
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();
     auto iter = TensorIterator::borrowing_nullary_op(r);
-    arange_stub(iter.device_type(), iter, start, size, step);
+    if(isComplexType(r.scalar_type())) {
+      if(size <= 1) {
+        result.fill_(start);
+      } else {
+        Scalar endc = start.to<c10::complex<double>>() + step.to<c10::complex<double>>() * static_cast<double>(size - 1);
+        linspace_stub(iter.device_type(), iter, start, endc, size);
+      }
+
+    } else {
+      arange_stub(iter.device_type(), iter, start, size, step);
+    }
     if (!result.is_contiguous()) {
       result.copy_(r);
     }
   });
 
   return result;
+}
+
+namespace {
+
+Tensor arange_meta_impl(
+    const Scalar& start,
+    const Scalar& end,
+    const Scalar& step,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
+  TensorOptions options = TensorOptions()
+                              .dtype(dtype)
+                              .layout(layout)
+                              .device(device)
+                              .pinned_memory(pin_memory);
+  const bool integer_args = start.isIntegral(/*includeBool=*/true) &&
+      end.isIntegral(/*includeBool=*/true) &&
+      step.isIntegral(/*includeBool=*/true);
+  if (!options.has_dtype() && integer_args) {
+    options = options.dtype(at::kLong);
+  }
+
+  if (!start.isSymbolic() && !end.isSymbolic() && !step.isSymbolic()) {
+    auto size = integer_args ? compute_arange_size<int64_t>(start, end, step)
+                             : compute_arange_size<double>(start, end, step);
+    return at::empty({size}, options);
+  }
+
+  c10::SymInt size;
+  if (integer_args) {
+    auto sym_start = start.toSymInt();
+    auto sym_end = end.toSymInt();
+    auto sym_step = step.toSymInt();
+    auto step_is_positive = sym_step.sym_gt(0);
+    auto step_is_negative = sym_step.sym_lt(0);
+    TORCH_SYM_CHECK(
+        step_is_positive | step_is_negative, "step must be nonzero");
+    TORCH_SYM_CHECK(
+        (step_is_positive & sym_end.sym_ge(sym_start)) |
+            (step_is_negative & sym_end.sym_le(sym_start)),
+        "upper bound and lower bound inconsistent with step sign");
+
+    auto sign = step_is_positive.toSymInt() - step_is_negative.toSymInt();
+    size = (sym_end - sym_start + sym_step - sign) / sym_step;
+  } else {
+    auto to_sym_float = [](const Scalar& value) {
+      return value.isSymInt() ? static_cast<c10::SymFloat>(value.toSymInt())
+                              : value.toSymFloat();
+    };
+    auto sym_start = to_sym_float(start);
+    auto sym_end = to_sym_float(end);
+    auto sym_step = to_sym_float(step);
+    auto step_is_positive = sym_step.sym_gt(0.0);
+    auto step_is_negative = sym_step.sym_lt(0.0);
+    TORCH_SYM_CHECK(
+        step_is_positive | step_is_negative, "step must be nonzero");
+    TORCH_SYM_CHECK(
+        (step_is_positive & sym_end.sym_ge(sym_start)) |
+            (step_is_negative & sym_end.sym_le(sym_start)),
+        "upper bound and lower bound inconsistent with step sign");
+
+    auto size_float = (sym_end - sym_start) / sym_step;
+    size = size_float.is_symbolic()
+        ? c10::SymInt(size_float.toSymNodeImpl()->ceil())
+        : c10::SymInt(
+              static_cast<int64_t>(std::ceil(size_float.as_float_unchecked())));
+  }
+  return at::empty_symint(c10::SymDimVector{std::move(size)}, options);
+}
+
+} // namespace
+
+Tensor arange_meta(
+    const Scalar& end,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
+  return arange_meta_impl(0, end, 1, dtype, layout, device, pin_memory);
+}
+
+Tensor arange_meta(
+    const Scalar& start,
+    const Scalar& end,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
+  return arange_meta_impl(start, end, 1, dtype, layout, device, pin_memory);
+}
+
+Tensor arange_meta(
+    const Scalar& start,
+    const Scalar& end,
+    const Scalar& step,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
+  return arange_meta_impl(start, end, step, dtype, layout, device, pin_memory);
 }
 
 DEFINE_DISPATCH(arange_stub);
