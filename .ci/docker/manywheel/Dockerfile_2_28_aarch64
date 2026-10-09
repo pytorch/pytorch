@@ -1,6 +1,6 @@
 # syntax = docker/dockerfile:experimental
 
-ARG BASE_CUDA_VERSION=12.6
+ARG BASE_CUDA_VERSION=13.2
 
 FROM quay.io/pypa/manylinux_2_28_aarch64 as base
 
