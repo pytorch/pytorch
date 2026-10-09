@@ -11822,6 +11822,8 @@ class Scheduler:
             return None
         with config.patch(subgraph.inductor_config_patches or {}):
             graph = subgraph.graph
+            if not config.triton.cudagraphs:
+                return "invoke_subgraph body opts out of cudagraphs"
             if graph.disable_cudagraphs_reason is not None:
                 return f"invoke_subgraph body {graph.disable_cudagraphs_reason}"
             # A body is never partitioned, so judge it by whole-graph rules. The
@@ -11924,27 +11926,38 @@ class Scheduler:
         or None if the node is cudagraphable.
         """
         region = self._get_invoke_subgraph_region(node)
-        if region is not None and config.triton.cudagraphs:
-            # invoke_subgraph is opaque to the outer scheduler, so the cudagraph
-            # checks have to run over the region body rather than the call node.
-            with config.patch(self._get_invoke_subgraph_config_patches(region) or {}):
-                skip_reason = self._invoke_subgraph_body_cudagraph_skip_reason(region)
-                if skip_reason is None:
-                    return self._invoke_subgraph_family_cudagraph_skip_reason(
-                        node, region
+        if region is not None:
+            patches = self._get_invoke_subgraph_config_patches(region)
+            cudagraphs_override = (
+                bool(patches["triton.cudagraphs"])
+                if patches is not None and "triton.cudagraphs" in patches
+                else None
+            )
+            if cudagraphs_override is False:
+                return "invoke_subgraph opts out of cudagraphs"
+            if V.graph.cudagraphs_top_level:
+                # invoke_subgraph is opaque to the outer scheduler, so the
+                # cudagraph checks run over the body, not the call node.
+                with config.patch(patches or {}):
+                    skip_reason = self._invoke_subgraph_body_cudagraph_skip_reason(
+                        region
                     )
-            if isinstance(node.node, ir.InvokeSubgraph):
-                cudagraphs_log.debug(
-                    "skipping cudagraphs for invoke_subgraph region: %s",
-                    skip_reason,
-                )
-            return skip_reason
+                    if skip_reason is None:
+                        return self._invoke_subgraph_family_cudagraph_skip_reason(
+                            node, region
+                        )
+                if isinstance(node.node, ir.InvokeSubgraph):
+                    cudagraphs_log.debug(
+                        "skipping cudagraphs for invoke_subgraph region: %s",
+                        skip_reason,
+                    )
+                return skip_reason
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
         # benefit to cudagraph
         if (
-            not torch._inductor.config.triton.cudagraphs
+            not V.graph.cudagraphs_top_level
             and _unstable_customized_partition_wrapper.wrapper is None
         ):
             return "partition includes all ops when cudagraphs is disabled"
