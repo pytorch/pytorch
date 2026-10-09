@@ -667,6 +667,9 @@ class TritonTemplateKernel(TritonKernel):
         self.kernel_name = kernel_name
         self.use_jit = use_jit
         self.tma_store = tma_store
+        # Store epilogue outputs other than the template's own with tl.store
+        # even when tma_store is set. See store.
+        self.plain_store_epilogue_outputs = False
         self.tma_load_for_template_epilogue = tma_load_for_template_epilogue
         self.transpose_discontiguous_tensor_descriptors_override = (
             transpose_discontiguous_tensor_descriptors_override
@@ -2378,6 +2381,22 @@ class TritonTemplateKernel(TritonKernel):
         # Already frozen or not a FlexibleLayout, just return current strides
         return node.get_stride()
 
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
+        # Each TMA store stages its whole output tile in shared memory, in its
+        # own buffer, so a reduction epilogue's many fp32 outputs overflow it.
+        # Only the template's own output keeps its TMA store.
+        if (
+            mode is None
+            and self.tma_store
+            and self.plain_store_epilogue_outputs
+            and name != self.output_node.get_name()
+        ):
+            with patch.object(self, "tma_store", False):
+                return super().store(name, index, value, mode)
+        return super().store(name, index, value, mode)
+
     def _compute_fusion_metadata(
         self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
     ):
@@ -2409,6 +2428,9 @@ class TritonTemplateKernel(TritonKernel):
         """
         self._compute_fusion_metadata(
             scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
+        )
+        self.plain_store_epilogue_outputs = any(
+            node.is_reduction() for node in epilogue_nodes
         )
         with self:
             partial_code = render()

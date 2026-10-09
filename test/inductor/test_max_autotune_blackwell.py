@@ -1104,6 +1104,32 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    def test_blackwell_mm_reduction_epilogue_plain_stores_extra_outputs(self):
+        """With a reduction epilogue, only the template's own output keeps its
+        TMA store; extra outputs use tl.store."""
+        kernels, code = self._run_reduction(
+            lambda a, b: (
+                (c := a @ b),
+                *(c.float() * i for i in range(1, 4)),
+                c.float().sum(-1),
+            ),
+            1024,
+            512,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8, warp_specialize=True),
+            **{
+                "triton.template_reduction_epilogue": True,
+                "triton.enable_template_tma_store": True,
+            },
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertEqual(len(re.findall(r"tma_descriptor\d+\.store\(", code)), 1)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     def test_blackwell_mm_row_reduction_epilogue_fusion_fp16(self):
         kernels, code = self._run_reduction(
             self.ROW_OPS["sum_and_out"],
@@ -2207,6 +2233,34 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
             # does one whose result is read only over the batches.
             partials = shape[1] > 128 or op == "matrix_mean"
             self.assertEqual("tl.pointer_type(tl.float32)" in code, partials)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_bmm_reduction_epilogue_plain_stores_extra_outputs(self):
+        """With a reduction epilogue, only the template's own output keeps its
+        TMA store: one staged fp32 128x128 tile per extra output would overflow
+        shared memory (an RMSNorm backward epilogue can store up to 17)."""
+
+        def fn(a, b, w):
+            c = a @ b
+            x = c.float() * w
+            return (c, *(x * i for i in range(1, 7)), x.sum(-1))
+
+        kernels, code = self._run_bmm_reduction(
+            fn,
+            300,
+            128,
+            64,
+            128,
+            BlackwellBMMConfig(128, 128, 64, 3, 8),
+            extra_input=True,
+            **{"triton.enable_template_tma_store": True},
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertEqual(len(re.findall(r"tma_descriptor\d+\.store\(", code)), 1)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
