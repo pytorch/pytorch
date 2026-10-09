@@ -3344,7 +3344,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
             *,
-            prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
+            reduce_scatter_input_fn: Callable = _default_reduce_scatter_input_fn,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -3363,7 +3363,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 partial_reduce_output,
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
-                prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
+                reduce_scatter_input_fn=reduce_scatter_input_fn,
             )
 
         with (
