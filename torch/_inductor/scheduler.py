@@ -657,6 +657,9 @@ class NestedReduction:
         return (
             config.triton.nested_reduction
             and _is_gpu_triton_backend(outer_node, grouped_node)
+            # Template epilogues generate their reductions over the template's
+            # output tiles (see can_fuse_template_reduction_epilogue).
+            and not outer_node.is_template()
             and not outer_node.has_strict_reduction()
             and not grouped_node.has_strict_reduction()
         )
