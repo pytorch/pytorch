@@ -1384,15 +1384,21 @@ class TestScheduler(TestCase):
 
     @parametrize(
         "write_kind,planned_name",
-        (("dense", "buf"), ("alias", "buf"), ("dense", "other")),
+        (("dense", "buf"), ("alias", "buf"), ("dense", "other"), ("pitched", "buf")),
     )
     def test_nested_dependency_matches_require_injective_producer(
         self, write_kind, planned_name
     ):
         d0, d1 = sympy.symbols("d0 d1", integer=True, nonnegative=True)
-        index = 2 * d0 + d1 if write_kind == "dense" else d0 + d1
+        index = {"dense": 2 * d0 + d1, "alias": d0 + d1, "pitched": 4 * d0 + d1}[
+            write_kind
+        ]
         write = MemoryDep("buf", index, (d0, d1), (2, 2))
-        read = MemoryDep("buf", d0 + 1, (d0,), (4,))
+        read = (
+            MemoryDep("buf", 4 * d0, (d0,), (2,))
+            if write_kind == "pitched"
+            else MemoryDep("buf", d0 + 1, (d0,), (4,))
+        )
         planned_write = write.rename({"buf": planned_name})
         planned_read = read.rename({"buf": planned_name})
         producer = Mock()
@@ -1425,10 +1431,28 @@ class TestScheduler(TestCase):
                     read.rename(scheduler.mutation_renames),
                 ),
             )
-            if write_kind == "dense" and planned_name == "buf"
+            if write_kind in ("dense", "pitched") and planned_name == "buf"
             else None
         )
         self.assertEqual(matches, expected)
+
+    def test_pitched_write_still_requires_matching_read(self):
+        s0, s1, d0, d1 = sympy.symbols("s0 s1 d0 d1", integer=True, nonnegative=True)
+        write = MemoryDep("buf", 8 * s0 + s1, (s0, s1), (2, 4))
+        scheduler = Scheduler.__new__(Scheduler)
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            self.assertTrue(write.is_non_overlapping())
+            for index, expected in (
+                (8 * d0 + FloorDiv(d1, 2), True),
+                (8 * d0 + FloorDiv(d1, 2) + 1, False),
+                (8 * (1 - d0) + FloorDiv(d1, 2), False),
+                (8 * FloorDiv(d1, 4) + d0, False),
+            ):
+                read = MemoryDep("buf", index, (d0, d1), (2, 8))
+                self.assertEqual(
+                    scheduler._fusable_read_after_index_equivalence(read, write),
+                    expected,
+                )
 
     @parametrize("ownership", ["nested", "both", "none"])
     def test_nested_dependency_matches_scope_index_equivalence(self, ownership):
@@ -1460,10 +1484,12 @@ class TestScheduler(TestCase):
         expected = (MemoryDepMatch(write, read),) if ownership == "nested" else None
         self.assertEqual(matches, expected)
 
-    @parametrize("reason", ["multiwrite", "tmp", "atomic"])
+    @parametrize("reason", ["multiwrite", "tmp", "atomic", "missing_axis"])
     def test_planned_dependency_matches_reject_unsafe_write(self, reason):
         d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
         index = make_symbol(SymT.TMP, 0) if reason == "tmp" else d0
+        if reason == "missing_axis":
+            index = sympy.S.Zero
         mode = "atomic_add" if reason == "atomic" else None
         write = MemoryDep("buf", index, (d0,), (4,), mode)
         read = MemoryDep("buf", index + 1, (d0,), (4,), mode)
