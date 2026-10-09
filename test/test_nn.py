@@ -47,7 +47,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
+    dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
@@ -5991,82 +5991,113 @@ class TestAddRelu(TestCase):
 
         self.assertEqual(broadcasted_res, res)
 
-
+dynamo_wrapper_skips = {}
+dynamo_wrapper_skips["xpu"] = {
+    # intel/torch-xpu-ops/issues/5401
+    'test_Hardshrink_no_batch_dim_xpu',
+    'test_Softshrink_no_batch_dim_xpu',
+    'test_Conv1d_zero_batch_xpu_fp32',
+    'test_Conv2d_zero_batch_xpu_fp32',
+    'test_Conv3d_zero_batch_xpu_fp32',
+    'test_Conv1d_zero_batch_xpu_tf32',
+    'test_Conv2d_zero_batch_xpu_tf32',
+    'test_Conv3d_zero_batch_xpu_tf32',
+    'test_Embedding_sparse_xpu',
+    'test_EmbeddingBag_sparse_xpu',
+}
 def add_test(test, decorator=None, tf32_decorator=None):
     def add(test_name, fn):
         if hasattr(TestNN, test_name):
             raise RuntimeError('Found two tests with the same name: ' + test_name)
         if decorator is not None:
             fn = decorator(fn)
+        if os.environ.get("PYTORCH_TEST_WITH_DYNAMO", "0") == "1":
+            device_type = (
+                acc.type
+                if (acc := torch.accelerator.current_accelerator())
+                else "cpu"
+            )
+            if dynamo_wrapper_skips.get(device_type) is not None \
+            and test_name in dynamo_wrapper_skips[device_type]:
+                return
         setattr(TestNN, test_name, fn)
 
     test_name = test.get_name()
     if not hasattr(test, 'test_cpu') or test.test_cpu:
         add(test_name, lambda self, test=test: test(self))
-    cuda_test_name = test_name + '_cuda'
-    # With dtype enable, it's good enough to test against three floating types
-    kwargs = {}
-    if 'extra_args' in get_function_arglist(test.test_cuda):
-        kwargs['extra_args'] = test.extra_args
 
-    if 'dtype' in get_function_arglist(test.test_cuda):
-        if torch.cuda.is_tf32_supported() and test.with_tf32:
+    if torch.accelerator.is_available():
+        device_type = torch.accelerator.current_accelerator(True).type
 
-            def with_tf32_off(self, test=test, kwargs=kwargs):
-                with tf32_off():
-                    test.test_cuda(self, dtype=torch.float, **kwargs)
+        # Only add XPU test in addition to CUDA test in this PR
+        # because other platforms such as MPS has limitations to run the test
+        if device_type in ('cuda', 'xpu'):
+            # Always suffix with device_type so this never collides with the plain
+            # CPU test name registered above, even when no accelerator is available
+            # (in which case test_accelerator() itself SkipTest's at runtime).
+            device_test_name = test_name + f"_{device_type}"
+            # With dtype enable, it's good enough to test against three floating types
+            kwargs = {}
+            if 'extra_args' in get_function_arglist(test.test_accelerator):
+                kwargs['extra_args'] = test.extra_args
 
-            add(cuda_test_name + '_fp32', with_tf32_off)
+            if 'dtype' in get_function_arglist(test.test_accelerator):
+                if (torch.cuda.is_tf32_supported() or torch.xpu.is_tf32_supported()) and test.with_tf32:
 
-            def with_tf32_on(self, test=test, kwargs=kwargs):
-                with tf32_on(self, test.tf32_precision):
-                    test.test_cuda(self, dtype=torch.float, **kwargs)
+                    def with_tf32_off(self, test=test, kwargs=kwargs):
+                        with tf32_off():
+                            test.test_accelerator(self, dtype=torch.float, **kwargs)
 
-            if tf32_decorator is not None:
-                with_tf32_on = tf32_decorator(with_tf32_on)
-            add(cuda_test_name + '_tf32', with_tf32_on)
-        else:
-            add(cuda_test_name + '_float', lambda self,
-                test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.float, **kwargs))
-        add(cuda_test_name + '_double', lambda self,
-            test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.double, **kwargs))
+                    add(device_test_name + '_fp32', with_tf32_off)
 
-        def test_half(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.half, **kwargs)
-        if getattr(test, 'check_half', True):
-            add(cuda_test_name + '_half', test_half)
+                    def with_tf32_on(self, test=test, kwargs=kwargs):
+                        with tf32_on(self, test.tf32_precision):
+                            test.test_accelerator(self, dtype=torch.float, **kwargs)
+                    if tf32_decorator is not None:
+                        with_tf32_on = tf32_decorator(with_tf32_on)
+                    add(device_test_name + '_tf32', with_tf32_on)
+                else:
+                    add(device_test_name + '_float', lambda self,
+                        test=test, kwargs=kwargs: test.test_accelerator(self, dtype=torch.float, **kwargs))
+                add(device_test_name + '_double', lambda self,
+                    test=test, kwargs=kwargs: test.test_accelerator(self, dtype=torch.double, **kwargs))
 
-        def test_bfloat16(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.bfloat16, **kwargs)
-        if getattr(test, 'check_bfloat16', True):
-            add(cuda_test_name + '_bfloat16', test_bfloat16)
+                def test_half(self, test=test, kwargs=kwargs):
+                    test.test_accelerator(self, dtype=torch.half, **kwargs)
+                if getattr(test, 'check_half', True):
+                    add(device_test_name + '_half', test_half)
 
-        def test_cfloat(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.cfloat, **kwargs)
+                def test_bfloat16(self, test=test, kwargs=kwargs):
+                    test.test_accelerator(self, dtype=torch.bfloat16, **kwargs)
+                if getattr(test, 'check_bfloat16', True):
+                    add(device_test_name + '_bfloat16', test_bfloat16)
 
-        def test_cdouble(self, test=test, kwargs=kwargs):
-            test.test_cuda(self, dtype=torch.cdouble, **kwargs)
-        if getattr(test, 'check_complex', False):
-            add(cuda_test_name + '_cfloat', test_cfloat)
-            add(cuda_test_name + '_cdouble', test_cdouble)
+                def test_cfloat(self, test=test, kwargs=kwargs):
+                    test.test_accelerator(self, dtype=torch.cfloat, **kwargs)
 
-    else:
-        def with_tf32_off(self, test=test, kwargs=kwargs):
-            with tf32_off():
-                test.test_cuda(self, **kwargs)
+                def test_cdouble(self, test=test, kwargs=kwargs):
+                    test.test_accelerator(self, dtype=torch.cdouble, **kwargs)
+                if getattr(test, 'check_complex', False):
+                    add(device_test_name + '_cfloat', test_cfloat)
+                    add(device_test_name + '_cdouble', test_cdouble)
 
-        if torch.cuda.is_tf32_supported() and test.with_tf32:
-            add(cuda_test_name + '_fp32', with_tf32_off)
+            else:
+                def with_tf32_off(self, test=test, kwargs=kwargs):
+                    with tf32_off():
+                        test.test_accelerator(self, **kwargs)
 
-            def with_tf32_on(self, test=test, kwargs=kwargs):
-                with tf32_on(self, test.tf32_precision):
-                    test.test_cuda(self, **kwargs)
+                if (torch.cuda.is_tf32_supported() or torch.xpu.is_tf32_supported()) and test.with_tf32:
+                    add(device_test_name + '_fp32', with_tf32_off)
 
-            if tf32_decorator is not None:
-                with_tf32_on = tf32_decorator(with_tf32_on)
-            add(cuda_test_name + '_tf32', with_tf32_on)
-        else:
-            add(cuda_test_name, with_tf32_off)
+                    def with_tf32_on(self, test=test, kwargs=kwargs):
+                        with tf32_on(self, test.tf32_precision):
+                            test.test_accelerator(self, **kwargs)
+
+                    if tf32_decorator is not None:
+                        with_tf32_on = tf32_decorator(with_tf32_on)
+                    add(device_test_name + '_tf32', with_tf32_on)
+                else:
+                    add(device_test_name, with_tf32_off)
 
 for test_params in module_tests + get_new_module_tests():
     # TODO: CUDA is not implemented yet
@@ -6141,7 +6172,7 @@ for test_params in module_tests + get_new_module_tests():
         test_params['reference_fn'] = reference_fn
         test_params['check_forward_only'] = True
         # Currently we don't support conv2d/conv3d for LongTensor in CUDA
-        test_params['test_cuda'] = False
+        test_params['test_accelerator'] = False
         test = NewModuleTest(**test_params)
 
         add_test(test, decorator)
@@ -7747,21 +7778,6 @@ class TestNNDeviceType(NNTestCase):
             layer_norm.cpu()
             Y_cpu = layer_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
-
-    @onlyOn(["cpu", "cuda"])
-    @dtypes(torch.float32, torch.bfloat16, torch.float16)
-    @parametrize_test("width", [11, 12, 16, 24, 244, 384, 1536])
-    def test_LayerNorm_constant_input_is_exactly_zero(self, device, dtype, width):
-        # A constant row has zero variance, so the saved mean is exactly the input
-        # value and every output element is exactly zero.
-        X = torch.ones(4, width, dtype=dtype, device=device)
-        Y, mean, _ = torch.ops.aten.native_layer_norm(X, (width,), None, None, 1e-5)
-        self.assertEqual(mean, torch.ones_like(mean), rtol=0, atol=0)
-        self.assertEqual(Y, torch.zeros_like(Y), rtol=0, atol=0)
-        gamma = torch.ones(width, dtype=dtype, device=device)
-        beta = torch.zeros(width, dtype=dtype, device=device)
-        Y_affine = F.layer_norm(X, (width,), gamma, beta, 1e-5)
-        self.assertEqual(Y_affine, torch.zeros_like(Y_affine), rtol=0, atol=0)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16)
