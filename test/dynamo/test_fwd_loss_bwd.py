@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
 import copy
 import functools
 import gc
@@ -20,6 +21,7 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch.testing._internal.common_utils import (
+    CrossRefMode,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -160,6 +162,7 @@ class <lambda>(torch.nn.Module):
             OrderedDict,
             functools.partial(defaultdict, None),
             MappingProxyType,
+            *([torch._frozendict] if torch._has_frozendict else []),
         ],
     )
     def test_autograd_grad_dict_inputs(self, mapping_cls):
@@ -255,9 +258,10 @@ class <lambda>(torch.nn.Module):
         gc.collect()
         self.assertIsNone(ref())
 
-    @parametrize("backward", [False, True])
+    @parametrize("api", ["grad", "backward", "backward_positional", "tensor_backward"])
     @parametrize("override", ["items", "values"])
-    def test_autograd_external_mapping_proxy_overrides(self, backward, override):
+    @parametrize("use_mode", [False, True])
+    def test_autograd_external_mapping_proxy_overrides(self, api, override, use_mode):
         class Inputs(OrderedDict):
             def items(self):
                 if override == "items":
@@ -271,8 +275,14 @@ class <lambda>(torch.nn.Module):
 
         def fn(x, y, inputs):
             loss = 2 * x + 3 * y
-            if backward:
+            if api == "tensor_backward":
                 loss.backward(inputs=inputs)
+                return x.grad, y.grad
+            if api == "backward":
+                torch.autograd.backward(loss, inputs=inputs)
+                return x.grad, y.grad
+            if api == "backward_positional":
+                torch.autograd.backward(loss, None, None, False, None, inputs)
                 return x.grad, y.grad
             return torch.autograd.grad(loss, inputs)
 
@@ -281,7 +291,8 @@ class <lambda>(torch.nn.Module):
             y = torch.tensor(7.0, requires_grad=True)
             return fn(x, y, MappingProxyType(Inputs(x=x, y=y)))
 
-        self.assertEqual(run(torch.compile(fn, backend="eager")), run(fn))
+        with CrossRefMode() if use_mode else contextlib.nullcontext():
+            self.assertEqual(run(torch.compile(fn, backend="eager")), run(fn))
 
     @parametrize("backward", [False, True])
     def test_autograd_mapping_proxy_mutation(self, backward):
@@ -301,6 +312,7 @@ class <lambda>(torch.nn.Module):
 
         self.assertEqual(run(torch.compile(fn, backend="eager")), run(fn))
 
+    @skipIfCrossRef
     @parametrize("proxy", [False, True])
     def test_backward_mapping_values_override(self, proxy):
         class Inputs(OrderedDict):
@@ -352,6 +364,7 @@ class <lambda>(torch.nn.Module):
             OrderedDict,
             functools.partial(defaultdict, None),
             MappingProxyType,
+            *([torch._frozendict] if torch._has_frozendict else []),
         ],
     )
     def test_backward_dict_inputs(self, mapping_cls):

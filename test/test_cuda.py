@@ -18,6 +18,7 @@ import unittest
 import warnings
 import weakref
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from copy import deepcopy
 from itertools import product
 from random import randint
@@ -14168,6 +14169,75 @@ class TestLocalizedAllocatorCallbacks(TestCase):
 
 instantiate_parametrized_tests(TestLocalizedAllocatorCallbacks)
 instantiate_device_type_tests(TestLocalizedAllocator, globals(), only_for="cuda")
+
+
+class TestGreenContextStreamPool(TestCase):
+    @parametrize("fail_first", [False, True])
+    def test_concurrent_stream_pool_initialization(self, fail_first: bool) -> None:
+        from torch.cuda import green_contexts
+
+        ctx = object.__new__(green_contexts.GreenContext)
+        ctx._init_from_cuda_objects(0, 1, 1)
+        creating = threading.Event()
+        release = threading.Event()
+        requesting = threading.Event()
+        created = []
+        pool_size = green_contexts._STREAMS_PER_GREEN_CONTEXT_POOL
+
+        def create_stream(*args) -> int:
+            handle = len(created) + 1
+            created.append(handle)
+            if handle == 1:
+                creating.set()
+                if not release.wait(10):
+                    raise RuntimeError("timed out waiting to publish the first stream")
+                if fail_first:
+                    raise RuntimeError("creation failed")
+            return handle
+
+        def wrap_pool() -> list[torch.cuda.Stream]:
+            requesting.set()
+            return [ctx.Stream() for _ in range(pool_size + 1)]
+
+        try:
+            with (
+                patch.object(green_contexts, "_drv") as driver,
+                patch.object(
+                    green_contexts, "_check_cuda_bindings", side_effect=lambda x: x
+                ),
+                patch(
+                    "torch.cuda.ExternalStream",
+                    side_effect=lambda stream, device: stream,
+                ),
+                ThreadPoolExecutor(max_workers=2) as executor,
+            ):
+                driver.cuGreenCtxStreamCreate.side_effect = create_stream
+                first = executor.submit(ctx.Stream)
+                try:
+                    self.assertTrue(creating.wait(10))
+                    rest = executor.submit(wrap_pool)
+                    self.assertTrue(requesting.wait(10))
+                    with self.assertRaises(FutureTimeoutError):
+                        rest.result(timeout=0.1)
+                finally:
+                    release.set()
+                if fail_first:
+                    with self.assertRaisesRegex(RuntimeError, "creation failed"):
+                        first.result(timeout=10)
+                    expected = list(range(2, pool_size + 2)) + [2]
+                else:
+                    self.assertEqual(first.result(timeout=10), 1)
+                    expected = list(range(2, pool_size + 1)) + [1, 2]
+                self.assertEqual(rest.result(timeout=10), expected)
+                self.assertEqual(created, list(range(1, pool_size + 1 + fail_first)))
+                self.assertTrue(
+                    all(stream is not None for stream in ctx._green_ctx_streams)
+                )
+        finally:
+            ctx._green_ctx = None
+
+
+instantiate_parametrized_tests(TestGreenContextStreamPool)
 
 
 class TestCudaArchList(TestCase):
