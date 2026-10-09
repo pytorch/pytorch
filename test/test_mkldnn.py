@@ -23,7 +23,8 @@ from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
     run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
     skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision, \
-    parametrize, instantiate_parametrized_tests, HardwareClassification
+    parametrize, instantiate_parametrized_tests, HardwareClassification, \
+    expectedIfCppFakeTensor
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -852,7 +853,7 @@ class TestMkldnn(TestCase):
                 self.assertEqual(y1, y2.to_dense())
 
     # https://github.com/pytorch/pytorch/issues/127111
-    @xfailIfTorchDynamo
+    @expectedIfCppFakeTensor(lambda fn: fn, xfailIfTorchDynamo)
     def test_max_pool_unsupported(self):
         # OneDNN not support dilation max_pooling, will be avilabled in v2.0.
         N = torch.randint(3, 10, (1,)).item()
