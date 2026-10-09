@@ -21,7 +21,6 @@ enum class NcclEpLayout : int64_t {
 struct NcclEpGroup : c10::intrusive_ptr_target {
   void* group{nullptr}; // ncclEpGroup_t, opaque to avoid including nccl_ep.h
   std::string group_name;
-  c10::intrusive_ptr<::c10d::ProcessGroup> process_group;
 
   NcclEpGroup() = default;
   ~NcclEpGroup();
@@ -30,8 +29,6 @@ struct NcclEpGroup : c10::intrusive_ptr_target {
 struct NcclEpHandle : c10::intrusive_ptr_target {
   void* handle{nullptr}; // ncclEpHandle_t, opaque
   NcclEpLayout layout{NcclEpLayout::Unset}; // queried for output shapes
-  // Native handle destruction accesses the group's allocator and configuration.
-  c10::intrusive_ptr<NcclEpGroup> group;
   std::string group_name; // for symm_mem zero-copy rendezvous lookup
   // The library stashes topk_idx's device pointer on the handle (per nccl_ep.h:
   // "User-owned (do not free). LL reads directly; HT uses cached
@@ -44,13 +41,12 @@ struct NcclEpHandle : c10::intrusive_ptr_target {
   NcclEpHandle(
       void* handle,
       NcclEpLayout layout,
-      c10::intrusive_ptr<NcclEpGroup> group,
+      std::string group_name,
       at::Tensor topk_idx,
       at::Tensor recv_total_counter)
       : handle(handle),
         layout(layout),
-        group(std::move(group)),
-        group_name(this->group->group_name),
+        group_name(std::move(group_name)),
         topk_idx(std::move(topk_idx)),
         recv_total_counter(std::move(recv_total_counter)) {}
   ~NcclEpHandle();

@@ -97,7 +97,6 @@
 #                            vars are no longer used.
 #   NCCL_ROOT / NCCL_LIB_DIR / NCCL_INCLUDE_DIR   nccl location (read from env in
 #                            cmake/Modules/FindNCCL.cmake)
-#   NCCL_EP_SOURCE_DIR       optional native nccl-extensions/nccl_ep override (passthrough)
 #   ACL_ROOT_DIR             Arm Compute Library location (read from env in
 #                            cmake/Modules/FindACL.cmake)
 #   LIBRARY_PATH / LD_LIBRARY_PATH   searched for libraries (compiler/linker native)
@@ -154,7 +153,6 @@ set(_ENV_PASSTHROUGH
   MSVC_Z7_OVERRIDE
   CAFFE2_USE_MSVC_STATIC_RUNTIME
   CAFFE2_CUSTOM_PROTOC_EXECUTABLE
-  NCCL_EP_SOURCE_DIR
   Numa_INCLUDE_DIR
   Numa_LIBRARIES
   ONNX_ML
