@@ -406,7 +406,11 @@ template <
 inline float remainder(const T x, const U y) {
   const auto x_f = static_cast<float>(x);
   const auto y_f = static_cast<float>(y);
-  return x_f - y_f * floor_divide(x_f, y_f);
+  auto mod = ::metal::fmod(x_f, y_f);
+  if (mod != 0 && (y_f < 0) != (mod < 0)) {
+    mod += y_f;
+  }
+  return mod;
 }
 
 template <

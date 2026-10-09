@@ -931,7 +931,7 @@ def _sfdp_replacement_30(query, key, value, inv_scale):
 
 @functools.lru_cache(None)
 def _warn_tf32_disabled() -> None:
-    if torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0):
+    if torch.cuda.is_available() and torch.cuda.is_tf32_supported():
         perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Skipping pattern matching to fused flash-attention. "

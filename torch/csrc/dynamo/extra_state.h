@@ -45,6 +45,11 @@ typedef struct CacheEntry CacheEntry;
 // level of abstraction of what is stored on the extra code object. Previously,
 // we saved different parts on different extra indexes.  We prefer this way
 // because of cleaner abstraction and faster SetExtra access.
+//
+// Everything that reads or writes an ExtraState does so inside
+// extra_state.cpp.  An ExtraState* never leaves that file except through the
+// guard manager's back-references, so the API below is keyed on the code
+// object.
 
 #ifdef __cplusplus
 
@@ -91,57 +96,6 @@ typedef struct PrecompileEntry PrecompileEntry;
 
 #endif
 
-// Helper to extract the first cache_entry for a given isolate_recompiles scope.
-// Ownership contract
-// args
-//  - extra_state: Borrowed
-//  - isolate_recompiles_id: The scope to extract from (-1 = default)
-// return
-//  - CacheEntry: Borrowed.
-CacheEntry* extract_cache_entry(
-    ExtraState* extra_state,
-    int64_t isolate_recompiles_id);
-
-// Returns either the previously stored frame state or an empty dict.
-// Ownership contract
-// args
-//  - extra_state: Borrowed
-// return
-//  - extra_state->frame_state: Borrowed.
-FrameState* extract_frame_state(ExtraState* extra_state);
-
-// Returns the FrameExecStrategy stored in extra_state.
-// Ownership contract
-// args
-//  - extra_state: Borrowed
-FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state);
-
-// Set the FrameExecStrategy to be done to all frames with code object
-// corresponding to this extra_state. Ownership contract
-// - extra_state: Borrowed
-void extra_state_set_exec_strategy(
-    ExtraState* extra_state,
-    FrameExecStrategy strategy);
-
-// Get the exec strategy for a specific isolate_recompiles region. Global SKIP
-// actions override the region strategy; other global actions are not inherited.
-FrameExecStrategy extra_state_get_region_exec_strategy(
-    ExtraState* extra_state,
-    int64_t isolate_recompiles_id);
-
-// Set the exec strategy for a specific isolate_recompiles region.
-void extra_state_set_region_exec_strategy(
-    ExtraState* extra_state,
-    int64_t isolate_recompiles_id,
-    FrameExecStrategy strategy);
-
-// Ownership contract
-// args
-//  - code: Borrowed
-// return
-//  - extra_state: Borrowed.
-ExtraState* get_extra_state(PyCodeObject* code);
-
 // This is passed as freefunc to _PyEval_RequestCodeExtraIndex. This acts as a
 // deleter for the object on extra scratch space. This function is called
 // internally in _PyCode_SetExtra and also during the code deallocation.
@@ -173,27 +127,55 @@ void destroy_extra_state(void* obj);
 // scratch space.
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 
-// Creates a new extra state and put it on the extra scratch space of the code
-// object.
+// Extracts the backend fn from the callback.
+PyObject* get_backend(PyObject* callback);
 
-// Ownership contract
-// args
-//  - code: Borrowed
-// return:
-//   - extra_state: New reference.
-// These references are then further passed to set_extra_state which becomes
-// the final owner of these references.
-ExtraState* init_and_set_extra_state(PyCodeObject* code);
+#ifdef __cplusplus
 
-// Lookup the cache held by extra_state.
+} // extern "C"
+
+// What the Dynamo callback is handed.  cache_entry is borrowed and is only
+// valid until the code object's cache is reset.
+struct CompileInputs {
+  CacheEntry* cache_entry{nullptr};
+  py::object frame_state;
+};
+
+// Returns false when the code object has no cache state and create is false.
+// Otherwise installs a state if needed and returns the region's strategy:
+// global SKIP actions override the region strategy, other global actions are
+// not inherited.
+bool get_frame_exec_strategy(
+    PyCodeObject* code,
+    int64_t isolate_recompiles_id,
+    bool create,
+    FrameExecStrategy* strategy);
+
+// Sets the strategy for every frame of this code object.
+void set_code_exec_strategy(PyCodeObject* code, FrameExecStrategy strategy);
+
+// Try to resolve a cache lookup without materializing frame locals or running
+// guard managers. Returns true when the lookup is complete (hit or miss), and
+// false when the caller must fall back to lookup().
+bool try_lookup_without_guard_eval(
+    PyCodeObject* code,
+    PyObject* backend,
+    int64_t isolate_recompiles_id,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation,
+    bool is_skip_guard_eval_unsafe);
+
+// Lookup the cache held by a code object.
 // Ownership contract
-// args
-//  - extra_state: Borrowed
+// args:
+//   - code: Borrowed reference
+//   - f_locals: Borrowed reference
+//   - backend: Borrowed reference
 // return:
-//   - Py_None or PyCodeObject: Borrowed reference.
-//   - Py_None or PyObject: Trace id of the compiled code.
+//   - maybe_cached_code: Borrowed reference or Py_None
+//   - trace_annotation: Borrowed pointer to cache entry
 void lookup(
-    ExtraState* extra_state,
+    PyCodeObject* code,
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     int64_t isolate_recompiles_id,
@@ -201,35 +183,26 @@ void lookup(
     const char** trace_annotation,
     bool is_skip_guard_eval_unsafe);
 
-// Try to resolve a cache lookup without materializing frame locals or running
-// guard managers. Returns true when the lookup is complete (hit or miss), and
-// false when the caller must fall back to lookup().
-bool try_lookup_without_guard_eval(
-    ExtraState* extra_state,
-    PyObject* backend,
+// Whether the region or the default bucket has any entries, for
+// guard_complete_hook.
+bool has_relevant_cache_entries(
+    PyCodeObject* code,
+    int64_t isolate_recompiles_id);
+
+CompileInputs get_compile_inputs(
+    PyCodeObject* code,
+    int64_t isolate_recompiles_id);
+
+// Applies the callback's result: the new strategy when apply_to_code, and a
+// cache entry for guarded_code unless it is None.  Returns the new entry, or
+// null; it is borrowed and only valid until the code object's cache is reset.
+CacheEntry* record_compile_result(
+    PyCodeObject* code,
     int64_t isolate_recompiles_id,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe);
-
-// Create a new cache entry at extra_state holding on to guarded_code.
-// Ownership contract
-// args
-//  - extra_state: Borrowed
-//  - guarded_code: Borrowed
-// return:
-//  - cache_entry: Borrowed reference
-CacheEntry* create_cache_entry(
-    ExtraState* extra_state,
-    PyObject* guraded_code,
-    PyObject* callback);
-
-// Extracts the backend fn from the callback.
-PyObject* get_backend(PyObject* callback);
-
-#ifdef __cplusplus
-
-} // extern "C"
+    bool apply_to_code,
+    FrameExecStrategy new_strategy,
+    PyObject* guarded_code,
+    PyObject* backend);
 
 // Returns the list of CacheEntry corresponding to code_obj.
 // Warning: returns references whose lifetimes are controlled by C++

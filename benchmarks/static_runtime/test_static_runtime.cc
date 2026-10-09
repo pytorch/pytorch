@@ -2253,6 +2253,10 @@ TEST(StaticRuntime, Narrow) {
 
   testStaticRuntime(narrow_with_int_script, args_a);
   testStaticRuntime(narrow_with_int_script, args_a, args_b);
+
+  auto c = at::tensor({1, 2, 3, 4, 5, 6, 7, 8, 9}).reshape({3, 3});
+  std::vector<IValue> args_c{c, -1, -1, 1};
+  testStaticRuntime(narrow_with_int_script, args_c);
 }
 
 TEST(StaticRuntime, TupleUnpack) {

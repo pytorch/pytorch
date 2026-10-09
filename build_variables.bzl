@@ -558,6 +558,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.cpp",
     "torch/csrc/distributed/fsdp/ChunkCat.cpp",
+    "torch/csrc/distributed/fsdp/CollectiveCopy.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
@@ -1470,6 +1471,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Distance.cpp",
     "aten/src/ATen/native/Distributions.cpp",
     "aten/src/ATen/native/Dropout.cpp",
+    "aten/src/ATen/native/ElementwiseRefMeta.cpp",
     "aten/src/ATen/native/Embedding.cpp",
     "aten/src/ATen/native/EmbeddingBag.cpp",
     "aten/src/ATen/native/Fill.cpp",

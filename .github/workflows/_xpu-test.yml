@@ -85,6 +85,18 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
     steps:
+      # These runners are persistent and the test container bind-mounts the
+      # workspace, so a container-owned file left behind by an earlier job makes
+      # actions/checkout fail for every later job on the same host. Reclaim the
+      # workspace before anything else touches it.
+      - name: Reclaim workspace ownership
+        shell: bash
+        run: |
+          if sudo -n true 2>/dev/null; then
+            sudo chown -R "$(id -u):$(id -g)" "${GITHUB_WORKSPACE}" || true
+          fi
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -268,15 +280,17 @@ jobs:
           docker exec -t "${container_name}" sh -c "cd .. && sudo cp -R workspace pytorch && sudo chown -R jenkins:jenkins pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
 
       - name: Save test results
-        if: always()
+        if: ${{ always() && env.CONTAINER_NAME }}
         run: |
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
       - name: Change permissions
-        if: ${{ always() && steps.test.conclusion }}
+        if: ${{ always() && env.CONTAINER_NAME }}
         run: |
-          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1000:1000 test"
+          # The container's jenkins user is uid 1001, which does not necessarily
+          # match the uid owning the workspace on these hosts.
+          docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R $(id -u):$(id -g) test" || true
 
       - name: Print remaining test logs
         shell: bash
@@ -318,7 +332,7 @@ jobs:
           find . -iname "core.[1-9]*" -exec docker exec "${CONTAINER_NAME}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
 
       - name: Stop container before exit
-        if: always()
+        if: ${{ always() && env.CONTAINER_NAME }}
         run: |
           # Workaround for multiple runners on same IDC node
           docker stop "${{ env.CONTAINER_NAME }}"

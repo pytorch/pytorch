@@ -1982,6 +1982,7 @@ class PythonWrapperCodegen(CodeGen):
     """
 
     supports_caching: bool = True  # Whether the output code is cacheable.
+    preserve_zero_dim_tensor_args: bool = False
 
     def __init__(self):
         super().__init__()
@@ -2334,8 +2335,16 @@ class PythonWrapperCodegen(CodeGen):
 
     @cache_on_self
     def get_output_refs(self) -> list[str]:
+        # Graph partition returns the mutated buffer, so the mutating op's name is
+        # only bound inside the partition function.
+        scheduler = V.graph.scheduler
+        mutations = scheduler.mutation_real_name.items() if scheduler else ()
+        # A mutated graph input may already be freed, since only the mutating op's
+        # buffer is tracked for liveness.
+        real_names = {k: v for k, v in mutations if v in V.graph.name_to_buffer}
         return [
-            x.codegen_reference(self.wrapper_call) for x in self.get_graph_outputs()
+            real_names.get(ref := x.codegen_reference(self.wrapper_call), ref)
+            for x in self.get_graph_outputs()
         ]
 
     def mark_output_type(self) -> None:

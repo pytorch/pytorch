@@ -190,6 +190,8 @@ struct C10_API PyInterpreterVTable {
   virtual c10::SymInt sym_numel(const TensorImpl* self) const = 0;
   virtual c10::SymIntArrayRef sym_strides(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_storage_offset(const TensorImpl* self) const = 0;
+  // torch.fx.experimental._config.backed_size_oblivious
+  virtual bool backed_size_oblivious() const = 0;
 
   virtual void trace_gpu_event_creation(
       c10::DeviceType device_type,

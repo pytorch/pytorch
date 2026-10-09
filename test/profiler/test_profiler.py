@@ -54,9 +54,9 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipIf,
+    skipXPUIf,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
+from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
+    TEST_XPU,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -93,7 +94,7 @@ def get_profiler_activities(device_type):
 
 
 def setUpModule():
-    initialize_kineto_with_cuda()
+    initialize_kineto_with_accelerator()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -1254,6 +1255,22 @@ class TestProfiler(TestCase):
                 )
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
 
+    def test_profiler_left_running_at_exit(self):
+        # A profiler that is never stopped (e.g. an exception between start() and
+        # stop()) used to segfault during static destruction: ~ProfilerStateBase
+        # soft-asserted through libkineto after libkineto's singleton was gone.
+        script = """
+import torch
+from torch.profiler import profile, ProfilerActivity
+p = profile(activities=[ProfilerActivity.CPU])
+p.start()
+torch.ones(10) * 2
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     def test_profiler_disable_fwd_bwd_link(self):
         try:
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
@@ -2173,6 +2190,12 @@ with open(sys.argv[1], "w") as f:
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
+    # The child deadlocks once the parent has initialized Kineto's XPU profiler,
+    # which setUpModule does on any XPU build.
+    @unittest.skipIf(
+        TEST_XPU,
+        "os.fork() deadlocks after Kineto XPU init! Refer https://github.com/intel/torch-xpu-ops/issues/5287",
+    )
     def test_forked_process(self):
         def validate_forked_json(profiler):
             nonlocal cpu_op_found, parent_tid, child_pid
@@ -2373,7 +2396,7 @@ class TestProfilerDevice(TestCase):
                 found_gemm = True
             if "memcpy" in e.name.lower() or "__amd_rocclr_copyBuffer" in e.name:
                 found_memcpy = True
-        if device_type in ("cuda",):
+        if device_type in ("cuda", "xpu"):
             self.assertTrue(found_gemm)
             self.assertTrue(found_memcpy)
         else:
@@ -2914,11 +2937,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
         event_list.table()
 
-    @skipIf(
-        True,
-        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
-        device_type="xpu",
-    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self, device):
@@ -3119,6 +3137,10 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
         self.assertEqual(len(p.events()), 0)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180072")
+    @skipXPUIf(
+        True,
+        "XPU kernel args lack stream/grid/block! Refer https://github.com/intel/torch-xpu-ops/issues/5284",
+    )
     @onlyAccelerator
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto_kernel_metadata_in_trace(self, device):
@@ -3189,7 +3211,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             )
 
 
-instantiate_device_type_tests(TestProfilerDevice, globals())
+instantiate_device_type_tests(TestProfilerDevice, globals(), allow_xpu=True)
 
 
 @instantiate_parametrized_tests
@@ -4970,7 +4992,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
     """Inline CUDA-graph annotations, driven through stub activities so the branches
     are covered without a capture or a live profiler."""
 
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.GENERIC
 
     def _export(self, activities, **kwargs):
         from torch.profiler._chrome_trace_export import export_chrome_trace
@@ -5168,7 +5190,7 @@ class TestChromeTraceInlineAnnotations(TestCase):
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestMetadataJsonFormat(TestCase):
+class TestMetadataJsonFormatCUDA(TestCase):
     """Guard the format of ITraceActivity.metadataJson() for kernel events.
 
     The Python-side chrome trace exporter splices metadataJson() verbatim

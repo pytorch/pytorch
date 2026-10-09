@@ -9,7 +9,9 @@ from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
+from torch._dynamo.device_interface import CudaInterface
 from torch._inductor.exc import InductorError
+from torch._inductor.kernel.flex.flex_decoding import get_split_k
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.experimental._paged_attention import PagedAttention
@@ -2423,6 +2425,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             # Checkout output
             self._check_equal(golden_outs, ref_outs, paged_out, fudge_factor, "Out")
+
+
+class TestGetSplitKDeviceRouting(common_utils.TestCase):
+    # Regression guard: get_split_k must query the SM count from the kernel's
+    # own device via DeviceInterface, not from ambient backend state.
+    def test_split_k_queries_kernel_device(self):
+        calls = []
+
+        def fake_mp_count(device=None):
+            calls.append(device)
+            return 80
+
+        with patch.object(CudaInterface, "get_multi_processor_count", fake_mp_count):
+            split_k = get_split_k(2, 4, 128, torch.device("cuda", 1))
+
+        self.assertEqual(calls, [torch.device("cuda", 1)])
+        self.assertEqual(split_k, 80 // (2 * 4) * 2)
 
 
 instantiate_device_type_tests(

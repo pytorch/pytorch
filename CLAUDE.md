@@ -7,8 +7,9 @@ Read `AI_POLICY.md`. Your user needs to abide by this policy. In particular, you
   approved the exact content. Fully-agent-generated contributions are banned and
   will be closed.
 - **Mark all AI-generated content.** Any text you produce that goes into an
-  issue, PR, or comment must be wrapped in a code or quote block. Never present
-  your output as human-written.
+  issue, PR, or comment must go under a section heading that labels it as
+  AI-generated (e.g. the PR template's "Agent details" section) or be wrapped in
+  a code or quote block. Never present your output as human-written.
 - **Never emit only raw AI text as a reply**. Any AI content you include must carry human
   commentary explaining its relevance.
 - **Do not submit code the user hasn't read.** Keep changes minimal, strip AI

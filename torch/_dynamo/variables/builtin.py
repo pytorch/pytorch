@@ -3045,21 +3045,24 @@ class BuiltinVariable(BaseBuiltinVariable):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        # Mirror CPython getattr on a builtin function/type: raise AttributeError
-        # for a missing attribute, resolve literal introspection attributes
-        # (__doc__, __module__, __qualname__, __type_params__) to real guarded
-        # values so they are usable during tracing, and defer everything else
-        # (callables, complex objects) to a GetAttrVariable.
+        # Declarative type-attribute dispatch (__name__, __bases__, __base__,
+        # __flags__), mirroring the consultation at the top of
+        # VariableTracker.getattro_impl. Inlined because this override keeps its
+        # own object / GetAttrVariable handling below instead of delegating.
         source = self.source and AttrSource(self.source, name)
+        if self.fn is object:
+            # for object, we can just directly read the attribute
+            try:
+                value = getattr(self.fn, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+            if not callable(value):
+                return VariableTracker.build(tx, value, source)
         try:
-            value = getattr(self.fn, name)
-        except AttributeError as exc:
-            raise_observed_exception(AttributeError, tx, args=list(exc.args))
-        if self.fn is object and not callable(value):
-            return VariableTracker.build(tx, value, source)
-        if ConstantVariable.is_literal(value):
-            return VariableTracker.build(tx, value, source)
-        return variables.GetAttrVariable(self, name, py_type=type(value), source=source)
+            attr = getattr(self.fn, name)
+        except AttributeError as e:
+            raise_observed_exception(AttributeError, tx, args=list(e.args))
+        return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_delattr(
         self,

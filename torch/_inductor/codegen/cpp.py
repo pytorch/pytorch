@@ -5118,6 +5118,7 @@ class CppScheduling(BaseScheduling):
     MAX_FUSED_KERNEL_ARGS_NUM = 500
     backend_features = OrderedSet(
         [
+            BackendFeature.INDIRECT_INDEXING,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
         ]
@@ -5728,13 +5729,16 @@ class CppScheduling(BaseScheduling):
                             def is_contiguous_index(x):
                                 return x == contiguous_index_expr
 
+                            # Users of a mutation output load the mutated buffer's
+                            # name, so they may have no read of this buffer.
                             return is_contiguous_index(write_index_expr) and all(
                                 isinstance(user.node, SchedulerNode)
-                                and is_contiguous_index(
-                                    user.node._body.get_read_expr(
+                                and (
+                                    read_exprs := user.node._body.get_all_read_expr(
                                         scheduler_buffer.get_name()
-                                    ),
+                                    )
                                 )
+                                and is_contiguous_index(read_exprs[0])
                                 for user in scheduler_buffer.users
                             )
 

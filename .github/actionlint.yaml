@@ -66,6 +66,7 @@ self-hosted-runner:
     - linux.rocm.mi210.docker-cache
     # gfx942 runners
     - linux.rocm.gpu.mi300.1
+    - linux.rocm.gpu.mi300.2
     - linux.rocm.gpu.mi300.4
     # gfx950 runners
     - linux.rocm.gpu.gfx950.1

@@ -77,12 +77,69 @@ class PyProcessGroup : public ProcessGroup {
       pyWork_ = py::object();
     }
 
+    // Work::synchronize unregisters this holder, which is what ProcessGroup
+    // registered, from the work registry.
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
-      return work_->wait(timeout);
+      auto completed = work_->wait(timeout);
+      Work::synchronize();
+      return completed;
+    }
+
+    void synchronize() override {
+      work_->synchronize();
+      Work::synchronize();
+    }
+
+    bool isCompleted() override {
+      return work_->isCompleted();
+    }
+
+    bool isSuccess() const override {
+      return work_->isSuccess();
+    }
+
+    std::exception_ptr exception() const override {
+      return work_->exception();
+    }
+
+    int sourceRank() const override {
+      return work_->sourceRank();
+    }
+
+    std::vector<at::Tensor> result() override {
+      return work_->result();
+    }
+
+    void blockCurrentStream() override {
+      work_->blockCurrentStream();
+    }
+
+    void abort() override {
+      work_->abort();
     }
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
       return work_->getFuture();
+    }
+
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override {
+      return work_->getFutureResult();
+    }
+
+    float getDuration() const override {
+      return work_->getDuration();
+    }
+
+    uint64_t getSequencenumber() const override {
+      return work_->getSequencenumber();
+    }
+
+    std::chrono::milliseconds getTimeout() const override {
+      return work_->getTimeout();
+    }
+
+    uint64_t getCompletionKey() const override {
+      return work_->getCompletionKey();
     }
 
    private:

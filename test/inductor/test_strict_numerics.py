@@ -279,6 +279,55 @@ class StrictNumericsCompileTest(TestCase):
         self.assertIn("libdevice.rcp_rn", code)
         self.assertNotIn("tl.sigmoid", code)
 
+    @ops(
+        [op for op in op_db if op.name == "nn.functional.relu"],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_relu_shared_predicate(self, device, dtype, op, numerics, upcast):
+        if dtype in (torch.float16, torch.bfloat16):
+            x = _exhaustive_16bit(dtype, device)
+        elif dtype == torch.float32:
+            x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)
+        else:
+            bits = torch.tensor(
+                [
+                    0,
+                    1,
+                    0x0010000000000000,
+                    0x3FF0000000000000,
+                    0x7FEFFFFFFFFFFFFF,
+                    0x7FF0000000000000,
+                    0x7FF0000000000001,
+                    0x7FF8123456789ABC,
+                    0x7FFFFFFFFFFFFFFF,
+                ],
+                dtype=torch.int64,
+                device=device,
+            )
+            x = torch.cat((bits, bits | torch.iinfo(torch.int64).min)).view(dtype)
+
+        def fn(x):
+            return op.op(x), x < 0
+
+        (result, negative), codes = run_and_get_code(
+            torch.compile(
+                fn,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+        )
+        expected, expected_negative = fn(x)
+        int_dtype = _BIT_VIEW[dtype]
+        self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+        self.assertEqual(negative, expected_negative)
+        self.assertIn("tl.where", "\n".join(codes))
+
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
         x = torch.full((1024,), 11.0, device=device)
@@ -912,9 +961,6 @@ POINTWISE_XFAIL = frozenset(
         ("nn_functional_relu6", "bfloat16"),
         ("nn_functional_relu6", "float16"),
         ("nn_functional_relu6", "float32"),
-        ("nn_functional_relu", "bfloat16"),
-        ("nn_functional_relu", "float16"),
-        ("nn_functional_relu", "float32"),
         ("nn_functional_softplus", "float32"),
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),

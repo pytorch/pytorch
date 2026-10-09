@@ -950,7 +950,20 @@ def trace_frame(
     def run_tracer() -> None:
         try:
             tracer.output.mark_bytecode_tracing_start()
-            with tracing(tracer.output.tracing_context), tracer.set_current_tx():
+            # An fx annotation active when this frame starts (e.g. an annotated
+            # caller that graph-broke into this frame) applies to every node it
+            # traces. OutputGraph guards on it, so the graph is not reused under
+            # a different annotation.
+            preserve_ambient_annotation = (
+                torch.fx.traceback.preserve_node_meta()
+                if tracer.output.fx_annotation
+                else contextlib.nullcontext()
+            )
+            with (
+                tracing(tracer.output.tracing_context),
+                tracer.set_current_tx(),
+                preserve_ambient_annotation,
+            ):
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()  # type: ignore[has-type]

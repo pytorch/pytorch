@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import copy
 import glob
+import importlib.util
 import json
 import os
 import platform
@@ -96,6 +97,10 @@ except ImportError:
 
     def upload_adhoc_failure_json(*args, **kwargs):
         pass
+
+
+# The installed torch (sometimes a nightly) may predate the test run report writer.
+HAS_TORCHCI_REPORTS = bool(importlib.util.find_spec("torch.testing._internal.torchci"))
 
 
 from torch.testing._internal.common_utils import HardwareClassification
@@ -315,7 +320,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
-    "test_cuda_trace",
+    "test_gpu_trace",
     "inductor/test_benchmark_fusion",
     "test_cuda_nvml_based_avail",
     # temporarily sets a global config
@@ -521,6 +526,12 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     return executable
 
 
+def _torchci_report_args(reports_dir: str | None) -> list[str]:
+    if not HAS_TORCHCI_REPORTS or not reports_dir:
+        return []
+    return [f"--save-torchci-reports={reports_dir}"]
+
+
 def run_test(
     test_module: ShardedTest,
     test_directory,
@@ -597,6 +608,9 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    if not is_cpp_test:
+        unittest_args.extend(_torchci_report_args(options.save_torchci_reports))
 
     if options.hw_classification:
         # forward hw classification filter to test subprocess
@@ -1473,13 +1487,17 @@ def run_ci_sanity_check(test: ShardedTest, test_directory, options):
         os.remove(file)
     for dirname in glob.glob(f"{test_reports_dir}/**/{test.name}"):
         shutil.rmtree(dirname)
+    if options.save_torchci_reports:
+        name = sanitize_test_filename(test.name)
+        for file in glob.glob(f"{options.save_torchci_reports}/{name}-*.report.jsonl"):
+            os.remove(file)
     return 0
 
 
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
     "test_cuda_nvml_based_avail": run_test_with_subprocess,
-    "test_cuda_trace": run_test_with_subprocess,
+    "test_gpu_trace": run_test_with_subprocess,
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
@@ -1651,6 +1669,13 @@ def parse_args():
         action="store_true",
         help="enable coverage",
         default=PYTORCH_COLLECT_COVERAGE,
+    )
+    parser.add_argument(
+        "--save-torchci-reports",
+        # Absolute, since tests run from test/.
+        type=os.path.abspath,
+        metavar="DIR",
+        help="write test run reports to DIR",
     )
     parser.add_argument(
         "-i",

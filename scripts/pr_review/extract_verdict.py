@@ -892,9 +892,9 @@ def build(obj: dict, touched: dict[str, set[int]]) -> dict:
 
     # And the other direction, which is the one an attacker wants. A clean
     # verdict alongside a `major` finding is a contradiction the rubric forbids
-    # ("say ready_for_human_review when no major finding is present"), and the
-    # publish job acts on the VERDICT, not on the findings — so it would move
-    # the PR to the terminal label while the artifact records a major problem
+    # ("say ready_for_human_review when no major finding is present"), and
+    # Dr. CI acts on the recorded VERDICT, not on the findings - so it would
+    # mark the PR ready for review while the artifact records a major problem
     # nothing downstream reads.
     #
     # Read off the CLAIM, not off `kept`, and that distinction is the whole
