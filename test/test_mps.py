@@ -17763,6 +17763,161 @@ class TestCommon(TestCase):
             cpu_tensor = ones("cpu")
             self.assertEqual(mps_tensor.cpu(), cpu_tensor)
 
+class TestAdaptiveAvgPool2dIndexing(TestCase):
+    @classmethod
+    def _library(cls):
+        if not hasattr(cls, "_pooling_library"):
+            path = os.path.join(_CONFORMANCE_REPO_ROOT, "aten/src/ATen/native/mps/kernels/AdaptivePooling.metal")
+            cls._pooling_library = torch.mps.compile_shader(embed_headers(path))
+        return cls._pooling_library
+
+    def _dispatch(self, phase, index_type, source, destination):
+        input, output = (source, destination) if phase == "forward" else (destination, source)
+        batched = input.ndim == 4
+        input_strides = list(input.stride()) if batched else [0, *input.stride()]
+        output_strides = list(output.stride()) if batched else [0, *output.stride()]
+        params = [input.size(0) if batched else 1, input.size(-3),
+                  *input.shape[-2:], *output.shape[-2:], *input_strides, *output_strides]
+        metal_type = {torch.float32: "float", torch.float16: "half", torch.bfloat16: "bfloat"}[input.dtype]
+        kernel = getattr(self._library(), f"adaptive_avg_pool2d_{phase}_{metal_type}_{index_type}")
+        kernel(source, destination, params, threads=destination.numel(),
+               group_size=min(destination.numel(), kernel.max_threads_per_threadgroup))
+
+    def _assert_bitwise_equal(self, actual, expected):
+        self.assertEqual(actual.cpu().contiguous().view(torch.uint8),
+                         expected.cpu().contiguous().view(torch.uint8))
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("shape,output_size,layout", [
+        ((2, 7, 9), (3, 4), "contiguous"),
+        ((2, 3, 7, 9), (3, 4), "channels_last"),
+        ((2, 3, 3, 5), (7, 9), "transpose"),
+        ((2, 3, 5), (7, 9), "slice"),
+        ((2, 3, 7, 3), (3, 7), "expand"),
+        ((3, 7, 3), (3, 7), "transpose"),
+    ])
+    def test_adaptive_avg_pool2d_index_specializations(self, device, dtype, shape, output_size, layout):
+        # Compile the actual production shader to compare both index types,
+        # including their stride/offset parameter ABI, with the native dispatch.
+        base_shape = list(shape)
+        if layout == "transpose":
+            base_shape[-2], base_shape[-1] = base_shape[-1], base_shape[-2]
+        elif layout == "slice":
+            base_shape[-2], base_shape[-1] = 2 * shape[-2] + 1, 2 * shape[-1] + 1
+        elif layout == "expand":
+            base_shape[-2] = 1
+
+        def view(base):
+            if layout == "transpose":
+                return base.transpose(-1, -2)
+            if layout == "slice":
+                return base[..., 1::2, 1::2]
+            if layout == "expand":
+                return base.expand(shape)
+            return base
+
+        cpu_base = make_tensor(base_shape, device="cpu", dtype=dtype)
+        if layout == "channels_last":
+            cpu_base = cpu_base.contiguous(memory_format=torch.channels_last)
+        base = cpu_base.to(device).requires_grad_()
+        cpu_base.requires_grad_()
+        input, cpu_input = view(base), view(cpu_base)
+        output_shape = (*shape[:-2], *output_size)
+        grad_storage = make_tensor((*shape[:-2], 2 * output_size[1] + 1, 2 * output_size[0] + 1),
+                                   device="cpu", dtype=dtype)
+        grad_output = grad_storage.to(device)[..., 1::2, 1::2].transpose(-1, -2)
+        cpu_grad_output = grad_storage[..., 1::2, 1::2].transpose(-1, -2)
+        ref_input = cpu_input.detach().float().requires_grad_()
+        ref_output = F.adaptive_avg_pool2d(ref_input, output_size)
+        ref_grad = torch.autograd.grad(ref_output, ref_input, cpu_grad_output.float())[0]
+        # Pool backward rounds to input dtype before an expanded view's reduction.
+        ref_leaf_grad = torch.autograd.grad(cpu_input, cpu_base, ref_grad.to(dtype))[0]
+        output = F.adaptive_avg_pool2d(input, output_size)
+        grad_input, leaf_grad = torch.autograd.grad(output, (input, base), grad_output)
+        self.assertEqual(output, ref_output.to(dtype))
+        self.assertEqual(grad_input, ref_grad.to(dtype))
+        self.assertEqual(leaf_grad, ref_leaf_grad)
+
+        for index_type in ("uint", "ulong"):
+            with self.subTest(index_type=index_type):
+                storage = torch.full((*output_shape[:-1], 2 * output_shape[-1] + 1),
+                                     math.nan, device=device, dtype=dtype)
+                strided_output = storage[..., 1::2]
+                self._dispatch("forward", index_type, input, strided_output)
+                self._assert_bitwise_equal(strided_output, output)
+                self.assertTrue(torch.isnan(storage[..., ::2]).all())
+
+                grad_storage = torch.full((*shape[:-1], 2 * shape[-1] + 1),
+                                          math.nan, device=device, dtype=dtype)
+                strided_grad_input = grad_storage[..., 1::2]
+                self._dispatch("backward", index_type, grad_output, strided_grad_input)
+                self._assert_bitwise_equal(strided_grad_input, grad_input)
+                self.assertTrue(torch.isnan(grad_storage[..., ::2]).all())
+
+        storage.fill_(math.nan)
+        strides = strided_output.stride()
+        result = torch.ops.aten.adaptive_avg_pool2d.out(input.detach(), output_size, out=strided_output)
+        self.assertEqual(result.data_ptr(), strided_output.data_ptr())
+        self.assertEqual(result.stride(), strides)
+        self._assert_bitwise_equal(result, output)
+        self.assertTrue(torch.isnan(storage[..., ::2]).all())
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("height,output_height", [(65535, 65536), (65536, 65537), (65536, 65536)])
+    def test_adaptive_avg_pool2d_index_boundary(self, device, dtype, height, output_height):
+        # The nondivisible cases exceed the uint endpoint bound with small tensors.
+        # 65536 -> 65537 also overflows uint after the endpoint's subtraction.
+        # 65536 -> 65536 is an identity control for the existing divisible path.
+        cpu_input = make_tensor((1, 1, height, 1), device="cpu", dtype=dtype)
+        input = cpu_input.to(device).requires_grad_()
+        grad_output = make_tensor((1, 1, output_height, 1), device=device, dtype=dtype)
+        ref_input = cpu_input.float().requires_grad_()
+        ref_output = F.adaptive_avg_pool2d(ref_input, (output_height, 1))
+        ref_grad = torch.autograd.grad(ref_output, ref_input, grad_output.cpu().float())[0]
+        output = F.adaptive_avg_pool2d(input, (output_height, 1))
+        grad_input = torch.autograd.grad(output, input, grad_output)[0]
+        self.assertEqual(output, ref_output.to(dtype))
+        self.assertEqual(grad_input, ref_grad.to(dtype))
+        if height != output_height:
+            expected_output, expected_grad = torch.empty_like(output), torch.empty_like(input)
+            self._dispatch("forward", "ulong", input, expected_output)
+            self._dispatch("backward", "ulong", grad_output, expected_grad)
+            self._assert_bitwise_equal(output, expected_output)
+            self._assert_bitwise_equal(grad_input, expected_grad)
+
+    @parametrize("shape,output_size", [((2, 3, 7, 9), (3, 4)), ((1, 1, 65536, 1), (65537, 1))])
+    def test_adaptive_avg_pool2d_index_gradgrad(self, device, shape, output_size):
+        # Exercise higher-order autograd through both nondivisible index paths.
+        cpu_input = make_tensor(shape, device="cpu", dtype=torch.float32, requires_grad=True)
+        input = cpu_input.detach().to(device).requires_grad_()
+        direction = make_tensor(shape, device="cpu", dtype=torch.float32)
+
+        def gradients(x, vector):
+            output = F.adaptive_avg_pool2d(x, output_size)
+            first = torch.autograd.grad(output.square().sum(), x, create_graph=True)[0]
+            second = torch.autograd.grad(first, x, vector)[0]
+            return first, second
+
+        self.assertEqual(gradients(input, direction.to(device)), gradients(cpu_input, direction))
+
+    @parametrize("limit", ["dispatch", "endpoint"])
+    def test_adaptive_avg_pool2d_rejects_index_overflow(self, device, limit):
+        # Expanded views exercise the real host guards without large allocations.
+        # Both shapes take the nondivisible path, and out is already correctly sized.
+        if limit == "dispatch":
+            input = torch.empty((1, 1, 2, 2), device=device)
+            output_size = (1, 2**32)
+            output = torch.empty((1, 1, 1, 1), device=device).expand(1, 1, *output_size)
+            message = "MPS dispatch supports at most 4294967295 elements"
+        else:
+            input = torch.empty((1, 1, 1, 1), device=device).expand(1, 1, 2**62, 1)
+            output_size = (7, 1)
+            output = torch.empty((1, 1, *output_size), device=device)
+            message = "spatial sizes exceed 64-bit indexing limits on MPS"
+        with self.assertRaisesRegex(RuntimeError, message):
+            torch.ops.aten.adaptive_avg_pool2d.out(input, output_size, out=output)
+
+
 class TestMetalLibrary(TestCaseMPS):
     def test_metal_arange(self):
         x = torch.zeros(12, device="mps", dtype=torch.half)
@@ -18189,6 +18344,7 @@ instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_f
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestInnerContiguous, globals(), allow_mps=True, only_for="mps")
+instantiate_device_type_tests(TestAdaptiveAvgPool2dIndexing, globals(), allow_mps=True, only_for="mps")
 instantiate_parametrized_tests(TestAdvancedIndexing)
 instantiate_parametrized_tests(TestNondeterministic)
 instantiate_parametrized_tests(TestAutocastMPS)

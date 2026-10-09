@@ -1,9 +1,11 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <fmt/format.h>
+#include <limits>
 #include <string_view>
 
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/AdaptivePooling.h>
@@ -55,11 +57,27 @@ static AdaptiveAvgPool2DParams adaptive_avg_pool2d_params(const Tensor& input, c
 static void adaptive_avg_pool2d_metal(const Tensor& input, Tensor& output, bool backward) {
   using namespace std::string_view_literals;
 
-  auto stream = getCurrentMPSStream();
+  constexpr auto max_index = std::numeric_limits<uint32_t>::max();
+  TORCH_CHECK(output.numel() <= max_index,
+              "adaptive_avg_pool2d(): MPS dispatch supports at most ",
+              max_index,
+              " elements, got ",
+              output.numel());
   const auto direction = backward ? "backward"sv : "forward"sv;
-  // TODO: Use 32-bit indexing when input is small enough.
-  const auto kernel = fmt::format("adaptive_avg_pool2d_{}_{}", direction, scalarToMetalTypeString(input));
   const auto params = backward ? adaptive_avg_pool2d_params(output, input) : adaptive_avg_pool2d_params(input, output);
+  TORCH_CHECK(params.bin_bounds_fit(std::numeric_limits<uint64_t>::max()),
+              "adaptive_avg_pool2d(): spatial sizes exceed 64-bit indexing limits on MPS");
+  // These checks cover both planes, pooling-bin areas and relative storage offsets.
+  // mtl_setArgs applies storage_offset when binding each buffer.
+  bool use_32bit_index = params.bin_bounds_fit(max_index) && canUse32BitIndexMath(input, max_index) &&
+      canUse32BitIndexMath(output, max_index);
+  for (const auto dim : c10::irange(4)) {
+    use_32bit_index =
+        use_32bit_index && params.input_strides[dim] <= max_index && params.output_strides[dim] <= max_index;
+  }
+  const auto kernel = fmt::format(
+      "adaptive_avg_pool2d_{}_{}_{}", direction, scalarToMetalTypeString(input), use_32bit_index ? "uint" : "ulong");
+  auto stream = getCurrentMPSStream();
   @autoreleasepool {
     auto pso = lib.getPipelineStateForFunc(kernel);
     dispatch_sync_with_rethrow(stream->queue(), ^() {
