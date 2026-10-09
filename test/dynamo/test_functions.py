@@ -6467,6 +6467,44 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_closure_capturing_method_descriptors(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def make(op):
+            def fn(x, y):
+                return op(x, y)
+
+            return fn
+
+        add_fn = make(torch.Tensor.__add__)
+        mul_fn = make(torch.Tensor.__mul__)
+        x = torch.tensor(6.0)
+        y = torch.tensor(3.0)
+
+        compiled_add = torch.compile(add_fn, backend=cnts)
+        self.assertEqual(compiled_add(x, y), torch.tensor(9.0))
+        self.assertEqual(cnts.frame_count, 1)
+
+        compiled_mul = torch.compile(mul_fn, backend=cnts)
+        self.assertEqual(compiled_mul(x, y), torch.tensor(18.0))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_method_descriptor_as_function_argument(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(op, x, y):
+            return op(x, y)
+
+        c_fn = torch.compile(fn, backend=cnts)
+        x = torch.tensor(6.0)
+        y = torch.tensor(3.0)
+
+        self.assertEqual(c_fn(torch.Tensor.__add__, x, y), torch.tensor(9.0))
+        self.assertEqual(cnts.frame_count, 1)
+
+        self.assertEqual(c_fn(torch.Tensor.__mul__, x, y), torch.tensor(18.0))
+        self.assertEqual(cnts.frame_count, 2)
+
 
 def udf_mul(x, y):
     return x * y

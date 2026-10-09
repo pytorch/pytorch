@@ -89,7 +89,6 @@ from ..utils import (
     guard_if_dyn,
     has_torch_function,
     hashable,
-    is_wrapper_or_member_descriptor,
     no_keywords,
     no_positional,
     product,
@@ -571,10 +570,8 @@ class BaseTorchVariable(VariableTracker):
             value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
         ):
             install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
-        elif is_wrapper_or_member_descriptor(value) or isinstance(
-            value, torch._dynamo.compiled_autograd.Op
-        ):
-            # Don't need to guard on wrappers
+        elif isinstance(value, torch._dynamo.compiled_autograd.Op):
+            # Don't need to guard on compiled_autograd Ops
             pass
         else:
             install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
