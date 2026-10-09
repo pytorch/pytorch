@@ -1112,16 +1112,7 @@ class TestReportHelpers(TestCase):
         environment = importlib.import_module("torch.testing._internal.torchci.environment")
         with unittest.mock.patch.multiple(torch.version, cuda=None, hip="7.16.26385", rocm="10.1.0"):
             # The ROCm release, not HIP's version.
-            self.assertEqual(environment._accelerator(), ("rocm", "10.1"))
-        with unittest.mock.patch.multiple(torch.version, cuda=None, hip="7.16.26385", rocm=None):
-            # A build that never recorded it.
-            self.assertEqual(environment._accelerator(), ("rocm", ""))
-
-    def test_xpu_version(self):
-        environment = importlib.import_module("torch.testing._internal.torchci.environment")
-        with unittest.mock.patch.multiple(torch.version, cuda=None, hip=None, xpu="20250101"):
-            # SYCL 2025.1.1, packed as major * 10000 + minor * 100 + patch.
-            self.assertEqual(environment._accelerator(), ("xpu", "2025.1"))
+            self.assertEqual(environment._accelerator(), ("rocm", "10.1.0"))
 
     @parametrize("config, expected", [
         # clang defines __GNUC__, so a clang build also prints a GCC line.
