@@ -195,7 +195,10 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return orig_params
 
     def _init_fsdp_param_group(
-        self, params: list[nn.Parameter], reshard_after_forward: bool | int
+        self,
+        params: list[nn.Parameter],
+        reshard_after_forward: bool | int,
+        shard_placement_fn=None,
     ):
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
@@ -208,7 +211,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             mesh_info,
             post_forward_mesh_info,
             self.device,
-            None,  # shard_placement_fn
+            shard_placement_fn,
             MixedPrecisionPolicy(),
             OffloadPolicy(),
         )
@@ -243,6 +246,22 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_stream=all_gather_stream,
             )
 
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_shard_dim1(self):
+        # Shard(1) needs even sharding over 128 ranks, and its post-forward shards
+        # chunk dim 0 over 8 ranks; the 1D parameter keeps Shard(0)
+        param_sizes = [torch.Size([8, 256]), torch.Size([16, 128, 3]), torch.Size([24])]
+        stream = device_module.Stream()
+        for reshard_after_forward in (True, 8):
+            self._test_all_gather(
+                param_sizes,
+                reshard_after_forward=reshard_after_forward,
+                async_op=False,
+                all_gather_copy_in_stream=stream,
+                all_gather_stream=stream,
+                shard_placement_fn=lambda param: Shard(1) if param.ndim > 1 else None,
+            )
+
     def _test_all_gather(
         self,
         param_sizes: list[torch.Size],
@@ -250,6 +269,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         async_op: bool,
         all_gather_copy_in_stream,
         all_gather_stream,
+        shard_placement_fn=None,
     ):
         def all_gather(fsdp_param_group: FSDPParamGroup, group: dist.ProcessGroup):
             all_gather_comm = DefaultAllGather()
@@ -279,7 +299,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         # Set up the reference parameters and construct the FSDP group
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(
-            orig_params, reshard_after_forward
+            orig_params, reshard_after_forward, shard_placement_fn
         )
         fsdp_params = fsdp_param_group.fsdp_params
         module = fsdp_param_group.modules[0]
@@ -296,7 +316,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         check_all_gathered_params(orig_params, module)
 
         # For reshard after after forward as an int, further test emulating the
-        # pre-backward all-gather
+        # pre-backward all-gather, which copies flat post-forward shards
         if type(reshard_after_forward) is not int:
             return
         fsdp_param_group._to_sharded_post_forward()
@@ -564,9 +584,12 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
         dist.broadcast(model.weight.detach(), src=0)
         reference = copy.deepcopy(model)
         shard_numel = model.weight.numel() // self.world_size
+        num_allocations = 0
 
         class StridedAlloc:
             def allocate(self, size, *, dtype, device):
+                nonlocal num_allocations
+                num_allocations += 1
                 # FSDP views the reduced gradient with contiguous strides.
                 if collective == "reduce_scatter" and size == (shard_numel,):
                     return torch.empty(size, dtype=dtype, device=device)
@@ -639,10 +662,11 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
             reference_optim.step()
             optim.zero_grad()
             reference_optim.zero_grad()
+        self.assertGreater(num_allocations, 0)
 
 
 instantiate_device_type_tests(
-    TestFullyShardCustomAllocation, globals(), only_for=("cpu", "cuda")
+    TestFullyShardCustomAllocation, globals(), only_for=("cpu", "cuda", "xpu")
 )
 
 
