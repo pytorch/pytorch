@@ -616,6 +616,8 @@ class NestedReduction:
 
     MAX_INNER_R_GROUP_SIZE = 512
     MAX_NON_INNER_GROUP_SIZE = 128
+    # Persistent lane forwarding keeps each whole group tile live in registers.
+    MAX_PERSISTENT_LANE_GROUP = 128
 
     @staticmethod
     def _is_dependent_reduction_pair(
@@ -786,8 +788,6 @@ class NestedReduction:
         [Sub-parent reduction epilogues].
         """
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
-        if not cls._mutations_survive_hoisting(nodes):
-            return None
         if not all(isinstance(node, SchedulerNode) for node in nodes):
             return None
         scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
@@ -803,7 +803,25 @@ class NestedReduction:
             numel,
             rnumel,
         )
+        requires_persistent = grouping is None
+        if requires_persistent:
+            grouping = cls._persistent_lane_epilogue_candidates(
+                scheduler_nodes, numel, rnumel
+            )
         if grouping is None:
+            return None
+        if not requires_persistent:
+            if not cls._mutations_survive_hoisting(nodes):
+                return None
+        elif any(
+            not isinstance(owner := V.graph.get_buffer(alias), ir.ConcatKernel)
+            or not any(inp is buf.node for inp in owner.inputs)
+            for node in scheduler_nodes
+            for buf in node.get_outputs()
+            for alias in buf.get_aliases()
+        ):
+            # Persistent candidates have no mutations. Concat slices are disjoint
+            # and keep their own store indexing; other aliases are unsupported.
             return None
         output_groups = grouping.output_groups
         sub_parent_factor = grouping.factor
@@ -863,11 +881,16 @@ class NestedReduction:
         planned_source_names = OrderedSet(
             relation.source_accesses[0].name for relation in source_relations
         )
-        ordered_parent_nodes = cls._order_sub_parent_parent_nodes(
-            parent_nodes,
-            planned_source_names & parent_write_names,
-            numel,
-            rnumel,
+        # A persistent tile keeps every parent value live until the epilogue.
+        ordered_parent_nodes = (
+            OrderedParentNodes(parent_nodes, None)
+            if requires_persistent
+            else cls._order_sub_parent_parent_nodes(
+                parent_nodes,
+                planned_source_names & parent_write_names,
+                numel,
+                rnumel,
+            )
         )
         if ordered_parent_nodes is None:
             return None
@@ -894,6 +917,59 @@ class NestedReduction:
             required_post_reduction_index=(
                 ordered_parent_nodes.required_post_reduction_index
             ),
+            requires_persistent=requires_persistent,
+        )
+
+    @classmethod
+    def _persistent_lane_epilogue_candidates(
+        cls,
+        nodes: Sequence[SchedulerNode],
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> SubParentEpilogueGrouping | None:
+        """Resolve reduced-width lane consumers using a complete persistent tile.
+
+        A reduced-width shape alone is insufficient: the caller must still prove
+        every fixed-lane source relation. Unlike the looped sub-parent path,
+        this stage may retain an internal value computed before the reduction.
+        """
+        if not config.triton.persistent_reductions or not isinstance(
+            rnumel, sympy.Integer
+        ):
+            return None
+        factor = int(rnumel)
+        if not 1 < factor <= cls.MAX_PERSISTENT_LANE_GROUP or not is_power_of_2(factor):
+            return None
+        # A single group gives epilogue nodes empty ranges, which the remapped
+        # pointwise codegen cannot split; there is also nothing to forward. A
+        # symbolic group count (dynamic K) can merge differently per node in
+        # Scheduler.merge_loops, after which codegen cannot re-derive the plan.
+        if V.graph.sizevars.statically_known_equals(numel, 1) or numel.has(FloorDiv):
+            return None
+        reductions = [node for node in nodes if node.is_reduction()]
+        if len(reductions) != 1 or any(
+            node.has_strict_reduction()
+            or any(buf.get_mutations() for buf in node.get_outputs())
+            for node in nodes
+        ):
+            return None
+        reduction = reductions[0]
+        # Leave reductions that the outer + grouped planner can own to it; it
+        # needs an upstream reduction over the same full domain.
+        full_numel = numel * rnumel
+        for name in reduction.ancestors:
+            upstream = reduction.scheduler.name_to_node.get(name)
+            if (
+                upstream is not None
+                and upstream.is_reduction()
+                and cls.is_candidate(upstream, reduction)
+                and V.graph.sizevars.statically_known_equals(
+                    sympy_product(upstream.group[1]), full_numel
+                )
+            ):
+                return None
+        return cls._sub_parent_epilogue_candidate_nodes(
+            nodes, numel, rnumel, persistent_factor=factor
         )
 
     @staticmethod
@@ -994,11 +1070,14 @@ class NestedReduction:
         nodes: Sequence[SchedulerNode],
         numel: sympy.Expr,
         rnumel: sympy.Expr,
+        *,
+        persistent_factor: int | None = None,
     ) -> SubParentEpilogueGrouping | None:
         """Group lane-resolution consumers and choose their lane factor.
 
         Other members must fit the parent reduction, reduced-output, or
-        full-parent domain.
+        full-parent domain. With a proved persistent tile, reduced-width
+        consumers may instead select fixed lanes of that tile.
         """
         full_numel = V.graph.sizevars.simplify(numel * rnumel)
         candidates: list[SubParentEpilogueCandidate] = []
@@ -1011,9 +1090,12 @@ class NestedReduction:
                 ):
                     return None
                 continue
-            # REDUCED takes precedence when rnumel == factor and its shape is
-            # indistinguishable from SUB_PARENT; decline the ambiguous latter.
+            # A looped parent cannot retain its full tile for reduced consumers.
             if cls._pointwise_node_matches_domain(node, numel, (numel,)):
+                if persistent_factor is not None:
+                    candidates.append(
+                        SubParentEpilogueCandidate(node, persistent_factor, 1)
+                    )
                 continue
             if cls._pointwise_node_matches_domain(node, full_numel, (numel, rnumel)):
                 continue
@@ -1444,6 +1526,16 @@ class NestedReduction:
         active_vars = OrderedSet(dep.var_names) & dep.index.free_symbols
         if len(active_vars) <= 1:
             return True
+        # A flat contiguous access over the whole frame splits at any boundary.
+        normalized = dep.normalize()
+        if (
+            len(normalized.var_names) == 1
+            and normalized.index == normalized.var_names[0]
+            and V.graph.sizevars.statically_known_equals(
+                sympy_product(normalized.size), parent_numel * rnumel
+            )
+        ):
+            return True
         sizes = tuple(sympy_subs(size, extent_subs) for size in dep.size)
         for split in range(len(sizes) + 1):
             prefix_numel = V.graph.sizevars.simplify(sympy_product(sizes[:split]))
@@ -1587,8 +1679,13 @@ class NestedReduction:
                 )
                 if lane_value is None:
                     return None
+                child_coordinate = (
+                    sympy.S.Zero
+                    if V.graph.sizevars.statically_known_equals(child_rnumel, 1)
+                    else child_r
+                )
                 expected = parent_index.subs(
-                    parent_r, sub_parent_factor * child_r + lane_value
+                    parent_r, sub_parent_factor * child_coordinate + lane_value
                 )
                 if not V.graph.sizevars.statically_known_equals(child_index, expected):
                     return None
@@ -2610,6 +2707,7 @@ class StagedReductionPlan:
     sub_parent_stages: tuple[SubParentEpilogueStage, ...]
     # First parent node that must follow a completed reduction loop.
     required_post_reduction_index: int | None = None
+    requires_persistent: bool = False
 
     def __post_init__(self) -> None:
         if self.nested_stage is None and not self.sub_parent_stages:
@@ -10389,7 +10487,7 @@ class Scheduler:
                 continue
             # TODO: Replace this inherited parent-to-grouped compatibility proof
             # with source-anchored records once they can be rebuilt after fusion.
-            if not is_nested_stage_read or not (
+            if not (is_nested_stage_read or plan.requires_persistent) or not (
                 self._fusable_read_after_index_equivalence(read, write)
             ):
                 return None
@@ -10746,6 +10844,17 @@ class Scheduler:
             plan = NestedReduction.plan(node1, node2)
             if plan is None:
                 why("nested reduction plan declined")
+        elif (
+            NestedReduction._is_enabled_for(node1, node2)
+            and type(node2) is FusedStagedReduction
+            and not node1.is_reduction()
+        ):
+            # A persistent tile can absorb its pointwise input producer after
+            # the reduction and fixed-lane epilogue have already fused.
+            _, (numel, rnumel) = node2.group
+            plan = NestedReduction.sub_parent_epilogue_plan(
+                [*node1.get_nodes(), *node2.get_nodes()], numel, rnumel
+            )
         elif (
             NestedReduction._is_enabled_for(node1, node2)
             and node1.is_reduction()

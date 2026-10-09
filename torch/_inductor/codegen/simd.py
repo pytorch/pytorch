@@ -3144,6 +3144,15 @@ class SIMDScheduling(BaseScheduling):
             return None
         if not self._sub_parent_tiling_is_2d(nodes, parent_numel, parent_rnumel):
             return None
+        if plan.requires_persistent:
+            schedule = self.generate_node_schedule(
+                list(plan.parent_nodes), parent_numel, parent_rnumel
+            )
+            features = SIMDKernelFeatures(schedule, parent_numel, parent_rnumel)
+            if not V.choices.should_use_persistent_reduction(
+                features, cooperative_reduction=False
+            ):
+                return None
         return plan
 
     def _sub_parent_tiling_is_2d(
@@ -4187,6 +4196,8 @@ class SIMDScheduling(BaseScheduling):
             "tiling_scores": tiling_score,
             "override_cooperative_reduction": False,
         }
+        if plan.requires_persistent:
+            kernel_kwargs["override_persistent_reduction"] = True
         kernels = cast(
             "list[TritonKernel]",
             self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs),
