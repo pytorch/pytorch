@@ -8,11 +8,7 @@ import sys
 import unittest
 
 import torch
-from torch._subclasses.fake_tensor import (
-    FakeTensor,
-    FakeTensorMode,
-    maybe_set_fake_device,
-)
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -237,7 +233,7 @@ for op in ops:
     def test_preserve_original_behavior(self):
         test_script = f"""\
 import torch
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, maybe_set_fake_device
 
 def cuda_calls_behavior_unchanged():
     exception_count = 0
