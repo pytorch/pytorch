@@ -60,11 +60,6 @@ on:
         default: "l-x86iavx512-8-64"
         description: |
           Label of the runner this job should run on.
-      local-sccache-only:
-        required: false
-        type: boolean
-        default: false
-        description: Use a fresh local sccache instead of the shared S3 cache.
       flash-attention-large-memory-build:
         required: false
         type: boolean
@@ -254,13 +249,8 @@ jobs:
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
           SKIP_SCCACHE_INITIALIZATION: 1
-          LOCAL_SCCACHE_ONLY: ${{ inputs.local-sccache-only }}
         shell: bash
         run: |
-          if [[ "$LOCAL_SCCACHE_ONLY" == "true" ]]; then
-            unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_NO_CREDENTIALS
-            export SCCACHE_DIR="/tmp/sccache-cold-${GITHUB_RUN_ID}"
-          fi
           START_TIME=$(date +%s)
           .ci/pytorch/build.sh
           END_TIME=$(date +%s)
