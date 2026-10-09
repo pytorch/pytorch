@@ -161,6 +161,16 @@ class TestScheduler(TestCase):
         snode.node = node
         return snode
 
+    def test_is_native_matmul_template(self):
+        """A fused group holding a template (e.g. one with a reduction
+        epilogue) is asked is_native_matmul when it fuses with a reduction."""
+        template, matmul = object.__new__(SchedulerNode), object.__new__(SchedulerNode)
+        template.node = Mock(spec=ir.TemplateBuffer)
+        matmul.node = Mock(spec=ir.ComputedBuffer)
+        matmul.node.get_reduction_type.return_value = "dot"
+        self.assertFalse(template.is_native_matmul())
+        self.assertTrue(matmul.is_native_matmul())
+
     def test_stable_topological_sort_schedule(self):
         consumer = self._mock_base_snode("consumer")
         independent = self._mock_base_snode("independent")

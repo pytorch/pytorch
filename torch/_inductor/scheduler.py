@@ -4099,6 +4099,9 @@ class SchedulerNode(BaseSchedulerNode):
         )
 
     def is_native_matmul(self) -> bool:
+        # A template with a reduction epilogue fuses with reductions too.
+        if isinstance(self.node, ir.TemplateBuffer):
+            return False
         if not isinstance(self.node, ir.ComputedBuffer):
             raise AssertionError(f"{type(self.node)=}")
         return self.node.get_reduction_type() == "dot"
