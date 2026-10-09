@@ -13,6 +13,7 @@ from .base import Member, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
 
+
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
@@ -27,13 +28,23 @@ def _current_cuda_device_source() -> CallFunctionNoArgsSource:
     )
 
 
-def _get_mempool_iface() -> Any:
+def _get_mempool_and_iface(mempool_index: int) -> tuple[Any, Any]:
+    """Fetch the mempool object at ``mempool_index`` and the device interface
+    that manages it, raising if the object is not a valid mempool or if no
+    accelerator is available."""
+    mempool = get_external_object_by_index(mempool_index)
     acc = torch.accelerator.current_accelerator()
     if acc is None:
         raise RuntimeError("No accelerator available for mempool operations")
     from torch._dynamo.device_interface import get_interface_for_device
 
-    return get_interface_for_device(acc.type)
+    iface = get_interface_for_device(acc.type)
+    if not isinstance(mempool, iface.get_mempool_type()):
+        raise RuntimeError(
+            f"use_mem_pool expected a {iface.get_mempool_type().__qualname__} "
+            f"object at index {mempool_index}"
+        )
+    return iface, mempool
 
 
 # These marker ops are intentional even though Inductor also annotates enclosed
@@ -42,13 +53,8 @@ def _get_mempool_iface() -> Any:
 # side-effects for non-Inductor backends.
 @custom_op("mempool::begin", mutates_args=())
 def begin_mempool(device_index: int, mempool_index: int) -> None:
-    mempool = get_external_object_by_index(mempool_index)
-    iface = _get_mempool_iface()
-    if not isinstance(mempool, iface.get_mempool_type()):
-        raise RuntimeError(
-            f"use_mem_pool expected a {iface.get_mempool_type()} object at index {mempool_index}"
-        )
-    iface.begin_allocate_to_pool(device_index, mempool.id)
+    iface, mempool = _get_mempool_and_iface(mempool_index)
+    iface.begin_allocate_current_thread_to_pool(device_index, mempool.id)
 
 
 @begin_mempool.register_fake
@@ -61,13 +67,8 @@ has_side_effect(torch.ops.mempool.begin.default)
 
 @custom_op("mempool::end", mutates_args=())
 def end_mempool(device_index: int, mempool_index: int) -> None:
-    mempool = get_external_object_by_index(mempool_index)
-    iface = _get_mempool_iface()
-    if not isinstance(mempool, iface.get_mempool_type()):
-        raise RuntimeError(
-            f"use_mem_pool expected a {iface.get_mempool_type()} object at index {mempool_index}"
-        )
-    iface.end_allocate_to_pool(device_index, mempool.id)
+    iface, mempool = _get_mempool_and_iface(mempool_index)
+    iface.end_allocate_current_thread_to_pool(device_index, mempool.id)
     iface.release_pool(device_index, mempool.id)
 
 

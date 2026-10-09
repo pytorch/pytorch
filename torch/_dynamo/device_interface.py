@@ -154,11 +154,15 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def begin_allocate_to_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+    def begin_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
         raise NotImplementedError
 
     @staticmethod
-    def end_allocate_to_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+    def end_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
         raise NotImplementedError
 
     @staticmethod
@@ -326,11 +330,15 @@ class CudaInterface(DeviceInterface):
         return torch.cuda.MemPool
 
     @staticmethod
-    def begin_allocate_to_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+    def begin_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
         torch.cuda.memory._cuda_beginAllocateCurrentThreadToPool(device_index, mempool_id)
 
     @staticmethod
-    def end_allocate_to_pool(device_index: int, mempool_id: tuple[int, int]) -> None:
+    def end_allocate_current_thread_to_pool(
+        device_index: int, mempool_id: tuple[int, int]
+    ) -> None:
         torch.cuda.memory._cuda_endAllocateToPool(device_index, mempool_id)
 
     @staticmethod
