@@ -2590,6 +2590,56 @@ class TestNVUniversalGemmHeuristics(TestCase):
         nvgemm.has_nvgemm_bool_output.side_effect = (False, True)
         self.assertFalse(scheduling.can_fuse_horizontal(node1, node2))
 
+    def test_supports_reduction_epilogue_checks_each_choice(self):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            GemmVariant,
+            NVUniversalGemmCaller,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            NVUniversalGemmScheduling,
+        )
+        from torch._inductor.ir import ReductionEpilogue
+
+        def choice(tile_shape, swap_ab=False, supports_epilogue_fusion=True):
+            caller = NVUniversalGemmCaller.__new__(NVUniversalGemmCaller)
+            caller.name = "nvgemm"
+            caller.variant = GemmVariant.GEMM
+            caller.swap_ab = swap_ab
+            caller.supports_epilogue_fusion = supports_epilogue_fusion
+            caller.kernel = MagicMock()
+            caller.kernel.metadata.design.tile_shape = tile_shape
+            caller.kernel.metadata.design.use_2cta_mma = False
+            return caller
+
+        def epilogue():
+            return ReductionEpilogue.__new__(ReductionEpilogue)
+
+        with mock.patch.object(
+            NVUniversalGemmScheduling,
+            "reduction_epilogue_min_tile_shape",
+            return_value=(0, 64),
+        ) as min_tile_shape:
+            # Groups of 64 along N, or along M for swap_ab choices.
+            reduction = epilogue()
+            self.assertEqual(
+                [
+                    c.supports_reduction_epilogue(reduction)
+                    for c in (
+                        choice((128, 128)),
+                        choice((128, 32)),
+                        choice((64, 128), swap_ab=True),
+                        choice((32, 128), swap_ab=True),
+                        choice((128, 128), supports_epilogue_fusion=False),
+                    )
+                ],
+                [True, False, True, False, False],
+            )
+            min_tile_shape.assert_called_once()
+
+            # No choice can host a reduction epilogue NVGEMM can't fuse.
+            min_tile_shape.return_value = None
+            self.assertFalse(choice((128, 128)).supports_reduction_epilogue(epilogue()))
+
     def test_grouped_reduction_affine_index_rejects_offset(self):
         from torch._inductor.codegen.nv_universal_gemm.epilogue_lowering import (
             _matches_affine_index,

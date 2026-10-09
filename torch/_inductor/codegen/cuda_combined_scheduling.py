@@ -181,6 +181,13 @@ class CUDACombinedScheduling(BaseScheduling):
             )
         return False
 
+    def can_fuse_template_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        return self._triton_scheduling.can_fuse_template_reduction_epilogue(
+            node1, node2
+        )
+
     def get_fusion_pair_priority(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -254,6 +261,9 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def codegen_mix_order_reduction(self, node):
         return self._triton_scheduling.codegen_mix_order_reduction(node)
+
+    def benchmark_mix_order_reduction(self, node):
+        return self._triton_scheduling.benchmark_mix_order_reduction(node)
 
     def codegen_staged_reduction(self, node):
         return self._triton_scheduling.codegen_staged_reduction(node)
