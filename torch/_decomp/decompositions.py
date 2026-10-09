@@ -5940,7 +5940,11 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
-@register_decomposition([aten.baddbmm])
+# Not registered on the aten.baddbmm packet: the compute_mode overloads must
+# not be decomposed, or the compute_mode would be dropped.
+@register_decomposition(
+    [aten.baddbmm.default, aten.baddbmm.out, aten.baddbmm.dtype, aten.baddbmm.dtype_out]
+)
 @out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):

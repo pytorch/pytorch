@@ -397,7 +397,7 @@ void Context::setImmediateMiopen(bool b) {
 
 bool Context::allowTF32CuBLAS() const {
   bool legacy_allow_tf32 = float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
-  bool allow_tf32_new = float32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::TF32;
+  bool allow_tf32_new = globalFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::TF32;
   TORCH_CHECK(
       legacy_allow_tf32 == allow_tf32_new,
       "PyTorch is checking whether allow_tf32_new is enabled for cuBlas matmul,",
@@ -421,16 +421,16 @@ void Context::setPreferCublasltGroupedGemm(bool b) {
 }
 
 Float32MatmulPrecision Context::float32MatmulPrecision() const {
-  bool invalid = float32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::TF32 &&
+  bool invalid = globalFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::TF32 &&
       float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST;
   invalid = invalid ||
-      (float32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL) == Float32Precision::BF16 &&
+      (globalFloat32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL) == Float32Precision::BF16 &&
        float32_matmul_precision != at::Float32MatmulPrecision::MEDIUM);
   invalid = invalid ||
-      (float32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL) == Float32Precision::TF32 &&
+      (globalFloat32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL) == Float32Precision::TF32 &&
        float32_matmul_precision != at::Float32MatmulPrecision::HIGH);
   invalid = invalid ||
-      (float32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::BF16X9 &&
+      (globalFloat32Precision(Float32Backend::CUDA, Float32Op::MATMUL) == Float32Precision::BF16X9 &&
        float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST);
   TORCH_CHECK(
       !invalid,
@@ -442,6 +442,15 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
 }
 
 Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op) const {
+  if (op == Float32Op::MATMUL) {
+    if (auto p = MatmulFloat32PrecisionGuard::get()) {
+      return *p;
+    }
+  }
+  return globalFloat32Precision(backend, op);
+}
+
+Float32Precision Context::globalFloat32Precision(Float32Backend backend, Float32Op op) const {
   std::pair<Float32Backend, Float32Op> key{backend, op};
   auto it = fp32_precision.find(key);
   TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
@@ -963,6 +972,24 @@ bool NoTF32Guard::should_disable_fp32_reduced_precision() {
 
 bool NoTF32Guard::should_disable_tf32() {
   return should_disable_fp32_reduced_precision();
+}
+
+thread_local static std::optional<Float32Precision> fp32_matmul_precision_override;
+
+MatmulFloat32PrecisionGuard::MatmulFloat32PrecisionGuard(Float32Precision p)
+    : prev_(fp32_matmul_precision_override) {
+  TORCH_INTERNAL_ASSERT(
+      p != Float32Precision::NONE && p != Float32Precision::DEFAULT,
+      "MatmulFloat32PrecisionGuard requires a concrete precision");
+  fp32_matmul_precision_override = p;
+}
+
+MatmulFloat32PrecisionGuard::~MatmulFloat32PrecisionGuard() {
+  fp32_matmul_precision_override = prev_;
+}
+
+std::optional<Float32Precision> MatmulFloat32PrecisionGuard::get() {
+  return fp32_matmul_precision_override;
 }
 
 // Ops can query this flag to know they are in the backward pass.

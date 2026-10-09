@@ -191,6 +191,17 @@ tf32_notes = {
     "tf32_note": """This operator supports :ref:`TensorFloat32<tf32_on_ampere>`."""
 }
 
+matmul_compute_mode_args = {
+    "compute_mode": """compute_mode (str): the internal precision of this FP32 matrix
+        multiplication, overriding the global ``fp32_precision`` setting for this
+        call only. One of ``"ieee"``, ``"tf32"``, ``"bf16"`` (CPU only) or
+        ``"bfx9"`` (CUDA only); see :ref:`tf32_on_ampere`. The backward pass uses
+        the same compute mode. A mode that is not supported on the device type
+        of the inputs raises an error. As with the global setting, a mode the
+        hardware cannot accelerate (for example ``"tf32"`` before Ampere) uses
+        IEEE precision."""
+}
+
 rocm_fp16_notes = {
     "rocm_fp16_note": """On certain ROCm devices, when using float16 inputs this module will use \
 :ref:`different precision<fp16_on_mi200>` for backward."""
@@ -661,7 +672,27 @@ Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
     {out}
-""".format(**common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes),
+
+.. function:: addmm(input, mat1, mat2, *, compute_mode, beta=1, alpha=1, out=None) -> Tensor
+   :noindex:
+
+Args:
+    input (Tensor): matrix to be added
+    mat1 (Tensor): the first matrix to be matrix multiplied
+    mat2 (Tensor): the second matrix to be matrix multiplied
+
+Keyword args:
+    {compute_mode}
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
+    {out}
+""".format(
+        **common_args,
+        **tf32_notes,
+        **rocm_fp16_notes,
+        **sparse_support_notes,
+        **matmul_compute_mode_args,
+    ),
 )
 
 add_docstr(
@@ -1578,7 +1609,21 @@ Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
     {out}
-""".format(**common_args, **tf32_notes, **rocm_fp16_notes),
+
+.. function:: baddbmm(input, batch1, batch2, *, compute_mode, beta=1, alpha=1, out=None) -> Tensor
+   :noindex:
+
+Args:
+    input (Tensor): the tensor to be added
+    batch1 (Tensor): the first batch of matrices to be multiplied
+    batch2 (Tensor): the second batch of matrices to be multiplied
+
+Keyword args:
+    {compute_mode}
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
+    {out}
+""".format(**common_args, **tf32_notes, **rocm_fp16_notes, **matmul_compute_mode_args),
 )
 
 add_docstr(
@@ -1759,7 +1804,18 @@ Args:
 
 Keyword Args:
     {out}
-""".format(**common_args, **tf32_notes, **rocm_fp16_notes),
+
+.. function:: bmm(input, mat2, *, compute_mode, out=None) -> Tensor
+   :noindex:
+
+Args:
+    input (Tensor): the first batch of matrices to be multiplied
+    mat2 (Tensor): the second batch of matrices to be multiplied
+
+Keyword Args:
+    {compute_mode}
+    {out}
+""".format(**common_args, **tf32_notes, **rocm_fp16_notes, **matmul_compute_mode_args),
 )
 
 add_docstr(
@@ -7885,7 +7941,24 @@ Args:
 
 Keyword args:
     {out}
-""".format(**common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes),
+
+.. function:: mm(input, mat2, *, compute_mode, out=None) -> Tensor
+   :noindex:
+
+Args:
+    input (Tensor): the first matrix to be matrix multiplied
+    mat2 (Tensor): the second matrix to be matrix multiplied
+
+Keyword args:
+    {compute_mode}
+    {out}
+""".format(
+        **common_args,
+        **tf32_notes,
+        **rocm_fp16_notes,
+        **sparse_support_notes,
+        **matmul_compute_mode_args,
+    ),
 )
 
 add_docstr(

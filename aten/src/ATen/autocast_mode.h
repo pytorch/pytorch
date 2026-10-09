@@ -829,17 +829,21 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   _(convolution)                         \
   _(prelu)                               \
   _(addmm)                               \
+  _(addmm, compute_mode)                 \
   _(addmv)                               \
   _(addr)                                \
   _(matmul)                              \
   _(einsum)                              \
   _(mm)                                  \
+  _(mm, compute_mode)                    \
   _(mv)                                  \
   _(linalg_vecdot)                       \
   _(linear)                              \
   _(addbmm)                              \
   _(baddbmm)                             \
+  _(baddbmm, compute_mode)               \
   _(bmm)                                 \
+  _(bmm, compute_mode)                   \
   _(chain_matmul)                        \
   _(linalg_multi_dot)                    \
   _(_thnn_fused_lstm_cell)               \

@@ -20,6 +20,7 @@
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/cpu/Utils.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/SymBool.h>
 #include <c10/util/accumulate.h>
@@ -47,12 +48,14 @@
 #include <ATen/ops/_weight_int8pack_mm_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addbmm_native.h>
+#include <ATen/ops/addmm.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr.h>
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argsort.h>
 #include <ATen/ops/as_strided_native.h>
+#include <ATen/ops/baddbmm.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
@@ -1916,6 +1919,94 @@ TORCH_IMPL_FUNC(bmm_out_cpu)
     bmm_out_or_baddbmm_(result, batch1.resolve_conj(), batch2.resolve_conj(), Scalar(0.0), Scalar(1.0), true);
     conjugate_mutable_input_if_needed(result, result_is_conj);
     }
+}
+
+// compute_mode overloads of mm, addmm, bmm and baddbmm. compute_mode selects
+// the internal precision of an FP32 matmul for this call only, using the same
+// names as torch.backends.*.fp32_precision. It is implemented by installing a
+// thread-local override of the matmul fp32_precision setting around the
+// regular kernel, so no backend kernel needs to know about it. Modes a device
+// does not implement are rejected rather than silently ignored.
+static Float32Precision matmul_compute_mode_to_precision(
+    std::string_view compute_mode,
+    const Tensor& mat,
+    const char* op_name) {
+  Float32Precision p;
+  if (compute_mode == "ieee") {
+    p = Float32Precision::IEEE;
+  } else if (compute_mode == "tf32") {
+    p = Float32Precision::TF32;
+  } else if (compute_mode == "bf16") {
+    p = Float32Precision::BF16;
+  } else if (compute_mode == "bfx9") {
+    p = Float32Precision::BF16X9;
+  } else {
+    TORCH_CHECK_VALUE(false, op_name, ": unknown compute_mode '", compute_mode,
+        "', expected one of 'ieee', 'tf32', 'bf16' or 'bfx9'");
+  }
+  switch (mat.device().type()) {
+    case kMeta:
+      break;
+    case kCPU:
+      TORCH_CHECK(p != Float32Precision::BF16X9, op_name,
+          ": compute_mode 'bfx9' is only supported on CUDA");
+      break;
+    case kCUDA:
+      TORCH_CHECK(p != Float32Precision::BF16, op_name,
+          ": compute_mode 'bf16' is not supported on CUDA");
+      if (p == Float32Precision::BF16X9) {
+        const auto& cuda_hooks = detail::getCUDAHooks();
+        TORCH_CHECK(!cuda_hooks.hasROCM(), op_name,
+            ": compute_mode 'bfx9' is only supported on NVIDIA CUDA");
+        TORCH_CHECK(cuda_hooks.hasCUDART() && cuda_hooks.versionCUDART() >= 12090, op_name,
+            ": compute_mode 'bfx9' requires PyTorch to be built with CUDA 12.9 or later");
+      }
+      break;
+    default:
+      TORCH_CHECK_NOT_IMPLEMENTED(false, op_name,
+          ": compute_mode is not supported on device type ", mat.device().type());
+  }
+  return p;
+}
+
+Tensor mm_compute_mode(const Tensor& self, const Tensor& mat2, std::string_view compute_mode) {
+  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, self, "mm"));
+  return at::mm(self, mat2);
+}
+
+Tensor& mm_compute_mode_out(const Tensor& self, const Tensor& mat2, std::string_view compute_mode, Tensor& out) {
+  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, self, "mm"));
+  return at::mm_out(out, self, mat2);
+}
+
+Tensor addmm_compute_mode(const Tensor& self, const Tensor& mat1, const Tensor& mat2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha) {
+  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, mat1, "addmm"));
+  return at::addmm(self, mat1, mat2, beta, alpha);
+}
+
+Tensor& addmm_compute_mode_out(const Tensor& self, const Tensor& mat1, const Tensor& mat2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha, Tensor& out) {
+  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, mat1, "addmm"));
+  return at::addmm_out(out, self, mat1, mat2, beta, alpha);
+}
+
+Tensor bmm_compute_mode(const Tensor& self, const Tensor& mat2, std::string_view compute_mode) {
+  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, self, "bmm"));
+  return at::bmm(self, mat2);
+}
+
+Tensor& bmm_compute_mode_out(const Tensor& self, const Tensor& mat2, std::string_view compute_mode, Tensor& out) {
+  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, self, "bmm"));
+  return at::bmm_out(out, self, mat2);
+}
+
+Tensor baddbmm_compute_mode(const Tensor& self, const Tensor& batch1, const Tensor& batch2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha) {
+  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, batch1, "baddbmm"));
+  return at::baddbmm(self, batch1, batch2, beta, alpha);
+}
+
+Tensor& baddbmm_compute_mode_out(const Tensor& self, const Tensor& batch1, const Tensor& batch2, std::string_view compute_mode, const Scalar& beta, const Scalar& alpha, Tensor& out) {
+  MatmulFloat32PrecisionGuard guard(matmul_compute_mode_to_precision(compute_mode, batch1, "baddbmm"));
+  return at::baddbmm_out(out, self, batch1, batch2, beta, alpha);
 }
 
 Tensor& dot_out(const Tensor& self, const Tensor& other, Tensor& result) {

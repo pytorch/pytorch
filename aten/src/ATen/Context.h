@@ -404,6 +404,9 @@ class TORCH_API Context {
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool /*b*/);
   Float32MatmulPrecision float32MatmulPrecision() const;
+  // Effective precision for (backend, op). For Float32Op::MATMUL, a
+  // thread-local MatmulFloat32PrecisionGuard takes priority over the global
+  // setting.
   Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
   CuBLASReductionOption allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(
@@ -498,6 +501,10 @@ class TORCH_API Context {
   }
 
  private:
+  // float32Precision() without the thread-local matmul override.
+  Float32Precision globalFloat32Precision(Float32Backend backend, Float32Op op)
+      const;
+
   std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
@@ -757,6 +764,27 @@ struct TORCH_API NoTF32Guard {
 
  private:
   bool changed = false;
+};
+
+// RAII guard that overrides the FP32 matmul precision (Float32Op::MATMUL, all
+// backends) on the current thread, taking priority over the global
+// fp32_precision settings. This backs the per-call compute_mode overloads of
+// mm, addmm, bmm and baddbmm; it is not a user-facing API. The CUDA BLAS paths
+// still let NoTF32Guard win over this guard, since kernels use it to protect
+// precision-sensitive internal matmuls.
+struct TORCH_API MatmulFloat32PrecisionGuard {
+  explicit MatmulFloat32PrecisionGuard(Float32Precision p);
+  MatmulFloat32PrecisionGuard(MatmulFloat32PrecisionGuard&& other) = delete;
+  MatmulFloat32PrecisionGuard(const MatmulFloat32PrecisionGuard&) = delete;
+  MatmulFloat32PrecisionGuard& operator=(const MatmulFloat32PrecisionGuard&) =
+      delete;
+  MatmulFloat32PrecisionGuard& operator=(MatmulFloat32PrecisionGuard&&) =
+      delete;
+  ~MatmulFloat32PrecisionGuard();
+  static std::optional<Float32Precision> get();
+
+ private:
+  std::optional<Float32Precision> prev_;
 };
 
 struct TORCH_API ROCmBackwardPassGuard {

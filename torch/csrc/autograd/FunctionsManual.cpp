@@ -1718,17 +1718,21 @@ Tensor mm_mat1_backward(
     at::SymIntArrayRef mat1_sizes,
     at::SymIntArrayRef mat1_strides,
     c10::Layout mat1_layout,
-    const Scalar& alpha) {
+    const Scalar& alpha,
+    std::optional<std::string_view> compute_mode) {
+  auto mm = [&](const Tensor& a, const Tensor& b) {
+    return compute_mode.has_value() ? at::mm(a, b, *compute_mode) : a.mm(b);
+  };
   if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
       mat1_layout == c10::kStrided) {
     // if input was column-major, return grad as column-order for efficiency
     if (mat1_strides[0] == 1 && mat1_strides[1] == mat1_sizes[0]) {
-      return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha.conj());
+      return maybe_multiply(mm(mat2.conj(), grad.t()).t(), alpha.conj());
     }
   }
 
   // General fallback, should work for any layout
-  return maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
+  return maybe_multiply(mm(grad, mat2.t().conj()), alpha.conj());
 }
 
 Tensor mm_mat2_backward(
@@ -1737,17 +1741,21 @@ Tensor mm_mat2_backward(
     at::SymIntArrayRef mat2_sizes,
     at::SymIntArrayRef mat2_strides,
     c10::Layout mat2_layout,
-    const Scalar& alpha) {
+    const Scalar& alpha,
+    std::optional<std::string_view> compute_mode) {
+  auto mm = [&](const Tensor& a, const Tensor& b) {
+    return compute_mode.has_value() ? at::mm(a, b, *compute_mode) : a.mm(b);
+  };
   if (grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided &&
       mat2_layout == c10::kStrided) {
     // if input was column-major, return grad as column-order for efficiency
     if (mat2_strides[0] == 1 && mat2_strides[1] == mat2_sizes[0]) {
-      return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha.conj());
+      return maybe_multiply(mm(grad.t(), mat1.conj()).t(), alpha.conj());
     }
   }
 
   // General fallback, should work for any layout
-  return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
+  return maybe_multiply(mm(mat1.t().conj(), grad), alpha.conj());
 }
 
 Tensor _grouped_mm_mat1_backward(
