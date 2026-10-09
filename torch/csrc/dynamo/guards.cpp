@@ -224,6 +224,8 @@ TensorCheck::TensorCheck(
               ? std::nullopt
               : std::optional<c10::DeviceIndex>(v.device().index())),
       requires_grad_(v.requires_grad()),
+      check_grad_dtype_(v.requires_grad()),
+      grad_dtype_(check_grad_dtype_ ? v.grad_dtype() : std::nullopt),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {
@@ -245,6 +247,7 @@ TensorCheck::TensorCheck(
       dtype_(dtype),
       device_index_(device_index),
       requires_grad_(requires_grad),
+      check_grad_dtype_(false),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
@@ -276,13 +279,14 @@ bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
   }
 
   return check(
-      state,
-      v.key_set(),
-      v.dtype().toScalarType(),
-      v.device(),
-      v.sym_sizes(),
-      sym_strides,
-      v.requires_grad());
+             state,
+             v.key_set(),
+             v.dtype().toScalarType(),
+             v.device(),
+             v.sym_sizes(),
+             sym_strides,
+             v.requires_grad()) &&
+      (!check_grad_dtype_ || v.grad_dtype() == grad_dtype_);
 }
 
 bool TensorCheck::check(
@@ -357,6 +361,13 @@ std::string TensorCheck::check_verbose(
     // requires_grad_);
     fail_reason << "requires_grad mismatch. expected requires_grad="
                 << requires_grad_;
+    return std::move(fail_reason).str();
+  } else if (check_grad_dtype_ && v.grad_dtype() != grad_dtype_) {
+    auto to_str = [](std::optional<at::ScalarType> d) {
+      return d.has_value() ? std::string(c10::toString(*d)) : "None";
+    };
+    fail_reason << "grad_dtype mismatch. expected " << to_str(grad_dtype_)
+                << ", actual " << to_str(v.grad_dtype());
     return std::move(fail_reason).str();
   }
   auto ndim = v.ndimension();
