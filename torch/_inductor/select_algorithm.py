@@ -40,6 +40,7 @@ from torch._dynamo.utils import (
 )
 from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
@@ -57,6 +58,7 @@ from .autotune_process import (
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
     CSEVariable,
+    DeferredLine,
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
@@ -94,6 +96,7 @@ from .runtime.hints import TritonMeta
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
+    can_use_tma,
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
@@ -551,19 +554,35 @@ class _PartialReduction(NamedTuple):
     node: Any
     buffer: str
     op: str
-    offset: int
-    tiles: int
-    size: int
+    offset: int | sympy.Expr
+    tiles: int | sympy.Expr
+    size: int | sympy.Expr
 
 
-def _partials_finish(ws: str, reduction: _PartialReduction) -> str:
+def _partials_finish(
+    ws: str, reduction: _PartialReduction, pexpr: Callable[[sympy.Expr], str]
+) -> str:
     """The wrapper expression that reduces reduction's partials in workspace
-    tensor ws."""
-    end = reduction.offset + reduction.tiles * reduction.size * torch.float32.itemsize
+    tensor ws, printing sizes with pexpr."""
+    offset, tiles, size = reduction.offset, reduction.tiles, reduction.size
+    end = offset + tiles * size * torch.float32.itemsize
     return (
-        f"{ws}[{reduction.offset}:{end}].view(torch.float32)"
-        f".view({reduction.tiles}, {reduction.size}).{reduction.op}(dim=0)"
+        f"{ws}[{pexpr(offset)}:{pexpr(end)}].view(torch.float32)"
+        f".view({pexpr(tiles)}, {pexpr(size)}).{reduction.op}(dim=0)"
     )
+
+
+def tma_store_outputs_within_budget(
+    outputs: Sequence[tuple[str, int]], budget: int
+) -> OrderedSet[str]:
+    """Names of the outputs, given as (name, staged bytes), to TMA-store:
+    largest first, each while its staging still fits in budget."""
+    kept: OrderedSet[str] = OrderedSet()
+    for name, nbytes in sorted(outputs, key=lambda o: -o[1]):
+        if nbytes <= budget:
+            kept.add(name)
+            budget -= nbytes
+    return kept
 
 
 class TritonTemplateKernel(TritonKernel):
@@ -658,6 +677,9 @@ class TritonTemplateKernel(TritonKernel):
         self.kernel_name = kernel_name
         self.use_jit = use_jit
         self.tma_store = tma_store
+        # With a reduction epilogue, the epilogue outputs that keep their TMA
+        # store when tma_store is set; the rest use tl.store. See store.
+        self.tma_store_epilogue_outputs: OrderedSet[str] | None = None
         self.tma_load_for_template_epilogue = tma_load_for_template_epilogue
         self.transpose_discontiguous_tensor_descriptors_override = (
             transpose_discontiguous_tensor_descriptors_override
@@ -721,6 +743,12 @@ class TritonTemplateKernel(TritonKernel):
         # Reductions fused into the epilogue as per-tile partials, which the
         # wrapper reduces after the kernel.
         self.partial_reductions: list[_PartialReduction] = []
+        # In a row reduction pass over a whole tile, with tma_store set: the
+        # tile's index symbols, origin and shape, so full-tile outputs keep
+        # their TMA store. See _tile_tma_store.
+        self._tile_tma_store_ctx: (
+            tuple[list[sympy.Symbol], list[sympy.Expr], tuple[int, int]] | None
+        ) = None
         # Epilogue nodes codegen'd after the kernel call instead of fused into it.
         self._unfused_epilogues: list[Any] = []
 
@@ -2048,8 +2076,11 @@ class TritonTemplateKernel(TritonKernel):
         if self.workspace_arg is None:
             raise AssertionError("reduction partials need a workspace")
         ws = self.workspace_arg.outer_name
+        pexpr = V.graph.wrapper_code.codegen_python_sizevar
         for reduction in self.partial_reductions:
-            codegen_reduced_buffer(reduction.buffer, _partials_finish(ws, reduction))
+            codegen_reduced_buffer(
+                reduction.buffer, _partials_finish(ws, reduction, pexpr)
+            )
         scheduler = V.graph.scheduler
         backend = scheduler.get_backend(self.output_node.get_device())
         # The buffers the template's fused nodes last read are already queued
@@ -2086,8 +2117,17 @@ class TritonTemplateKernel(TritonKernel):
             if isinstance(sig, WorkspaceArg)
             and sig.outer_name == self.workspace_arg.outer_name
         )
+
+        def hint(expr: sympy.Expr) -> str:
+            # Same hints as get_args, so the slices match the workspace.
+            return str(
+                V.graph.sizevars.optimization_hint_with_override(
+                    expr, hint_override=self.hint_override
+                )
+            )
+
         for reduction in self.partial_reductions:
-            finish = _partials_finish(f"args[{idx}]", reduction)
+            finish = _partials_finish(f"args[{idx}]", reduction, hint)
             # Like the wrapper, cast the fp32 partials to the output dtype.
             if (dtype := V.graph.get_dtype(reduction.buffer)) != torch.float:
                 finish += f".to({dtype})"
@@ -2147,6 +2187,178 @@ class TritonTemplateKernel(TritonKernel):
         # Already frozen or not a FlexibleLayout, just return current strides
         return node.get_stride()
 
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
+        if (
+            mode is None
+            and self.tma_store
+            and self.tma_store_epilogue_outputs is not None
+            and name != self.output_node.get_name()
+            and name not in self.tma_store_epilogue_outputs
+        ):
+            with patch.object(self, "tma_store", False):
+                return super().store(name, index, value, mode)
+        if mode is None and self._tile_tma_store(name, index, value):
+            return None
+        return super().store(name, index, value, mode)
+
+    def _tile_tma_store(self, name: str, index: sympy.Expr, value: CSEVariable) -> bool:
+        """TMA-store a full-tile output of a row reduction pass, e.g. a
+        normalized output, whose index is row-major in the tile's symbols. The
+        descriptor uses the tile's origin as offsets, so it needs no standard
+        block symbols. Returns False to fall back to tl.store."""
+        ctx = self._tile_tma_store_ctx
+        if ctx is None or name not in (self.tma_store_epilogue_outputs or ()):
+            return False
+        (x, r), origin, (rows, cols) = ctx
+        layout = V.graph.get_buffer(name).get_layout()
+        tile_index = index.xreplace(
+            {s: e.expr for s, e in self.range_tree_nodes.items()}
+        )
+        # The descriptor sees the output as [M, N], also when it's a row-major
+        # view such as [B, S, N].
+        shape = [sympy_product(layout.size[:-1]), layout.size[-1]]
+        strides = [layout.stride[-2], layout.stride[-1]]
+        if tile_index != strides[0] * x + r or not all(
+            self._tma_dim_fits_int32(name, size) for size in shape
+        ):
+            return False
+        offsets = [
+            texpr(o) if self.index_dtype == "tl.int32" else f"({texpr(o)}).to(tl.int32)"
+            for o in origin
+        ]
+        var = self.args.output(name)
+        desc = self.prologue_cache.get(var)
+        if desc is None:
+            desc = f"tma_descriptor{next(self.block_ptr_id)}"
+            self.prologue.writeline(
+                DeferredLine(
+                    name,
+                    f"{desc} = tl.make_tensor_descriptor({var}, "
+                    f"shape={self.index_to_str(shape)}, strides={strides}, "
+                    f"block_shape=[{rows}, {cols}])",
+                )
+            )
+            self.prologue_cache[var] = desc
+        self._device_tma_buffers.add(name)
+        self.stores.writeline(
+            DeferredLine(
+                name,
+                f"{desc}.store([{', '.join(offsets)}], "
+                f"tl.broadcast_to({value}, [{rows}, {cols}])"
+                f".to({triton_type(layout.dtype)}))",
+            )
+        )
+        return True
+
+    @staticmethod
+    def _tma_dim_fits_int32(name: str, size: sympy.Expr) -> bool:
+        """Whether a TMA descriptor dim, and so every coordinate along it,
+        fits in int32. Admitting a TMA template already guards its output size
+        (use_triton_tma_template); this guards a dynamic size below 2**31 if
+        not, so a larger one recompiles. One that can't be guarded falls back
+        to tl.store."""
+        limit = 2**31
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_lt(size, limit):
+            return True
+        if free_unbacked_symbols(size):
+            reason = "is unbacked"
+        elif sizevars.optimization_hint(size) >= limit:
+            reason = "is at least 2**31"
+        elif sizevars.guard_or_false(sympy.Lt(size, limit)):
+            return True
+        else:
+            reason = "can't be guarded below 2**31"
+        log.debug("Storing %s with tl.store: its size %s %s", name, size, reason)
+        return False
+
+    def _staged_tile_elems(self) -> int | None:
+        """Elements in one TMA store's shared-memory staging buffer: an
+        epilogue subtile, BLOCK_M x BLOCK_N / EPILOGUE_SUBTILE, single-buffered."""
+        bm, bn = self.meta.get("BLOCK_M"), self.meta.get("BLOCK_N")
+        if bm is None or bn is None:
+            return None
+        return bm * (bn // self.meta.get("EPILOGUE_SUBTILE", 1))
+
+    def _epilogue_tma_store_budget(self) -> int:
+        """Shared memory left for staging the TMA stores of epilogue outputs,
+        after the operand ring and the template output's own staging."""
+        device = self.output_node.get_device()
+        tile = [self.meta.get(k) for k in ("BLOCK_M", "BLOCK_N", "BLOCK_K")]
+        staged = self._staged_tile_elems()
+        if device is None or device.type != "cuda" or None in tile or staged is None:
+            return 0
+        bm, bn, bk = tile
+        props = torch.cuda.get_device_properties(device)
+        # ROCm reports only shared_memory_per_block. With neither, budget
+        # nothing: all-plain costs ~2%, an overflow costs the fused choice.
+        limit = getattr(
+            props,
+            "shared_memory_per_block_optin",
+            getattr(props, "shared_memory_per_block", 0),
+        )
+        operands = self.input_nodes[
+            self.prefix_args : len(self.input_nodes) - self.suffix_args
+        ]
+        elem = max(node.get_dtype().itemsize for node in operands)
+        ring = self.num_stages * (bm * bk + bk * bn) * elem
+        template_out = staged * self.output_node.get_dtype().itemsize
+        # Err toward tl.store: an overflow drops the fused choice to
+        # num_stages=1, or fails it outright. The margin covers the epilogue's
+        # layout-conversion and reduction scratch and the barriers, measured at
+        # under BM * BN / EPILOGUE_SUBTILE bytes plus 1 KB on B200.
+        margin = bm * bn + 16 * 1024
+        return limit - ring - template_out - margin
+
+    def _full_tile_epilogue_outputs(
+        self, template_node, epilogue_nodes
+    ) -> list[tuple[str, int]]:
+        """The epilogue outputs a TMA store can write whole, with the bytes of
+        their staged (sub)tile: materialized, the template output's shape or
+        a row-major view of it, and 16-byte aligned. Smaller or irregular
+        outputs use tl.store."""
+        staged = self._staged_tile_elems()
+        scheduler = V.graph.scheduler
+        if staged is None or scheduler is None:
+            return []
+        fused = OrderedSet(
+            [template_node.get_name(), *(n.get_name() for n in epilogue_nodes)]
+        )
+        size = self.output_node.get_size()
+        outputs = []
+        for node in epilogue_nodes:
+            if node.is_reduction():
+                continue
+            for name in node.get_buffer_names():
+                if scheduler.can_buffer_be_removed_through_fusion(name, fused):
+                    continue
+                layout = V.graph.get_buffer(name).get_layout()
+                if (
+                    not all(
+                        isinstance(x, (int, sympy.Integer))
+                        for x in (layout.size[-1], *layout.stride, layout.offset)
+                    )  # dynamic layout, other than the outer sizes
+                    # [M, N] or a row-major view of it, e.g. [B, S, N]
+                    or sympy_product(layout.size) != sympy_product(size)
+                    or layout.size[-1] != size[-1]  # not full-tile
+                    or layout.offset != 0  # irregular output
+                    or layout.stride[-1] != 1  # irregular output
+                    or any(  # irregular output
+                        layout.stride[i] != layout.stride[i + 1] * layout.size[i + 1]
+                        for i in range(len(layout.size) - 2)
+                    )
+                    or not can_use_tma(output_layout=layout)
+                    or not all(
+                        self._tma_dim_fits_int32(name, dim)
+                        for dim in (sympy_product(layout.size[:-1]), layout.size[-1])
+                    )
+                ):
+                    continue
+                outputs.append((name, staged * layout.dtype.itemsize))
+        return outputs
+
     def _compute_fusion_metadata(
         self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
     ):
@@ -2179,6 +2391,15 @@ class TritonTemplateKernel(TritonKernel):
         self._compute_fusion_metadata(
             scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
         )
+        self.tma_store_epilogue_outputs = None
+        if self.tma_store and any(node.is_reduction() for node in epilogue_nodes):
+            # Each TMA store stages its whole tile in its own shared-memory
+            # buffer, so a reduction epilogue's many, often fp32, outputs can
+            # overflow it. Keep the largest on TMA while they fit.
+            self.tma_store_epilogue_outputs = tma_store_outputs_within_budget(
+                self._full_tile_epilogue_outputs(template_node, epilogue_nodes),
+                self._epilogue_tma_store_budget(),
+            )
         with self:
             partial_code = render()
 
@@ -2337,19 +2558,29 @@ class TritonTemplateKernel(TritonKernel):
                 name = stage2.get_outputs()[0].node.get_name()
             # One partial per tile along the reduced dim.
             if columns:
-                tiles, size = ceildiv(int(m), rows), int(n)
+                tiles, size = ceildiv(m, rows), n
                 tile_idx = f"{origin[0]} // {rows}"
             else:
-                tiles, size = ceildiv(int(n), cols), int(m)
+                tiles, size = ceildiv(n, cols), m
                 tile_idx = f"{origin[1]} // {cols}"
-            nbytes = tiles * size * torch.float32.itemsize
             ws = next(
                 (w for w in self.args.workspace_args if w.inner_name == "ws_ptr"), None
             )
             # Partials share ws_ptr with the template's workspace (e.g. TMA
             # descriptors): align them to 16 bytes, and rebind workspace_arg to
-            # the joined arg so the wrapper allocates both.
-            pad = -int(ws.count) % 16 if ws is not None else 0
+            # the joined arg so the wrapper allocates both. Regions are padded
+            # to 16 bytes, so only the template's own (static) workspace needs
+            # a leading pad, even when M is dynamic.
+            count = ws.count if ws is not None else sympy.S.Zero
+            if V.graph.sizevars.statically_known_multiple_of(count, 16):
+                pad = 0
+            elif isinstance(count, (int, sympy.Integer)):
+                pad = -int(count) % 16
+            else:
+                raise AssertionError(
+                    f"can't 16-byte align partials after {count} workspace bytes"
+                )
+            nbytes = 16 * ceildiv(tiles * size * torch.float32.itemsize, 16)
             ws_ptr, ws_name, offset = self.args.workspace(pad + nbytes, False)
             self.workspace_arg = next(
                 w for w in self.args.workspace_args if w.outer_name == ws_name
@@ -2373,8 +2604,9 @@ class TritonTemplateKernel(TritonKernel):
                 in_bounds = f"({origin[1]} < {n})"
                 mask = in_bounds if mask == "None" else f"{mask} & {in_bounds}"
             self.post_loop_store.writeline(
-                f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
-                f"{size} * ({tile_idx}) + {indexing.index_str}, "
+                f"tl.store(({ws_ptr} + {self.index_to_str(offset)})"
+                f".to(tl.pointer_type(tl.float32)) + "
+                f"{self.index_to_str(size)} * ({tile_idx}) + {indexing.index_str}, "
                 f"{value}, {mask})"
             )
 
@@ -2408,6 +2640,11 @@ class TritonTemplateKernel(TritonKernel):
             node.unsplit_reduction() if columns else node for node in nodes
         ]
         header, init, tail = self.body, IndentedBuffer(), IndentedBuffer()
+        tile_tma_store_ctx = (
+            (tile_syms, origin, (rows, cols))
+            if self.tma_store and not partial and subtiles == 1
+            else None
+        )
         with (
             self.use_range_trees(range_trees),
             patch.object(self.cse, "store_cache", store_cache),
@@ -2423,6 +2660,7 @@ class TritonTemplateKernel(TritonKernel):
                 # Tensor descriptors expect standard block symbols, not the tile's.
                 tma_store=False,
                 tma_load_for_template_epilogue=False,
+                _tile_tma_store_ctx=tile_tma_store_ctx,
             ),
         ):
             for tree in range_trees:

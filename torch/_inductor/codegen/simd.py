@@ -470,12 +470,13 @@ def finishes_from_partials(
     node: scheduler.BaseSchedulerNode, m: sympy.Expr, n: sympy.Expr
 ) -> bool:
     """Whether reduction node over an (m, n) template output can store fp32
-    per-tile partials. Python wrapper code finishes them, so buffer sizes must
-    be static; SizeHintMultiKernel never emits that code."""
+    per-tile partials. Python wrapper code finishes them, which
+    SizeHintMultiKernel never emits. M may be dynamic, if backed; a static N
+    keeps the column tiles fixed."""
     return (
         not V.graph.cpp_wrapper
         and not config.multi_kernel_hints
-        and isinstance(m, sympy.Integer)
+        and not free_unbacked_symbols(m)
         and isinstance(n, sympy.Integer)
         and isinstance(node.node, ir.ComputedBuffer)
         and node.node.get_reduction_type() in PARTIAL_REDUCTION_OPS
