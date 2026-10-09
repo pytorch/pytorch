@@ -12,7 +12,6 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._higher_order_ops.utils import (
     _check_alias_and_mutation,
-    _find_or_create_fake_mode,
     _maybe_run_with_interpreter,
     autograd_not_implemented,
     check_meta_consistency,
@@ -25,7 +24,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode, maybe_clear_fake_constant
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -343,6 +342,16 @@ def while_loop_autograd(
     )
 
 
+def _find_or_create_fake_mode() -> FakeTensorMode:
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    fake_mode = torch._guards.detect_fake_mode()
+    if fake_mode is None:
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    return fake_mode
+
+
 def _create_unbacked_symint(
     fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
 ) -> torch.SymInt:
@@ -434,7 +443,9 @@ def while_loop_tracing(
             # be specialized to fixed values during tracing body_fn or cond_fn.
             elif isinstance(x, torch.Tensor):
                 x = x.clone()
-                maybe_clear_fake_constant(x)
+                if hasattr(x, "constant") and x.constant is not None:
+                    # pyrefly: ignore [missing-attribute]
+                    x.constant = None
             return x
 
         with disable_proxy_modes_tracing():
