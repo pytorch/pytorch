@@ -26,7 +26,7 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
-from collections.abc import Set as AbstractSet
+from collections.abc import Mapping, Set as AbstractSet
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
 from datetime import timedelta
@@ -143,7 +143,11 @@ from .cache_key import (
     FX_GRAPH_CACHE_KEY_STRATEGY,
     SYSTEM_CACHE_KEY_STRATEGY,
 )
-from .output_code import CompiledFxGraph
+from .output_code import (
+    annotate_fx_graph_runnable,
+    CompiledFxGraph,
+    fx_graph_runnable_metadata,
+)
 from .remote_cache import cache_stats, create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -2161,6 +2165,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         graph: CompiledFxGraph,
         cache_info: CacheInfo,
         constants: CompiledFxGraphConstants,
+        fx_kwargs: Mapping[str, Any] | None = None,
     ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Cache specific post compile steps that need to run if we find a graph in the cache
@@ -2213,14 +2218,16 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         output_code_log.debug("Output code: \n%s", code)
         output_code_log.debug("Output code written to: %s", artifact_path)
-        # On cache hit, use artifact path as filename
+        current_fx_kwargs = cast(
+            "_CompileFxKwargs", {**graph.fx_kwargs, **(fx_kwargs or {})}
+        )
+        graph.fx_kwargs = current_fx_kwargs
         trace_structured(
             "artifact",
-            metadata_fn=lambda: {
-                "name": "fx_graph_runnable",
-                "encoding": "string",
-            },
-            payload_fn=lambda: graph.runnable_graph_str,
+            metadata_fn=lambda: fx_graph_runnable_metadata(current_fx_kwargs),
+            payload_fn=lambda: annotate_fx_graph_runnable(
+                graph.runnable_graph_str, current_fx_kwargs
+            ),
         )
         trace_structured(
             "inductor_post_grad_graph",
@@ -2268,6 +2275,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         constants: CompiledFxGraphConstants,
         evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
         | None = None,
+        fx_kwargs: Mapping[str, Any] | None = None,
     ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -2328,7 +2336,9 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 "fx graph cache key %s post-load guards: %s", key, shape_env.guards
             )
 
-        return FxGraphCache.cache_hit_post_compile(graph, cache_info, constants)
+        return FxGraphCache.cache_hit_post_compile(
+            graph, cache_info, constants, fx_kwargs
+        )
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:
@@ -2494,6 +2504,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         constants: CompiledFxGraphConstants,
         evaluate_guards: Callable[[str, list[int] | list[torch.SymInt]], bool]
         | None = None,
+        fx_kwargs: Mapping[str, Any] | None = None,
     ) -> tuple[CompiledFxGraph | None, CacheInfo]:
         """
         Lookup the graph with the given key, and return results and metadata.
@@ -2501,7 +2512,13 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         differently from FXGraphCache.
         """
         compiled_graph, cache_info = FxGraphCache._lookup_graph(
-            key, example_inputs, local, remote_cache, constants, evaluate_guards
+            key=key,
+            example_inputs=example_inputs,
+            local=local,
+            remote_cache=remote_cache,
+            constants=constants,
+            evaluate_guards=evaluate_guards,
+            fx_kwargs=fx_kwargs,
         )
         cache_info: CacheInfo = {
             **cache_info,

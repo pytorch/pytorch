@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import json
 import logging
 import os
 from functools import partial
@@ -67,7 +68,7 @@ from .runtime.autotune_cache import AutotuneCacheBundler
 
 if TYPE_CHECKING:
     from collections import Counter
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
@@ -96,6 +97,53 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+_FX_GRAPH_RUNNABLE_IDENTITY_PREFIX = "# torch._inductor.fx_graph_runnable: "
+
+
+def _fx_graph_runnable_identity(fx_kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    if fx_kwargs.get("is_backward", False):
+        graph_role = "backward"
+    elif fx_kwargs.get("is_inference", False):
+        graph_role = "inference"
+    else:
+        graph_role = "forward"
+    return {
+        "graph_id": fx_kwargs.get("graph_id"),
+        "graph_role": graph_role,
+    }
+
+
+def fx_graph_runnable_metadata(fx_kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    identity = _fx_graph_runnable_identity(fx_kwargs)
+    return {
+        "name": "fx_graph_runnable",
+        "encoding": "string",
+        **identity,
+    }
+
+
+def annotate_fx_graph_runnable(source: str, fx_kwargs: Mapping[str, Any]) -> str:
+    """Put the graph identity in the runnable payload for offline consumers."""
+    if not source:
+        return source
+    if source.startswith(_FX_GRAPH_RUNNABLE_IDENTITY_PREFIX):
+        _, separator, source = source.partition("\n")
+        if not separator:
+            return ""
+    identity = _fx_graph_runnable_identity(fx_kwargs)
+    compile_id = CompileContext.current_compile_id()
+    identity.update(
+        compiled_autograd_id=(
+            compile_id.compiled_autograd_id if compile_id is not None else None
+        ),
+        frame_id=compile_id.frame_id if compile_id is not None else None,
+        frame_compile_id=(
+            compile_id.frame_compile_id if compile_id is not None else None
+        ),
+    )
+    identity = json.dumps(identity, sort_keys=True)
+    return f"{_FX_GRAPH_RUNNABLE_IDENTITY_PREFIX}{identity}\n{source}"
 
 
 @dataclasses.dataclass

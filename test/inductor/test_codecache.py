@@ -766,6 +766,25 @@ class TestFxGraphCache(TestCase):
         torch._dynamo.reset()
         clear_caches()
 
+    def test_lookup_graph_preserves_positional_evaluate_guards(self) -> None:
+        shape_env = mock.Mock()
+        evaluate_guards = mock.Mock()
+        with (
+            mock.patch.object(FxGraphCache, "_get_shape_env", return_value=shape_env),
+            mock.patch.object(
+                FxGraphCache,
+                "find_guarded_entry",
+                return_value=(None, None, {}),
+            ) as find_entry,
+        ):
+            graph, cache_info = FxGraphCache._lookup_graph(
+                "key", [], True, None, mock.sentinel.constants, evaluate_guards
+            )
+
+        self.assertIsNone(graph)
+        self.assertEqual(cache_info, {})
+        self.assertIs(find_entry.call_args.args[3], evaluate_guards)
+
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
             f"""

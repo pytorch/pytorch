@@ -181,6 +181,11 @@ class StructuredTraceTestingFormatter(logging.Formatter):
             metadata["compilation_metrics_runtime"] = "METRICS"
         if "bwd_compilation_metrics_runtime" in metadata:
             metadata["bwd_compilation_metrics_runtime"] = "METRICS"
+        if (artifact := metadata.get("artifact")) is not None and artifact.get(
+            "name"
+        ) == "fx_graph_runnable":
+            artifact.pop("graph_id", None)
+            artifact.pop("graph_role", None)
         metadata = self._id_normalizer.normalize(metadata)
         if (
             (k := "create_symbol") in metadata
@@ -1016,6 +1021,156 @@ def forward(self, x, y):
 """,
         )
         self.assertParses()
+
+    @torch._inductor.config.patch("fx_graph_cache", True)
+    @torch._functorch.config.patch("enable_autograd_cache", False)
+    def test_fx_graph_runnable_identity(self):
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_inductor_cache
+
+        metadata = []
+        payloads = []
+        compile_ids = []
+
+        class CaptureHandler(logging.Handler):
+            def emit(self, record):
+                artifact = record.metadata.get("artifact")
+                if artifact is not None and artifact.get("name") == "fx_graph_runnable":
+                    metadata.append(copy.deepcopy(artifact))
+                    payloads.append(record.payload)
+                    compile_ids.append(
+                        (
+                            record.metadata["frame_id"],
+                            record.metadata["frame_compile_id"],
+                        )
+                    )
+
+        handler = CaptureHandler()
+        trace_log.addHandler(handler)
+        self.addCleanup(trace_log.removeHandler, handler)
+
+        def first(x):
+            return x.sin()
+
+        def second(x):
+            return x.sin()
+
+        with fresh_inductor_cache():
+            counters.clear()
+            torch.compile(first, backend="inductor")(torch.ones(1))
+            torch.compile(second, backend="inductor")(torch.ones(1))
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        self.assertEqual(len(metadata), 2)
+        identities = [
+            json.loads(payload.partition(": ")[2].splitlines()[0])
+            for payload in payloads
+        ]
+        self.assertEqual(
+            [
+                (identity["frame_id"], identity["frame_compile_id"])
+                for identity in identities
+            ],
+            compile_ids,
+        )
+        self.assertNotEqual(identities[0]["frame_id"], identities[1]["frame_id"])
+        for identity, artifact in zip(identities, metadata):
+            self.assertEqual(identity["compiled_autograd_id"], None)
+            self.assertEqual(identity["graph_id"], artifact["graph_id"])
+            self.assertEqual(identity["graph_role"], "inference")
+        self.assertEqual(
+            metadata,
+            [
+                {
+                    "name": "fx_graph_runnable",
+                    "encoding": "string",
+                    "graph_id": 0,
+                    "graph_role": "inference",
+                },
+                {
+                    "name": "fx_graph_runnable",
+                    "encoding": "string",
+                    "graph_id": 1,
+                    "graph_role": "inference",
+                },
+            ],
+        )
+
+        metadata.clear()
+        payloads.clear()
+        compile_ids.clear()
+        torch._dynamo.reset()
+        x = torch.ones(1, requires_grad=True)
+        torch.compile(first, backend="inductor")(x).sum().backward()
+
+        self.assertEqual(
+            [artifact["graph_role"] for artifact in metadata],
+            ["forward", "backward"],
+        )
+        self.assertIsInstance(metadata[0]["graph_id"], int)
+        self.assertEqual(metadata[0]["graph_id"], metadata[1]["graph_id"])
+        self.assertEqual(
+            [
+                json.loads(payload.partition(": ")[2].splitlines()[0])
+                for payload in payloads
+            ],
+            [
+                {
+                    "compiled_autograd_id": None,
+                    "frame_compile_id": 0,
+                    "frame_id": 0,
+                    "graph_id": metadata[0]["graph_id"],
+                    "graph_role": "forward",
+                },
+                {
+                    "compiled_autograd_id": None,
+                    "frame_compile_id": 0,
+                    "frame_id": 0,
+                    "graph_id": metadata[1]["graph_id"],
+                    "graph_role": "backward",
+                },
+            ],
+        )
+
+    @torch._inductor.config.patch("fx_graph_cache", True)
+    @torch._functorch.config.patch("enable_autograd_cache", True)
+    def test_aot_autograd_cache_hit_runnable_identity(self):
+        from torch._dynamo.utils import counters
+        from torch._inductor.utils import fresh_inductor_cache
+
+        payloads = []
+
+        class CaptureHandler(logging.Handler):
+            def emit(self, record):
+                artifact = record.metadata.get("artifact")
+                if artifact is not None and artifact.get("name") == "fx_graph_runnable":
+                    payloads.append(record.payload)
+
+        handler = CaptureHandler()
+        trace_log.addHandler(handler)
+        self.addCleanup(trace_log.removeHandler, handler)
+
+        def fn(x):
+            return x.sin()
+
+        with fresh_inductor_cache():
+            counters.clear()
+            compiled = torch.compile(fn, backend="inductor")
+            compiled(torch.ones(1))
+            torch._dynamo.reset()
+            compiled(torch.ones(1))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        identities = [
+            json.loads(payload.partition(": ")[2].splitlines()[0])
+            for payload in payloads
+        ]
+        self.assertEqual(len(identities), 2)
+        for identity in identities:
+            self.assertIsInstance(identity["graph_id"], int)
+            self.assertEqual(identity["graph_role"], "inference")
 
     @requires_tlparse
     def test_make_fx_fail_partial(self):
