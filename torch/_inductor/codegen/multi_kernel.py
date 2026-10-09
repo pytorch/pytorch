@@ -414,6 +414,13 @@ class MultiKernelCall:
             def inner():
                 filtered_args = self._get_filtered_args(args, index)
                 args_clone, kwargs_clone = kernel.clone_args(*filtered_args, **kwargs)
+                if "stream" in kwargs_clone:
+                    # CUDA graph benchmarking captures on a side stream; launch on
+                    # the stream current at call time so the kernel is captured.
+                    device_interface = kernel.get_device_interface()
+                    kwargs_clone["stream"] = device_interface.get_raw_stream(
+                        device_interface.current_device()
+                    )
                 return kernel.run(*args_clone, **kwargs_clone)
 
             return inner
