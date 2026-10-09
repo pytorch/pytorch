@@ -48,7 +48,6 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
-from torch.utils.weak import WeakIdKeyDictionary
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -216,28 +215,14 @@ class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
     allow_non_fake_inputs_override: bool | None
-    non_strict_export_fake_tensor_tracker: WeakIdKeyDictionary
+    non_strict_export_fake_tensor_tracker: weakref.WeakSet[FakeTensor]
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
-        self.non_strict_export_fake_tensor_tracker = WeakIdKeyDictionary()
+        self.non_strict_export_fake_tensor_tracker = weakref.WeakSet()
 
 
 fake_tensor_tls = FakeTensorTLS()
-
-
-def tracking_fake_tensors_for_export() -> bool:
-    return (
-        torch.compiler.is_exporting()
-        and torch._export.config.detect_non_strict_fake_tensor_leaks
-    )
-
-
-# C++ fake tensors have no Python __init__, and constructor-only tracking misses
-# memoized tensors reused during non-strict export.
-def track_fake_tensor_for_export(t: object) -> None:
-    if tracking_fake_tensors_for_export() and is_fake_tensor(t):
-        fake_tensor_tls.non_strict_export_fake_tensor_tracker[t] = None
 
 
 def ordered_set(*items: T) -> dict[T, Literal[True]]:
@@ -361,18 +346,8 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
 
 
 def maybe_get_real_tensor(x: object) -> Tensor | None:
-    from torch._subclasses.functional_tensor import FunctionalTensor
-
     if isinstance(x, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
         return x.real_tensor
-    elif isinstance(x, FunctionalTensor):
-        return maybe_get_real_tensor(x.elem)
-    elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
-        reapply_views = torch._C._functionalization_reapply_views_tls()
-        unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
-        return maybe_get_real_tensor(unwrapped)
-    elif isinstance(x, Tensor) and is_functorch_wrapped_tensor(x):
-        return maybe_get_real_tensor(torch._C._functorch.get_unwrapped(x))
     elif isinstance(x, Tensor) and torch._C._is_fake_tensor(x):
         return torch._C._get_real_tensor(x)
     return None
@@ -822,7 +797,6 @@ class FakeTensorConverter:
         if maybe_memo is not None:
             if t.is_mkldnn and not maybe_memo.is_mkldnn:
                 maybe_memo.dispatch_keys = torch._C._dispatch_keys(t)
-            track_fake_tensor_for_export(maybe_memo)
             return maybe_memo
         # not yet supported in metatensors
         if t.is_quantized:
@@ -991,7 +965,6 @@ class FakeTensorConverter:
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
-        track_fake_tensor_for_export(out)
         return out
 
     # If you specify the device, it MUST be a meta tensor.
@@ -1421,7 +1394,11 @@ class FakeTensor(Tensor):
     #
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__()
-        track_fake_tensor_for_export(self)
+        if (
+            torch.compiler.is_exporting()
+            and torch._export.config.detect_non_strict_fake_tensor_leaks
+        ):
+            fake_tensor_tls.non_strict_export_fake_tensor_tracker.add(self)
 
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
