@@ -17,7 +17,10 @@ from torch._C import _functionalization
 from torch._custom_class_base import CustomClassBase
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import is_fake_tensor
-from torch._subclasses.functional_tensor import FunctionalTensor
+from torch._subclasses.functional_tensor import (
+    copy_grad_dtype_override,
+    FunctionalTensor,
+)
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq, SymIntEqByExpr
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -38,6 +41,7 @@ def to_fun(t: object) -> Any:
             # goes at the bottom.
             # recurse here, so we can support nested wrapper subclasses
             out = transform_subclass(t, lambda _, inner_t: to_fun(inner_t))
+            copy_grad_dtype_override(t, out)
             torch._mirror_autograd_meta_to(t, out)  # type: ignore[attr-defined]
             return out
         else:

@@ -4361,6 +4361,102 @@ def forward(self, tangents_1):
 
         self.verify_aot_autograd(f, [torch.randn(3)])
 
+    @parametrize("grad_dtype", [torch.float32, None])
+    def test_custom_autograd_grad_dtype(self, grad_dtype):
+        # The custom backward returns an fp32 grad for a bf16 leaf whose grad_dtype allows
+        # it, so the compiled backward must not round the grad to bf16.
+        class MatmulWithFp32WeightGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x)
+                return x @ weight.T
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                (x,) = ctx.saved_tensors
+                return None, grad_out.float().T @ x.float()
+
+        def weight_grad(fn):
+            weight = torch.nn.Parameter(torch.ones(1, 1, dtype=torch.bfloat16))
+            weight.grad_dtype = grad_dtype
+            # (1 + 2^-7)^2 is not representable in bf16.
+            x = torch.full((1, 1), 1 + 2**-7, dtype=torch.bfloat16)
+            fn(x, weight).backward(x)
+            return weight.grad
+
+        fn = MatmulWithFp32WeightGrad.apply
+        ref = weight_grad(fn)
+        res = weight_grad(torch.compile(fn, backend="aot_eager", fullgraph=True))
+        self.assertEqual(ref.dtype, torch.float32)
+        self.assertEqual(res, ref, atol=0, rtol=0)
+
+    def test_custom_autograd_grad_dtype_changed_before_backward(self):
+        # The compiled backward bakes in the grad_dtype seen at trace time, so
+        # changing it before backward raises, unless it was traced with None.
+        class MatmulWithFp32WeightGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x)
+                return x @ weight.T
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                (x,) = ctx.saved_tensors
+                return None, grad_out.float().T @ x.float()
+
+        def weight_grad(fn, grad_dtype_fwd, grad_dtype_bwd):
+            weight = torch.nn.Parameter(torch.ones(1, 1, dtype=torch.bfloat16))
+            weight.grad_dtype = grad_dtype_fwd
+            x = torch.full((1, 1), 1 + 2**-7, dtype=torch.bfloat16)
+            out = fn(x, weight)
+            weight.grad_dtype = grad_dtype_bwd
+            out.backward(x)
+            return weight.grad
+
+        fn = MatmulWithFp32WeightGrad.apply
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        for fwd, bwd in [
+            (torch.bfloat16, torch.float32),
+            (torch.float32, torch.bfloat16),
+            (torch.float32, None),
+        ]:
+            with self.assertRaisesRegex(RuntimeError, "grad_dtype of an input"):
+                weight_grad(compiled, fwd, bwd)
+        for fwd, bwd in [
+            (torch.float32, torch.float32),
+            (None, torch.float32),
+            (None, torch.bfloat16),
+        ]:
+            ref = weight_grad(fn, fwd, bwd)
+            res = weight_grad(compiled, fwd, bwd)
+            self.assertEqual(res, ref, atol=0, rtol=0, exact_dtype=True)
+
+    def test_custom_backward_reads_grad_dtype(self):
+        # AOTAutograd runs this backward while tracing, so its kernel choice is fixed
+        # by the grad_dtype at trace time.
+        class PicksKernelByGradDtype(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                return x @ weight.T
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                x, weight = ctx.saved_tensors
+                if weight.grad_dtype == torch.float32:
+                    return None, grad_out.float().T @ x.float()
+                return None, grad_out.T @ x
+
+        torch._dynamo.allow_in_graph(PicksKernelByGradDtype)
+        weight = torch.nn.Parameter(torch.ones(1, 1, dtype=torch.bfloat16))
+        x = torch.full((1, 1), 1 + 2**-7, dtype=torch.bfloat16)
+        fn = PicksKernelByGradDtype.apply
+        compiled = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out = compiled(x, weight)
+        weight.grad_dtype = torch.float32
+        with self.assertRaisesRegex(RuntimeError, "grad_dtype of an input"):
+            out.backward(x)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_autocast_disable_guard(self):
         with torch._C._DisableAutocast():

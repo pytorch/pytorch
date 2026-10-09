@@ -792,15 +792,19 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
     ) -> tuple[Callable[..., Any], tuple[Any]]:
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+        # Subclass hashes don't cover the outer tensor's grad_dtype, which the
+        # traced backward casts input grads to.
+        grad_dtype = tensor.grad_dtype if tensor.requires_grad else tensor.dtype
         if hasattr(tensor, "_stable_hash_for_caching"):
-            return (_ident, (tensor._stable_hash_for_caching(),))
+            return (_ident, ((tensor._stable_hash_for_caching(), grad_dtype),))
         if is_traceable_wrapper_subclass(tensor):
             warn_once(
                 f"{type(tensor).__name__} does not implement _stable_hash_for_caching. "
                 "For PT2-compatible tensor subclasses, it is recommended to implement "
                 "_stable_hash_for_caching(self) -> str for stable AOT autograd caching."
             )
-            return (_ident, (self._default_stable_hash_for_caching(tensor),))
+            subclass_hash = self._default_stable_hash_for_caching(tensor)
+            return (_ident, ((subclass_hash, grad_dtype),))
         return self._reduce_tensor(tensor)
 
     def _collect_inner_tensor_hashes(
@@ -888,7 +892,8 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
         Reduce the tensor to a stable key for caching.
         """
         metadata = extract_tensor_metadata_for_cache_key(t)
-        return (_ident, (metadata,))
+        grad_dtype = t.grad_dtype if t.requires_grad else t.dtype
+        return (_ident, ((metadata, grad_dtype),))
 
 
 @contextlib.contextmanager

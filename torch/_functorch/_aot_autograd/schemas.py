@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
 from torch._subclasses.fake_tensor import is_fake, is_fake_tensor
+from torch._subclasses.functional_tensor import copy_grad_dtype_override
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -396,6 +397,9 @@ class SubclassCreationMeta:
             # has correct autograd metadata, since we'll be tracing through the autograd engine with the subclass.
             # We don't trace through the autograd engine at runtime though, so no need
             # to compute this extra metadata then!
+            if self.original_subclass is None:
+                raise AssertionError("original_subclass must not be None at trace time")
+            copy_grad_dtype_override(self.original_subclass, rebuilt)
             torch._mirror_autograd_meta_to(self.original_subclass, rebuilt)  # type: ignore[attr-defined]
 
         return rebuilt
@@ -586,6 +590,15 @@ class ViewAndMutationMeta:
 
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: list[str | None] | None = None
+
+    # grad_dtype of each grad-requiring leaf input at trace time. The traced backward
+    # bakes it in (its grad cast, and any choice a custom backward made by reading
+    # it), so the runtime rejects changes to it between forward and backward. Inputs
+    # traced with None are skipped: their grads leave the graph uncast and the
+    # autograd engine casts them to the grad_dtype set at backward time, as in eager.
+    # FSDP2 relies on this when an earlier backward restores grad_dtype under a
+    # forward that chose None.
+    input_grad_dtypes: dict[int, torch.dtype] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.

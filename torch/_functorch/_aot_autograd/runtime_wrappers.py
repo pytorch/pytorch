@@ -3538,6 +3538,9 @@ class _AOTDispatchAutogradFunctionFactory:
             @staticmethod
             # pyrefly: ignore [bad-override]
             def forward(ctx: Any, *deduped_flat_tensor_args: Any) -> Any:
+                ctx.grad_dtype_inputs = [
+                    deduped_flat_tensor_args[i] for i in fw_metadata.input_grad_dtypes
+                ]
                 return CompiledFunction._fwd_fn(
                     ctx,
                     deduped_flat_tensor_args,
@@ -3549,6 +3552,15 @@ class _AOTDispatchAutogradFunctionFactory:
 
             @staticmethod
             def backward(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
+                traced = fw_metadata.input_grad_dtypes.values()
+                for inp, dtype in zip(ctx.grad_dtype_inputs, traced):
+                    if inp.grad_dtype != dtype:
+                        raise RuntimeError(
+                            f"The grad_dtype of an input to a compiled function changed from "
+                            f"{dtype} to {inp.grad_dtype} between its forward and backward. "
+                            f"The compiled backward was traced with {dtype}, so it can't follow "
+                            "the change. Set grad_dtype before calling the compiled function."
+                        )
                 return CompiledFunction._bwd_fn(
                     flat_args,
                     ctx,

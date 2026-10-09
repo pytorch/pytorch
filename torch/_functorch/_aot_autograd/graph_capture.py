@@ -544,6 +544,12 @@ def aot_dispatch_autograd_graph(
         aot_config=aot_config,
     )
 
+    fw_metadata.input_grad_dtypes = {
+        i: arg.grad_dtype
+        for i, (arg, info) in enumerate(zip(flat_args, fw_metadata.input_info))
+        if info.requires_grad and info.is_leaf and arg.grad_dtype is not None
+    }
+
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.
     # See Note: [Fake Modules and AOTAutograd]
