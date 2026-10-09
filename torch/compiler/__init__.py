@@ -790,6 +790,34 @@ def load_cache_artifacts(serialized_artifacts: bytes) -> CacheInfo | None:
     return None
 
 
+def get_guarding_strategy_fn(strategy: str):
+    strats = {
+        None: defensive_guarding_strategy,
+        "defensive": defensive_guarding_strategy,
+        "inference": inference_guarding_strategy,
+    }
+    try:
+        return strats[strategy]
+    except KeyError:
+        raise AssertionError(f"Guarding strategy must be one of: {strats}")
+
+
+def defensive_guarding_strategy(guard_entries):
+    return [True for guard in guard_entries]
+
+
+def inference_guarding_strategy(guard_entries):
+    """
+    Filter all guards so that only guards produced for input arguments
+    to the compile region which are non-nn.module are preserved.
+
+    >> opt_mod = torch.compile(mod, guarding_strategy='inference')
+    """
+    return [
+        (not guard.orig_guard.is_module() and guard.is_input) for guard in guard_entries
+    ]
+
+
 def keep_portable_guards_unsafe(guard_entries):
     """
     A common function to only keep guards that can be used in both Python and non-Python environments.

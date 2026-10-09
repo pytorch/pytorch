@@ -206,6 +206,18 @@ class GuardSource(enum.Enum):
             GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
+    def is_module(self) -> bool:
+        return self in (
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+            GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_FSDP_MODULE,
+            GuardSource.GLOBAL_FSDP_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+        )
+
 
 """
 Base class for a "GuardBuilder" role.
@@ -389,6 +401,9 @@ class Guard:
 
     def is_local(self) -> bool:
         return self.source.is_local()
+
+    def is_module(self) -> bool:
+        return self.source.is_module()
 
     def create_fn_name(self) -> str:
         if isinstance(self.create_fn, functools.partial):
