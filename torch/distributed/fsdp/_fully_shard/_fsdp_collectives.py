@@ -674,9 +674,9 @@ def foreach_reduce(
     )
 
     copy_in(reduce_scatter_input)
+    # Only after the copy-in finishes can we free the gradients, including any
+    # that copy_in holds
     del copy_in
-
-    # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
