@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA,
+    HardwareClassification,
     TestCase,
 )
 from torch.testing._internal.common_quantized import (
@@ -725,6 +726,8 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
 
 
 class TestFP8Matmul(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipXPU
     def test_pack_uint4(self):
         """
@@ -742,6 +745,7 @@ class TestFP8Matmul(TestCase):
 
 
 class TestFP8MatmulDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
@@ -2715,6 +2719,7 @@ class TestFP8MatmulDevice(TestCase):
 
 
 class TestFP8MatmulCudaOnly(TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     def assert_scaled_addmm_inplace(self, input, expected, args, **kwargs):
         """Check the identity, storage, version, and value contract."""
