@@ -1240,10 +1240,10 @@ t2.start()
     @skipCUDAIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     @deviceCountAtLeast(2)
     def test_graph_destroy_preserves_current_device(self, devices):
-        # ~CUDAGraph runs when the last reference goes away, on whatever thread drops
-        # it, so it must leave that thread's current device alone. The invariant is
-        # device-generic; the regression it guards is ROCm-only, where the destructor
-        # synchronizes the capture device to let deferred frees finish.
+        # The graph destructor runs when the last reference goes away, on whatever
+        # thread drops it, so it must leave that thread's current device alone. The
+        # invariant is device-generic; the regression it guards is ROCm-only, where
+        # ~CUDAGraph synchronizes the capture device to let deferred frees finish.
         device_module = torch.get_device_module(devices[0])
         device_module.set_device(devices[0])
         g = _get_graph_by_device(devices[0])
