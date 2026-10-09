@@ -361,7 +361,7 @@ def _get_string_list_kwarg(
     return None
 
 
-def _accelerator_availability_check(call: ast.Call) -> str | None:
+def _accelerator_check(call: ast.Call) -> str | None:
     """Return the dotted name of an accelerator is_available() call, or None."""
 
     # Device modules an availability check may probe. "accelerator" is included on
@@ -378,7 +378,7 @@ def _accelerator_availability_check(call: ast.Call) -> str | None:
     }
 
     func = call.func
-    if not (isinstance(func, ast.Attribute) and func.attr == "is_available"):
+    if not isinstance(func, ast.Attribute):
         return None
 
     name = ast.unparse(func)
@@ -653,7 +653,7 @@ class AcceleratorAvailabilityRule(Rule):
             for node in ast.walk(stmt):
                 if not isinstance(node, ast.Call):
                     continue
-                check = _accelerator_availability_check(node)
+                check = _accelerator_check(node)
                 if check is None:
                     continue
                 messages.append(
