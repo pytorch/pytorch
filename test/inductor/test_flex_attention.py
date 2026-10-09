@@ -4370,16 +4370,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             dtype_low
         )
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
-        if device == "cpu":
-            with self.assertRaisesRegex(
-                InductorError,
-                "Mixed query, key, and value dtype is not supported on this platform",
-            ):
-                compiled_fn(query, key, value, _identity)
-        else:
-            out = compiled_fn(query, key, value, _identity)
-            self.assertEqual(out.shape, query.shape)
-            self.assertEqual(out.dtype, query.dtype)
+        out = compiled_fn(query, key, value, _identity)
+        self.assertEqual(out.shape, query.shape)
+        self.assertEqual(out.dtype, query.dtype)
 
     @skip_on_cpu
     @supported_platform

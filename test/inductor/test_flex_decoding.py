@@ -9,6 +9,7 @@ from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
+from torch._inductor.codegen.cpp_utils import DTYPE_TO_CPP
 from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -1830,6 +1831,45 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             device=device,
             kernel_options={"PARTITION_SIZE": partition_size},
         )
+
+    @supported_platform
+    @skipCUDAIf(True, "Not supported on CUDA")
+    @skipXPUIf(True, "Not supported on XPU")
+    @parametrize_device_dtype("dtypes")
+    @common_utils.parametrize("kv_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    @common_utils.parametrize("head_dim", [16, 72])
+    def test_flash_decoding_fp8_kv_cache(self, device, dtype, kv_dtype, head_dim):
+        B, Hq, Hkv, KV_S = 2, 8, 2, 2048
+        q = torch.randn(B, Hq, 1, head_dim, device=device, dtype=dtype)
+        k = torch.randn(B, Hkv, KV_S, head_dim, device=device, dtype=dtype)
+        v = torch.randn(B, Hkv, KV_S, head_dim, device=device, dtype=dtype)
+        k, v = k.to(kv_dtype), v.to(kv_dtype)
+        # Per-head key scale, as used to dequantize an FP8 key cache
+        k_scale = torch.rand(Hq, device=device) + 0.5
+
+        def score_mod(score, b, h, m, n):
+            return score * k_scale[h]
+
+        # Gives full, partial and empty KV blocks
+        block_mask = create_block_mask(
+            lambda b, h, m, n: n < 1500, None, None, 1, KV_S, device=device
+        )
+        attention = torch.compile(
+            functools.partial(
+                flex_attention,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                enable_gqa=True,
+            )
+        )
+        out, code = run_and_get_code(attention, q, k, v)
+        # FP8 -> query dtype is exact, so this must match the upcast cache
+        self.assertEqual(out, attention(q, k.to(dtype), v.to(dtype)))
+        # The decoding template reads the FP8 cache without an upcast kernel
+        kv_t = DTYPE_TO_CPP[kv_dtype]
+        self.assertIn(f"const {kv_t}* k_data", code[0])
+        self.assertIn(f"const {kv_t}* v_data", code[0])
+        self.assertIn("PARTITION_SIZE", code[0])
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
