@@ -20,7 +20,7 @@ from ...utils import get_k_splits, use_triton_blackwell_tma_template
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
-from .triton import CUDAConfigHeuristic
+from .triton import BaseConfig, CUDAConfigHeuristic
 
 
 if TYPE_CHECKING:
@@ -123,7 +123,14 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             for config_index in config_indices:
                 partial_config = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
                 if exceeds_smem is not None and exceeds_smem(
-                    partial_config, dtype_size
+                    BaseConfig(
+                        partial_config.block_m,
+                        partial_config.block_n,
+                        partial_config.block_k,
+                        partial_config.num_stages,
+                        partial_config.num_warps,
+                    ),
+                    dtype_size,
                 ):
                     continue
                 m_tiles = math.ceil(m_hint / partial_config.block_m)
