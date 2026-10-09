@@ -237,3 +237,11 @@ unsharded parameters, as with the default layout: it frees them on reshard,
 unless `set_keep_unsharded_storage` keeps them, and re-allocates them for the
 next unshard. The layout authoring interfaces are private and may change without
 backward compatibility.
+
+Custom backend-owned all-gather outputs are an explicit opt-in through
+`BackendOwnedAllGatherLayout`. The layout owns the outputs' storage and releases
+its lease after reshard, discarded prefetch completion, or failed setup. FSDP
+does not free these buffers. Each stateful layout binds to one parameter group;
+install a separate instance on each module with `set_all_gather_layout(...,
+recurse=False)`. The backend must order storage reuse after local and remote
+consumers. The default contract continues to use FSDP-owned buffers.
