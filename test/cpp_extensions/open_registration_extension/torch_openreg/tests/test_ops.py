@@ -211,6 +211,21 @@ class TestFallback(TestCase):
         self.assertEqual(z_cpu, z[0])
         self.assertEqual(z_cpu, z[1])
 
+    def test_out_variant_fallback(self):
+        """Test that an out= op without a backend kernel falls back to CPU"""
+        x_cpu = torch.tensor([[1.0, 2.0, 2.0, 3.0], [4.0, 4.0, 5.0, 4.0]])
+        x = x_cpu.to("openreg")
+        values = torch.empty(0, device="openreg")
+        indices = torch.empty(0, dtype=torch.long, device="openreg")
+
+        # call mode.values (mode with out=), which will fallback to cpu
+        torch.mode(x, 1, out=(values, indices))
+
+        expected = torch.mode(x_cpu, 1)
+        self.assertEqual(values.device.type, "openreg")
+        self.assertEqual(values, expected.values)
+        self.assertEqual(indices, expected.indices)
+
 
 class TestSDPA(NNTestCase):
     @skipIfTorchDynamo()
