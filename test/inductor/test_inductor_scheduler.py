@@ -1209,6 +1209,8 @@ class TestScheduler(TestCase):
                 prologue_cache={},
                 block_ptr_id=iter([1]),
                 index_dtype=index_dtype,
+                _tma_dim_fits_int32=TritonTemplateKernel._tma_dim_fits_int32,
+                index_to_str=lambda sizes: str(list(sizes)),
             )
             graph = Mock(sizevars=SizeVarAllocator())
             graph.get_buffer.return_value.get_layout.return_value = layout
@@ -1277,6 +1279,35 @@ class TestScheduler(TestCase):
                 for name in ("full", "padded_rows", "view_3d", "size_1")
             ],
         )
+
+    def test_tma_dim_fits_int32_guards_dynamic_size(self):
+        """A dynamic TMA descriptor dim is guarded below 2**31, so a larger size
+        recompiles. A size whose hint is already past it, or an unbacked size,
+        uses tl.store without a guard."""
+        from torch._dynamo.source import ConstantSource
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        graph = Mock(sizevars=SizeVarAllocator(shape_env))
+
+        def fits(size):
+            with V.set_graph_handler(graph):
+                return TritonTemplateKernel._tma_dim_fits_int32("buf1", size)
+
+        def symbol(hint):
+            return shape_env.create_symbol(
+                hint, ConstantSource(f"m{hint}"), dynamic_dim=DimDynamic.DYNAMIC
+            )
+
+        m = symbol(4096)
+        self.assertTrue(fits(m))
+        self.assertIn(sympy.Lt(m, 2**31), [guard.expr for guard in shape_env.guards])
+        num_guards = len(shape_env.guards)
+        self.assertFalse(fits(symbol(2**31)))
+        self.assertFalse(fits(shape_env.create_unbacked_symint().node.expr))
+        self.assertTrue(fits(sympy.Integer(2**31 - 1)))
+        self.assertFalse(fits(sympy.Integer(2**31)))
+        self.assertEqual(len(shape_env.guards), num_guards)
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)

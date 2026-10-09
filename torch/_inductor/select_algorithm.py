@@ -40,6 +40,7 @@ from torch._dynamo.utils import (
 )
 from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
@@ -2216,10 +2217,12 @@ class TritonTemplateKernel(TritonKernel):
             {s: e.expr for s, e in self.range_tree_nodes.items()}
         )
         # The descriptor sees the output as [M, N], also when it's a row-major
-        # view such as [B, S, N]. Its shapes and coordinates are int32.
+        # view such as [B, S, N].
         shape = [sympy_product(layout.size[:-1]), layout.size[-1]]
         strides = [layout.stride[-2], layout.stride[-1]]
-        if tile_index != strides[0] * x + r or max(shape) >= 2**31:
+        if tile_index != strides[0] * x + r or not all(
+            self._tma_dim_fits_int32(name, size) for size in shape
+        ):
             return False
         offsets = [
             texpr(o) if self.index_dtype == "tl.int32" else f"({texpr(o)}).to(tl.int32)"
@@ -2233,7 +2236,7 @@ class TritonTemplateKernel(TritonKernel):
                 DeferredLine(
                     name,
                     f"{desc} = tl.make_tensor_descriptor({var}, "
-                    f"shape={shape}, strides={strides}, "
+                    f"shape={self.index_to_str(shape)}, strides={strides}, "
                     f"block_shape=[{rows}, {cols}])",
                 )
             )
@@ -2248,6 +2251,28 @@ class TritonTemplateKernel(TritonKernel):
             )
         )
         return True
+
+    @staticmethod
+    def _tma_dim_fits_int32(name: str, size: sympy.Expr) -> bool:
+        """Whether a TMA descriptor dim, and so every coordinate along it,
+        fits in int32. Admitting a TMA template already guards its output size
+        (use_triton_tma_template); this guards a dynamic size below 2**31 if
+        not, so a larger one recompiles. One that can't be guarded falls back
+        to tl.store."""
+        limit = 2**31
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_lt(size, limit):
+            return True
+        if free_unbacked_symbols(size):
+            reason = "is unbacked"
+        elif sizevars.optimization_hint(size) >= limit:
+            reason = "is at least 2**31"
+        elif sizevars.guard_or_false(sympy.Lt(size, limit)):
+            return True
+        else:
+            reason = "can't be guarded below 2**31"
+        log.debug("Storing %s with tl.store: its size %s %s", name, size, reason)
+        return False
 
     def _staged_tile_elems(self) -> int | None:
         """Elements in one TMA store's shared-memory staging buffer: an
@@ -2313,8 +2338,8 @@ class TritonTemplateKernel(TritonKernel):
                 if (
                     not all(
                         isinstance(x, (int, sympy.Integer))
-                        for x in (*layout.size, *layout.stride, layout.offset)
-                    )  # dynamic layout
+                        for x in (layout.size[-1], *layout.stride, layout.offset)
+                    )  # dynamic layout, other than the outer sizes
                     # [M, N] or a row-major view of it, e.g. [B, S, N]
                     or sympy_product(layout.size) != sympy_product(size)
                     or layout.size[-1] != size[-1]  # not full-tile
@@ -2325,6 +2350,10 @@ class TritonTemplateKernel(TritonKernel):
                         for i in range(len(layout.size) - 2)
                     )
                     or not can_use_tma(output_layout=layout)
+                    or not all(
+                        self._tma_dim_fits_int32(name, dim)
+                        for dim in (sympy_product(layout.size[:-1]), layout.size[-1])
+                    )
                 ):
                     continue
                 outputs.append((name, staged * layout.dtype.itemsize))

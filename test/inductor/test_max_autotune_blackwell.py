@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils._triton import (
     has_datacenter_blackwell_tma_device,
     has_triton_tma_device,
@@ -1346,6 +1347,62 @@ class TestBlackwellTMALoadFusion(TestCase):
         self.assertIsNotNone(
             re.search(r"def triton_tem_fused\w*\([^)]*\bks0\b", codes[-1]), codes[-1]
         )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("outputs", ("post", "all"))
+    def test_blackwell_mm_row_reduction_epilogue_dynamic_m_tma_store(
+        self, outputs: str
+    ):
+        """With a dynamic M, the full-tile outputs keep their TMA stores: the
+        one computed after the row reduction (post), and also the template's
+        own and one computed before it (all). M stays guarded below 2**31 so the
+        descriptors' int32 shapes and coordinates can't overflow."""
+
+        def fn(a, b):
+            c = a @ b
+            d = c.float() * 2
+            out = (d - d.amax(-1, keepdim=True)).to(a.dtype)
+            return out if outputs == "post" else (c, d.to(a.dtype), out)
+
+        torch._dynamo.reset()
+        K, N = 64, 128
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE).to(torch.bfloat16)
+        counter = CompileCounterWithBackend("inductor")
+        codes = []
+        guards, guards_ctx = logs_to_string("torch._dynamo.guards", "guards")
+        with (
+            self._mm_config(
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                **{
+                    "triton.template_reduction_epilogue": True,
+                    "triton.enable_template_tma_store": True,
+                },
+            ),
+            self._poison_outputs(),
+            mock.patch.object(GraphLowering, "save_output_code", codes.append),
+            guards_ctx(),
+        ):
+            compiled = torch.compile(fn, backend=counter)
+            for M in (1024, 1000, 4099):
+                a = torch.randint(-1, 2, (M, K), device=GPU_TYPE).to(torch.bfloat16)
+                torch._dynamo.mark_dynamic(a, 0)
+                self.assertEqual(compiled(a, b), fn(a, b), atol=0, rtol=0)
+        self.assertEqual(counter.frame_count, 1)
+        kernels = re.findall(r"def (triton_\w+)\(", codes[-1])
+        self._assert_row_fused(kernels, codes[-1], "amax")
+        self.assertIn("shape=[ks0, 128]", codes[-1])
+        self.assertEqual(
+            len(re.findall(r"tma_descriptor\d+\.store\(", codes[-1])),
+            1 if outputs == "post" else 3,
+        )
+        self.assertNotIn("tl.store(", codes[-1])
+        # M >= 2**31 recompiles instead of overflowing the descriptor. The
+        # TMA template's admission sets this guard first; see
+        # test_tma_dim_fits_int32_guards_dynamic_size for the store's own.
+        self.assertRegex(guards.getvalue(), r"L\['a'\]\.size\(\)\[0\] <= 2147483647")
 
     DYNAMIC_M_PARTIAL_OPS = {
         # (fn, N): column reductions finish from per-row-tile partials, row
