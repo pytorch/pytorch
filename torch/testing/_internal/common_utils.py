@@ -184,6 +184,7 @@ SLOW_TESTS_FILE = ""
 TEST_BAILOUTS = False
 TEST_DISCOVER = False
 TEST_IN_SUBPROCESS = False
+TEST_SAVE_TORCHCI_REPORTS = ""
 TEST_SAVE_XML = ""
 UNITTEST_ARGS : list[str] = []
 USE_PYTEST = False
@@ -1167,6 +1168,7 @@ def parse_cmd_line_args():
     global TEST_BAILOUTS
     global TEST_DISCOVER
     global TEST_IN_SUBPROCESS
+    global TEST_SAVE_TORCHCI_REPORTS
     global TEST_SAVE_XML
     global UNITTEST_ARGS
     global USE_PYTEST
@@ -1184,6 +1186,7 @@ def parse_cmd_line_args():
     parser.add_argument('--save-xml', nargs='?', type=str,
                         const=_get_test_report_path(),
                         default=_get_test_report_path() if IS_CI else None)
+    parser.add_argument('--save-torchci-reports', type=str)
     parser.add_argument('--discover-tests', action='store_true')
     parser.add_argument('--log-suffix', type=str, default="")
     parser.add_argument('--run-parallel', type=int, default=1)
@@ -1225,6 +1228,7 @@ def parse_cmd_line_args():
     PYTEST_SINGLE_TEST = args.pytest_single_test
     TEST_DISCOVER = args.discover_tests
     TEST_IN_SUBPROCESS = args.subprocess
+    TEST_SAVE_TORCHCI_REPORTS = args.save_torchci_reports
     TEST_SAVE_XML = args.save_xml
     REPEAT_COUNT = args.repeat
     SHOWLOCALS = args.showlocals
@@ -1554,6 +1558,8 @@ def run_tests(argv=None):
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
             other_args += ['--save-xml', TEST_SAVE_XML]
+        if TEST_SAVE_TORCHCI_REPORTS:
+            other_args.append(f'--save-torchci-reports={TEST_SAVE_TORCHCI_REPORTS}')
         if HW_CLASSIFICATION is not None:
             other_args += ['--hw-classification'] + [req.name for req in HW_CLASSIFICATION]
 
@@ -1619,6 +1625,9 @@ def run_tests(argv=None):
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+        if TEST_SAVE_TORCHCI_REPORTS:
+            prefix = os.path.join(TEST_SAVE_TORCHCI_REPORTS, sanitize_test_filename(argv[0]))
+            pytest_args += ['-p', 'torch.testing._internal.torchci.plugin', f'--torchci-report-prefix={prefix}']
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 

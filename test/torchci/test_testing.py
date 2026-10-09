@@ -37,6 +37,8 @@ from torch.testing._internal.torchci import report as torchci_report
 
 
 _TEST_DIR = Path(__file__).resolve().parent.parent
+# For importing run_test.
+sys.path.append(str(_TEST_DIR))
 # test/test_testing.py's TestJunitXml fixture suite, which covers every outcome the
 # pytest path reports.
 _PYTEST_SUITE = _TEST_DIR / "junit_xml_testdata/pytest_suite.py"
@@ -432,6 +434,56 @@ class TestReportFailureIsolation(TestCase):
 
 
 instantiate_parametrized_tests(TestReportFailureIsolation)
+
+
+@unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
+@unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+@skipIfTorchDynamo("subprocess test does not need Dynamo coverage")
+@unittest.skipIf(TEST_WITH_CROSSREF, "subprocess test does not need crossref coverage")
+@unittest.skipIf(
+    TEST_CUDA or TEST_WITH_ROCM, "report enablement doesn't need GPU coverage"
+)
+class TestReportEnablement(TestCase):
+    def test_basic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report_dir = Path(tmp) / "reports"
+            script = [
+                sys.executable,
+                "enablement_report.py",
+                "--use-pytest",
+                "-p",
+                "no:cacheprovider",
+            ]
+            t0_ms = int(time.time() * 1000)
+            proc = subprocess.run(
+                [*script, f"--save-torchci-reports={report_dir}"],
+                cwd=_REPORT_TESTDATA,
+                env=_REPORT_CHILD_ENV,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            t1_ms = int(time.time() * 1000)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            reports = _report_files(report_dir / "enablement_report")
+            self.assertEqual(len(reports), 1)
+            self.assertRegex(
+                reports[0].name,
+                r"^enablement_report-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.report\.jsonl$",
+            )
+            records = [json.loads(line) for line in reports[0].read_text().splitlines()]
+        self.assertEqual([record["type"] for record in records], ["report", "run"])
+        _assert_run_line(self, records[1], t0_ms, t1_ms)
+        self.assertEqual(records[1]["outcome"], "passed")
+
+    def test_run_test_forwarding(self) -> None:
+        run_test_module = importlib.import_module("run_test")
+        args = run_test_module._torchci_report_args
+        with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", True):
+            self.assertEqual(args("/reports"), ["--save-torchci-reports=/reports"])
+            self.assertEqual(args(None), [])
+        with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
+            self.assertEqual(args("/reports"), [])
 
 
 class TestReportHelpers(TestCase):
