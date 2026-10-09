@@ -2413,8 +2413,8 @@ class _CudaDeviceProperties:
     memory_bus_width: _int
     shared_memory_per_block: _int
     shared_memory_per_multiprocessor: _int
-    # Registered only without ROCm, but stubs cannot be platform-conditional; gcnArchName
-    # above is the reciprocal HIP-only case.
+    # Not registered on HIP before ROCm 6.0, but stubs cannot be
+    # platform-conditional.
     shared_memory_per_block_optin: _int
     regs_per_multiprocessor: _int
 
