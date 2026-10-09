@@ -15,7 +15,7 @@ from sympy import I, Max, Min, Symbol, sympify
 
 import torch
 from torch._dynamo import device_interface as di
-from torch._dynamo.device_interface import DeviceInterface
+from torch._dynamo.device_interface import BackendFeature, DeviceInterface
 from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
@@ -1767,6 +1767,7 @@ class _GpuWithStream(DeviceInterface):
     class Stream:  # overrides the base sentinel Stream -> exposes_streams() True
         pass
 
+    # Legacy contract: is_gpu() overridden directly, no backend_features().
     @staticmethod
     def is_gpu() -> bool:
         return True
@@ -1779,8 +1780,8 @@ class _GpuWithStream(DeviceInterface):
 class _GpuNoStream(DeviceInterface):
     # deliberately does NOT define Stream: inherits the base sentinel (mps-like)
     @staticmethod
-    def is_gpu() -> bool:
-        return True
+    def backend_features(device=None) -> set[BackendFeature]:
+        return {BackendFeature.GPU}
 
     @staticmethod
     def is_available() -> bool:
@@ -1789,8 +1790,8 @@ class _GpuNoStream(DeviceInterface):
 
 class _GpuUnavailable(DeviceInterface):
     @staticmethod
-    def is_gpu() -> bool:
-        return True
+    def backend_features(device=None) -> set[BackendFeature]:
+        return {BackendFeature.GPU}
 
     @staticmethod
     def is_available() -> bool:
@@ -1798,20 +1799,20 @@ class _GpuUnavailable(DeviceInterface):
 
 
 class _NonGpu(DeviceInterface):
-    # is_gpu() NOT overridden: inherits the base default of False
+    # neither is_gpu() nor backend_features() overridden: base defaults (non-GPU)
     @staticmethod
     def is_available() -> bool:
         return True
 
 
 class _GpuOnlyClassified(DeviceInterface):
-    # Overrides nothing but is_gpu(): a partially-implemented out-of-tree
-    # interface whose other base-class methods (is_available, device_count,
-    # ...) raise NotImplementedError. Registry-driven consumers must treat
-    # it as unavailable rather than propagate the error.
+    # Declares only the GPU capability. A partially-implemented out-of-tree
+    # interface: other base-class methods (is_available, device_count, ...)
+    # raise NotImplementedError. Registry-driven consumers must treat it as
+    # unavailable rather than propagate the error.
     @staticmethod
-    def is_gpu() -> bool:
-        return True
+    def backend_features(device=None) -> set[BackendFeature]:
+        return {BackendFeature.GPU}
 
 
 class TestDeviceClassification(TestCase):
@@ -1821,10 +1822,11 @@ class TestDeviceClassification(TestCase):
         get_gpu_type.cache_clear()
 
     def tearDown(self):
-        # GPU_TYPES is an import-time snapshot and never refreshes, so tests
-        # patch it rather than mutate it; only get_gpu_type() caches at all.
+        # Registration refreshes GPU_TYPES in place and clears get_gpu_type()'s
+        # cache. Popping registry entries directly bypasses both; restore here.
         for name in self._registered:
             di.device_interfaces.pop(name, None)
+        inductor_utils._refresh_gpu_types()
         get_gpu_type.cache_clear()
         super().tearDown()
 
@@ -1836,7 +1838,8 @@ class TestDeviceClassification(TestCase):
     def test_base_is_gpu_defaults_false(self):
         self.assertFalse(DeviceInterface.is_gpu())
         self.assertFalse(_NonGpu.is_gpu())
-        self.assertTrue(_GpuWithStream.is_gpu())
+        self.assertTrue(_GpuWithStream.is_gpu())  # explicit is_gpu() override
+        self.assertTrue(_GpuNoStream.is_gpu())  # derived via BackendFeature.GPU
 
     # ---- exposes_streams(): sentinel comparison, NOT None ----
     def test_exposes_streams_true_when_stream_overridden(self):
@@ -1860,22 +1863,19 @@ class TestDeviceClassification(TestCase):
     def test_is_gpu_registered(self):
         self._register("fakegpu", _GpuWithStream)
         self._register("fakecpu", _NonGpu)
-        # GPU_TYPES snapshots at inductor import; patch it with a fresh scan
-        # so is_gpu() sees the fixtures.
-        with mock.patch.object(inductor_utils, "GPU_TYPES", _gpu_types()):
-            self.assertTrue(is_gpu("fakegpu"))
-            self.assertFalse(is_gpu("fakecpu"))
+        # registration refreshes GPU_TYPES; no patching needed
+        self.assertTrue(is_gpu("fakegpu"))
+        self.assertFalse(is_gpu("fakecpu"))
 
     # ---- device_need_guard(device) ----
     def test_device_need_guard(self):
         self._register("fakegpu", _GpuWithStream)
         self._register("fakemps", _GpuNoStream)
         self._register("fakecpu", _NonGpu)
-        with mock.patch.object(inductor_utils, "GPU_TYPES", _gpu_types()):
-            self.assertTrue(device_need_guard("fakegpu"))
-            self.assertFalse(device_need_guard("fakemps"))  # gpu but no stream
-            self.assertFalse(device_need_guard("fakecpu"))
-            self.assertFalse(device_need_guard("definitely_not_a_device"))
+        self.assertTrue(device_need_guard("fakegpu"))
+        self.assertFalse(device_need_guard("fakemps"))  # gpu but no stream
+        self.assertFalse(device_need_guard("fakecpu"))
+        self.assertFalse(device_need_guard("definitely_not_a_device"))
 
     # ---- _gpu_types() ----
     def test_gpu_types_filters_indexed_and_non_gpu(self):
@@ -1887,19 +1887,39 @@ class TestDeviceClassification(TestCase):
         self.assertNotIn("fakegpu:0", result)
         self.assertNotIn("fakecpu", result)
 
-    def test_gpu_types_is_an_import_time_snapshot(self):
-        # GPU_TYPES is scanned exactly once, when inductor is imported;
-        # registering afterwards is documented as unsupported and must not be
-        # reflected (see register_interface_for_device).
+    def test_gpu_types_refreshes_on_registration(self):
+        # GPU_TYPES refreshes in place on every registration. Late
+        # registrations are reflected, including in references imported
+        # before the registration.
+        from torch.testing._internal.inductor_utils import (
+            GPU_TYPES as consumer_gpu_types,
+        )
+
         first = get_gpu_type()
-        self._register("acc", _GpuWithStream)
-        self.assertIn("acc", _gpu_types())  # a fresh scan does see it
-        self.assertNotIn("acc", inductor_utils.GPU_TYPES)  # the snapshot does not
-        self.assertFalse(is_gpu("acc"))
-        # Clear the cache so this re-evaluates over the frozen snapshot rather
-        # than trivially hitting functools.cache.
-        get_gpu_type.cache_clear()
+        self._register("acc", _GpuUnavailable)
+        self.assertIn("acc", _gpu_types())
+        self.assertIn("acc", inductor_utils.GPU_TYPES)
+        self.assertTrue(is_gpu("acc"))
+        # Only an in-place refresh reaches this pre-registration reference.
+        self.assertIn("acc", consumer_gpu_types)
+        self.assertIs(consumer_gpu_types, inductor_utils.GPU_TYPES)
+        # get_gpu_type() re-derives lazily; an unavailable late registration
+        # does not change the selection.
         self.assertEqual(get_gpu_type(), first)
+        # An available late registration does change it.
+        self._register("fakegpu2", _GpuWithStream)
+        acc = types.SimpleNamespace(type="fakegpu2")
+        with mock.patch("torch.accelerator.current_accelerator", return_value=acc):
+            self.assertEqual(get_gpu_type(), "fakegpu2")
+
+    def test_gpu_types_refreshes_on_replacement(self):
+        # Re-registering a device with a different interface refreshes
+        # GPU_TYPES; classification follows the latest registration.
+        self._register("fakegpu", _GpuWithStream)
+        self.assertTrue(is_gpu("fakegpu"))
+        self._register("fakegpu", _NonGpu)
+        self.assertFalse(is_gpu("fakegpu"))
+        self.assertNotIn("fakegpu", _gpu_types())
 
     def test_gpu_types_consumer_resolves_out_of_tree_via_registry(self):
         # A third-party PrivateUse1 backend (here "acc") registers a GPU-class
@@ -1976,8 +1996,9 @@ class TestDeviceClassification(TestCase):
 
     def test_in_tree_gpu_types_unchanged(self):
         # The registry scan replaces a hardcoded GPU_TYPES literal, so pin the
-        # in-tree result: dropping an is_gpu() override would otherwise shift
-        # the classification silently, with no test in the repo failing.
+        # in-tree result: dropping the GPU capability from an interface's
+        # backend_features() would otherwise shift the classification
+        # silently, with no test in the repo failing.
         known = {"cuda", "xpu", "mtia", "mps", "cpu", "tpu"}
         self.assertEqual(set(_gpu_types()) & known, {"cuda", "xpu", "mtia", "mps"})
         # MPS is GPU-class but exposes no Stream, so it takes no stream guard.
