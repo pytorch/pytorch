@@ -2,6 +2,7 @@
 from functools import partial
 
 import torch
+from torch._C._distributed_rpc import _get_current_rpc_agent
 from torch.futures import Future
 
 from . import functions, rpc_async
@@ -48,7 +49,11 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
         # rpc_async returns a Future pointing to the return value of `func_name`, it returns a `Future[T]`
         # Calling _rref_type_cont from the `then` lambda causes Future wrapping. IOW, `then` returns a `Future[Future[T]]`
         # To address that, we return a Future that is completed with the result of the async call.
-        result: Future = Future()
+        # It must cover the devices of the response tensors so that wait() syncs
+        # the caller's current streams with the streams that received them.
+        agent = _get_current_rpc_agent()
+        devices = [d for d in agent._get_device_map(rref.owner()) if d.type != "cpu"]
+        result: Future = Future(devices=devices)
 
         def _wrap_rref_type_cont(fut):
             try:
