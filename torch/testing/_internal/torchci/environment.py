@@ -128,16 +128,10 @@ def _compiler(config: str) -> tuple[str, str]:
 def _accelerator() -> tuple[str, str]:
     if torch.version.cuda:
         return "cuda", torch.version.cuda
-    if torch.version.hip:
-        # The ROCm release (10.1), not HIP's own version (7.16).
-        return "rocm", ".".join((torch.version.rocm or "").split(".")[:2])
-    xpu = str(getattr(torch.version, "xpu", "") or "")
-    if xpu:
-        # The SYCL version packed as major * 10000 + minor * 100 + patch.
-        version = xpu
-        if xpu.isdigit() and len(xpu) == 8:
-            version = f"{xpu[:4]}.{int(xpu[4:6])}"
-        return "xpu", version
+    if torch.version.rocm:
+        return "rocm", torch.version.rocm
+    if torch.version.xpu:
+        return "xpu", torch.version.xpu
     if torch.backends.mps.is_built():
         return "mps", ""
     return "cpu", ""
