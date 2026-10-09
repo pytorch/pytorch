@@ -1694,22 +1694,12 @@ def parse_args():
         help="enable coverage",
         default=PYTORCH_COLLECT_COVERAGE,
     )
-    reports_dir = str(REPO_ROOT / "test/torchci-reports")
     parser.add_argument(
         "--save-torchci-reports",
-        nargs="?",
-        const=reports_dir,
-        default=None,
+        # Absolute, since tests run from test/.
+        type=os.path.abspath,
         metavar="DIR",
-        help="write test run reports (default: test/torchci-reports)",
-    )
-    parser.add_argument(
-        "--no-save-torchci-reports",
-        dest="save_torchci_reports",
-        action="store_const",
-        const=None,
-        default=argparse.SUPPRESS,
-        help="don't write test run reports",
+        help="write test run reports to DIR",
     )
     parser.add_argument(
         "-i",
@@ -1870,10 +1860,6 @@ def parse_args():
     args, extra = parser.parse_known_args()
     if "--" in extra:
         extra.remove("--")
-    # Tests run from test/, so a relative DIR means test/DIR.
-    reports_dir = args.save_torchci_reports
-    if reports_dir and not os.path.isabs(reports_dir):
-        args.save_torchci_reports = str(REPO_ROOT / "test" / reports_dir)
     args.additional_args = extra
     return args
 
