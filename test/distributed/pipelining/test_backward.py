@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
+import gc
 import weakref
 
 from model_registry import MLPModule, MultiInterMediateModel
@@ -161,9 +162,10 @@ class StageBackwardTests(TestCase):
         for name, p in mod.named_parameters():
             torch.testing.assert_close(p.grad, ref_mod.get_parameter(name).grad)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight_custom_autograd_function(self, device):
-        # Split dI/dW must keep custom autograd.Function nodes alive after
-        # stage outputs are detached. See https://github.com/pytorch/pytorch/issues/166577
+        # Split dI/dW grads for a custom autograd.Function should match a
+        # full backward().
         class CustomMatmul(torch.autograd.Function):
             @staticmethod
             def forward(ctx, a, b):
@@ -202,8 +204,9 @@ class StageBackwardTests(TestCase):
             input_values=[x],
             weights=mod.parameters(),
         )
-        for param_group in param_groups:
-            self.assertTrue(param_group.get("ownership_tokens"))
+        # Pipeline stages may drop activations before dW.
+        del out
+        gc.collect()
         stage_backward_weight(mod.parameters(), param_groups)
 
         ref_mod(ref_x).backward(output_grad)

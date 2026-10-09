@@ -394,6 +394,8 @@ def stage_backward_weight(
         finally:
             for handle in handles:
                 handle.remove()
+            # dW no longer needs the C++ graph pin taken before detach.
+            param_group.pop("ownership_tokens", None)
     return tuple(weight_grads)
 
 
