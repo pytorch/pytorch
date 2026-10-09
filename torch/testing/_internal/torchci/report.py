@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import signal
 from typing import Any, NamedTuple
 
 
@@ -20,6 +22,17 @@ class TestId(NamedTuple):
     case_name: str
     language: str
     declared_case_name: str
+
+
+def nodeid_identity(nodeid: str) -> TestId:
+    """A test's identity from its node id alone, for a test whose xdist worker died
+    before reporting it, so plugin.identity never saw its item. The declared name
+    only drops pytest parameters."""
+    path, _, rest = nodeid.partition("::")
+    head, bracket, params = rest.partition("[")
+    parts = head.split("::")
+    suite = parts[-2] if len(parts) > 1 else ""
+    return TestId(path, suite, parts[-1] + bracket + params, "python", parts[-1])
 
 
 def report_path(prefix: str, report_uuid: str) -> str:
@@ -67,6 +80,14 @@ def run_record(
         "ended_at": int(ended * 1000),
         "properties": {},
     }
+
+
+def exit_summary(exit_code: int) -> str:
+    """The outcome summary of a run whose process exited with ``exit_code``."""
+    summary = f"the test process exited with code {exit_code}"
+    with contextlib.suppress(ValueError):
+        summary += f" ({signal.Signals(-exit_code).name})"
+    return summary
 
 
 def line(record: dict[str, Any]) -> str:

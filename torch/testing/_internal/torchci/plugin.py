@@ -8,6 +8,7 @@ import contextlib
 import inspect
 import os
 import sys
+import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass
@@ -30,6 +31,9 @@ if TYPE_CHECKING:
 # Set where the test runs; xdist ships it to the controller with the report. Not
 # item.user_properties, which pytest also writes into the junit XML CI ingests.
 _TEST_ID = "_torchci_test_id"
+# Where run_test.py reads test/conftest.py's stepcurrent files; the report's path
+# and in-flight run (recovery.finish) are published next to them.
+STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 
 _disabled = False
 _writer: ReportWriter | None = None
@@ -96,9 +100,12 @@ class _Run:
     failed_phase: str = ""
     skipped: bool = False
     wasxfail: bool = False
+    crashed: bool = False
     outcome_summary: str = ""
 
     def outcome(self) -> str:
+        if self.crashed:
+            return "crashed"
         if self.failed_phase:
             return "failed" if self.failed_phase == "call" else "error"
         if self.skipped:
@@ -107,9 +114,11 @@ class _Run:
 
 
 class ReportWriter:
-    def __init__(self, path: str, report_uuid: str) -> None:
-        self.path = path
+    def __init__(self, path: str, report_uuid: str, config: Config) -> None:
+        # run_test.py reads the published path from another working directory.
+        self.path = os.path.abspath(path)
         self.report_uuid = report_uuid
+        self.config = config
         self.file: IO[str] | None = None
         # By node id and xdist worker (report.node, None without xdist), as junitxml
         # keys its test cases: flakefinder's copies of a test share a node id and can
@@ -117,16 +126,32 @@ class ReportWriter:
         self.runs: dict[tuple[str, Any], _Run] = {}
         self.rerun_numbers: Counter[str] = Counter()
         self.tests: dict[str, report.TestId | None] = {}
+        # Only run_test.py's retries read what's published, and they never use xdist.
+        self.xdist = bool(config.getoption("numprocesses", default=None))
+        self.cache: Any = None
+        self.cache_dir = ""
+        # The test published as in flight, until its run line is written.
+        self.inflight_nodeid: str | None = None
+
+    def _publish(self, name: str, value: Any) -> None:
+        if self.cache is not None:
+            self.cache.set(f"{self.cache_dir}/{name}", value)
 
     def pytest_sessionstart(self, session: Session) -> None:
         if _disabled:
             return
         with _guard():
+            # Read here: test/conftest.py sets it from --sc/--rs in its pytest_configure.
+            key = self.config.getoption("stepcurrent", default=None)
+            if key and not self.xdist:
+                self.cache = getattr(self.config, "cache", None)
+                self.cache_dir = f"{STEPCURRENT_CACHE_DIR}/{key}"
             record = report.report_record(self.report_uuid, environment.capture())
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             self.file = open(self.path, "w", encoding="utf-8", newline="\n")  # noqa: SIM115
             self.file.write(report.line(record))
             self.file.flush()
+            self._publish("report_path", self.path)
 
     def pytest_collection_finish(self, session: Session) -> None:
         if _disabled:
@@ -134,6 +159,22 @@ class ReportWriter:
         with _guard():
             # Empty on an xdist controller; workers send identities via makereport.
             self.tests = {item.nodeid: identity(item) for item in session.items}
+
+    def pytest_runtest_logstart(self, nodeid: str, location: Any) -> None:
+        if _disabled:
+            return
+        with _guard():
+            # Before setup, so run_test.py can record the test if the process dies.
+            test = self.tests.get(nodeid)
+            inflight = None
+            if test is not None:
+                inflight = {
+                    "test": test._asdict(),
+                    "started_at": time.time(),
+                    "rerun_number": self.rerun_numbers[nodeid],
+                }
+            self._publish("report_inflight", inflight)
+            self.inflight_nodeid = nodeid
 
     # Before test/conftest.py's LogXMLReruns rewrites skip longreprs.
     @pytest.hookimpl(tryfirst=True)
@@ -146,12 +187,23 @@ class ReportWriter:
     def _logreport(self, test_report: TestReport) -> None:
         nodeid = test_report.nodeid
         key = (nodeid, getattr(test_report, "node", None))
+        if test_report.when not in ("setup", "call", "teardown"):
+            # xdist's report for a test whose worker crashed: when "???", no times,
+            # and nothing else follows for this run. A worker that died before its
+            # setup report sent no identity or start time.
+            run = self.runs.setdefault(key, _Run(time.time(), None))
+            run.test = run.test or report.nodeid_identity(nodeid)
+            run.ended = time.time()
+            run.crashed = True
+            run.outcome_summary = str(test_report.longrepr)
+            self._finish(key, run)
+            return
         if test_report.when == "setup":
             test_id = getattr(test_report, _TEST_ID, None)
             test = report.TestId(**test_id) if test_id else self.tests.get(nodeid)
             self.runs[key] = _Run(test_report.start, test)
         run = self.runs.get(key)
-        if run is None or test_report.when not in ("setup", "call", "teardown"):
+        if run is None:
             return
         run.ended = test_report.stop
         # A failing pytest-subtests subtest fails the run.
@@ -174,6 +226,7 @@ class ReportWriter:
 
     def _finish(self, key: tuple[str, Any], run: _Run) -> None:
         del self.runs[key]
+        self.inflight_nodeid = None
         nodeid = key[0]
         # No identity: the item isn't a Python test function, or, under xdist, the
         # worker's writer turned itself off and its setup report came without one.
@@ -194,9 +247,18 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
+            # xdist stops at -x/--maxfail right after the failing report, so that
+            # run's teardown never arrives; its outcome is already known.
+            for key, run in list(self.runs.items()):
+                if run.failed_phase:
+                    self._finish(key, run)
             if self.file is not None:
                 self.file.close()
                 self.file = None
+            # A test still in flight was interrupted, maybe before its setup report;
+            # run_test.py records it.
+            if self.inflight_nodeid is None:
+                self._publish("report_inflight", None)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -230,5 +292,5 @@ def pytest_configure(config: Config) -> None:
         if prefix and not worker and not config.getoption("collectonly"):
             report_uuid = str(uuid.uuid4())
             path = report.report_path(prefix, report_uuid)
-            _writer = ReportWriter(path, report_uuid)
+            _writer = ReportWriter(path, report_uuid, config)
             config.pluginmanager.register(_writer, "torchci_report_writer")
