@@ -52,6 +52,7 @@ from torch.utils._sympy.functions import (
     RoundToInt,
 )
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 # int64_t is long long on MacOS, but long on 64-bit Linux
@@ -446,6 +447,19 @@ class TestIndexingSimplification(InductorTestCase):
         actual = sizevars.combine_modular_indexing_pairs(expr2)
         self.assertEqual(expr2, actual)
         self.assertNotEqual(ModularIndexing(x, 1, b), actual)
+
+    def test_modular_indexing_symbolic_whole_period(self):
+        sizevars = SizeVarAllocator()
+        w = sympy.Symbol("w", integer=True, positive=True)
+        sizevars.shape_env.var_to_range[w] = ValueRanges(128, 1024)
+
+        self.assertEqual(sizevars.simplify_with_ranges(ModularIndexing(w, 1, w), {}), 0)
+
+    def test_modular_indexing_fractional_period(self):
+        w = sympy.Symbol("w", integer=True, positive=True)
+        expr = ModularIndexing(w * (w + 1) / 2 + 1, 1, w)
+
+        self.assertEqual(expr.subs(w, 4), 3)
 
     def test_modular_indexing_positive(self):
         x = sympy.Symbol("x", integer=True, positive=True)
