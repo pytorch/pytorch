@@ -78,6 +78,28 @@ runs:
             test/test-reports/tlparse_output "tlparse-${FILE_SUFFIX}.zip" '**/*'
         fi
 
+    # Separate, so a failure here can't block the zips above.
+    - name: Zip test run reports for upload
+      if: runner.os != 'Windows'
+      continue-on-error: true
+      shell: bash
+      env:
+        FILE_SUFFIX: ${{ inputs.file-suffix }}
+      run: |
+        rm -f torchci-reports-*.report.zip
+        if [ -d test/torchci-reports ]; then
+          uv run --no-project python - <<'EOF'
+        import os
+        import zipfile
+        from pathlib import Path
+
+        name = f"torchci-reports-{os.environ['FILE_SUFFIX']}.report.zip"
+        with zipfile.ZipFile(name, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in Path("test/torchci-reports").glob("*.report.jsonl"):
+                z.write(f)
+        EOF
+        fi
+
     # Windows zip
     - name: Zip JSONs for upload
       if: runner.os == 'Windows'
@@ -96,6 +118,18 @@ runs:
       run: |
         # -ir => recursive include all files in pattern
         7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\test-reports\*.xml' -ir'!test\test-reports\*.csv'
+
+    - name: Zip test run reports for upload
+      if: runner.os == 'Windows'
+      continue-on-error: true
+      shell: powershell
+      env:
+        FILE_SUFFIX: ${{ inputs.file-suffix }}
+      run: |
+        # -ir => recursive include all files in pattern
+        if (Test-Path test\torchci-reports) {
+          7z a "torchci-reports-$Env:FILE_SUFFIX.report.zip" -ir'!test\torchci-reports\*.report.jsonl'
+        }
 
     - name: Zip usage log for upload
       if: runner.os == 'Windows'
@@ -135,6 +169,19 @@ runs:
         retention-days: 14
         if-no-files-found: warn
         path: test-reports-*.zip
+
+    - name: Store Test Run Reports on S3
+      id: s3-upload-run-reports
+      if: ${{ inputs.skip-s3 != 'true' }}
+      uses: seemethere/upload-artifact-s3@v5
+      continue-on-error: true
+      with:
+        s3-bucket: ${{ inputs.s3-bucket }}
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+        retention-days: 14
+        if-no-files-found: ignore
+        path: torchci-reports-*.report.zip
 
     - name: Store Usage Logs on S3
       id: s3-upload-logs
@@ -233,6 +280,20 @@ runs:
         path: |
           test/**/*.xml
           test/**/*.csv
+
+    # Not through check-s3, so a failed upload here can't move the junit zips off S3.
+    - name: Store Test Run Reports on Github (fallback)
+      uses: actions/upload-artifact@v4
+      if: inputs.skip-s3 == 'true' || steps.s3-upload-run-reports.outcome == 'failure'
+      continue-on-error: true
+      with:
+        # Add the run attempt, see [Artifact run attempt]
+        name: torchci-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.report.zip
+        retention-days: 14
+        if-no-files-found: ignore
+        # upload-artifact roots at the first wildcard, so a leading one keeps the
+        # test/torchci-reports/ prefix the S3 zip has.
+        path: test*/torchci-reports/*.report.jsonl
 
     - name: Store Usage Logs on Github (fallback)
       uses: actions/upload-artifact@v4
