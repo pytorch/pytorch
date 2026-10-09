@@ -5,7 +5,9 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import signal
+from pathlib import Path
 from typing import Any, NamedTuple
 
 
@@ -25,10 +27,17 @@ class TestId(NamedTuple):
 
 
 def nodeid_identity(nodeid: str) -> TestId:
-    """A test's identity from its node id alone, for a test whose xdist worker died
-    before reporting it, so plugin.identity never saw its item. The declared name
-    only drops pytest parameters."""
+    """A test's identity from its node id alone: for a pytest-cpp gtest, whose node
+    id is ``<binary>::<suite>.<test>``, and for a Python test whose xdist worker died
+    before reporting it, so plugin.identity never saw its item. A gtest is
+    ``cpp/<binary>``, its suite and test name, with a value-parameterized ``/N``
+    dropped from the declared name. A Python test's declared name only drops pytest
+    parameters."""
     path, _, rest = nodeid.partition("::")
+    if not path.endswith(".py"):
+        suite, _, case_name = rest.partition(".")
+        declared = re.sub(r"/\d+$", "", case_name)
+        return TestId(f"cpp/{Path(path).stem}", suite, case_name, "cpp", declared)
     head, bracket, params = rest.partition("[")
     parts = head.split("::")
     suite = parts[-2] if len(parts) > 1 else ""
