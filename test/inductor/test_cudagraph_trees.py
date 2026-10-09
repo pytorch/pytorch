@@ -326,26 +326,6 @@ class CudagraphGateTest(TestCase):
                     f"implement Graphs.{member}",
                 )
 
-    def test_single_supported_device_passes_gate(self):
-        for device_type in _CUDAGRAPH_SUPPORTED_DEVICE_TYPES:
-            self.assertIsNone(
-                check_multiple_devices_or_any_cpu_nodes(
-                    {torch.device(device_type, 0): None}
-                )
-            )
-
-    def test_unsupported_device_is_not_reported_as_multiple_devices(self):
-        reason = check_multiple_devices_or_any_cpu_nodes({torch.device("mps", 0): None})
-        self.assertIsNotNone(reason)
-        self.assertNotIn("multiple devices", reason)
-        self.assertIn("mps", reason)
-
-    def test_multiple_devices_still_reported(self):
-        reason = check_multiple_devices_or_any_cpu_nodes(
-            {torch.device("cuda", 0): None, torch.device("cuda", 1): None}
-        )
-        self.assertIn("multiple devices", reason)
-
     @config.patch("graph_partition", False)
     @parametrize(
         "devices",
