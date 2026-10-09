@@ -933,7 +933,7 @@ class Module:
                 module._apply(fn)
 
         # _apply is traced by dynamo at the bytecode level, and torch._subclasses
-        # is in dynamo's MOD_SKIPLIST, revisit later for c++
+        # is in dynamo's MOD_SKIPLIST
         from torch._subclasses.fake_tensor import FakeTensor
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
