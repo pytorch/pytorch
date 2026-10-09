@@ -107,15 +107,19 @@ def _create_tensor_with_layout(layout, rows, cols, dtype, device="cuda"):
         raise ValueError(f"Unknown layout: {layout}")
 
 
-def _make_nvfp4_scaled_mm_inputs(m, n, k):
+def _make_nvfp4_scaled_mm_inputs(m, n, k, *, device="cuda"):
     packed_k = k // 2
-    a = _create_tensor_with_layout("contiguous", m, packed_k, torch.float4_e2m1fn_x2)
-    b = _create_tensor_with_layout("contiguous", n, packed_k, torch.float4_e2m1fn_x2).T
+    a = _create_tensor_with_layout(
+        "contiguous", m, packed_k, torch.float4_e2m1fn_x2, device
+    )
+    b = _create_tensor_with_layout(
+        "contiguous", n, packed_k, torch.float4_e2m1fn_x2, device
+    ).T
     scale_k = _prep_k(k, 16)
-    scale_a = torch.rand(_round_up(m, 128) * scale_k, device="cuda").to(
+    scale_a = torch.rand(_round_up(m, 128) * scale_k, device=device).to(
         torch.float8_e4m3fn
     )
-    scale_b = torch.rand(_round_up(n, 128) * scale_k, device="cuda").to(
+    scale_b = torch.rand(_round_up(n, 128) * scale_k, device=device).to(
         torch.float8_e4m3fn
     )
     return a, b, scale_a, scale_b
@@ -4262,7 +4266,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             ):
                 compiled_fn(x, w)
 
-    def test_dynamic_shapes(self):
+    def test_dynamic_mm(self):
         """Test NVGEMM across backed symbolic shapes."""
 
         def matmul(a, b):
@@ -4295,12 +4299,180 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
                 else:
                     self.assertEqual(compiled_fn(a, b), a @ b)
 
+    def test_dynamic_addmm(self):
+        def addmm(bias, a, b):
+            return torch.addmm(bias, a, b)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(addmm, dynamic=True)
+            for m, n, k in ((64, 128, 256), (128, 256, 512), (64, 128, 256)):
+                bias = torch.randn(n, dtype=torch.bfloat16, device="cuda")
+                a = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
+                b = torch.randn(k, n, dtype=torch.bfloat16, device="cuda")
+                self.assertEqual(
+                    compiled_fn(bias, a, b),
+                    addmm(bias, a, b),
+                    atol=1e-2,
+                    rtol=1.6e-2,
+                )
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_dynamic_bmm(self):
+        def bmm(a, b):
+            return torch.bmm(a, b)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(bmm, dynamic=True)
+            for batch, m, n, k in (
+                (2, 64, 128, 256),
+                (4, 128, 256, 512),
+                (2, 64, 128, 256),
+            ):
+                a = torch.randn(batch, m, k, dtype=torch.bfloat16, device="cuda")
+                b = torch.randn(batch, k, n, dtype=torch.bfloat16, device="cuda")
+                self.assertEqual(compiled_fn(a, b), bmm(a, b))
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_dynamic_scaled_mm(self):
+        torch._dynamo.reset()
+        counters.clear()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(_nvfp4_scaled_mm, dynamic=True)
+            for m, n, k in (
+                (128, 384, 512),
+                (512, 384, 512),
+                (128, 640, 512),
+                (128, 384, 1024),
+                (128, 384, 512),
+            ):
+                inputs = _make_nvfp4_scaled_mm_inputs(m, n, k)
+                self.assertEqual(
+                    compiled_fn(*inputs),
+                    _nvfp4_scaled_mm(*inputs),
+                    equal_nan=True,
+                )
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_dynamic_scaled_mm_mxfp8(self):
+        def scaled_mm(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a,
+                b,
+                scale_a=scale_a,
+                scale_b=scale_b,
+                out_dtype=torch.float32,
+            )
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(scaled_mm, dynamic=True)
+            for m, n, k in (
+                (128, 384, 512),
+                (256, 384, 512),
+                (128, 640, 512),
+                (128, 384, 1024),
+                (128, 384, 512),
+            ):
+                a = torch.randint(-1, 2, (m, k), device="cuda").to(torch.float8_e4m3fn)
+                b = (
+                    torch.randint(-1, 2, (n, k), device="cuda")
+                    .to(torch.float8_e4m3fn)
+                    .T
+                )
+                scale_k = _prep_k(k, 32)
+                scale_a = torch.rand(m, scale_k, device="cuda").to(torch.float8_e8m0fnu)
+                scale_b = torch.rand(scale_k, n, device="cuda").to(torch.float8_e8m0fnu)
+                self.assertEqual(
+                    compiled_fn(a, b, scale_a, scale_b),
+                    scaled_mm(a, b, scale_a, scale_b),
+                )
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_dynamic_grouped_mm(self):
+        def grouped_mm(a, b, offsets):
+            return torch._grouped_mm(a, b, offs=offsets)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled_fn = torch.compile(grouped_mm, dynamic=True)
+            cases = (
+                ((64, 64), 256, 512),
+                ((32, 96, 128, 128), 128, 256),
+                ((64, 64), 256, 512),
+            )
+            for group_ms, n, k in cases:
+                g = len(group_ms)
+                total_m = sum(group_ms)
+                a = torch.randn(total_m, k, dtype=torch.bfloat16, device="cuda")
+                b = torch.randn(g, n, k, dtype=torch.bfloat16, device="cuda").permute(
+                    0, 2, 1
+                )
+                offsets = torch.tensor(
+                    [sum(group_ms[: index + 1]) for index in range(g)],
+                    dtype=torch.int32,
+                    device="cuda",
+                )
+                self.assertEqual(compiled_fn(a, b, offsets), grouped_mm(a, b, offsets))
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
 
 @unittest.skipIf(
     not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
     "Requires cutlass.operators and Blackwell",
 )
 class TestNVUniversalGemmDynamicShapeComments(TestCase):
+    @parametrize("dynamic", (False, True))
+    def test_fp4_logical_divisibility(self, device, dynamic):
+        torch._dynamo.reset()
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            compiled = torch.compile(_nvfp4_scaled_mm, dynamic=dynamic)
+            for k in (96, 128):
+                args = _make_nvfp4_scaled_mm_inputs(128, 128, k, device=device)
+                self.assertEqual(
+                    compiled(*args), _nvfp4_scaled_mm(*args), equal_nan=True
+                )
+            args = _make_nvfp4_scaled_mm_inputs(128, 128, 96, device=device)
+            bad = torch.randint(0, 256, (128, 62), device=device, dtype=torch.uint8)
+            bad = bad.view(torch.float4_e2m1fn_x2)[:, :48]
+            with self.assertRaisesRegex(
+                Exception, "NoValidChoicesError|no valid choice"
+            ):
+                compiled(bad, *args[1:])
+            self.assertEqual(compiled(*args), _nvfp4_scaled_mm(*args), equal_nan=True)
+
+    def test_scaled_grouped_has_no_nvgemm_choice(self, device):
+        def fn(a, b, sa, sb, offsets):
+            return torch._scaled_grouped_mm(
+                a, b, sa, sb, offs=offsets, out_dtype=torch.bfloat16
+            )
+
+        a = torch.randn(128, 256, device=device).to(torch.float8_e4m3fn)
+        b = (
+            torch.randn(2, 128, 256, device=device)
+            .to(torch.float8_e4m3fn)
+            .transpose(-1, -2)
+        )
+        sa = torch.ones(128, device=device)
+        sb = torch.ones(2, 128, device=device)
+        offsets = torch.tensor([64, 128], device=device, dtype=torch.int32)
+        torch._dynamo.reset()
+        with config.patch(_nvgemm_config(nvgemm_max_profiling_configs=2)):
+            with self.assertRaisesRegex(
+                Exception, "NoValidChoicesError|no valid choice"
+            ):
+                torch.compile(fn, dynamic=True)(a, b, sa, sb, offsets)
+
     def test_compatible_shapes_share_graph(self, device):
         def fn(a, b):
             return a @ b

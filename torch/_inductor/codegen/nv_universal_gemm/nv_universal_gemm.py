@@ -7,6 +7,7 @@ high-performance GEMM kernels for NVIDIA GPUs.
 """
 
 import itertools
+import math
 import re
 from enum import auto, Enum
 from typing import Any, Literal
@@ -507,22 +508,38 @@ class NVUniversalGemmCaller(ChoiceCaller):
         return self.bmreq.benchmark(*args, out=out)
 
     @staticmethod
-    def _tensor_constraint_checks(size, stride, constraint):
+    def _tensor_constraint_checks(size, stride, constraint, dtype=None):
         expected = constraint.stride
         rank = len(stride)
-        if (
-            expected is None
-            or rank == 0
-            or len(size) != rank
-            or len(expected) not in (rank, rank + 1)
-        ):
+        if rank == 0 or len(size) != rank:
             raise ValueError("NVGEMM operand constraint has incompatible rank")
-        expected = expected[-rank:]
-        if 1 not in expected:
-            raise ValueError("NVGEMM operand constraint has no contiguous mode")
-        major = expected.index(1)
+        if expected is None:
+            hinted_size = V.graph.sizevars.optimization_hints(size)
+            hinted_stride = V.graph.sizevars.optimization_hints(stride)
+            major = next(
+                (
+                    dim
+                    for dim, (extent, step) in enumerate(
+                        zip(hinted_size, hinted_stride, strict=True)
+                    )
+                    if extent > 1 and step == 1
+                ),
+                rank - 1 if all(extent == 1 for extent in hinted_size) else None,
+            )
+            if major is None:
+                raise ValueError("NVGEMM operand constraint has no contiguous mode")
+        else:
+            if len(expected) not in (rank, rank + 1):
+                raise ValueError("NVGEMM operand constraint has incompatible rank")
+            expected = expected[-rank:]
+            if 1 not in expected:
+                raise ValueError("NVGEMM operand constraint has no contiguous mode")
+            major = expected.index(1)
         yield sympy.Eq(stride[major], 1), "NVGEMM operand is not contiguous"
         divisor = constraint.divisibility
+        # FP4 IR dimensions count packed pairs; metadata counts logical values.
+        if dtype == torch.float4_e2m1fn_x2:
+            divisor //= math.gcd(divisor, 2)
         if divisor > 1:
             yield (
                 sympy.Eq(sympy.Mod(size[major], divisor), 0),
@@ -536,20 +553,48 @@ class NVUniversalGemmCaller(ChoiceCaller):
                     )
 
     def _operand_constraints(self):
-        if self.variant != GemmVariant.GEMM:
-            return
         operands = self.kernel.metadata.operands
-        a_idx, b_idx = (1, 0) if self.swap_ab else (0, 1)
-        for node, constraint in (
-            (self.input_nodes[a_idx], operands.A),
-            (self.input_nodes[b_idx], operands.B),
-        ):
+        if self.variant == GemmVariant.GROUPED_GEMM:
+            nodes = [
+                (self.input_nodes[0], operands.A, False),
+                (self.input_nodes[1], operands.B, False),
+                (self.input_nodes[2], operands.offsets, False),
+            ]
+        else:
+            a_idx, b_idx = (1, 0) if self.swap_ab else (0, 1)
+            scaled = self.variant == GemmVariant.SCALED_GEMM
+            nodes = [
+                (
+                    self.input_nodes[a_idx],
+                    operands.A.quantized if scaled else operands.A,
+                    self.swap_ab,
+                ),
+                (
+                    self.input_nodes[b_idx],
+                    operands.B.quantized if scaled else operands.B,
+                    self.swap_ab,
+                ),
+            ]
+            if scaled:
+                scale_a, scale_b = (3, 2) if self.swap_ab else (2, 3)
+                nodes.extend(
+                    [
+                        (self.input_nodes[scale_a], operands.A.scale, False),
+                        (self.input_nodes[scale_b], operands.B.scale, False),
+                    ]
+                )
+        for node, constraint, transpose in nodes:
             size, stride = list(node.get_size()), list(node.get_stride())
-            if self.swap_ab:
+            if transpose:
                 size[-2:] = reversed(size[-2:])
                 stride[-2:] = reversed(stride[-2:])
-            yield size, stride, constraint
-        yield self._kernel_layout.size, self._kernel_layout.stride, operands.out
+            yield size, stride, constraint, node.get_dtype()
+        yield (
+            self._kernel_layout.size,
+            self._kernel_layout.stride,
+            operands.out,
+            self._kernel_layout.dtype,
+        )
 
     @staticmethod
     def _shape_constraint_satisfied(condition) -> bool:
@@ -573,8 +618,6 @@ class NVUniversalGemmCaller(ChoiceCaller):
             return False
 
     def _guard_dynamic_shape_constraints(self) -> None:
-        if self.variant != GemmVariant.GEMM:
-            return
         sizevars = V.graph.sizevars
         for geometry in self._operand_constraints():
             for condition, message in self._tensor_constraint_checks(*geometry):
