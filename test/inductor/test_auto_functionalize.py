@@ -66,6 +66,106 @@ class AutoFunctionalizeTests(torch._inductor.test_case.TestCase):
 
             f(x, out)
 
+    @parametrize("enable_auto_functionalized_v2", [False, True])
+    @parametrize(
+        "case",
+        ["e8m0", "complex", "meta", "sparse", "fp8", "fp8_uint8", "cpu_output"],
+    )
+    def test_auto_functionalize_decomposition_before_type_fallback(
+        self, enable_auto_functionalized_v2, case
+    ):
+        from contextlib import ExitStack
+        from unittest import mock
+
+        import torch._inductor.codegen.triton_utils as triton_utils
+        import torch._inductor.lowering as lowering
+        from torch._inductor.fx_passes.post_grad import decompose_auto_functionalized
+        from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        dtype = {
+            "e8m0": torch.float8_e8m0fnu,
+            "complex": torch.complex64,
+            "fp8": torch.float8_e4m3fn,
+            "fp8_uint8": torch.float8_e4m3fn,
+        }.get(case, torch.float32)
+        device = "meta" if case == "meta" else "cpu"
+        src = torch.tensor([2.0, 4.0], device=device).to(dtype)
+        out = torch.ones(2, device=device).to(dtype)
+        if case == "sparse":
+            src = src.to_sparse()
+
+        with (
+            inductor_config.patch(
+                enable_auto_functionalized_v2=enable_auto_functionalized_v2,
+                disable_cpp_codegen=case == "cpu_output",
+            ),
+            torch.library._scoped_library("mylib", "FRAGMENT") as lib,
+            ExitStack() as stack,
+        ):
+            lib.define(
+                "foo(Tensor src, Tensor(a!) out) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            def foo_impl(src, out):
+                out.copy_(src)
+
+            @torch.library.register_fake("mylib::foo", lib=lib)
+            def foo_fake(src, out):
+                return None
+
+            if case in ("fp8", "fp8_uint8"):
+                # Exercise both unsupported-FP8 paths without requiring a GPU.
+                stack.enter_context(
+                    mock.patch.object(
+                        lowering,
+                        "is_triton_fp8_dtype_supported",
+                        return_value=False,
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        triton_utils,
+                        "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
+                        return_value=case == "fp8_uint8",
+                    )
+                )
+
+            def f(src, out):
+                torch.ops.mylib.foo(src, out)
+                return out
+
+            gm = make_fx(
+                PythonFunctionalizeAPI().functionalize(f), tracing_mode="fake"
+            )(src, out)
+            hop = (
+                torch.ops.higher_order.auto_functionalized_v2
+                if enable_auto_functionalized_v2
+                else torch.ops.higher_order.auto_functionalized
+            )
+            self.assertEqual(
+                len(gm.graph.find_nodes(op="call_function", target=hop)), 1
+            )
+            decompose_auto_functionalized(gm.graph)
+            mutable_nodes = gm.graph.find_nodes(
+                op="call_function", target=torch.ops.mylib.foo.default
+            )
+            self.assertEqual(len(mutable_nodes), 1)
+
+            if case in ("e8m0", "complex"):
+                eager_out = out.clone()
+                compiled_out = out.clone()
+                f(src, eager_out)
+                torch.compile(f, backend="inductor", fullgraph=True)(src, compiled_out)
+
+                # Compare bytes because E8M0 does not support arithmetic comparisons.
+                self.assertEqual(
+                    compiled_out.view(torch.uint8), eager_out.view(torch.uint8)
+                )
+                self.assertEqual(compiled_out.view(torch.uint8), src.view(torch.uint8))
+
     def test_auto_functionalize_self_as_mutate_arg(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             lib.define("foo(Tensor(a!) self) -> None")
@@ -1668,7 +1768,8 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                         graph_inductor,
                         """\
 def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
-        nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(arg0_1)
+        clone: "f32[s77][1]cpu" = torch.ops.aten.clone.default(arg0_1)
+        nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(clone);  clone = None
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
@@ -1687,7 +1788,8 @@ def forward(self, arg0_1: "f32[s77][1]cpu", arg1_1: "Sym(s77)"):
                         graph_inductor,
                         """\
 def forward(self, arg0_1: "f32[2][1]cpu"):
-        nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(arg0_1)
+        clone: "f32[2][1]cpu" = torch.ops.aten.clone.default(arg0_1)
+        nonzero: "i64[u0, 1][1, u0]cpu" = torch.ops.aten.nonzero.default(clone);  clone = None
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(nonzero, 0)
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None

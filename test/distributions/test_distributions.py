@@ -111,7 +111,6 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
-    dtypesIfMPS,
     dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
@@ -4132,7 +4131,6 @@ class TestDistributions(DistributionsTestCase):
             )
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfMPS(torch.float)
     @dtypesIfCUDA(torch.double)
     @dtypesIfXPU(torch.double)
     def test_beta_underflow(self, dtype, device):
