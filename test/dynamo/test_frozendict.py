@@ -10,7 +10,6 @@ from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    run_tests,
     runWithoutCompiledAutograd,
     subtest,
 )
@@ -239,10 +238,15 @@ if torch._has_frozendict:
             with self.assertRaisesRegex(TypeError, "does not support item assignment"):
                 result[4]["a"] = x
 
-        @parametrize("operation", [dict.__eq__, dict.__ne__, dict.__or__])
-        def test_dict_descriptors(self, operation):
+        @parametrize("name", ["__eq__", "__ne__", "__or__"])
+        def test_dict_descriptors(self, name):
             def fn(x):
-                return x + 1, operation({"a": x}, builtins.frozendict(a=x))
+                op = getattr(dict, name)
+                return (
+                    x + 1,
+                    op({"a": x}, builtins.frozendict(a=x)),
+                    op({"a": x}, builtins.frozendict(b=x)),
+                )
 
             x = torch.randn(3)
             self.assertEqual(
@@ -639,4 +643,4 @@ if torch._has_frozendict:
 
 
 if __name__ == "__main__":
-    run_tests()
+    torch._dynamo.test_case.run_tests()
