@@ -1539,8 +1539,8 @@ class TestFactoryRequiresGradKwarg(TestCase):
     """`factory(..., requires_grad=True)` traced as `factory()` + `requires_grad_()`
     on the intermediate when `graph_break_on_factory_requires_grad` is off.
 
-    Only the tests that consume the gradient in-graph patch `trace_autograd_ops`;
-    everything else runs under the default config.
+    The class only patches `graph_break_on_factory_requires_grad`; the tests that
+    consume the gradient in-graph also patch `trace_autograd_ops`.
     """
 
     NON_DIFFERENTIABLE = (
@@ -1677,6 +1677,60 @@ class GraphModule(torch.nn.Module):
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
 
+    def test_non_factory_keeps_kwarg(self):
+        # Only tensor factories are rewritten: `requires_grad` reaches every
+        # other callable untouched, so they behave exactly as in eager.
+        def sin(x):
+            return torch.sin(x, requires_grad=True)
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(TypeError, "unexpected keyword argument"):
+            sin(x)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "TypeError when making fake tensor call"
+        ):
+            torch.compile(sin, backend="eager", fullgraph=True)(x)
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("scale(Tensor x, *, bool requires_grad=False) -> Tensor")
+            lib.impl(
+                "scale",
+                lambda x, *, requires_grad=False: x * (2 if requires_grad else 1),
+                "CompositeExplicitAutograd",
+            )
+
+            def custom(x):
+                return torch.ops.mylib.scale(x, requires_grad=True)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
+            ):
+                torch.compile(custom, backend="eager", fullgraph=True)(x)
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(custom, backend="eager")(x), x * 2)
+
+    def test_asarray_graph_breaks(self):
+        # `asarray` may return its input, so `requires_grad_()` on the result
+        # would act on a graph input.
+        def fn(x):
+            return torch.asarray(x, requires_grad=True).sum().detach()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(4))
+
+    def test_out_kwarg_graph_breaks(self):
+        out = torch.empty(4)
+
+        def fn(x):
+            return (torch.zeros(4, out=out, requires_grad=True) + x).detach()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(4))
+
     @torch._dynamo.config.patch(graph_break_on_factory_requires_grad=True)
     def test_gated_graph_breaks(self):
         def fn(x):
@@ -1684,7 +1738,8 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(4)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
+            torch._dynamo.exc.Unsupported,
+            f"(?s){self.FACTORY_GRAPH_BREAK}.*graph_break_on_factory_requires_grad",
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
         torch._dynamo.reset()
