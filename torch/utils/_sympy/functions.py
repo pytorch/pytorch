@@ -369,8 +369,10 @@ class ModularIndexing(sympy.Function):
             new_terms: list[sympy.Expr] = []
             all_nonnegative: bool = True
             for term in terms:
-                quotient = term / period
-                if safe_gcd(term, period) != period or quotient.is_integer is not True:
+                if (
+                    safe_gcd(term, period) != period
+                    or (term / period).is_integer is not True
+                ):
                     if term.is_nonnegative is not True:
                         # workaround for https://github.com/triton-lang/triton/issues/619,
                         # if terms are not provably nonnegative, // can produce
