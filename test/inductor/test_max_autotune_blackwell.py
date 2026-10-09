@@ -1870,13 +1870,18 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    def test_blackwell_mm_reduction_epilogue_tma_stores_extra_output(self):
+    @parametrize("view_3d", (False, True))
+    def test_blackwell_mm_reduction_epilogue_tma_stores_extra_output(
+        self, view_3d: bool
+    ):
         """An extra output whose staged tile fits in shared memory keeps its
-        TMA store."""
+        TMA store, also when it is a row-major [B, S, N] view of the output."""
 
         def fn(a, b):
             c = a @ b
             x = c.float()
+            if view_3d:
+                x = x.view(8, -1, x.shape[-1])
             return c, x * 2, x.sum(-1)
 
         kernels, code = self._run_reduction(
@@ -1899,15 +1904,21 @@ class TestBlackwellTMALoadFusion(TestCase):
     )
     @parametrize("M", (1024, 1000))
     @parametrize("template_out", (True, False))
+    @parametrize("view", ("2d", "3d", "size_1"))
     def test_blackwell_mm_row_reduction_epilogue_tma_stores_after_reduction(
-        self, M: int, template_out: bool
+        self, M: int, template_out: bool, view: str
     ):
         """The template output and a full-tile output computed after the row
-        reduction both keep their TMA stores, also on a ragged last row tile."""
+        reduction both keep their TMA stores, also on a ragged last row tile
+        and when the output is a row-major view of [M, N]."""
 
         def fn(a, b):
             c = a @ b
             x = c.float()
+            if view == "3d":
+                x = x.view(8, -1, x.shape[-1])
+            elif view == "size_1":
+                x = x.unsqueeze(1)
             out = (x - x.amax(-1, keepdim=True)).to(c.dtype)
             return (c, out) if template_out else out
 

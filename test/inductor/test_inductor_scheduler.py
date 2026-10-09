@@ -1286,6 +1286,9 @@ class TestScheduler(TestCase):
         self.assertEqual(budget(tile, 3), 68608)
         # fp32 operands double the ring.
         self.assertEqual(budget(tile, 3, (torch.float32, torch.float32)), 68608 - 98304)
+        # The ring is what Triton allocates: num_stages A and B tiles, so
+        # BLOCK_K=128 overflows the budget.
+        self.assertEqual(budget({**tile, "BLOCK_K": 128}, 3), -29696)
         # A TMA store stages one 128 x (128 / EPILOGUE_SUBTILE) subtile.
         for subtile in (2, 4):
             subtiled = {**tile, "EPILOGUE_SUBTILE": subtile}
@@ -1311,9 +1314,13 @@ class TestScheduler(TestCase):
         int64, and falls back to tl.store when the output's shape exceeds int32."""
         x, r, cm, cn = sympy.symbols("xtile r0_tile offs_cm offs_cn_i", integer=True)
 
-        def store_line(rows, index_dtype):
+        def store_line(rows, index_dtype, view=None):
+            size = [*(view or [rows]), 128]
             layout = ir.FixedLayout(
-                torch.device("cuda"), torch.bfloat16, [rows, 128], [128, 1]
+                torch.device("cuda"),
+                torch.bfloat16,
+                size,
+                ir.FlexibleLayout.contiguous_strides(size),
             )
             kernel = Mock(
                 _tile_tma_store_ctx=((x, r), [cm, cn], (128, 128)),
@@ -1330,7 +1337,10 @@ class TestScheduler(TestCase):
                     kernel, "buf1", 128 * x + r, "tmp0"
                 ):
                     return None
-            return kernel.stores.writeline.call_args.args[0].line
+            return "\n".join(
+                buf.writeline.call_args.args[0].line
+                for buf in (kernel.prologue, kernel.stores)
+            )
 
         self.assertIn(".store([offs_cm, offs_cn_i], ", store_line(4096, "tl.int32"))
         self.assertIn(
@@ -1338,6 +1348,55 @@ class TestScheduler(TestCase):
             store_line(2**24, "tl.int64"),
         )
         self.assertIsNone(store_line(2**31, "tl.int64"))
+        # A [B, S, N] view gets the same [M, N] descriptor.
+        self.assertIn(
+            "shape=[4096, 128], strides=[128, 1]",
+            store_line(4096, "tl.int32", view=[4, 1024]),
+        )
+
+    def test_full_tile_epilogue_outputs(self):
+        m, n = 64, 32
+        layouts = {
+            "full": ([m, n], [n, 1]),
+            "padded_rows": ([m, n], [n + 8, 1]),
+            "view_3d": ([4, 16, n], [16 * n, n, 1]),
+            "size_1": ([m, 1, n], [n, n, 1]),
+            "batched": ([2, m, n], [m * n, n, 1]),
+            "transposed": ([m, n], [1, m]),
+            "gap_between_batches": ([4, 16, n], [32 * n, n, 1]),
+            "other_last_dim": ([n, m], [m, 1]),
+            "row_result": ([m, 1], [1, 1]),
+        }
+        device = torch.device("cuda", 0)
+        buffers = {
+            name: Mock(
+                get_layout=Mock(
+                    return_value=ir.FixedLayout(device, torch.bfloat16, size, stride)
+                )
+            )
+            for name, (size, stride) in layouts.items()
+        }
+        kernel = Mock(meta={"BLOCK_M": 32, "BLOCK_N": 32})
+        kernel._staged_tile_elems = lambda: 32 * 32
+        kernel.output_node.get_size.return_value = [sympy.Integer(m), sympy.Integer(n)]
+        epilogue = Mock(get_buffer_names=Mock(return_value=list(layouts)))
+        epilogue.is_reduction.return_value = False
+        graph = Mock(get_buffer=lambda name: buffers[name])
+        graph.scheduler.can_buffer_be_removed_through_fusion.return_value = False
+        with (
+            V.set_graph_handler(graph),
+            patch("torch._inductor.select_algorithm.can_use_tma", return_value=True),
+        ):
+            outputs = TritonTemplateKernel._full_tile_epilogue_outputs(
+                kernel, Mock(), [epilogue]
+            )
+        self.assertEqual(
+            outputs,
+            [
+                (name, 32 * 32 * 2)
+                for name in ("full", "padded_rows", "view_3d", "size_1")
+            ],
+        )
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
