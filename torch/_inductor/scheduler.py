@@ -1149,30 +1149,33 @@ class NestedReduction:
         )
 
     @classmethod
-    def _r_grouped_stage_accesses_match(
+    def _try_get_r_grouped_lane_accesses(
         cls,
         outer_node: BaseSchedulerNode,
         grouped_node: BaseSchedulerNode,
         domain_context: PointwiseDomainContext,
         pointwise_domains: Sequence[tuple[SchedulerNode, PointwiseDomain]],
-    ) -> bool:
-        """Check cross-stage forwarding in the grouped R coordinate frame.
+    ) -> tuple[SubParentAccessRelation, ...] | None:
+        """Prove grouped R accesses, returning required lane projections or None.
 
-        Codegen forwards internal values positionally. Reindex every ordinary
+        Codegen normally forwards internal values positionally. Reindex every ordinary
         grouped-stage internal read, and its producer's write, into one frame
         spanning the parent ``[X, R]`` and grouped ``[X, R/G, G]`` geometries,
-        and require them to address the same element. Sub-parent edges use the
+        and require them to address the same element, or record a proved
+        fixed-lane projection for a reduced consumer. Sub-parent edges use the
         separate lane and broadcast proofs in the sub-parent planner.
         """
         from .utils import sympy_index_symbol
 
+        lane_accesses: list[SubParentAccessRelation] = []
+
         if domain_context.grouped_axis is not cls.GroupedAxis.R:
-            return False
+            return None
         if not all(
             isinstance(node, SchedulerNode) and isinstance(node.node, ComputedBuffer)
             for node in (*outer_node.get_nodes(), *grouped_node.get_nodes())
         ):
-            return False
+            return None
 
         parent_numel, parent_rnumel = domain_context.parent_full_domain
         group_size = domain_context.group_size
@@ -1195,7 +1198,7 @@ class NestedReduction:
             grouped_values = (parent_x * group_count + group_r, local_r)
             reduced_values = (parent_x * group_count + group_r,)
         else:
-            return False
+            return None
 
         # A coordinate with a single element is always zero. Keep it out of the
         # comparison so a degenerate extent does not look like a stride.
@@ -1297,21 +1300,72 @@ class NestedReduction:
                 writers = writers_by_name[dep.name]
                 consumer_frame = frames_by_node.get(consumer)
                 if consumer_frame is None or len(writers) != 1:
-                    return False
+                    return None
                 writer_frame = frames_by_node.get(writers[0])
                 if writer_frame is None or writers[0] is consumer:
-                    return False
+                    return None
                 read = frame_index(consumer, dep, consumer_frame)
-                writes = [
-                    frame_index(writers[0], write, writer_frame)
+                source_writes = tuple(
+                    write
                     for write in read_writes(writers[0]).writes
                     if write.name == dep.name
+                )
+                writes = [
+                    frame_index(writers[0], write, writer_frame)
+                    for write in source_writes
                 ]
                 if read is None or not writes or any(w is None for w in writes):
-                    return False
-                if not any(cls._index_exprs_equal(read, write) for write in writes):
-                    return False
-        return True
+                    return None
+                if any(cls._index_exprs_equal(read, write) for write in writes):
+                    continue
+                # A reduced epilogue can select a fixed lane of a live
+                # parent tile. Require a unique, unit-stride write and
+                # prove that the read stays within that same local group.
+                # An unclassified outer writer belongs to an earlier pass.
+                if (
+                    domains_by_node.get(consumer) is not cls.PointwiseDomain.REDUCED
+                    or domains_by_node.get(writers[0])
+                    not in (
+                        cls.PointwiseDomain.LOCAL_REDUCTION_INPUT,
+                        cls.PointwiseDomain.PARENT_FULL,
+                    )
+                    or writers[0].is_reduction()
+                    or len(source_writes) != 1
+                    or not isinstance(dep, MemoryDep)
+                    or dep.mode is not None
+                    or not isinstance(source_writes[0], MemoryDep)
+                    or source_writes[0].mode is not None
+                ):
+                    return None
+                write = writes[0]
+                if write is None or write.diff(local_r) != 1:
+                    return None
+                base = write.subs(local_r, 0)
+                lane = V.graph.sizevars.simplify(read - base)
+                if (
+                    not isinstance(lane, sympy.Integer)
+                    or not 0 <= lane < group_size
+                    # Codegen recovers the lane as index mod G (_planned_lane).
+                    or not V.graph.sizevars.statically_known_multiple_of(
+                        base, group_size
+                    )
+                ):
+                    return None
+                if not cls._sub_parent_access_preserves_x_boundary(
+                    source_writes[0], parent_numel, parent_rnumel, {}
+                ) or not cls._sub_parent_access_preserves_x_boundary(
+                    dep, parent_numel, group_count, {}
+                ):
+                    return None
+                lane_accesses.append(
+                    SubParentAccessRelation(
+                        source_accesses=(source_writes[0],),
+                        consumer_access=dep,
+                        parent_lane=int(lane),
+                        requires_live_source=True,
+                    )
+                )
+        return tuple(lane_accesses)
 
     @staticmethod
     def _index_exprs_equal(left: sympy.Expr, right: sympy.Expr) -> bool:
@@ -2180,6 +2234,12 @@ class NestedReduction:
         # Splitting X forces a minimum XBLOCK and has consistently lost to the
         # unfused kernels. Keep nested codegen to one [X, R/G, G] geometry.
         if grouped_axis is not cls.GroupedAxis.R:
+            fusion_log.debug(
+                "nested reduction: grouped axis of %s is %s, not R (ranges %s)",
+                block_local_reduction.get_name(),
+                grouped_axis,
+                block_local_reduction.get_ranges(),
+            )
             return None
         iter_ranges, _ = block_local_reduction.get_ranges()
         if len(iter_ranges) == 2:
@@ -2263,9 +2323,10 @@ class NestedReduction:
         # the local nodes after a dependent parent node would reverse that edge.
         if any(node.ancestors & local_stage_names for node in parent_nodes):
             return None
-        if not cls._r_grouped_stage_accesses_match(
+        lane_accesses = cls._try_get_r_grouped_lane_accesses(
             outer_node, grouped_node, domain_context, pointwise_domains
-        ):
+        )
+        if lane_accesses is None:
             return None
         sub_parent_nodes = OrderedSet(
             node
@@ -2274,6 +2335,8 @@ class NestedReduction:
         )
         sub_parent_stages: tuple[SubParentEpilogueStage, ...] = ()
         if sub_parent_nodes:
+            if lane_accesses:
+                return None
             sub_parent_stage = cls._plan_nested_sub_parent_stage(
                 outer_node,
                 grouped_node.get_nodes(),
@@ -2299,6 +2362,7 @@ class NestedReduction:
                 grouped_nodes=grouped_stage_nodes,
                 domain_context=domain_context,
                 pointwise_domains=tuple(pointwise_domains),
+                lane_accesses=lane_accesses,
             ),
             sub_parent_stages=sub_parent_stages,
         )
@@ -2436,6 +2500,7 @@ class NestedReductionStage:
     grouped_nodes: tuple[BaseSchedulerNode, ...]
     domain_context: NestedReduction.PointwiseDomainContext
     pointwise_domains: tuple[tuple[SchedulerNode, NestedReduction.PointwiseDomain], ...]
+    lane_accesses: tuple[SubParentAccessRelation, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -10259,6 +10324,13 @@ class Scheduler:
             MemoryDepMatch(source, read)
             for source, read in plan.sub_parent_access_pairs()
         )
+        grouped_lane_matches = OrderedSet(
+            MemoryDepMatch(source.normalize(), relation.consumer_access.normalize())
+            for relation in (
+                () if plan.nested_stage is None else plan.nested_stage.lane_accesses
+            )
+            for source in relation.source_accesses
+        )
         nested_stage_reads = OrderedSet(
             dep
             for node in (
@@ -10298,6 +10370,15 @@ class Scheduler:
             if self.fusable_read_and_write(read, write):
                 continue
             match = MemoryDepMatch(write, read)
+            if (
+                is_nested_stage_read
+                and MemoryDepMatch(raw_write.normalize(), raw_read.normalize())
+                in grouped_lane_matches
+            ):
+                if not self._memory_dep_supports_index_equivalence(read, write):
+                    return None
+                matches.add(match)
+                continue
             if is_sub_parent_read:
                 raw_match = MemoryDepMatch(raw_write, raw_read)
                 if raw_match not in relation_matches or not (
@@ -10663,6 +10744,8 @@ class Scheduler:
         elif NestedReduction.is_candidate(node1, node2):
             # Path 2: initially form an outer + grouped reduction pipeline.
             plan = NestedReduction.plan(node1, node2)
+            if plan is None:
+                why("nested reduction plan declined")
         elif (
             NestedReduction._is_enabled_for(node1, node2)
             and node1.is_reduction()
