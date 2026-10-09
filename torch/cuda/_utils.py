@@ -1,4 +1,5 @@
 import ctypes
+import re
 import sys
 from typing import Any
 
@@ -339,13 +340,17 @@ def _nvrtc_compile(
     num_options = len(options)
     options_array = (ctypes.c_char_p * num_options)(*options)
 
+    # Template expressions in kernel_name are not valid filenames on Windows,
+    # where HIPRTC then fails with an empty log (ROCm/TheRock#8216).
+    source_name = re.sub(r"[^\w.-]", "_", kernel_name) + ".cu"
+
     # Create program
     prog = ctypes.c_void_p()
     check_nvrtc(
         libnvrtc.nvrtcCreateProgram(
             ctypes.byref(prog),
             source_bytes,
-            f"{kernel_name}.cu".encode(),
+            source_name.encode(),
             0,
             None,
             None,
@@ -538,7 +543,6 @@ class _CudaKernel:
 
         # Get device properties to validate against limits
         device_props = torch.cuda.get_device_properties()
-        # HIP doesn't have shared_memory_per_block_optin in device properties, so we hard-code it here
         if torch.version.hip:
             # navi, CDNA1-CDNA3 allows a max of 64KB shared memory,
             # CDNA4 (gfx950) 160KB, and CDNA5 (gfx1250) 320KB.

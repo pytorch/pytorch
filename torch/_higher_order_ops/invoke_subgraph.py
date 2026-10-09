@@ -1592,7 +1592,6 @@ def invoke_subgraph_inductor_compile(
         if is_inference:
             cudagraphs = BoxedBool(requested_cudagraphs)
             forward_device_index = BoxedDeviceIndex(None)
-            forward_cudagraphs_enabled = False
         elif is_backward:
             if cudagraph_state.forward_device_index is None:
                 cudagraph_state.forward_device_index = BoxedDeviceIndex(None)
@@ -1604,14 +1603,12 @@ def invoke_subgraph_inductor_compile(
                 requested_cudagraphs = False
             cudagraphs = BoxedBool(requested_cudagraphs)
             forward_device_index = cudagraph_state.forward_device_index
-            forward_cudagraphs_enabled = forward_device_index.value is not None
         else:
             cudagraph_state.forward_requested = requested_cudagraphs
             cudagraph_state.forward_cudagraphs = BoxedBool(requested_cudagraphs)
             cudagraph_state.forward_device_index = BoxedDeviceIndex(None)
             cudagraphs = cudagraph_state.forward_cudagraphs
             forward_device_index = cudagraph_state.forward_device_index
-            forward_cudagraphs_enabled = False
 
         compiled_fn_inner: Any = compile_fx_inner(
             gm,
@@ -1620,7 +1617,6 @@ def invoke_subgraph_inductor_compile(
             is_backward=is_backward,
             is_inference=is_inference,
             boxed_forward_device_index=forward_device_index,
-            cudagraphs_forward_enabled=forward_cudagraphs_enabled,
         )
         if (
             regional_cudagraph_state is not None

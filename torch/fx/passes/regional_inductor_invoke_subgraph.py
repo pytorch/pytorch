@@ -356,38 +356,41 @@ def regional_inductor_invoke_subgraph(
             from torch._functorch._aot_autograd.runtime_wrappers import (
                 current_autograd_invocation,
             )
-            from torch._inductor.cudagraph_trees import get_manager
+            from torch._inductor.cudagraph_trees import (
+                CUDAGraphTreeManager,
+                get_manager,
+            )
 
-            def transition(device_index: int | None) -> None:
-                manager = get_manager(device_index, create_if_none_exists=False)
-                if manager and manager.running_forwards_with_pending_backwards:
+            def transition(manager: CUDAGraphTreeManager) -> None:
+                if manager.running_forwards_with_pending_backwards:
                     manager.set_to_running_backward()
 
-            # Only a forward region whose call in this invocation was captured
-            # left a generation to transition, and only once: a size outside
-            # triton.cudagraph_capture_sizes runs uncaptured, and a retained
-            # graph can run this backward again after another forward is
-            # pending. Consuming the call here also keeps the uncaptured
+            # Only a device where this invocation's forward call left the
+            # generation pending has one to transition, and only once: a size
+            # outside triton.cudagraph_capture_sizes runs uncaptured, and a
+            # retained graph can run this backward again after another forward
+            # is pending. Consuming the call here also keeps the uncaptured
             # backward regions' own wrappers from repeating the transition.
             invocation = current_autograd_invocation()
-            captured_devices: dict[int | None, None] = {}
-            for box in forward_regions:
-                if invocation in box.captured_invocations:
-                    box.captured_invocations.discard(invocation)
-                    captured_devices[box.value] = None
+            pending: dict[int | None, CUDAGraphTreeManager] = {}
+            for device_index in {box.value for box in forward_regions}:
+                manager = get_manager(device_index, create_if_none_exists=False)
+                if manager is not None and invocation in manager.pending_invocations:
+                    manager.pending_invocations.discard(invocation)
+                    pending[device_index] = manager
             # A captured backward region transitions from inside its own node.
             # Transitioning its device before that node runs would let it start a
             # new generation and free the forward pool holding the activations it
             # reads, so such a device waits until the backward is done, and only
             # transitions if the region ran uncaptured after all, e.g. at a size
             # outside triton.cudagraph_capture_sizes.
-            for device_index in captured_devices:
+            for device_index, manager in pending.items():
                 if device_index not in captured_backward_devices:
-                    transition(device_index)
+                    transition(manager)
             out = compiled_fn(args)
-            for device_index in captured_devices:
+            for device_index, manager in pending.items():
                 if device_index in captured_backward_devices:
-                    transition(device_index)
+                    transition(manager)
             return out
 
         backward._boxed_call = True  # pyrefly: ignore [missing-attribute]
