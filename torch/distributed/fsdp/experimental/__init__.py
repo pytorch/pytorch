@@ -17,9 +17,9 @@ strided collective buffers can increase CPU time, GPU time, and metadata memory.
 Benchmark the callbacks on the target workload before enabling them.
 
 All-gather extensions can return ``AllGatherInput`` records from
-``fsdp_pre_all_gather`` to declare each payload's concatenation dimension and
-gathered shape. FSDP batches these copies before calling ``fsdp_post_all_gather``
-to reconstruct the parameter. Existing hooks returning tensors remain supported.
+``fsdp_pre_all_gather`` to declare each payload's concatenation dimension. FSDP
+batches these copies before calling ``fsdp_post_all_gather`` to reconstruct the
+parameter. Existing hooks returning tensors remain supported.
 
 .. warning::
     These APIs are experimental. Callback signatures and supported FSDP

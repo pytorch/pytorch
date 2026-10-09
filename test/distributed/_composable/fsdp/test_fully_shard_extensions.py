@@ -751,7 +751,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             rank_tag = torch.tensor(rank, dtype=torch.int64, device=local_tensor.device)
             payload_refs.extend((weakref.ref(payload_tags), weakref.ref(rank_tag)))
             return (
-                AllGatherInput(local_tensor, dim=-1, output_size=torch.Size((2, 4, 8))),
+                AllGatherInput(local_tensor, dim=-1),
                 AllGatherInput(payload_tags),
                 AllGatherInput(rank_tag),
                 # Tensor payloads follow the parameter's shard layout
@@ -770,9 +770,9 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             del local_tensor
             weight, gathered_tags, ranks, tensor_payload = all_gather_outputs
             self.assertEqual(metadata, (torch.Size((8, 8)), shard_world_size))
-            self.assertEqual(weight.shape, (2, 4, 8))
+            self.assertEqual(weight.shape, (8, 8))
             self.assertEqual(weight.dtype, param_dtype)
-            self.assertEqual(weight, expected_weight.view(2, 4, 8))
+            self.assertEqual(weight, expected_weight)
             self.assertEqual(gathered_tags.shape, (2 * shard_world_size, 3))
             self.assertEqual(gathered_tags.dtype, torch.bfloat16)
             self.assertEqual(
@@ -784,7 +784,6 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             self.assertEqual(ranks, torch.arange(shard_world_size, device=device_type))
             self.assertEqual(tensor_payload.view(8, 8), expected_weight)
             post_out_ids.append(None if out is None else id(out))
-            weight = weight.view(8, 8)
             if out is not None:
                 with _unsafe_preserve_version_counter(out):
                     out.copy_(weight)

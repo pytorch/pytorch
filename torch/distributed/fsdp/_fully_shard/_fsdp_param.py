@@ -1464,15 +1464,13 @@ def _get_all_gather_output_layout(
     input_size: torch.Size,
     dim: int,
     world_size: int,
-    output_size: torch.Size | None = None,
 ) -> _AllGatherOutputLayout:
     input_size = torch.Size(input_size or (1,))
     dim %= len(input_size)
     gathered_size = list(input_size)
     gathered_size[dim] *= world_size
-    output_size = torch.Size(gathered_size if output_size is None else output_size)
     outer_size = math.prod(input_size[:dim]) if input_size.numel() else 1
-    return _AllGatherOutputLayout(output_size, outer_size)
+    return _AllGatherOutputLayout(torch.Size(gathered_size), outer_size)
 
 
 def _validate_all_gather_inputs(
@@ -1506,15 +1504,6 @@ def _validate_all_gather_inputs(
             if not -ndim <= inp.dim < ndim:
                 raise ValueError(
                     f"All-gather dim {inp.dim} is invalid for input size {tensor.size()}"
-                )
-            output_size = inp.output_size
-            if output_size is not None and (
-                any(size < 0 for size in output_size)
-                or math.prod(output_size) != gathered_numel
-            ):
-                raise ValueError(
-                    f"All-gather output size {output_size} must contain "
-                    f"{gathered_numel} elements"
                 )
             if output is not None and (
                 output.dtype != tensor.dtype or output.numel() != gathered_numel
@@ -1573,9 +1562,7 @@ def _normalize_all_gather_inputs(
     layouts: list[_AllGatherOutputLayout] = []
     for inp, tensor in zip(inputs, tensors):
         if isinstance(inp, AllGatherInput):
-            layout = _get_all_gather_output_layout(
-                tensor.size(), inp.dim, world_size, inp.output_size
-            )
+            layout = _get_all_gather_output_layout(tensor.size(), inp.dim, world_size)
         else:
             # Tensor inputs follow the parameter's padded sharded layout and keep
             # their trailing dims, where -1 cannot be inferred if one is zero

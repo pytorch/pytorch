@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field, KW_ONLY, replace
+from dataclasses import dataclass, field, replace
 
 import torch
 import torch.distributed as dist
@@ -264,8 +264,8 @@ class AllGatherInput:
     using its own shape, independently of the parameter's shard dimension.
     For example, a payload of shape ``(2, F, D)`` with ``dim=1`` produces
     ``(2, world_size * F, D)``. Scalar payloads are treated as shape ``(1,)``.
-    The gathered payload is optionally reshaped to ``output_size`` before
-    being passed to the unchanged ``fsdp_post_all_gather`` hook.
+    The unchanged ``fsdp_post_all_gather`` hook receives the gathered payload
+    in this concatenated shape.
 
     Payloads must be flattenable with ``view(-1)``. Each rank must return the
     same payload shapes, dtypes, and layouts; extensions own any padding.
@@ -276,12 +276,7 @@ class AllGatherInput:
         tensor (Tensor): Local payload to communicate.
         dim (int): Payload dimension to concatenate across ranks. Negative
             dimensions are supported. Defaults to 0.
-        output_size (torch.Size, optional): Shape passed to the post hook, with
-            the same number of elements as the gathered payload. Defaults to
-            the concatenated shape.
     """
 
     tensor: torch.Tensor
-    _: KW_ONLY
-    dim: int = 0
-    output_size: torch.Size | None = None
+    dim: int = field(default=0, kw_only=True)
