@@ -43,6 +43,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     in_kernel_invocation_manager,
     is_fake_tensor,
+    maybe_get_fake_constant,
     maybe_get_fake_device,
     maybe_get_item_memo,
     maybe_set_fake_device,
@@ -495,7 +496,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(
 
 
 def _spdiags_static_offsets(offsets: FakeTensorLike) -> list[int] | None:
-    constant = getattr(offsets, "constant", None)
+    constant = maybe_get_fake_constant(offsets)
     if constant is None:
         constant = getattr(offsets, "real_tensor", None)
     if is_fake_tensor(constant):
@@ -1459,7 +1460,20 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if (nnz := arg.nonzero_memo) is None:
+    nnz = getattr(arg, "nonzero_memo", None)
+    if (
+        nnz is not None
+        and not isinstance(arg, FakeTensor)  # noqa: ISINSTANCE_FAKE_TENSOR
+        and (
+            (
+                not arg.is_inference()
+                and getattr(arg, "_nonzero_memo_vc", None) != arg._version
+            )
+            or getattr(arg, "_nonzero_memo_epoch", None) != fake_mode.epoch
+        )
+    ):
+        nnz = None
+    if nnz is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -1498,6 +1512,11 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
             _constrain_range_for_size(nnz, max=maxval)
 
         arg.nonzero_memo = nnz  # pyrefly: ignore[bad-assignment]
+        if not isinstance(arg, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+            arg_any = typing_cast(Any, arg)
+            if not arg.is_inference():
+                arg_any._nonzero_memo_vc = arg._version
+            arg_any._nonzero_memo_epoch = fake_mode.epoch
     return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)  # type: ignore[return]
 
 
