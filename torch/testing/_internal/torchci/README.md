@@ -2,7 +2,9 @@
 
 `plugin.py` writes one JSON Lines file per test process for the `tests.*`
 ClickHouse tables: a report line, then one line per completed test run. Lines are
-flushed as tests finish; readers skip a torn last line.
+flushed as tests finish; readers skip a torn last line. Split lines on `\n`, not
+with `str.splitlines()`, which also breaks at U+2028, U+2029 and U+0085 inside
+strings.
 
 ## Path
 
