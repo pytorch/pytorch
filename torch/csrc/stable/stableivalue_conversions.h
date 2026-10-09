@@ -264,12 +264,18 @@ struct FromImpl<std::optional<T>> {
     }
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_13_0
 
-    const StableIValue value = detail::FromImpl<T>::call(
-        val.value(), extension_build_version, is_internal);
-
+    // Allocate the heap slot (the fallible step) before producing the owning
+    // inner value; if producing it throws, free the still-empty slot so it does
+    // not leak. Mirrors from_ivalue's OptionalType branch in shim_common.cpp.
     StableIValue* ivalue_ptr = nullptr;
     TORCH_ERROR_CODE_CHECK(torch_new_stable_ivalue(&ivalue_ptr));
-    *ivalue_ptr = value;
+    try {
+      *ivalue_ptr = detail::FromImpl<T>::call(
+          val.value(), extension_build_version, is_internal);
+    } catch (...) {
+      (void)torch_delete_stable_ivalue(ivalue_ptr);
+      throw;
+    }
     return torch::stable::detail::from(ivalue_ptr);
 #else
     return torch::stable::detail::from(
