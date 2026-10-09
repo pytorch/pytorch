@@ -1057,6 +1057,16 @@ def torch_key() -> bytes:
         return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
+# Bound at import so tests that mock.patch torch_key/triton_key don't break it.
+_cache_key_prefetchers = (torch_key.prefetch, triton_key.prefetch)  # type: ignore[attr-defined]
+
+
+def prefetch_cache_keys() -> None:
+    """Start computing torch_key and triton_key in a background thread."""
+    for prefetch in _cache_key_prefetchers:
+        prefetch()
+
+
 def get_inductor_root() -> str:
     return os.path.dirname(__file__)
 
@@ -1109,13 +1119,26 @@ class CacheabilityValidator:
             if not isinstance(module, torch.fx.GraphModule):
                 continue
             for node in module.graph.nodes:
+                target = node.target
                 if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
+                    isinstance(target, torch._ops.HigherOrderOperator)
+                    and not target.cacheable()
                 ):
-                    self.bypass(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    # with_effects(token, op, *args) is as cacheable as the op it
+                    # wraps: always for an OpOverload, per cacheable() for a HOP.
+                    inner = (
+                        node.args[1]
+                        if target is torch.ops.higher_order.with_effects
+                        else None
                     )
+                    if not (
+                        isinstance(inner, torch._ops.OpOverload)
+                        or (
+                            isinstance(inner, torch._ops.HigherOrderOperator)
+                            and inner.cacheable()
+                        )
+                    ):
+                        self.bypass(f"Can't cache HigherOrderOperator: {target.name()}")
                 # TODO: this check is broken in two ways:
                 # 1. FX uses "get_attr" (with underscore), not "getattr"
                 # 2. It only checks for ScriptObject, not FakeScriptObject
