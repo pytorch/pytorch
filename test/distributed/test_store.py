@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import datetime
 import os
 import socket
@@ -8,7 +9,7 @@ import sys
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import timedelta
 from sys import platform
 from unittest import mock
@@ -19,7 +20,10 @@ import torch.distributed.distributed_c10d as c10d
 import torch.distributed.rpc as rpc
 from torch.distributed import DistError, DistNetworkError, DistStoreError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
 if not dist.is_available():
@@ -1331,6 +1335,224 @@ class TestClientProtocol(TestCase):
 
         thread.join()
 
+    # Runs fn in a daemon thread so a regression fails instead of hanging.
+    @staticmethod
+    def _bounded(fn, *args):
+        fut = Future()
+
+        def run() -> None:
+            try:
+                fut.set_result(fn(*args))
+            except BaseException as e:
+                fut.set_exception(e)
+
+        threading.Thread(target=run, daemon=True).start()
+        return fut.result(timeout=30)
+
+    # Proxies one client connection per entry of drops to the server at port.
+    # Replies on connection i are dropped once drops[i] is set. Nothing is read
+    # from clients while paused is set, or from the server while
+    # paused_replies is set. A small receive buffer and MSS keep the peers'
+    # send buffers small, so a stalled transfer of a few MB blocks regardless
+    # of host TCP settings. A close is forwarded
+    # as on a direct connection: with unread data it resets the peer. Returns
+    # the listening socket and the proxied sockets.
+    def _proxy(self, port, drops, paused=None, paused_replies=None):
+        def small_buf_socket(family=socket.AF_INET):
+            s = socket.socket(family)
+            self.addCleanup(s.close)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 16)
+            if hasattr(socket, "TCP_MAXSEG"):
+                with contextlib.suppress(OSError):
+                    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG, 1400)
+            return s
+
+        # Accepted sockets inherit these options.
+        listen = small_buf_socket()
+        listen.bind(("localhost", 0))
+        listen.listen()
+        conns = []
+        paused = paused or threading.Event()
+        paused_replies = paused_replies or threading.Event()
+
+        def forward(src, dst, drop, pause):
+            try:
+                while True:
+                    while pause.is_set():
+                        time.sleep(0.01)
+                    if not (data := src.recv(1 << 16)):
+                        break
+                    if not drop.is_set():
+                        dst.sendall(data)
+            except OSError:
+                pass
+            with contextlib.suppress(OSError):
+                dst.shutdown(socket.SHUT_RDWR)
+            dst.close()
+
+        def proxy() -> None:
+            for drop in drops:
+                client, _ = listen.accept()
+                self.addCleanup(client.close)
+                family, _, _, _, addr = socket.getaddrinfo(
+                    "localhost", port, type=socket.SOCK_STREAM
+                )[0]
+                upstream = small_buf_socket(family)
+                upstream.connect(addr)
+                conns.extend((client, upstream))
+                for args in (
+                    (client, upstream, threading.Event(), paused),
+                    (upstream, client, drop, paused_replies),
+                ):
+                    threading.Thread(target=forward, args=args, daemon=True).start()
+
+        threading.Thread(target=proxy, daemon=True).start()
+        return listen, conns
+
+    # Checks that a new client connecting directly to port is served, i.e. the
+    # server is not blocked on another client's failed connection.
+    def _assert_serves_new_client(self, port):
+        store = self._bounded(
+            lambda: dist.TCPStore(
+                "localhost",
+                port,
+                is_master=False,
+                timeout=timedelta(seconds=5),
+                wait_for_workers=False,
+            )
+        )
+        self._bounded(store.set, "new", "1")
+        self.assertEqual(self._bounded(store.get, "new"), b"1")
+
+    @parametrize("use_libuv", [True, False])
+    def test_client_op_timeout_reconnects(self, use_libuv) -> None:
+        bounded = self._bounded
+        server = dist.TCPStore(
+            "localhost", 0, is_master=True, wait_for_workers=False, use_libuv=use_libuv
+        )
+        server.set("key", "value")
+        stalled = threading.Event()
+        listen, conns = self._proxy(server.port, (stalled, threading.Event()))
+
+        store = dist.TCPStore(
+            "localhost",
+            listen.getsockname()[1],
+            is_master=False,
+            timeout=timedelta(seconds=60),
+            wait_for_workers=False,
+        )
+        self.assertEqual(bounded(store.get, "key"), b"value")
+
+        # Applies to the existing connection.
+        store.set_timeout(timedelta(seconds=1))
+
+        # wait and barrier use their own timeout, not the store timeout.
+        # The server side is delayed past the store timeout.
+        long = timedelta(seconds=10)
+        for release, op in (
+            (lambda: server.set("late", "1"), lambda: store.wait(["late"], long)),
+            (lambda: server.barrier("b", 2), lambda: store.barrier("b", 2, long)),
+        ):
+            t = threading.Timer(1.5, release)
+            t.daemon = True
+            t.start()
+            start = time.monotonic()
+            bounded(op)
+            self.assertGreater(time.monotonic() - start, 1.2)
+
+        stalled.set()
+        start = time.monotonic()
+        with self.assertRaises(DistNetworkError):
+            bounded(store.check, ["key"])
+        self.assertLess(time.monotonic() - start, 10)
+        self._assert_serves_new_client(server.port)
+        store.set_timeout(timedelta(seconds=10))
+        self.assertTrue(bounded(store.check, ["key"]))
+        self.assertEqual(bounded(store.get, "key"), b"value")
+
+        # Once the server refuses connections, ops fail fast rather than each
+        # retrying the connection until the timeout.
+        store.set_timeout(timedelta(seconds=60))
+        listen.close()
+        for s in conns:
+            with contextlib.suppress(OSError):
+                s.shutdown(socket.SHUT_RDWR)
+        start = time.monotonic()
+        with self.assertRaises(DistNetworkError):
+            bounded(store.check, ["key"])
+        for _ in range(2):
+            with self.assertRaisesRegex(DistNetworkError, "reconnect to .* failed"):
+                bounded(store.check, ["key"])
+        self.assertLess(time.monotonic() - start, 30)
+
+    @parametrize("use_libuv", [True, False])
+    @parametrize("stall", ["send", "recv"])
+    def test_client_transfer_timeout_reconnects(self, use_libuv, stall) -> None:
+        bounded = self._bounded
+        server = dist.TCPStore(
+            "localhost", 0, is_master=True, wait_for_workers=False, use_libuv=use_libuv
+        )
+        # Below the libuv server's per-value limit; a stalled send writes
+        # three to exceed what the socket buffers hold.
+        big = b"x" * (7 << 20)
+        server.set("big", big)
+        server.set("key", "value")
+        sends, replies = threading.Event(), threading.Event()
+        listen, _ = self._proxy(
+            server.port, (threading.Event(), threading.Event()), sends, replies
+        )
+        store = dist.TCPStore(
+            "localhost",
+            listen.getsockname()[1],
+            is_master=False,
+            timeout=timedelta(seconds=60),
+            wait_for_workers=False,
+        )
+        self.assertEqual(bounded(store.get, "key"), b"value")
+
+        store.set_timeout(timedelta(seconds=1))
+        if stall == "send":
+            paused, op = sends, lambda: store.multi_set(["k0", "k1", "k2"], [big] * 3)
+        else:
+            paused, op = replies, lambda: store.get("big")
+        paused.set()
+        start = time.monotonic()
+        with self.assertRaises(DistNetworkError):
+            bounded(op)
+        self.assertLess(time.monotonic() - start, 10)
+
+        # The legacy server serves one request at a time, so this also checks
+        # that the failed connection was closed.
+        paused.clear()
+        self._assert_serves_new_client(server.port)
+
+        store.set_timeout(timedelta(seconds=10))
+        bounded(store.set, "k", "v")
+        self.assertEqual(bounded(store.get, "k"), b"v")
+
+    def test_client_reconnects_without_timeout(self) -> None:
+        bounded = self._bounded
+        server = dist.TCPStore("localhost", 0, is_master=True, wait_for_workers=False)
+        server.set("key", "value")
+        listen, conns = self._proxy(server.port, (threading.Event(), threading.Event()))
+        store = dist.TCPStore(
+            "localhost",
+            listen.getsockname()[1],
+            is_master=False,
+            timeout=timedelta(seconds=60),
+            wait_for_workers=False,
+        )
+        self.assertEqual(bounded(store.get, "key"), b"value")
+
+        # With no store timeout the reconnect still needs a connect deadline.
+        store.set_timeout(timedelta(0))
+        conns[0].shutdown(socket.SHUT_RDWR)
+        with self.assertRaises(DistNetworkError):
+            bounded(store.check, ["key"])
+        self.assertTrue(bounded(store.check, ["key"]))
+
+
+instantiate_parametrized_tests(TestClientProtocol)
 
 if __name__ == "__main__":
     if device_type != "cpu":
