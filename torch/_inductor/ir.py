@@ -7328,6 +7328,7 @@ class ExternKernel(InputsKernel):
         default_factory=dict
     )
     mutation_outputs: list[MutationOutput] = dataclasses.field(default_factory=list)
+    tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None
 
     def __init__(
         self,
@@ -7357,6 +7358,7 @@ class ExternKernel(InputsKernel):
         self.collect_arg_kwarg_properties()
         self.unbacked_bindings = {}
         self.mutation_outputs = []
+        self.tunable_dyn_dims_mask = None
         self.fx_node = V.graph.current_node
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self.annotations: dict[str, object] = {}

@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NamedTuple
+from unittest.mock import patch
 
 import torch
 from torch._inductor import config
@@ -219,6 +220,139 @@ class TestGpuWrapper(InductorTestCase):
             "stream0",
             prologue(CppWrapperGpu, "mtia", MTIADeviceOpOverrides(), aot_mode=True),
         )
+
+    def test_tunableop_dynamic_dims_guard_codegen(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.device = "cuda"
+        wrapper.lines = []
+
+        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}):
+            self.assertTrue(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, True, False, False), "cuda"
+                )
+            )
+        self.assertEqual(
+            wrapper.lines,
+            [
+                "{",
+                "AOTICudaTunableOpDynamicDimsGuard tunable_dynamic_dims_guard(2);",
+            ],
+        )
+        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}):
+            self.assertFalse(wrapper._begin_tunableop_dynamic_dims_guard(None, "cuda"))
+            self.assertFalse(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, False, False, False), "cuda"
+                )
+            )
+            self.assertFalse(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, True, False, False), "cpu"
+                )
+            )
+        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": False}):
+            self.assertFalse(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, True, False, False), "cuda"
+                )
+            )
+
+    def test_tunableop_dynamic_dims_guard_preserves_alloc_output_scope(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.device = "cuda"
+        wrapper.lines = []
+        extern_kernel = SimpleNamespace(
+            name="buf0",
+            op_overload=None,
+            outputs=[],
+            python_kernel_name=None,
+            tunable_dyn_dims_mask=(True, False, False, False),
+            get_device=lambda: torch.device("cuda"),
+            get_kernel_name=lambda: "at::test",
+        )
+
+        def emit_call(wrapper, *_args, **_kwargs):
+            wrapper.writeline("CALL;")
+
+        with (
+            config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}),
+            patch.object(
+                CppWrapperCpu,
+                "generate_c_shim_extern_kernel_call",
+                emit_call,
+            ),
+        ):
+            wrapper._generate_extern_kernel_alloc_helper(extern_kernel, ["arg0"])
+
+        self.assertEqual(
+            wrapper.lines,
+            [
+                "AtenTensorHandle buf0_handle;",
+                "{",
+                "AOTICudaTunableOpDynamicDimsGuard tunable_dynamic_dims_guard(1);",
+                "CALL;",
+                "}",
+                "RAIIAtenTensorHandle buf0(buf0_handle);",
+            ],
+        )
+
+    def test_tunableop_dynamic_dims_guard_in_compiled_wrapper(self):
+        if not RUN_GPU or self.device != "cuda":
+            self.skipTest("requires CUDA/ROCm cpp_wrapper")
+
+        def fn(bias, x, weight):
+            return torch.addmm(bias, x, weight)
+
+        bias = torch.randn(32, device=self.device)
+        x = torch.randn(8, 16, device=self.device)
+        weight = torch.randn(16, 32, device=self.device)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        previous_enabled = torch.cuda.tunable.is_enabled()
+        previous_tuning = torch.cuda.tunable.tuning_is_enabled()
+        previous_filename = torch.cuda.tunable.get_filename()
+        try:
+            torch.cuda.tunable.enable(False)
+            torch.cuda.tunable.tuning_enable(False)
+            with config.patch(
+                {
+                    "cuda.autotune_tunableop_dynamic_dims_wildcard": True,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN",
+                }
+            ):
+                compiled = torch.compile(
+                    fn, fullgraph=True, options={"cpp_wrapper": True}
+                )
+                actual, code = test_torchinductor.run_and_get_cpp_code(
+                    compiled, bias, x, weight
+                )
+
+            self.assertEqual(actual, fn(bias, x, weight))
+            self.assertIn("AOTICudaTunableOpDynamicDimsGuard", code)
+            self.assertIn("tunable_dynamic_dims_guard(1)", code)
+            self.assertNotIn("ATen/cuda/tunable/Tunable.h", code)
+            self.assertNotIn("at::cuda::tunable", code)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                torch.cuda.tunable.set_filename(
+                    os.path.join(tmpdir, "results.csv"), False
+                )
+                torch.cuda.tunable._clear_all()
+                torch.cuda.tunable.enable(True)
+                torch.cuda.tunable.tuning_enable(True)
+                self.assertEqual(compiled(bias, x, weight), fn(bias, x, weight))
+                self.assertTrue(
+                    any("*" in entry[1] for entry in torch.cuda.tunable.get_results())
+                )
+        finally:
+            torch.cuda.tunable.tuning_enable(False)
+            torch.cuda.tunable.enable(False)
+            torch.cuda.tunable._clear_all()
+            torch.cuda.tunable.set_filename(previous_filename, False)
+            torch.cuda.tunable.enable(previous_enabled)
+            torch.cuda.tunable.tuning_enable(previous_tuning)
 
     def test_debug_sync_graph(self):
         if not RUN_GPU:
