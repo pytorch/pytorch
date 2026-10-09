@@ -64,11 +64,14 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         self.init_pg(backend=backend)
 
     def destroy_comms(self, destroy_rpc=True):
-        # Wait for all ranks to reach here before starting shutdown.
-        dist.barrier()
-
+        # Shut down RPC before the barrier: graceful shutdown waits for in-flight
+        # RPCs on all workers, while a pending NCCL barrier kernel can block
+        # TensorPipe's CUDA channel (cudaDeviceSynchronize) from serving them.
         if destroy_rpc:
             rpc.shutdown()
+
+        # Wait for all ranks to reach here before destroying the process group.
+        dist.barrier()
         dist.destroy_process_group()
 
     def setUp(self) -> None:
