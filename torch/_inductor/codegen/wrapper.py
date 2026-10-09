@@ -1981,6 +1981,7 @@ class PythonWrapperCodegen(CodeGen):
     """
 
     supports_caching: bool = True  # Whether the output code is cacheable.
+    preserve_zero_dim_tensor_args: bool = False
 
     def __init__(self):
         super().__init__()

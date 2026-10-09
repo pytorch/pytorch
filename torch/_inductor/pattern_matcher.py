@@ -539,7 +539,11 @@ class PatternExpr(ABC):
         try:
             return MatchContext([self], graph=node.graph).match(self, node)
         except FailedMatch as e:
-            return e
+            # Drop the traceback: the caller keeps the returned FailedMatch in a
+            # local, and its traceback would hold this frame and, via f_back, the
+            # whole calling stack (e.g. the autograd backward that triggered a
+            # lazy backward compile, with its real tensors) in a reference cycle.
+            return e.with_traceback(None)
 
     def has_multiple_users(self) -> bool:
         return False
@@ -923,6 +927,47 @@ _SimpleSpec = tuple[Any, ...]
 _NodeMeta = tuple[Sequence["torch.SymInt | int"], torch.dtype, torch.device]
 
 
+def _canonical_kwarg(k: str, v: Any) -> Any:
+    # A strided layout and unpinned memory are equivalent to their None default.
+    if k == "layout" and v is torch.strided or k == "pin_memory" and v is False:
+        return None
+    return v
+
+
+@functools.cache
+def _schema_defaults(op: torch._ops.OpOverload) -> dict[str, Any]:
+    # An Optional arg without a default (e.g. div's rounding_mode) defaults to None.
+    # Enum defaults (dtype, memory_format, layout) come back as ints, so a node that
+    # explicitly passes one is conservatively treated as non-default.
+    defaults = {}
+    for a in op._schema.arguments:
+        if a.has_default_value():
+            defaults[a.name] = _canonical_kwarg(a.name, a.default_value)
+        elif isinstance(a.type, torch.OptionalType):
+            defaults[a.name] = None
+    return defaults
+
+
+def _has_undeclared_non_default_kwarg(
+    target: Any, kwargs: Mapping[str, Any], declared: Mapping[str, Any]
+) -> bool:
+    # Patterns don't bind kwargs they don't declare, so matching a node that sets
+    # one (e.g. add's alpha) would silently drop it from the replacement.
+    # Patterns must declare any kwarg they accept (dtype, memory_format, ...).
+    undeclared = [(k, v) for k, v in kwargs.items() if k not in declared]
+    if not isinstance(target, torch._ops.OpOverload):
+        # without a schema we can't tell which values are defaults
+        return bool(undeclared)
+    defaults = _schema_defaults(target)
+    return any(
+        k not in defaults
+        # comparing a symbolic value to the default would install a guard
+        or isinstance(v, (torch.SymInt, torch.SymFloat, torch.SymBool))
+        or _canonical_kwarg(k, v) != defaults[k]
+        for k, v in undeclared
+    )
+
+
 class _TargetArgsExpr(_TargetExpr):
     """
     Base class for filtering match by node.{target,args,kwargs}
@@ -1037,16 +1082,14 @@ class _TargetArgsExpr(_TargetExpr):
 
             if normalized_args_and_kwargs is None:
                 return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
-            else:
-                _args, _kwargs = normalized_args_and_kwargs
-                if len(_args) == len(self.args) and len(_kwargs) >= len(self.kwargs):
-                    _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
-                else:
-                    return FailedMatch(
-                        "function_mismatch: node={}, pattern={}", node, self
-                    )
-        else:
-            _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+            _args, _kwargs = normalized_args_and_kwargs
+            if len(_args) != len(self.args) or len(_kwargs) < len(self.kwargs):
+                return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
+
+        # raw kwargs, since normalization fills in every default
+        if _has_undeclared_non_default_kwarg(node.target, node.kwargs, self.kwargs):
+            return FailedMatch("undeclared_kwarg: node={}, pattern={}", node, self)
+        _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
 
         node_items, node_spec = self.flatten(_args, _kwargs)
         self_items, self_spec = self.flat_args_kwargs
@@ -1288,7 +1331,8 @@ class MultiOutputPattern(PatternExpr):
         try:
             return MatchContext(self.outputs, graph=node.graph).match(self, node)
         except FailedMatch as e:
-            return e
+            # See PatternExpr.match.
+            return e.with_traceback(None)
 
     def pattern_eq(self, other: object) -> bool:
         if not super().pattern_eq(other):
