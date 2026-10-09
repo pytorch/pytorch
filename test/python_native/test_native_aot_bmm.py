@@ -155,9 +155,6 @@ class TestNativeAotBmmOuter(TestCase):
             self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
 
     def test_mixed_dtypes_raise_instead_of_being_served(self):
-        # Neither layer runs aten's dtype-equality check (it lives in the meta
-        # function), and both specialize on self's dtype: without their own checks a
-        # bf16 mat2 would be read as f32 and the call would return garbage.
         a, b = self._outer(8, 48, 256)
         b16 = self._outer(8, 48, 256, torch.bfloat16)[1]
         with self.assertRaises(RuntimeError):
@@ -275,14 +272,6 @@ class TestNativeAotBmmOuter(TestCase):
             out = torch.bmm(a, b)
         self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
 
-    @skipIfNoNativeAot("bmm")
-    def test_out_variant_routes_to_aot(self):
-        a, b = self._outer(16, 48, 256, seed=3)
-        out = torch.empty(16, 48, 256, device="cuda")
-        with _jit_masked():
-            self.assertTrue(_ran_aot(lambda: torch.bmm(a, b, out=out)))
-        self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
-
     def test_disabled_context_masks_aot(self):
         a, b = self._outer(16, 48, 256, seed=4)
         with torch.backends.python_native.triton.disabled():
@@ -292,6 +281,31 @@ class TestNativeAotBmmOuter(TestCase):
         a, b = self._outer(16, 48, 256, seed=5)
         out = torch.bmm(a, b)
         self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
+
+
+class TestNativeAotBmmOut(TestCase):
+    @skipIfNoNativeAot("bmm")
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_internally_overlapping_output_raises(self, device, dtype):
+        a = torch.randn(2, 48, 1, device=device, dtype=dtype)
+        b = torch.randn(2, 1, 128, device=device, dtype=dtype)
+        out = torch.empty(2, 1, 128, device=device, dtype=dtype).expand(2, 48, 128)
+        error = "more than one element.*refers to a single memory location"
+        with _jit_masked(), self.assertRaisesRegex(RuntimeError, error):
+            torch.bmm(a, b, out=out)
+
+    @skipIfNoNativeAot("bmm")
+    @dtypes(torch.float32, torch.bfloat16)
+    @parametrize("padding", [0, 16])
+    def test_out_variant_routes_to_aot(self, device, dtype, padding):
+        a = torch.randn(2, 48, 1, device=device, dtype=dtype)
+        b = torch.randn(2, 1, 128, device=device, dtype=dtype)
+        storage = torch.full((2, 48, 128 + padding), -1, device=device, dtype=dtype)
+        out = storage[:, :, :128]
+        with _jit_masked():
+            self.assertTrue(_ran_aot(lambda: torch.bmm(a, b, out=out)))
+        self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
+        self.assertEqual(storage[:, :, 128:], torch.full_like(storage[:, :, 128:], -1))
 
 
 class TestNativeAotBmmDeclaration(TestCase):
@@ -353,7 +367,7 @@ class TestNativeBmmJit(TestCase):
     @dtypes(torch.float32, torch.bfloat16)
     @parametrize("n", [2**31 - 128, 2**31 - 2, 2**31 - 1])
     def test_partial_launch_with_large_n(self, device, dtype, n):
-        from torch._native.ops.bmm_outer_product.aot_kernel import (
+        from torch._native.ops.bmm_outer_product.triton_kernels import (
             _bmm_outer_product_aot_kernel,
         )
 
@@ -362,7 +376,7 @@ class TestNativeBmmJit(TestCase):
         a = torch.randn(1, device=device, dtype=dtype)
         b = torch.randn(256, device=device, dtype=dtype)
         out = torch.empty_like(b)
-        _bmm_outer_product_aot_kernel[(2,)](
+        _bmm_outer_product_aot_kernel.jit_kernel[(2,)](
             a, b, out, 1, 1, n, 0, 1, 0, 1, 0, 0, 1, BLOCK_M=32, BLOCK_N=128
         )
         self.assertEqual(out, a * b, atol=0, rtol=0)
@@ -370,6 +384,7 @@ class TestNativeBmmJit(TestCase):
 
 instantiate_parametrized_tests(TestNativeAotBmmOuter)
 instantiate_parametrized_tests(TestNativeAotBmmDeclaration)
+instantiate_device_type_tests(TestNativeAotBmmOut, globals(), only_for="cuda")
 instantiate_device_type_tests(TestNativeBmmJit, globals(), only_for="cuda")
 
 

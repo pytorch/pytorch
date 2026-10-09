@@ -4,7 +4,7 @@ non-CUDA stay with the JIT override."""
 
 ATEN_OP = "bmm"
 DISPATCH_KEY = "CUDA"
-KERNEL_MODULE = "aot_kernel.py"
+KERNEL_MODULE = "triton_kernels.py"
 # Stated, or the default claims every KNOWN_ARCHES. Both spellings, since either can
 # appear in TORCH_CUDA_ARCH_LIST and export matches them exactly.
 ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a")
@@ -46,14 +46,13 @@ def covered_axes(self, mat2):
     )
     m = self.shape[1] if is_outer else 0
     covered_bucket = any(lo < m and (hi is None or m <= hi) for _, lo, hi in _M_BUCKETS)
-    # Mirrors the prelude; alignment via storage_offset, since data_ptr() would
-    # materialize COW on every call.
+    # const_data_ptr checks alignment without materializing copy-on-write storage.
     specialized = (
         is_outer
         and self.stride(1) == 1
         and mat2.stride(2) == 1
-        and (self.storage_offset() * self.element_size()) % 16 == 0
-        and (mat2.storage_offset() * mat2.element_size()) % 16 == 0
+        and self.const_data_ptr() % 16 == 0
+        and mat2.const_data_ptr() % 16 == 0
     )
     # Also the prelude's: the ABI narrows these to int32_t. Coverage wider than the
     # stub's acceptance costs the call its JIT route as well, so the bounds belong on
@@ -114,9 +113,7 @@ def cpp_dispatch_prelude():
     return f"""
       const auto st = self.scalar_type();
       if ({dtype_reject}) return false;
-      // aten's own dtype-equality check lives in the meta function, which this path
-      // never runs: without this, a f32 kernel would write an out that bmm allocated
-      // from mat2's bf16 options.
+      // Match aten's dtype checks before launching the compiled kernel.
       if (mat2.scalar_type() != st || out.scalar_type() != st) return false;
       if (self.size(2) != 1 || mat2.size(1) != 1) return false;
       if (self.numel() == 0 || mat2.numel() == 0) return false;
@@ -134,6 +131,7 @@ def cpp_dispatch_prelude():
       if (N < {_MIN_N}) return false;
       // Parity with the exported kernels: innermost strides baked to 1, 16B alignment.
       if (self.stride(1) != 1 || mat2.stride(2) != 1 || out.stride(2) != 1) return false;
+      if (at::has_internal_overlap(out) == at::MemOverlap::Yes) return false;
       // const_data_ptr: data_ptr() would materialize COW.
       if (reinterpret_cast<std::uintptr_t>(self.const_data_ptr()) % 16 != 0 ||
           reinterpret_cast<std::uintptr_t>(mat2.const_data_ptr()) % 16 != 0 ||
