@@ -655,7 +655,7 @@ op_db: list[OpInfo] = [
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
+            )
         ],
     ),
     OpInfo(
