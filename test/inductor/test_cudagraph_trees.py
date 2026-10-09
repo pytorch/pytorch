@@ -10,6 +10,7 @@ import re
 import sys
 import unittest
 import warnings
+import weakref
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from unittest import mock
@@ -3194,6 +3195,25 @@ if HAS_CUDA_AND_TRITON:
 
             node = self.get_manager().current_node
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+
+        def test_static_input_output_does_not_keep_parameter_alive(self):
+            # An output that is one of the static inputs (e.g. a weight saved for
+            # backward) must not be held by the node; otherwise a dropped module's
+            # parameters stay alive until the cudagraph trees are reset.
+            def run():
+                mod = nn.Sequential(nn.Linear(16, 16), nn.ReLU(), nn.Linear(16, 16))
+                mod = mod.cuda()
+                foo = torch.compile(mod, mode="reduce-overhead")
+                for _ in range(3):
+                    for p in mod.parameters():
+                        p.grad = None
+                    inp = torch.rand([4, 16], device="cuda", requires_grad=True)
+                    foo(inp).sum().backward()
+                return [weakref.ref(p) for p in mod.parameters()]
+
+            param_refs = run()
+            gc.collect()
+            self.assertEqual([ref for ref in param_refs if ref() is not None], [])
 
         @requires_multigpu()
         def test_manager_per_device(self):
