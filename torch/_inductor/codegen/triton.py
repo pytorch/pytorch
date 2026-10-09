@@ -6722,17 +6722,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
             return
         half = factor // 2
-        split_shape = (*shape[:-1], half, 2)
+        # Contiguous halves help looped kernels but regress persistent kernels.
+        contiguous = not self.persistent_reduction
+        split_axes = (2, half) if contiguous else (half, 2)
+        expr = f"tl.reshape({expr}, {triton_shape_str((*shape[:-1], *split_axes))})"
+        if contiguous:
+            perm = (*range(len(shape) - 1), len(shape), len(shape) - 1)
+            expr = f"tl.permute({expr}, {perm})"
         part_shape = (*shape[:-1], half)
         split_dtype = torch.uint8 if is_float8 else dtype
-        even = self.cse.newvar(dtype=split_dtype, shape=part_shape)
-        odd = self.cse.newvar(dtype=split_dtype, shape=part_shape)
-        self.compute.writeline(
-            f"{even}, {odd} = tl.split("
-            f"tl.reshape({expr}, {triton_shape_str(split_shape)}))"
-        )
-        self._emit_recursive_split(str(even), names[0::2], part_shape, dtype)
-        self._emit_recursive_split(str(odd), names[1::2], part_shape, dtype)
+        left = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        right = self.cse.newvar(dtype=split_dtype, shape=part_shape)
+        self.compute.writeline(f"{left}, {right} = tl.split({expr})")
+        left_names = names[:half] if contiguous else names[0::2]
+        right_names = names[half:] if contiguous else names[1::2]
+        self._emit_recursive_split(str(left), left_names, part_shape, dtype)
+        self._emit_recursive_split(str(right), right_names, part_shape, dtype)
 
     def emit_split_via_reshape(
         self,
@@ -6745,6 +6750,39 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if dtype is None:
             raise AssertionError("split value must have a known dtype")
         expr = self._bitcast_reshape_expr(value, reshape_shape, dtype)
+        factor = len(part_names)
+        if (
+            factor > 2
+            and factor & (factor - 1) == 0
+            and dtype in (torch.int16, torch.float16, torch.bfloat16)
+        ):
+            # Move pairs in 32-bit words to avoid repeated 16-bit layout conversions.
+            half = factor // 2
+            pair_shape = (*reshape_shape[:-1], half)
+            low, high = (
+                self.cse.newvar(dtype=torch.uint16, shape=pair_shape) for _ in range(2)
+            )
+            shape = triton_shape_str((*pair_shape, 2))
+            self.compute.writeline(
+                f"{low}, {high} = tl.split(tl.reshape({expr}.to(tl.uint16, bitcast=True), {shape}))"
+            )
+            packed = self.cse.newvar(dtype=torch.uint32, shape=pair_shape)
+            self.compute.writeline(
+                f"{packed} = {low}.to(tl.uint32) | ({high}.to(tl.uint32) << 16)"
+            )
+            parts = tuple(
+                self.cse.newvar(dtype=torch.uint32, shape=reshape_shape[:-1])
+                for _ in range(half)
+            )
+            self._emit_recursive_split(str(packed), tuple(map(str, parts)), pair_shape, torch.uint32)
+            for part, low_name, high_name in zip(parts, part_names[::2], part_names[1::2]):
+                self.compute.writeline(
+                    f"{low_name} = {part}.to(tl.uint16).to({triton_type(dtype)}, bitcast=True)"
+                )
+                self.compute.writeline(
+                    f"{high_name} = ({part} >> 16).to(tl.uint16).to({triton_type(dtype)}, bitcast=True)"
+                )
+            return
         self._emit_recursive_split(expr, part_names, reshape_shape, dtype)
 
     def emit_broadcast_via_reshape(
