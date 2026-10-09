@@ -5134,6 +5134,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_dunder_new_function_inlining_alias_guard(self):
+        class AliasedNew(collections.deque):
+            __new__ = collections.deque.__new__
+
+        class Child(AliasedNew):
+            def __new__(cls):
+                return super().__new__(cls)
+
+            def __init__(self):
+                super().__init__([1, 2])
+
+        def fn(x):
+            return x + len(Child())
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(opt_fn(x), x + 2)
+
+        AliasedNew.__new__ = staticmethod(lambda cls: ())
+        self.assertEqual(opt_fn(x), x)
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_user_defined_object_class_interaction(self):
         class Foo:
             x = 5
