@@ -34,7 +34,7 @@ from torch.utils._sympy.symbol import (
 )
 
 from ..._dynamo.utils import counters
-from .. import config, ir, scheduler
+from .. import config, dependencies, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..autows_utils import meta_ws_enabled
 from ..codecache import code_hash, PyCodeCache
@@ -490,6 +490,23 @@ def is_row_major_read(dep: MemoryDep, numel: sympy.Expr) -> bool:
     return dep.is_contiguous() and dep.get_numel() == numel
 
 
+def linear_loop_body(
+    node: scheduler.SchedulerNode,
+) -> tuple[dependencies._RecordLoadStoreInner, sympy.Expr, sympy.Expr]:
+    """node's unnormalized loads and stores, and its iteration and reduction
+    indices, each linearized over its ranges."""
+    sizes = node.get_ranges()
+    args, var_ranges = dependencies.index_vars_squeeze(*sizes)
+    x, r = (
+        sympy_dot(arg, ir.FlexibleLayout.contiguous_strides(size))
+        for arg, size in zip(args, sizes)
+    )
+    body = dependencies.extract_loop_body_with_args(
+        node._body, [list(arg) for arg in args], var_ranges
+    )
+    return body, x, r
+
+
 def template_reduction_axis(
     node: scheduler.BaseSchedulerNode,
     template: ir.Buffer,
@@ -513,12 +530,65 @@ def template_reduction_axis(
             (1, dep.size[0]), dep.var_names
         )
 
+    # A per-row result of the row pass, e.g. the mean that a two-pass variance
+    # reads back: stored at the row index by an epilogue node over the rows.
+    def is_row_stat(name):
+        buf = node.scheduler.name_to_buf.get(name)
+        writer = buf.defining_op if buf is not None else None
+        if not (
+            isinstance(writer, scheduler.SchedulerNode)
+            and not writer.is_template()
+            and writer.group[1] in ((m, n), (m, sympy.S.One))
+        ):
+            return False
+        if (
+            writer.is_reduction()
+            and template_reduction_axis(writer, template, produced) != 0
+        ):
+            return False
+        body, x, _ = linear_loop_body(writer)
+        writes = [dep for dep in body._writes if dep.name == name]
+        return (
+            bool(writes)
+            and all(
+                isinstance(dep, MemoryDep) and sympy.expand(dep.index - x) == 0
+                for dep in writes
+            )
+            # A node over the rows must read the epilogue's results at its own
+            # row too: the load returns the in-register value whatever its index.
+            and (
+                writer.is_reduction()
+                or all(
+                    isinstance(dep, MemoryDep)
+                    and sympy.expand(dep.index - x) == 0
+                    and is_row_stat(dep.name)
+                    for dep in body._reads
+                    if dep.name in produced
+                )
+            )
+        )
+
     if node.group[1] == (m, n) and reads(
         node, functools.partial(is_row_major_read, numel=m * n)
     ):
         return 0
     if not (isinstance(node, scheduler.SchedulerNode) and node.is_reduction()):
         return None
+    if node.group[1] == (m, n):
+        # Each read is in place, at element (x, r), or of a per-row result at
+        # row x. Indices are checked unnormalized: normalized dependencies
+        # can't tell a row index from a column index when m == n.
+        body, x, r = linear_loop_body(node)
+        if all(
+            isinstance(dep, MemoryDep)
+            and (
+                sympy.expand(dep.index - (r + n * x)) == 0
+                or (sympy.expand(dep.index - x) == 0 and is_row_stat(dep.name))
+            )
+            for dep in body._reads
+            if dep.name in produced
+        ):
+            return 0
     unsplit = node.unsplit_reduction()
     if unsplit is not node:
         # The whole reduction replaces both stages of the split.
