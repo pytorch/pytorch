@@ -640,6 +640,7 @@ def _tuned_grouped_mm_common(
 
     if (
         is_nonzero
+        and not scaled
         and a_is_2d
         and not b_is_2d
         and offs is not None

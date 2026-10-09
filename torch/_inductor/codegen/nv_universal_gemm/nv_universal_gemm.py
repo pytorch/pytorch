@@ -546,7 +546,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
 
     @classmethod
     def _tensor_constraint_satisfied(
-        cls, size, stride, offset, itemsize, constraint
+        cls, size, stride, offset, dtype, constraint
     ) -> bool:
         if free_unbacked_symbols((size, stride, offset)):
             return False
@@ -554,48 +554,62 @@ class NVUniversalGemmCaller(ChoiceCaller):
         hinted_size = V.graph.sizevars.optimization_hints(size)
         hinted_stride = V.graph.sizevars.optimization_hints(stride)
         hinted_offset = V.graph.sizevars.optimization_hint(offset)
+        divisor = cls._storage_divisibility(dtype, constraint.divisibility)
 
         if hinted_stride[major_dim] != 1:
             return False
-        if constraint.divisibility > 1:
-            if hinted_size[major_dim] % constraint.divisibility != 0:
+        if divisor > 1:
+            if hinted_size[major_dim] % divisor != 0:
                 return False
             if any(
-                step % constraint.divisibility != 0
+                step % divisor != 0
                 for dim, step in enumerate(hinted_stride)
                 if dim != major_dim
             ):
                 return False
         return constraint.ptr_alignment_bytes <= 1 or (
-            hinted_offset * itemsize % constraint.ptr_alignment_bytes == 0
+            hinted_offset * dtype.itemsize % constraint.ptr_alignment_bytes == 0
         )
 
     @classmethod
-    def _guard_tensor_constraint(
-        cls, size, stride, offset, itemsize, constraint
-    ) -> None:
+    def _guard_tensor_constraint(cls, size, stride, offset, dtype, constraint) -> None:
         major_dim = cls._constraint_major_dim(size, stride, constraint)
+        divisor = cls._storage_divisibility(dtype, constraint.divisibility)
 
         if not V.graph.sizevars.guard_or_false(sympy.Eq(stride[major_dim], 1)):
             raise AssertionError("selected NVGEMM operand is not contiguous")
-        if constraint.divisibility > 1:
+        if divisor > 1:
             if not V.graph.sizevars.guard_or_false(
-                sympy.Eq(sympy.Mod(size[major_dim], constraint.divisibility), 0)
+                sympy.Eq(sympy.Mod(size[major_dim], divisor), 0)
             ):
                 raise AssertionError(
                     "selected NVGEMM operand extent violates alignment"
                 )
             for dim, step in enumerate(stride):
                 if dim != major_dim and not V.graph.sizevars.guard_or_false(
-                    sympy.Eq(sympy.Mod(step, constraint.divisibility), 0)
+                    sympy.Eq(sympy.Mod(step, divisor), 0)
                 ):
                     raise AssertionError(
                         "selected NVGEMM operand stride violates alignment"
                     )
         if constraint.ptr_alignment_bytes > 1 and not V.graph.sizevars.guard_or_false(
-            sympy.Eq(sympy.Mod(offset * itemsize, constraint.ptr_alignment_bytes), 0)
+            sympy.Eq(
+                sympy.Mod(offset * dtype.itemsize, constraint.ptr_alignment_bytes), 0
+            )
         ):
             raise AssertionError("selected NVGEMM operand pointer is misaligned")
+
+    @staticmethod
+    def _storage_divisibility(dtype, logical_divisibility: int) -> int:
+        from cutlass.operators.utils.dtype import (
+            cutlass_type_from_torch_type,
+            torch_storage_packing_factor,
+        )
+
+        packing = torch_storage_packing_factor(cutlass_type_from_torch_type(dtype))
+        if logical_divisibility % packing:
+            raise AssertionError("NVGEMM divisibility is not storage-aligned")
+        return max(logical_divisibility // packing, 1)
 
     @staticmethod
     def _tensor_geometry(node, transpose: bool = False):
@@ -606,31 +620,53 @@ class NVUniversalGemmCaller(ChoiceCaller):
             stride[-2:] = reversed(stride[-2:])
         return size, stride
 
-    def _guard_dynamic_shape_constraints(self) -> None:
-        if self.variant != GemmVariant.GEMM:
-            return
-
+    def _operand_constraints(self):
         operands = self.kernel.metadata.operands
-        a_idx, b_idx = (1, 0) if self.swap_ab else (0, 1)
-        for node, constraint in (
-            (self.input_nodes[a_idx], operands.A),
-            (self.input_nodes[b_idx], operands.B),
-        ):
-            size, stride = self._tensor_geometry(node, self.swap_ab)
-            self._guard_tensor_constraint(
-                size,
-                stride,
-                node.get_layout().offset,
-                node.get_dtype().itemsize,
-                constraint,
+        if self.variant == GemmVariant.GROUPED_GEMM:
+            operand_nodes = (
+                (self.input_nodes[0], operands.A, False),
+                (self.input_nodes[1], operands.B, False),
+                (self.input_nodes[2], operands.offsets, False),
             )
-        self._guard_tensor_constraint(
+        else:
+            a_idx, b_idx = (1, 0) if self.swap_ab else (0, 1)
+            scaled = self.variant == GemmVariant.SCALED_GEMM
+            operand_nodes = [
+                (
+                    self.input_nodes[a_idx],
+                    operands.A.quantized if scaled else operands.A,
+                    self.swap_ab,
+                ),
+                (
+                    self.input_nodes[b_idx],
+                    operands.B.quantized if scaled else operands.B,
+                    self.swap_ab,
+                ),
+            ]
+            if scaled:
+                scale_a_idx, scale_b_idx = (3, 2) if self.swap_ab else (2, 3)
+                operand_nodes.extend(
+                    (
+                        (self.input_nodes[scale_a_idx], operands.A.scale, False),
+                        (self.input_nodes[scale_b_idx], operands.B.scale, False),
+                    )
+                )
+
+        for node, constraint, transpose in operand_nodes:
+            size, stride = self._tensor_geometry(node, transpose)
+            layout = node.get_layout()
+            yield size, stride, layout.offset, node.get_dtype(), constraint
+        yield (
             self._kernel_layout.size,
             self._kernel_layout.stride,
             self._kernel_layout.offset,
-            self._kernel_layout.dtype.itemsize,
+            self._kernel_layout.dtype,
             operands.out,
         )
+
+    def _guard_dynamic_shape_constraints(self) -> None:
+        for geometry in self._operand_constraints():
+            self._guard_tensor_constraint(*geometry)
         if minimums := self._preferred_cluster_minimums():
             for extent, minimum in zip(
                 self._kernel_layout.size[-2:], minimums, strict=True
@@ -639,6 +675,11 @@ class NVUniversalGemmCaller(ChoiceCaller):
                     raise AssertionError(
                         "selected NVGEMM preferred cluster exceeds problem shape"
                     )
+        if maximum := self._narrow_n_maximum():
+            if not V.graph.sizevars.guard_or_false(
+                sympy.Le(self._kernel_layout.size[-1], maximum)
+            ):
+                raise AssertionError("selected NVGEMM narrow-N tile is too small")
 
     def _preferred_cluster_minimums(self) -> tuple[int, int] | None:
         design = self.kernel.metadata.design
@@ -649,39 +690,28 @@ class NVUniversalGemmCaller(ChoiceCaller):
             design.tile_shape[1] * design.cluster_shape[1],
         )
 
-    def _supports_current_shape_constraints(self) -> bool:
-        if self.variant != GemmVariant.GEMM:
-            return True
+    def _narrow_n_maximum(self) -> int | None:
+        if self.variant != GemmVariant.SCALED_GEMM:
+            return None
+        tile_n = self.kernel.metadata.design.tile_shape[1]
+        return tile_n if tile_n < 64 else None
 
-        operands = self.kernel.metadata.operands
-        a_idx, b_idx = (1, 0) if self.swap_ab else (0, 1)
-        for node, constraint in (
-            (self.input_nodes[a_idx], operands.A),
-            (self.input_nodes[b_idx], operands.B),
-        ):
-            size, stride = self._tensor_geometry(node, self.swap_ab)
-            if not self._tensor_constraint_satisfied(
-                size,
-                stride,
-                node.get_layout().offset,
-                node.get_dtype().itemsize,
-                constraint,
-            ):
-                return False
-        if not self._tensor_constraint_satisfied(
-            self._kernel_layout.size,
-            self._kernel_layout.stride,
-            self._kernel_layout.offset,
-            self._kernel_layout.dtype.itemsize,
-            operands.out,
+    def _supports_current_shape_constraints(self) -> bool:
+        if not all(
+            self._tensor_constraint_satisfied(*geometry)
+            for geometry in self._operand_constraints()
         ):
             return False
+        shape = V.graph.sizevars.optimization_hints(self._kernel_layout.size[-2:])
         if minimums := self._preferred_cluster_minimums():
-            shape = V.graph.sizevars.optimization_hints(self._kernel_layout.size[-2:])
-            return all(
+            if not all(
                 extent >= minimum
                 for extent, minimum in zip(shape, minimums, strict=True)
-            )
+            ):
+                return False
+        if maximum := self._narrow_n_maximum():
+            if shape[-1] > maximum:
+                return False
         return True
 
     def output_node(self, *, install_guards: bool = True) -> TensorBox:
