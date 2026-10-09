@@ -890,18 +890,14 @@ class FSDPModule:
             This API is experimental. The callback signature and supported FSDP
             internals may change without backward compatibility.
 
-        The function is called as
-        ``copy_in = fn(unsharded_grads, shard_dims, world_size)`` before FSDP
-        allocates the reduce-scatter input and may replace entries of
-        ``unsharded_grads`` with reordered gradients. FSDP then calls
-        ``copy_in(reduce_scatter_input)``, which must fill the flat input
-        buffer with each rank's padded shards in rank-major order, converting
-        to the buffer's dtype. FSDP frees ``copy_in`` and the gradients right
-        after that call, so neither may be kept elsewhere. Gradients in a group
-        can have different dtypes, e.g. with per-parameter ``grad_dtype``.
-        ``world_size`` is 1 when no reduce-scatter is needed, and the function
-        is still called. Both calls run on the current stream. See
-        :mod:`torch.distributed.fsdp.experimental` for a native implementation.
+        ``copy_in = fn(unsharded_grads, shard_dims, world_size)`` runs before FSDP
+        allocates the reduce-scatter input and may replace gradients, e.g. with
+        reordered copies. ``copy_in(reduce_scatter_input)`` then fills that flat
+        buffer with each rank's padded gradient shards in rank order, casting
+        gradients of any dtype to its dtype. Both run on the current stream, also
+        when ``world_size`` is 1. FSDP frees ``copy_in`` and the gradients
+        afterward, so keep neither. See :mod:`torch.distributed.fsdp.experimental`
+        for a native implementation.
 
         Args:
             fn (Optional[Callable]): Function returning the copy-in function, or
