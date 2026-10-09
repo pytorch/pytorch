@@ -355,10 +355,18 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
         mask = index;
         for (const auto j : c10::irange(index.dim())) {
           int64_t srcIdx = num_ind + j;
-          if (!TORCH_GUARD_OR_FALSE(
-                  index.sym_size(j).sym_eq(self.sym_size(srcIdx)))) {
-            return std::make_tuple(false, Tensor());
-          }
+          TORCH_CHECK_INDEX(
+              index.sym_size(j)
+                  .sym_eq(self.sym_size(srcIdx))
+                  .expect_true(__FILE__, __LINE__),
+              "The shape of the mask ",
+              index.sym_sizes(),
+              " at index ",
+              j,
+              " does not match the shape of the indexed tensor ",
+              self.sym_sizes(),
+              " at index ",
+              srcIdx);
         }
         num_ind += mask.ndimension();
       }
