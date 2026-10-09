@@ -87,9 +87,7 @@ if(USE_XPU)
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
   endif()
-  foreach(flag ${XPU_HOST_CXX_FLAGS})
-    add_definitions(${flag})
-  endforeach()
+  add_compile_definitions(${XPU_HOST_CXX_DEFINITIONS})
 endif()
 
 # ---[ Custom Protobuf
@@ -714,6 +712,18 @@ if(USE_FBGEMM)
     endif()
     target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     target_compile_options_if_supported(asmjit -Wno-unused-variable)
+
+    # fbgemm passes "/arch:AVX512 /arch:AVX2" to fbgemm_avx512, and clang-cl
+    # honors the last /arch. Its AVX512 kernels also use AVX512-BF16, which
+    # clang-cl's /arch:AVX512 doesn't enable. MSVC accepts the intrinsics as is.
+    if(MSVC AND TARGET fbgemm_avx512)
+      get_target_property(FBGEMM_AVX512_OPTIONS fbgemm_avx512 COMPILE_OPTIONS)
+      list(REMOVE_ITEM FBGEMM_AVX512_OPTIONS ${CXX_AVX2_FLAGS})
+      set_property(TARGET fbgemm_avx512 PROPERTY COMPILE_OPTIONS ${FBGEMM_AVX512_OPTIONS})
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(fbgemm_avx512 PRIVATE -mavx512bf16)
+      endif()
+    endif()
 
     # fbgemm's cpp_library() gives source-less aggregate targets (like fbgemm
     # itself) a placeholder .cc named via STRING(RANDOM) and rewritten with
