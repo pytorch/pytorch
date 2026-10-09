@@ -7784,6 +7784,238 @@ def forward(self, primals_1, tangents_1):
         # so the producer op does not appear in the backward graph.
         self.assertNotIn("topk", bw_graph["gm"].code)
 
+    # Recompute defers a read to backward time. A read of a tensor that is mutated
+    # in between is a snapshot, so deferring it past the mutation changes its value.
+    # Each case below is a different way such a read can reach the mutated input.
+
+    NUM_BINS = 16
+    # Counts start at zero and each update adds 1, so a touched bin crosses this in
+    # one step: the forward sees False where a recompute would see True.
+    THRESHOLD = 0.5
+
+    def _min_cut_run(self, case, budget, compiled, keep=True):
+        """Run `case()` eagerly or under min-cut; return (grads, backward code).
+
+        `case()` builds fresh state and returns (fn, args, leaves).
+        """
+        import torch._functorch.config as functorch_config
+
+        torch.manual_seed(0)
+        fn, args, leaves = case()
+        bw_graph = {}
+
+        if not compiled:
+            fn(*args).backward()
+            return [leaf.grad for leaf in leaves], ""
+
+        def backend(gm, example_inputs):
+            return aot_module_simplified(
+                gm,
+                example_inputs,
+                fw_compiler=lambda g, _: g,
+                bw_compiler=lambda g, _: bw_graph.setdefault("gm", g),
+                partition_fn=min_cut_rematerialization_partition,
+                keep_inference_input_mutations=keep,
+            )
+
+        with functorch_config.patch(activation_memory_budget=budget):
+            torch._dynamo.reset()
+            torch.compile(fn, backend=backend)(*args).backward()
+        return (
+            [leaf.grad for leaf in leaves],
+            bw_graph["gm"].print_readable(print_output=False),
+        )
+
+    def _assert_matches_eager(self, case, budget, keep=True):
+        expected, _ = self._min_cut_run(case, budget, compiled=False)
+        actual, code = self._min_cut_run(case, budget, compiled=True, keep=keep)
+        for a, b in zip(expected, actual):
+            self.assertEqual(a, b)
+        return code
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_no_recompute_through_mutated_input(self):
+        # Two gathers off one buffer, updated at the second one's bin ids. The second
+        # head reads the first's output, so the first gather is also an ancestor of
+        # the update.
+        outer, n = self, self.NUM_BINS
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a, self.b = torch.nn.Linear(8, 1), torch.nn.Linear(8, 1)
+                self.register_buffer("counts", torch.zeros(n, dtype=torch.float64))
+                self.register_buffer("boundaries", torch.linspace(0.0, 1.0, n - 1))
+
+            def forward(self, x, label):
+                loss, out = 0.0, torch.zeros_like(label)
+                for head in (self.a, self.b):
+                    pred = torch.sigmoid(head(x + out[:, None])).reshape(-1)
+                    bin_ids = torch.bucketize(pred, self.boundaries)
+                    cond = self.counts[bin_ids] > outer.THRESHOLD
+                    out = torch.where(cond, pred * 0.5, pred)
+                    loss = loss + (out - label).pow(2).mean()
+                self.counts.index_add_(0, bin_ids, self.counts.new_ones(len(bin_ids)))
+                return loss
+
+        def case():
+            x = torch.randn(32, 8, requires_grad=True)
+            return M(), (x, torch.rand(32)), [x]
+
+        code = self._assert_matches_eager(case, budget=0.05)
+        self.assertNotIn("aten.index.Tensor", code)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @parametrize("read", ["view", "chunk", "updated"])
+    def test_min_cut_no_recompute_read_of_mutated_input(self, read):
+        # view: saving it pins an alias of counts, not a snapshot. chunk: its
+        # getitems carry no schema, so aliasing is decided by storage. updated: the
+        # forward reads the value after an update.
+        cond_fn = {
+            "view": lambda c: c.view(-1) > self.THRESHOLD,
+            "chunk": lambda c: c.chunk(2)[0] > self.THRESHOLD,
+            "updated": lambda c: c.add_(1) > self.THRESHOLD + 1,
+        }[read]
+
+        def f(x, counts):
+            cond = cond_fn(counts)
+            counts.add_(1)
+            return torch.where(cond, x * 0.5, x).sum()
+
+        def case():
+            x = torch.ones(1, requires_grad=True)
+            return f, (x, torch.zeros(self.NUM_BINS, dtype=torch.float64)), [x]
+
+        self._assert_matches_eager(case, budget=0.0)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @parametrize("keep", [False, True])
+    def test_min_cut_no_recompute_read_of_metadata_mutated_input(self, keep):
+        # The runtime epilogue applies t_() to the saved input before the backward.
+        # Dynamo does not trace metadata mutations of inputs, hence aot_function.
+        def f(a, b):
+            y = (a.cos() * b).sin().sum()
+            a.t_()
+            return y
+
+        a, b = torch.randn(2, 3), torch.randn(2, 3, requires_grad=True)
+        f(a.clone(), b).backward()
+        expected, b.grad = b.grad, None
+        compiled = aot_function(
+            f,
+            nop,
+            partition_fn=min_cut_rematerialization_partition,
+            keep_inference_input_mutations=keep,
+        )
+        compiled(a, b).backward()
+        self.assertEqual(b.grad, expected)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @parametrize("budget", [0.0, 0.05, 0.5])
+    def test_min_cut_no_recompute_tuple_output_read_by_backward(self, budget):
+        # A tuple-producing op cannot be saved, only its getitems. The backward reads
+        # them directly, and min-cut never bans a getitem, so pinning them alone lets
+        # it recompute the producer after the mutation.
+        def f(a, b, counts):
+            s = counts.sort()
+            counts.add_(1)
+            return (a * s.values).sum() + (b * s.indices.double()).sum()
+
+        def case():
+            a = torch.ones(1, dtype=torch.float64, requires_grad=True)
+            b = torch.ones(1, dtype=torch.float64, requires_grad=True)
+            return f, (a, b, torch.zeros(self.NUM_BINS, dtype=torch.float64)), [a, b]
+
+        self._assert_matches_eager(case, budget=budget)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_no_recompute_batch_norm_saved_stats(self):
+        # Training BN reads the running stats, so it is saved, not recomputed, even
+        # though its main outputs depend only on batch stats; conservative but
+        # consistent. Inductor decomposes BN before partitioning and is unaffected.
+        def case():
+            m = torch.nn.Sequential(
+                torch.nn.Conv2d(3, 4, 3, padding=1),
+                torch.nn.BatchNorm2d(4),
+                torch.nn.ReLU(),
+            )
+            x = torch.randn(2, 3, 8, 8, requires_grad=True)
+            return (lambda x: m(x).sum()), (x,), [x]
+
+        code = self._assert_matches_eager(case, budget=0.0)
+        self.assertNotIn("_native_batch_norm_legit_functional", code)
+
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @parametrize("subclass", [False, True])
+    @parametrize("mutate", [False, True])
+    @parametrize("keep", [False, True])
+    def test_min_cut_recompute_of_input_read(self, keep, mutate, subclass):
+        # Reads of an input are recomputed as before unless the forward mutates it,
+        # whether the mutation is kept in the graph or applied by the epilogue.
+        def f(x, counts, ids):
+            y = torch.where(counts[ids] > self.THRESHOLD, x * 0.5, x).sum()
+            if mutate:
+                counts.add_(1)
+            return y
+
+        def case():
+            x = torch.ones(self.NUM_BINS)
+            counts = torch.zeros(self.NUM_BINS, dtype=torch.float64)
+            if subclass:
+                x, counts = TwoTensor(x, x.clone()), TwoTensor(counts, counts.clone())
+            return f, (x.requires_grad_(), counts, torch.arange(self.NUM_BINS)), [x]
+
+        code = self._assert_matches_eager(case, budget=0.0, keep=keep)
+        self.assertEqual("aten.index.Tensor" in code, not mutate)
+
+    def _default_partition_checkpointed_buffer_read(self, keep, **checkpoint_kwargs):
+        from torch.utils.checkpoint import checkpoint
+
+        def f(x, buf):
+            fn = lambda x: (x * (buf.view(-1) * 2)).sum()  # noqa: E731
+            y = checkpoint(fn, x, use_reentrant=False, **checkpoint_kwargs)
+            with torch.no_grad():
+                buf.add_(1)
+            return y
+
+        def backend(gm, example_inputs):
+            return aot_module_simplified(
+                gm,
+                example_inputs,
+                fw_compiler=nop,
+                partition_fn=default_partition,
+                keep_inference_input_mutations=keep,
+            )
+
+        x = torch.ones(4, requires_grad=True)
+        torch._dynamo.reset()
+        compiled = torch.compile(f, backend=backend, fullgraph=True)
+        compiled(x, torch.arange(4.0)).backward()
+        return x.grad
+
+    @parametrize("keep", [False, True])
+    def test_default_partition_no_recompute_read_of_mutated_input(self, keep):
+        # Matches the un-checkpointed function: the read sees buf before add_(1).
+        grad = self._default_partition_checkpointed_buffer_read(keep)
+        self.assertEqual(grad, torch.arange(4.0) * 2)
+
+    def test_must_recompute_read_of_mutated_input_is_honored(self):
+        from torch.utils.checkpoint import (
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        context_fn = partial(
+            create_selective_checkpoint_contexts,
+            lambda ctx, op, *args, **kwargs: CheckpointPolicy.MUST_RECOMPUTE,
+        )
+        torch._logging._internal.warning_once.cache_clear()
+        with self.assertLogs("torch._functorch.partitioners", "WARNING") as logs:
+            self._default_partition_checkpointed_buffer_read(
+                True, context_fn=context_fn
+            )
+        self.assertIn("Honoring MUST_RECOMPUTE", logs.output[0])
+
     def test_disable_functionalization_ignores_effect_token_metadata(self):
         def fn(args):
             (x,) = args
