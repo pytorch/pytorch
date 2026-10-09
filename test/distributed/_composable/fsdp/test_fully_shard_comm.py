@@ -247,11 +247,15 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             )
 
     @skip_if_lt_x_gpu(1)
-    def test_all_gather_shard_dim1(self):
+    def test_all_gather_shard_dim1_post_forward(self):
         # Shard(1) needs even sharding over 128 ranks, and its post-forward shards
         # chunk dim 0 over 8 ranks; the 1D parameter keeps Shard(0)
         param_sizes = [torch.Size([8, 256]), torch.Size([16, 128, 3]), torch.Size([24])]
         stream = device_module.Stream()
+
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
+            return Shard(1) if param.ndim > 1 else None
+
         for reshard_after_forward in (True, 8):
             self._test_all_gather(
                 param_sizes,
@@ -259,8 +263,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 async_op=False,
                 all_gather_copy_in_stream=stream,
                 all_gather_stream=stream,
-                shard_placement_fn=lambda param: Shard(1) if param.ndim > 1 else None,
+                shard_placement_fn=shard_placement_fn,
             )
+        params = [nn.Parameter(torch.empty(12, 256, device=self.device))]
+        with self.assertRaisesRegex(NotImplementedError, "divisible"):
+            self._init_fsdp_param_group(params, 8, shard_placement_fn)
 
     def _test_all_gather(
         self,
@@ -584,15 +591,15 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
         dist.broadcast(model.weight.detach(), src=0)
         reference = copy.deepcopy(model)
         shard_numel = model.weight.numel() // self.world_size
-        num_allocations = 0
+        num_strided_allocations = 0
 
         class StridedAlloc:
             def allocate(self, size, *, dtype, device):
-                nonlocal num_allocations
-                num_allocations += 1
+                nonlocal num_strided_allocations
                 # FSDP views the reduced gradient with contiguous strides.
                 if collective == "reduce_scatter" and size == (shard_numel,):
                     return torch.empty(size, dtype=dtype, device=device)
+                num_strided_allocations += 1
                 buffer = torch.empty((*size, 2), dtype=dtype, device=device)[..., 0]
                 test_case.assertFalse(buffer.is_contiguous())
                 return buffer
@@ -662,7 +669,7 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
             reference_optim.step()
             optim.zero_grad()
             reference_optim.zero_grad()
-        self.assertGreater(num_allocations, 0)
+        self.assertGreater(num_strided_allocations, 0)
 
 
 instantiate_device_type_tests(
