@@ -259,24 +259,25 @@ class CPUOffloadPolicy(OffloadPolicy):
 class AllGatherInput:
     r"""Describe one payload returned by an FSDP all-gather extension.
 
-    Return these records in the inputs of ``(inputs, metadata)`` from
-    ``fsdp_pre_all_gather``. Each rank's payload is concatenated along ``dim``
-    using its own shape, independently of the parameter's shard dimension.
-    For example, a payload of shape ``(2, F, D)`` with ``dim=1`` produces
-    ``(2, world_size * F, D)``. Scalar payloads are treated as shape ``(1,)``.
-    The unchanged ``fsdp_post_all_gather`` hook receives the gathered payload
-    in this concatenated shape.
+    Return these in the ``inputs`` of ``fsdp_pre_all_gather``. FSDP concatenates
+    each rank's ``tensor`` along ``dim``, independently of the parameter's shard
+    dim, and passes the result to ``fsdp_post_all_gather``. For example,
+    ``(2, F, D)`` with ``dim=1`` gathers to ``(2, world_size * F, D)``.
 
-    Payloads must be flattenable with ``view(-1)``. Each rank must return the
-    same payload shapes, dtypes, and layouts; extensions own any padding.
-    The number, element counts, and dtypes of payloads must stay fixed across
-    calls so FSDP can reuse their output buffers.
+    Payloads must be flattenable with ``view(-1)`` and match across ranks in
+    shape, dtype, and layout; extensions own any padding. Their number, element
+    counts, and dtypes must stay fixed across calls so FSDP can reuse outputs.
 
     Attributes:
-        tensor (Tensor): Local payload to communicate.
-        dim (int): Payload dimension to concatenate across ranks. Negative
-            dimensions are supported. Defaults to 0.
+        tensor (Tensor): Local payload. Scalars count as shape ``(1,)``.
+        dim (int): Dimension to concatenate along; may be negative.
+            (Default: ``0``)
     """
 
     tensor: torch.Tensor
     dim: int = field(default=0, kw_only=True)
+
+    def __post_init__(self) -> None:
+        ndim = max(self.tensor.dim(), 1)
+        if not -ndim <= self.dim < ndim:
+            raise ValueError(f"dim {self.dim} is invalid for size {self.tensor.size()}")

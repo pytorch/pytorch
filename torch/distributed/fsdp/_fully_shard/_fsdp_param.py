@@ -181,9 +181,8 @@ class _AllGatherOutputLayout:
     outer_size: int
 
 
-# Post-forward resharding keeps a flat chunk of the unsharded data, so the
-# all-gather before backward concatenates flat chunks into the unsharded data.
-# Its copy-out must stay flat instead of reassembling along the Shard(i) dim.
+# Post-forward shards are flat chunks of the unsharded data, so their all-gather
+# copies out flat instead of reassembling along the Shard(i) dim.
 _POST_FORWARD_ALL_GATHER_OUTPUT_LAYOUT = _AllGatherOutputLayout(torch.Size((-1,)), 1)
 
 
@@ -1012,9 +1011,8 @@ class FSDPParam:
                 0, sharded_numel * shard_rank, sharded_numel
             )
         ).clone()  # clone to be able to free all-gather output
-        # The post-forward size comes from chunking dim 0, which matches this
-        # flat chunk only if shard_world_size divides dim 0. Shard(i>0)
-        # parameters whose dim 0 does not divide are unsupported and fail here.
+        # The post-forward size chunks dim 0 and matches this flat chunk only if
+        # shard_world_size divides it, so other Shard(i>0) parameters fail here.
         sharded_post_forward_tensor = torch.as_strided(
             self._sharded_post_forward_param_data,
             size=self.sharded_post_forward_size,
@@ -1466,6 +1464,17 @@ def _get_all_gather_output_layout(
     return _AllGatherOutputLayout(torch.Size(gathered_size), outer_size)
 
 
+def _fits_cached_output(
+    tensor: torch.Tensor, output: torch.Tensor, world_size: int, exact: bool
+) -> bool:
+    # AllGatherInput payloads keep their output's size and dtype. Tensor inputs may
+    # shrink or become byte views, which leave their gathered payload as a prefix.
+    nbytes = tensor.nbytes * world_size
+    if exact:
+        return tensor.dtype == output.dtype and nbytes == output.nbytes
+    return tensor.dtype in (output.dtype, torch.uint8) and nbytes <= output.nbytes
+
+
 def _validate_all_gather_inputs(
     inputs: Sequence[torch.Tensor | AllGatherInput],
     tensors: Sequence[torch.Tensor],
@@ -1477,55 +1486,29 @@ def _validate_all_gather_inputs(
 ) -> None:
     if all_gather_outputs and len(all_gather_outputs) != len(inputs):
         raise ValueError(
-            f"fsdp_pre_all_gather returned {len(inputs)} all-gather inputs, but "
-            f"{len(all_gather_outputs)} all-gather outputs are cached from an "
-            "earlier call"
+            f"fsdp_pre_all_gather returned {len(inputs)} inputs for "
+            f"{len(all_gather_outputs)} cached outputs"
         )
     # Tensor inputs of Shard(i>0) parameters are reassembled with the padded
     # sharded layout, so their gathered outputs must have its size
-    padded_layout = world_size > 1 and shard_dim > 0
     padded_numel = padded_sharded_size.numel() * world_size
+    padded_layout = world_size > 1 and shard_dim > 0
     outputs = all_gather_outputs or [None] * len(inputs)
     for i, (inp, tensor, output) in enumerate(zip(inputs, tensors, outputs)):
-        if not isinstance(tensor, torch.Tensor):
-            raise TypeError(
-                f"Expected an all-gather input Tensor, got {type(tensor).__name__}"
-            )
-        gathered_numel = tensor.numel() * world_size
-        if isinstance(inp, AllGatherInput):
-            ndim = max(tensor.dim(), 1)
-            if not -ndim <= inp.dim < ndim:
-                raise ValueError(
-                    f"All-gather dim {inp.dim} is invalid for input size {tensor.size()}"
-                )
-            if output is not None and (
-                output.dtype != tensor.dtype or output.numel() != gathered_numel
-            ):
-                raise ValueError(
-                    f"AllGatherInput {i} must keep its element count and dtype "
-                    f"across calls, but got {tensor.numel()} {tensor.dtype} "
-                    f"elements after {output.numel() // world_size} {output.dtype} "
-                    "elements"
-                )
-            continue
-        # Tensor inputs may shrink or become byte views of their cached
-        # outputs, which then hold the gathered payload as a prefix
-        if output is not None and tensor.dtype not in (output.dtype, torch.uint8):
+        is_record = isinstance(inp, AllGatherInput)
+        if output is None:
+            numel = tensor.numel() * world_size
+        elif _fits_cached_output(tensor, output, world_size, is_record):
+            numel = output.numel()
+        else:
             raise ValueError(
-                f"All-gather input {i} changed dtype from {output.dtype} to "
-                f"{tensor.dtype}"
+                f"All-gather input {i} ({tensor.numel()} {tensor.dtype} per rank) "
+                f"does not fit its cached output ({output.numel()} {output.dtype})"
             )
-        if output is not None and tensor.nbytes * world_size > output.nbytes:
+        if padded_layout and not is_record and tensor.numel() and numel != padded_numel:
             raise ValueError(
-                f"All-gather input {i} needs {tensor.nbytes * world_size} bytes "
-                f"across ranks, but its cached output has {output.nbytes}"
-            )
-        output_numel = gathered_numel if output is None else output.numel()
-        if padded_layout and tensor.numel() and output_numel != padded_numel:
-            raise ValueError(
-                f"Shard({shard_dim}) all-gather output must have {padded_numel} "
-                f"elements for padded local size {padded_sharded_size} and world "
-                f"size {world_size}, but got {output_numel}"
+                f"Shard({shard_dim}) all-gather input {i} must gather to "
+                f"{padded_numel} elements, but gathers to {numel}"
             )
 
 
@@ -1538,9 +1521,8 @@ def _normalize_all_gather_inputs(
     all_gather_outputs: Sequence[torch.Tensor] = (),
 ) -> tuple[list[torch.Tensor], tuple[_AllGatherOutputLayout, ...]]:
     """
-    Validates the inputs from ``fsdp_pre_all_gather`` before the collective,
-    including against ``all_gather_outputs`` cached from earlier calls, and
-    returns their tensors and copy-out layouts.
+    Validates ``fsdp_pre_all_gather`` inputs, also against cached
+    ``all_gather_outputs``, and returns their tensors and copy-out layouts.
     """
     tensors = [inp.tensor if isinstance(inp, AllGatherInput) else inp for inp in inputs]
     _validate_all_gather_inputs(
