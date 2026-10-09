@@ -58,7 +58,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     skipIfCppFakeTensor,
-    skipIfRocm,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
