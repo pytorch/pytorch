@@ -167,7 +167,8 @@ flydsl_mm_template = FlyDSLTemplate(
 blackwell_ws_persistent_tma_mm_template = TritonTemplate(
     name="blackwell_ws_persistent_tma",
     grid=blackwell_persistent_mm_grid,
-    source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm"),
+    source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm")
+    + load_kernel_template("triton_gemm_helpers"),
 )
 
 
