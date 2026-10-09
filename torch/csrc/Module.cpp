@@ -29,6 +29,7 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -100,6 +101,7 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
+#include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/tensor_layouts.h>
@@ -2777,10 +2779,23 @@ PyObject* initModule() {
         "_fake_dispatch_register_prim_meta",
         add_for(FakeDispatchCategory::PrimMeta));
     py_module.def(
+        "_fake_dispatch_register_python_cia",
+        add_for(FakeDispatchCategory::PythonCIA));
+    py_module.def(
+        "_fake_dispatch_register_custom_op_impl",
+        add_for(FakeDispatchCategory::CustomOpImpl));
+    py_module.def(
         "_fake_dispatch_deregister_op_impl",
         [](const std::string& name, const std::string& overload) {
           at::impl::fakeDispatchTableRemove(
               FakeDispatchCategory::OpImpl, c10::OperatorName(name, overload));
+        });
+    py_module.def(
+        "_fake_dispatch_deregister_custom_op_impl",
+        [](const std::string& name, const std::string& overload) {
+          at::impl::fakeDispatchTableRemove(
+              FakeDispatchCategory::CustomOpImpl,
+              c10::OperatorName(name, overload));
         });
   }
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
@@ -3429,6 +3444,14 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
+  // See Note [in_kernel_invocation].
+  torch::impl::py_context_manager<c10::impl::FakeInKernelInvocationGuard>(
+      py_module, "_CppFakeInKernelInvocation");
+
+  py_module.def("_cpp_fake_in_kernel_invocation", []() {
+    return c10::impl::FakeTensorModeTLS::in_kernel_invocation();
+  });
+
   py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     c10::DispatchKeySet key_set({at::DispatchKey::Meta});
@@ -3485,8 +3508,9 @@ Call this whenever a new thread is created in order to propagate values from
       "_is_cow_tensor",
       [](const at::Tensor& tensor) {
         TORCH_CHECK(
-            !tensor.key_set().has(c10::DispatchKey::Python),
-            "_is_cow_tensor is not defined for Python tensor subclasses");
+            !tensor.is_fake() &&
+                !tensor.key_set().has(c10::DispatchKey::Python),
+            "_is_cow_tensor is not defined for Python tensor subclasses or FakeTensors");
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");

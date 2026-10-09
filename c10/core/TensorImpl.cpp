@@ -4,6 +4,7 @@
 #include <c10/core/CopyBytes.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -206,7 +207,8 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   // but since we have an extra field for fake_device_,
   // we can just set it upon FakeTensor creation
   // and determine in device_custom() which device to return
-  // (based on if DispatchKey::Fake is excluded or not)
+  // (based on FakeTensorModeTLS::in_kernel_invocation(), see
+  // Note [in_kernel_invocation])
   get_extra_meta().fake_device_ = fake_device;
   key_set_ = key_set_.add(DispatchKey::Fake);
 
@@ -429,7 +431,7 @@ c10::Device TensorImpl::device_custom() const {
     return (*c10::impl::getGlobalPyInterpreter())->device(this);
   }
   if (C10_UNLIKELY(extra_meta_ && extra_meta_->fake_device_.has_value())) {
-    if (c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
+    if (c10::impl::FakeTensorModeTLS::in_kernel_invocation()) {
       return device_default();
     }
     // has_value() is checked above; the dataflow check misses it here.
@@ -984,9 +986,10 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   refresh_sizes_strides_policy();
   auto& extra_meta{get_extra_meta()};
   if (extra_meta.symbolic_shape_meta_ == nullptr) {
-    extra_meta_->symbolic_shape_meta_ =
+    extra_meta.symbolic_shape_meta_ =
         std::make_unique<c10::SymbolicShapeMeta>();
-    extra_meta_->symbolic_shape_meta_->strides_valid_ = !is_sparse();
+    extra_meta.symbolic_shape_meta_->strides_valid_ = !is_sparse();
+    extra_meta.symbolic_shape_meta_->storage_offset_ = storage_offset_;
   }
 
   clone_symvec(sizes, symbolic_shape_meta().sizes_);
