@@ -2650,6 +2650,25 @@ graph():
         ):
             export(M(), args, strict=False)
 
+    def test_boolean_mask_setitem_unbacked(self):
+        class M(torch.nn.Module):
+            def forward(self, labels, mask):
+                labels = labels[mask]
+                labels[labels.ne(-1)] = 0
+                return labels
+
+        labels = torch.tensor([[-1, 1, 2], [3, -1, 4], [5, 6, -1]])
+        mask = torch.tensor([True, False, True])
+        m = M()
+        ep = export(m, (labels, mask))
+        for mask in (
+            mask,
+            torch.tensor([False, False, False]),
+            torch.tensor([False, True, False]),
+        ):
+            with self.subTest(mask=mask):
+                self.assertEqual(ep.module()(labels, mask), m(labels, mask))
+
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
