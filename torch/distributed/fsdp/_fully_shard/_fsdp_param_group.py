@@ -54,7 +54,7 @@ from ._fsdp_common import (
     ShardPlacementFnResult,
     TrainingState,
 )
-from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
 
 
 if TYPE_CHECKING:
@@ -266,7 +266,8 @@ class FSDPParamGroup:
         # FSDP-owned buffers behind the all-gather outputs when a custom layout
         # chose them on the first unshard, freed on reshard
         self._all_gather_buffers: _PersistentBuffers | None = None
-        self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
+        # See Note [Reduce-scatter input fn]
+        self._reduce_scatter_input_fn: Callable = _default_reduce_scatter_input_fn
         self._reduce_scatter_param_indices: list[int] = []
         self._fsdp_params_deferring_grad_upcast: list[FSDPParam] = []
         self._param_group_index: int = 0
@@ -535,27 +536,29 @@ class FSDPParamGroup:
 
             for fsdp_param in self.fsdp_params:
                 all_gather_inputs = fsdp_param.all_gather_inputs
-                if not fsdp_param.all_gather_outputs:
-                    fsdp_param.init_all_gather_outputs(
-                        [tensor.numel() for tensor in all_gather_inputs],
-                        [tensor.dtype for tensor in all_gather_inputs],
-                        world_size,
-                        self.device,
-                    )
-                fsdp_param.alloc_all_gather_outputs()
-                outputs = fsdp_param.all_gather_outputs
-                with torch.autograd._unsafe_preserve_version_counter(
-                    tuple(output for output in outputs if not output.is_inference())
+                fsdp_param.init_all_gather_outputs(
+                    [t.numel() for t in all_gather_inputs],
+                    [t.dtype for t in all_gather_inputs],
+                    world_size,
+                    self.device,
+                )
+                for tensor, all_gather_input in zip(
+                    fsdp_param.all_gather_outputs, all_gather_inputs
                 ):
-                    for output, tensor in zip(outputs, all_gather_inputs):
+                    alloc_storage(tensor)
+                    with (
+                        torch.autograd._unsafe_preserve_version_counter(tensor)
+                        if not tensor.is_inference()
+                        else contextlib.nullcontext()
+                    ):
                         # Like the world_size > 1 path, copy byte payloads
                         # bytewise into cached outputs of other dtypes, and
                         # smaller payloads into a prefix
-                        if tensor.dtype == torch.uint8:
-                            output = output.view(torch.uint8)
-                        if output.numel() != tensor.numel():
-                            output = output.narrow(0, 0, tensor.numel())
-                        output.copy_(tensor)
+                        if all_gather_input.dtype == torch.uint8:
+                            tensor = tensor.view(torch.uint8)
+                        if tensor.numel() != all_gather_input.numel():
+                            tensor = tensor.narrow(0, 0, all_gather_input.numel())
+                        tensor.copy_(all_gather_input)
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
@@ -834,7 +837,7 @@ class FSDPParamGroup:
                     partial_input,
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
-                    prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
+                    reduce_scatter_input_fn=self._reduce_scatter_input_fn,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event

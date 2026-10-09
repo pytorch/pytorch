@@ -970,13 +970,14 @@ class FSDPModule:
             internals may change without backward compatibility.
 
         ``copy_in = fn(unsharded_grads, shard_dims, world_size)`` runs before FSDP
-        allocates the reduce-scatter input and may replace gradients, e.g. with
-        reordered copies. ``copy_in(reduce_scatter_input)`` then fills that flat
-        buffer with each rank's padded gradient shards in rank order, casting
-        gradients of any dtype to its dtype. Both run on the current stream, also
-        when ``world_size`` is 1. FSDP frees ``copy_in`` and the gradients
-        afterward, so keep neither. See :mod:`torch.distributed.fsdp.experimental`
-        for a native implementation.
+        allocates the reduce-scatter input and may replace entries of
+        ``unsharded_grads``, e.g. with reordered copies.
+        ``copy_in(reduce_scatter_input)`` then fills that flat buffer so that,
+        viewed as ``(world_size, -1)``, row ``r`` holds each gradient's padded
+        shard ``r`` in order, cast from any gradient dtype to the buffer's. Both
+        run on the current stream, also when ``world_size`` is 1. FSDP frees
+        ``copy_in`` and the gradients afterward, so keep neither. See
+        :mod:`torch.distributed.fsdp.experimental` for a native implementation.
 
         Args:
             fn (Optional[Callable]): Function returning the copy-in function, or
@@ -991,7 +992,7 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group._prepare_reduce_scatter_inputs = fn
+                    fsdp_param_group._reduce_scatter_input_fn = fn
 
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True

@@ -60,16 +60,20 @@ def all_gather_output_fn_with_native_copy(
     See the module documentation for the performance tradeoffs. Groups with a
     tensor payload smaller than its cached output use the default copy-out.
     """
+    # The op copies within one dtype, so mixed-dtype groups copy bytes
+    copy_outputs = outputs
+    if all_gather_output.dtype == torch.uint8:
+        copy_outputs = [output.view(torch.uint8) for output in outputs]
     if any(
         output.numel() != split_size * world_size
-        for output, split_size in zip(outputs, split_sizes)
+        for output, split_size in zip(copy_outputs, split_sizes)
     ):
         _default_all_gather_output_fn(
             all_gather_output, outputs, split_sizes, outer_sizes, world_size
         )
         return
     torch.ops.fsdp._all_gather_copy_out_(
-        outputs, all_gather_output, split_sizes, outer_sizes, world_size
+        copy_outputs, all_gather_output, split_sizes, outer_sizes, world_size
     )
 
 

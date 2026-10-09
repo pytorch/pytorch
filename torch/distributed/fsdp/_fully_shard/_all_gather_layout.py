@@ -39,17 +39,16 @@ if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
 
 
-# An all-gather output fn, like the default below, is called as
-# fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size) under
-# no_grad on the current stream to copy the flat rank-major all_gather_output into
-# outputs: outputs[i] gets each rank's split_sizes[i] elements, concatenated along
-# the dim whose leading dims multiply to outer_sizes[i]. Only payloads with
-# outer_sizes[i] == 1 may be smaller than outputs[i], and they fill its prefix.
-# uint8 buffers come with uint8 output views and byte sizes. fn may only write
-# outputs and must not keep its arguments. It is skipped for empty buffers and
-# single-rank groups.
-
-
+# Note [All-gather output fn]
+# fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size) runs under
+# no_grad on the current stream and copies the flat rank-major all_gather_output
+# into outputs. Each rank's chunk has split_sizes[i] elements for outputs[i]:
+# viewed as (outer_sizes[i], -1), the ranks' chunks are concatenated along dim 1 of
+# outputs[i].view(outer_sizes[i], -1). Only chunks with outer_sizes[i] == 1 may be
+# smaller than outputs[i], and they fill its prefix. Mixed-dtype groups gather
+# bytes, so all_gather_output is uint8 and split_sizes count bytes, while outputs
+# keep their dtypes. fn may only write outputs and must not keep its arguments.
+# FSDPParamGroup skips it for a single rank.
 def _default_all_gather_output_fn(
     all_gather_output: torch.Tensor,
     outputs: list[torch.Tensor],
@@ -57,17 +56,17 @@ def _default_all_gather_output_fn(
     outer_sizes: list[int],
     world_size: int,
 ) -> None:
-    r"""Copy payloads with outer_size > 1 via intermediate buffers, others directly."""
+    """Copy outputs with outer_size > 1 via intermediate buffers, others directly."""
+    byte_views = all_gather_output.dtype == torch.uint8
     copy_outputs: list[torch.Tensor] = []
     split_outputs: list[torch.Tensor] = []
     for output, split_size, outer_size in zip(outputs, split_sizes, outer_sizes):
-        copy_output = output
-        if outer_size > 1 and output.numel():
-            copy_output = torch.empty_like(output)
+        copy_output = torch.empty_like(output) if outer_size > 1 else output
         copy_outputs.append(copy_output)
-        if (numel := split_size * world_size) != copy_output.numel():
-            copy_output = copy_output.narrow(0, 0, numel)
-        split_outputs.append(copy_output.view(world_size, -1))
+        split_output = copy_output.view(torch.uint8) if byte_views else copy_output
+        if (numel := split_size * world_size) != split_output.numel():
+            split_output = split_output.narrow(0, 0, numel)
+        split_outputs.append(split_output.view(world_size, -1))
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
     )
@@ -293,13 +292,12 @@ class DefaultAllGatherLayout(AllGatherLayout):
                 all_gather_output, metadata.param_metadata, world_size
             )
         buffers = metadata.buffers or new_buffers
+        # Nothing to copy, and fns could not view an empty buffer as (world_size, -1)
         if all_gather_output.numel() == 0:
             return AllGatherOutputs(plan.outputs, buffers)
         outputs = [output for param_outputs in plan.outputs for output in param_outputs]
         non_inference_outputs = tuple(t for t in outputs if not t.is_inference())
-        if all_gather_output.dtype == torch.uint8:
-            outputs = [t.view(torch.uint8) for t in outputs]
-        # Views share their base's version counter
+        # Views share their base's version counter. See Note [All-gather output fn].
         with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
             self.output_fn(
                 all_gather_output,
@@ -334,8 +332,8 @@ def _plan_rank_major_outputs(
             new_buffers.extend(outputs)
         plan.outputs.append(outputs)
         plan.split_sizes.extend(
-            numel * output.element_size() // all_gather_output.element_size()
-            for numel, output in zip(param.input_numels, outputs)
+            numel * dtype.itemsize // all_gather_output.element_size()
+            for numel, dtype in zip(param.input_numels, param.input_dtypes)
         )
         plan.outer_sizes.extend(param.outer_sizes)
     return plan, new_buffers
