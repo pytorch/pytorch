@@ -16,6 +16,7 @@ from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
+from torch.distributed.fsdp._fully_shard._fsdp_param import _normalize_all_gather_inputs
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -25,7 +26,7 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -640,12 +641,13 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             mesh_dim_names=("replicate", "shard"),
         )["shard"]
         byte_payloads = False
+        offset = 1
         test = self
 
         def fsdp_pre_all_gather(
             local_tensor, mesh, outer_size, outer_stride, module, mp_policy
         ):
-            payloads = (local_tensor, (local_tensor + 1).to(torch.bfloat16))
+            payloads = (local_tensor, (local_tensor + offset).to(torch.bfloat16))
             if byte_payloads:
                 payloads = tuple(t.view(torch.uint8) for t in payloads)
             return payloads, outer_size
@@ -656,7 +658,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         ):
             # Typed outputs take the trailing dims of the byte payloads
             weight, auxiliary = (t.view(metadata) for t in all_gather_outputs)
-            test.assertEqual(auxiliary, (weight + 1).to(torch.bfloat16))
+            test.assertEqual(auxiliary, (weight + offset).to(torch.bfloat16))
             if out is not None:
                 with _unsafe_preserve_version_counter(out):
                     out.copy_(weight)
@@ -671,7 +673,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         )
         inp = torch.randn((2, 16), device=device_type)
         for iteration in range(2):
-            byte_payloads = iteration == 1
+            # A new offset per iteration so that stale outputs fail the check
+            byte_payloads, offset = iteration == 1, iteration + 1
             output = model(inp)
             ref_output = ref_model(inp)
             self.assertEqual(output, ref_output)
@@ -797,10 +800,9 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             shard_placement_fn=lambda _: Shard(1),
             reshard_after_forward=True,
         )
-        local_weight = model.weight._local_tensor
-        local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
-        local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
-
+        self._patch_all_gather_extension(
+            model, fsdp_pre_all_gather, fsdp_post_all_gather
+        )
         inp = torch.arange(16, device=device_type).float().view(2, 8) / 16
         for _ in range(2):
             model.zero_grad(set_to_none=True)
@@ -816,6 +818,143 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertIsNotNone(post_out_ids[1])
         self.assertEqual(post_out_ids, [None] + [post_out_ids[1]] * 3)
         self.assertTrue(all(ref() is None for ref in payload_refs))
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_smaller_payload(self):
+        self.run_subtests(
+            {"shard_world_size": [2, 1]},
+            self._test_all_gather_extension_smaller_payload,
+        )
+
+    def _test_all_gather_extension_smaller_payload(self, shard_world_size: int):
+        # A Tensor payload of a Shard(0) parameter may shrink after its first
+        # call and then fills a prefix of its cached output, also when a size-1
+        # shard mesh copies it directly
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size // shard_world_size, shard_world_size),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        num_tags = 4
+        test = self
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            rank = mesh.get_local_rank()
+            tags = torch.arange(num_tags, device=local_tensor.device) + 10.0 * rank
+            return (local_tensor, tags), (outer_size, num_tags)
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            outer_size, num_rank_tags = metadata
+            weight, tags = all_gather_outputs
+            expected_tags = [
+                torch.arange(num_rank_tags, device=tags.device) + 10.0 * rank
+                for rank in range(shard_world_size)
+            ]
+            test.assertEqual(
+                tags[: num_rank_tags * shard_world_size], torch.cat(expected_tags)
+            )
+            weight = weight.view(outer_size)
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(weight)
+                return
+            return weight, (weight,)
+
+        model = nn.Linear(8, 16, bias=False, device=device_type)
+        # Seeding is per process, not per thread
+        dist.broadcast(model.weight.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=mesh)
+        self._patch_all_gather_extension(
+            model, fsdp_pre_all_gather, fsdp_post_all_gather
+        )
+        inp = torch.randn((2, 8), device=device_type)
+        for num_tags in (4, 2):
+            output = model(inp)
+            self.assertEqual(output, ref_model(inp))
+            output.sum().backward()
+
+
+class TestAllGatherInputValidation(TestCase):
+    # Shard(1) of a (4, 8) parameter over 2 ranks
+    padded_sharded_size = torch.Size((4, 4))
+
+    def _normalize(self, inputs, outputs=(), shard_dim=0):
+        return _normalize_all_gather_inputs(
+            inputs,
+            list(outputs),
+            world_size=2,
+            shard_dim=shard_dim,
+            padded_sharded_size=self.padded_sharded_size,
+            param_fqn="lin.weight",
+        )
+
+    def test_dim_out_of_range(self):
+        with self.assertRaisesRegex(ValueError, "dim 2 is invalid"):
+            AllGatherInput(torch.ones(4, 4), dim=2)
+        # Scalars count as shape (1,)
+        AllGatherInput(torch.ones(()), dim=-1)
+
+    def test_output_layouts(self):
+        inputs = [
+            AllGatherInput(torch.ones(2, 3, 4), dim=1),
+            AllGatherInput(torch.ones(())),
+            torch.ones(4, 4),
+        ]
+        _, layouts = self._normalize(inputs, shard_dim=1)
+        self.assertEqual(
+            [tuple(layout) for layout in layouts],
+            [((2, 6, 4), 2), ((2,), 1), ((-1, 4), 4)],
+        )
+
+    def test_payload_count_change(self):
+        with self.assertRaisesRegex(
+            ValueError, "lin.weight returned 2 inputs for 1 cached outputs"
+        ):
+            self._normalize([torch.ones(4, 4)] * 2, [torch.empty(32)])
+
+    def test_non_contiguous_input(self):
+        with self.assertRaisesRegex(
+            ValueError, "input 0 of lin.weight is not contiguous"
+        ):
+            self._normalize([torch.ones(4, 8)[:, ::2]])
+
+    def test_records_keep_size_and_dtype(self):
+        output = torch.empty(32)
+        self._normalize([AllGatherInput(torch.ones(4, 4))], [output])
+        for tensor in (torch.ones(2, 4), torch.ones(4, 4).view(torch.uint8)):
+            with self.assertRaisesRegex(
+                ValueError, "input 0 of lin.weight .* does not fit its cached output"
+            ):
+                self._normalize([AllGatherInput(tensor)], [output])
+
+    def test_tensor_inputs_shrink_or_become_byte_views(self):
+        output = torch.empty(32)
+        for tensor in (torch.ones(2, 4), torch.ones(4, 4).view(torch.uint8)):
+            self._normalize([tensor], [output])
+        for tensor in (torch.ones(8, 4), torch.ones(4, 4, dtype=torch.bfloat16)):
+            with self.assertRaisesRegex(ValueError, "does not fit its cached output"):
+                self._normalize([tensor], [output])
+
+    def test_shard_dim_tensor_inputs_keep_padded_size(self):
+        # Reassembled along the shard dim, so they cannot shrink. Byte views count
+        # bytes, which a first call accepts as any whole multiple of the elements.
+        self._normalize([torch.ones(4, 4).view(torch.uint8)], shard_dim=1)
+        for outputs in ((), (torch.empty(32),)):
+            with self.assertRaisesRegex(
+                ValueError,
+                r"Shard\(1\) all-gather input 0 of lin.weight must have the 16",
+            ):
+                self._normalize([torch.ones(4, 2)], outputs, shard_dim=1)
+        with self.assertRaisesRegex(ValueError, "does not fit its cached output"):
+            self._normalize(
+                [torch.ones(4, 2).view(torch.uint8)], [torch.empty(32)], shard_dim=1
+            )
 
 
 if __name__ == "__main__":
