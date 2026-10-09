@@ -608,6 +608,7 @@ class FakeTensorConverter:
         if maybe_memo is not None:
             if t.is_mkldnn and not maybe_memo.is_mkldnn:
                 maybe_memo.dispatch_keys = torch._C._dispatch_keys(t)
+            track_fake_tensor_for_export(maybe_memo)
             return maybe_memo
         # not yet supported in metatensors
         if t.is_quantized:
@@ -681,6 +682,7 @@ class FakeTensorConverter:
         if (
             not self.export
             and _is_plain_tensor(t)  # mostly, we want to know if item() works
+            and not is_fake(t)
             and t.dim() == 0
             and t.device.type == "cpu"
             # All integer types are fair game, because signed overflow is UB
@@ -775,6 +777,7 @@ class FakeTensorConverter:
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
+        track_fake_tensor_for_export(out)
         return out
 
     # If you specify the device, it MUST be a meta tensor.
@@ -1204,11 +1207,7 @@ class FakeTensor(Tensor):
     #
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__()
-        if (
-            torch.compiler.is_exporting()
-            and torch._export.config.detect_non_strict_fake_tensor_leaks
-        ):
-            fake_tensor_tls.non_strict_export_fake_tensor_tracker[self] = None
+        track_fake_tensor_for_export(self)
 
     @staticmethod
     def from_tensor(t: Tensor, fake_mode: FakeTensorMode) -> FakeTensor:
