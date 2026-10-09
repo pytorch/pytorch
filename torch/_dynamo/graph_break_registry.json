@@ -1387,6 +1387,16 @@
       ]
     }
   ],
+  "GB9131": [
+    {
+      "Gb_type": "Skipped function wrapper __dict__ access",
+      "Context": "{self}",
+      "Explanation": "Dynamo does not model the copied dictionary of this function wrapper.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0089": [
     {
       "Gb_type": "Observed exception (EXCEPT_HANDLER)",
