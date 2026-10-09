@@ -494,6 +494,7 @@ test_python_smoke_b200() {
     --include \
       test_matmul_cuda \
       test_scaled_matmul_cuda \
+      test_quantize_tensor \
       inductor/test_fp8 \
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
