@@ -39,12 +39,15 @@ import torch.nn.functional as F
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.aot_compile import (
+    _AOT_COMPILE_FORMAT_VERSION,
+    _AOT_COMPILE_MAGIC,
     _GuardScope,
     _names_a_missing_global,
     _resolve_guard_scope,
     _warn_dropped_module_dispatch,
     AOTCompiledFunction,
     AOTCompiledModel,
+    AOTCompileUnpickler,
     ModelInput,
     SerializableCallable,
 )
@@ -52,6 +55,7 @@ from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallab
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.graph_utils import _graph_device_types
 from torch._dynamo.guards import CheckFunctionManager
+from torch._dynamo.hooks import Hooks
 from torch._dynamo.package import (
     _collapse_device_types,
     DynamoCache,
@@ -74,6 +78,7 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
     disable_gc,
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -1492,6 +1497,15 @@ class BottomlessReduce:
         return (BottomlessReduce, (BottomlessReduce(),))
 
 
+# On fbcode's Python 3.14 an unbounded recursion through the C pickler can run
+# past the interpreter's stack-address recursion guard and segfault the whole
+# test process instead of raising RecursionError.
+skipIfCPicklerOverflowCrashes = unittest.skipIf(
+    IS_FBCODE and sys.version_info >= (3, 14),
+    "C pickler stack overflow segfaults instead of raising RecursionError",
+)
+
+
 class WritesBackOnReduce:
     # Reducing it writes onto the function it is stashed on, while that
     # function's __dict__ is being walked.
@@ -1864,6 +1878,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertIn("Linear", msg)
         self.assertIn("external_data", msg)
 
+    @skipIfCPicklerOverflowCrashes
     def test_save_guidance_when_a_default_overflows_the_pickler(self):
         # A value in an unpruned slot that recurses without bound in the C
         # pickler raises RecursionError; it gets the same guidance and the
@@ -1954,6 +1969,101 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         rebuilt = cell.cell_contents
         self.assertFalse(hasattr(rebuilt.__wrapped__, "lock"))
         self.assertEqual(set(rebuilt.__dict__), {"__wrapped__"})
+
+    def test_aot_compile_basic_model(self):
+        mod = SimpleLinearModule()
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        inputs = (torch.randn(3, 3),)
+        compiled_mod = torch._dynamo.aot_compile.aot_compile_module(
+            mod,
+            [ModelInput(inputs, {}, [])],
+            Hooks(),
+            backend,
+        )
+        expected = mod(*inputs)
+        self.assertEqual(compiled_mod(*inputs), expected)
+
+        data = compiled_mod.serialize()
+        torch._dynamo.reset()
+        loaded_mod = AOTCompiledModel.deserialize(mod, data)
+        self.assertEqual(loaded_mod(*inputs), expected)
+
+    def test_compatibility_checked_after_compiled_payload(self):
+        def fn(x):
+            return x + 1
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend=backend).aot_compile(
+            ((torch.randn(3, 4),), {})
+        )
+        compiled_fn._artifacts.system_info = dataclasses.replace(
+            compiled_fn._artifacts.system_info,
+            torch_version="incompatible",
+        )
+        data = AOTCompiledFunction.serialize(compiled_fn).serialized_data
+        original_load = AOTCompileUnpickler.load
+        decoded = False
+
+        def tracked_load(unpickler):
+            nonlocal decoded
+            decoded = True
+            return original_load(unpickler)
+
+        with patch.object(AOTCompileUnpickler, "load", tracked_load):
+            with self.assertRaisesRegex(RuntimeError, "different PyTorch version"):
+                AOTCompiledFunction.deserialize(data)
+        self.assertTrue(decoded)
+
+    @parametrize("entry_point", ["function", "model"])
+    @parametrize("format_kind", ["legacy", "newer"])
+    def test_rejects_unsupported_aot_compile_format(self, entry_point, format_kind):
+        if format_kind == "legacy":
+            function_data = pickle.dumps({})
+        else:
+            function_data = _AOT_COMPILE_MAGIC + bytes(
+                [_AOT_COMPILE_FORMAT_VERSION + 1]
+            )
+
+        if entry_point == "model":
+            data = pickle.dumps([function_data])
+            deserialize = functools.partial(
+                AOTCompiledModel.deserialize, torch.nn.Module(), data
+            )
+        else:
+            deserialize = functools.partial(
+                AOTCompiledFunction.deserialize, function_data
+            )
+
+        with patch.object(
+            AOTCompileUnpickler,
+            "load",
+            side_effect=AssertionError("compiled payload was decoded"),
+        ) as load:
+            with self.assertRaisesRegex(
+                RuntimeError, "unsupported serialization format"
+            ):
+                deserialize()
+        load.assert_not_called()
+
+    def test_model_preflights_all_aot_compile_formats(self):
+        supported = _AOT_COMPILE_MAGIC + bytes([_AOT_COMPILE_FORMAT_VERSION])
+        future = _AOT_COMPILE_MAGIC + bytes([_AOT_COMPILE_FORMAT_VERSION + 1])
+        data = pickle.dumps([supported, future])
+        with patch.object(
+            AOTCompileUnpickler,
+            "load",
+            side_effect=AssertionError("compiled payload was decoded"),
+        ) as load:
+            with self.assertRaisesRegex(
+                RuntimeError, "unsupported serialization format"
+            ):
+                AOTCompiledModel.deserialize(torch.nn.Module(), data)
+        load.assert_not_called()
 
     def test_aot_compile_autocast_guard_reload(self):
         def fn(x):
@@ -11467,6 +11577,7 @@ class TestAOTCompilePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out.b.c(), "c!")
         self.assertFalse(hasattr(out.b.c, "a"))
 
+    @skipIfCPicklerOverflowCrashes
     def test_pickler_prunes_an_entry_that_overflows_the_probe(self):
         # A recursion overflow inside the probe counts as unpicklable: the entry
         # is dropped with a warning and the save succeeds. The guard pickler
