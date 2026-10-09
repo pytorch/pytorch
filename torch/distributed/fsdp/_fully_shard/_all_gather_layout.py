@@ -43,10 +43,11 @@ if TYPE_CHECKING:
 # fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size) under
 # no_grad on the current stream to copy the flat rank-major all_gather_output into
 # outputs: outputs[i] gets each rank's split_sizes[i] elements, concatenated along
-# the dim whose leading dims multiply to outer_sizes[i]. A payload smaller than
-# outputs[i] is reassembled from a zero-padded rank-major buffer. uint8 buffers
-# come with uint8 output views and byte sizes. fn may only write outputs and must
-# not keep its arguments. It is skipped for empty buffers and single-rank groups.
+# the dim whose leading dims multiply to outer_sizes[i]. Only payloads with
+# outer_sizes[i] == 1 may be smaller than outputs[i], and they fill its prefix.
+# uint8 buffers come with uint8 output views and byte sizes. fn may only write
+# outputs and must not keep its arguments. It is skipped for empty buffers and
+# single-rank groups.
 
 
 def _default_all_gather_output_fn(
@@ -58,22 +59,17 @@ def _default_all_gather_output_fn(
 ) -> None:
     r"""Copy payloads with outer_size > 1 via intermediate buffers, others directly."""
     copy_outputs: list[torch.Tensor] = []
+    split_outputs: list[torch.Tensor] = []
     for output, split_size, outer_size in zip(outputs, split_sizes, outer_sizes):
-        if outer_size == 1 or not output.numel():
-            copy_output = output
-        elif output.numel() == split_size * world_size:
+        copy_output = output
+        if outer_size > 1 and output.numel():
             copy_output = torch.empty_like(output)
-        else:
-            copy_output = output.new_zeros(output.numel())
         copy_outputs.append(copy_output)
+        if (numel := split_size * world_size) != copy_output.numel():
+            copy_output = copy_output.narrow(0, 0, numel)
+        split_outputs.append(copy_output.view(world_size, -1))
     torch.ops.fsdp.split_with_sizes_copy(
-        all_gather_output.view(world_size, -1),
-        split_sizes,
-        dim=1,
-        out=[
-            t.view(-1).narrow(0, 0, split_size * world_size).view(world_size, -1)
-            for t, split_size in zip(copy_outputs, split_sizes)
-        ],
+        all_gather_output.view(world_size, -1), split_sizes, dim=1, out=split_outputs
     )
     for copy_output, output, outer_size in zip(copy_outputs, outputs, outer_sizes):
         if copy_output is not output:

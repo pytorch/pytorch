@@ -255,7 +255,7 @@ class CPUOffloadPolicy(OffloadPolicy):
     pin_memory: bool = True
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class AllGatherInput:
     r"""Describe one payload returned by an FSDP all-gather extension.
 
@@ -264,9 +264,11 @@ class AllGatherInput:
     dim, and passes the result to ``fsdp_post_all_gather``. For example,
     ``(2, F, D)`` with ``dim=1`` gathers to ``(2, world_size * F, D)``.
 
-    Payloads must be flattenable with ``view(-1)`` and match across ranks in
-    shape, dtype, and layout; extensions own any padding. Their number, element
-    counts, and dtypes must stay fixed across calls so FSDP can reuse outputs.
+    Payloads must be contiguous. Their number, element counts, and dtypes must
+    stay fixed across calls so FSDP can reuse outputs. Every rank must return the
+    same shapes and dtypes, which FSDP cannot check locally: a mismatch hangs or
+    corrupts the collective. Extensions own any padding, since ``local_tensor``
+    is unpadded on ranks with a smaller shard.
 
     Attributes:
         tensor (Tensor): Local payload. Scalars count as shape ``(1,)``.

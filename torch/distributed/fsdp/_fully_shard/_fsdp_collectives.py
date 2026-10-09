@@ -1,4 +1,3 @@
-import functools
 import math
 from collections.abc import Callable, Sequence
 from itertools import chain, groupby
@@ -40,7 +39,8 @@ class AllGatherResult(NamedTuple):
     # 1D flattened version of `param_all_gather_input_numels` saved to avoid
     # CPU overhead from recomputing
     all_gather_input_split_sizes: list[int]
-    # Product of each input's dims before its concatenation dim
+    # Per input, the product of the dims before the dim that ranks are
+    # concatenated along (see _AllGatherOutputLayout)
     all_gather_input_outer_sizes: list[int]
     layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
     output_metadata: object | None = None
@@ -384,9 +384,9 @@ def foreach_all_gather(
         param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
         # Extension layouts are set by the all_gather_inputs call above
         outer_sizes = [
-            copy_layout.outer_size
+            layout.outer_size
             for fsdp_param in fsdp_params
-            for copy_layout in fsdp_param.all_gather_copy_layouts
+            for layout in fsdp_param.all_gather_output_layouts
         ]
         (
             param_all_gather_input_dtypes,
@@ -612,14 +612,14 @@ def _default_reduce_scatter_input_fn(
     shard_dims: list[int],
     world_size: int,
 ) -> Callable:
-    r"""Reorder gradients sharded on a nonzero dim by rank, then copy them in."""
+    r"""Reorder gradients sharded on a nonzero dim by rank and return their copy-in."""
     if world_size > 1:
         for i, shard_dim in enumerate(shard_dims):
             if shard_dim != 0:
                 chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
                 unsharded_grads[i] = torch.cat(chunks, dim=0)
-    return functools.partial(
-        foreach_reduce_scatter_copy_in, unsharded_grads, world_size=world_size
+    return lambda reduce_scatter_input: foreach_reduce_scatter_copy_in(
+        unsharded_grads, reduce_scatter_input, world_size
     )
 
 

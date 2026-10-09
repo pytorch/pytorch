@@ -535,28 +535,26 @@ class FSDPParamGroup:
 
             for fsdp_param in self.fsdp_params:
                 all_gather_inputs = fsdp_param.all_gather_inputs
-                fsdp_param.init_all_gather_outputs(
-                    [tensor.numel() for tensor in all_gather_inputs],
-                    [tensor.dtype for tensor in all_gather_inputs],
-                    world_size,
-                    self.device,
-                )
+                if not fsdp_param.all_gather_outputs:
+                    fsdp_param.init_all_gather_outputs(
+                        [tensor.numel() for tensor in all_gather_inputs],
+                        [tensor.dtype for tensor in all_gather_inputs],
+                        world_size,
+                        self.device,
+                    )
                 fsdp_param.alloc_all_gather_outputs()
-                non_inference_outputs = tuple(
-                    tensor
-                    for tensor in fsdp_param.all_gather_outputs
-                    if not tensor.is_inference()
-                )
+                outputs = fsdp_param.all_gather_outputs
                 with torch.autograd._unsafe_preserve_version_counter(
-                    non_inference_outputs
+                    tuple(output for output in outputs if not output.is_inference())
                 ):
-                    for output, tensor in zip(
-                        fsdp_param.all_gather_outputs, all_gather_inputs
-                    ):
+                    for output, tensor in zip(outputs, all_gather_inputs):
                         # Like the world_size > 1 path, copy byte payloads
-                        # bytewise into cached outputs of other dtypes
+                        # bytewise into cached outputs of other dtypes, and
+                        # smaller payloads into a prefix
                         if tensor.dtype == torch.uint8:
                             output = output.view(torch.uint8)
+                        if output.numel() != tensor.numel():
+                            output = output.narrow(0, 0, tensor.numel())
                         output.copy_(tensor)
 
         else:
