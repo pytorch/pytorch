@@ -7448,8 +7448,6 @@ def _check_scaled_mm_sizes(
                     ),
                 )
         else:
-            # e8m0fnu blockwise scaling (DeepSeek recipe) is XPU-only, matching
-            # check_deepseek_recipe's is_xpu() gate in ScaledBlasUtils.cpp.
             is_xpu = device_hint(self) == "xpu"
             torch._check(
                 (scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32)
