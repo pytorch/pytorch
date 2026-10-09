@@ -23322,6 +23322,41 @@ class NoOpFoldingTests(InductorTestCase):
         )
         self.assertEqual(gm(x, y), fn(x, y))
 
+    def test_identity_before_multiple_mm_consumers_is_folded(self):
+        def fn(x, a, b):
+            value = x * 1
+            return torch.mm(value, a), torch.mm(value, b)
+
+        x = torch.randn(2, 2)
+        a = torch.randn(2, 2)
+        b = torch.randn(2, 2)
+        gm = make_fx(fn, tracing_mode="real")(x, a, b)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        remove_no_ops(gm, OrderedSet(), OrderedSet())
+        gm.recompile()
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 0
+        )
+        self.assertEqual(gm(x, a, b), fn(x, a, b))
+
+    def test_identity_of_slice_before_value_consumer_is_folded(self):
+        def fn(x):
+            return torch.sin(x[:, 1:] * 1)
+
+        x = torch.randn(3, 4)
+        gm = make_fx(fn, tracing_mode="real")(x)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        remove_no_ops(gm, OrderedSet(), OrderedSet())
+        gm.recompile()
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 0
+        )
+        self.assertEqual(gm(x), fn(x))
+
     def test_identity_before_mm_is_folded(self):
         def fn(x, y):
             return torch.mm(x * 1, y)

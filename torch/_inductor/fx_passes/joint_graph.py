@@ -131,7 +131,7 @@ def remove_no_ops(
                 return None
             return right if matches(left) else left
 
-        def same_metadata(node, replacement):
+        def same_metadata(node, replacement, *, require_strides):
             node_val = node.meta.get("val")
             replacement_val = replacement.meta.get("val")
             if not isinstance(node_val, torch.Tensor) or not isinstance(
@@ -153,15 +153,21 @@ def remove_no_ops(
                 or not guard_or_false(sym_eq(node_val.shape, replacement_val.shape))
             ):
                 return False
-            return node_val.layout != torch.strided or (
-                guard_or_false(sym_eq(node_val.stride(), replacement_val.stride()))
-                and guard_or_false(
-                    sym_eq(node_val.storage_offset(), replacement_val.storage_offset())
+            return (
+                not require_strides
+                or node_val.layout != torch.strided
+                or (
+                    guard_or_false(sym_eq(node_val.stride(), replacement_val.stride()))
+                    and guard_or_false(
+                        sym_eq(
+                            node_val.storage_offset(), replacement_val.storage_offset()
+                        )
+                    )
                 )
             )
 
         mm_targets = (aten.mm.default, aten.bmm.default, aten.addmm.default)
-        mutated_storages = get_mutated_storages(gm)
+        mutated_storages = None
 
         def view_source(node):
             if (
@@ -187,6 +193,9 @@ def remove_no_ops(
             return None
 
         def replacement_is_mutated(replacement):
+            nonlocal mutated_storages
+            if mutated_storages is None:
+                mutated_storages = get_mutated_storages(gm)
             storage = get_node_storage(replacement)
             if storage is not None and storage in mutated_storages:
                 return True
@@ -235,18 +244,17 @@ def remove_no_ops(
             return False
 
         def can_fold_identity(node, replacement):
-            if not isinstance(replacement, torch.fx.Node) or not same_metadata(
-                node, replacement
-            ):
+            if not isinstance(replacement, torch.fx.Node):
                 return False
-            sole_user = next(iter(node.users), None) if len(node.users) == 1 else None
-            value_consumer = False
-            if sole_user is not None and isinstance(
-                sole_user.target, torch._ops.OpOverload
-            ):
-                target = sole_user.target
-                value_consumer = (
-                    sole_user.op == "call_function"
+
+            def safe_value_consumer(user):
+                if user.op != "call_function":
+                    return False
+                target = user.target
+                if target in mm_targets:
+                    return True
+                return (
+                    isinstance(target, torch._ops.OpOverload)
                     and not target._schema.is_mutable
                     and all(ret.alias_info is None for ret in target._schema.returns)
                     and (
@@ -254,16 +262,20 @@ def remove_no_ops(
                         or torch.Tag.reduction in target.tags
                     )
                 )
-            eligible = (
+
+            producer_fold = (
                 replacement.op == "call_function"
                 and replacement.target in mm_targets
                 and len(replacement.users) == 1
-            ) or (
-                sole_user is not None
-                and sole_user.op == "call_function"
-                and (sole_user.target in mm_targets or value_consumer)
             )
-            return eligible and not replacement_is_mutated(replacement)
+            consumer_fold = bool(node.users) and all(
+                safe_value_consumer(user) for user in node.users
+            )
+            return (
+                (producer_fold or consumer_fold)
+                and same_metadata(node, replacement, require_strides=not consumer_fold)
+                and not replacement_is_mutated(replacement)
+            )
 
         for target in (
             aten.add.Tensor,
