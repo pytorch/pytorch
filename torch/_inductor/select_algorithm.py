@@ -680,6 +680,9 @@ class TritonTemplateKernel(TritonKernel):
         # With a reduction epilogue, the epilogue outputs that keep their TMA
         # store when tma_store is set; the rest use tl.store. See store.
         self.tma_store_epilogue_outputs: OrderedSet[str] | None = None
+        # With a reduction epilogue and tma_load_for_template_epilogue, the
+        # full-tile epilogue inputs the row pass TMA-loads. See _tile_tma_load.
+        self.tma_load_epilogue_inputs: OrderedSet[str] = OrderedSet()
         self.tma_load_for_template_epilogue = tma_load_for_template_epilogue
         self.transpose_discontiguous_tensor_descriptors_override = (
             transpose_discontiguous_tensor_descriptors_override
@@ -2208,27 +2211,70 @@ class TritonTemplateKernel(TritonKernel):
         normalized output, whose index is row-major in the tile's symbols. The
         descriptor uses the tile's origin as offsets, so it needs no standard
         block symbols. Returns False to fall back to tl.store."""
-        ctx = self._tile_tma_store_ctx
-        if ctx is None or name not in (self.tma_store_epilogue_outputs or ()):
+        if name not in (self.tma_store_epilogue_outputs or ()):
             return False
+        access = self._tile_tma_descriptor(name, index, self.args.output(name))
+        if access is None:
+            return False
+        desc, offsets = access
+        rows, cols = self._tile_tma_store_ctx[2]
+        dtype = V.graph.get_buffer(name).get_dtype()
+        self.stores.writeline(
+            DeferredLine(
+                name,
+                f"{desc}.store([{offsets}], "
+                f"tl.broadcast_to({value}, [{rows}, {cols}])"
+                f".to({triton_type(dtype)}))",
+            )
+        )
+        return True
+
+    def _tile_tma_load(self, name: str, index: sympy.Expr) -> CSEVariable | None:
+        """TMA-load a full-tile epilogue input of a row reduction pass, e.g. the
+        incoming gradient of a norm backward, as _tile_tma_store writes
+        full-tile outputs. Returns None to fall back to tl.load."""
+        if name not in self.tma_load_epilogue_inputs:
+            return None
+        access = self._tile_tma_descriptor(name, index, self.args.input(name))
+        if access is None:
+            return None
+        desc, offsets = access
+        line, dtype = f"{desc}.load([{offsets}])", V.graph.get_buffer(name).get_dtype()
+        if (
+            dtype in (torch.float16, torch.bfloat16)
+            and config.triton.codegen_upcast_to_fp32
+        ):
+            line, dtype = f"{line}.to(tl.float32)", torch.float32
+        return self.cse.generate(
+            self.loads, line, dtype=dtype, shape=self._tile_tma_store_ctx[2]
+        )
+
+    def _tile_tma_descriptor(
+        self, name: str, index: sympy.Expr, var: str
+    ) -> tuple[str, str] | None:
+        """The tensor descriptor of buffer name (kernel arg var) over the row
+        pass's tile, and the tile's origin as its offsets, if index is
+        row-major in the tile's symbols; else None."""
+        ctx = self._tile_tma_store_ctx
+        if ctx is None:
+            return None
         (x, r), origin, (rows, cols) = ctx
         layout = V.graph.get_buffer(name).get_layout()
         tile_index = index.xreplace(
             {s: e.expr for s, e in self.range_tree_nodes.items()}
         )
-        # The descriptor sees the output as [M, N], also when it's a row-major
+        # The descriptor sees the buffer as [M, N], also when it's a row-major
         # view such as [B, S, N].
         shape = [sympy_product(layout.size[:-1]), layout.size[-1]]
         strides = [layout.stride[-2], layout.stride[-1]]
         if tile_index != strides[0] * x + r or not all(
             self._tma_dim_fits_int32(name, size) for size in shape
         ):
-            return False
-        offsets = [
+            return None
+        offsets = ", ".join(
             texpr(o) if self.index_dtype == "tl.int32" else f"({texpr(o)}).to(tl.int32)"
             for o in origin
-        ]
-        var = self.args.output(name)
+        )
         desc = self.prologue_cache.get(var)
         if desc is None:
             desc = f"tma_descriptor{next(self.block_ptr_id)}"
@@ -2242,15 +2288,7 @@ class TritonTemplateKernel(TritonKernel):
             )
             self.prologue_cache[var] = desc
         self._device_tma_buffers.add(name)
-        self.stores.writeline(
-            DeferredLine(
-                name,
-                f"{desc}.store([{', '.join(offsets)}], "
-                f"tl.broadcast_to({value}, [{rows}, {cols}])"
-                f".to({triton_type(layout.dtype)}))",
-            )
-        )
-        return True
+        return desc, offsets
 
     @staticmethod
     def _tma_dim_fits_int32(name: str, size: sympy.Expr) -> bool:
@@ -2326,7 +2364,6 @@ class TritonTemplateKernel(TritonKernel):
         fused = OrderedSet(
             [template_node.get_name(), *(n.get_name() for n in epilogue_nodes)]
         )
-        size = self.output_node.get_size()
         outputs = []
         for node in epilogue_nodes:
             if node.is_reduction():
@@ -2335,29 +2372,60 @@ class TritonTemplateKernel(TritonKernel):
                 if scheduler.can_buffer_be_removed_through_fusion(name, fused):
                     continue
                 layout = V.graph.get_buffer(name).get_layout()
-                if (
-                    not all(
-                        isinstance(x, (int, sympy.Integer))
-                        for x in (layout.size[-1], *layout.stride, layout.offset)
-                    )  # dynamic layout, other than the outer sizes
-                    # [M, N] or a row-major view of it, e.g. [B, S, N]
-                    or sympy_product(layout.size) != sympy_product(size)
-                    or layout.size[-1] != size[-1]  # not full-tile
-                    or layout.offset != 0  # irregular output
-                    or layout.stride[-1] != 1  # irregular output
-                    or any(  # irregular output
-                        layout.stride[i] != layout.stride[i + 1] * layout.size[i + 1]
-                        for i in range(len(layout.size) - 2)
-                    )
-                    or not can_use_tma(output_layout=layout)
-                    or not all(
-                        self._tma_dim_fits_int32(name, dim)
-                        for dim in (sympy_product(layout.size[:-1]), layout.size[-1])
-                    )
-                ):
+                if not self._is_full_tile_tma_layout(name, layout):
                     continue
                 outputs.append((name, staged * layout.dtype.itemsize))
         return outputs
+
+    def _full_tile_epilogue_inputs(
+        self, template_node, epilogue_nodes
+    ) -> list[tuple[str, int]]:
+        """The buffers the epilogue reads, other than the template's and the
+        epilogue's own, that a TMA load can read whole, with the bytes of their
+        staged tile. Smaller inputs, e.g. a norm weight, keep tl.load."""
+        staged = self._staged_tile_elems()
+        if staged is None or self.meta.get("EPILOGUE_SUBTILE", 1) != 1:
+            return []
+        produced = OrderedSet(
+            [self.output_node.get_name(), *template_node.get_buffer_names()]
+        ).union(*(node.get_buffer_names() for node in epilogue_nodes))
+        inputs: dict[str, int] = {}
+        for node in epilogue_nodes:
+            for dep in node.read_writes.reads:
+                if dep.name in produced or dep.name in inputs:
+                    continue
+                buf = V.graph.try_get_buffer(dep.name)
+                if buf is not None and self._is_full_tile_tma_layout(
+                    dep.name, layout := buf.get_layout()
+                ):
+                    inputs[dep.name] = staged * layout.dtype.itemsize
+        return list(inputs.items())
+
+    def _is_full_tile_tma_layout(self, name: str, layout: ir.Layout) -> bool:
+        """Whether a TMA descriptor can cover the buffer with this layout in
+        template output tiles: the template output's shape or a row-major view
+        of it, and 16-byte aligned."""
+        size = self.output_node.get_size()
+        return (
+            all(
+                isinstance(x, (int, sympy.Integer))
+                for x in (layout.size[-1], *layout.stride, layout.offset)
+            )  # static, other than the outer sizes
+            # [M, N] or a row-major view of it, e.g. [B, S, N]
+            and sympy_product(layout.size) == sympy_product(size)
+            and layout.size[-1] == size[-1]
+            and layout.offset == 0
+            and layout.stride[-1] == 1
+            and all(
+                layout.stride[i] == layout.stride[i + 1] * layout.size[i + 1]
+                for i in range(len(layout.size) - 2)
+            )
+            and can_use_tma(output_layout=layout)
+            and all(
+                self._tma_dim_fits_int32(name, dim)
+                for dim in (sympy_product(layout.size[:-1]), layout.size[-1])
+            )
+        )
 
     def _compute_fusion_metadata(
         self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
@@ -2392,13 +2460,36 @@ class TritonTemplateKernel(TritonKernel):
             scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
         )
         self.tma_store_epilogue_outputs = None
-        if self.tma_store and any(node.is_reduction() for node in epilogue_nodes):
-            # Each TMA store stages its whole tile in its own shared-memory
-            # buffer, so a reduction epilogue's many, often fp32, outputs can
-            # overflow it. Keep the largest on TMA while they fit.
-            self.tma_store_epilogue_outputs = tma_store_outputs_within_budget(
-                self._full_tile_epilogue_outputs(template_node, epilogue_nodes),
-                self._epilogue_tma_store_budget(),
+        self.tma_load_epilogue_inputs = OrderedSet()
+        if any(node.is_reduction() for node in epilogue_nodes) and (
+            self.tma_store or self.tma_load_for_template_epilogue
+        ):
+            # Each TMA store or load stages its whole tile in its own
+            # shared-memory buffer, so a reduction epilogue's many, often fp32,
+            # outputs and inputs can overflow it. Keep the largest on TMA while
+            # they fit. Epilogue inputs are TMA-loaded only under
+            # tma_load_for_template_epilogue (off by default), which on
+            # fb-triton builds without facebookexperimental/triton#3938-#3940
+            # can give wrong results for single-K-tile templates.
+            outputs = (
+                self._full_tile_epilogue_outputs(template_node, epilogue_nodes)
+                if self.tma_store
+                else []
+            )
+            inputs = (
+                self._full_tile_epilogue_inputs(template_node, epilogue_nodes)
+                if self.tma_load_for_template_epilogue
+                else []
+            )
+            kept = tma_store_outputs_within_budget(
+                outputs + inputs, self._epilogue_tma_store_budget()
+            )
+            if self.tma_store:
+                self.tma_store_epilogue_outputs = OrderedSet(
+                    name for name, _ in outputs if name in kept
+                )
+            self.tma_load_epilogue_inputs = OrderedSet(
+                name for name, _ in inputs if name in kept
             )
         with self:
             partial_code = render()
@@ -2631,7 +2722,9 @@ class TritonTemplateKernel(TritonKernel):
                         dtype=v.dtype,
                         shape=shape,
                     )
-            var = load(name, index)
+            var = (None if columns else self._tile_tma_load(name, index)) or load(
+                name, index
+            )
             if record:
                 tile_loads[(name, key)] = var
             return var
@@ -2642,7 +2735,9 @@ class TritonTemplateKernel(TritonKernel):
         header, init, tail = self.body, IndentedBuffer(), IndentedBuffer()
         tile_tma_store_ctx = (
             (tile_syms, origin, (rows, cols))
-            if self.tma_store and not partial and subtiles == 1
+            if (self.tma_store or self.tma_load_epilogue_inputs)
+            and not partial
+            and subtiles == 1
             else None
         )
         with (
