@@ -828,20 +828,15 @@ def generic_jump(
         if exc is None:
             raise AssertionError("expected exc is not None to be true")
 
-        try:
-            # compile a partial subgraph prefix then skip the rest of user code
-            if self.maybe_has_backedge():
-                self.raise_loop_graph_break(self.f_code, exc)
+        # compile a partial subgraph prefix then skip the rest of user code
+        if self.maybe_has_backedge():
+            self.raise_loop_graph_break(self.f_code, exc)
 
-            self.log_graph_break(
-                self.code_options,
-                reason=str(exc),
-                exc=exc,
-            )
-        finally:
-            # exc's traceback holds this frame; keeping it bound would pin the
-            # frame and the Dynamo stack above it in a reference cycle.
-            del exc
+        self.log_graph_break(
+            self.code_options,
+            reason=str(exc),
+            exc=exc,
+        )
 
         self.push(value)
         log.debug("generic_jump triggered compile")
