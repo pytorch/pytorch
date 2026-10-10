@@ -1154,6 +1154,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
                 updated_grad = updated_grad.clone(source=None, mutation_type=None)
                 tx.output.side_effects.store_attr(variable, "grad", updated_grad)
+                if not variable.source:
+                    tx.output.sourceless_leaf_grad_accumulated = True
                 return ConstantVariable.create(None)
             if len(args) == 3 and not kwargs:
                 variable, variable_grad, new_grad = args
@@ -1173,6 +1175,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     "grad",
                     updated_grad.clone(source=None, mutation_type=None),
                 )
+                if not variable.source:
+                    tx.output.sourceless_leaf_grad_accumulated = True
                 return updated_grad
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.accumulate_grad_no_alias),

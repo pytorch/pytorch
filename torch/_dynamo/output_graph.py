@@ -763,6 +763,9 @@ class OutputGraph(OutputGraphCommon):
         # (e.g., nn.Parameter via tracable_create_parameter). These need to be
         # tracked separately from input_source_to_var for backward() auto-detection.
         self.leaf_var_creation_order: list[VariableTracker] = []
+        # Whether .grad was accumulated in-graph into a source-less leaf. Its
+        # .grad side effect may be pruned as dead, but the .grad can escape.
+        self.sourceless_leaf_grad_accumulated = False
         self.export = export
         self.export_constraints = export_constraints  # type: ignore[assignment]
         self.frame_state = frame_state
@@ -2800,6 +2803,20 @@ class OutputGraph(OutputGraphCommon):
                 edges.add(torch.autograd.graph._get_grad_fn_or_grad_acc(example_value))
         return edges
 
+    def _leaf_grad_edge_observable(self, tainted_nodes: set[torch.fx.Node]) -> bool:
+        """Whether dropping the gradient edge into a source-less leaf is observable.
+
+        A hook on a tainted tensor never fires if its gradient is only on the
+        dropped path. A .grad accumulated in-graph (e.g. by backward()) can
+        escape, and in eager a later backward would accumulate into it in place.
+        """
+        from torch._higher_order_ops.register_hook import register_hook_op
+
+        return self.sourceless_leaf_grad_accumulated or any(
+            n.meta.get("has_backward_hook") or n.target is register_hook_op
+            for n in tainted_nodes
+        )
+
     def _check_requires_grad_intermediate_outputs(
         self, rv: list["VariableTracker"], tx: "InstructionTranslatorBase"
     ) -> None:
@@ -2818,14 +2835,12 @@ class OutputGraph(OutputGraphCommon):
         stays differentiable and its backward into every graph input matches
         eager. The only edge dropped is the one into the source-less leaf, which
         is unobservable since the leaf itself is never let out (as an output it
-        reaches no graph input). Backward hooks on tainted tensors could observe
-        it, so they keep the graph break. This is the
-        ``energy -> autograd.grad(create_graph=True) -> force`` pattern of
+        reaches no graph input). Hooks and in-graph .grad accumulation can
+        observe it, so they keep the graph break (see _leaf_grad_edge_observable).
+        This is the ``energy -> autograd.grad(create_graph=True) -> force`` pattern of
         force-supervised training, where the force is returned so that a loss
         on it can be backpropagated into the parameters.
         """
-        from torch._higher_order_ops.register_hook import register_hook_op
-
         from .variables.tensor import TensorVariable
 
         # Collect FX nodes for source-less requires_grad_() intermediates
@@ -2858,13 +2873,11 @@ class OutputGraph(OutputGraphCommon):
                 # Differentiable w.r.t. a graph input: AOTAutograd keeps the
                 # output differentiable and its backward reaches that input.
                 if input_edges is None:
-                    # A hook on a tainted tensor never fires if its gradient is
-                    # only on the dropped path into the source-less leaf.
-                    hooked = any(
-                        n.meta.get("has_backward_hook") or n.target is register_hook_op
-                        for n in tainted_nodes
+                    input_edges = (
+                        set()
+                        if self._leaf_grad_edge_observable(tainted_nodes)
+                        else self._requires_grad_input_edges()
                     )
-                    input_edges = set() if hooked else self._requires_grad_input_edges()
                 if input_edges:
                     fake_tensor = var.as_proxy().node.meta.get("example_value")
                     if isinstance(fake_tensor, torch.Tensor):
@@ -3732,6 +3745,7 @@ class OutputGraph(OutputGraphCommon):
         self.tracing_context.clear()
         self.input_source_to_var.clear()
         self.leaf_var_creation_order.clear()
+        self.sourceless_leaf_grad_accumulated = False
         self.unspec_variable_map.clear()
         self.backward_state.clear()
 
