@@ -241,6 +241,9 @@ it.
 # so concurrent backend="inductor" captures lower one at a time. The make_fx trace,
 # on either backend, is serialized by the reentrant _CAPTURE_LOCK, taken before
 # _COMPILE_LOCK whenever both are held (MakeFxTracer's docstring has the rules).
+# torch.compiler.export_python also holds _CAPTURE_LOCK across an artifact's whole
+# materialization (capture, lowering, file write, exec) and its first launch, so a
+# concurrent capture waits for all of that, not just a trace.
 #
 # tracer: the capture front-end, orthogonal to backend. MakeFxTracer is the non-strict
 # trace everything above describes (the invariants, the contract). DynamoTracer (the
@@ -442,12 +445,12 @@ def _graph_rng_devices(gm: torch.fx.GraphModule) -> set[torch.device] | None:
             continue
         if not (
             isinstance(target, torch._ops.OpOverload)
-            and target.name().startswith("aten::")
+            and target.name().startswith(("aten::", "prims::"))
         ):
             # Fail closed: an opaque op (a custom op, or a HOP such as a user Triton
             # kernel) can draw inside its own kernel with nothing in the graph to say so.
             return None
-        if not _op_can_draw(node) or _node_arg(node, "generator") is not None:
+        if not _op_can_draw(node) or _explicit_generator_draw(gm, node):
             continue
         val = node.meta.get("val")
         if isinstance(val, (tuple, list)):
@@ -461,6 +464,23 @@ def _graph_rng_devices(gm: torch.fx.GraphModule) -> set[torch.device] | None:
 def _rng_devices_indicate_a_draw(drawn: set[torch.device] | None) -> bool:
     """None means "could be any generator"; a non-empty set names them."""
     return drawn is None or bool(drawn)
+
+
+def _explicit_generator_draw(gm: torch.fx.GraphModule, node: torch.fx.Node) -> bool:
+    gen = _node_arg(node, "generator")
+    if isinstance(gen, torch.fx.Node):
+        gen = operator.attrgetter(cast(str, gen.target))(gm)
+    if not isinstance(gen, torch.Generator):
+        return gen is not None
+    # make_fx stashes a new wrapper of the caller's generator, so compare the generator
+    # it wraps: naming a device's default generator is a draw from that default.
+    if gen.device.type == "cpu":
+        default = torch.default_generator
+    elif gen.device.index is None:
+        return True
+    else:
+        default = torch._C._accelerator_getDefaultGenerator(gen.device.index)
+    return gen._cdata != default._cdata
 
 
 class _CaptureRngState:
@@ -478,16 +498,14 @@ class _CaptureRngState:
             self._cpu = torch.random.get_rng_state().clone()
             self._devices = []
             self._states = []
-            self._unsnapshotted: list[torch.device] = []
             for device in _capture_rng_devices(args):
                 try:
                     module = torch.get_device_module(device.type)
                     state = module.get_rng_state(device).clone()
                 except Exception:
                     # Reading a generator can fail (a fake tensor naming a device this
-                    # host does not have). Record it so settle can report it, rather
-                    # than dying with a bare driver error here or dropping it silently.
-                    self._unsnapshotted.append(device)
+                    # host does not have). Leave it unsaved, rather than dying with a
+                    # bare driver error here; settle warns if the graph could draw on it.
                     continue
                 self._devices.append((module, device))
                 self._states.append(state)
@@ -517,11 +535,8 @@ class _CaptureRngState:
             # be rewound, and the capturing run will not reproduce on load.
             live = _capture_rng_devices(args) if drawn is None else drawn
             saved = {device for _module, device in self._devices}
-            missed = sorted(
-                {d for d in live if d.type != "cpu" and d not in saved}
-                | set(self._unsnapshotted),
-                key=str,
-            )
+            accel = getattr(torch.accelerator.current_accelerator(), "type", None)
+            missed = sorted({d for d in live if d.type == accel} - saved, key=str)
             if missed:
                 log.warning(
                     "precompile: the captured graph may draw on %s, whose generator "
@@ -541,8 +556,7 @@ class _CaptureRngState:
                 getattr(fn, "__name__", "fn"),
             )
         if any(
-            _op_can_draw(n) and _node_arg(n, "generator") is not None
-            for n in gm.graph.nodes
+            _op_can_draw(n) and _explicit_generator_draw(gm, n) for n in gm.graph.nodes
         ):
             # Its state could not be saved before capture named it, and rewinding the
             # default generator of its device instead would replay unrelated draws.
@@ -685,17 +699,17 @@ class MakeFxTracer:
     containing no op that can draw leaves the generators untouched even if a concurrent
     thread advanced them. Every op tagged ``nondeterministic_seeded`` counts as a draw
     on its output's device unless a literal argument proves it cannot
-    (``dropout_p=0.0``, ``train=False``), and an op that is not an aten op (a custom op,
-    a higher-order op) could draw from any generator, so every saved one is restored. A
-    draw through an explicit ``torch.Generator`` is left advanced with a warning, and no
-    default generator is rewound for it. When a restore does happen it rewinds any draw
-    a concurrent thread made while the trace ran, so capture random computations before
-    starting threads that share the default generator. The restore happens once the
-    graph is traced, so a capture rejected after that still restores; one that fails
-    mid-trace has no graph to attribute draws to and restores nothing. The CPU generator
-    is always saved; of the current accelerator (CUDA, XPU, MPS, ...) only an
-    already-initialized current device and the devices reachable from the arguments are,
-    and a draw on any other device warns and is left as-is.
+    (``dropout_p=0.0``, ``train=False``), and an op that is not an aten or prims op (a
+    custom op, a higher-order op) could draw from any generator, so every saved one is
+    restored. A draw through an explicit ``torch.Generator`` is left advanced with a
+    warning, and no default generator is rewound for it. When a restore does happen it
+    rewinds any draw a concurrent thread made while the trace ran, so capture random
+    computations before starting threads that share the default generator. The restore
+    happens once the graph is traced, so a capture rejected after that still restores;
+    one that fails mid-trace has no graph to attribute draws to and restores nothing.
+    The CPU generator is always saved; of the current accelerator (CUDA, XPU, MPS, ...)
+    only an already-initialized current device and the devices reachable from the
+    arguments are, and a draw on any other device warns and is left as-is.
     """
 
     decompositions: dict | None = None
@@ -1965,7 +1979,8 @@ class _Capture:
 
 _GENERATED_HEADER = """\
 # Generated by torch.compiler.precompile. Editing it is supported: this source is
-# what runs, so an edit here takes effect on the next load.
+# what runs. An edited file no longer matches the code_hash in its cache, so run it
+# directly as below rather than through load(artifact_path, cache_path).
 #
 # This is a SELF-CONTAINED, EXECUTABLE artifact: it runs on its own, needing no
 # companion cache. You provide the model(s) at runtime, exactly as the original fn
@@ -2235,7 +2250,9 @@ def _build_python_source(
 
 _EAGER_GENERATED_HEADER = """\
 # Generated by torch.compiler.precompile (backend="eager"). Editing it is supported:
-# this source is what runs, so an edit here takes effect on the next load.
+# this source is what runs. An edited file no longer matches the code_hash in its
+# cache, so run it directly
+# as below rather than through load(artifact_path, cache_path).
 #
 # Self-contained, executable artifact: the captured ATen graph is inlined below (both
 # the human-readable rendering and the executable code) and runs on its own. Provide
@@ -3455,8 +3472,10 @@ def _runnable_from_pair(
                     "cache does not match python_code (its code_hash "
                     f"{blob.get('code_hash')!r} != sha256(python_code) "
                     f"{expected_code_hash!r}); the cache and python_code came from "
-                    "different precompile captures. Pair each cache with the "
-                    "python_code from the same capture."
+                    "different precompile captures, or python_code was edited after "
+                    "capture. Pair each cache with the unedited python_code from the "
+                    "same capture, or run an edited python_code directly with "
+                    "runpy.run_path."
                 )
             artifact = blob.get("artifact")
     except PrecompileError:
@@ -3678,4 +3697,6 @@ def load(
     """
     torch._C._log_api_usage_once("torch.compiler.precompile.load")
     python_code, cache = _read_artifact(artifact_path, cache_path)
-    return _runnable_from_pair(python_code, cache, filename=os.fspath(artifact_path))
+    return _runnable_from_pair(
+        python_code, cache, filename=os.path.abspath(artifact_path)
+    )
