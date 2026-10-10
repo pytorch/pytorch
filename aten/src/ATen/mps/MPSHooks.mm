@@ -26,9 +26,13 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
       switch (minor) {
         case 0:
           return is_macos_at_least(MacOSVersion::MACOS_26_0);
+        case 2:
+          return is_macos_at_least(MacOSVersion::MACOS_26_2);
+        case 4:
+          return is_macos_at_least(MacOSVersion::MACOS_26_4);
         default:
-          TORCH_WARN("Can't check whether running on 26.", minor, "+ returning one for 26.0+");
-          return is_macos_at_least(MacOSVersion::MACOS_26_0);
+          TORCH_WARN("Can't check whether running on 26.", minor, "+ returning one for 26.4+");
+          return is_macos_at_least(MacOSVersion::MACOS_26_4);
       }
     case 15:
       switch (minor) {
@@ -41,15 +45,6 @@ bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
           return is_macos_at_least(MacOSVersion::MACOS_15_1);
       }
     case 14:
-      switch (minor) {
-        case 0:
-          return true;
-        case 4:
-          return is_macos_at_least(MacOSVersion::MACOS_14_4);
-        default:
-          TORCH_WARN("Can't check whether running on 14.", minor, "+ returning one for 14.4+");
-          return is_macos_at_least(MacOSVersion::MACOS_14_4);
-      }
     case 13:
       return true;
     default:
@@ -70,23 +65,35 @@ Generator MPSHooks::getNewGenerator([[maybe_unused]] DeviceIndex device_index) c
   return make_generator<at::MPSGeneratorImpl>();
 }
 
+// Unlike commitStream()/getCommandBuffer() below, every caller of this one
+// (torch.mps.synchronize() and torch::mps::synchronize()) is off the serial
+// queue, so it has to take the queue itself: synchronize() ends and releases
+// the encoder, which races whichever thread is mid-encode.
 void MPSHooks::deviceSynchronize() const {
-  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
+  at::mps::synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
 }
 
+// torch::mps::commit() and get_command_buffer() are encoding-time calls: per
+// torch/mps.h the caller drives them from inside a dispatch_sync() on
+// get_dispatch_queue(), so they must not dispatch again. Assert that contract
+// rather than leave it to the docs -- dispatching here would trap on re-entry,
+// and running off-queue would race whoever owns the encoder.
 void MPSHooks::commitStream() const {
-  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT);
+  auto stream = at::mps::getCurrentMPSStream();
+  dispatch_assert_queue(stream->queue());
+  stream->synchronize(SyncType::COMMIT);
 }
 
 void* MPSHooks::getCommandBuffer() const {
-  auto stream = at::mps::getDefaultMPSStream();
+  auto stream = at::mps::getCurrentMPSStream();
+  dispatch_assert_queue(stream->queue());
   // Release pending computeCommandEncoder, as extensions is likely to allocate new one
   stream->endKernelCoalescing();
   return stream->commandBuffer();
 }
 
 void* MPSHooks::getDispatchQueue() const {
-  return at::mps::getDefaultMPSStream()->queue();
+  return at::mps::getCurrentMPSStream()->queue();
 }
 
 void MPSHooks::emptyCache() const {

@@ -15,6 +15,7 @@ from torch._dynamo.eval_frame import (
     _get_total_cache_entry_count,
 )
 from torch._dynamo.exc import FailOnRecompileLimitHit
+from torch._dynamo.types import FrameAction, FrameExecStrategy
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1117,6 +1118,46 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
 
     # ===== Default strategy × region: SKIP inherited, RUN_ONLY not =====
 
+    def test_isolate_recompiles_late_global_skip_overrides_region(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        opt = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+        region = opt._isolate_recompiles_id
+        self.assertNotEqual(region, -1)
+        opt(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(_get_cache_entries_for_region(f, region)), 1)
+
+        torch._dynamo.eval_frame.skip_code(f.__code__)
+        x = torch.randn(4)
+        self.assertEqual(opt(x), f(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(_get_cache_entries_for_region(f, region)), 1)
+
+    def test_isolate_recompiles_global_recursive_skip_precedence(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return y.cos()
+
+        opt = torch.compile(f, backend=cnt, dynamic=False, isolate_recompiles=True)
+        self.assertNotEqual(opt._isolate_recompiles_id, -1)
+        opt(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 2)
+
+        torch._dynamo.eval_frame.set_code_exec_strategy(
+            f.__code__,
+            FrameExecStrategy(FrameAction.DEFAULT, FrameAction.SKIP),
+        )
+        opt(torch.randn(4))
+
+        self.assertEqual(cnt.frame_count, 3)
+
     def test_isolate_recompiles_inherits_default_skip(self):
         """Global SKIP (from skip_code / @torch._dynamo.skip / FX plumbing /
         TorchScript __init__ / etc.) is a correctness decision — the code
@@ -1178,6 +1219,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
     # ===== Cache internals: insertion order, fallback, shared bucket =====
 
     @torch._dynamo.config.patch(recompile_limit=2, automatic_dynamic_shapes=False)
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_isolate_recompiles_insertion_order_per_region(self):
         """New entries are added at the front of their region's list.
         Interleaved compilations across regions don't mix ordering.
@@ -1227,6 +1269,7 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(_get_cache_entries_for_region(f, id_b)), 2)
 
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_isolate_recompiles_lru_move_to_front(self):
         """On a cache hit, the matched entry moves to the front of its
         region's list (LRU). Verify by inspecting compile_id ordering
