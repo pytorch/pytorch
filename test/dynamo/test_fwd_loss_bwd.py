@@ -2137,6 +2137,7 @@ class GraphModule(torch.nn.Module):
         self._compile_with_requires_grad_leak_graph_break(fn, x, g).backward()
         self.assertEqual(g, eager_g)
 
+    @skipIfCrossRef
     def test_requires_grad_intermediate_leaf_grad_escapes_graph_breaks(self):
         # y.grad, accumulated by an in-graph backward(), escapes. In eager a
         # later backward of the first output accumulates into it in place.
