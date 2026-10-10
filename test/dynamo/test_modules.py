@@ -3,6 +3,7 @@
 
 import collections
 import copy
+import inspect
 import itertools
 import os
 import tempfile
@@ -1317,6 +1318,33 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
 
+    def test_rnn_graph_break_resumes_after_call(self):
+        class RecurrentModel(torch.nn.Module):
+            def __init__(self, recurrent_cls) -> None:
+                super().__init__()
+                self.pre = torch.nn.Linear(8, 8)
+                self.rnn = recurrent_cls(8, 8, batch_first=True)
+                self.post = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                x = self.pre(x)
+                x, _ = self.rnn(x)
+                return self.post(x[:, -1, :])
+
+        inp = torch.randn(2, 3, 8)
+
+        for recurrent_cls in (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM):
+            with self.subTest(recurrent_cls=recurrent_cls):
+                m = RecurrentModel(recurrent_cls).eval()
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_m = torch.compile(m, backend=cnt)
+
+                r = opt_m(inp)
+
+                self.assertTrue(torch._dynamo.testing.same(r, m(inp)))
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(cnt.op_count, 3)
+
     @patch.object(torch._dynamo.config, "allow_unspec_int_on_nn_module", True)
     def test_self_mutating1(self):
         m1 = torch.nn.Linear(10, 10)
@@ -1859,6 +1887,24 @@ class MockModule(torch.nn.Module):
 
 class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_wrapping_does_not_use_getattr_static(self):
+        # Wrapping a module can happen while the eval frame callback is
+        # installed (compiled autograd compiles the backward graph that way),
+        # and Dynamo then intercepts and traces CPython's inspect internals.
+        # Use _static_getattr instead (gh-190500).
+        seen = []
+        orig = inspect.getattr_static
+
+        def spy(obj, name, default=None):
+            seen.append(name)
+            return orig(obj, name, default)
+
+        with patch("inspect.getattr_static", spy):
+            torch.compile(MockModule(), backend="eager")
+
+        static = [n for n in seen if n in ("_initialize_hook", "get_compiler_config")]
+        self.assertFalse(static, "should be looked up with _static_getattr")
 
     def test_nn_module(self):
         mod = MockModule()
