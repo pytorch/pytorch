@@ -761,19 +761,25 @@ class TestDecomp(TestCase):
     @onlyCPU
     def test_log_sigmoid_forward_buffer_shape(self, device):
         # The buffer output of aten.log_sigmoid_forward is only consumed by the
-        # CPU backward kernel (log_sigmoid_backward_cpu); accelerator kernels
-        # (CUDA/XPU/MPS/PrivateUse1) allocate an empty (0,) buffer and ignore it
-        # (see the NOTE comments in log_sigmoid_backward_{cuda,mps}). The
+        # CPU backward kernel (log_sigmoid_backward_cpu); the accelerator
+        # forward kernels (log_sigmoid_forward_{cuda,mps}, and the registered
+        # PrivateUse1 backend) allocate an empty (0,) buffer and ignore it. The
         # decomposition used for FakeTensor shape inference must match the real
         # kernels, otherwise torch.compile/export raise a MetadataMismatchError
         # (see log_sigmoid_forward in torch/_decomp/decompositions.py). The
         # assertions pivot on fake/meta devices and are independent of the
         # injected `device`.
         with FakeTensorMode():
+            # Resolved at runtime so renamed PrivateUse1 trees (e.g. npu) are
+            # covered too; the explicit :0 index skips _pin_device_index,
+            # which would getattr(torch, "privateuseone") and fail on trees
+            # where the backend module is absent.
+            privateuse1 = torch._C._get_privateuse1_backend_name()
             for fake_device, expected_shape in (
                 ("cpu", (3,)),
                 ("cuda", (0,)),
                 ("mps", (0,)),
+                (f"{privateuse1}:0", (0,)),
             ):
                 _, buffer = torch.ops.aten.log_sigmoid_forward(
                     torch.randn(3, device=fake_device)

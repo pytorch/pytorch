@@ -3559,12 +3559,16 @@ def log_sigmoid_forward(self: Tensor) -> tuple[Tensor, Tensor]:
     z = torch.exp(-torch.abs(self))
     # Note [log_sigmoid_forward buffer contract]: The buffer output is only
     # consumed by the CPU backward kernel (log_sigmoid_backward_cpu). The
-    # CUDA/XPU/MPS kernels allocate an empty (0,) buffer and ignore it (see
-    # the NOTE comments in log_sigmoid_backward_{cuda,mps}), and we verified
-    # the same on a PrivateUse1 device. Meta tensors follow the CPU branch:
-    # this op has no Meta kernel, so this decomposition defines its meta
-    # behavior, matching aten on meta inputs. Backends not listed below keep
-    # the historical full-shape buffer.
+    # CUDA and MPS forward kernels allocate an empty (0,) buffer and ignore
+    # it (log_sigmoid_forward_{cuda,mps}; the same NOTE also appears in some
+    # backward and out variants, e.g. log_sigmoid_backward_cuda and
+    # log_sigmoid_forward_out_mps). PrivateUse1 backends follow the
+    # accelerator semantics (verified on the registered torch_npu backend).
+    # Meta tensors follow the CPU branch: this op has no Meta kernel, and
+    # this decomposition is what activate_meta()
+    # (torch/_meta_registrations.py) registers as its Meta kernel, so it
+    # defines its own meta behavior. Backends not listed below keep the
+    # historical full-shape buffer.
     if self.is_cpu or self.is_meta:
         buffer = z
     elif (
