@@ -1352,13 +1352,12 @@ TORCH_IMPL_FUNC(upsample_bilinear2d_backward_out_cuda) (
   upsample_bilinear2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
 #else
+  // See Note [Enabling Deterministic Operations]
+  // Use alternate implementation which avoids atomicAdd
   if (globalContext().deterministicAlgorithms()) {
     upsample_bilinear2d_backward_out_cuda_template_deterministic(
         grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
   } else {
-    // See Note [Writing Nondeterministic Operations]
-    // Nondeterministic because of atomicAdd usage
-    globalContext().alertNotDeterministic("upsample_bilinear2d_backward_out_cuda");
     upsample_bilinear2d_backward_out_cuda_template(
         grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
   }
