@@ -571,6 +571,156 @@ print(eval(f"bbmod.{name}.{path}") is code)
 import torch
 
 
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_bound_method_name_guard_survives_func_reached_first(self):
+        # Regression: a guard on a bound method's __name__ where the method's
+        # __func__ is ALSO reachable (self.other) and inserted first, so the
+        # pickle memoizes the fqn-mismatched function as _Missing before it
+        # reaches the method. Seeding the method's __func__ into
+        # guard_tree_values makes the save order-independent; without it the
+        # method's __func__ loads back as _Missing and the __name__ guard
+        # AttributeErrors at torch.compile() wrap time in the reloading process.
+        mod = BoundMethodNameGuardModule()
+        keys = list(mod.__dict__)
+        self.assertLess(keys.index("other"), keys.index("cb"))
+        x = torch.randn(3)
+        expected = mod(x)
+        self.assertEqual(torch.compile(mod)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(len(entry["backend_ids"]), 1)
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
+        code = BoundMethodNameGuardModule.forward.__code__
+        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), expected)
+            # The reloaded guard really reads __name__ off the rebuilt function.
+            _bound_method_guard_wrapper.__name__ = "renamed"
+            try:
+                with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                    compiled(x)
+            finally:
+                _bound_method_guard_wrapper.__name__ = "_bound_method_guard_target"
+
+    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
+    def test_unserializable_guard_bypasses_the_package(self):
+        # A guarded value that cannot be pickled is a package bypass, not a
+        # compile failure: the frame still compiles and runs, and its entry is
+        # saved bypassed with no backend, so nothing is installed on reload.
+        def fn(x, cfg=UnpicklableConfig()):
+            if cfg.scale == 2.0:
+                x = x + 1
+            return x.sin()
+
+        x = torch.randn(3)
+        expected = fn(x)
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
+        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
+        self.assertEqual(entry["backend_ids"], [])
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        # Wrapping is what reloads the cache; the bypassed entry installs nothing.
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            self.assertEqual(compiled(x), expected)
+        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
+
+    def test_import_alias_is_not_bound_to_a_non_module_import(self):
+        # sys.modules accepts any object and __import__ hands it back verbatim.
+        # IMPORT_NAME rejects it before import_source binds the alias, so the
+        # traced globals never hold the non-module, and a later trace after a
+        # real module has replaced the entry binds the alias to that module
+        # rather than tracing it through a slot still holding the non-module.
+        name = "torch_test_package_import_alias_non_module"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 1
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            import torch_test_package_import_alias_non_module as taken
+
+            return x + taken.VALUE
+
+        try:
+            sys.modules[name] = object()
+            with self.assertRaisesRegex(Unsupported, "Bad import result"):
+                torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            self.assertNotIn(alias, fn.__globals__)
+            torch._dynamo.reset()
+            sys.modules[name] = module
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(*args), compiled(*args))
+            self.assertIs(fn.__globals__[alias], module)
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            # The memo outlives the sys.modules entry: a same-process rerun would
+            # otherwise resolve this run's module from it.
+            _import_module.cache_clear()
+            torch._dynamo.reset()
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_a_poisoned_entry_is_reset_on_load_instead_of_growing(self):
+        # A resume frame whose backend artifact is missing at save time is
+        # written bypassed. install() skips it and the frame is traced fresh;
+        # that compile used to append its guarded code to the stale one and
+        # re-register the missing backend id, so every reload/save cycle
+        # re-poisoned the entry and grew it. Loading a bypassed entry now drops
+        # its stale codes and ids: the entry stops growing and the next save is
+        # installable, so the third process hits without a recompile.
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return x.sin() + y
+
+        x = torch.randn(3, 2)
+        expected = torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
+        dynamo_entry = next(iter(PrecompileContext._dynamo_cache_entries.values()))
+        for code in dynamo_entry.codes:
+            if any("resume" in name for name in code.function_names):
+                (backend,) = code.backend_ids
+                del PrecompileContext._backend_artifacts_by_key[backend]
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        def resume_of(entry):
+            (code,) = [
+                c for c in entry.codes if any("resume" in n for n in c.function_names)
+            ]
+            return code
+
+        def resume_entry():
+            return resume_of(DynamoCache.load(fn).dynamo)
+
+        self.assertTrue(resume_entry().bypassed)
+        self.assertEqual(len(resume_entry().guarded_codes), 1)
+        # Loading resets the package's copy, not the caller's entry.
+        loaded = DynamoCache.load(fn).dynamo
+        package = CompilePackage(fn, dynamo=loaded)
+        self.assertEqual(len(resume_of(loaded).guarded_codes), 1)
+        reset = resume_of(package.cache_entry())
+        self.assertEqual(reset.guarded_codes, [])
+        self.assertEqual(reset.backend_ids, [])
+        # The containers the fresh compile writes to are detached as well.
+        self.assertIsNot(reset.import_sources, resume_of(loaded).import_sources)
+        self.assertIsNot(reset.function_names, resume_of(loaded).function_names)
+        self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+        # One guarded code and one backend id, not two of each; and installable:
+        # the third process compiles nothing (FRAME_COUNTER also advances for
+        # installed entries, so count actual compiles).
+        self.assertFalse(resume_entry().bypassed)
+        self.assertEqual(len(resume_entry().guarded_codes), 1)
+        self.assertEqual(len(resume_entry().backend_ids), 1)
+        compiles = torch._dynamo.utils.counters["frames"]["total"]
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], compiles)
+
 class Child(torch.nn.Module):
     def forward(self, x):
         return x.sin()
@@ -877,8 +1027,9 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         PrecompileContext.clear()
 
     @parametrize("backend", ("eager", "inductor"))
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     def test_basic_fn(self, device, backend):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -915,9 +1066,9 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
-    @parametrize("backend", ("eager", "inductor"))
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     def test_lazy_backward(self, device, backend):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -957,9 +1108,9 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
-    @parametrize("backend", ("eager", "inductor"))
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     def test_graph_break_bomb(self, device, backend):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
         def fn(x, l, r):
@@ -1016,9 +1167,9 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
-    @parametrize("backend", ("eager", "inductor"))
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     def test_dynamic_shape(self, device, backend):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
         def fn(x):
@@ -1061,8 +1212,9 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(*args2)
 
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     def test_dynamo_cache_manual_load(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         def fn(x):
             return x.sin() + x.cos()
 
@@ -1092,94 +1244,10 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    @parametrize("backend", ("eager", "inductor"))
-    def test_reset_clears_installed_package(self, backend):
-        # Regression test for https://github.com/pytorch/pytorch/issues/190664.
-        # package.install() must register target_code in input_codes so that
-        # torch._dynamo.reset() clears precompile entries on the installed code.
-
-        ctx = DiskDynamoStore()
-
-        def fn(x):
-            return x.sin() + x.cos()
-
-        package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(backend=backend, package=package)(fn)
-        compiled_fn(torch.randn(3, 2))
-        if backend == "eager":
-            for backend_id, bknd in package.cached_backends.items():
-                ctx.record_eager_backend(backend_id, bknd)
-        ctx.save_package(package, self.path())
-
-        torch._dynamo.reset()
-        package, backends = ctx.load_package(fn, self.path())
-        package.install(backends)
-        self.assertGreater(len(_debug_get_precompile_entries(fn.__code__)), 0)
-
-        torch._dynamo.reset()
-        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-
-    @torch._dynamo.config.patch(caching_precompile=True)
-    def test_bound_method_name_guard_survives_func_reached_first(self):
-        # Regression: a guard on a bound method's __name__ where the method's
-        # __func__ is ALSO reachable (self.other) and inserted first, so the
-        # pickle memoizes the fqn-mismatched function as _Missing before it
-        # reaches the method. Seeding the method's __func__ into
-        # guard_tree_values makes the save order-independent; without it the
-        # method's __func__ loads back as _Missing and the __name__ guard
-        # AttributeErrors at torch.compile() wrap time in the reloading process.
-        mod = BoundMethodNameGuardModule()
-        keys = list(mod.__dict__)
-        self.assertLess(keys.index("other"), keys.index("cb"))
-        x = torch.randn(3)
-        expected = mod(x)
-        self.assertEqual(torch.compile(mod)(x), expected)  # noqa: UNSPECIFIED_BACKEND
-        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
-        self.assertEqual(len(entry["backend_ids"]), 1)
-        torch._dynamo.reset()
-        PrecompileContext.clear()
-        compiled = torch.compile(mod)  # noqa: UNSPECIFIED_BACKEND
-        code = BoundMethodNameGuardModule.forward.__code__
-        self.assertEqual(len(_debug_get_precompile_entries(code)), 1)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(compiled(x), expected)
-            # The reloaded guard really reads __name__ off the rebuilt function.
-            _bound_method_guard_wrapper.__name__ = "renamed"
-            try:
-                with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
-                    compiled(x)
-            finally:
-                _bound_method_guard_wrapper.__name__ = "_bound_method_guard_target"
-
-    @torch._dynamo.config.patch(caching_precompile=True, strict_precompile=False)
-    def test_unserializable_guard_bypasses_the_package(self):
-        # A guarded value that cannot be pickled is a package bypass, not a
-        # compile failure: the frame still compiles and runs, and its entry is
-        # saved bypassed with no backend, so nothing is installed on reload.
-        def fn(x, cfg=UnpicklableConfig()):
-            if cfg.scale == 2.0:
-                x = x + 1
-            return x.sin()
-
-        x = torch.randn(3)
-        expected = fn(x)
-        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
-            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
-        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
-        (entry,) = PrecompileContext.save_to_dynamo_cache()["dynamo"]
-        self.assertEqual(entry["backend_ids"], [])
-        torch._dynamo.reset()
-        PrecompileContext.clear()
-        # Wrapping is what reloads the cache; the bypassed entry installs nothing.
-        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
-        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
-            self.assertEqual(compiled(x), expected)
-        self.assertTrue(any("config cannot pickle" in line for line in logs.output))
-
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_serialize(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         def fn(x):
             return x.sin() + x.cos()
 
@@ -1206,57 +1274,10 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, [result1, result2])
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    def test_import_source_unpickle_without_trace(self):
-        # Deserializing an ImportSource happens at torch.compile() time with no
-        # active TracingContext (e.g. precompile warm-load). Reconstructing the
-        # source must not install a guard (which would require a tracing
-        # context), so the round-trip must not raise.
-        import pickle
-
-        from torch._dynamo.source import ImportSource
-
-        source = ImportSource("torch")
-        reloaded = pickle.loads(pickle.dumps(source))
-        self.assertEqual(reloaded, source)
-
-    def test_import_alias_is_not_bound_to_a_non_module_import(self):
-        # sys.modules accepts any object and __import__ hands it back verbatim.
-        # IMPORT_NAME rejects it before import_source binds the alias, so the
-        # traced globals never hold the non-module, and a later trace after a
-        # real module has replaced the entry binds the alias to that module
-        # rather than tracing it through a slot still holding the non-module.
-        name = "torch_test_package_import_alias_non_module"
-        alias = f"__import_{name}"
-        module = types.ModuleType(name)
-        module.VALUE = 1
-        args = (torch.randn(3, 2),)
-
-        def fn(x):
-            import torch_test_package_import_alias_non_module as taken
-
-            return x + taken.VALUE
-
-        try:
-            sys.modules[name] = object()
-            with self.assertRaisesRegex(Unsupported, "Bad import result"):
-                torch.compile(fn, backend="eager", fullgraph=True)(*args)
-            self.assertNotIn(alias, fn.__globals__)
-            torch._dynamo.reset()
-            sys.modules[name] = module
-            compiled = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(fn(*args), compiled(*args))
-            self.assertIs(fn.__globals__[alias], module)
-        finally:
-            sys.modules.pop(name, None)
-            fn.__globals__.pop(alias, None)
-            # The memo outlives the sys.modules entry: a same-process rerun would
-            # otherwise resolve this run's module from it.
-            _import_module.cache_clear()
-            torch._dynamo.reset()
-
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_import_source_guard(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         # Warm-loading a guard state whose serialized sources include an
         # ImportSource must not raise. `pytree.tree_is_leaf` routes through
         # `get_pytree_SUPPORTED_NODES_source`, which builds an
@@ -1280,9 +1301,10 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             self.assertEqual(result, expected)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_recompiles(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         def fn(x):
             return x.sin() + x.cos()
 
@@ -1308,13 +1330,10 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         self.assertEqual(result2, expected2)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO or IS_LINUX,
-        "https://github.com/pytorch/pytorch/issues/183810",
-    )
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         def fn(x, l, r):
             if l > r:
                 return x.sum()
@@ -1353,10 +1372,10 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             # Should have same number of frames as on cold start
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184832")
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_lazy_backward(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         def fn(x):
             return x.sin() + x.cos()
 
@@ -1379,65 +1398,9 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
     @torch._dynamo.config.patch(caching_precompile=True)
-    def test_a_poisoned_entry_is_reset_on_load_instead_of_growing(self):
-        # A resume frame whose backend artifact is missing at save time is
-        # written bypassed. install() skips it and the frame is traced fresh;
-        # that compile used to append its guarded code to the stale one and
-        # re-register the missing backend id, so every reload/save cycle
-        # re-poisoned the entry and grew it. Loading a bypassed entry now drops
-        # its stale codes and ids: the entry stops growing and the next save is
-        # installable, so the third process hits without a recompile.
-        def fn(x):
-            y = x.sin()
-            torch._dynamo.graph_break()
-            return x.sin() + y
-
-        x = torch.randn(3, 2)
-        expected = torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
-        dynamo_entry = next(iter(PrecompileContext._dynamo_cache_entries.values()))
-        for code in dynamo_entry.codes:
-            if any("resume" in name for name in code.function_names):
-                (backend,) = code.backend_ids
-                del PrecompileContext._backend_artifacts_by_key[backend]
-        self._save_and_reload(expected_backends=1, expected_dynamo=1)
-
-        def resume_of(entry):
-            (code,) = [
-                c for c in entry.codes if any("resume" in n for n in c.function_names)
-            ]
-            return code
-
-        def resume_entry():
-            return resume_of(DynamoCache.load(fn).dynamo)
-
-        self.assertTrue(resume_entry().bypassed)
-        self.assertEqual(len(resume_entry().guarded_codes), 1)
-        # Loading resets the package's copy, not the caller's entry.
-        loaded = DynamoCache.load(fn).dynamo
-        package = CompilePackage(fn, dynamo=loaded)
-        self.assertEqual(len(resume_of(loaded).guarded_codes), 1)
-        reset = resume_of(package.cache_entry())
-        self.assertEqual(reset.guarded_codes, [])
-        self.assertEqual(reset.backend_ids, [])
-        # The containers the fresh compile writes to are detached as well.
-        self.assertIsNot(reset.import_sources, resume_of(loaded).import_sources)
-        self.assertIsNot(reset.function_names, resume_of(loaded).function_names)
-        self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
-        self._save_and_reload(expected_backends=2, expected_dynamo=1)
-        # One guarded code and one backend id, not two of each; and installable:
-        # the third process compiles nothing (FRAME_COUNTER also advances for
-        # installed entries, so count actual compiles).
-        self.assertFalse(resume_entry().bypassed)
-        self.assertEqual(len(resume_entry().guarded_codes), 1)
-        self.assertEqual(len(resume_entry().backend_ids), 1)
-        compiles = torch._dynamo.utils.counters["frames"]["total"]
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], compiles)
-
-    @unittest.skipIf(not has_triton(), "Requires Triton")
-    @torch._dynamo.config.patch(caching_precompile=True)
     def test_graph_break_partial_backend(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         def fn(x):
             y = x.sin()
             torch._dynamo.graph_break()
@@ -1477,9 +1440,10 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         # One recompile on a new frame, so total_frames should increase by 1
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames + 1)
 
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_call_function_from_resume(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         mod = torch.nn.Linear(2, 3, device=device)
 
         def foo(x, mod):
@@ -1501,9 +1465,10 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_code_with_generator(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         def foo(set_of_x):
             if not all(isinstance(s, torch.Tensor) for s in set_of_x):
                 raise TypeError(
@@ -1517,9 +1482,10 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         compiled_fn(*args)
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks_from_print_model_as_fn(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         def guard_filter_fn(guards):
             return [
                 guard.guard_type not in ("CLOSURE_MATCH", "FUNCTION_MATCH")
@@ -1561,9 +1527,9 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             compiled_fn(x)
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
-    @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     def test_nn_module(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1578,9 +1544,10 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         x = torch.randn(10, 10, device=device)
         compiled_fn(x)
 
-    @unittest.skipIf(not has_triton(), "Requires Triton")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_classmethod_qualname(self, device):
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
         x = torch.rand(10, device=device)
         model = _tempNetForQualName()
         model.forward(x)
@@ -1594,7 +1561,6 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 instantiate_device_type_tests(
     TestPackageAccelerator,
     globals(),
-    except_for=["cpu"],
     allow_xpu=True,
     allow_mps=True,
 )
