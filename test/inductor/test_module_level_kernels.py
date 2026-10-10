@@ -24,7 +24,12 @@ from torch._inductor.codegen.wrapper import (
 )
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
+from torch._inductor.utils import (
+    collect_defined_kernels,
+    fresh_cache,
+    is_big_gpu,
+    run_and_get_code,
+)
 from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -254,6 +259,15 @@ class TestModuleLevelKernels(TestCase):
         self.assertNotIn("async_compile.triton", code)
         self.assertEqual(result, torch.softmax(x, -1))
         self.assertEqual(_run_from_file(code, [x])[0], result)
+
+    @requires_cuda_and_triton
+    def test_collect_defined_kernels(self):
+        # Its define_kernel wrapper must forward standalone= and autotune_body=.
+        kernels = []
+        with collect_defined_kernels(kernels):
+            _code_for(_softmax, torch.randn(64, 128, device="cuda"))
+        self.assertTrue(kernels)
+        self.assertTrue(all("tl.store" in k for k in kernels), kernels)
 
     @requires_cuda_and_triton
     @parametrize("case", ["scan", "flex_attention"])
