@@ -27,6 +27,28 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+def _restore_blas_workspace_sizes(cublas_size: int, cublaslt_size: int) -> None:
+    torch._C._cuda_clearCublasWorkspaces()
+    torch.backends.cuda.cublas_workspace_size(cublas_size)
+    torch.backends.cuda.cublaslt_workspace_size(cublaslt_size)
+
+
+def _disable_blas_workspaces(dev: torch.device, add_cleanup) -> None:
+    # MemTracker accounts for tensor storages, while BLAS workspaces are raw
+    # caching-allocator allocations. ROCm allocates them per operation by
+    # default, up to 128 MiB each on gfx942 and gfx950, which distorts the
+    # accelerator peak used as ground truth, so disable both workspace kinds
+    # there.
+    if dev.type != "cuda" or not torch.version.hip:
+        return
+    cublas_size = torch.backends.cuda.cublas_workspace_size()
+    cublaslt_size = torch.backends.cuda.cublaslt_workspace_size()
+    add_cleanup(_restore_blas_workspace_sizes, cublas_size, cublaslt_size)
+    torch._C._cuda_clearCublasWorkspaces()
+    torch.backends.cuda.cublas_workspace_size(0)
+    torch.backends.cuda.cublaslt_workspace_size(0)
+
+
 def _init_cublas_workspace(dev: torch.device):
     lin = torch.nn.Linear(768, 768, device=dev)
     inp = torch.randn(1, 768, device=dev)
@@ -79,6 +101,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     ):
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
+        _disable_blas_workspaces(dev, self.addCleanup)
         _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
@@ -137,6 +160,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
         """
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
+        _disable_blas_workspaces(dev, self.addCleanup)
         _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
@@ -249,6 +273,7 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
             )
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
+        _disable_blas_workspaces(dev, self.addCleanup)
         _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)

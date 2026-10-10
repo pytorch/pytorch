@@ -69,13 +69,13 @@ inline void assertSameType(
     const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
   for (const auto& tensor : tensors) {
-    if (!tensor.options().type_equal(type.options())) {
-      const std::string expected = type.toString();
-      const std::string actual = tensor.toString();
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "mixed types (" + expected + " and " + actual + ")");
-    }
+    TORCH_CHECK_VALUE(
+        tensor.options().type_equal(type.options()),
+        "mixed types (",
+        type.toString(),
+        " and ",
+        tensor.toString(),
+        ")");
   }
 }
 
@@ -191,42 +191,38 @@ inline void assertSameSizes(
     const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
   for (const auto& tensor : tensors) {
-    if (!tensor.sizes().equals(sizes)) {
-      const auto expected = toString(sizes);
-      const auto actual = toString(tensor.sizes());
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "mixed sizes (" + expected + " and " + actual + ")");
-    }
+    TORCH_CHECK_VALUE(
+        tensor.sizes().equals(sizes),
+        "mixed sizes (",
+        toString(sizes),
+        " and ",
+        toString(tensor.sizes()),
+        ")");
   }
 }
 
 inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure we have at least one tensor
-  if (tensors.empty()) {
-    throw std::invalid_argument("argument is empty");
-  }
+  TORCH_CHECK_VALUE(!tensors.empty(), "argument is empty");
 
   // Ensure all tensors have identical type and shape
   auto options = tensors[0].options();
   auto sizes = tensors[0].sizes();
   for (const auto i : c10::irange(1, tensors.size())) {
-    if (!tensors[i].options().type_equal(options)) {
-      const auto expected = toString(options);
-      const auto actual = toString(tensors[i].options());
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "argument contains mixed types (" + expected + " and " + actual +
-          ")");
-    }
-    if (!tensors[i].sizes().equals(sizes)) {
-      const auto expected = toString(sizes);
-      const auto actual = toString(tensors[i].sizes());
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "argument contains mixed types (" + expected + " and " + actual +
-          ")");
-    }
+    TORCH_CHECK_VALUE(
+        tensors[i].options().type_equal(options),
+        "argument contains mixed types (",
+        toString(options),
+        " and ",
+        toString(tensors[i].options()),
+        ")");
+    TORCH_CHECK_VALUE(
+        tensors[i].sizes().equals(sizes),
+        "argument contains mixed types (",
+        toString(sizes),
+        " and ",
+        toString(tensors[i].sizes()),
+        ")");
   }
 }
 
