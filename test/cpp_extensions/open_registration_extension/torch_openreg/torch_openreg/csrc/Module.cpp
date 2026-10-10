@@ -1,5 +1,6 @@
 #include <ATen/Context.h>
 
+#include <c10/core/DeviceType.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils.h>
 #include <torch/csrc/utils/device_lazy_init.h>
@@ -13,6 +14,7 @@
 #include "distributed/init.hpp"
 #endif
 #include <runtime/OpenRegFunctions.h>
+#include <runtime/OpenRegGenerator.h>
 
 static PyObject* _initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
@@ -43,13 +45,11 @@ static PyObject* _getDefaultGenerator(PyObject* self, PyObject* arg) {
   return THPGenerator_initDefaultGenerator(
       at::globalContext().defaultGenerator(
           c10::Device(c10::DeviceType::PrivateUse1, idx)));
-
   END_HANDLE_TH_ERRORS
 }
 // LITERALINCLUDE END: OPENREG GET DEFAULT GENERATOR
 
 // LITERALINCLUDE START: MODULE SET DEVICE HELPER
-
 PyObject* _setDevice(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to setDevice");
@@ -60,7 +60,6 @@ PyObject* _setDevice(PyObject* self, PyObject* arg) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-
 // LITERALINCLUDE END: MODULE SET DEVICE HELPER
 
 PyObject* _exchangeDevice(PyObject* self, PyObject* arg) {
