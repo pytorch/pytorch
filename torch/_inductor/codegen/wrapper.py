@@ -2318,13 +2318,10 @@ class PythonWrapperCodegen(CodeGen):
             "async_compile = AsyncCompile()",
         )
 
-    def write_if_used(
-        self, buf: IndentedBuffer, line: str, names: tuple[str, ...] | None = None
-    ) -> None:
-        """Write a line that is kept only if the module uses a name in ``names``, by
-        default the names the import or binding on it binds."""
-        if names is None:
-            names = self._names_bound_by(line)
+    def write_if_used(self, buf: IndentedBuffer, line: str) -> None:
+        """Write an import or binding that is kept only if the module uses a name it
+        binds."""
+        names = self._names_bound_by(line)
         if "torch" in names:
             # The rest of the preamble is written in terms of it.
             buf.writeline(line)
@@ -2350,7 +2347,7 @@ class PythonWrapperCodegen(CodeGen):
             if len(names) == m.group(2).count(",") + 1:
                 return tuple(names)
         raise AssertionError(
-            f"cannot tell what {line!r} binds; write it with an explicit `names`"
+            f"cannot tell what {line!r} binds; write it in a form _names_bound_by reads"
         )
 
     def write_omitted_from_scan(self, buf: IndentedBuffer, code: str) -> None:
@@ -2369,7 +2366,7 @@ class PythonWrapperCodegen(CodeGen):
     def names_used_in(self, module: IndentedBuffer) -> OrderedSet[str]:
         self.scanning_for_uses = True
         try:
-            text = module.getrawvalue()
+            text = module.getvalue()
         finally:
             self.scanning_for_uses = False
         # Each kernel's provenance comment names its source ops ("Original ATen:
