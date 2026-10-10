@@ -124,6 +124,16 @@ def _closure_step(model, x):
     return get()
 
 
+def _identity(loss):
+    return loss
+
+
+def _callback_step(model, x, cb):
+    loss = (model(x) * _MULTIGRAPH_SCALE).sum()
+    loss.backward()
+    return cb(loss)
+
+
 # Module-level so the guards on it serialize and the entry is not bypassed.
 class _GraphBreakingChild(torch.nn.Module):
     def forward(self, x):
@@ -2933,10 +2943,17 @@ class TestPrecompile(TestCase):
         self._scrub_minted(step.__globals__)
         binding = {"defaults": None, "kwdefaults": None}
         build = self._multigraph_driver(frames, backends, binding)
-        # A callback defined in the capturing script, which Dynamo records while
-        # the continuation runs eager: nothing names it, so its __main__ module
-        # is never imported and the load does not refuse.
-        callback = {**frames[1], "resume_names": [], "python_module": "__main__"}
+        # Dynamo records a callback the continuation calls while it runs eager,
+        # trivial and with no resume names. Defined in the capturing script, its
+        # record names __main__; nothing names it, so that module is never
+        # imported and the load does not refuse.
+        cb_package = CompilePackage(_callback_step)
+        torch._dynamo.optimize(
+            backend="eager", package=cb_package, guard_filter_fn=default_guard_filter_fn
+        )(_callback_step)(torch.nn.Linear(4, 4), x, _identity)
+        *_, recorded = _multigraph_frames(cb_package.cache_entry())
+        self.assertEqual((recorded["trivial"], recorded["resume_names"]), (True, []))
+        callback = {**recorded, "python_module": "__main__"}
         with mock.patch.dict(build.__globals__, {"_FRAMES": _b64([*frames, callback])}):
             forward = build()
         served = torch.nn.Linear(4, 4)
