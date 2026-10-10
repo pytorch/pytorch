@@ -117,14 +117,19 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-    def _test_broadcast(self, backend):
+    def _device(self, device_type):
+        return torch.device(
+            f"cuda:{self.rank}" if device_type == "cuda" else device_type
+        )
+
+    def _test_broadcast(self, backend, device_type="cuda"):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = self._device(device_type)
         x = torch.ones(5, 5, device=device) + self.rank
         x.requires_grad = True
         y = torch.distributed.nn.broadcast(x, 1)
@@ -137,14 +142,14 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         elif self.rank == 0:
             self.assertEqual(x.grad, torch.zeros(5, 5, device=device))
 
-    def _test_reduce(self, backend):
+    def _test_reduce(self, backend, device_type="cuda"):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = self._device(device_type)
         x = torch.ones(5, 5, device=device) + self.rank
         x.requires_grad = True
         y = torch.distributed.nn.reduce(x, 1, op=c10d.ReduceOp.SUM)
@@ -158,14 +163,14 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         x_g = (3 * torch.ones(5, 5, device=device)).cos()
         self.assertEqual(x.grad, x_g)
 
-    def _test_allreduce(self, backend):
+    def _test_allreduce(self, backend, device_type="cuda"):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = self._device(device_type)
         x = torch.ones(5, 5, device=device) + self.rank
         x.requires_grad = True
         y = torch.distributed.nn.all_reduce(x, op=c10d.ReduceOp.SUM)
@@ -177,14 +182,14 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         x_g = 2 * (3 * torch.ones(5, 5, device=device)).cos()
         self.assertEqual(x.grad, x_g)
 
-    def _test_all_gather(self, backend):
+    def _test_all_gather(self, backend, device_type="cuda"):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = self._device(device_type)
         x = torch.ones(5, 5, device=device) + self.rank
         x.requires_grad = True
         tensors = torch.distributed.nn.all_gather(x)
@@ -197,14 +202,14 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         x_s = 2 * (3 * torch.ones(5, 5, device=device)).cos()
         self.assertEqual(x.grad, x_s)
 
-    def _test_all_to_all(self, backend):
+    def _test_all_to_all(self, backend, device_type="cuda"):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = self._device(device_type)
         x0 = torch.ones(5, 5, device=device) + 2 * self.rank
         x1 = torch.ones(5, 5, device=device) + 2 * self.rank
         x0.requires_grad = True
@@ -221,14 +226,14 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         self.assertEqual(x0.grad, x_s)
         self.assertEqual(x1.grad, x_s)
 
-    def _test_all_to_all_single(self, backend):
+    def _test_all_to_all_single(self, backend, device_type="cuda"):
         store = c10d.FileStore(self.file_name, self.world_size)
         # This is required because these functions calls directly to the .dist and needs
         # the world to be initialized
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = self._device(device_type)
         row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
         x = torch.ones(int(row), 5, device=device) * (self.rank + 1)
         x.requires_grad = True
@@ -245,6 +250,57 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         z = y.sin().sum()
         z.backward()
         x_s = ((self.rank + 1) * torch.ones(int(row), 5, device=device)).cos()
+        self.assertEqual(x.grad, x_s)
+
+    def _test_reduce_scatter(self, backend, device_type="cuda"):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            store=store, rank=self.rank, world_size=self.world_size, backend=backend
+        )
+        device = self._device(device_type)
+        x0 = torch.ones(5, 5, device=device) + self.rank
+        x1 = torch.ones(5, 5, device=device) + self.rank + 1
+        x0.requires_grad = True
+        x1.requires_grad = True
+        y = torch.empty_like(x0)
+        expected = (
+            1 + self.world_size
+        ) * self.world_size / 2 + self.world_size * self.rank
+        y = torch.distributed.nn.reduce_scatter(y, [x0, x1])
+        self.assertEqual(y, torch.ones(5, 5, device=device) * expected)
+        z = y.sin().sum()
+        z.backward()
+        expected_0 = (1 + self.world_size) * self.world_size / 2
+        expected_1 = expected_0 + self.world_size
+        x_s_0 = (expected_0 * torch.ones(5, 5, device=device)).cos()
+        x_s_1 = (expected_1 * torch.ones(5, 5, device=device)).cos()
+        self.assertEqual(x0.grad, x_s_0)
+        self.assertEqual(x1.grad, x_s_1)
+
+    def _test_all_gather_base(self, backend, device_type="cuda"):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            store=store, rank=self.rank, world_size=self.world_size, backend=backend
+        )
+        device = self._device(device_type)
+        x = torch.ones(5, 5, device=device) + self.rank
+        x.requires_grad = True
+
+        output = torch.empty(5 * self.world_size, 5, device=device)
+        output = torch.distributed.nn.functional._all_gather_base(output, x)
+        self.assertEqual(output.size(), torch.Size((5 * self.world_size, 5)))
+
+        for idx in range(self.world_size):
+            self.assertEqual(
+                output[5 * idx : 5 * (idx + 1)],
+                torch.ones(5, 5, device=device) + idx,
+            )
+
+        y = torch.sum(output.view(self.world_size, 5, 5), axis=0)
+        z = y.sin().sum()
+        z.backward()
+
+        x_s = 2 * (3 * torch.ones(5, 5, device=device)).cos()
         self.assertEqual(x.grad, x_s)
 
 
