@@ -1637,6 +1637,57 @@ graph():
         else:
             self.assertExpectedInline(counts.op_count, """2""")
 
+    def test_user_defined_binop_with_tensor(self):
+        # https://github.com/pytorch/pytorch/issues/200455
+        class Box:
+            def __init__(self, t):
+                self.t = t
+
+            def __mul__(self, other):
+                return Box(self.t * other)
+
+            def __rmul__(self, other):
+                return Box(other * self.t)
+
+            def __isub__(self, other):
+                self.t = self.t - other
+                return self
+
+            def __rsub__(self, other):
+                return Box(other - self.t)
+
+        class Int(int):
+            def __radd__(self, other):
+                return "Int.__radd__"
+
+        def mul(b, x):
+            return (b * x).t
+
+        def rmul(b, x):
+            return (x * b).t
+
+        def isub(b, x):
+            b -= x
+            return b.t
+
+        def rsub(b, x):
+            x = x.clone()
+            x -= b
+            return x.t
+
+        x = torch.randn(3)
+        for fn in (mul, rmul, isub, rsub):
+            with self.subTest(fn=fn.__name__):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(
+                    opt_fn(Box(torch.ones(3)), x), fn(Box(torch.ones(3)), x)
+                )
+
+        # Tensor.__add__ accepts an int subclass, so Int.__radd__ must not run
+        opt_fn = torch.compile(lambda x, i: x + i, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, Int(3)), x + 3)
+
     def test_user_defined_iter(self):
         class Mod:
             def __init__(self) -> None:
