@@ -198,10 +198,17 @@ class OptimizerVariable(UserDefinedObjectVariable):
     def _safe_to_set_capturable(self, group: dict[str, Any]) -> bool:
         # Live-dict flip is only for eager _init_group: GPU params need step on
         # device. CPU must keep capturable=False so step matches eager.
+        # Reuse the authoritative runtime list (torch/optim/optimizer.py) so
+        # the device set exactly matches the optimizers' capturable support,
+        # incl. PrivateUse1 backends, without widening it to unsupported
+        # accelerators (e.g. mps).
+        from torch.optim.optimizer import _get_capturable_supported_devices
+
+        capturable_devices = _get_capturable_supported_devices()
         all_uninitialized = True
         all_gpu = True
         for p in group.get("params", []):
-            all_gpu &= p.is_cuda or p.is_xpu
+            all_gpu &= p.device.type in capturable_devices
             all_uninitialized &= p not in self.value.state
         return "capturable" in group and all_uninitialized and all_gpu
 
