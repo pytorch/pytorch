@@ -407,18 +407,17 @@ class DynamoTracer:
 
     ``guard_filter_fn`` takes the ``GuardFilterEntry`` records (``guard_type``,
     ``name``, ...) and returns one keep flag per entry. It filters the runtime
-    guards during capture as well as the serialized ones, so a dropped guard never
-    triggers a recompile during capture (the default drops only what cannot be
-    serialized); ``recompile_limit`` caps
-    recompilations per frame, and a call past it runs eager and is absent from
-    the artifact without any gate refusing it; ``dynamic`` forces dynamic shapes
-    as ``torch.compile(dynamic=)`` does. The ``require_*`` gates refuse, at write
-    time, an artifact with a coverage gap (``require_complete``: a bypassed or
-    uncovered frame, a call that raised) or one whose dropped guards told
-    captured variants apart or hang off a configuration-chosen slot
-    (``require_no_risky_drops``). Other dropped guards,
-    such as the identity guards every model drops because they cannot be
-    serialized, are listed in the artifact rather than refused.
+    guards during capture as well as the serialized ones (the default drops only
+    what cannot be serialized), so a dropped guard never triggers a recompile during
+    capture; ``recompile_limit`` caps recompilations per frame, and a call past it
+    runs eager and is absent from the artifact without any gate refusing it;
+    ``dynamic`` forces dynamic shapes as ``torch.compile(dynamic=)`` does. The
+    ``require_*`` gates refuse, at write time, an artifact with a coverage gap
+    (``require_complete``: a bypassed or uncovered frame, a call that raised) or one
+    whose dropped guards told captured variants apart or hang off a
+    configuration-chosen slot (``require_no_risky_drops``). Other dropped guards,
+    such as the identity guards every model drops because they cannot be serialized,
+    are listed in the artifact rather than refused.
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -2069,7 +2068,9 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
     global binding but none of its guarded codes: a continuation the frame ahead
     of it names must stay bound, and a bypassed code's guarded codes are dead.
     A code that is neither bypassed nor has variants is ``trivial``: it ran as
-    plain Python during capture, and the driver rebuilds it as plain Python.
+    plain Python during capture, and the driver rebuilds it as plain Python when
+    a resume name reaches it. An unnamed trivial code (a callback the
+    continuation called) gets a refusal stub that nothing binds.
     """
     return [
         {
@@ -2283,6 +2284,10 @@ def _build_multigraph_python_source(
     buf.writeline(
         f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
     )
+    buf.writeline(
+        "# Kept by the filter but discarded by the invariance policy; likewise not"
+    )
+    buf.writeline("# checked at serve time.")
     buf.writeline(
         f"POLICY_DROPPED_GUARDS = {[list(g) for g in summary.policy_dropped_guards]!r}"
     )
