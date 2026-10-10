@@ -1947,11 +1947,15 @@ def _adjust_group_norm_scalars(
     for d in local_shape[2:]:
         hxw_local *= d
     args = list(schema.args_schema)
-    # Use fixed schema positions, including optional tensor arguments.
-    scalar_start = 3 if schema.op == aten.native_group_norm.default else 5
-    args[scalar_start] = n_local
-    args[scalar_start + 1] = c_local
-    args[scalar_start + 2] = hxw_local
+    # Resolve scalar positions from the ATen schema, including optional args.
+    arg_indices = {
+        arg.name: i for i, arg in enumerate(schema.op._schema.arguments)
+    }
+    for name, value in zip(
+        ("N", "C", "HxW"),
+        (n_local, c_local, hxw_local),
+    ):
+        args[arg_indices[name]] = value
     return OpSchema(schema.op, tuple(args), schema.kwargs_schema)
 
 
