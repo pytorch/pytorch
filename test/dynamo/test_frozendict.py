@@ -37,6 +37,30 @@ parametrize_pytree_module = parametrize(
 @unittest.skipIf(not torch._has_frozendict, "requires builtins.frozendict")
 @instantiate_parametrized_tests
 class FrozenDictTests(torch._dynamo.test_case.TestCase):
+    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("construct", [False, True])
+    def test_allowed_function_argument(self, backend, construct):
+        @torch.compiler.allow_in_graph
+        def consume(mapping):
+            if type(mapping) is not builtins.frozendict:
+                raise AssertionError("expected frozendict")
+            if type(mapping["nested"]) is not builtins.frozendict:
+                raise AssertionError("expected nested frozendict")
+            return mapping["x"] + mapping["nested"]["y"]
+
+        def fn(x, mapping):
+            if construct:
+                mapping = builtins.frozendict(x=x, nested=builtins.frozendict(y=x * 2))
+            return consume(mapping)
+
+        try:
+            compiled = torch.compile(fn, backend=backend, fullgraph=True)
+            for x in (torch.ones(2), torch.full((2,), 3.0)):
+                mapping = builtins.frozendict(x=x, nested=builtins.frozendict(y=x * 2))
+                self.assertEqual(compiled(x, mapping), fn(x, mapping))
+        finally:
+            torch._dynamo.disallow_in_graph(consume)
+
     def test_sourceless_custom_key_hash(self):
         class Meta(type):
             hash_value = 1
