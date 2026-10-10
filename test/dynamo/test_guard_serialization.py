@@ -2914,6 +2914,71 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(ref, loaded, {"x": None}, False)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    def test_tensor_match_current_device(self):
+        # The relative-device decision must survive a load on a rank whose current
+        # device differs from the saving one. The derivation ignores the saved
+        # tensor's index -- the one piece of the artifact that is rank-specific --
+        # and reads compile_on_one_rank off the saved graph state rather than the
+        # loading process's config, so the guard that is rebuilt is the one that
+        # was saved.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        with torch.cuda.device(0):
+            ref, _ = self._test_serialization(
+                "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+            )
+
+        with mock.patch("torch.accelerator.current_device_index", return_value=1):
+            state = load_guards_state(self._cached_guards_state)
+            loaded = load_guard_manager(state, self._cached_f_code, f.__globals__)
+
+        self.assertIn("device=current", "\n".join(loaded.code_parts))
+
+        with torch.cuda.device(0):
+            inputs = {"x": torch.randn(4, device="cuda:0")}
+            self._test_check_fn(ref, loaded, inputs, True)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_tensor_match_current_device_survives_config_change_on_load(self):
+        # Whether the index is pinned or relative belongs to the saved guard, not to
+        # the loading process. Rebuilding from the loader's own compile_on_one_rank
+        # would flip the guard either way: a relaxed one reloaded without CooR would
+        # be rebuilt pinned and reject the device it was saved to accept, and a
+        # pinned one reloaded with CooR on would be rebuilt relaxed and accept one it
+        # was saved to reject.
+        from torch._dynamo.package import load_guard_manager, load_guards_state
+
+        def f(x: torch.Tensor):
+            return x + 1
+
+        for saved_with_coor in (True, False):
+            with (
+                torch.compiler.config.patch(compile_on_one_rank=saved_with_coor),
+                torch.cuda.device(0),
+            ):
+                torch._dynamo.reset()
+                self._test_serialization(
+                    "TENSOR_MATCH", f, torch.randn(4, device="cuda:0")
+                )
+                saved_state = self._cached_guards_state
+                saved_code = self._cached_f_code
+
+            # Load under the opposite setting.
+            with torch.compiler.config.patch(compile_on_one_rank=not saved_with_coor):
+                state = load_guards_state(saved_state)
+                loaded = load_guard_manager(state, saved_code, f.__globals__)
+
+            code = "\n".join(loaded.code_parts)
+            if saved_with_coor:
+                self.assertIn("device=current", code)
+            else:
+                self.assertNotIn("device=current", code)
+
     def test_not_present_in_generic_dict(self):
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor):

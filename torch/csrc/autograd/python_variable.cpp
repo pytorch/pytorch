@@ -548,8 +548,8 @@ static PyObject* view_func_impl(
           out = view_func(new_base);
         }
       } else {
-        out = new_base.as_strided(
-            self.sizes(), self.strides(), self.storage_offset());
+        out = new_base.as_strided_symint(
+            self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
       }
     }
   }
@@ -1350,6 +1350,10 @@ static bool is_random_op(const c10::OperatorHandle& op) {
       "randn_like",
       "uniform_",
       "bernoulli",
+      "exponential_",
+      "geometric_",
+      "log_normal_",
+      "multinomial",
   });
   std::string_view name_without_namespace(
       op_name.name.c_str() + aten_namespace_prefix_len,
