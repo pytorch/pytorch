@@ -1817,6 +1817,13 @@ class DunderDictVariable(ConstDictVariable):
         "copy": Method(dict_copy),
     }
 
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if isinstance(self.items.item, variables.ClassMethodVariable):
+            codegen(self.items.item)
+            codegen.extend_output(codegen.create_load_attrs("__dict__"))
+            return
+        super().reconstruct(codegen)
+
     # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
     # so we don't need to install guards. Guard installation is overridden to no-op.
     def install_dict_keys_match_guard(self) -> None:
