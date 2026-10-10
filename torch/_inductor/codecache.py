@@ -1057,6 +1057,16 @@ def torch_key() -> bytes:
         return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
+# Bound at import so tests that mock.patch torch_key/triton_key don't break it.
+_cache_key_prefetchers = (torch_key.prefetch, triton_key.prefetch)  # type: ignore[attr-defined]
+
+
+def prefetch_cache_keys() -> None:
+    """Start computing torch_key and triton_key in a background thread."""
+    for prefetch in _cache_key_prefetchers:
+        prefetch()
+
+
 def get_inductor_root() -> str:
     return os.path.dirname(__file__)
 
@@ -1109,13 +1119,26 @@ class CacheabilityValidator:
             if not isinstance(module, torch.fx.GraphModule):
                 continue
             for node in module.graph.nodes:
+                target = node.target
                 if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
+                    isinstance(target, torch._ops.HigherOrderOperator)
+                    and not target.cacheable()
                 ):
-                    self.bypass(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
+                    # with_effects(token, op, *args) is as cacheable as the op it
+                    # wraps: always for an OpOverload, per cacheable() for a HOP.
+                    inner = (
+                        node.args[1]
+                        if target is torch.ops.higher_order.with_effects
+                        else None
                     )
+                    if not (
+                        isinstance(inner, torch._ops.OpOverload)
+                        or (
+                            isinstance(inner, torch._ops.HigherOrderOperator)
+                            and inner.cacheable()
+                        )
+                    ):
+                        self.bypass(f"Can't cache HigherOrderOperator: {target.name()}")
                 # TODO: this check is broken in two ways:
                 # 1. FX uses "get_attr" (with underscore), not "getattr"
                 # 2. It only checks for ScriptObject, not FakeScriptObject
@@ -1817,8 +1840,6 @@ def compiled_fx_graph_hash(
     # cache in this module.
     key = pickler.get_key(details)
     debug_lines = pickler.debug_lines(details)
-    debug_str = "\n".join(debug_lines)
-    log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
     return key, debug_lines
 
 
@@ -3176,6 +3197,14 @@ end
                                 pass
 
                         del buf_view
+
+                        if torch.accelerator.is_available():
+                            # Constants have just been copied to host, so most of
+                            # the caching allocator's pool is now free-but-reserved
+                            # slack. Hand it back before packaging, which otherwise
+                            # reserves its own allocation on top and sets a new
+                            # high-water mark.
+                            torch.accelerator.empty_cache()
                     else:
                         serialized_weights = b""
             else:
