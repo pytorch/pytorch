@@ -2082,7 +2082,8 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                         device_mesh,
                         replicate,
                     )
-                    if use_weight else None
+                    if use_weight
+                    else None
                 )
                 dt_bias_bwd = (
                     distribute_tensor(
@@ -2090,7 +2091,8 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                         device_mesh,
                         replicate,
                     )
-                    if use_bias else None
+                    if use_bias
+                    else None
                 )
                 ref_output = F.group_norm(ref_input, num_groups, ref_weight, ref_bias)
                 dt_output = F.group_norm(
