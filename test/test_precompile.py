@@ -3389,6 +3389,15 @@ class TestPrecompile(TestCase):
             )
         self.assertTrue(any("was not saved" in m for m in cm.output), cm.output)
 
+    def test_capture_drawing_on_meta_does_not_warn(self):
+        # A meta "draw" consumes no generator, so there is nothing unsaved to report.
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: torch.rand_like(a),
+                torch.empty(4, device="meta"),
+                backend="eager",
+            )
+
     def test_capture_through_an_opaque_op_restores_every_generator(self):
         # A custom op can draw inside its own kernel with nothing in the graph to say
         # so; its presence alone makes capture restore every saved generator.
@@ -3404,6 +3413,17 @@ class TestPrecompile(TestCase):
             op = torch.ops.precompile_rng.draw.default
             _precompile_pair(op, torch.empty(4), backend="eager")
         self.assertEqual(torch.random.get_rng_state(), before)
+
+    def test_capture_through_a_prims_op_restores_nothing(self):
+        # prims ops are as transparent as aten ones (decomposition tables emit them), so
+        # one in a graph that does not draw must not undo a reseed made during capture.
+        def reseed_then_convert(a):
+            torch.random.default_generator.manual_seed(7)
+            return torch.ops.prims.convert_element_type(a, torch.float64)
+
+        torch.manual_seed(0)
+        _precompile_pair(reseed_then_convert, torch.empty(4), backend="eager")
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
 
     def test_concurrent_captures_are_serialized(self):
         # Capture clears the example tensors' .grad and reparametrizes the example

@@ -365,7 +365,7 @@ def _graph_rng_devices(gm: torch.fx.GraphModule) -> set[torch.device] | None:
             continue
         if not (
             isinstance(target, torch._ops.OpOverload)
-            and target.name().startswith("aten::")
+            and target.name().startswith(("aten::", "prims::"))
         ):
             # Fail closed: an opaque op (a custom op, or a HOP such as a user Triton
             # kernel) can draw inside its own kernel with nothing in the graph to say so.
@@ -401,16 +401,14 @@ class _CaptureRngState:
             self._cpu = torch.random.get_rng_state().clone()
             self._devices = []
             self._states = []
-            self._unsnapshotted: list[torch.device] = []
             for device in _capture_rng_devices(args):
                 try:
                     module = torch.get_device_module(device.type)
                     state = module.get_rng_state(device).clone()
                 except Exception:
                     # Reading a generator can fail (a fake tensor naming a device this
-                    # host does not have). Record it so settle can report it, rather
-                    # than dying with a bare driver error here or dropping it silently.
-                    self._unsnapshotted.append(device)
+                    # host does not have). Leave it unsaved, rather than dying with a
+                    # bare driver error here; settle warns if the graph could draw on it.
                     continue
                 self._devices.append((module, device))
                 self._states.append(state)
@@ -440,11 +438,8 @@ class _CaptureRngState:
             # be rewound, and the capturing run will not reproduce on load.
             live = _capture_rng_devices(args) if drawn is None else drawn
             saved = {device for _module, device in self._devices}
-            missed = sorted(
-                {d for d in live if d.type != "cpu" and d not in saved}
-                | set(self._unsnapshotted),
-                key=str,
-            )
+            accel = getattr(torch.accelerator.current_accelerator(), "type", None)
+            missed = sorted({d for d in live if d.type == accel} - saved, key=str)
             if missed:
                 log.warning(
                     "precompile: the captured graph may draw on %s, whose generator "
@@ -598,8 +593,8 @@ class MakeFxTracer:
     containing no op that can draw leaves the generators untouched even if a
     concurrent thread advanced them. Every op tagged ``nondeterministic_seeded``
     counts as a draw on its output's device, even one configured not to draw, and an
-    op that is not an aten op (a custom op, a higher-order op) could draw from any
-    generator, so every saved one is restored. A draw through an explicit
+    op that is not an aten or prims op (a custom op, a higher-order op) could draw
+    from any generator, so every saved one is restored. A draw through an explicit
     ``torch.Generator`` is attributed to its output's device, so that device's
     default generator is restored and the named one is left advanced. When a restore
     does happen it rewinds any draw a concurrent thread made while the trace ran, so
