@@ -19,6 +19,8 @@
 #include <ATen/ops/upsample_linear1d_backward_native.h>
 #endif
 
+#include <limits>
+
 namespace at::native {
 namespace {
 
@@ -68,6 +70,54 @@ __global__ void upsample_linear1d_out_frame(
   }
 }
 
+
+// Unrolled version for upsample_linear1d_out_frame
+// This version exposes more parallelism by launching more threads.
+// Instead of each thread looping over "batchsize" and "channels",
+// more threads are launched and each thread does only one interpolation.
+// The launch site only takes this path when batchsize * channels * width2 fits
+// in an int32, so the flat thread index stays 32-bit.
+template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(512)
+__global__ void upsample_linear1d_out_frame_unrolled(
+    const accscalar_t rwidth,
+    const bool align_corners,
+    const PackedTensorAccessor64<const scalar_t, 3> idata,
+    PackedTensorAccessor64<scalar_t, 3> odata) {
+
+  const int batchsize = idata.size(0);
+  const int channels = idata.size(1);
+  const int width1 = idata.size(2);
+  const int width2 = odata.size(2);
+
+  const int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
+  const int num_total = batchsize * channels * width2;
+  if (thread_id >= num_total) return;
+
+  // Get a unique (n, c, w2) from thread_id
+  const int n = thread_id / (channels * width2);
+  const int c = (thread_id - n*(channels * width2)) / width2;
+  const int w2 = thread_id - n*(channels * width2) - c*width2;
+
+  // special case: just copy
+  if (width1 == width2) {
+    odata[n][c][w2] = idata[n][c][w2];
+    return;
+  }
+
+  const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+      rwidth, w2, align_corners, /*cubic=*/false);
+  const int w1 = w1r;
+  const int w1p = (w1 < width1 - 1) ? 1 : 0;
+  const accscalar_t w1lambda = w1r - w1;
+  const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+
+  const accscalar_t val =
+      w0lambda * idata[n][c][w1] + w1lambda * idata[n][c][w1 + w1p];
+  odata[n][c][w2] = static_cast<scalar_t>(val);
+}
+
+
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(512)
@@ -116,6 +166,53 @@ __global__ void upsample_linear1d_out_frame_backward(
   }
 }
 
+
+// Backward (adjoint) operation 1 <- 2 (accumulates)
+// Unrolled version for upsample_linear1d_out_frame_backward
+// This version exposes more parallelism by launching more threads
+// and each thread does only one backward interpolation. As in the forward
+// kernel, the launch site keeps the flat thread index within an int32.
+template <typename scalar_t, typename accscalar_t>
+C10_LAUNCH_BOUNDS_1(512)
+__global__ void upsample_linear1d_out_frame_backward_unrolled(
+    const accscalar_t rwidth,
+    const bool align_corners,
+    PackedTensorAccessor64<scalar_t, 3> idata,
+    const PackedTensorAccessor64<const scalar_t, 3> odata) {
+
+  const int batchsize = idata.size(0);
+  const int channels = idata.size(1);
+  const int width1 = idata.size(2);
+  const int width2 = odata.size(2);
+
+  const int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
+  const int num_total = batchsize * channels * width2;
+  if (thread_id >= num_total) return;
+
+  // Get a unique (n, c, w2) from thread_id
+  const int n = thread_id / (channels * width2);
+  const int c = (thread_id - n*(channels * width2)) / width2;
+  const int w2 = thread_id - n*(channels * width2) - c*width2;
+
+  // special case: just copy
+  if (width1 == width2) {
+    idata[n][c][w2] = odata[n][c][w2];
+    return;
+  }
+
+  const accscalar_t w1r = area_pixel_compute_source_index<accscalar_t>(
+      rwidth, w2, align_corners, /*cubic=*/false);
+  const int w1 = w1r;
+  const int w1p = (w1 < width1 - 1) ? 1 : 0;
+  const accscalar_t w1lambda = w1r - w1;
+  const accscalar_t w0lambda = static_cast<accscalar_t>(1) - w1lambda;
+
+  const scalar_t d2val = odata[n][c][w2];
+  gpuAtomicAddNoReturn(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
+  gpuAtomicAddNoReturn(
+      &idata[n][c][w1 + w1p], static_cast<scalar_t>(w1lambda * d2val));
+}
+
 static void upsample_linear1d_out_cuda_template(
     const Tensor& output,
     const Tensor& input,
@@ -125,6 +222,10 @@ static void upsample_linear1d_out_cuda_template(
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU(__func__, {input_arg, output_arg});
 
+  if (output.numel() == 0) {
+    return;
+  }
+
   int output_width = output_size[0];
 
   int input_width = input.size(2);
@@ -133,8 +234,43 @@ static void upsample_linear1d_out_cuda_template(
 
   const int num_kernels = output_width;
   const int num_threads = 512;
+  const int num_blocks = ceil_div(num_kernels, num_threads);
+  constexpr int num_blocks_threshold = 128;
       //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  // The unrolled kernels index one thread per output element with 32-bit math,
+  // and on ROCm gridDim.x * blockDim.x must fit in uint32_t (the HSA AQL
+  // dispatch packet stores grid_size_{x,y,z} as uint32_t). Both limits are
+  // respected by only taking that path when the output fits in an int32, minus
+  // the num_threads that ceil_div adds before dividing.
+  const int64_t num_total = input.size(0) * input.size(1) * output_width;
+  const bool use_unrolled = num_blocks < num_blocks_threshold &&
+      num_total <= std::numeric_limits<int32_t>::max() - num_threads;
+
+  // Use unrolled version if the number of blocks is small
+  if (use_unrolled){
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      input.scalar_type(), "upsample_linear1d_out_frame_unrolled", [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
+
+        auto idata = input.packed_accessor64<const scalar_t, 3>();
+        auto odata = output.packed_accessor64<scalar_t, 3>();
+
+        const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
+          input_width, output_width, align_corners, scales);
+
+        upsample_linear1d_out_frame_unrolled<scalar_t, accscalar_t>
+            <<<ceil_div(static_cast<int>(num_total), num_threads),
+               num_threads,
+               0,
+               stream>>>(rwidth, align_corners, idata, odata);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
+    return;
+  }
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -175,10 +311,45 @@ static void upsample_linear1d_backward_out_cuda_template(
 
   grad_input.zero_();
 
+  if (grad_input.numel() == 0 || grad_output.numel() == 0) {
+    return;
+  }
+
   const int num_kernels = output_width;
   const int num_threads = 512;
+  const int num_blocks = ceil_div(num_kernels, num_threads);
+  constexpr int num_blocks_threshold = 128;
       //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  // See the note on the forward launch: the unrolled kernels require the output
+  // to fit in an int32 for both 32-bit indexing and the ROCm grid limit.
+  const int64_t num_total = input_size[0] * input_size[1] * output_width;
+  const bool use_unrolled = num_blocks < num_blocks_threshold &&
+      num_total <= std::numeric_limits<int32_t>::max() - num_threads;
+
+  // Use unrolled version if the number of blocks is small
+  if (use_unrolled){
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      grad_output.scalar_type(), "upsample_linear1d_out_frame_backward_unrolled", [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
+
+        auto idata = grad_input.packed_accessor64<scalar_t, 3>();
+        auto odata = grad_output.packed_accessor64<const scalar_t, 3>();
+
+        const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
+            input_width, output_width, align_corners, scales);
+
+        upsample_linear1d_out_frame_backward_unrolled<scalar_t, accscalar_t>
+            <<<ceil_div(static_cast<int>(num_total), num_threads),
+               num_threads,
+               0,
+               stream>>>(rwidth, align_corners, idata, odata);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
+    return;
+  }
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
