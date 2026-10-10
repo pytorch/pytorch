@@ -1665,10 +1665,6 @@ class PythonWrapperCodegen(CodeGen):
     """
 
     supports_caching: bool = True  # Whether the output code is cacheable.
-    # Whether Triton kernels are bound by handing their source to AsyncCompile (the
-    # default) or defined directly at module level. Only the former can fan compilation
-    # out to the worker pool, so this also decides whether priming it pays.
-    async_compiles_triton_kernels: bool = True
 
     def __init__(self):
         super().__init__()
@@ -3821,15 +3817,65 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
 
-        The default form hands the kernel to AsyncCompile as a source STRING, which is
-        what lets compilation fan out to the worker pool. Subclasses that care more
-        about the emitted module being readable can define the kernel as code instead.
+        The default form hands the kernel to AsyncCompile as a source string, which is
+        what lets compilation fan out to the worker pool. Under
+        ``triton.module_level_kernels`` the kernel is defined as code instead.
         """
+        if not self.defines_triton_kernels_as_code():
+            self.define_kernel(
+                kernel_name,
+                self.async_compile_triton_body(subs_name, src_code, device_type),
+                metadata,
+            )
+            return
+        # src_code is already a complete module: the triton imports, the
+        # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
+        # @triton.jit def. Spliced at module level it binds kernel_name to the same
+        # object async_compile.triton would have returned, so the launch site
+        # (KERNEL.run(...)) is unchanged.
+        # Kernels define module-level @triton.jit helpers under names that are only
+        # unique per kernel (scan combine_fns, flex attention's forward_inner, ...), so
+        # two kernels can define the same name with different bodies; in one shared
+        # namespace the later def would win for both. Make them kernel-unique.
+        helpers = re.findall(r"^def (\w+)\(", src_code, re.MULTILINE)
+        for helper in OrderedSet(helpers) - OrderedSet([kernel_name, subs_name]):
+            src_code = re.sub(rf"\b{helper}\b", f"{helper}_{kernel_name}", src_code)
         self.define_kernel(
             kernel_name,
-            self.async_compile_triton_body(subs_name, src_code, device_type),
+            src_code,
             metadata,
+            standalone=True,
+            # The compile-time autotune block execs its kernels instead of emitting
+            # them, and a module-level kernel there has no __file__ to name itself by,
+            # so that block keeps the AsyncCompile form. It runs at compile time only
+            # and is not carried in the emitted module.
+            autotune_body=(
+                self.async_compile_triton_body(subs_name, src_code, device_type)
+                if config.triton.autotune_at_compile_time
+                else None
+            ),
         )
+
+    def defines_triton_kernels_as_code(self) -> bool:
+        if not config.triton.module_level_kernels:
+            return False
+        if not config.triton.unique_kernel_names:
+            # Every kernel would be named `triton_`, so defining them at module level
+            # makes all but the last unreachable.
+            raise RuntimeError(
+                "torch._inductor.config.triton.module_level_kernels requires "
+                "triton.unique_kernel_names so kernels do not shadow each other."
+            )
+        for flag in ("benchmark_kernel", "benchmark_combo_kernel"):
+            if getattr(config, flag):
+                # These append get_args()/call()/__main__ to each kernel's source; at
+                # module level those collide with each other and with the wrapper's.
+                raise RuntimeError(
+                    "torch._inductor.config.triton.module_level_kernels is "
+                    f"incompatible with {flag}, which appends a get_args()/call()/"
+                    "__main__ harness to every kernel."
+                )
+        return True
 
     @staticmethod
     def async_compile_triton_body(

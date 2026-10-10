@@ -3,8 +3,9 @@
 Inductor's normal python wrapper is written to be loaded by inductor. This variant is
 written to be opened by a person (or an agent) who wants to retune the generated kernel
 in place: it emits Triton kernels as ordinary module-level code rather than as source
-strings handed to ``AsyncCompile``, and it emits only the preamble lines (including the
-``AsyncCompile`` lifecycle) that the finished module uses. See
+strings handed to ``AsyncCompile`` (as ``triton.module_level_kernels`` does), and it
+emits only the preamble lines (including the ``AsyncCompile`` lifecycle) that the
+finished module uses. See
 ``torch.compiler.export_python``, which is the consumer.
 
 The tradeoffs are deliberate and are the reason this is opt-in: a kernel defined at
@@ -66,8 +67,6 @@ class _LineIfNamesUsed(DeferredLineBase):
 
 class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
     """Emit kernels as code rather than as strings passed to AsyncCompile."""
-
-    async_compiles_triton_kernels = False
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
@@ -168,6 +167,11 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         return
 
     @override
+    def defines_triton_kernels_as_code(self) -> bool:
+        # readable_wrapper_requested() has already refused the configs that can't.
+        return True
+
+    @override
     def emit_triton_kernel_definition(
         self,
         kernel_name: str,
@@ -176,11 +180,6 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
         device_type: str,
         metadata: str | None = None,
     ) -> None:
-        # src_code is already a complete module: the triton imports, the
-        # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
-        # @triton.jit def. Spliced at module level it binds kernel_name to the same
-        # object async_compile.triton would have returned, so the launch site
-        # (KERNEL.run(...)) is unchanged.
         # The provenance comment leads with "# kernel path: /tmp/torchinductor_.../x.py",
         # which is where the kernel WOULD have been compiled from. It is defined right
         # here instead, and pointing a reader at a cache file is the exact confusion this
@@ -191,27 +190,8 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
                 for line in metadata.splitlines()
                 if not line.startswith("# kernel path:")
             )
-        # Kernels define module-level @triton.jit helpers under names that are only
-        # unique per kernel (scan combine_fns, flex attention's forward_inner, ...), so
-        # two kernels can define the same name with different bodies; in one shared
-        # namespace the later def would win for both. Make them kernel-unique.
-        helpers = re.findall(r"^def (\w+)\(", src_code, re.MULTILINE)
-        for helper in OrderedSet(helpers) - OrderedSet([kernel_name, subs_name]):
-            src_code = re.sub(rf"\b{helper}\b", f"{helper}_{kernel_name}", src_code)
-        self.define_kernel(
-            kernel_name,
-            src_code,
-            metadata,
-            standalone=True,
-            # The compile-time autotune block execs its kernels instead of emitting
-            # them, and a module-level kernel there has no __file__ to name itself by,
-            # so that block keeps the AsyncCompile form. It runs at compile time only
-            # and is not carried in the emitted module.
-            autotune_body=(
-                self.async_compile_triton_body(subs_name, src_code, device_type)
-                if config.triton.autotune_at_compile_time
-                else None
-            ),
+        super().emit_triton_kernel_definition(
+            kernel_name, subs_name, src_code, device_type, metadata
         )
 
     @override
