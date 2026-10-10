@@ -52,10 +52,24 @@ namespace at::hip::detail {
 			static constexpr bool FixedVectorSizeC = VectorSizeC_ != 0;
 			static constexpr index_t VectorSizeAB = FixedVectorSizeAB ? VectorSizeAB_ : 1;
 			static constexpr index_t VectorSizeC = FixedVectorSizeC ? VectorSizeC_ : 1;
+			// Only a 16-bit C vector width of 1 needs NoSplitKEpilogue; every other config uses CShuffleEpilogue as is.
+			static constexpr bool UseNoSplitKEpilogue = FixedVectorSizeC && VectorSizeC == 1;
 
 			// GemmSpatiallyLocalTilePartitioner: GroupNum matches the 8 XCDs of gfx942/gfx950.
 			static constexpr index_t TilePartitionerGroupNum = 8;
 			static constexpr index_t TilePartitionerM01 = 4;
+		};
+
+		// GroupedGemmKernel instantiates a split-K (k_batch > 1) atomic_add epilogue next to the plain store one.
+		// We always run k_batch == 1, so compile the atomic_add path out: 16-bit atomics reject a C vector width of 1.
+		template <typename Epilogue>
+		struct NoSplitKEpilogue : Epilogue {
+			template <typename OutWindow, typename... Args>
+			CK_TILE_DEVICE auto operator()(OutWindow& out_window, Args&&... args) {
+				if constexpr (OutWindow::BottomTensorView::DstInMemOp == ck_tile::memory_operation_enum::set) {
+					return Epilogue::operator()(out_window, std::forward<Args>(args)...);
+				}
+			}
 		};
 
 		template<typename DataType, typename ALayout, typename BLayout, typename Config>
@@ -88,7 +102,7 @@ namespace at::hip::detail {
 
 			using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;
 
-			using GemmEpilogue = ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<
+			using CShuffleEpilogue = ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<
 				DataType, DataType, ck_tile::tuple<>, AccDataType,
 				DataType, ck_tile::tuple<>, CLayout, PassThrough,
 				TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
@@ -97,6 +111,7 @@ namespace at::hip::detail {
 				PipelineProblem::TransposeC,
 				1 /* kNumWaveGroups */, Config::FixedVectorSizeC, Config::VectorSizeC>
 			>;
+			using GemmEpilogue = std::conditional_t<Config::UseNoSplitKEpilogue, NoSplitKEpilogue<CShuffleEpilogue>, CShuffleEpilogue>;
 
 			using Kernel = ck_tile::GroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
 		};
@@ -108,27 +123,29 @@ namespace at::hip::detail {
 		// configs for bf16 and fp16 for gfx950
 		template <>
 		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t> {
+			// Tuned on MI355X (gfx950). Classes that share a tile alias the same type, so they share one instantiation.
 			// Forward and dX (2D x 3D, 3D x 3D): row-major A, K % 64 == 0
-			using ForwardN256      = CkTileGroupGemmConfig<256, 256, 64, 16, 16, 32, 2, 2, false, false, false>;  // N % 256 == 0
-			using ForwardN128      = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>;  // N % 128 == 0
-			using ForwardN64 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>; // N % 64 == 0  TODO: tune, placeholder = ForwardN8
-			using ForwardN32 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>; // N % 32 == 0  TODO: tune, placeholder = ForwardN8
-			using ForwardN16 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>; // N % 16 == 0  TODO: tune, placeholder = ForwardN8
-			using ForwardN8 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>;  // N % 8 == 0
-			using ForwardUnalignedN = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // N % 8 != 0  TODO: placeholder = FallbackEvenN, wrong for odd N
-			
+			using ForwardN256 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, false, false, false>; // N % 256 == 0
+			using ForwardN128 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>; // N % 128 == 0
+			using ForwardN64 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false>; // N % 64 == 0; beat 256x64 and 64x64 tiles
+			using ForwardN32 = ForwardN64; // N % 32 == 0; beat 256x32 and 128x32 tiles
+			using ForwardN16 = ForwardN64; // N % 16 == 0; beat 256x16 tiles
+			using ForwardN8 = ForwardN64; // N % 8 == 0
+			using ForwardUnalignedN = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, true, false, false, 0, 1>; // N % 8 != 0, C width 1 for odd N
+
 			// dW (2D x 2D, jagged K)
-			using WeightGradNM256 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, false, false, true>;  // M, N % 256 == 0
-			using WeightGradNM128 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>;  // M, N % 128 == 0  TODO: tune, placeholder = padded WeightGradNM256
-			using WeightGradNM64 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>;  // M, N % 64 == 0  TODO: tune, placeholder = padded WeightGradNM256
-			using WeightGradNM32 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>;  // M, N % 32 == 0  TODO: tune, placeholder = padded WeightGradNM256
-			using WeightGradNM16 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>;  // M, N % 16 == 0  TODO: tune, placeholder = padded WeightGradNM256
-			using WeightGradNM8 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>;  // M, N % 8 == 0  TODO: tune, placeholder = padded WeightGradNM256
-			using WeightGradUnaligned = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // other M, N (e.g. 2880)  TODO: placeholder = FallbackEvenN
-			
+			using WeightGradNM256 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, false, false, true>; // M, N % 256 == 0
+			using WeightGradNM128 = CkTileGroupGemmConfig<128, 128, 64, 16, 16, 32, 2, 2, false, false, true>; // M, N % 128 == 0
+			using WeightGradNM64 = CkTileGroupGemmConfig<256, 256, 32, 16, 16, 32, 2, 2, true, true, true>; // M, N % 64 == 0
+			using WeightGradNM32 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true>; // M, N % 32 == 0
+			using WeightGradNM16 = WeightGradNM32; // M, N % 16 == 0
+			using WeightGradNM8 = WeightGradNM32; // M, N % 8 == 0
+
 			// Anything the classes above reject: K % 64 != 0, column-major A, jagged N (3D x 2D)
-			using FallbackEvenN          = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // even N
-			using FallbackOddN      = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // jagged or odd N, C width 1  TODO: placeholder = FallbackEvenN, wrong for odd N
+			using FallbackEvenN = CkTileGroupGemmConfig<256, 256, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 2>; // even N, C width 2
+			using FallbackOddN = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 1>; // jagged or odd N, C width 1
+			// M or N not a multiple of 8: the host alignment check rejects these for 16-bit types, so this is never selected today
+			using WeightGradUnaligned = FallbackOddN;
 		};
 
 		// fp16 has the same element size and MFMA shapes as bf16
