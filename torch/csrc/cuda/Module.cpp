@@ -792,6 +792,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str addr_s = "addr";
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
+  py::str expandable_segment_base_s = "expandable_segment_base";
+  py::str expandable_reservation_size_s = "expandable_reservation_size";
+  py::str expandable_segment_size_s = "expandable_segment_size";
+  py::str expandable_segment_handle_type_s = "expandable_segment_handle_type";
   py::str frames_s = "frames";
   py::str forward_frames_s = "forward_frames";
   py::str time_us_s = "time_us";
@@ -829,6 +833,14 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
     segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
     segmentDict[segment_pool_id] = segmentInfo.owner_private_pool_id;
     segmentDict[is_expandable_s] = segmentInfo.is_expandable;
+    segmentDict[expandable_segment_base_s] =
+        segmentInfo.expandable_segment_base;
+    segmentDict[expandable_reservation_size_s] =
+        segmentInfo.expandable_reservation_size;
+    segmentDict[expandable_segment_size_s] =
+        segmentInfo.expandable_segment_size;
+    segmentDict[expandable_segment_handle_type_s] =
+        segmentInfo.expandable_segment_handle_type;
     add_frame_key(segmentDict, segmentInfo.context_when_allocated);
 
     auto address = segmentInfo.address;
@@ -1005,6 +1017,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       segmentDict[segment_type_s] = small_s;
       segmentDict[segment_pool_id] = seg.owner_private_pool_id;
       segmentDict[is_expandable_s] = false;
+      segmentDict[expandable_segment_base_s] = size_t(0);
+      segmentDict[expandable_reservation_size_s] = size_t(0);
+      segmentDict[expandable_segment_size_s] = size_t(0);
+      segmentDict[expandable_segment_handle_type_s] = 0;
       add_frame_key(segmentDict, seg.context_when_allocated);
 
       py::dict blockDict;
@@ -1360,11 +1376,10 @@ void* callPythonAllocator(
   if (!Py_IsInitialized() || Py_IsFinalizing()) {
     return nullptr;
   }
-  c10::cuda::CUDAStreamGuard stream_guard(
-      c10::cuda::getStreamFromExternal(stream, device));
   py::gil_scoped_acquire gil;
-  py::object result = py::reinterpret_borrow<py::object>(
-      getPythonAllocatorCallback(state, 0))(size);
+  py::object result =
+      py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 0))(
+          size, device, reinterpret_cast<uintptr_t>(stream));
   if (result.is_none()) {
     return nullptr;
   }
@@ -1395,12 +1410,13 @@ void callPythonDeallocator(
         message);
   };
   try {
-    c10::cuda::CUDAStreamGuard stream_guard(
-        c10::cuda::getStreamFromExternal(stream, device));
     py::gil_scoped_acquire gil;
     try {
       py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 1))(
-          reinterpret_cast<uintptr_t>(ptr), size);
+          reinterpret_cast<uintptr_t>(ptr),
+          size,
+          device,
+          reinterpret_cast<uintptr_t>(stream));
     } catch (const std::exception& e) {
       // Report the Python error while the GIL is still held, but do not let a
       // cleanup callback throw through allocator teardown.
@@ -1639,6 +1655,38 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
             device, mempool_id, [](cudaStream_t) { return true; });
       });
+
+  m.def(
+      "_cuda_restoreExpandableSegment",
+      [](c10::DeviceIndex device,
+         at::cuda::MempoolId_t mempool_id,
+         bool is_small,
+         size_t address,
+         size_t reserve_size,
+         size_t segment_size,
+         int handle_type,
+         const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
+        auto stream = at::cuda::getCurrentCUDAStream(device);
+        c10::cuda::CUDACachingAllocator::restoreExpandableSegment(
+            device,
+            stream,
+            mempool_id,
+            is_small,
+            address,
+            reserve_size,
+            segment_size,
+            static_cast<c10::cuda::CUDACachingAllocator::
+                            Expandable_Segments_Handle_Type>(handle_type),
+            mapped_ranges);
+      },
+      py::arg("device"),
+      py::arg("mempool_id"),
+      py::arg("is_small"),
+      py::arg("address"),
+      py::arg("reserve_size"),
+      py::arg("segment_size"),
+      py::arg("handle_type"),
+      py::arg("mapped_ranges"));
 
   m.def(
       "_cuda_beginAllocateCurrentThreadToPool",
