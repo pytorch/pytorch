@@ -896,6 +896,19 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
 class TestFP4Support(TestCase):
     """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
 
+    def test_ensure_nv_universal_gemm_import_error(self):
+        from torch._inductor import utils
+
+        utils.ensure_nv_universal_gemm_available.cache_clear()
+        self.addCleanup(utils.ensure_nv_universal_gemm_available.cache_clear)
+        with (
+            mock.patch.object(utils.importlib.util, "find_spec", return_value=object()),
+            mock.patch.object(
+                utils, "_ensure_fp4_dtype_registered", side_effect=ImportError
+            ),
+        ):
+            self.assertFalse(utils.ensure_nv_universal_gemm_available())
+
     @unittest.skipIf(
         not (torch.cuda.is_available() and ensure_nv_universal_gemm_available()),
         "requires CUDA and cutlass.operators",
