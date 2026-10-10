@@ -219,7 +219,7 @@ bool aoti_torch_grad_mode_is_enabled() {
 }
 
 void aoti_torch_grad_mode_set_enabled(bool enabled) {
-  return c10::GradMode::set_enabled(enabled);
+  c10::GradMode::set_enabled(enabled);
 }
 
 size_t aoti_torch_dtype_element_size(int32_t dtype) {
@@ -495,7 +495,7 @@ AOTITorchError aoti_torch_empty_strided_pinned(
     const int64_t* strides_ptr,
     int32_t dtype,
     int32_t device_type,
-    int32_t device_index,
+    int32_t /*device_index*/,
     AtenTensorHandle* ret_new_tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
@@ -810,7 +810,7 @@ AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle scale_result,
     int8_t use_fast_accum,
     AtenTensorHandle* ret0,
-    AtenTensorHandle* ret1) {
+    AtenTensorHandle* /*ret1*/) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
@@ -1041,7 +1041,7 @@ AOTITorchError aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
     AtenTensorHandle input,
     AtenTensorHandle weight,
     AtenTensorHandle bias, // optional argument
-    int64_t out_channel,
+    int64_t /*out_channel*/,
     AtenTensorHandle* out) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* input_tensor = tensor_handle_to_tensor_pointer(input);
