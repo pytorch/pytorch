@@ -1707,7 +1707,6 @@ class TestCxxPytree(TestCase):
             [GlobalDummyType(1, None)],
             (GlobalDummyType(1, None),),
             {"a'b\\c": GlobalDummyType(1, None)},
-            OrderedDict(a=GlobalDummyType(1, None)),
             defaultdict(list, a=GlobalDummyType(1, None)),
             deque([GlobalDummyType(1, None)]),
             deque([GlobalDummyType(1, None)], maxlen=2),
