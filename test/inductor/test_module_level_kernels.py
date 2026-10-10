@@ -141,9 +141,9 @@ class TestModuleLevelKernels(TestCase):
         self.assertEqual(len(set(pooled.values())), len(kernels), pooled)
 
         # Anyone else's load of the module, such as running a copy of it, builds its
-        # kernels from the defs in it, so a hand edit there takes effect. They key the
-        # autotune cache on the same per-kernel name as the pool's kernels rather than
-        # on the module they share.
+        # kernels from the defs in it, so a hand edit there takes effect. They compile
+        # at async_compile.wait, and key the autotune cache on the same per-kernel name
+        # as the pool's kernels rather than on the module they share.
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "module.py")
             with open(path, "w") as f:
@@ -152,12 +152,9 @@ class TestModuleLevelKernels(TestCase):
             exec(compile(code, path, "exec"), ns)
         for k in kernels:
             self.assertEqual(ns[k].fn.fn.__code__.co_filename, path)
+            self.assertTrue(ns[k].launchers, k)
             self.assertEqual(ns[k].kernel_hash, pooled[k])
-        with mock.patch.object(
-            CachingAutotuner, "_precompile_config", _compiled_in_this_process
-        ):
-            with self.assertRaisesRegex(Exception, "compiling process"):
-                ns["call"]([x])
+        self.assertEqual(ns["call"]([x])[0], result)
 
     @requires_cuda_and_triton
     @config.patch(compile_threads=2)
