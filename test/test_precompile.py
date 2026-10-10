@@ -8,6 +8,7 @@ import io
 import os
 import pickle
 import re
+import runpy
 import shutil
 import stat
 import subprocess
@@ -1076,6 +1077,22 @@ class TestPrecompile(TestCase):
         ns = {"__name__": "_artifact"}
         exec(compile(code, "<artifact>", "exec"), ns)
         self.assertEqual(ns["forward"](m, x), m(x))
+
+    @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA + Triton")
+    def test_artifact_with_module_level_kernels_runs_from_its_file(self):
+        # A module-level Triton kernel reads its source back from the module's file,
+        # which both the header's runpy.run_path recipe and the inlined load provide.
+        m = torch.nn.Sequential(torch.nn.Linear(8, 4), torch.nn.ReLU()).eval().cuda()
+        x = torch.randn(3, 8, device="cuda")
+        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        self.assertRegex(code, r"(?m)^def triton_\w+\(")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "artifact.py")
+            with open(path, "w") as f:
+                f.write(code)
+            self.assertEqual(runpy.run_path(path)["forward"](m, x), m(x))
+        for _, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
+            self.assertEqual(f_c(m, x), m(x))
 
     @unittest.skipUnless(
         torch.cuda.is_available(), "needs CUDA + Triton for the kernel cache"
@@ -6281,11 +6298,9 @@ class TestExportPython(TestCase):
             source = f.read()
         self.assertNotIn("do not edit", source)
         self.assertIn("Editing it is supported", source)
-        # the documented snippet, executed verbatim
-        self.assertIn('exec(compile(open(path).read(), path, "exec"), ns)', source)
-        namespace = {"__file__": path}
-        exec(compile(source, path, "exec"), namespace)
-        self.assertEqual(namespace["forward"](x), fn(x))
+        # the documented snippet
+        self.assertIn('ns = runpy.run_path("this_file.py")', source)
+        self.assertEqual(runpy.run_path(path)["forward"](x), fn(x))
 
     @unittest.skipUnless(TEST_CUDA, "needs a Triton kernel to break")
     def test_broken_kernel_names_the_artifact_and_its_line(self, device):
@@ -6323,10 +6338,10 @@ class TestExportPython(TestCase):
         self.assertEqual(int(reported.group(1)), target + 1, message)
 
     @unittest.skipUnless(TEST_CUDA, "Triton kernels are the hoisted backend")
-    def test_artifact_carries_no_build_time_machinery(self, device):
-        # AsyncCompile farms kernel compilation out to a worker pool at build time; a
-        # file that is exec'd once has no use for it, and it forces every kernel to live
-        # inside a string where it cannot be edited cleanly or reported against.
+    def test_artifact_defines_its_kernels_as_code(self, device):
+        # A kernel inside a string cannot be edited cleanly or reported against. What
+        # is left of AsyncCompile is the wait, which compiles the module-level defs on
+        # the worker pool when the file loads.
         if torch.device(device).type != "cuda":
             self.skipTest("only Triton kernels become module-level code")
         path = self._tmp_path("light.py")
@@ -6339,16 +6354,9 @@ class TestExportPython(TestCase):
         expected = torch.compiler.export_python(path=path)(fn)(x, y)
         with open(path, encoding="utf-8") as f:
             source = f.read()
-        for machinery in (
-            "async_compile = AsyncCompile()",
-            "= async_compile.triton(",
-            "async_compile.wait(",
-            "import AsyncCompile",
-        ):
-            self.assertNotIn(machinery, source)
-        # the kernel is real module-level code, not a quoted string
         self.assertRegex(source, r"(?m)^def triton_\w+\(")
         self.assertNotIn("= async_compile.triton(", source)
+        self.assertIn("async_compile.wait(globals())", source)
         # and it still runs, from a fresh load
         self.assertEqual(torch.compiler.export_python(path=path)(fn)(x, y), expected)
 
