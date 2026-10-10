@@ -3695,6 +3695,11 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             # than propagating a graph break from tp_getattro_impl.
             if not check_unspec_or_constant_args(args, kwargs):
                 raise
+            obj = args[0]
+            if isinstance(
+                obj, variables.UserDefinedClassVariable
+            ) and obj.getattr_needs_tracing(tx, args[1].as_python_constant()):
+                raise
             try:
                 result = getattr(*[a.as_python_constant() for a in args])
             except AttributeError:
@@ -3844,6 +3849,12 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        elif isinstance(
+            obj, variables.UserDefinedClassVariable
+        ) and name_var.is_constant_match("__bases__"):
+            # CPython recomputes the MRO of the class and its subclasses on this
+            # write; a pending store would leave later lookups on the old one.
+            unmodeled_setter(obj, tx, val)
         elif (
             not tx.output.side_effects.is_attribute_mutation(obj)
             and obj.source is not None
