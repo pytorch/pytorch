@@ -88,6 +88,14 @@ class TestWrapperPreamble(TestCase):
         wrapper.scan_for_used_names(buf)
         self.assertEqual(buf.getvalue(), "import os\nsep = os.sep\nprint(sep)\n")
 
+    def test_the_scan_reads_the_text_that_is_emitted(self):
+        # getrawvalue would join `y = a\` and `os.sep` into `y = aos.sep`.
+        wrapper, buf = self._wrapper(), IndentedBuffer()
+        wrapper.write_if_used(buf, "import os")
+        buf.writelines(["y = a\\", "os.sep"])
+        wrapper.scan_for_used_names(buf)
+        self.assertEqual(buf.getvalue(), "import os\ny = a\\\nos.sep\n")
+
     def test_blank_lines_before_an_omitted_block_survive_a_splice(self):
         wrapper, buf = self._wrapper(), IndentedBuffer()
         for name in ("a", "b"):

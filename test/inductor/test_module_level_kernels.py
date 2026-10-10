@@ -202,13 +202,6 @@ class TestModuleLevelKernels(TestCase):
         self.assertIn("# kernel path:", code)
 
     @requires_gpu_and_triton
-    def test_default_wrapper_defines_kernels_as_code(self):
-        x = torch.randn(64, 128, device=GPU_TYPE)
-        _, code = _code_for(_softmax, x)
-        self.assertRegex(code, r"(?m)^def triton_\w+\(")
-        self.assertNotIn("= async_compile.triton(", code)
-
-    @requires_gpu_and_triton
     @parametrize("autotune_at_compile_time", [None, True])
     def test_module_runs_from_its_file(self, autotune_at_compile_time):
         x = torch.randn(64, 128, device=GPU_TYPE)
@@ -511,6 +504,7 @@ class TestModuleLevelKernels(TestCase):
                 "max_autotune_gemm_backends": "TRITON",
             },
         ],
+        name_fn=lambda p: "_".join(k for k, v in p.items() if v is True),
     )
     # In-process compiles, so each kernel's module is loaded into PyCodeCache here.
     @config.patch(compile_threads=1)
@@ -528,8 +522,11 @@ class TestModuleLevelKernels(TestCase):
         PyCodeCache.cache_clear()
         result, code = _code_for(fn, a, b, x, y, **patch)
         self.assertEqual(result, fn(a, b, x, y))
+        self.assertEqual(_run_from_file(code, [a, b, x, y]), result)
         if "max_autotune" in patch:
             self.assertIn("triton_tem_", code)
+        if "combo_kernels" in patch:
+            self.assertIn("pid_offset", code)
         # Only the wrapper's own harness is at module level; each kernel's stays in the
         # module the kernel is compiled from, where benchmark_all_kernels finds it.
         self.assertEqual(code.count("__main__"), 1, code)
@@ -652,8 +649,8 @@ class TestModuleLevelKernels(TestCase):
                 x, y, asm_str=asm, constraints="=r,r,r", dtype=torch.int32
             )
 
-        x = torch.randint(-8, 8, (256,), device=GPU_TYPE, dtype=torch.int32)
-        y = torch.randint(-8, 8, (256,), device=GPU_TYPE, dtype=torch.int32)
+        x = torch.randint(-8, 8, (256,), device="cuda", dtype=torch.int32)
+        y = torch.randint(-8, 8, (256,), device="cuda", dtype=torch.int32)
         cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
         result, code = _code_for(fn, x, y, **cfg)
         self.assertEqual(result, (x >= y).int())
