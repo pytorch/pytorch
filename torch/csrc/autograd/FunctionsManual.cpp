@@ -4538,6 +4538,19 @@ std::tuple<Tensor, Tensor> linalg_qr_piv_jvp(
   // the JVP satisfies dA P = dQ R + Q dR, assuming the pivot
   // pattern is locally constant (dP = 0).
 
+  auto [compute_q, reduced] = at::native::_parse_qr_piv_mode(mode);
+
+  TORCH_CHECK(
+      compute_q,
+      "The derivative of linalg.qr_piv depends on Q, which is not computed when "
+      "mode='r'. Please use linalg.qr_piv(A, mode='reduced') if you are "
+      "going to differentiate through linalg.qr_piv.");
+
+  TORCH_CHECK(
+      reduced || dA.sym_size(-2) <= dA.sym_size(-1),
+      "The pivoted QR decomposition is not differentiable when "
+      "mode='complete' and nrows > ncols.");
+
   auto P_expanded =
       P.contiguous().toType(at::kLong).unsqueeze(-2).expand_as(dA);
   auto dAP = dA.gather(-1, P_expanded);

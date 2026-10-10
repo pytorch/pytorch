@@ -1192,33 +1192,30 @@ def sample_inputs_linalg_qr_geqrf(
         yield SampleInput(make_arg(*shape))
 
 
-def sample_inputs_linalg_qr_piv(op_info, device, dtype, requires_grad=False, **kwargs):
+def sample_inputs_linalg_qr_piv(
+    op_info, device, dtype, requires_grad=False, *, differentiable=True, **kwargs
+):
     # QR is just well defined when the matrix is full rank
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-    make_arg = partial(make_fullrank, dtype=dtype, device=device)
+    make_arg = partial(
+        make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad
+    )
 
     batches = [(), (0,), (2,), (1, 1)]
     ns = [5, 2, 0]
 
+    # mode='r' and mode='complete' with m > n are documented to raise when
+    # differentiated, so they are sampled by the "nondifferentiable" variant.
     for batch, (m, n) in product(batches, product(ns, ns)):
         shape = batch + (m, n)
-        yield SampleInput(make_arg(*shape, requires_grad=requires_grad))
-
-        # mode='complete' is only differentiable for m <= n (see the warning
-        # on torch.linalg.qr_piv); skip the m > n case for the gradient-based
-        # OpInfo tests, since gradcheck requires at least one differentiable
-        # input and this path is documented to raise. The explicit error is
-        # covered directly by test_linalg_qr_piv_autograd.
-        if not requires_grad or m <= n:
-            yield SampleInput(
-                make_arg(*shape, requires_grad=requires_grad),
-                kwargs={"mode": "complete"},
-            )
-
-        # mode='r' discards Q and is never differentiable; only exercise it
-        # for the forward-value OpInfo tests.
-        if not requires_grad:
+        if differentiable:
+            yield SampleInput(make_arg(*shape))
+            if m <= n:
+                yield SampleInput(make_arg(*shape), kwargs={"mode": "complete"})
+        else:
             yield SampleInput(make_arg(*shape), kwargs={"mode": "r"})
+            if m > n:
+                yield SampleInput(make_arg(*shape), kwargs={"mode": "complete"})
 
 
 def sample_inputs_linalg_polar(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -2009,6 +2006,16 @@ op_db: list[OpInfo] = [
         # In-place ops
         check_batched_gradgrad=False,
         sample_inputs_func=sample_inputs_linalg_qr_piv,
+        decorators=[onlyCPU, skipCPUIfNoLapack],
+    ),
+    OpInfo(
+        "linalg.qr_piv",
+        aten_name="linalg_qr_piv",
+        op=torch.linalg.qr_piv,
+        variant_test_name="nondifferentiable",
+        dtypes=floating_and_complex_types(),
+        supports_autograd=False,
+        sample_inputs_func=partial(sample_inputs_linalg_qr_piv, differentiable=False),
         decorators=[onlyCPU, skipCPUIfNoLapack],
     ),
     OpInfo(
