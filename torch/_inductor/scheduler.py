@@ -7543,6 +7543,8 @@ class Scheduler:
                     choice, torch._inductor.select_algorithm.TritonTemplateCaller
                 ):
                     return False
+                if not choice.supports_epilogue_fusion:
+                    return False
                 # For prologue fusion we check if the underlying template of the choice
                 # supports all allowed prologue inputs. If not, we skip this choice in
                 # the fusion benchmark.
@@ -7637,7 +7639,7 @@ class Scheduler:
                     continue
 
                 # pyrefly: ignore [missing-attribute]
-                if is_nvgemm and not choice.supports_epilogue_fusion:
+                if not choice.supports_epilogue_fusion:
                     continue
 
                 # NVGEMM doesn't support prologue fusion. Skip NVGEMM choices in
