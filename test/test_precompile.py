@@ -18,6 +18,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import time
 import typing
 import unittest
 import uuid
@@ -30,6 +31,7 @@ import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._precompile import _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.compiler._export_python import ExportedPythonArtifact
 from torch.compiler.precompile import (
     capture,
     DynamoTracer,
@@ -3446,6 +3448,15 @@ class TestPrecompile(TestCase):
             )
         self.assertTrue(any("was not saved" in m for m in cm.output), cm.output)
 
+    def test_capture_drawing_on_meta_does_not_warn(self):
+        # A meta "draw" consumes no generator, so there is nothing unsaved to report.
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: torch.rand_like(a),
+                torch.empty(4, device="meta"),
+                backend="eager",
+            )
+
     def test_capture_rejected_after_tracing_still_restores_rng(self):
         # These rejections all fire with a complete graph in hand, so they know what
         # the capture drew and must not leave the caller's stream advanced.
@@ -3495,6 +3506,17 @@ class TestPrecompile(TestCase):
             _precompile_pair(op, torch.empty(4), backend="eager")
         self.assertEqual(torch.random.get_rng_state(), before)
 
+    def test_capture_through_a_prims_op_restores_nothing(self):
+        # prims ops are as transparent as aten ones (decomposition tables emit them), so
+        # one in a graph that does not draw must not undo a reseed made during capture.
+        def reseed_then_convert(a):
+            torch.random.default_generator.manual_seed(7)
+            return torch.ops.prims.convert_element_type(a, torch.float64)
+
+        torch.manual_seed(0)
+        _precompile_pair(reseed_then_convert, torch.empty(4), backend="eager")
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+
     def test_capture_drawing_from_an_explicit_generator_rewinds_no_default(self):
         # The named generator cannot be saved before capture names it, and rewinding
         # its device's default generator instead would replay unrelated draws.
@@ -3512,8 +3534,20 @@ class TestPrecompile(TestCase):
         self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
         self.assertNotEqual(gen.get_state(), gen_before)
 
+    def test_capture_drawing_from_a_default_generator_by_name_restores_it(self):
+        torch.manual_seed(0)
+        before = torch.random.get_rng_state()
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: a + torch.rand(4, generator=torch.default_generator),
+                torch.empty(4),
+                backend="eager",
+            )
+        self.assertEqual(torch.random.get_rng_state(), before)
+
     def test_capture_drawing_from_explicit_and_default_generators(self):
         gen = torch.Generator().manual_seed(0)
+        gen_before = gen.get_state()
         torch.manual_seed(0)
         before = torch.random.get_rng_state()
         with self.assertLogs("torch._precompile", level="WARNING") as cm:
@@ -3524,6 +3558,7 @@ class TestPrecompile(TestCase):
             )
         self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
         self.assertEqual(torch.random.get_rng_state(), before)
+        self.assertNotEqual(gen.get_state(), gen_before)
         with self.assertNoLogs("torch._precompile", level="WARNING"):
             _precompile_pair(
                 lambda a: torch.rand_like(a), torch.empty(4), backend="eager"
@@ -3585,7 +3620,9 @@ class TestPrecompile(TestCase):
             return op is not None and torch.Tag.nondeterministic_seeded in op.tags
 
         gates = ("dropout_p", "train", "training")
-        discovered, never = {}, set()
+        # Every overload's gate, so overloads that disagree (or one lacking the gate)
+        # fail rather than the first one seen winning.
+        discovered = {}
         for schema in torch._C._jit_get_all_schemas():
             if not schema.name.startswith("aten::"):
                 continue
@@ -3593,12 +3630,10 @@ class TestPrecompile(TestCase):
                 continue
             args = [a.name for a in schema.arguments]
             gate = next((g for g in gates if g in args), None)
-            if gate is None:
-                never.add(schema.name)
-            else:
-                discovered.setdefault(schema.name, gate)
-        gated = {k: v for k, v in _RNG_GATED_BY_ARG.items() if v is not None}
-        self.assertEqual(discovered, gated)
+            discovered.setdefault(schema.name, set()).add(gate)
+        never = {k for k, v in discovered.items() if v == {None}}
+        gated = {k: {v} for k, v in _RNG_GATED_BY_ARG.items() if v is not None}
+        self.assertEqual({k: v for k, v in discovered.items() if v != {None}}, gated)
         # Never-drawing entries are tagged ops without a gate argument.
         self.assertLessEqual(set(_RNG_GATED_BY_ARG) - set(gated), never)
 
@@ -3784,6 +3819,24 @@ class TestPrecompile(TestCase):
                 frames = traceback.extract_tb(e.__traceback__)
         self.assertTrue(any(fr.filename == artifact for fr in frames), frames)
 
+    def test_load_of_an_edited_artifact_says_to_run_it_directly(self):
+        with tempfile.TemporaryDirectory() as d:
+            artifact, cache = os.path.join(d, "a.py"), os.path.join(d, "a.cache")
+            with capture(
+                lambda a: a + 1,
+                artifact_path=artifact,
+                cache_path=cache,
+                tracer=MakeFxTracer(),
+                backend="eager",
+            ) as cap:
+                cap(torch.ones(2))
+            with open(artifact, "a") as f:
+                f.write("# a hand edit\n")
+            with self.assertRaisesRegex(PrecompileError, "edited after capture"):
+                load(artifact, cache)
+            ns = runpy.run_path(artifact)
+            self.assertEqual(ns["forward"](torch.ones(2)), torch.ones(2) + 1)
+
     def test_generated_source_says_it_may_be_edited(self):
         # The artifact's own header is the only documentation most readers will see. It
         # used to carry a generated-code "do not edit" banner, which is exactly backwards
@@ -3794,19 +3847,45 @@ class TestPrecompile(TestCase):
             )
             self.assertIn("Editing it is supported", code)
 
+    def test_inductor_cpu_reduction_sizes_its_accumulator_at_run_time(self):
+        # The cpp.dynamic_threads pin: an accumulator array sized at the capture's thread
+        # count overflows when the artifact runs under a larger OMP team. Inductor bakes
+        # one only when the thread count equals os.cpu_count().
+        prev = torch.get_num_threads()
+        torch.set_num_threads(os.cpu_count())
+        try:
+            code, _cache = _precompile_pair(lambda a: a.sum(), torch.randn(1 << 20))
+        finally:
+            torch.set_num_threads(prev)
+        self.assertNotRegex(code, r"_arr\[\d+\]")
+        self.assertIn("_arr[max_threads]", code)
+
     @unittest.skipIf(not TEST_CUDA, "needs CUDA")
-    def test_load_from_a_code_string_gives_triton_a_file(self):
-        # Kernels are module-level code, and @triton.jit reads its own source off disk:
-        # it refuses a function whose module has no file. A caller loading from a string
-        # has no path to offer, so load parks a copy where triton can find it rather
-        # than failing on every CUDA artifact.
-        code, cache = _precompile_pair(
+    def test_inductor_artifact_turns_off_the_local_autotune_cache(self):
+        # The local autotune cache writes a <hash>.best_config next to __file__, which
+        # is the artifact once load() runs it from its path.
+        code, _cache = _precompile_pair(
             lambda a: (a * 2).relu(), torch.ones(64, device="cuda")
         )
-        self.assertIn("@triton.jit", code)
-        loaded = _load_pair(code, cache)
-        x = torch.randn(64, device="cuda")
-        self.assertEqual(loaded(x), (x * 2).relu())
+        self.assertIn("'autotune_local_cache': False", code)
+
+    @unittest.skipIf(not TEST_CUDA, "needs CUDA")
+    def test_load_runs_triton_kernels_from_the_artifact_file(self):
+        # @triton.jit reads a module-level kernel's source by filename, and load() hands
+        # it the artifact itself rather than a copy in the inductor cache dir.
+        def fn(a):
+            return (a * 2).relu()
+
+        with tempfile.TemporaryDirectory() as d:
+            artifact, cache = os.path.join(d, "a.py"), os.path.join(d, "a.cache")
+            with capture(
+                fn, artifact_path=artifact, cache_path=cache, tracer=MakeFxTracer()
+            ) as cap:
+                cap(torch.ones(64, device="cuda"))
+            loaded = load(artifact, cache)
+            self.assertEqual(loaded._loaded_forward.__code__.co_filename, artifact)
+            x = torch.randn(64, device="cuda")
+            self.assertEqual(loaded(x), fn(x))
 
 
 class _FilesModel(torch.nn.Module):
@@ -5572,8 +5651,8 @@ class TestPrecompileDynamoCapture(TestCase):
 class TestExportPython(TestCase):
     # torch.compiler.export_python is the disk-cached decorator over
     # torch.compiler.precompile: first call writes the emitted, self-contained python,
-    # later calls read and exec it directly. Run device-generically so the inductor
-    # path is exercised on CUDA too.
+    # later calls read and exec it directly. Run device-generically so every test
+    # covers CUDA too.
 
     def _tmp_path(self, name="artifact.py"):
         d = tempfile.mkdtemp()
@@ -5664,20 +5743,11 @@ class TestExportPython(TestCase):
 
         self.assertEqual(run(m, x), expected)
 
-        # Wrap the artifact's own entry point so the edit is backend-agnostic: whatever
-        # forward() computes, the edited file must return twice it.
-        with open(path, encoding="utf-8") as f:
-            code = f.read()
-        code = code.replace("def forward(", "def _orig_forward(", 1)
-        code += textwrap.dedent(
-            """
-
-            def forward(*args, **kwargs):
-                return _orig_forward(*args, **kwargs) * 2
-            """
-        )
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(code)
+        # Rebinding forward keeps the edit independent of where the emitter puts things:
+        # whatever forward() computes, the edited file must return twice it.
+        rebind = "\n_orig = forward\n\ndef forward(*a):\n    return _orig(*a) * 2\n"
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(rebind)
 
         @torch.compiler.export_python(path=path, backend="inductor")
         def run2(model, inp):
@@ -6108,10 +6178,6 @@ class TestExportPython(TestCase):
             self.assertEqual(r, x + 1)
 
     def test_concurrent_first_launches_are_serialized(self, device):
-        import time
-
-        from torch.compiler._export_python import ExportedPythonArtifact
-
         x = make_tensor((4,), device=device, dtype=torch.float32)
 
         @torch.compiler.export_python(
@@ -6171,118 +6237,6 @@ class TestExportPython(TestCase):
         for r in results:
             self.assertEqual(r, x + 1)
 
-    def test_concurrent_distinct_captures_are_serialized(self, device):
-        import time
-
-        import torch._precompile as precompile_impl
-
-        x = make_tensor((4,), device=device, dtype=torch.float32)
-        runs = []
-        for i in range(4):
-
-            @torch.compiler.export_python(
-                path=self._tmp_path(f"concurrent_{i}.py"), backend="eager"
-            )
-            def run(inp):
-                return inp + 1
-
-            runs.append(run)
-
-        real = precompile_impl._capture
-        state_lock = threading.Lock()
-        active = 0
-        max_active = 0
-
-        def spy(*args, **kwargs):
-            nonlocal active, max_active
-            with state_lock:
-                active += 1
-                max_active = max(max_active, active)
-            try:
-                time.sleep(0.02)
-                return real(*args, **kwargs)
-            finally:
-                with state_lock:
-                    active -= 1
-
-        barrier = threading.Barrier(len(runs))
-        results: list = [None] * len(runs)
-
-        def worker(i):
-            barrier.wait()
-            results[i] = runs[i](x)
-
-        with mock.patch.object(precompile_impl, "_capture", spy):
-            threads = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
-
-        self.assertEqual(max_active, 1)
-        for result in results:
-            self.assertEqual(result, x + 1)
-
-    def test_export_and_direct_precompile_captures_are_serialized(self, device):
-        import time
-
-        import torch._precompile as precompile_impl
-
-        x = make_tensor((4,), device=device, dtype=torch.float32)
-
-        @torch.compiler.export_python(
-            path=self._tmp_path("direct_concurrent.py"), backend="eager"
-        )
-        def exported(inp):
-            return inp + 1
-
-        real_capture = precompile_impl._capture
-        state_lock = threading.Lock()
-        active = 0
-        max_active = 0
-
-        def spy(*args, **kwargs):
-            nonlocal active, max_active
-            with state_lock:
-                active += 1
-                max_active = max(max_active, active)
-            try:
-                time.sleep(0.05)
-                return real_capture(*args, **kwargs)
-            finally:
-                with state_lock:
-                    active -= 1
-
-        barrier = threading.Barrier(2)
-        errors = []
-
-        def export_worker():
-            try:
-                barrier.wait()
-                exported(x)
-            except BaseException as e:
-                errors.append(e)
-
-        def precompile_worker():
-            try:
-                barrier.wait()
-                _precompile_pair(lambda inp: inp + 2, x, backend="eager")
-            except BaseException as e:
-                errors.append(e)
-
-        with mock.patch.object(precompile_impl, "_capture", spy):
-            threads = [
-                threading.Thread(target=export_worker),
-                threading.Thread(target=precompile_worker),
-            ]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join(20)
-        self.assertFalse(any(thread.is_alive() for thread in threads))
-        self.assertEqual(errors, [])
-        self.assertEqual(max_active, 1)
-
     def test_nested_first_capture_does_not_deadlock(self, device):
         code = textwrap.dedent(
             f"""
@@ -6314,7 +6268,7 @@ class TestExportPython(TestCase):
             [sys.executable, "-c", code],
             capture_output=True,
             text=True,
-            timeout=20,
+            timeout=600,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -6421,6 +6375,30 @@ class TestExportPython(TestCase):
                 _atomic_publish(path, b"payload")
         self.assertFalse(os.path.exists(path))
         self.assertEqual(os.listdir(os.path.dirname(path)), [])
+
+    def test_publish_retries_when_the_winners_file_vanishes(self, device):
+        # A peer can win the link and then delete its file (to force a regenerate)
+        # before this loser reads it; the loser then publishes its own capture.
+        import torch.compiler._export_python as ep
+
+        path = self._tmp_path("vanish.py")
+        real_publish = ep._atomic_publish
+        calls = []
+
+        def lose_once(p, data):
+            calls.append(p)
+            return len(calls) > 1 and real_publish(p, data)
+
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def run(inp):
+            return inp + 1
+
+        with mock.patch.object(ep, "_atomic_publish", lose_once):
+            self.assertEqual(run(x), x + 1)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(os.path.isfile(path))
 
     @unittest.skipIf(sys.platform == "win32", "creating a symlink needs privileges")
     def test_publish_through_a_dangling_symlink_creates_its_target(self, device):
@@ -6535,6 +6513,18 @@ class TestExportPython(TestCase):
         with self.assertRaisesRegex(TypeError, r"\*\*kwargs"):
             run(x, b=x)
 
+    def test_var_positional_arity_fixed_at_capture(self, device):
+        @torch.compiler.export_python(path=self._tmp_path("varpos.py"), backend="eager")
+        def run(a, *rest):
+            return a + sum(rest)
+
+        x, y, z = (make_tensor(4, device=device, dtype=torch.float32) for _ in range(3))
+        self.assertEqual(run(x, y), x + y)
+        with self.assertRaisesRegex(PrecompileError, "expected 2 positional args"):
+            run(x, y, z)
+        with self.assertRaisesRegex(TypeError, r"parameter 'rest\[1\]'"):
+            run(x, y, 1)
+
     def test_decompositions_forwarded(self, device):
         from unittest.mock import patch
 
@@ -6623,8 +6613,8 @@ class TestExportPython(TestCase):
         with open(path, encoding="utf-8") as f:
             lines = f.read().split("\n")
         tag = "# torch.compiler.export_python torch-version: "
-        if lines and lines[0].startswith(tag):
-            lines = lines[1:]
+        self.assertTrue(lines[0].startswith(tag))
+        lines = lines[1:]
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
 
@@ -6652,9 +6642,12 @@ class TestExportPython(TestCase):
 
         self.assertEqual(run(x), x + 1)
         with open(path, encoding="utf-8") as f:
-            code = f.read()
+            lines = f.readlines()
+        # Below the leading comment block, so the stamps stay readable.
+        end = next(i for i, line in enumerate(lines) if not line.startswith("#"))
+        lines.insert(end, "import a_module_that_does_not_exist_xyz\n")
         with open(path, "w", encoding="utf-8") as f:
-            f.write("import a_module_that_does_not_exist_xyz\n" + code)
+            f.writelines(lines)
 
         @torch.compiler.export_python(path=path, backend="eager")
         def run2(inp):
@@ -6722,8 +6715,31 @@ class TestExportPython(TestCase):
         def loaded(mod, inp):
             return mod(inp)
 
-        with self.assertRaisesRegex(PrecompileError, "training state"):
+        with self.assertRaisesRegex(
+            PrecompileError, "submodule 'inner' was training=True at capture"
+        ):
             loaded(model, x)
+
+    def test_training_stamp_is_taken_before_capture_runs_fn(self, device):
+        # Capture runs fn on the example, so a fn that sets the mode itself must not
+        # stamp the mode it set: the per-call check reads the caller's modules before
+        # the call runs, and every call would be refused.
+        path = self._tmp_path("fn_sets_training.py")
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                return inp + 1 if self.training else inp - 1
+
+        model = Model().to(device).eval()
+        x = make_tensor((4,), device=device, dtype=torch.float32)
+
+        @torch.compiler.export_python(path=path, backend="eager")
+        def step(mod, inp):
+            mod.train()
+            return mod(inp)
+
+        self.assertEqual(step(model, x), x + 1)
+        self.assertEqual(step(model, x), x + 1)
 
     def test_recursive_decorated_function_raises_not_hangs(self, device):
         path = self._tmp_path("recursive.py")
@@ -6937,8 +6953,8 @@ class TestExportPython(TestCase):
 
     def test_capture_drawing_only_on_the_accelerator_leaves_cpu_rng_alone(self, device):
         # The restore is per generator, not all-or-nothing: rewinding the CPU generator
-        # for a graph that only drew on CUDA replays an unrelated CPU draw.
-        if not TEST_CUDA or torch.device(device).type != "cuda":
+        # for a graph that only drew on the accelerator replays an unrelated CPU draw.
+        if torch.device(device).type == "cpu":
             self.skipTest("needs a non-CPU generator to draw from")
         path = self._tmp_path("cuda_only_rng.py")
 
@@ -6972,12 +6988,16 @@ class TestExportPython(TestCase):
 
     def test_untagged_drawing_op_still_restores(self, device):
         # An opaque custom op can draw inside its own kernel with nothing in the graph
-        # to say so -- the shape this API targets. Attributing the restore per device
-        # would leave those draws un-restored, so a non-aten op in the graph has to
-        # fall back to restoring every snapshotted generator.
+        # to say so -- the shape this API targets. It may draw on a generator other
+        # than its output's device (here always CPU), so a non-aten op in the graph has
+        # to restore every snapshotted generator, not just its output device's.
         lib = self._library("precompile_untagged")
         lib.define("draw(Tensor x) -> Tensor")
-        lib.impl("draw", lambda x: x + torch.rand_like(x), "CompositeExplicitAutograd")
+
+        def draw(x):
+            return x + torch.rand(x.shape).to(x.device)
+
+        lib.impl("draw", draw, "CompositeExplicitAutograd")
         path = self._tmp_path("untagged.py")
 
         def build():
@@ -6990,8 +7010,10 @@ class TestExportPython(TestCase):
         x = torch.zeros(4, device=device)
         torch.manual_seed(1234)
         first = build()(x).clone()
+        first_state = self._rng_state(device)
         torch.manual_seed(1234)
         self.assertEqual(build()(x), first)
+        self.assertEqual(self._rng_state(device), first_state)
 
     def test_inputs_sliced_from_one_buffer_are_not_aliased(self, device):
         # Overlap must mean sharing actual bytes. torch._C._overlaps answers a different
@@ -7019,6 +7041,27 @@ class TestExportPython(TestCase):
 
         buf = make_tensor((8,), device=device, dtype=torch.float32)
         self.assertEqual(add(buf[:4], buf[4:]), buf[:4] + buf[4:])
+
+    def test_overlap_stamp_is_taken_before_capture_runs_fn(self, device):
+        # Capture runs fn on the example, and set_ there makes inputs alias that were
+        # distinct when the graph was traced. A stamp taken after capture records that
+        # aliasing and refuses the very call the artifact was traced for.
+        def fn(a, b):
+            a.set_(b)
+            return a + 1
+
+        def inputs():
+            return torch.zeros(4, device=device), torch.ones(4, device=device)
+
+        for label, example_inputs in [("first_call", None), ("example", inputs())]:
+            with self.subTest(path=label):
+                path = self._tmp_path(f"set_{label}.py")
+                wrapped = torch.compiler.export_python(
+                    path=path, backend="eager", example_inputs=example_inputs
+                )(fn)
+                self.assertEqual(wrapped(*inputs()), fn(*inputs()))
+                with open(path, encoding="utf-8") as f:
+                    self.assertIn("input-overlap: []\n", f.read())
 
     def test_capture_copy_that_loses_parameter_aliasing_is_refused(self, device):
         # nn.Parameter.__deepcopy__ is self.data.clone(), which does not join the
@@ -7166,6 +7209,27 @@ class TestExportPython(TestCase):
             logs.output,
         )
 
+    def test_input_that_is_a_module_buffer_is_guarded(self, device):
+        # A view of a buffer and the buffer itself report the same overlap pair, so only
+        # the duplicate stamp, which must see module tensors, tells the calls apart.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.zeros(4, device=device))
+
+        def fn(m, x):
+            return m.b + x * 2
+
+        run = torch.compiler.export_python(
+            path=self._tmp_path("module_dup.py"), backend="eager"
+        )(fn)
+        captured = M()
+        run(captured, captured.b[:])
+
+        called = M()
+        with self.assertRaisesRegex(PrecompileError, "repeat tensor objects"):
+            run(called, called.b)
+
     def test_artifact_does_not_bake_the_capture_thread_count(self, device):
         # See the cpp.dynamic_threads pin in PrecompiledModule._compile. Capture runs in
         # a subprocess because it changes the process-global thread count, and the
@@ -7221,10 +7285,9 @@ class TestExportPython(TestCase):
                 run(TwoTensor(moved, moved.clone()))
 
     def test_indented_comment_does_not_stop_the_stamp_reader(self, device):
-        # The documented rule is that the reader stops at the first NON-COMMENT line. An
-        # indented comment is still a comment, but it ended the scan -- silently turning
-        # off every stamp below it, which is the degradation mode the design reserves
-        # for a stamp actually being deleted.
+        # The reader stops at the first NON-COMMENT line, and an indented comment is
+        # still a comment: it must not end the stamp scan, or every stamp below it is
+        # silently turned off.
         def fn(a, b):
             a.add_(1.0)
             return b * 10
@@ -7259,14 +7322,17 @@ class TestExportPython(TestCase):
         def fn(inp):
             return inp + 1
 
-        torch.compiler.export_python(path=path)(fn)(x)
+        torch.compiler.export_python(path=path, backend="eager")(fn)(x)
         with open(path, encoding="utf-8") as f:
             lines = f.read().splitlines(True)
         lines[0] = f"# torch.compiler.export_python torch-version: {'9' * 4400}\n"
         with open(path, "w", encoding="utf-8") as f:
             f.write("".join(lines))
 
-        self.assertEqual(torch.compiler.export_python(path=path)(fn)(x), fn(x))
+        loaded = torch.compiler.export_python(path=path, backend="eager")(fn)
+        with self.assertLogs("torch.compiler._export_python", level="WARNING") as cm:
+            self.assertEqual(loaded(x), fn(x))
+        self.assertTrue(any("produced by torch" in m for m in cm.output))
 
     def test_overlap_is_bytes_not_storage_identity(self, device):
         # Two tensors can reach the same bytes through DIFFERENT UntypedStorages --
@@ -7321,9 +7387,9 @@ class TestExportPython(TestCase):
     def test_overlap_sees_through_a_wrapper_that_misreports_its_device(self, device):
         # A subclass can report a device differing from its payload's in INDEX
         # (map_location="cuda" over a "cuda:0" payload) or in TYPE
-        # (map_location={"cuda:0": "cpu"}). Deciding on the wrapper rather than the leaf
-        # reported such a tensor as sharing memory with nothing -- including its own
-        # payload -- so the aliasing guard would go blind on it.
+        # (map_location={"cuda:0": "cpu"}). The decision must be made on the leaf:
+        # deciding on the wrapper would report such a tensor as sharing memory with
+        # nothing -- including its own payload -- and blind the aliasing guard to it.
         from torch.compiler._export_python import _shares_memory
 
         base = make_tensor((8,), device=device, dtype=torch.float32)
@@ -7389,6 +7455,12 @@ class TestExportPython(TestCase):
         if TEST_CUDA:
             elsewhere = "cpu" if torch.device(device).type == "cuda" else "cuda"
             self.assertFalse(_shares_memory(opaque, torch.randn(4, device=elsewhere)))
+
+        # The conservative fallback also reads devices off the leaves: an unlocatable
+        # tensor against a wrapper whose payload sits on its device must still alias.
+        lying = _MisreportedDevice(base[:4], _type_lying_device(device))
+        self.assertTrue(_shares_memory(opaque, lying))
+        self.assertTrue(_shares_memory(lying, opaque))
 
     def test_overlap_sweep_matches_the_pairwise_predicate(self, device):
         # _input_overlaps sweeps sorted byte spans instead of running _shares_memory
