@@ -168,7 +168,6 @@ class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
 
     @override
     def defines_triton_kernels_as_code(self) -> bool:
-        # readable_wrapper_requested() has already refused the configs that can't.
         return True
 
     @override
@@ -242,15 +241,6 @@ def readable_wrapper_requested() -> bool:
     """Whether this compile asked for readable output, and can actually have it."""
     if not config.readable_wrapper:
         return False
-    for flag in ("benchmark_kernel", "benchmark_combo_kernel"):
-        if getattr(config, flag):
-            # These append get_args()/call()/__main__ to each kernel's source; at module
-            # level those collide with each other and with the wrapper's own call.
-            raise RuntimeError(
-                f"torch._inductor.config.readable_wrapper is incompatible with {flag}, "
-                "which appends a get_args()/call()/__main__ harness to every kernel; "
-                "defined at module level those collide."
-            )
     if config.profile_bandwidth_output:
         # profile_bandwidth_output runs the module's benchmark harness, which this mode
         # does not emit.

@@ -412,16 +412,6 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertIn("async_compile.triton", code)
         self.assertIn("AsyncCompile()", code)
 
-    @parametrize("flag", ["benchmark_kernel", "benchmark_combo_kernel"])
-    def test_benchmark_harness_is_refused(self, flag):
-        # these append a get_args()/call()/__main__ harness to each kernel; at module
-        # level those collide with each other and with the wrapper's own call.
-        def fn(x):
-            return (x * 2).relu()
-
-        with self.assertRaisesRegex(Exception, flag):
-            _code_for(fn, torch.randn(256), readable_wrapper=True, **{flag: True})
-
     @parametrize("flag", ["cpp_wrapper", "fx_wrapper"])
     def test_non_python_wrapper_is_refused(self, flag):
         # these select a different wrapper, which would silently drop readable_wrapper

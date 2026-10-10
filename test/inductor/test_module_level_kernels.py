@@ -9,6 +9,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor import CompiledArtifact, config
 from torch._inductor.async_compile import AsyncCompile
+from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, run_and_get_code
@@ -81,12 +82,27 @@ class TestModuleLevelKernels(TestCase):
     @requires_cuda_and_triton
     @parametrize(
         "patch",
-        [{"benchmark_kernel": True}, {"benchmark_combo_kernel": True}],
+        [
+            {"benchmark_kernel": True},
+            {"benchmark_combo_kernel": True, "combo_kernels": True},
+        ],
     )
-    def test_shadowing_configs_are_refused(self, patch):
-        x = torch.randn(64, 128, device="cuda")
-        with self.assertRaisesRegex(Exception, "module_level_kernels"):
-            _code_for(_softmax, x, **{"triton.module_level_kernels": True}, **patch)
+    def test_kernel_benchmark_harness(self, patch):
+        def fn(x, y):
+            # Independent pointwise kernels, which combo_kernels fuses into one.
+            return x.sin() * 2, y.cos() + 1
+
+        x, y = torch.randn(64, 128, device="cuda"), torch.randn(32, device="cuda")
+        flags = {"triton.module_level_kernels": True, **patch}
+        PyCodeCache.cache_clear()
+        result, code = _code_for(fn, x, y, **flags)
+        self.assertEqual(result, fn(x, y))
+        # Only the wrapper's own harness is at module level; each kernel's stays in the
+        # module the kernel is compiled from, where benchmark_all_kernels finds it.
+        self.assertEqual(code.count("__main__"), 1, code)
+        self.assertNotIn("def get_args", code.split("def call(")[0])
+        kernels = [m for m in PyCodeCache.modules if hasattr(m, "get_args")]
+        self.assertTrue(kernels)
 
     @requires_cuda_and_triton
     @config.patch(compile_threads=2)
