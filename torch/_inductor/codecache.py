@@ -4907,6 +4907,18 @@ def touch(filename: str) -> None:
         pass
 
 
+def exec_from_cache_file(code: str, name: str) -> dict[str, Any]:
+    """Exec ``code`` as module ``name`` from a file in the cache dir, which a
+    module-level Triton kernel needs: @triton.jit reads its source back from it."""
+    # write() keeps a file already at its path, so key on the exact text (not the
+    # stripped default) and apart from PyCodeCache's modules, which may be hand-edited:
+    # the file the kernels read their lines from must hold exactly the code being run.
+    _, path = write(code, "py", key=get_hash(code, "exec_from_cache_file"))
+    namespace: dict[str, Any] = {"__name__": name, "__file__": path}
+    exec(compile(code, path, "exec"), namespace)
+    return namespace
+
+
 @clear_on_fresh_cache
 class PyCodeCache:
     """Caches generated Python modules and their source mappings."""
