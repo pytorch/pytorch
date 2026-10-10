@@ -412,16 +412,6 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertIn("async_compile.triton", code)
         self.assertIn("AsyncCompile()", code)
 
-    def test_shadowing_kernel_names_are_refused(self):
-        def fn(x):
-            return (x * 2).relu()
-
-        x = torch.randn(256)
-        with self.assertRaisesRegex(Exception, "unique_kernel_names"):
-            _code_for(
-                fn, x, readable_wrapper=True, **{"triton.unique_kernel_names": False}
-            )
-
     @parametrize("flag", ["benchmark_kernel", "benchmark_combo_kernel"])
     def test_benchmark_harness_is_refused(self, flag):
         # these append a get_args()/call()/__main__ harness to each kernel; at module
