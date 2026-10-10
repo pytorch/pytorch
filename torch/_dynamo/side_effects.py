@@ -827,7 +827,9 @@ class SideEffects:
         variable_cls: type[variables.UserDefinedObjectVariable] = (
             variables.UserDefinedObjectVariable
         )
-        if issubclass(
+        if torch._has_frozendict and issubclass(user_cls, torch._frozendict):
+            variable_cls = variables.UserDefinedFrozenDictVariable
+        elif issubclass(
             user_cls, TorchFunctionMode
         ) and TorchFunctionModeVariable.is_supported_torch_function_mode(user_cls):
             variable_cls = TorchFunctionModeVariable
@@ -842,8 +844,6 @@ class SideEffects:
             variable_cls = variables.UserDefinedOrderedDictVariable
         elif issubclass(user_cls, dict):
             variable_cls = variables.UserDefinedDictVariable
-        elif torch._has_frozendict and issubclass(user_cls, torch._frozendict):
-            variable_cls = variables.UserDefinedFrozenDictVariable
         elif issubclass(user_cls, frozenset):
             variable_cls = variables.UserDefinedFrozensetVariable
         elif issubclass(user_cls, set):

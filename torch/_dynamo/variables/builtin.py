@@ -3631,11 +3631,27 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if name == "__class_getitem__":
+            no_keywords(tx, "frozendict.__class_getitem__", kwargs)
+            check_positional(tx, name, len(args), 1, 1)
+            return variables.TypingVariable(self._fn).mp_subscript_impl(tx, args[0])
         if name == "__new__":
-            check_positional(tx, name, len(args), 1, 2)
-            cls = args[0].as_python_constant()
-            if not isinstance(cls, type) or not issubclass(cls, self._fn):
-                raise_type_error(tx, "frozendict.__new__ requires a frozendict subtype")
+            if not args:
+                raise_type_error(tx, "frozendict.__new__(): not enough arguments")
+            if not args[0].is_python_constant() or not isinstance(
+                cls := args[0].as_python_constant(), type
+            ):
+                raise_type_error(
+                    tx,
+                    "frozendict.__new__(X): X is not a type object "
+                    f"({args[0].python_type_name()})",
+                )
+            if not issubclass(cls, self._fn):
+                raise_type_error(
+                    tx,
+                    f"frozendict.__new__({cls.__name__}): {cls.__name__} "
+                    "is not a subtype of frozendict",
+                )
             result = self.call_function(tx, args[1:], kwargs)
             if not isinstance(result, variables.FrozenDictVariable):
                 raise AssertionError(f"Expected FrozenDictVariable, got {type(result)}")
@@ -3673,10 +3689,9 @@ class FrozenDictBuiltinVariable(BaseBuiltinVariable):
         if cls is not None:
             seed = cls.call_function(tx, [], {})
             if isinstance(seed, variables.FrozenDictVariable):
+                storage = ConstDictVariable({}, mutation_type=ValueMutationNew())
+                storage.dict_update(tx, [seed], {})
                 additions = self.fromkeys(tx, args, {})
-                storage = ConstDictVariable(
-                    seed.items.copy(), mutation_type=ValueMutationNew()
-                )
                 storage.dict_update(tx, [additions], {})
                 return cls.call_function(
                     tx, [variables.FrozenDictVariable(storage.items)], {}
