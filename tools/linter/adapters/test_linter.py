@@ -92,10 +92,6 @@ EXCLUDE_PREFIXES = (
 PARSE_ERROR_NAME = "[parse_error]"
 
 
-class _UnknownKwarg:
-    pass
-
-
 # Mirrors the member names of `torch.testing._internal.common_utils.HardwareClassification`.
 # Values differ from upstream; only member names are used for matching.
 # Defined locally to avoid importing test infrastructure into the linter.
@@ -146,8 +142,6 @@ def _load_allowlist() -> set[str]:
 
 
 _allowlist: set[str] = _load_allowlist()
-
-_KWARG_UNKNOWN = _UnknownKwarg()  # sentinel: kwarg present but not a literal
 
 
 def _is_test_file(filename: str) -> bool:
@@ -329,47 +323,30 @@ def _collect_test_classes(tree: ast.Module) -> dict[str, ClassEntry]:
     }
 
 
-def _get_string_list_kwarg(
-    call: ast.Call, param_name: str
-) -> list[str] | None | _UnknownKwarg:
-    """Return statically known string list value of a keyword argument.
+def _has_only_for(call: ast.Call) -> bool:
+    """True if *call* passes an ``only_for`` that restricts devices.
 
-    Returns:
-        - None: keyword argument is absent.
-        - list[str]: keyword argument is a statically known string list.
-        - _KWARG_UNKNOWN: keyword argument exists but cannot be statically resolved.
+    An explicit ``only_for=None`` restricts nothing. Every other value is a
+    restriction, including ones that cannot be resolved statically: a
+    restriction we cannot read is still a restriction.
     """
-    for kw_item in call.keywords:
-        if kw_item.arg != param_name:
-            continue
-
-        node = kw_item.value
-
-        if isinstance(node, ast.Constant) and node.value is None:
-            return None
-
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return [node.value]
-
-        if isinstance(node, (ast.List, ast.Tuple)):
-            result = [
-                elt.value
-                for elt in node.elts
-                if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
-            ]
-
-            # list contains non-string elements
-            if len(result) != len(node.elts):
-                return _KWARG_UNKNOWN
-            return result
-
-        return _KWARG_UNKNOWN
-
-    return None
+    return any(
+        kw_item.arg == "only_for"
+        and not (
+            isinstance(kw_item.value, ast.Constant) and kw_item.value.value is None
+        )
+        for kw_item in call.keywords
+    )
 
 
 def _accelerator_api_call(call: ast.Call) -> str | None:
-    """Return the dotted name of a call into an accelerator torch module, or None."""
+    """Return the dotted name of a call into an accelerator ``torch`` module.
+
+    Only calls rooted at ``torch`` are considered, and only the attribute names
+    along the callee chain are inspected. Unparsing the callee would also match
+    text inside its arguments: ``torch.load("ckpt.cuda.pt")`` would look like a
+    ``torch.cuda`` call.
+    """
 
     # "accelerator" is included on purpose: torch.accelerator.* still needs an
     # accelerator to exist.
@@ -384,15 +361,20 @@ def _accelerator_api_call(call: ast.Call) -> str | None:
         "xpu",
     }
 
-    func = call.func
-    if not isinstance(func, ast.Attribute):
+    parts: list[str] = []
+    node: ast.expr = call.func
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+
+    if not isinstance(node, ast.Name) or node.id != "torch":
         return None
 
-    name = ast.unparse(func)
-    parts = name.split(".")
-    if parts[0] != "torch" or not ACCELERATOR_MODULES.intersection(parts):
+    parts.append("torch")
+    parts.reverse()
+    if not ACCELERATOR_MODULES.intersection(parts):
         return None
-    return name
+    return ".".join(parts)
 
 
 @dataclass(frozen=True)
@@ -400,11 +382,11 @@ class InstantiationContext:
     """Context for an ``instantiate_device_type_tests`` call."""
 
     call: ast.Call
-    only_for: list[str] | None | _UnknownKwarg
+    has_only_for: bool
 
     @classmethod
     def from_call(cls, call: ast.Call) -> InstantiationContext:
-        return cls(call=call, only_for=_get_string_list_kwarg(call, "only_for"))
+        return cls(call=call, has_only_for=_has_only_for(call))
 
 
 @dataclass(frozen=True)
@@ -515,9 +497,14 @@ def _register(*groups: HardwareClassification) -> Callable[[type[Rule]], type[Ru
     return decorator
 
 
-# The gate rule: it must run before dispatch, when the classification is not
-# known yet, so it is called explicitly instead of being registered.
 class HwClassificationRule(Rule):
+    """Gate rule: validates the declaration before any rule can be dispatched.
+
+    It must run while the classification is still unknown, so ``check_file``
+    calls it explicitly instead of registering it, and it implements ``parse``
+    rather than the ``Rule.check`` dispatch contract.
+    """
+
     id = RuleId.HW_CLASSIFICATION
     summary = (
         "Every test class must declare a valid hw_classification attribute "
@@ -748,7 +735,7 @@ class OnlyForRule(Rule):
 
     @classmethod
     def check(cls, ctx: RuleContext) -> list[LintMessage]:
-        if ctx.instantiation is None or ctx.instantiation.only_for is None:
+        if ctx.instantiation is None or not ctx.instantiation.has_only_for:
             return []
         return [
             error_msg(
