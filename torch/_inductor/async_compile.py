@@ -1075,6 +1075,7 @@ class AsyncCompile:
         swizzle_type_a=None,
         swizzle_type_b=None,
         has_bias_epilogue=False,
+        has_output_scale=False,
         swap_ab=False,
         metadata=None,
     ):
@@ -1105,6 +1106,7 @@ class AsyncCompile:
             swizzle_type_a,
             swizzle_type_b,
             has_bias_epilogue,
+            has_output_scale,
             swap_ab,
             metadata,
         )
