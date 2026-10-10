@@ -2,6 +2,7 @@
 
 import operator
 import random
+import unittest
 import warnings
 from functools import reduce
 from itertools import product
@@ -11,6 +12,7 @@ import numpy as np
 import torch
 from torch import tensor
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import evaluate_gfx_arch_within
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
@@ -20,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIf,
     skipMPS,
@@ -2352,6 +2355,168 @@ class TestIndexingDevice(TestCase):
         expected = out.cpu().clone().index_add_(0, idx.cpu(), src.cpu())
         out.index_add_(0, idx, src)
         self.assertEqual(out.cpu(), expected)
+
+    @serialTest()
+    @onlyCUDA
+    @unittest.skipUnless(
+        evaluate_gfx_arch_within(["gfx942", "gfx950"]),
+        "MI300x/MI350x index_select backward path",
+    )
+    @dtypes(torch.half)
+    @parametrize("num_indices", [4096, 8192])
+    def test_index_select_backward_below_sort_threshold_uses_native_half(
+        self, device, dtype, num_indices
+    ):
+        inner_size = 64
+        source = torch.zeros(
+            (2, inner_size), device=device, dtype=dtype, requires_grad=True
+        )
+        index = torch.zeros(num_indices, device=device, dtype=torch.int64)
+
+        contribution = torch.tensor(0.1, device=device, dtype=dtype)
+        grad = contribution.expand(num_indices, inner_size).contiguous()
+        source.index_select(0, index).backward(grad)
+
+        expected = torch.zeros_like(source).index_add_(0, index, grad)
+        self.assertEqual(source.grad, expected, atol=0, rtol=0)
+
+    @serialTest()
+    @onlyCUDA
+    @unittest.skipUnless(
+        evaluate_gfx_arch_within(["gfx942", "gfx950"]),
+        "MI300x/MI350x index_select backward path",
+    )
+    @parametrize("num_indices", [4096, 8192])
+    @parametrize("inner_size", [64, 128, 256])
+    def test_index_select_backward_below_sort_threshold_uses_native_bfloat16(
+        self, device, num_indices, inner_size
+    ):
+        source = torch.zeros(
+            (2, inner_size),
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        index = torch.zeros(num_indices, device=device, dtype=torch.int64)
+        contribution = torch.tensor(0.1, device=device, dtype=torch.bfloat16)
+        grad = contribution.expand(num_indices, inner_size).contiguous()
+        source.index_select(0, index).backward(grad)
+
+        expected = torch.zeros_like(source).index_add_(0, index, grad)
+        self.assertEqual(source.grad, expected, atol=0, rtol=0)
+
+    @serialTest()
+    @onlyCUDA
+    @unittest.skipUnless(
+        evaluate_gfx_arch_within(["gfx942", "gfx950"]),
+        "MI300x/MI350x index_select backward path",
+    )
+    @parametrize("inner_size", [64, 128, 256])
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    def test_index_select_backward_at_sort_threshold_supported_widths(
+        self, device, inner_size, index_dtype
+    ):
+        num_indices = 1000000
+        num_rows = 100000
+        index = torch.arange(num_indices, device=device, dtype=index_dtype).remainder(
+            num_rows
+        )
+        repetitions = torch.arange(num_indices, device=device).div(
+            num_rows, rounding_mode="floor"
+        )
+        signs = 1 - 2 * repetitions.remainder(2)
+        grad = signs.to(torch.bfloat16).unsqueeze(1).expand(-1, inner_size).contiguous()
+        source = torch.zeros(
+            (num_rows, inner_size),
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+
+        source.index_select(0, index).backward(grad)
+
+        counts = torch.bincount(index, minlength=num_rows)
+        expected = counts.remainder(2).to(torch.bfloat16).unsqueeze(1).expand_as(source)
+        self.assertEqual(source.grad, expected, atol=0, rtol=0)
+
+    @serialTest()
+    @onlyCUDA
+    @unittest.skipUnless(
+        evaluate_gfx_arch_within(["gfx942", "gfx950"]),
+        "MI300x/MI350x index_select backward path",
+    )
+    def test_index_select_backward_at_sort_threshold_long_run(self, device):
+        num_indices = 1000000
+        inner_size = 64
+        index = torch.zeros(num_indices, device=device, dtype=torch.int64)
+        signs = 1 - 2 * torch.arange(num_indices, device=device).remainder(2)
+        grad = signs.to(torch.bfloat16).unsqueeze(1).expand(-1, inner_size).contiguous()
+        source = torch.zeros(
+            (2, inner_size),
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+
+        source.index_select(0, index).backward(grad)
+
+        self.assertEqual(source.grad, torch.zeros_like(source), atol=0, rtol=0)
+
+    @serialTest()
+    @onlyCUDA
+    @unittest.skipUnless(
+        evaluate_gfx_arch_within(["gfx942", "gfx950"]),
+        "MI300x/MI350x index_select backward path",
+    )
+    @parametrize("inner_size", [4, 32])
+    def test_index_select_backward_unsupported_inner_size_uses_native_bfloat16(
+        self, device, inner_size
+    ):
+        num_indices = 1000000
+        source = torch.zeros(
+            (2, inner_size),
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        index = torch.zeros(num_indices, device=device, dtype=torch.int64)
+        contribution = torch.tensor(0.1, device=device, dtype=torch.bfloat16)
+        grad = contribution.expand(num_indices, inner_size).contiguous()
+
+        source.index_select(0, index).backward(grad)
+
+        expected = torch.zeros_like(source).index_add_(0, index, grad)
+        self.assertEqual(source.grad, expected, atol=0, rtol=0)
+
+    @serialTest()
+    @onlyCUDA
+    @unittest.skipUnless(
+        evaluate_gfx_arch_within(["gfx942", "gfx950"]),
+        "MI300x/MI350x index_select backward path",
+    )
+    def test_index_select_backward_sorted_chunks_edge_cases(self, device):
+        source = torch.randn((3, 0, 5), device=device, requires_grad=True)
+        index = torch.empty(0, device=device, dtype=torch.int64)
+        source.index_select(1, index).sum().backward()
+        self.assertEqual(source.grad, torch.zeros_like(source))
+
+        base = torch.randn((4, 513, 4), device=device)
+        grad = base[:, :, ::2]
+        source = torch.randn((4, 2, 2), device=device, requires_grad=True)
+        index = torch.ones(513, device=device, dtype=torch.int64)
+        source.index_select(1, index).backward(grad)
+        expected = torch.zeros_like(source).index_add_(1, index, grad)
+        self.assertEqual(source.grad, expected)
+
+        with DeterministicGuard(True):
+            deterministic_source = torch.randn(
+                (2, 4), device=device, requires_grad=True
+            )
+            deterministic_index = torch.zeros(513, device=device, dtype=torch.int64)
+            deterministic_source.index_select(0, deterministic_index).sum().backward()
+            expected = torch.zeros_like(deterministic_source)
+            expected[0] = deterministic_index.numel()
+            self.assertEqual(deterministic_source.grad, expected)
 
     @serialTest()
     @onlyAccelerator
