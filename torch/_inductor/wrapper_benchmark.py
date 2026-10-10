@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import os
 import tempfile
 from collections import defaultdict
 from collections.abc import Sequence
@@ -96,7 +97,12 @@ def benchmark_all_kernels(
     # nothing else loads when the wrapper runs as a script. Loaded by async_compile, they
     # would be precompiled, which benchmark_all_configs needs for its launchers.
     for key in kernel_modules:
-        mod = PyCodeCache.load_by_key_path(key, get_path(key, "py")[2])
+        path = get_path(key, "py")[2]
+        # e.g. an FX graph cache hit served from TritonBundler writes no kernel module.
+        if not os.path.exists(path):
+            print(f"Skipping kernel module {key}: {path} is not in this cache dir")
+            continue
+        mod = PyCodeCache.load_by_key_path(key, path)
         get_triton_kernel(mod).precompile()
 
     nfound = 0
