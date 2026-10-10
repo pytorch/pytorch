@@ -2144,10 +2144,9 @@ class PythonWrapperCodegen(CodeGen):
         # until _generate scans the module, and until then every such line is emitted.
         self.used_names: OrderedSet[str] | None = None
         self.scanning_for_uses = False
-        # Whether write_if_used wrote a line, so that _generate scans. The FX wrapper
-        # writes this header too but has its own _generate, which never scans, so it
-        # keeps every line.
-        self.has_conditional_preamble = False
+        # The lines write_if_used wrote; _generate scans only if there are any. The FX
+        # wrapper writes this header too but has its own _generate, which never scans,
+        # so it keeps every line.
         self.conditional_lines: list[_LineIfNamesUsed] = []
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
@@ -2313,18 +2312,14 @@ class PythonWrapperCodegen(CodeGen):
             "async_compile = AsyncCompile()",
         )
 
-    def write_if_used(
-        self, buf: IndentedBuffer, line: str, names: tuple[str, ...] | None = None
-    ) -> None:
-        """Write a line that is kept only if the module uses a name in ``names``, by
-        default the names the import or binding on it binds."""
-        if names is None:
-            names = self._names_bound_by(line)
+    def write_if_used(self, buf: IndentedBuffer, line: str) -> None:
+        """Write an import or binding that is kept only if the module uses a name it
+        binds."""
+        names = self._names_bound_by(line)
         if "torch" in names:
             # The rest of the preamble is written in terms of it.
             buf.writeline(line)
             return
-        self.has_conditional_preamble = True
         self.conditional_lines.append(_LineIfNamesUsed(line, names, self))
         buf.writeline(self.conditional_lines[-1])
 
@@ -2345,7 +2340,7 @@ class PythonWrapperCodegen(CodeGen):
             if len(names) == m.group(2).count(",") + 1:
                 return tuple(names)
         raise AssertionError(
-            f"cannot tell what {line!r} binds; write it with an explicit `names`"
+            f"cannot tell what {line!r} binds; write it in a form _names_bound_by reads"
         )
 
     def write_omitted_from_scan(self, buf: IndentedBuffer, code: str) -> None:
@@ -2365,7 +2360,7 @@ class PythonWrapperCodegen(CodeGen):
         """Record which names ``module``, the finished wrapper, uses."""
         self.scanning_for_uses = True
         try:
-            text = module.getrawvalue()
+            text = module.getvalue()
         finally:
             self.scanning_for_uses = False
         # Each kernel's provenance comment names its source ops ("Original ATen:
@@ -3476,7 +3471,7 @@ class PythonWrapperCodegen(CodeGen):
         self.generate_end(result)
 
         self.add_benchmark_harness(result)
-        if self.has_conditional_preamble:
+        if self.conditional_lines:
             self.scan_for_used_names(result)
 
         return (
