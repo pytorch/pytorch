@@ -48,7 +48,7 @@ template <detail::SafeConvIntegral To, detail::SafeConvIntegral From>
 #else
 template <typename To, typename From>
 #endif
-C10_HOST_DEVICE To safe_conv(From f, const char* name = nullptr) {
+[[nodiscard]] C10_HOST_DEVICE To safe_conv(From f, const char* name = nullptr) {
 #if !defined(__cpp_concepts)
   // The integer-only restriction is load-bearing for correctness, not just
   // ergonomics: the TypeSafeSignMath range check below is exact for
