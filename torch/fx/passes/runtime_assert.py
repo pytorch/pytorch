@@ -673,7 +673,33 @@ def insert_deferred_runtime_asserts(
                     # treat upper bound == sys.maxsize - 1 for int symbols as +oo
                     # to avoid redundant runtime assert
                     vr = ValueRanges(vr.lower, int_oo)
-                if not shape_env._default_unspecified_value_range().issubset(vr):
+                # If i0 is just another name for rep (i0 -> rep in replacements)
+                # and rep's range checks were already emitted above, skip i0's
+                # range checks: i0 equals rep, so checking rep is enough. This
+                # only holds if rep's range is at least as tight as i0's.
+                #
+                # For example, calling item() twice on the same tensor gives the
+                # value two names (the second call hits the fake tensor cache and
+                # gets a new symbol u1 that is replaced by u0):
+                #
+                #   n = y.item()            # u0
+                #   m = y.item()            # u1, another name for u0
+                #   torch._check(m >= 0)
+                #   torch._check(n >= 3)
+                #   torch._check(-m >= -9)
+                #   torch._check(n <= 6)    # u0 (and so u1) is in [3, 6]
+                #
+                # We emit u0 >= 3 and u0 <= 6. Without this skip we would also
+                # emit u1 >= 3 and u1 <= 6, which check the same thing again
+                # (test_checks_to_constrain_range in test/export/test_export.py
+                # fails under strict export because of that).
+                rep = shape_env.replacements.get(i0)
+                checked_via_rep = rep in constrained_unbacked_symbols and (
+                    shape_env.var_to_range[rep].issubset(vr)
+                )
+                if not checked_via_rep and not (
+                    shape_env._default_unspecified_value_range().issubset(vr)
+                ):
                     # The runtime range is constrained, so add a runtime
                     # assert and also explicitly refine the range
                     # (refinement should not be necessary once runtime

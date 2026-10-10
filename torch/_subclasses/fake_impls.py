@@ -753,10 +753,11 @@ def _unique(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    nnz = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+    memo = arg.unique_consecutive_memo if unique_consecutive else arg.unique_memo
+    nnz = memo
 
     # Do not use a memo for unique_dim
-    if dim is not None or nnz is None:
+    if dim is not None or nnz is None or _is_unbacked_symbol_memo(memo):
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -784,11 +785,13 @@ def _unique(
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        if dim is None:
+        if dim is None and memo is None:
             if unique_consecutive:
                 arg.unique_consecutive_memo = nnz  # pyrefly: ignore[bad-assignment]
             else:
                 arg.unique_memo = nnz  # pyrefly: ignore[bad-assignment]
+        elif dim is None and isinstance(nnz, torch.SymInt):
+            _bind_fresh_equal_to_memo(fake_mode, nnz, memo)
 
     if dim is None:
         # pyrefly: ignore[no-matching-overload]
@@ -1389,13 +1392,57 @@ def repeat_interleave_tensor(
     return repeats.new_empty(output_size)  # type: ignore[return-value]
 
 
+def _is_unbacked_symbol_memo(memo: object) -> bool:
+    import sympy
+
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    return (
+        isinstance(memo, (torch.SymInt, torch.SymFloat, torch.SymBool))
+        and isinstance(memo.node._expr, sympy.Symbol)
+        and bool(free_unbacked_symbols(memo.node._expr))
+    )
+
+
+def _bind_fresh_equal_to_memo(
+    fake_mode: FakeTensorMode, fresh: object, memo: object
+) -> None:
+    # Why a memo hit does not just return the memoized symbol:
+    #
+    # If item()/nonzero()/unique() is called twice on the same fake tensor, the
+    # second call hits the memo. Returning the memoized symbol would make both
+    # calls share one symbol, which breaks retracing. For example:
+    #
+    #   original graph: two item() calls       -> u0, u1
+    #   after CSE both calls read the same tensor, so on retrace the second
+    #   call hits the memo: both item() calls  -> u6
+    #
+    # Retracing maps each new symbol back to the original one, call site by
+    # call site (u6 -> u0, then u6 -> u1), and assumes this is one-to-one. With
+    # one shared u6, either u0 or u1 is left with no call site producing it,
+    # and any code that still refers to it breaks (#187415).
+    #
+    # So every call gets its own fresh symbol (u6, u7), and the memo is only
+    # used to record that they are equal (u7 == u6). The memo tells us the two
+    # values are equal; it should not merge their symbols. The equality is
+    # recorded as a replacement with no runtime assert, since it holds by
+    # construction.
+    fake_mode.shape_env._eliminate_unbacked(fresh.node._expr, memo.node.expr)  # type: ignore[union-attr]
+    # The fresh symbol may not show up in the op's output: x.repeat(d) calls
+    # item() on d internally, and the output size simplifies to the memoized
+    # symbol. That is fine, so do not raise PendingUnbackedSymbolNotFound for
+    # it. If it does show up (e.g. the item() node itself), it is still bound.
+    fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(fresh.node._expr)  # type: ignore[union-attr]
+
+
 @register_op_impl(torch.ops.aten.item.default)
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(
     fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
 ) -> int | float | bool | torch.SymInt | torch.SymFloat | torch.SymBool:
-    if (r := arg.item_memo) is not None:
+    if (r := arg.item_memo) is not None and not _is_unbacked_symbol_memo(r):
         return r
+    memo = r
     if fake_mode.shape_env is None or (
         not fake_mode.shape_env.allow_scalar_outputs
         and not fake_mode.allow_scalar_outputs
@@ -1410,7 +1457,10 @@ def local_scalar_dense(
         r = fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
-    arg.item_memo = r
+    if memo is None:
+        arg.item_memo = r
+    else:
+        _bind_fresh_equal_to_memo(fake_mode, r, memo)
     return r
 
 
@@ -1432,7 +1482,8 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if (nnz := arg.nonzero_memo) is None:
+    memo = arg.nonzero_memo
+    if (nnz := memo) is None or _is_unbacked_symbol_memo(memo):
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -1470,7 +1521,10 @@ def nonzero(fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor) -> Fak
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.nonzero_memo = nnz  # pyrefly: ignore[bad-assignment]
+        if memo is None:
+            arg.nonzero_memo = nnz  # pyrefly: ignore[bad-assignment]
+        elif isinstance(nnz, torch.SymInt):
+            _bind_fresh_equal_to_memo(fake_mode, nnz, memo)
     return arg.new_empty_strided((nnz, arg.dim()), (1, nnz), dtype=torch.int64)  # type: ignore[return]
 
 
