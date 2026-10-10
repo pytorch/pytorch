@@ -41,13 +41,16 @@ def canonicalize_as_strided(gm: GraphModule) -> int:
             if (
                 storage is None
                 or storage != get_node_storage(parent)
-                or value.dtype != parent_value.dtype
                 or value.device != parent_value.device
                 or value.is_conj()
                 or parent_value.is_conj()
                 or value.is_neg()
                 or parent_value.is_neg()
             ):
+                break
+            if value.dtype != parent_value.dtype:
+                # A dtype-changing alias is not a supported storage base.
+                base = source
                 break
             base = parent
         if base is source:

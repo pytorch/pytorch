@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import re
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -12,7 +13,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
 )
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import parametrize, subtest
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
 aten = torch.ops.aten
@@ -106,12 +108,10 @@ class TestAsStrided(TestCase):
         self.assertEqual(node.args[0].target, aten.clone.default)
         self.assertEqual(gm(x), expected)
 
-    @parametrize("kind", ["dtype", "conj", "neg"])
+    @parametrize("kind", ["conj", "neg"])
     def test_special_view_boundary(self, device, kind):
         def fn(x):
-            if kind == "dtype":
-                view = x.view(torch.float32)
-            elif kind == "conj":
+            if kind == "conj":
                 view = x.conj()
             else:
                 view = torch._neg_view(x)
@@ -124,7 +124,6 @@ class TestAsStrided(TestCase):
             0
         ]
         targets = {
-            "dtype": aten.view.dtype,
             "conj": aten._conj.default,
             "neg": aten._neg_view.default,
         }
@@ -324,6 +323,41 @@ class TestAsStrided(TestCase):
                 x = torch.arange(32, device=device) < count
                 self.assertEqual(compiled(x), fn(x))
 
+    @parametrize("copy", [False, True])
+    def test_compile_missing_input_metadata(self, device, copy):
+        op = torch.as_strided_copy if copy else torch.as_strided
+
+        def fn(x):
+            return op(x + 1, (2,), (1,), 1) + 2
+
+        def remove_metadata(graph):
+            for n in graph.nodes:
+                if n.target in (aten.as_strided.default, aten.as_strided_copy.default):
+                    n.args[0].meta.pop("val", None)
+
+        x = torch.arange(8, dtype=torch.float32, device=device)
+        with config.patch(
+            post_grad_custom_post_pass=remove_metadata, force_disable_caches=True
+        ):
+            self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @parametrize("copy", [False, True])
+    def test_compile_unbacked_base_strides(self, device, copy):
+        op = torch.as_strided_copy if copy else torch.as_strided
+
+        def fn(x):
+            indices = x.nonzero()
+            torch._check(indices.shape[0] >= 3)
+            base = indices.t().contiguous() + 1
+            return op(base[1:], (3,), (1,), 0) + 2
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        for count in (5, 7):
+            with self.subTest(count=count):
+                x = torch.arange(24, device=device).reshape(6, 4) < count
+                self.assertEqual(compiled(x), fn(x))
+
     @parametrize(
         "src_dtype,dst_dtype,tracing_mode,offset",
         [
@@ -348,17 +382,12 @@ class TestAsStrided(TestCase):
 
         x = torch.arange(32, dtype=src_dtype, device=device).reshape(4, 8)
         gm = make_fx(fn, tracing_mode=tracing_mode)(x)
-        typed = gm.graph.find_nodes(op="call_function", target=aten.view.dtype)[0]
-        typed_args = typed.args
-        nodes = list(gm.graph.nodes)
-        self.assertGreater(canonicalize_as_strided(gm), 0)
-        self.assertEqual(typed.target, aten.view.dtype)
-        self.assertEqual(typed.args, typed_args)
-        self.assertEqual(list(gm.graph.nodes), nodes)
         out = gm.graph.find_nodes(op="call_function", target=aten.as_strided.default)[0]
-        self.assertIs(out.args[0], typed)
-        self.assertEqual(out.args[3], 1 if offset is None else offset)
+        out_args = out.args
+        nodes = list(gm.graph.nodes)
         self.assertEqual(canonicalize_as_strided(gm), 0)
+        self.assertEqual(out.args, out_args)
+        self.assertEqual(list(gm.graph.nodes), nodes)
         for width in (8, 12) if tracing_mode == "symbolic" else (8,):
             with self.subTest(width=width):
                 other = torch.arange(4 * width, dtype=src_dtype, device=device)
@@ -367,6 +396,23 @@ class TestAsStrided(TestCase):
                 self.assertEqual(actual, fn(other))
                 self.assertTrue(torch._C._is_alias_of(actual[0], actual[1]))
                 self.assertTrue(torch._C._is_alias_of(actual[0], actual[2]))
+
+    @parametrize("copy", [False, True])
+    @parametrize("dynamic", [False, True])
+    def test_compile_complex_view_default_offset(self, device, copy, dynamic):
+        op = torch.as_strided_copy if copy else torch.as_strided
+
+        def fn(x):
+            view = x.view(torch.float32)[2:]
+            return op(view, (2,), (1,)) + 1
+
+        real = torch.arange(10, dtype=torch.float32, device=device)
+        base = torch.complex(real, real + 100)
+        compiled = torch.compile(fn, fullgraph=True, dynamic=dynamic)
+        for offset in (1, 3):
+            with self.subTest(offset=offset):
+                x = base[offset:]
+                self.assertEqual(compiled(x), fn(x))
 
     @parametrize("dtypes", [(torch.int32, torch.int16), (torch.int16, torch.int32)])
     @parametrize("default_offset", [False, True])
@@ -400,7 +446,10 @@ class TestAsStrided(TestCase):
 
     @onlyCPU
     @parametrize("strict", [False, True])
-    @parametrize("return_view", [False, True])
+    @parametrize(
+        "return_view",
+        [False, subtest(True, decorators=[unittest.expectedFailure])],
+    )
     def test_compile_shared_mkldnn_view(self, device, strict, return_view):
         if not torch.backends.mkldnn.is_available():
             self.skipTest("MKLDNN is required")
@@ -428,9 +477,14 @@ class TestAsStrided(TestCase):
         with config.patch(strict_output_strides=strict):
             actual = torch.compile(fn, fullgraph=True)(x)
         self.assertEqual(actual, expected)
-        # The sibling view's output stride/alias is a separate pre-existing issue.
         self.assertEqual(actual[-1].stride(), expected[-1].stride())
         self.assertTrue(torch._C._is_alias_of(actual[0], actual[-1]))
+        if return_view:
+            # https://github.com/pytorch/pytorch/pull/197712#issuecomment-6074453380
+            self.assertEqual(
+                (actual[1].stride(), torch._C._is_alias_of(actual[0], actual[1])),
+                (expected[1].stride(), True),
+            )
 
     @onlyCPU
     @parametrize("as_strided_source", ["none", "unrelated", "base", "view"])
@@ -488,8 +542,14 @@ class TestAsStrided(TestCase):
         self.assertEqual(torch.compile(fn, fullgraph=True)(x, weight), fn(x, weight))
 
 
-instantiate_device_type_tests(TestAsStrided, globals(), only_for=("cpu", "cuda"))
+devices = ["cpu"] if HAS_CPU else []
+if HAS_GPU:
+    devices.append(GPU_TYPE)
+instantiate_device_type_tests(
+    TestAsStrided, globals(), only_for=devices, allow_xpu=True
+)
 
 
 if __name__ == "__main__":
-    run_tests()
+    if HAS_CPU or HAS_GPU:
+        run_tests()
