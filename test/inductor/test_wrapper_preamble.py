@@ -79,6 +79,28 @@ class TestWrapperPreamble(TestCase):
         wrapper.scan_for_used_names(buf)
         self.assertEqual(buf.getvalue(), "import os.path\np = os.path.join('a')\n")
 
+    def test_a_kept_binding_keeps_the_import_its_right_hand_side_uses(self):
+        wrapper, buf = self._wrapper(), IndentedBuffer()
+        for line in ("import os", "import sys", "sep = os.sep", "path = sys.path"):
+            wrapper.write_if_used(buf, line)
+        buf.writeline("print(sep)")
+        wrapper.scan_for_used_names(buf)
+        self.assertEqual(buf.getvalue(), "import os\nsep = os.sep\nprint(sep)\n")
+
+    def test_blank_lines_before_an_omitted_block_survive_a_splice(self):
+        wrapper, buf = self._wrapper(), IndentedBuffer()
+        for name in ("a", "b"):
+            wrapper.write_omitted_from_scan(buf, f"\n\ndef {name}():\n    pass\n")
+        module = IndentedBuffer()
+        module.splice(buf)
+        expected = "\n\ndef a():\n    pass\n\n\ndef b():\n    pass\n"
+        self.assertEqual(module.getvalue(), expected)
+
+    def test_an_omitted_block_cannot_be_indented(self):
+        wrapper, buf = self._wrapper(), IndentedBuffer()
+        with buf.indent(), self.assertRaisesRegex(AssertionError, "indent 0"):
+            wrapper.write_omitted_from_scan(buf, "x = 1\ny = 2\n")
+
     def test_a_line_whose_bindings_cannot_be_read_raises(self):
         wrapper, buf = self._wrapper(), IndentedBuffer()
         for line in ("from m import (a, b)", "from m import *", "del x"):
@@ -140,6 +162,23 @@ class TestWrapperPreamble(TestCase):
         result, code = _code_for(fn, x)
         self.assertIn("extern_kernels.mm(", code)
         self.assertNotIn("extern_kernels.mm(", code.split("def call(")[-1])
+        self.assertIn("import extern_kernels", code)
+        self.assertEqual(_run_from_file(code, [x])[0], result)
+
+    @requires_cuda_and_triton
+    def test_a_name_used_only_in_a_nested_subgraph_is_kept(self):
+        # Only the inner true branch calls extern_kernels.mm. Its code is spliced into
+        # the outer branch's, which does not scan it either.
+        def fn(x):
+            def outer(t):
+                return torch.cond(t.mean() > 0, lambda u: u @ u, lambda u: -u, (t,))
+
+            return torch.cond(x.sum() > 0, outer, lambda t: t.cos(), (x,))
+
+        # Positive, so both predicates take the branch that calls mm.
+        x = torch.rand(16, 16, device="cuda")
+        result, code = _code_for(fn, x)
+        self.assertIn("extern_kernels.mm(", code)
         self.assertIn("import extern_kernels", code)
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
