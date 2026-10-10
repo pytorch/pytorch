@@ -2500,6 +2500,8 @@ class TestProfilerDevice(TestCase):
 
     @parametrize("use_kineto", [False, True])
     def test_profiler_tracing(self, device, use_kineto):
+        if device.startswith("xpu") and not use_kineto:
+            self.skipTest("Legacy profiling is not supported on XPU")
         if use_kineto and not kineto_available():
             self.skipTest("Kineto is required")
         device_type = device.split(":")[0]
