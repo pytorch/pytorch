@@ -8566,6 +8566,29 @@ SavedForBackwardsAOTOutput(idx=5)""",
         result = f(torch.randn(5))
         self.assertEqual(result, 5)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    @parametrize("dynamic", [False, True])
+    @parametrize("shape", [(), (3,), (0,), (2, 0)])
+    def test_one_hot_invalid_num_classes(self, backend, dynamic, shape):
+        x = torch.zeros(shape, dtype=torch.long)
+        invalid_classes = (-2, 0)
+        error = (
+            "Can not infer total number of classes from empty tensor"
+            if x.numel() == 0
+            else "Class values must be smaller than num_classes"
+        )
+        compiled = torch.compile(
+            torch.nn.functional.one_hot,
+            backend=backend,
+            fullgraph=True,
+            dynamic=dynamic,
+        )
+        for num_classes in invalid_classes:
+            with self.subTest(num_classes=num_classes):
+                with self.assertRaisesRegex(RuntimeError, error):
+                    compiled(x, num_classes)
+        self.assertEqual(compiled(x, 4), torch.nn.functional.one_hot(x, 4))
+
     def test_one_hot_bounds_check_compiled(self):
         # https://github.com/pytorch/pytorch/issues/144211
         # torch.compile(one_hot) should raise on out-of-bounds indices,
