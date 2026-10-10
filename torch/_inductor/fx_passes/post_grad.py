@@ -2950,7 +2950,7 @@ class ConstructorMoverPass:
 
         # a moved cpu placeholder keeps its cpu tensor for the output use, but a
         # moved constructor changes the device the caller sees
-        returned_constructors = OrderedSet[fx.Node]()
+        returned_constructors: OrderedSet[fx.Node] = OrderedSet()
 
         queue: list[fx.Node] = list(constructors)
 
