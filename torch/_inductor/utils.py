@@ -3580,9 +3580,22 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    from .codecache import PyCodeCache
+
     remove_quote = kwargs.pop("remove_quote", False)
-    # pyrefly: ignore [bad-argument-type]
-    result, source_codes = run_and_get_code(fn, *args, **kwargs)
+    # A module-level kernel's def is renamed and its benchmark harness cut, so take the
+    # source it is compiled from, which every load of a wrapper passes, cache hits too.
+    module_level: list[str] = []
+    orig_load = PyCodeCache.load_by_key_path
+
+    def load(*load_args: Any, kernel_sources: Any = None, **load_kwargs: Any) -> Any:
+        for _, src in (kernel_sources or {}).values():
+            module_level.append(f"'''\n{src.strip()}\n'''")
+        return orig_load(*load_args, kernel_sources=kernel_sources, **load_kwargs)
+
+    with mock.patch.object(PyCodeCache, "load_by_key_path", load):
+        # pyrefly: ignore [bad-argument-type]
+        result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
         if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
@@ -3591,8 +3604,9 @@ def run_and_get_kernels(
             kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))
         else:
             kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
-        if remove_quote:
-            kernels = [kernel[3:-3] for kernel in kernels]
+    kernels += module_level
+    if remove_quote:
+        kernels = [kernel[3:-3] for kernel in kernels]
     return result, kernels
 
 
