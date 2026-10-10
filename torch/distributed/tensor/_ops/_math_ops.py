@@ -1070,6 +1070,16 @@ POOL_SPATIAL_RANK: dict[torch._ops.OpOverload, int] = {
     aten.max_pool1d_with_indices.default: 1,
     aten.max_pool2d_with_indices.default: 2,
     aten.max_pool3d_with_indices.default: 3,
+    aten.max_unpool2d.default: 2,
+    aten.max_unpool3d.default: 3,
+    aten._adaptive_avg_pool2d_backward.default: 2,
+    aten._adaptive_avg_pool3d_backward.default: 3,
+    aten.avg_pool2d_backward.default: 2,
+    aten.avg_pool3d_backward.default: 3,
+    aten.adaptive_max_pool2d_backward.default: 2,
+    aten.adaptive_max_pool3d_backward.default: 3,
+    aten.max_pool2d_with_indices_backward.default: 2,
+    aten.max_pool3d_with_indices_backward.default: 3,
 }
 
 AVG_POOL_OPS = [
@@ -1832,20 +1842,6 @@ def interp_upsample_1out_1in_strategy(
     ]
 
 
-POOL_BACKWARD_SPATIAL_RANK: dict[torch._ops.OpOverload, int] = {
-    aten._adaptive_avg_pool2d_backward.default: 2,
-    aten._adaptive_avg_pool3d_backward.default: 3,
-    aten.avg_pool2d_backward.default: 2,
-    aten.avg_pool3d_backward.default: 3,
-    aten.max_pool2d_with_indices_backward.default: 2,
-    aten.max_pool3d_with_indices_backward.default: 3,
-    aten.adaptive_max_pool2d_backward.default: 2,
-    aten.adaptive_max_pool3d_backward.default: 3,
-    aten.max_unpool2d.default: 2,
-    aten.max_unpool3d.default: 3,
-}
-
-
 @register_single_dim_strategy(
     [
         aten.max_unpool2d.default,
@@ -1862,12 +1858,15 @@ def interp_pool_1out_2in_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # 1 output + 2 inputs = 3 placements
+    # 1 output + 2 inputs = 3 placements: [output, grad_output/self, self/indices]
+    # Linear in the first input; the second only supplies shape or indices.
     input_meta = cast(TensorMeta, args_schema[0])
     strategies: list[list[Placement | _ShardingPlaceholder]] = [
         [_ShardingPlaceholder(0)] * 3,
+        [Partial("sum"), Partial("sum"), Replicate()],
+        [Partial("avg"), Partial("avg"), Replicate()],
     ]
-    spatial_rank = POOL_BACKWARD_SPATIAL_RANK[op]
+    spatial_rank = POOL_SPATIAL_RANK[op]
     if len(input_meta.shape) >= spatial_rank + 2:
         strategies.append([_ShardingPlaceholder(1)] * 3)
     return strategies
@@ -1893,7 +1892,7 @@ def pool_backward_strategy(
     strategies: list[list[Placement | _ShardingPlaceholder]] = [
         [_ShardingPlaceholder(0)] * 4,
     ]
-    spatial_rank = POOL_BACKWARD_SPATIAL_RANK[op]
+    spatial_rank = POOL_SPATIAL_RANK[op]
     if len(input_meta.shape) >= spatial_rank + 2:
         strategies.append([_ShardingPlaceholder(1)] * 4)
     # The backward is linear in grad_output, so P(sum/avg) pass through.
