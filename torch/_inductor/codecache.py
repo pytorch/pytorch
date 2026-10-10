@@ -4947,7 +4947,11 @@ class PyCodeCache:
         attrs: dict[str, Any] | None = None,
         *,
         set_sys_modules: bool | None = None,
+        kernel_sources: dict[str, tuple[str, str]] | None = None,
     ) -> ModuleType:
+        """kernel_sources maps each module-level Triton kernel def to the (name, source)
+        AsyncCompile compiles it from, so the module binds the kernels the worker pool
+        built (see compiled_kernels_for_load)."""
         if linemap is None:
             linemap = []
 
@@ -4961,7 +4965,12 @@ class PyCodeCache:
                 sys.modules.setdefault(mod.__name__, mod)
             return mod
 
-        mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
+        if kernel_sources:
+            mod = _load_with_compiled_kernels(
+                key, path, set_sys_modules, kernel_sources
+            )
+        else:
+            mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
 
         # unzip into separate lines/nodes lists
         if set_sys_modules:
@@ -5025,6 +5034,44 @@ class PyCodeCache:
             ]
 
         return parse_stack_trace(entry)
+
+
+def _load_with_compiled_kernels(
+    key: str,
+    path: str,
+    set_sys_modules: bool,
+    kernel_sources: dict[str, tuple[str, str]],
+) -> ModuleType:
+    from torch._inductor.async_compile import AsyncCompile
+    from torch._inductor.runtime.triton_heuristics import compiled_kernels_for_load
+
+    async_compile = AsyncCompile()
+
+    def compile_kernel(subs_name: str, source: str) -> Any:
+        # Compiling serially loads the kernel's own module in this process, and its
+        # decorator must build the kernel rather than ask for it again.
+        token = compiled_kernels_for_load.set(None)
+        try:
+            return async_compile.triton(subs_name, source)
+        finally:
+            compiled_kernels_for_load.reset(token)
+
+    token = compiled_kernels_for_load.set(
+        {
+            name: functools.partial(compile_kernel, subs_name, source)
+            for name, (subs_name, source) in kernel_sources.items()
+        }
+    )
+    try:
+        mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
+    finally:
+        compiled_kernels_for_load.reset(token)
+    # The module's own wait, if it has one, has already resolved these.
+    scope = {name: getattr(mod, name) for name in kernel_sources}
+    async_compile.wait(scope)
+    for name, kernel in scope.items():
+        setattr(mod, name, kernel)
+    return mod
 
 
 def _load_triton_kernel_from_source(
