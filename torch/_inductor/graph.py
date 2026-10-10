@@ -2105,9 +2105,14 @@ class GraphLowering(torch.fx.Interpreter):
                 user.target in as_strided_ops for user in n.users
             )
             # Keep dtype reinterpretations on their existing layout handling path.
-            preserve_storage_layout = n.target is not aten.view.dtype and any(
-                user.target in (aten.as_strided.default, aten.as_strided_copy.default)
-                for user in n.users
+            preserve_storage_layout = (
+                n.target is not aten.view.dtype
+                and any(
+                    u.target in (aten.as_strided.default, aten.as_strided_copy.default)
+                    for u in n.users
+                )
+                and isinstance(n.meta.get("val"), torch.Tensor)
+                and not free_unbacked_symbols(n.meta["val"].stride())
             )
 
             if preserve_storage_layout and isinstance(result, TensorBox):
