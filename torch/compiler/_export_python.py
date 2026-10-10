@@ -24,8 +24,6 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
-import torch
-
 
 log = logging.getLogger(__name__)
 
@@ -80,16 +78,18 @@ class ExportedPythonArtifact:
                     "non-leaf tensor or a weight_norm module). Pass explicit "
                     "example_inputs=... to precompile against dedicated inputs."
                 ) from e
-        # precompile returns (python_code, cache); the cache is an acceleration
-        # artifact that export_python does not use -- the emitted source is
-        # self-contained and always exec'd -- so only the code is written to disk.
-        code, _cache = torch.compiler.precompile(
+        # Only the python_code is written: the emitted source is self-contained and
+        # always exec'd, so export_python never builds precompile's acceleration cache.
+        from torch._precompile import PrecompiledModule
+
+        compiled = PrecompiledModule(
             self._fn,
-            *example,
             backend=self._backend,
             tracer=self._tracer,
             decompositions=self._decompositions,
         )
+        compiled._compile(example)
+        code = compiled.to_python_code()
         parent = os.path.dirname(self._path)
         if parent:
             os.makedirs(parent, exist_ok=True)
