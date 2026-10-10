@@ -1640,8 +1640,11 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(4, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, self.NON_DIFFERENTIABLE):
             fn(x)
-        with self.assertRaisesRegex(RuntimeError, self.NON_DIFFERENTIABLE):
-            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        # Without fullgraph the observed exception reaches the caller as is;
+        # a failing fake call would surface as a Dynamo-internal error instead.
+        with self.assertRaisesRegex(RuntimeError, self.NON_DIFFERENTIABLE) as cm:
+            torch.compile(fn, backend="eager")(x)
+        self.assertIs(type(cm.exception), RuntimeError)
 
     @parametrize("value", ("int", "symbool"))
     def test_non_bool_requires_grad_is_an_eager_error(self, value):
@@ -1676,6 +1679,20 @@ class GraphModule(torch.nn.Module):
             torch._dynamo.exc.Unsupported, self.FACTORY_GRAPH_BREAK
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_full_tensor_fill_value(self):
+        # `full` with a tensor fill value is traced as `empty().fill_()`; the
+        # leaf must only start requiring grad after the in-place fill.
+        def fn(v):
+            w = torch.full((3,), v, requires_grad=True)
+            return torch.autograd.grad((w * w).sum(), w)[0].detach()
+
+        v = torch.tensor(1.5)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)(v)
+        self.assertEqual(compiled, fn(v))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_non_factory_keeps_kwarg(self):
         # Only tensor factories are rewritten: `requires_grad` reaches every
