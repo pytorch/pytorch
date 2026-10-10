@@ -164,6 +164,7 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("linalg.polar"),
     xfail("linalg.qr"),
     xfail("linalg.qr_piv"),
+    xfail("linalg.qr_piv", "nondifferentiable"),
     xfail("linalg.slogdet"),
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
