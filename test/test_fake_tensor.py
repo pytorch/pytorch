@@ -897,23 +897,30 @@ class FakeTensorTest(TestCase):
                 x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
             )
 
-    @unittest.skipUnless(RUN_CUDA, "requires cuda")
     def test_conv_mismatched_device_error_matches_eager(self):
-        error = "Expected all tensors to be on the same device.*weight is on cuda:0"
+        devices = []
+        if RUN_CUDA:
+            devices.append("cuda")
+        if torch.xpu.is_available():
+            devices.append("xpu")
+        if not devices:
+            self.skipTest("requires CUDA or XPU")
 
-        for name, ctx in (
-            ("eager", contextlib.nullcontext()),
-            ("fake", FakeTensorMode()),
-        ):
-            with self.subTest(name), ctx:
-                x = torch.empty(1, 3, 8, 8)
-                w = torch.empty(3, 3, 3, 3, device="cuda")
-                b = torch.empty(3, device="cuda")
+        for device in devices:
+            error = f"Expected all tensors to be on the same device.*weight is on {device}:0"
+            for name, ctx in (
+                ("eager", contextlib.nullcontext()),
+                ("fake", FakeTensorMode()),
+            ):
+                with self.subTest(device=device, name=name), ctx:
+                    x = torch.empty(1, 3, 8, 8)
+                    w = torch.empty(3, 3, 3, 3, device=f"{device}:0")
+                    b = torch.empty(3, device=f"{device}:0")
 
-                with self.assertRaisesRegex(RuntimeError, error):
-                    torch.ops.aten.convolution.default(
-                        x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
-                    )
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        torch.ops.aten.convolution.default(
+                            x, w, b, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
+                        )
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):

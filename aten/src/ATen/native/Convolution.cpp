@@ -885,6 +885,18 @@ static void check_input_same_type_as_parameters(
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
 }
 
+static void check_input_same_device_as_parameters(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias) {
+  TORCH_CHECK(input.device() == weight.device(),
+      "Expected all tensors to be on the same device, but got weight is on ", weight.device(),
+      ", different from other tensors on ", input.device());
+  TORCH_CHECK(!bias.defined() || input.device() == bias.device(),
+      "Expected all tensors to be on the same device, but got bias is on ", bias.device(),
+      ", different from other tensors on ", input.device());
+}
+
 #if AT_MKLDNN_ENABLED()
 static void check_input_same_type_as_parameters(
     const Tensor& input,
@@ -1590,6 +1602,8 @@ at::Tensor _convolution(
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
   TORCH_CHECK(groups_ > 0, "non-positive groups is not supported");
+
+  check_input_same_device_as_parameters(input, weight, bias);
 
   ConvParams<int64_t> params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);
