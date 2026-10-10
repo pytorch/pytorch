@@ -57,8 +57,7 @@ class ExportedPythonArtifact:
         example_inputs: Sequence[object] | None,
     ) -> None:
         self._fn = fn
-        self._signature = inspect.signature(fn)
-        self._call_signature = self._signature
+        self._call_signature = inspect.signature(fn)
         self._path = path
         self._backend = backend
         self._tracer = tracer
@@ -87,16 +86,18 @@ class ExportedPythonArtifact:
         else:
             example = self._bind_positional(example, {}, "example_inputs=")
             self._check_supported_args(example)
-        # precompile returns (python_code, cache); the cache is an acceleration
-        # artifact that export_python does not use -- the emitted source is
-        # self-contained and always exec'd -- so only the code is written to disk.
-        code, _cache = torch.compiler.precompile(
+        # Only the python_code is written: the emitted source is self-contained and
+        # always exec'd, so export_python never builds precompile's acceleration cache.
+        from torch._precompile import PrecompiledModule
+
+        compiled = PrecompiledModule(
             self._fn,
-            *example,
             backend=self._backend,
             tracer=self._tracer,
             decompositions=self._decompositions,
         )
+        compiled._compile(example)
+        code = compiled.to_python_code()
         parent = os.path.dirname(self._path)
         if parent:
             os.makedirs(parent, exist_ok=True)
@@ -149,10 +150,8 @@ class ExportedPythonArtifact:
                 f"{getattr(self._fn, '__name__', 'fn')}'s signature: {e}"
             ) from e
         bound.apply_defaults()
-        # bound.kwargs holds every argument bind() could not place positionally. That
-        # is a keyword-only / **kwargs param (never positional), or a plain
-        # positional-or-keyword param passed by keyword while an earlier one was left
-        # to its default -- distinguish them so the error names the real cause.
+        # After apply_defaults every positional-or-keyword parameter is placed, so
+        # bound.kwargs holds only keyword-only and **kwargs entries.
         if bound.kwargs:
             params = sig.parameters
             kw_only = sorted(
@@ -162,25 +161,14 @@ class ExportedPythonArtifact:
             )
             if kw_only:
                 raise TypeError(
-                    "torch.compiler.export_python does not support keyword-only "
-                    f"parameters (got {kw_only}); the precompile calling convention "
-                    "is positional."
-                )
-            # Names not declared as parameters were absorbed by a **kwargs param;
-            # they are never positional, so name **kwargs as the cause rather than
-            # misreporting them as a positional-or-keyword arg left to its default.
-            var_kw = sorted(n for n in bound.kwargs if n not in params)
-            if var_kw:
-                raise TypeError(
-                    "torch.compiler.export_python does not support **kwargs "
-                    f"parameters (got {var_kw}); the precompile calling convention "
-                    "is positional."
+                    "torch.compiler.export_python does not support functions that "
+                    f"declare keyword-only parameters ({kw_only}); the precompile "
+                    "calling convention is positional."
                 )
             raise TypeError(
-                "torch.compiler.export_python could not place keyword arguments "
-                f"{sorted(bound.kwargs)} positionally because an earlier positional "
-                "parameter was left to its default; pass those arguments positionally "
-                "or provide example_inputs."
+                "torch.compiler.export_python does not support **kwargs parameters "
+                f"(got {sorted(bound.kwargs)}); the precompile calling convention is "
+                "positional."
             )
         return bound.args
 
