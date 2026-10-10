@@ -1,9 +1,15 @@
 # Owner(s): ["module: inductor"]
 
+import os
 import re
+import tempfile
+from unittest import mock
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.async_compile import AsyncCompile
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
@@ -29,6 +35,10 @@ def _cond_softmax(x):
     return torch.cond(
         x.sum() > 0, lambda t: torch.softmax(t * 2, dim=-1), lambda t: t.cos(), (x,)
     )
+
+
+def _compiled_in_this_process(*args, **kwargs):
+    raise AssertionError("a kernel was compiled in the compiling process")
 
 
 class TestModuleLevelKernels(TestCase):
@@ -65,6 +75,64 @@ class TestModuleLevelKernels(TestCase):
         x = torch.randn(64, 128, device="cuda")
         with self.assertRaisesRegex(Exception, "module_level_kernels"):
             _code_for(_softmax, x, **{"triton.module_level_kernels": True}, **patch)
+
+    @requires_cuda_and_triton
+    @config.patch(compile_threads=2)
+    def test_kernels_compile_on_the_worker_pool(self):
+        # The pool's workers are separate processes, so the patch only catches a compile
+        # in this one: every kernel has to arrive already compiled.
+        self.assertTrue(AsyncCompile.wait_process_pool_ready())
+        x = torch.randn(64, 128, device="cuda")
+        counters.clear()
+        with mock.patch.object(
+            CachingAutotuner, "_precompile_config", _compiled_in_this_process
+        ):
+            result, code = _code_for(
+                _cond_softmax, x, **{"triton.module_level_kernels": True}
+            )
+        self.assertEqual(result, _cond_softmax(x))
+        kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
+        self.assertEqual(counters["inductor"]["async_compile_cache_hit"], len(kernels))
+
+        # Anyone else's load of the module, such as running a copy of it, builds its
+        # kernels from the defs in it, so a hand edit there takes effect.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "module.py")
+            with open(path, "w") as f:
+                f.write(code)
+            ns = {"__file__": path, "__name__": "_module_level_kernels"}
+            exec(compile(code, path, "exec"), ns)
+        self.assertTrue(all(isinstance(ns[k], CachingAutotuner) for k in kernels))
+        with mock.patch.object(
+            CachingAutotuner, "_precompile_config", _compiled_in_this_process
+        ):
+            with self.assertRaisesRegex(Exception, "compiling process"):
+                ns["call"]([x])
+
+    @requires_cuda_and_triton
+    @config.patch(compile_threads=2)
+    def test_kernels_reloaded_from_their_source_while_the_wrapper_loads(self):
+        # dynamic_scale_rblock and coordesc tuning reload a pool-compiled kernel from
+        # its own module in this process, which runs while the wrapper module loads.
+        self.assertTrue(AsyncCompile.wait_process_pool_ready())
+        scale_rblock = CachingAutotuner._dynamic_scale_rblock
+
+        def reload_first(self):
+            self._ensure_kernel_loaded()
+            scale_rblock(self)
+
+        x = torch.randn(64, 128, device="cuda")
+        flags = {"triton.module_level_kernels": True}
+        with mock.patch.object(CachingAutotuner, "_dynamic_scale_rblock", reload_first):
+            result, _ = _code_for(_softmax, x, **flags)
+        self.assertEqual(result, _softmax(x))
+
+    @requires_cuda_and_triton
+    @config.patch(compile_threads=1)
+    def test_kernels_compile_serially_without_a_pool(self):
+        x = torch.randn(64, 128, device="cuda")
+        result, _ = _code_for(_cond_softmax, x, **{"triton.module_level_kernels": True})
+        self.assertEqual(result, _cond_softmax(x))
 
 
 instantiate_parametrized_tests(TestModuleLevelKernels)
