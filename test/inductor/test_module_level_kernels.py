@@ -2,6 +2,8 @@
 
 import os
 import re
+import subprocess
+import sys
 import tempfile
 from unittest import mock
 
@@ -103,6 +105,18 @@ class TestModuleLevelKernels(TestCase):
         self.assertNotIn("def get_args", code.split("def call(")[0])
         kernels = [m for m in PyCodeCache.modules if hasattr(m, "get_args")]
         self.assertTrue(kernels)
+        # Run as a script, the wrapper compiles its kernels from its own defs, so
+        # benchmark_all_kernels has to find their harnesses from those.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "module.py")
+            with open(path, "w") as f:
+                f.write(code)
+            env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+            cmd = [sys.executable, path, "-kc"]
+            out = subprocess.check_output(cmd, env=env, stderr=subprocess.STDOUT)
+        defs = re.findall(r"^def triton_\w+\(", code, re.MULTILINE)
+        # -c prints a line per config, which needs each kernel precompiled.
+        self.assertGreaterEqual(out.decode().count("GB/s"), len(defs), out.decode())
 
     @requires_cuda_and_triton
     @config.patch(compile_threads=2)
