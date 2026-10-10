@@ -63,13 +63,25 @@ class TestModuleLevelKernels(TestCase):
         self.assertIn("async_compile.triton(", code)
 
     @requires_cuda_and_triton
+    @config.patch({"compile_threads": 2, "triton.unique_kernel_names": False})
+    def test_kernels_without_unique_names(self):
+        self.assertTrue(AsyncCompile.wait_process_pool_ready())
+        x = torch.randn(64, 128, device="cuda")
+        flags = {"triton.module_level_kernels": True}
+        with mock.patch.object(
+            CachingAutotuner, "_precompile_config", _compiled_in_this_process
+        ):
+            result, code = _code_for(_cond_softmax, x, **flags)
+        self.assertEqual(result, _cond_softmax(x))
+        self.assertNotIn("def triton_(", code)
+        kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
+        self.assertGreater(len(kernels), 1, code)
+        self.assertEqual(len(kernels), len(set(kernels)), kernels)
+
+    @requires_cuda_and_triton
     @parametrize(
         "patch",
-        [
-            {"triton.unique_kernel_names": False},
-            {"benchmark_kernel": True},
-            {"benchmark_combo_kernel": True},
-        ],
+        [{"benchmark_kernel": True}, {"benchmark_combo_kernel": True}],
     )
     def test_shadowing_configs_are_refused(self, patch):
         x = torch.randn(64, 128, device="cuda")

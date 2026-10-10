@@ -242,14 +242,6 @@ def readable_wrapper_requested() -> bool:
     """Whether this compile asked for readable output, and can actually have it."""
     if not config.readable_wrapper:
         return False
-    if not config.triton.unique_kernel_names:
-        # Every kernel would be named `triton_`, so hoisting them to module level makes
-        # all but the last unreachable -- an artifact that runs and is wrong.
-        raise RuntimeError(
-            "torch._inductor.config.readable_wrapper defines kernels at module level, "
-            "which requires triton.unique_kernel_names so they do not shadow each "
-            "other. Enable unique_kernel_names or disable readable_wrapper."
-        )
     for flag in ("benchmark_kernel", "benchmark_combo_kernel"):
         if getattr(config, flag):
             # These append get_args()/call()/__main__ to each kernel's source; at module
