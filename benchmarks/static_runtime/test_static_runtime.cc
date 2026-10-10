@@ -2253,6 +2253,10 @@ TEST(StaticRuntime, Narrow) {
 
   testStaticRuntime(narrow_with_int_script, args_a);
   testStaticRuntime(narrow_with_int_script, args_a, args_b);
+
+  auto c = at::tensor({1, 2, 3, 4, 5, 6, 7, 8, 9}).reshape({3, 3});
+  std::vector<IValue> args_c{c, -1, -1, 1};
+  testStaticRuntime(narrow_with_int_script, args_c);
 }
 
 TEST(StaticRuntime, TupleUnpack) {
@@ -3084,6 +3088,10 @@ namespace {
 
 void maybe_throw(bool should_throw) {
   if (should_throw) {
+    // The ModelCrash* tests below assert EXPECT_THROW(..., std::runtime_error)
+    // on what escapes the runtime. c10::Error derives from std::exception, not
+    // std::runtime_error, so TORCH_CHECK here would stop matching.
+    // @allow-raw-throw: tests below match on std::runtime_error
     throw std::runtime_error("test exception");
   }
 }
