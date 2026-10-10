@@ -2067,7 +2067,9 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
     global binding but none of its guarded codes: a continuation the frame ahead
     of it names must stay bound, and a bypassed code's guarded codes are dead.
     A code that is neither bypassed nor has variants is ``trivial``: it ran as
-    plain Python during capture, and the driver rebuilds it as plain Python.
+    plain Python during capture, and the driver rebuilds it as plain Python when
+    a resume name reaches it. An unnamed trivial code (a callback the
+    continuation called) gets a refusal stub that nothing binds.
     """
     return [
         {
@@ -2281,6 +2283,10 @@ def _build_multigraph_python_source(
     buf.writeline(
         f"RISKY_DROPPED_GUARDS = {[list(g) for g in summary.risky_dropped_guards]!r}"
     )
+    buf.writeline(
+        "# Kept by the filter but discarded by the invariance policy; likewise not"
+    )
+    buf.writeline("# checked at serve time.")
     buf.writeline(
         f"POLICY_DROPPED_GUARDS = {[list(g) for g in summary.policy_dropped_guards]!r}"
     )
