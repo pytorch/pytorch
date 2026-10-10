@@ -3852,6 +3852,12 @@ class PythonWrapperCodegen(CodeGen):
         # @triton.jit helpers under names that are only unique per kernel (scan
         # combine_fns, flex attention's forward_inner, ...). In one shared namespace the
         # later def would win for all of them, so make every def name kernel-unique.
+        # benchmark_kernel and benchmark_combo_kernel append a get_args()/call()/__main__
+        # harness to every kernel. It stays in the per-kernel modules the pool builds,
+        # which is where benchmark_all_kernels looks for it, but at module level each
+        # kernel's __main__ block would run whenever the wrapper does.
+        if harness := re.search(r"^def get_args\(\):$", src_code, re.MULTILINE):
+            src_code = src_code[: harness.start()]
         renames = {subs_name: kernel_name}
         for helper in re.findall(r"^def (\w+)\(", src_code, re.MULTILINE):
             if helper not in (kernel_name, subs_name):
@@ -3871,18 +3877,7 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def defines_triton_kernels_as_code(self) -> bool:
-        if not config.triton.module_level_kernels:
-            return False
-        for flag in ("benchmark_kernel", "benchmark_combo_kernel"):
-            if getattr(config, flag):
-                # These append get_args()/call()/__main__ to each kernel's source; at
-                # module level those collide with each other and with the wrapper's.
-                raise RuntimeError(
-                    "torch._inductor.config.triton.module_level_kernels is "
-                    f"incompatible with {flag}, which appends a get_args()/call()/"
-                    "__main__ harness to every kernel."
-                )
-        return True
+        return config.triton.module_level_kernels
 
     @staticmethod
     def async_compile_triton_body(
