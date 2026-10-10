@@ -72,6 +72,28 @@ class TestWrapperPreamble(TestCase):
         wrapper.scan_for_used_names(buf)
         self.assertEqual(buf.getvalue(), "import os.path\np = os.path.join('a')\n")
 
+    def test_a_kept_binding_keeps_the_import_its_right_hand_side_uses(self):
+        wrapper, buf = self._wrapper(), IndentedBuffer()
+        for line in ("import os", "import sys", "sep = os.sep", "path = sys.path"):
+            wrapper.write_if_used(buf, line)
+        buf.writeline("print(sep)")
+        wrapper.scan_for_used_names(buf)
+        self.assertEqual(buf.getvalue(), "import os\nsep = os.sep\nprint(sep)\n")
+
+    def test_blank_lines_before_an_omitted_block_survive_a_splice(self):
+        wrapper, buf = self._wrapper(), IndentedBuffer()
+        for name in ("a", "b"):
+            wrapper.write_omitted_from_scan(buf, f"\n\ndef {name}():\n    pass\n")
+        module = IndentedBuffer()
+        module.splice(buf)
+        expected = "\n\ndef a():\n    pass\n\n\ndef b():\n    pass\n"
+        self.assertEqual(module.getvalue(), expected)
+
+    def test_an_omitted_block_cannot_be_indented(self):
+        wrapper, buf = self._wrapper(), IndentedBuffer()
+        with buf.indent(), self.assertRaisesRegex(AssertionError, "indent 0"):
+            wrapper.write_omitted_from_scan(buf, "x = 1\ny = 2\n")
+
     def test_a_line_whose_bindings_cannot_be_read_raises(self):
         wrapper, buf = self._wrapper(), IndentedBuffer()
         for line in ("from m import (a, b)", "from m import *", "del x"):
