@@ -250,18 +250,15 @@ def toolkit_version(device_type: str) -> str:
 class CutlassDeviceInterface:
     """
     CUTLASS-specific device hooks for cuda/xpu.
-
-    Keeps device dispatch centralized without depending on
-    torch._dynamo.device_interface. Members are lazy callables where the
-    underlying imports are heavy or device-specific.
     """
 
     get_config: Callable[[], Any]
     get_code_cache: Callable[[], type]
-    get_compile_command: Callable[..., str]
+    get_compile_command: Callable[[list[str], str, str, list[str] | None], str]
     support_debug_trace: Callable[[], bool]
 
 
+@functools.cache
 def get_cutlass_device_interface(device_type: str) -> CutlassDeviceInterface:
     if device_type == "xpu":
         import torch._inductor.codecache
@@ -647,6 +644,6 @@ def cutlass_standalone_runner_compile_command(
     if iface.support_debug_trace():
         extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
     compile_command = iface.get_compile_command(
-        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
+        [str(srcpath)], str(exepath), "exe", extra_args
     )
     return compile_command
