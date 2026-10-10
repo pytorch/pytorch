@@ -21,33 +21,33 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.inductor_utils import HAS_GPU
-
-
-device_type = torch.device(get_devtype())
+from torch.testing._internal.common_fsdp import FSDPTest, MLP
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.utils._triton import has_triton
 
 
 class Mod(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super().__init__()
 
         self.encoder = torch.nn.Sequential(
-            torch.nn.Linear(28 * 28, 1024, device=device_type),
-            torch.nn.Linear(1024, 1024, device=device_type),
-            torch.nn.Linear(1024, 4096, device=device_type),
+            torch.nn.Linear(28 * 28, 1024, device=device),
+            torch.nn.Linear(1024, 1024, device=device),
+            torch.nn.Linear(1024, 4096, device=device),
         )
 
     def forward(self, x):
         return self.encoder(x)
 
 
+@unittest.skipIf(not has_triton(), "Triton is not available")
 class TestFullyShardCompileCompute(FSDPTest):
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skip_if_lt_x_gpu(2)
-    def test_disable_compiling_hooks(self):
+    def test_disable_compiling_hooks(self, device):
         """Verify that dynamo never traces into FSDP hooks in forward or backward."""
         torch._dynamo.reset()
         trace_rules_check_count = 0
@@ -65,18 +65,17 @@ class TestFullyShardCompileCompute(FSDPTest):
         orig_trace_rules_check = torch._dynamo.trace_rules.check
         torch.distributed.barrier()
         torch._dynamo.trace_rules.check = patched_trace_rules_check
-        model = MLP(4).to(device_type)
+        model = MLP(4).to(self.device_type)
         fully_shard(model)
         model.compile()
-        out = model(torch.randn((4, 4), device=device_type))
+        out = model(torch.randn((4, 4), device=self.device_type))
         out.sum().backward()
         torch.distributed.barrier()
         torch._dynamo.trace_rules.check = orig_trace_rules_check
         self.assertEqual(trace_rules_check_count, 0)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
-    def test_compiled_autograd_fsdp2_backward(self):
+    def test_compiled_autograd_fsdp2_backward(self, device):
         """
         Verify that compiled autograd with FSDP2 backward does not crash and
         that FSDP hooks cause graph breaks (due to _dynamo_disable).
@@ -90,11 +89,11 @@ class TestFullyShardCompileCompute(FSDPTest):
         """
         torch._dynamo.reset()
         counters.clear()
-        model = MLP(4).to(device_type)
+        model = MLP(4).to(self.device_type)
         ref_model = copy.deepcopy(model)
         fully_shard(model)
         fully_shard(ref_model)
-        inp = torch.randn((4, 4), device=device_type)
+        inp = torch.randn((4, 4), device=self.device_type)
 
         # Eager reference
         ref_out = ref_model(inp)
@@ -123,16 +122,15 @@ class TestFullyShardCompileCompute(FSDPTest):
         #   graph break 2: post_backward (from RegisterPostBackwardFunction)
         self.assertEqual(backend_count, 2)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
-    def test_compile_optimizer_uneven_shard(self):
+    def test_compile_optimizer_uneven_shard(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/176667
         # When a param dim is not divisible by world_size, FSDP2 creates
         # param._local_tensor as a narrow view of an N-D padded tensor, while
         # grad._local_tensor is a view of a 1-D flat gradient buffer. Dynamo
         # must not reuse param's symbolic context for the grad.
         torch._dynamo.reset()
-        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16, reduce_dtype=torch.float32
         )
@@ -140,13 +138,13 @@ class TestFullyShardCompileCompute(FSDPTest):
         with torch.device("meta"):
             model = nn.Conv2d(3, 47, 3, padding=1)
         fully_shard(model, mesh=mesh, mp_policy=mp_policy, reshard_after_forward=False)
-        model.to_empty(device=device_type)
+        model.to_empty(device=self.device_type)
         with torch.no_grad():
             for p in model.parameters():
                 p.uniform_(-0.01, 0.01)
 
         opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-        x = torch.randn(4, 3, 8, 8, device=device_type, dtype=torch.bfloat16)
+        x = torch.randn(4, 3, 8, 8, device=self.device_type, dtype=torch.bfloat16)
 
         # Eager warmup
         model(x).sum().backward()
@@ -157,16 +155,15 @@ class TestFullyShardCompileCompute(FSDPTest):
         model(x).sum().backward()
         torch.compile(opt.step)()
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(4)
-    def test_tp_mixed_precision_dtensor_spec_dtype(self):
+    def test_tp_mixed_precision_dtensor_spec_dtype(self, device):
         torch._dynamo.reset()
         if self.world_size % 2 != 0:
             self.skipTest(f"Expects even world size but got {self.world_size}")
 
         dim, tp_size = 16, 2
         mesh = init_device_mesh(
-            device_type.type,
+            self.device_type,
             (self.world_size // tp_size, tp_size),
             mesh_dim_names=("dp", "tp"),
         )
@@ -178,9 +175,9 @@ class TestFullyShardCompileCompute(FSDPTest):
         )
 
         class RowwiseLinear(torch.nn.Module):
-            def __init__(self, dim: int):
+            def __init__(self, dim: int, device):
                 super().__init__()
-                self.proj = nn.Linear(dim, dim, bias=False, device=device_type)
+                self.proj = nn.Linear(dim, dim, bias=False, device=device)
 
             def forward(self, x):
                 return self.proj(x).clone()
@@ -193,7 +190,7 @@ class TestFullyShardCompileCompute(FSDPTest):
             return Shard(0)
 
         for compile_model in (False, True):
-            model = RowwiseLinear(dim)
+            model = RowwiseLinear(dim, self.device_type)
             parallelize_module(model, tp_mesh, {"proj": RowwiseParallel()})
             if compile_model:
                 model.compile(backend="eager")
@@ -208,7 +205,7 @@ class TestFullyShardCompileCompute(FSDPTest):
             x = torch.randn(
                 2,
                 dim // tp_size,
-                device=device_type,
+                device=self.device_type,
                 dtype=torch.bfloat16,
             )
             y = model(x)
@@ -221,9 +218,11 @@ class TestFullyShardCompileCompute(FSDPTest):
             dist.barrier()
 
 
-@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+@unittest.skipIf(not has_triton(), "Triton is not available")
 class TestFullyShardCompile(FSDPTest):
-    def test_dynamo_trace_use_training_state(self):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_dynamo_trace_use_training_state(self, device):
         torch._dynamo.reset()
         # Construct a dummy FSDPParamGroup, since we just want to test the `use_training_state` ctx manager.
         param_group = FSDPParamGroup(
@@ -231,7 +230,7 @@ class TestFullyShardCompile(FSDPTest):
             (torch.nn.Linear(1, 1),),  # module: Tuple[nn.Module, ...],
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
-            device_type,  # device: torch.device,
+            self.device_type,  # device: torch.device,
             None,  # shard_placement_fn: Optional[Callable],
             None,  # mp_policy: MixedPrecisionPolicy,
             None,  # offload_policy: OffloadPolicy,
@@ -260,7 +259,7 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
 
-    def test_trace_fsdp_copy_(self):
+    def test_trace_fsdp_copy_(self, device):
         @torch.library.custom_op("mylib::add_one_out", mutates_args={"out"})
         def add_one_out(x: torch.Tensor, out: torch.Tensor) -> None:
             torch.add(x, 1, out=out)
@@ -278,15 +277,30 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
-    def test_dynamo_recompiles_on_fsdp_layers(self):
-        m = Mod()
+    def test_dynamo_recompiles_on_fsdp_layers(self, device):
+        m = Mod(self.device_type)
         for name, child in m.encoder.named_children():
             if isinstance(child, torch.nn.Linear):
                 new_child = torch.compile(child)
                 setattr(m.encoder, name, new_child)
         m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
-        inp = torch.randn(32, 784, device=device_type)
+        inp = torch.randn(32, 784, device=self.device_type)
         m(inp)
+
+
+instantiate_device_type_tests(
+    TestFullyShardCompileCompute,
+    globals(),
+    except_for=["cpu", "hpu", "privateuse1"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestFullyShardCompile,
+    globals(),
+    except_for=["cpu", "hpu", "privateuse1"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
