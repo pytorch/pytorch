@@ -1447,6 +1447,105 @@ class TestSortAndSelectCUDA(TestCase):
                     expected = rank.sort(stable=True).indices[:, :k]
                     self.assertEqual(idx.cpu(), expected, msg=msg)
 
+    @dtypes(
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.half,
+        torch.bfloat16,
+        torch.float,
+    )
+    def test_select_ties_at_dtype_extremes(self, device, dtype):
+        # Covers the steps of the ROCm register-path select (see the note in SortingRadixSelect.cuh). Its
+        # reductions answer with a key and leave the all-ones key (NaN for floating types, the maximum for
+        # integers) to the radix walk, so ties at the extremes near the selected rank must give exact values.
+        if dtype.is_floating_point:
+            lo, hi = float("-inf"), float("inf")
+            tie_values = (lo, hi, float("nan"))
+        else:
+            lo, hi = torch.iinfo(dtype).min, torch.iinfo(dtype).max
+            tie_values = (lo, hi)
+
+        def check_topk(x_dev, x, k, msg):
+            # Compared unsorted (sorted on the CPU) so that GPU sort behavior for NaN does not enter.
+            for largest in (True, False):
+                got = torch.topk(x_dev, k, dim=1, largest=largest, sorted=False).values
+                want = torch.topk(x, k, dim=1, largest=largest).values
+                self.assertEqual(
+                    got.cpu().sort(dim=1).values,
+                    want.sort(dim=1).values,
+                    atol=0,
+                    rtol=0,
+                    msg=f"{msg} {largest=}",
+                )
+
+        g = torch.Generator().manual_seed(0)
+        # Slice lengths at each register-path size of a 1024-thread block (rows per thread 1, 4, 10, 14 and,
+        # on GFX9, 20); k = 1 and n take the max reduction, k <= 16 from either end the small-k threshold, the
+        # rest the radix walk.
+        for n in (1023, 1024, 4096, 4097, 10241, 14336, 20480):
+            if dtype.is_floating_point:
+                x = torch.randn(3, n, generator=g).to(dtype)
+            else:
+                x = torch.randint(
+                    max(lo, -1000), min(hi, 1000), (3, n), generator=g
+                ).to(dtype)
+            for value in tie_values:
+                y = x.clone()
+                y[:, torch.randperm(n, generator=g)[:5]] = value
+                y_dev = y.to(device)
+                # k near n with five tied extremes selects the extreme itself through the small-k path.
+                for k in (1, 2, 16, 17, n - 16, n - 15, n - 4, n - 3, n - 1, n):
+                    msg = f"{n=} {value=} {k=}"
+                    self.assertEqual(
+                        torch.kthvalue(y_dev, k, dim=1).values,
+                        torch.kthvalue(y, k, dim=1).values,
+                        atol=0,
+                        rtol=0,
+                        msg=msg,
+                    )
+                    # topk on 3 slices this long takes the multi-block path instead.
+                    if n < 20000:
+                        check_topk(y_dev, y, k, msg)
+                for op in (torch.median, torch.nanmedian):
+                    self.assertEqual(
+                        op(y_dev, dim=1).values,
+                        op(y, dim=1).values,
+                        atol=0,
+                        rtol=0,
+                        msg=f"{op.__name__} {n=} {value=}",
+                    )
+        # Few distinct values overflow the small-k candidate buffer, so the radix walk decides.
+        for n in (1000, 4000, 14336):
+            x = torch.randint(0, 4, (3, n), generator=g).to(dtype)
+            x_dev = x.to(device)
+            for k in (2, 8, 16, n - 15, n - 7, n - 1):
+                check_topk(x_dev, x, k, f"few values {n=} {k=}")
+                self.assertEqual(
+                    torch.kthvalue(x_dev, k, dim=1).values,
+                    torch.kthvalue(x, k, dim=1).values,
+                    atol=0,
+                    rtol=0,
+                    msg=f"few values {n=} {k=}",
+                )
+        if dtype in (torch.uint8, torch.int8):
+            # Seeded 8-bit input from randomized testing: ties at the maximum, with k = n - 15 reaching the
+            # small-k threshold from the low end. 1-byte keys take the register path only on GFX9.
+            n = 1024
+            gen = torch.Generator().manual_seed(35)
+            x = torch.randint(lo, hi, (n,), generator=gen)
+            ties = torch.rand(n, generator=gen) < 0.003
+            ties[torch.randint(0, n, (3,), generator=gen)] = True
+            x[ties] = hi
+            x = x.to(dtype)
+            self.assertEqual(
+                torch.topk(x.to(device), n - 15).values,
+                torch.topk(x, n - 15).values,
+                atol=0,
+                rtol=0,
+            )
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @slowTest
     @largeTensorTest("170GB", "cpu")
