@@ -2064,7 +2064,7 @@ def group_norm_backward_strategy(
 ) -> list[list[Placement | _ShardingPlaceholder | None]]:
     # native_group_norm_backward(grad_out, input, mean, rstd, weight?,
     #                            N, C, HxW, group, output_mask)
-    output_mask = args_schema[9]
+    output_mask = args_schema[-1]
     placements: list[Placement | _ShardingPlaceholder | None] = [
         _ShardingPlaceholder(0) if output_mask[0] else None,
         Partial("sum") if output_mask[1] else None,
