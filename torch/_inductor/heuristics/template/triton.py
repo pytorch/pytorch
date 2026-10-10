@@ -41,6 +41,8 @@ from ...utils import (
     get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
+    kpack_supported,
+    mfma_kdim,
     rocm_gfx_arch,
     tdm_descriptor_row_major,
     TMA_DESCRIPTOR_SIZE,
@@ -961,6 +963,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
@@ -1157,9 +1160,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             if torch.cuda.is_available():
                 device = torch.cuda.current_device()
                 props = torch.cuda.get_device_properties(device)
-                if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                if hasattr(props, "shared_memory_per_block_optin"):
                     sm_available = int(props.shared_memory_per_block_optin)
-                elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                elif hasattr(props, "shared_memory_per_block"):
                     sm_available = int(props.shared_memory_per_block)
                 else:
                     return None
@@ -1271,7 +1274,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
             scaled_configs = self._prune_reg_spill_configs(scaled_configs)
-        return self._finalize_mm_configs(scaled_configs)
+        return self._finalize_mm_configs(scaled_configs, dtype_size=dtype_size)
 
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
@@ -1683,6 +1686,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         self.default_num_stages = get_backend_num_stages()
 
+        kpack_choices = [1, 2] if kpack_supported() else [1]
+
         self.mm_configs: list[BaseConfig] = [
             ROCmGemmConfig(
                 16, 16, 256, self.default_num_stages, 4, group_m=4, waves_per_eu=2
@@ -1762,7 +1767,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]
             for waves_per_eu in [0, 2]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
         ]
 
         # Architecture-aware default kpack for flex configs
@@ -1882,7 +1887,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
         ]
 
         self.exhaustive_flex_attn_bwd_configs: list[FlexBwDConfig] = [
@@ -1906,7 +1911,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
-            for kpack in [1, 2]
+            for kpack in kpack_choices
             if BLOCK_N1 % BLOCK_M1 == 0
             and BLOCK_M2 % BLOCK_N2 == 0  # kernel static assertions
         ]
@@ -2023,25 +2028,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 b_row_major,
             )
 
-    def _prune_exhaustive_configs(
-        self,
-        configs: list[BaseConfig],
-        dtype_size: int,
-    ) -> list[BaseConfig]:
-        # these cause AMD compile to crash
-        pruned_configs = [
-            c
-            for c in configs
-            if not (
-                (
-                    getattr(c, "matrix_instr_nonkdim", 0) == 2
-                    and getattr(c, "kpack", 0) == 2
-                )
-                or (c.block_k <= 16 and getattr(c, "kpack", 0) == 2)
-            )
-        ]
-        return pruned_configs
-
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         ROCm specific filtering
@@ -2053,6 +2039,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
+        dtype_size: int = 0,
     ) -> Generator[TritonConfig, None, None]:
         """
         Finalizes configs after scaling, applying additional constraints.
@@ -2070,13 +2057,35 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             waves_per_eu: int = getattr(conf, "waves_per_eu", 0)
             # Use explicit kpack if set, otherwise determine optimal value based on
             # architecture and BLOCK_K
-            kpack: int = getattr(conf, "kpack", get_default_kpack(conf.block_k))
+            explicit_kpack = getattr(conf, "kpack", None)
+            kpack: int = explicit_kpack or get_default_kpack(conf.block_k)
+            kdim = mfma_kdim(dtype_size, matrix_instr_nonkdim)
+
+            # Policy: mfma_kdim returns None for a dtype not in the CDNA MFMA
+            # table (e.g. fp64, or an unspecified dtype_size=0). Without the true
+            # MFMA K-extent we cannot decide whether a kpack pack underfills the
+            # operand, so we skip the kpack underfill check rather than guessing
+            # from matrix_instr_nonkdim (which over-prunes small-kdim dtypes).
+            if kdim is None:
+                underfills_mfma = False
+            else:
+                underfills_mfma = kpack > 1 and conf.block_k < kpack * kdim
+
+            # A default kpack that would underfill is dropped to 1
+            # so a valid config is emitted instead of being pruned. An explicitly
+            # requested kpack that underfills is left to be pruned below.
+            if explicit_kpack is None and underfills_mfma:
+                kpack = 1
+                underfills_mfma = False
 
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
                 or conf.block_n % matrix_instr_nonkdim != 0
+                or underfills_mfma
             ):
                 #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                #  an explicitly requested kpack > 1 must supply kpack whole MFMA
+                #  K-steps (kpack * kdim) or packing miscompiles
                 continue
 
             # Construct key for finding duplicate configs
@@ -2359,13 +2368,6 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
         return flex_decode_configs
 
-    def _prune_exhaustive_configs(
-        self,
-        configs: list[BaseConfig],
-        dtype_size: int,
-    ) -> list[BaseConfig]:
-        return configs
-
 
 class MTIAConfigHeuristic(BaseConfigHeuristic):
     """
@@ -2374,6 +2376,21 @@ class MTIAConfigHeuristic(BaseConfigHeuristic):
 
 
 # Template-specific mixin classes
+def mm_allow_tf32(m: Any, n: Any, k: Any, device_type: str | None) -> bool:
+    """Whether a Triton GEMM template should use TF32, matching eager matmul."""
+    if device_type == "xpu":
+        # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
+        return bool(torch.backends.mkldnn.allow_tf32)
+    if device_type == "cuda":
+        # allow_tf32 alignment heuristics based on reverse engineering
+        # H100 CUDA 12.8 behavior
+        size_threshold = V.graph.sizevars.statically_known_true(
+            sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
+        )
+        return torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
+    return False
+
+
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     """
     Mixin class that converts config lists to template kwargs.
@@ -2416,24 +2433,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
-        device_type = kernel_inputs.device_type
-        if device_type == "xpu":
-            # XPU eager matmul takes TF32 from the oneDNN flag, not the CUDA one.
-            allow_tf32 = torch.backends.mkldnn.allow_tf32
-        elif device_type == "cuda":
-            # allow_tf32 alignment heuristics based on reverse engineering
-            # H100 CUDA 12.8 behavior
-            size_threshold = V.graph.sizevars.statically_known_true(
-                sympy.And(sympy.Ge(m, 16), sympy.Ge(Min(n, k), 512))
-            )
-            allow_tf32 = (
-                torch.backends.cuda.matmul.fp32_precision == "tf32" and size_threshold
-            )
-        else:
-            allow_tf32 = False
-
         extra_kwargs = {
-            "ALLOW_TF32": allow_tf32,
+            "ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type),
         }
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because
