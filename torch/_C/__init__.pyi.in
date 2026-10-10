@@ -1711,6 +1711,7 @@ def _set_generator_metaclass(metaclass: type) -> None: ...
 
 class Generator:
     device: _device
+    _cdata: _int
     def __init__(self, device: DeviceLikeType | None = None) -> None: ...
     def __reduce__(
         self,

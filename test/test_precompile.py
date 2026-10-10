@@ -3389,6 +3389,15 @@ class TestPrecompile(TestCase):
             )
         self.assertTrue(any("was not saved" in m for m in cm.output), cm.output)
 
+    def test_capture_drawing_on_meta_does_not_warn(self):
+        # A meta "draw" consumes no generator, so there is nothing unsaved to report.
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: torch.rand_like(a),
+                torch.empty(4, device="meta"),
+                backend="eager",
+            )
+
     def test_capture_rejected_after_tracing_still_restores_rng(self):
         # These rejections all fire with a complete graph in hand, so they know what
         # the capture drew and must not leave the caller's stream advanced.
@@ -3438,6 +3447,17 @@ class TestPrecompile(TestCase):
             _precompile_pair(op, torch.empty(4), backend="eager")
         self.assertEqual(torch.random.get_rng_state(), before)
 
+    def test_capture_through_a_prims_op_restores_nothing(self):
+        # prims ops are as transparent as aten ones (decomposition tables emit them), so
+        # one in a graph that does not draw must not undo a reseed made during capture.
+        def reseed_then_convert(a):
+            torch.random.default_generator.manual_seed(7)
+            return torch.ops.prims.convert_element_type(a, torch.float64)
+
+        torch.manual_seed(0)
+        _precompile_pair(reseed_then_convert, torch.empty(4), backend="eager")
+        self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
+
     def test_capture_drawing_from_an_explicit_generator_rewinds_no_default(self):
         # The named generator cannot be saved before capture names it, and rewinding
         # its device's default generator instead would replay unrelated draws.
@@ -3455,8 +3475,20 @@ class TestPrecompile(TestCase):
         self.assertEqual(torch.random.get_rng_state(), self._reseeded_cpu_state())
         self.assertNotEqual(gen.get_state(), gen_before)
 
+    def test_capture_drawing_from_a_default_generator_by_name_restores_it(self):
+        torch.manual_seed(0)
+        before = torch.random.get_rng_state()
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            _precompile_pair(
+                lambda a: a + torch.rand(4, generator=torch.default_generator),
+                torch.empty(4),
+                backend="eager",
+            )
+        self.assertEqual(torch.random.get_rng_state(), before)
+
     def test_capture_drawing_from_explicit_and_default_generators(self):
         gen = torch.Generator().manual_seed(0)
+        gen_before = gen.get_state()
         torch.manual_seed(0)
         before = torch.random.get_rng_state()
         with self.assertLogs("torch._precompile", level="WARNING") as cm:
@@ -3467,6 +3499,7 @@ class TestPrecompile(TestCase):
             )
         self.assertTrue(any("explicit torch.Generator" in m for m in cm.output))
         self.assertEqual(torch.random.get_rng_state(), before)
+        self.assertNotEqual(gen.get_state(), gen_before)
         with self.assertNoLogs("torch._precompile", level="WARNING"):
             _precompile_pair(
                 lambda a: torch.rand_like(a), torch.empty(4), backend="eager"
