@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -13,7 +14,6 @@
 #include <ATen/native/FractionalMaxPooling.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <ATen/native/cuda/KernelUtils.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -145,10 +145,9 @@ __global__ void fractional_max_pool3d_backward_out_frame(
       gradInput.size(4));
     CUDA_KERNEL_ASSERT(inputT < gradInput.size(2));
 
-    fastAtomicAdd(
-      gradInput,
-      gradOutput[batch][plane][outputT][outputH][outputW],
-      batch, plane, inputT, inputH, inputW
+    gpuAtomicAddNoReturn(
+      &gradInput[batch][plane][inputT][inputH][inputW],
+      gradOutput[batch][plane][outputT][outputH][outputW]
       );
     }
   }
