@@ -101,7 +101,7 @@ class TestModuleLevelKernels(TestCase):
     @parametrize("fn", [_softmax, _cond_softmax])
     def test_kernels_are_defined_at_module_level(self, fn):
         x = torch.randn(64, 128, device="cuda")
-        result, code = _code_for(fn, x, **{"triton.module_level_kernels": True})
+        result, code = _code_for(fn, x)
         self.assertEqual(result, fn(x))
         self.assertNotIn("async_compile.triton", code)
         self.assertTrue(re.search(r"^@triton_heuristics\.\w+\(", code, re.MULTILINE))
@@ -112,22 +112,14 @@ class TestModuleLevelKernels(TestCase):
         self.assertIn("# kernel path:", code)
 
     @requires_cuda_and_triton
-    def test_kernels_are_module_level_by_default(self):
-        x = torch.randn(64, 128, device="cuda")
-        _, code = _code_for(_softmax, x)
-        self.assertNotIn("async_compile.triton(", code)
-        self.assertTrue(re.search(r"^def triton_\w+\(", code, re.MULTILINE), code)
-
-    @requires_cuda_and_triton
     @config.patch({"compile_threads": 2, "triton.unique_kernel_names": False})
     def test_kernels_without_unique_names(self):
         self.assertTrue(AsyncCompile.wait_process_pool_ready())
         x = torch.randn(64, 128, device="cuda")
-        flags = {"triton.module_level_kernels": True}
         with mock.patch.object(
             CachingAutotuner, "_precompile_config", _compiled_in_this_process
         ):
-            result, code = _code_for(_cond_softmax, x, **flags)
+            result, code = _code_for(_cond_softmax, x)
         self.assertEqual(result, _cond_softmax(x))
         self.assertNotIn("def triton_(", code)
         kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
@@ -148,9 +140,8 @@ class TestModuleLevelKernels(TestCase):
             return x.sin() * 2, y.cos() + 1
 
         x, y = torch.randn(64, 128, device="cuda"), torch.randn(32, device="cuda")
-        flags = {"triton.module_level_kernels": True, **patch}
         PyCodeCache.cache_clear()
-        result, code = _code_for(fn, x, y, **flags)
+        result, code = _code_for(fn, x, y, **patch)
         self.assertEqual(result, fn(x, y))
         # Only the wrapper's own harness is at module level; each kernel's stays in the
         # module the kernel is compiled from, where benchmark_all_kernels finds it.
@@ -182,9 +173,7 @@ class TestModuleLevelKernels(TestCase):
         with mock.patch.object(
             CachingAutotuner, "_precompile_config", _compiled_in_this_process
         ):
-            result, code = _code_for(
-                _cond_softmax, x, **{"triton.module_level_kernels": True}
-            )
+            result, code = _code_for(_cond_softmax, x)
         self.assertEqual(result, _cond_softmax(x))
         kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
         self.assertEqual(counters["inductor"]["async_compile_cache_hit"], len(kernels))
@@ -213,7 +202,7 @@ class TestModuleLevelKernels(TestCase):
     def test_load_from_python(self):
         # It loads source it is handed, and a module-level kernel needs it in a file.
         x = torch.randn(64, 128, device="cuda")
-        result, code = _code_for(_softmax, x, **{"triton.module_level_kernels": True})
+        result, code = _code_for(_softmax, x)
         self.assertEqual(load_from_python(code)([x])[0], result)
 
     @requires_cuda_and_triton
@@ -229,9 +218,8 @@ class TestModuleLevelKernels(TestCase):
             scale_rblock(self)
 
         x = torch.randn(64, 128, device="cuda")
-        flags = {"triton.module_level_kernels": True}
         with mock.patch.object(CachingAutotuner, "_dynamic_scale_rblock", reload_first):
-            result, _ = _code_for(_softmax, x, **flags)
+            result, _ = _code_for(_softmax, x)
         self.assertEqual(result, _softmax(x))
 
     @requires_cuda_and_triton
@@ -240,13 +228,12 @@ class TestModuleLevelKernels(TestCase):
         self.assertTrue(AsyncCompile.wait_process_pool_ready())
         # torch.cond bypasses the FX graph cache, so this uses a graph without one.
         x = torch.randn(64, 128, device="cuda")
-        flags = {"triton.module_level_kernels": True}
-        _code_for(_softmax, x, **flags)
+        _code_for(_softmax, x)
         counters.clear()
         with mock.patch.object(
             CachingAutotuner, "_precompile_config", _compiled_in_this_process
         ):
-            result, _ = _code_for(_softmax, x, **flags)
+            result, _ = _code_for(_softmax, x)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(result, _softmax(x))
 
@@ -255,8 +242,7 @@ class TestModuleLevelKernels(TestCase):
         x = torch.ones(4, device="cuda")
         gms = []
         torch.compile(lambda t: t * 2, backend=lambda gm, _: gms.append(gm) or gm)(x)
-        flags = {"triton.module_level_kernels": True, "fx_graph_cache": True}
-        with tempfile.TemporaryDirectory() as d, config.patch(flags):
+        with tempfile.TemporaryDirectory() as d, config.patch(fx_graph_cache=True):
             with fresh_cache():
                 artifact = torch._inductor.standalone_compile(gms[0], [x])
                 self.assertEqual(artifact(x)[0], x * 2)
@@ -293,7 +279,7 @@ class TestModuleLevelKernels(TestCase):
 
             x = torch.randn(256, device="cuda")
             expected = (x.abs() * 2 + 1, x.floor() * 3 + 1)
-            result, code = _code_for(fn, x, **{"triton.module_level_kernels": True})
+            result, code = _code_for(fn, x)
             self.assertEqual(result, expected)
             self.assertNotIn("async_compile.triton", code)
             kernels = re.findall(r"^def scale_kernel_\d\(", code, re.MULTILINE)
@@ -322,7 +308,7 @@ class TestModuleLevelKernels(TestCase):
 
             x = torch.randn(256, device="cuda")
             expected = (x.abs() + 1, x.floor() + 1)
-            result, code = _code_for(fn, x, **{"triton.module_level_kernels": True})
+            result, code = _code_for(fn, x)
             self.assertEqual(result, expected)
             path = os.path.join(d, "module.py")
             with open(path, "w") as f:
@@ -343,7 +329,7 @@ class TestModuleLevelKernels(TestCase):
 
         x = torch.randint(-8, 8, (256,), device="cuda", dtype=torch.int32)
         y = torch.randint(-8, 8, (256,), device="cuda", dtype=torch.int32)
-        result, _ = _code_for(fn, x, y, **{"triton.module_level_kernels": True})
+        result, _ = _code_for(fn, x, y)
         self.assertEqual(result, (x >= y).int())
 
     @requires_cuda_and_triton
@@ -352,7 +338,7 @@ class TestModuleLevelKernels(TestCase):
         # Both consume each kernel's async_compile.triton(...) source themselves.
         x = torch.randn(64, 128, device="cuda")
         torch._dynamo.reset()
-        with config.patch({wrapper: True, "triton.module_level_kernels": True}):
+        with config.patch({wrapper: True}):
             result = torch.compile(_softmax)(x)
         self.assertEqual(result, _softmax(x))
 
@@ -360,7 +346,7 @@ class TestModuleLevelKernels(TestCase):
     @config.patch(compile_threads=1)
     def test_kernels_compile_serially_without_a_pool(self):
         x = torch.randn(64, 128, device="cuda")
-        result, _ = _code_for(_cond_softmax, x, **{"triton.module_level_kernels": True})
+        result, _ = _code_for(_cond_softmax, x)
         self.assertEqual(result, _cond_softmax(x))
 
 
