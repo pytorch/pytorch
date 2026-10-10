@@ -9785,6 +9785,24 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 class TestLinalgSVD(TestCase):
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.complex64)
+    @parametrize("shape", [(4, 4), (8, 4), (4, 8), (2, 4, 4)])
+    @parametrize("scale", [1e-8, 5e-8])
+    def test_svd_small_scale(self, device, dtype, shape, scale):
+        A = torch.eye(*shape[-2:], dtype=dtype).expand(shape)
+        Am = (A * scale).to(device)
+        U, S, Vh = torch.linalg.svd(Am, full_matrices=False)
+        eye = torch.eye(min(shape[-2:]), dtype=dtype, device=device).expand(*shape[:-2], -1, -1)
+        self.assertEqual(U.mH @ U, eye, atol=1e-5, rtol=1e-5)
+        self.assertEqual(Vh @ Vh.mH, eye, atol=1e-5, rtol=1e-5)
+        self.assertEqual(((U * (S / scale).unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-5, rtol=1e-5)
+        pinv = torch.linalg.pinv(A)
+        self.assertEqual(torch.linalg.pinv(Am).cpu() * scale, pinv, atol=1e-5, rtol=1e-5)
+        B = torch.eye(shape[-2], dtype=dtype, device=device).expand(*shape[:-2], -1, -1)
+        self.assertEqual(torch.linalg.lstsq(Am, B).solution.cpu() * scale, pinv, atol=1e-5, rtol=1e-5)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_svd_ill_conditioned(self, device, dtype):
         # Small columns must still undergo Jacobi rotations: skipping them at
