@@ -2724,6 +2724,13 @@ class TestOptimRenewed(TestCase):
             expected,
         )
 
+    def test_rmsprop_invalid_alpha(self):
+        param = [torch.nn.Parameter(torch.randn(2, 2))]
+        with self.assertRaisesRegex(ValueError, "Invalid alpha value: -0.1"):
+            torch.optim.RMSprop(param, alpha=-0.1)
+        with self.assertRaisesRegex(ValueError, "Invalid alpha value: 1.5"):
+            torch.optim.RMSprop(param, alpha=1.5)
+
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
