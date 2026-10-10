@@ -1218,6 +1218,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     def test_dynamo_cache_manual_load(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
+
         def fn(x):
             return x.sin() + x.cos()
 
@@ -1251,6 +1252,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     def test_automatic_dynamo_serialize(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
+
         def fn(x):
             return x.sin() + x.cos()
 
@@ -1281,6 +1283,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     def test_automatic_dynamo_import_source_guard(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
+
         # Warm-loading a guard state whose serialized sources include an
         # ImportSource must not raise. `pytree.tree_is_leaf` routes through
         # `get_pytree_SUPPORTED_NODES_source`, which builds an
@@ -1308,6 +1311,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     def test_automatic_dynamo_recompiles(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
+
         def fn(x):
             return x.sin() + x.cos()
 
@@ -1341,6 +1345,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     def test_automatic_dynamo_graph_breaks(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
+
         def fn(x, l, r):
             if l > r:
                 return x.sum()
@@ -1384,6 +1389,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     def test_automatic_dynamo_lazy_backward(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
+
         def fn(x):
             return x.sin() + x.cos()
 
@@ -1409,6 +1415,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     def test_graph_break_partial_backend(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
+
         def fn(x):
             y = x.sin()
             torch._dynamo.graph_break()
@@ -1477,6 +1484,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     def test_code_with_generator(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
+
         def foo(set_of_x):
             if not all(isinstance(s, torch.Tensor) for s in set_of_x):
                 raise TypeError(
@@ -1494,6 +1502,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     def test_automatic_dynamo_graph_breaks_from_print_model_as_fn(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
+
         def guard_filter_fn(guards):
             return [
                 guard.guard_type not in ("CLOSURE_MATCH", "FUNCTION_MATCH")
@@ -1539,6 +1548,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
     def test_nn_module(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
