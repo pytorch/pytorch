@@ -43,6 +43,22 @@ function install_cudnn {
   rm -rf tmp_cudnn
 }
 
+function install_cublas {
+  local cublas_version=$1
+  local archive="libcublas-linux-${arch_path}-${cublas_version}_cuda13-archive"
+  local tmp_dir
+  tmp_dir=$(mktemp -d)
+  pushd "${tmp_dir}"
+  wget -q "https://developer.download.nvidia.com/compute/cublas/redist/libcublas/linux-${arch_path}/${archive}.tar.xz"
+  tar xf "${archive}.tar.xz"
+  # Remove old libraries so ldconfig cannot restore links to the toolkit version.
+  rm -f /usr/local/cuda/lib64/libcublas* /usr/local/cuda/lib64/libnvblas*
+  cp -a "${archive}/include/"* /usr/local/cuda/include/
+  cp -a "${archive}/lib/"* /usr/local/cuda/lib64/
+  popd
+  rm -rf "${tmp_dir}"
+}
+
 function install_nvshmem {
   cuda_major_version=$1      # e.g. "12"
   nvshmem_version=$2         # e.g. "3.3.9"
@@ -201,11 +217,14 @@ function install_132 {
 }
 
 function install_134 {
+  CUBLAS_VERSION=13.8.1.7
   CUDNN_VERSION=9.26.0.51
   CUSPARSELT_VERSION=0.8.1.1
   echo "Installing CUDA 13.4 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-${CUSPARSELT_VERSION}"
   # install CUDA 13.4 in the same container
   install_cuda 13.4.1 cuda_13.4.1_linux
+
+  install_cublas $CUBLAS_VERSION
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
   install_cudnn 13 $CUDNN_VERSION

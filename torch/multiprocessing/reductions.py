@@ -176,9 +176,8 @@ def rebuild_cuda_tensor(
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
     else:
-        storage = storage_from_cache(
-            storage_cls, (storage_handle, storage_offset_bytes)
-        )
+        cache_key = (storage_device, storage_handle, storage_offset_bytes)
+        storage = storage_from_cache(storage_cls, cache_key)
         if storage is None:
             torch.cuda._lazy_init()
             storage = storage_cls._new_shared_cuda(
@@ -191,9 +190,7 @@ def rebuild_cuda_tensor(
                 event_handle,
                 event_sync_required,
             )
-            shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(
-                storage
-            )
+            shared_cache[cache_key] = StorageWeakRef(storage)
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(
