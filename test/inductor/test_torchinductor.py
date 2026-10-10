@@ -19024,6 +19024,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled_out = compiled_f(*inps)
         torch.testing.assert_close(eager_out, compiled_out)
 
+    def test_return_input_mutated_by_fallback(self):
+        # Complex copy_ falls back to ATen, so the graph output is an op mutating a
+        # graph input, whose name is freed before the return.
+        def fn(x):
+            x += 1
+            return x
+
+        x = torch.randn(4, dtype=torch.complex64, device=self.device)
+        expected = x + 1
+        self.assertEqual(torch.compile(fn)(x), expected)
+
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_arange1(self):
         def fn(step, device):
@@ -19505,7 +19516,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (x, y, mask)
         self.common(Model(), inputs)
 
-    @skipIfRocmArch(NAVI_ARCH)
     @requires_gpu_and_triton
     @parametrize("use_cat", [True, False])
     def test_copy_non_blocking_is_pinned(self, use_cat):

@@ -491,27 +491,25 @@ PyObject* dynamo__custom_eval_frame(
   }
 #endif
 
-  ExtraState* extra = get_extra_state(F_CODE(frame));
-
-  if (callback.is(py::bool_(false)) && extra == nullptr) {
-    DEBUG_TRACE("skip (run only with empty cache) %s", get_frame_name(frame));
-    eval_default();
-    return eval_result;
-  }
-
-  // create cache
-  if (extra == nullptr) {
-    extra = init_and_set_extra_state(F_CODE(frame));
-  }
-
+  PyCodeObject* code = F_CODE(frame);
   // Resolve strategy per isolate_recompiles scope. For non-isolated
   // frames (id < 0) this returns extra->strategy; for isolated regions
   // it returns the region's own strategy with global SKIP applied
   // (deliberate "do not trace" marks must apply across regions), but
   // does not inherit RUN_ONLY (recompile-limit hits are per-region).
   int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
-  FrameExecStrategy strategy =
-      extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
+  FrameExecStrategy strategy{DEFAULT, DEFAULT};
+  // In run-only mode a code object without a cache is never compiled, so do
+  // not create one for it.
+  if (!get_frame_exec_strategy(
+          code,
+          isolate_recompiles_id,
+          /*create=*/!callback.is(py::bool_(false)),
+          &strategy)) {
+    DEBUG_TRACE("skip (run only with empty cache) %s", get_frame_name(frame));
+    eval_default();
+    return eval_result;
+  }
 
   recursive_callback =
       _callback_from_action(recursive_callback, strategy.recursive_action);
@@ -535,7 +533,7 @@ PyObject* dynamo__custom_eval_frame(
   PyObject* maybe_cached_code = nullptr;
   std::unique_ptr<FrameLocalsMapping> locals;
   if (!try_lookup_without_guard_eval(
-          extra,
+          code,
           backend,
           isolate_recompiles_id,
           &maybe_cached_code,
@@ -545,7 +543,7 @@ PyObject* dynamo__custom_eval_frame(
     _PytorchRecordFunctionState* rf =
         _pytorch_record_function_enter(cache_lookup_profiler_str);
     lookup(
-        extra,
+        code,
         locals.get(),
         backend,
         isolate_recompiles_id,
@@ -574,8 +572,7 @@ PyObject* dynamo__custom_eval_frame(
   // overtriggering and we don't need to do guard collectives the very first
   // time we've seen a frame in this region.
   bool has_relevant_entries =
-      extra->cache_entry_map.count(isolate_recompiles_id) > 0 ||
-      extra->cache_entry_map.count(-1) > 0;
+      has_relevant_cache_entries(code, isolate_recompiles_id);
   if (guard_complete_hook != nullptr && has_relevant_entries) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
     // False means force compilation (someone cache missed)
@@ -614,8 +611,7 @@ PyObject* dynamo__custom_eval_frame(
   if (locals == nullptr) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
-  CacheEntry* cache_entry = extract_cache_entry(extra, isolate_recompiles_id);
-  FrameState* frame_state = extract_frame_state(extra);
+  CompileInputs inputs = get_compile_inputs(code, isolate_recompiles_id);
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
@@ -630,7 +626,11 @@ PyObject* dynamo__custom_eval_frame(
     }
     PreserveGlobalState preserve_global_state;
     callback_result = dynamo_call_callback(
-        callback, frame, locals.get(), cache_entry, frame_state);
+        callback,
+        frame,
+        locals.get(),
+        inputs.cache_entry,
+        inputs.frame_state.ptr());
     new_strategy =
         callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
     apply_to_code = callback_result.attr("apply_to_code").cast<bool>();
@@ -664,26 +664,21 @@ PyObject* dynamo__custom_eval_frame(
       DEBUG_TRACE(
           "create recursive action: %d\n", new_strategy.recursive_action);
     }
-    extra_state_set_region_exec_strategy(
-        extra, isolate_recompiles_id, new_strategy);
   }
 
-  if (!Py_IsNone(guarded_code)) {
+  // The callback ran arbitrary Python, which may have reset this code object's
+  // cache; the strategy and the new entry go on whatever state it has now.
+  CacheEntry* new_cache_entry = record_compile_result(
+      code,
+      isolate_recompiles_id,
+      apply_to_code,
+      new_strategy,
+      guarded_code,
+      backend);
+  if (new_cache_entry != nullptr) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
-
-    // NB: We could use extract_cache_entry to get the cache_entry, but
-    // extract_cache_entry returns a borrowed reference. Modifying a borrowed
-    // reference seems wrong. Therefore, we directly access the
-    // extra->cache_entry. extra won't be NULL here.
-    CacheEntry* new_cache_entry =
-        create_cache_entry(extra, guarded_code, backend);
-
-    // Update the existing cache_entry on the extra object. This extra object
-    // is sitting on the extra scratch space, we are just changing the
-    // cache_entry ptr. As a result, extra now becomes the owner of CacheEntry
-    // object. This will be cleaned up when set_extra_state is called.
     // Re-enable custom behavior
-    cached_code = CacheEntry_get_code(new_cache_entry),
+    cached_code = CacheEntry_get_code(new_cache_entry);
     trace_annotation = CacheEntry_get_trace_annotation(new_cache_entry);
     eval_custom();
   } else {
@@ -703,26 +698,14 @@ PyObject* dynamo_set_code_exec_strategy(PyObject* /*dummy*/, PyObject* args) {
     return nullptr;
   }
 
-  PyCodeObject* code = (PyCodeObject*)code_obj;
-  ExtraState* extra = get_extra_state(code);
-  if (extra == nullptr) {
-    extra = init_and_set_extra_state(code);
-  }
-
   FrameExecStrategy strategy =
       py::handle(strategy_obj).cast<FrameExecStrategy>();
 
-  extra_state_set_exec_strategy(extra, strategy);
+  set_code_exec_strategy((PyCodeObject*)code_obj, strategy);
   Py_RETURN_NONE;
 }
 
 void dynamo_skip_code_recursive(PyCodeObject* code) {
-  ExtraState* extra = get_extra_state(code);
-  if (extra == nullptr) {
-    extra = init_and_set_extra_state(code);
-  }
-
-  FrameExecStrategy strategy =
-      FrameExecStrategy{FrameAction::SKIP, FrameAction::SKIP};
-  extra_state_set_exec_strategy(extra, strategy);
+  set_code_exec_strategy(
+      code, FrameExecStrategy{FrameAction::SKIP, FrameAction::SKIP});
 }

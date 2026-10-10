@@ -90,6 +90,7 @@ from .utils import (
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
+    forwarded_cuda_compile_options,
     fp32_matmul_precision_key,
     get_dtype_size,
     is_gpu,
@@ -98,7 +99,6 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
-    tlx_only_cuda_options,
     triton_type,
     triton_type_to_torch,
     unique,
@@ -573,20 +573,19 @@ class TritonTemplateKernel(TritonKernel):
         always_freeze_layout: bool = False,
         index_dtype_override: str | None = None,
     ) -> None:
-        tma_2d = tma_store or tma_load_for_template_epilogue
-        if tma_store:
-            pass
+        tma_tiled = tma_store or tma_load_for_template_epilogue
         numel = sympy_product(output_node.get_size())
-        if tma_2d:
-            if len(output_node.get_size()) != 2:
+        if tma_tiled:
+            output_rank = len(output_node.get_size())
+            supported_ranks = (2, 3) if tma_store else (2,)
+            if output_rank not in supported_ranks:
                 raise AssertionError(
-                    "TMA load/store only supported for 2D with templates"
+                    f"TMA template output rank must be in {supported_ranks}, "
+                    f"got {output_rank}"
                 )
-            tiling = {
-                "x": output_node.get_size()[0],
-                "y": output_node.get_size()[1],
-                "r0_": sympy.S.One,
-            }
+            prefixes = ("x", "y", "z")
+            tiling = dict(zip(prefixes, output_node.get_size()))
+            tiling["r0_"] = sympy.S.One
         else:
             tiling = {
                 "x": numel,
@@ -597,7 +596,7 @@ class TritonTemplateKernel(TritonKernel):
             features=SIMDKernelFeatures([], numel),
             hint_override=hint_override,
         )
-        if tma_2d:
+        if tma_tiled:
             # By default `construct_range_trees` will return the range_trees in the order
             # ["z", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
             # and this order defines what the kernel block shape will be. So if the template
@@ -952,9 +951,10 @@ class TritonTemplateKernel(TritonKernel):
         if kpack is not None:
             triton_meta["kpack"] = kpack
 
-        # tlx options carry dynamic string keys outside the TritonMeta schema.
+        # Forwarded CUDA options (ctas_per_cga, tlx) carry dynamic string keys
+        # outside the TritonMeta schema.
         triton_meta_extra = cast(dict[str, Any], triton_meta)
-        for k in tlx_only_cuda_options():
+        for k in forwarded_cuda_compile_options():
             if v := self.meta.get(k, None):
                 triton_meta_extra[k] = v
 
@@ -998,9 +998,10 @@ class TritonTemplateKernel(TritonKernel):
             num_buffers_warp_spec={self.num_buffers_warp_spec},
         """
 
-        # tlx options carry dynamic string keys outside the TritonMeta schema.
+        # Forwarded CUDA options (ctas_per_cga, tlx) carry dynamic string keys
+        # outside the TritonMeta schema.
         triton_meta_extra = cast(dict[str, Any], self.triton_meta)
-        for k in tlx_only_cuda_options():
+        for k in forwarded_cuda_compile_options():
             if v := self.meta.get(k, None):
                 template_args += f"""
                     {k}={v},
@@ -1634,9 +1635,18 @@ class TritonTemplateKernel(TritonKernel):
                     raise AssertionError(
                         "Blocking indexing requires passing in val_shape"
                     )
-                if len(val_shape) != 2:
+                # Same ranks the constructor allows for TMA tiling: 3D only
+                # for TMA stores, so the pointer path stays 2D.
+                supported_ranks = (2, 3) if self.tma_store else (2,)
+                if len(lengths) not in supported_ranks:
                     raise AssertionError(
-                        "Blocking indexing only supports 2D data at this time"
+                        f"Blocking indexing supports output ranks {supported_ranks}, "
+                        f"got {len(lengths)}"
+                    )
+                if len(val_shape) != len(lengths):
+                    raise AssertionError(
+                        "Blocking indexing requires one value dimension per output "
+                        f"dimension, got {len(val_shape)} and {len(lengths)}"
                     )
                 if mask:
                     raise AssertionError("Mask is not supported with blocking indexing")
@@ -1666,7 +1676,7 @@ class TritonTemplateKernel(TritonKernel):
                         intermediate_lines.extend(
                             self._generate_index_from_tma_index(
                                 name,
-                                "xoffset" if name == "xindex" else "yoffset",
+                                name.replace("index", "offset"),
                                 index_symbols[i],
                                 val_shape[i],
                                 i,
@@ -1679,7 +1689,7 @@ class TritonTemplateKernel(TritonKernel):
                             self._generated_mask_for_tma(
                                 name,
                                 self.size(None, i),
-                                "xmask" if name == "xindex" else "ymask",
+                                name.replace("index", "mask"),
                             )
                         )
                         # Update the val_shape information to use consistent naming

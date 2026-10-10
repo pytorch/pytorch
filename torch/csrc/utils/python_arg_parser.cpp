@@ -1918,7 +1918,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     return THPVariable_Unpack(obj);
   }
 
-  bool save_symint = false;
+  c10::SymNode symbolic_node;
   at::Scalar scalar;
   if (PyBool_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
@@ -1933,16 +1933,16 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     // conversion to Tensor does not.  Instead, do it out of band.
   } else if (
       torch::is_symint(py::handle(obj)) || torch::is_dynint(py::handle(obj))) {
-    save_symint = true;
+    symbolic_node = py::handle(obj).cast<c10::SymInt>().toSymNode();
     // This scalar value doesn't matter, it shouldn't ever actually
     // get read out.  Make it a big and weird looking number to help
     // people figure out if there's aproblem.
     scalar = at::Scalar(7777777);
   } else if (torch::is_symfloat(py::handle(obj))) {
-    save_symint = true;
+    symbolic_node = py::handle(obj).cast<c10::SymFloat>().toSymNodeImpl();
     scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
   } else if (torch::is_symbool(py::handle(obj))) {
-    save_symint = true;
+    symbolic_node = py::handle(obj).cast<c10::SymBool>().toSymNodeImpl();
     scalar = at::Scalar(true);
   } else {
     // NB: Are you here because you passed None to a Variable method,
@@ -1962,7 +1962,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
 
-  if (save_symint) {
+  if (symbolic_node) {
+    tensor.unsafeGetTensorImpl()->set_symbolic_wrapped_number(
+        std::move(symbolic_node));
     auto py_tensor = py::cast(tensor);
     TORCH_CHECK_PYTHON(
         PyObject_SetAttrString(py_tensor.ptr(), "_wrapped_number", obj) >= 0);
