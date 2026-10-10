@@ -420,7 +420,14 @@ TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
-  if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
+  bool mkldnn_gelu = use_mkldnn(self) && (approximate_type == GeluType::None);
+  // oneDNN supports bf16/fp16 eltwise forward but not backward on avx2_vnni_2.
+  if (mkldnn_gelu && self.scalar_type() != kFloat && ideep::check_isa_is_avx2_vnni_2()) {
+    TORCH_WARN_ONCE("oneDNN does not support bf16/fp16 GELU backward on CPUs with avx2_vnni_2"
+                    " as their best ISA; falling back to the native implementation.");
+    mkldnn_gelu = false;
+  }
+  if (mkldnn_gelu) {
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor grady = itensor_from_tensor(grad, /*from_const_data_ptr*/true);
     ideep::tensor gradx = itensor_from_tensor(grad_input);
