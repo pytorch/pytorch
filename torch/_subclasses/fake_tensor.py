@@ -49,6 +49,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakIdRef
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -806,9 +807,26 @@ class SymNumberMemoDescriptor:
     def _memo_epoch(self, obj: FakeTensor) -> str:
         return f"_{self._name}_epoch"
 
+    def _isolate(self, obj: FakeTensor, value: object = None) -> None:
+        if self._is_nested_int or (scope := obj.fake_mode._memo_scope) is None:
+            return
+        memo = getattr(obj, self._memo(obj), None)
+        if memo is None and value is None:
+            return
+        key = (WeakIdRef(obj), self)
+        if key not in scope:
+            scope[key] = (
+                memo,
+                getattr(obj, self._memo_vc(obj), None),
+                getattr(obj, self._memo_epoch(obj), None),
+            )
+            if not (isinstance(memo, torch.SymFloat) and memo.node.hint is not None):
+                setattr(obj, self._memo(obj), None)
+
     def __get__(
         self, obj: FakeTensor, objtype: type[FakeTensor] | None = None
     ) -> torch.SymInt | torch.SymFloat | None:
+        self._isolate(obj)
         if (r := getattr(obj, self._memo(obj))) is None:
             return None
 
@@ -839,6 +857,7 @@ class SymNumberMemoDescriptor:
         obj: FakeTensor,
         value: torch.SymInt | torch.SymFloat | torch.SymBool | int | float | None,
     ) -> None:
+        self._isolate(obj, value)
         if value is None:
             setattr(obj, self._memo(obj), None)
             setattr(obj, self._memo_vc(obj), None)
@@ -848,6 +867,11 @@ class SymNumberMemoDescriptor:
             if not self._is_nested_int and not obj.is_inference():
                 setattr(obj, self._memo_vc(obj), obj._version)
             setattr(obj, self._memo_epoch(obj), obj.fake_mode.epoch)
+
+
+_SymNumberMemoScope = dict[
+    tuple[WeakIdRef, SymNumberMemoDescriptor], tuple[object, object, object]
+]
 
 
 class FakeTensor(Tensor):
@@ -1637,6 +1661,7 @@ class FakeTensorMode(TorchDispatchMode):
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
         self.enter_stack: list[tuple[bool, TorchDispatchMode | None, bool | None]] = []
+        self._memo_scope: _SymNumberMemoScope | None = None
 
         self.shape_env = shape_env
 
@@ -1656,6 +1681,25 @@ class FakeTensorMode(TorchDispatchMode):
 
     def reset_nt_tensor_id_counter(self) -> None:
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+
+    @contextlib.contextmanager
+    def isolate_symbolic_memos(self) -> Generator[None, None, None]:
+        if self.shape_env is None:
+            yield
+            return
+        # Subgraphs need their own bindings; keep parent memos for the parent graph.
+        parent_scope = self._memo_scope
+        scope: _SymNumberMemoScope = {}
+        self._memo_scope = scope
+        try:
+            yield
+        finally:
+            for (ref, descriptor), (memo, version, epoch) in scope.items():
+                if (tensor := ref()) is not None:
+                    setattr(tensor, descriptor._memo(tensor), memo)
+                    setattr(tensor, descriptor._memo_vc(tensor), version)
+                    setattr(tensor, descriptor._memo_epoch(tensor), epoch)
+            self._memo_scope = parent_scope
 
     # Typically, there is only one fake tensor mode and you test for it by
     # doing an isinstance test.  However, in some situations, there might be
