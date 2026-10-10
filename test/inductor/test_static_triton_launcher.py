@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 import gc
 import os
+import pickle
 import random
+import shutil
 import tempfile
 import unittest
 import weakref
@@ -12,6 +14,7 @@ import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
+from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
 from torch._inductor.runtime.static_triton_launcher import (
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
@@ -250,6 +253,78 @@ class TestStaticTritonLauncherUnit(TestCase):
         autotuner, result = self._autotuner_with_static_cubin(b"cubin")
         autotuner.prepare_for_caching()
         self.assertEqual(result.kernel.cubin_raw, b"cubin")
+
+    def _can_statically_launch(self, kernel_name, filenames):
+        from torch._inductor.runtime.hints import HeuristicType
+
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory)
+        metadata_group = {}
+        for filename in filenames:
+            path = os.path.join(directory, filename)
+            with open(path, "wb") as f:
+                f.write(b"binary")
+            metadata_group[filename] = path
+        fn = SimpleNamespace(__name__=kernel_name, arg_names=["out"], params=[])
+
+        class FakeCompiledKernel(SimpleNamespace):
+            launch_enter_hook = None
+            launch_exit_hook = None
+
+        compiled_kernel = FakeCompiledKernel(
+            src=SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={}),
+            metadata=SimpleNamespace(num_warps=4, shared=0, num_ctas=1),
+            metadata_group=metadata_group,
+            hash="ab" * 32,
+            asm={"cubin": b"binary"},
+        )
+        with torch._inductor.config.patch(use_static_triton_launcher=True):
+            static_kernel = StaticTritonCompileResult.can_statically_launch(
+                compiled_kernel,
+                {},
+                {"device_type": "cuda", "device": 0},
+                HeuristicType.POINTWISE,
+            )
+        return static_kernel, metadata_group
+
+    @skipIfRocm
+    def test_static_launch_takes_cubin_from_metadata_group(self):
+        # Triton truncates long cache filenames, so the kernel symbol does not
+        # name the binary.
+        static_kernel, metadata_group = self._can_statically_launch(
+            "kernel_with_a_long_name", ["kernel_with.cubin", "kernel_with.json"]
+        )
+        self.assertEqual(static_kernel.cubin_path, metadata_group["kernel_with.cubin"])
+        self.assertEqual(static_kernel.cubin_filename, "kernel_with.cubin")
+
+        restored = pickle.loads(pickle.dumps(static_kernel))
+        self.assertIsNone(restored.cubin_path)
+        self.assertEqual(restored.cubin_filename, "kernel_with.cubin")
+
+        restored.cubin_raw = b"binary"
+        result = object.__new__(StaticTritonCompileResult)
+        result.kernel = restored
+        result.compile_meta = {"device": 0, "device_type": "cuda"}
+        with (
+            tempfile.TemporaryDirectory() as cache_dir,
+            mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": cache_dir}),
+        ):
+            result.reload_cubin_path()
+            self.assertEqual(
+                restored.cubin_path,
+                os.path.join(
+                    cache_dir, triton_hash_to_path_key("ab" * 32), "kernel_with.cubin"
+                ),
+            )
+            with open(restored.cubin_path, "rb") as f:
+                self.assertEqual(f.read(), b"binary")
+
+    @skipIfRocm
+    def test_static_launch_rejects_ambiguous_metadata_group(self):
+        for filenames in (["kernel.json"], ["kernel.cubin", "kernel_1.cubin"]):
+            with self.subTest(filenames=filenames):
+                static_kernel, _ = self._can_statically_launch("kernel", filenames)
+                self.assertIsNone(static_kernel)
 
 
 @requires_gpu_and_triton

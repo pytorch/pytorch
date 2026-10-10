@@ -3960,7 +3960,17 @@ class CppCodeCache:
     be compiled, while compilation flags are set by CppBuilder."""
 
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
-    cache_clear = staticmethod(cache.clear)
+    # Shared by subclasses and never cleared: a key hashes the source and build
+    # command, and every miss rewrites its entry for the current cache directory.
+    _binary_paths: dict[str, str] = {}
+
+    @staticmethod
+    def cache_clear() -> None:
+        from torch.compiler._runtime_cache import clear_cpp_kernels
+
+        CppCodeCache.cache.clear()
+        clear_cpp_kernels()
+
     cpp_compile_command_flags: dict[str, Any] = {}
 
     @staticmethod
@@ -4084,14 +4094,24 @@ class CppCodeCache:
             optimized_path = os.devnull
 
         if key not in cls.cache:
+            from torch.compiler._runtime_cache import (
+                has_frozen_cpp_kernel,
+                restore_cpp_kernel,
+            )
             from torch.utils._filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Future[Any] | None = None
             lib = None
 
-            # if requested, pre-compile any headers
-            if config.cpp_cache_precompile_headers and not _IS_WINDOWS:
+            # if requested, pre-compile any headers. A frozen binary is restored
+            # below and never built, so it needs no header, and precompiling one
+            # on a host with an empty header cache fails under no_compilation().
+            if (
+                config.cpp_cache_precompile_headers
+                and not _IS_WINDOWS
+                and not has_frozen_cpp_kernel(key)
+            ):
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
                         header,
@@ -4155,6 +4175,9 @@ class CppCodeCache:
                     main_builder.get_target_file_path()
                 )
 
+            cls._binary_paths[key] = binary_path
+            restore_cpp_kernel(key, binary_path)
+
             def load_fn() -> Any:
                 nonlocal lib
                 if lib is None:
@@ -4175,10 +4198,16 @@ class CppCodeCache:
             if submit_fn is not None:
                 with FileLock(lock_path, timeout=LOCK_TIMEOUT):
                     if not os.path.exists(binary_path):
+                        from torch.compiler._no_compile import check_compilation_allowed
+
+                        check_compilation_allowed("C++ kernel cache miss")
                         future = submit_fn(worker_fn)
 
             cls.cache[key] = load_fn
 
+        from torch.compiler._runtime_cache import record_cpp_kernel
+
+        record_cpp_kernel(key, cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
     @classmethod
@@ -4193,8 +4222,13 @@ def _worker_compile_cpp(
     from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+        if os.path.exists(cpp_builders[-1].get_target_file_path()):
+            return
         for builder in cpp_builders:
             if not os.path.exists(builder.get_target_file_path()):
+                from torch.compiler._no_compile import check_compilation_allowed
+
+                check_compilation_allowed("C++ kernel compilation")
                 builder.build()
 
 
@@ -4763,6 +4797,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         need_compile = not os.path.exists(donefile)
         jobs: list[Any] = []
         if need_compile:
+            from torch.compiler._no_compile import check_compilation_allowed
+
+            check_compilation_allowed("Halide kernel compilation")
             write_atomic(genfile, source_code)
             cmd = [
                 sys.executable,
@@ -4848,6 +4885,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
             with FileLock(lock_file, LOCK_TIMEOUT):
                 if not os.path.exists(done_file):
+                    from torch.compiler._no_compile import check_compilation_allowed
+
+                    check_compilation_allowed("Halide runtime compilation")
                     with open(hook_file, "w") as f:
                         if device_type == "cuda":
                             f.write(
@@ -5333,6 +5373,9 @@ class CUTLASSCodeCache:
                     )
                     raise cls._COMPILE_ERROR(cmd_parts, error_output)
                 if not os.path.exists(output_path):
+                    from torch.compiler._no_compile import check_compilation_allowed
+
+                    check_compilation_allowed("GPU kernel compilation")
                     cmd = cls._compile_command(
                         src_files, output_path, dst_file_ext, extra_args
                     )
@@ -5613,6 +5656,9 @@ class ROCmCodeCache:
             with lock:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
+                    from torch.compiler._no_compile import check_compilation_allowed
+
+                    check_compilation_allowed("GPU kernel compilation")
                     cmd = rocm_compile_command(
                         [input_path], output_path, dst_file_ext, extra_args
                     )
@@ -5670,15 +5716,20 @@ class LambdaFuture(CodeCacheFuture):
     ) -> None:
         self.result_fn = result_fn
         self.future = future
+        self._result: tuple[Callable[..., Any]] | None = None
 
     def result(self, timeout: float | None = None) -> Callable[..., Any]:
-        if timeout is not None and self.future is not None:
-            # Wait on the underlying cross-process future with the caller's
-            # timeout; raises concurrent.futures.TimeoutError if it does not
-            # resolve in time. result_fn will then consume the completed
-            # future without blocking further.
-            self.future.result(timeout=timeout)
-        return self.result_fn()
+        # result_fn can have side effects (a Triton kernel's runs precompile), and
+        # AsyncCompile.drain_pending may consume a future before its owner does.
+        if self._result is None:
+            if timeout is not None and self.future is not None:
+                # Wait on the underlying cross-process future with the caller's
+                # timeout; raises concurrent.futures.TimeoutError if it does not
+                # resolve in time. result_fn will then consume the completed
+                # future without blocking further.
+                self.future.result(timeout=timeout)
+            self._result = (self.result_fn(),)
+        return self._result[0]
 
 
 class StaticAutotunerFuture(CodeCacheFuture):

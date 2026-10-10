@@ -227,6 +227,21 @@ def _process_pool_allowed() -> bool:
 
 
 @clear_on_fresh_cache
+class FrozenTritonKernels:
+    """
+    The precompile runtime cache's frozen Triton kernels. They outlive
+    CompiledTritonKernels.cache_clear(), which runs on every compile, and are
+    only dropped when fresh_cache() / clear_caches() resets Inductor's caches.
+    """
+
+    @staticmethod
+    def cache_clear() -> None:
+        from torch.compiler._runtime_cache import clear_triton_kernels
+
+        clear_triton_kernels()
+
+
+@clear_on_fresh_cache
 class CompiledTritonKernels:
     """
     In memory cache for storing compiled triton kernels.
@@ -299,6 +314,38 @@ class AsyncCompile:
                 f"expected get_compile_threads() > 1, got {get_compile_threads()}"
             )
         return ThreadPoolExecutor(get_compile_threads())
+
+    @classmethod
+    def drain_pending(cls, timeout: float | None = 600) -> None:
+        """Wait for all submitted compile work, then shut down the compile workers.
+
+        Call this only after submissions have stopped. It first waits on every
+        cached Triton kernel future (running its result callback), the worker
+        warm-up future, and every job still queued in a subprocess pool.
+        ``timeout`` bounds the total time spent on those waits; exceeding it
+        raises ``concurrent.futures.TimeoutError``, and a failed future re-raises
+        its error. Either error propagates before anything is shut down, so the
+        pools and compile workers stay usable. Thread pools and a non-subprocess
+        process pool expose no pending work to wait on, so the shutdown that
+        follows joins them without the ``timeout`` bound.
+        """
+        deadline = None if timeout is None else time() + timeout
+
+        def remaining() -> float | None:
+            return None if deadline is None else max(0.0, deadline - time())
+
+        for future in list(CompiledTritonKernels._cache.values()):
+            if not isinstance(future, StaticAutotunerFuture):
+                future.result(timeout=remaining())
+        if cls._ready_future is not None:
+            cls._ready_future.result(timeout=remaining())
+        for pool in list(_pool_set):
+            if isinstance(pool, SubprocPool):
+                pool.drain_pending(timeout=remaining())
+        if cls.pool.cache_info().currsize:
+            cls.pool().shutdown(wait=True)
+            cls.pool.cache_clear()
+        shutdown_compile_workers()
 
     @staticmethod
     def _get_ready():
@@ -535,11 +582,28 @@ class AsyncCompile:
                 torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
             )
 
-        is_parallel = self.use_process_pool()
+        from torch.compiler._no_compile import (
+            check_compilation_allowed,
+            is_compilation_forbidden,
+        )
+        from torch.compiler._runtime_cache import (
+            load_triton_kernel,
+            record_triton_kernel,
+        )
+
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
         set_feature_use("parallel_compile_post_warmup", is_parallel)
 
         compile_id = torch._guards.CompileContext.current_compile_id()
         is_backward = getattr(V.graph, "is_backward", False)
+
+        source_key = CompiledTritonKernels.key(source_code)
+        if (kernel := load_triton_kernel(source_key)) is not None:
+            counters["inductor"]["async_compile_cache_hit"] += 1
+            kernel.set_compile_info(compile_id, is_backward)
+            kernel._reload_kernel = reload_kernel_in_parent
+            record_triton_kernel(source_key, kernel)
+            return kernel
 
         if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
@@ -548,12 +612,20 @@ class AsyncCompile:
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
+                record_triton_kernel(source_key, future.static_autotuner)
             if is_parallel:
                 return future
             else:
                 return future.result()
 
         # Cache miss
+        check_compilation_allowed(
+            "Triton kernel cache miss",
+            "no_compilation() only serves Triton kernels already in Inductor's "
+            "in-process kernel cache (statically launchable ones restored from a "
+            "cache bundle); loading a kernel through triton.compile, even from "
+            "Triton's on-disk cache, counts as compilation.",
+        )
         if is_parallel:
             # Ensure libdevice path is set in os.environ before passing to workers
             _set_triton_libdevice_path()
@@ -566,7 +638,10 @@ class AsyncCompile:
             ]
             extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
-                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
+                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher,
+                "static_launch_user_defined_triton_kernels": (
+                    torch._inductor.config.static_launch_user_defined_triton_kernels
+                ),
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:
@@ -626,6 +701,7 @@ class AsyncCompile:
                     reload_kernel=reload_kernel_in_parent,
                     static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
+                record_triton_kernel(source_key, kernel)
                 _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                 return kernel
 
@@ -651,6 +727,7 @@ class AsyncCompile:
                         warm_cache_only=False,
                         static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                     )
+                    record_triton_kernel(source_key, kernel)
                     elapsed_us = (time_ns() - start_ns) // 1000
                     _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                     return kernel
@@ -760,11 +837,14 @@ class AsyncCompile:
             CuteDSLKernelWrapper,
             MAIN_SUFFIX,
         )
+        from torch.compiler._no_compile import is_compilation_forbidden
 
         kernel_code_log.info("CuteDSL Kernel:\n%s", source_code)
         _compile_start()
 
-        is_parallel = self.use_process_pool()
+        # The pool worker compiles eagerly; loading in-process defers any JIT
+        # to the wrapper's first run(), which the policy checks.
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
@@ -823,10 +903,12 @@ class AsyncCompile:
         if not flydsl_utils.runtime_available():
             raise RuntimeError("FlyDSL runtime is unavailable")
 
+        from torch.compiler._no_compile import is_compilation_forbidden
+
         kernel_code_log.info("FlyDSL Kernel:\n%s", source_code)
         _compile_start()
 
-        is_parallel = self.use_process_pool()
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
@@ -930,11 +1012,12 @@ class AsyncCompile:
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
             MAIN_SUFFIX,
         )
+        from torch.compiler._no_compile import is_compilation_forbidden
 
         kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
         _compile_start()
 
-        is_parallel = self.use_process_pool()
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
 
         if is_parallel:
             extra_env = _pycodecache_kernel_compile_env()
@@ -1047,6 +1130,9 @@ class AsyncCompile:
 
         if self._metal_sources:
             from torch._inductor.runtime.runtime_utils import compile_mps_shaders
+            from torch.compiler._no_compile import check_compilation_allowed
+
+            check_compilation_allowed("Metal shader compilation")
 
             scope.update(compile_mps_shaders(self._metal_sources))
             self._metal_sources.clear()
