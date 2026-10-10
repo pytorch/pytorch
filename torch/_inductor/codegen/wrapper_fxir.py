@@ -252,6 +252,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     ) -> None:
         """FXIR does not emit deferred alignment copies."""
 
+    def defines_triton_kernels_as_code(self) -> bool:
+        # Each kernel is imported from a `name = async_compile.triton(...)` module of its own.
+        return False
+
     @classmethod
     def create(
         cls: type["WrapperFxCodegen"],
