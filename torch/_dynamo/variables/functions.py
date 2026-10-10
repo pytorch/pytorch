@@ -3854,11 +3854,9 @@ class PolyfilledFunctionVariable(VariableTracker):
         method = getattr(self.fn, name, None)
         if not (method or is_function(method)):
             raise_type_error(tx, f"Cannot find callable {name} in {self.fn}")
-        options = {}
-        if self.source:
-            options["source"] = AttrSource(self.source, name)
-        polyfilled_method_variable = PolyfilledFunctionVariable(method, **options)
-        return polyfilled_method_variable.call_function(tx, args, kwargs)
+        source = AttrSource(self.source, name) if self.source else None
+        method_variable = VariableTracker.build(tx, method, source=source)
+        return method_variable.call_function(tx, args, kwargs)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
