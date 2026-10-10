@@ -835,6 +835,15 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
         loss.backward()
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
+    @with_comms()
+    def test_broadcast(self, device) -> None:
+        t = torch.full((2, 2), float(self.rank), requires_grad=True, device=device)
+        out = ft_c.wait_tensor(ft_c.broadcast(t * 1, 1, self.pg))
+        self.assertEqual(out, torch.ones_like(t))
+        out.sum().backward()
+        expected = self.world_size if self.rank == 1 else 0
+        self.assertEqual(t.grad, torch.full_like(t, float(expected)))
+
 
 # Update the supported devices in DEVICE
 instantiate_device_type_tests(

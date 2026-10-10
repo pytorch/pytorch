@@ -743,6 +743,40 @@ torch.library.register_autograd(
 )
 
 
+def broadcast_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for broadcast: sum the gradients onto ``src``, zero elsewhere.
+
+    There is no functional reduce, so this uses all_reduce.
+    """
+    grad_input = wait_tensor(
+        torch.ops._c10d_functional.all_reduce(
+            grad_output.contiguous(), "sum", ctx.group_name
+        )
+    )
+    if not ctx.is_src:
+        grad_input = torch.zeros_like(grad_input)
+    return grad_input, None, None
+
+
+def broadcast_setup_context(ctx, inputs, output):
+    _, src, group_name = inputs
+    pg = (
+        c10d._resolve_process_group(c10d.GroupName(group_name))
+        if isinstance(group_name, str)
+        else group_name
+    )
+    ctx.group_name = group_name
+    ctx.is_src = pg.rank() == src
+
+
+torch.library.register_autograd(
+    "_c10d_functional::broadcast",
+    broadcast_backward,
+    setup_context=broadcast_setup_context,
+)
+
+
 def all_gather_into_tensor_backward(ctx, grad_output: torch.Tensor):
     """
     Backward for all_gather_into_tensor: reduce_scatter with sum.
