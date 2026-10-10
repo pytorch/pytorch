@@ -669,6 +669,7 @@ class FakeTensorConverter:
         if (
             not self.export
             and _is_plain_tensor(t)  # mostly, we want to know if item() works
+            and not is_fake(t)
             and t.dim() == 0
             and t.device.type == "cpu"
             # All integer types are fair game, because signed overflow is UB
