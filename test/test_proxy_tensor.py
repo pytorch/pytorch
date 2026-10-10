@@ -2238,7 +2238,7 @@ instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for="cpu")
 
 
 class TestGenericProxyTensorDevice(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_amp_cache(self, device):
         layer = torch.nn.Conv2d(3, 3, 3).to(device)
@@ -2276,13 +2276,18 @@ class TestGenericProxyTensorDevice(TestCase):
         )
 
 
-instantiate_device_type_tests(TestGenericProxyTensorDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestGenericProxyTensorDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 class TestSymbolicTracingDevice(TestCase):
-    hw_classification = HardwareClassification.CUDA
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_cpu_scalar_cuda(self, device):
+    def test_cpu_scalar_device(self, device):
         # Extracted from wave2vec2
         def f(a, b):
             return (a * b) @ b
@@ -2302,7 +2307,12 @@ def forward(self, a_1, b_1):
         )
 
 
-instantiate_device_type_tests(TestSymbolicTracingDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestSymbolicTracingDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 class TestUnbackedSymbolicTracingDevice(TestCase):
@@ -2353,7 +2363,7 @@ class TestUnbackedSymbolicTracingDevice(TestCase):
             torch._check(z1 == z2 + z3)
             return y * 2
 
-        # NB: inputs are done as CUDA to ensure they aren't queried to be
+        # NB: inputs are done as CUDA/XPU to ensure they aren't queried to be
         # backed
 
         gm = make_fx(f, tracing_mode="symbolic")(
@@ -2378,7 +2388,12 @@ class TestUnbackedSymbolicTracingDevice(TestCase):
                 torch.tensor([1.0], device=device),
             )
 
-instantiate_device_type_tests(TestUnbackedSymbolicTracingDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestUnbackedSymbolicTracingDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 if __name__ == '__main__':
     run_tests()
