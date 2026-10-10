@@ -43,19 +43,6 @@ if torch.backends.mps.is_available():
             "ormqr",
             "renorm",
             "sparse.sampled_addmm",
-            "to_sparse",
-        }
-
-        MACOS_BEFORE_14_4_XFAILLIST = {
-            # These ops work fine in 14.4 but fail in 14.2 or 13.x
-            "fft.hfft2": [torch.complex64],
-        }
-
-        MACOS_BEFORE_15_0_XFAILLIST = {
-            # matrix_exp is disabled on MPS before macOS 15 (TORCH_CHECK): MPSGraph
-            # complex matmul is numerically unreliable there and breaks the
-            # scale-and-square recurrence, so the op raises for every dtype.
-            "matrix_exp": None,
         }
 
         # Those ops are not expected to work
@@ -67,7 +54,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "hash_tensor": None,
-            "heaviside": None,
             # "kthvalue": None,
             "linalg.ldl_factor": None,
             "linalg.ldl_factor_ex": None,
@@ -239,14 +225,6 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int16,
             ],
-            "nn.functional.nll_loss": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.bool,
-                torch.int8,
-            ],
             "nn.functional.pdist": None,
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
@@ -273,7 +251,7 @@ if torch.backends.mps.is_available():
             # int64 lacks atomic_binary_op in Metal; the old MPSGraph path cast
             # to int32 (silently lossy). amin/amax for int64 go through the
             # sign-flip encode + ulong atomic_min/max bracket and work fine.
-            # bool prod/mean are excluded via dtypesIfMPS in the OpInfo itself.
+            # bool prod is excluded via dtypesIfMPS in the OpInfo, and mean doesn't list bool.
             "scatter_reduceprod": [torch.int64],
             "_segment_reducelengths": None,
             "_segment_reduceoffsets": None,
@@ -492,32 +470,6 @@ if torch.backends.mps.is_available():
                         op,
                         DecorateInfo(unittest.expectedFailure, dtypes=xfaillist[key]),
                     )
-
-            if (
-                key in MACOS_BEFORE_14_4_XFAILLIST
-                and key not in xfail_exclusion
-                and (MACOS_VERSION < 14.4)
-            ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_14_4_XFAILLIST[key],
-                    ),
-                )
-
-            if (
-                key in MACOS_BEFORE_15_0_XFAILLIST
-                and key not in xfail_exclusion
-                and (MACOS_VERSION < 15.0)
-            ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_15_0_XFAILLIST[key],
-                    ),
-                )
 
             # If op is not supported for complex types, expect it to fail
             if key in UNSUPPORTED_COMPLEX_OPS:
