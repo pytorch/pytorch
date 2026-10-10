@@ -118,6 +118,9 @@ __global__ void segment_reduce_forward_kernel(
   int64_t offset_idx = outer_idx * lengths_cumsum_stride_axis * (segment_count + 1) + dim_idx;
   index_t offset_start = lengths_cumsum_data[offset_idx];
   index_t offset_end = lengths_cumsum_data[offset_idx + 1];
+  CUDA_KERNEL_ASSERT(
+      offset_start >= 0 && offset_start <= offset_end &&
+      offset_end <= data_size_axis);
 
   // ===== step2: apply reduction
   for (index_t j = offset_start; j < offset_end; ++j) {
@@ -188,6 +191,7 @@ __global__ void segment_reduce_backward_kernel(
 
   int64_t lengths_idx = outer_idx * lengths_stride_axis * segment_count + dim_idx;
   auto segment_length = lengths_data[lengths_idx];
+  CUDA_KERNEL_ASSERT(segment_length >= 0);
   if (segment_length == 0) {
     return;
   }
@@ -195,6 +199,9 @@ __global__ void segment_reduce_backward_kernel(
   int64_t offset_idx = outer_idx * lengths_cumsum_stride_axis * (segment_count + 1) + dim_idx;
   index_t offset_start = lengths_cumsum_data[offset_idx];
   index_t offset_end = lengths_cumsum_data[offset_idx + 1];
+  CUDA_KERNEL_ASSERT(
+      offset_start >= 0 && offset_start <= offset_end &&
+      offset_end <= data_size_axis);
 
   int64_t output_index = outer_idx * output_stride_axis * output_size_axis
                          + dim_idx * output_stride_axis + lane_id;
