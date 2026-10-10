@@ -17241,6 +17241,17 @@ def forward(self, x):
     return (getitem, cos_default_1)""",
             )
 
+    def test_preserve_cia_op_nonzero_numpy_scalar(self):
+        # Preserved CIA ops are fake-propagated by their registered fake rule,
+        # so the nonzero_numpy rule must keep eager's 0-dim special case.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.nonzero(x, as_tuple=True)
+
+        x = torch.tensor(3.0)
+        ep = export(M(), (x,)).run_decompositions({})
+        self.assertEqual(ep.module()(x), M()(x))
+
     @testing.expectedFailureStrictV2
     def test_run_decompositions_keep_metadata(self):
         """Make sure the metadata is kept after exported program run_decompositions."""

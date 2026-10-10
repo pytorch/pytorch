@@ -68,7 +68,6 @@ from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     IS_S390X,
     IS_SANDCASTLE,
-    MACOS_VERSION,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -3277,15 +3276,11 @@ class TestForwardADWithScalars(TestCase):
                 )
 
 
-instantiate_device_type_tests(
-    TestCommon, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
-)
+instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(
-    TestFakeTensor, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
-)
+instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestTags, globals(), only_for="cpu")
 instantiate_device_type_tests(TestForwardADWithScalars, globals(), allow_xpu=True)
 
