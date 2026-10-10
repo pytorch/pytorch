@@ -8,6 +8,7 @@ from unittest import mock
 
 import torch
 from torch._inductor import config
+from torch._inductor.runtime.hints import HeuristicType
 from torch._inductor.runtime.triton_heuristics import (
     AutotuneCache,
     CachingAutotuner,
@@ -136,6 +137,37 @@ class TestKernelConfigs(TestCase):
         ns = _load_from_file(code)
         self.assertNotIn(template, ns.get("KERNEL_CONFIGS", {}))
         self.assertEqual(ns["call"]([a, b])[0], result)
+
+    @requires_cuda_and_triton
+    def test_user_defined_kernel_keeps_its_autotuning(self):
+        import triton
+        import triton.language as tl
+
+        @triton.autotune(
+            configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
+            key=["n"],
+        )
+        @triton.jit
+        def add_one(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
+            offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offs < n
+            tl.store(out_ptr + offs, tl.load(x_ptr + offs, mask=mask) + 1, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            n = x.numel()
+            add_one[lambda meta: (triton.cdiv(n, meta["BLOCK"]),)](x, out, n)
+            return out.sin()
+
+        x = torch.randn(4096, device="cuda")
+        result, code = _code_for(fn, x)
+        self.assertEqual(result, fn(x))
+        (user_kernel,) = re.findall(r"^def (add_one\w*)\(", code, re.MULTILINE)
+        ns = _load_from_file(code)
+        self.assertEqual(set(ns["KERNEL_CONFIGS"]), _kernels(code))
+        self.assertNotIn(user_kernel, ns["KERNEL_CONFIGS"])
+        self.assertEqual(ns[user_kernel].heuristic_type, HeuristicType.USER_AUTOTUNE)
+        self.assertEqual(ns["call"]([x])[0], result)
 
     @requires_cuda_and_triton
     def test_without_compile_time_autotuning_nothing_is_pinned(self):
