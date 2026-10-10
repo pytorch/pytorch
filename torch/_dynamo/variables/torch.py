@@ -3759,6 +3759,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if isinstance(
             member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
+            if source is not None:
+                return TorchInGraphFunctionVariable.create_with_source(member, source)
             return TorchInGraphFunctionVariable(member, source=source)
         # Function metadata (__name__, __module__, __qualname__, ...) is
         # immutable on builtins and descriptors, so it can be constant folded.
