@@ -258,17 +258,19 @@ class PyTreeSpec:
                 or optree.is_namedtuple_class(treespec.type)
                 or optree.is_structseq_class(treespec.type)
             ):
-                return treespec._unflatten_func(
-                    treespec._metadata,
-                    children_representations,
+                return repr(
+                    treespec._unflatten_func(
+                        treespec._metadata,
+                        children_representations,
+                    )
                 )
             return (
                 f"CustomTreeNode({treespec.type.__name__}[{treespec._metadata!r}], "
-                f"[{', '.join(map(str, children_representations))}])"
+                f"[{', '.join(children_representations)}])"
             )
 
         inner = [
-            str(helper(self)),
+            helper(self),
             *(["NoneIsLeaf"] if self.none_is_leaf else []),
             f"namespace={self.namespace!r}",
         ]

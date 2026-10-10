@@ -681,7 +681,6 @@ class ConstDictVariable(VariableTracker):
                     (
                         variables.UserDefinedObjectVariable,
                         MappingProxyVariable,
-                        FrozenDictVariable,
                     ),
                 )
                 and other.call_obj_hasattr(tx, "keys").as_python_constant()
@@ -1349,7 +1348,9 @@ class FrozenDictVariable(VariableTracker):
                 FrozenDictVariable,
             ):
                 return left
-        storage = ConstDictVariable(left.items.copy(), mutation_type=ValueMutationNew())
+        storage = ConstDictVariable({}, mutation_type=ValueMutationNew())
+        if left.items:
+            storage.dict_update(tx, [left], {})
         storage.dict_update(tx, [right], {})
         if isinstance(left, FrozenDictVariable):
             return FrozenDictVariable(storage.items)
