@@ -1449,6 +1449,7 @@ _GENERATED_HEADER = """\
 # companion cache. You provide the model(s) at runtime, exactly as the original fn
 # took them, e.g.:
 #
+#     import runpy
 #     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
@@ -1713,6 +1714,7 @@ _EAGER_GENERATED_HEADER = """\
 # the human-readable rendering and the executable code) and runs on its own. Provide
 # the model(s) at runtime, exactly as the original fn took them:
 #
+#     import runpy
 #     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the traced fn
 #
@@ -1815,6 +1817,7 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 # frame Dynamo compiled -- the entry frame plus each continuation -- with one guard tree
 # per captured variant, and dispatches among them at call time:
 #
+#     import runpy
 #     ns = runpy.run_path("this_file.py")
 #     out = ns["forward"](model, my_input)      # same args as the captured callable
 #
@@ -2378,19 +2381,17 @@ def _make_inlined_forward(
     # __file__ as well as __name__: a kernel is defined at module level and carries
     # filename=__file__ from its heuristics decorator, and @triton.jit resolves its own
     # source by that path, so a namespace without it cannot load such an artifact.
+    module_ns: dict[str, Any]
     if filename == _ANONYMOUS_FILENAME and "@triton.jit" in python_code:
         # A caller that had no file to name (precompile.load on a code string) still
-        # has to give triton one: @triton.jit reads its own source off disk and rejects
-        # a function whose module has no file. Park a copy in the inductor cache dir,
-        # which is where every kernel source already lives.
-        from torch._inductor.codecache import write
+        # has to give triton one: park a copy in the inductor cache dir, which is where
+        # every kernel source already lives.
+        from torch._inductor.codecache import exec_from_cache_file
 
-        _key, filename = write(python_code, "py")
-    module_ns: dict[str, object] = {
-        "__name__": "_precompiled_artifact",
-        "__file__": filename,
-    }
-    exec(compile(python_code, filename, "exec"), module_ns)
+        module_ns = exec_from_cache_file(python_code, "_precompiled_artifact")
+    else:
+        module_ns = {"__name__": "_precompiled_artifact", "__file__": filename}
+        exec(compile(python_code, filename, "exec"), module_ns)
     return cast("Callable[..., object]", module_ns["forward"])
 
 
