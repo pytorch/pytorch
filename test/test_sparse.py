@@ -4437,21 +4437,30 @@ class TestSparseOneOff(TestCase):
         sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().to(device),
                                            torch.randn(4, 4, 4).to(device),
                                            [3, 4, 4])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a (CUDA|XPU) tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"add: expected 'self' to be a {torch.device(device).type.upper()} tensor, but got a CPU tensor",
+        ):
             x + sparse_y
 
         x = torch.zeros(3, 4, 4, 0)
         sparse_y = torch.sparse_coo_tensor(torch.zeros(1, 4).long().to(device),
                                            torch.randn(4, 4, 4, 0).to(device),
                                            [3, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a (CUDA|XPU) tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"add: expected 'self' to be a {torch.device(device).type.upper()} tensor, but got a CPU tensor",
+        ):
             x + sparse_y
 
         x = torch.zeros(0, 4, 4, 0)
         sparse_y = torch.sparse_coo_tensor(torch.empty(1, 0).long().to(device),
                                            torch.randn(0, 4, 4, 0).to(device),
                                            [0, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a (CUDA|XPU) tensor, but got a CPU tensor"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            f"add: expected 'self' to be a {torch.device(device).type.upper()} tensor, but got a CPU tensor",
+        ):
             x + sparse_y
 
 
