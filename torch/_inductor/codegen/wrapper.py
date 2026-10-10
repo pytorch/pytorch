@@ -3865,6 +3865,22 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.autotune_at_compile_time
             else None
         )
+        # benchmark_kernel and benchmark_combo_kernel append a get_args()/call()/__main__
+        # harness to every kernel. It stays in the per-kernel modules the pool builds,
+        # which is where benchmark_all_kernels looks for it, but at module level each
+        # kernel's __main__ block would run whenever the wrapper does.
+        if harness := _KERNEL_BENCHMARK_HARNESS.search(src_code):
+            src_code = src_code[: harness.start()]
+        if "if __name__ == '__main__':" in src_code:
+            raise AssertionError(f"kernel {kernel_name} kept its benchmark harness")
+        # The string form passes filename=__file__ from its own module, which is named by
+        # the hash of this source, and the autotune cache keys on that basename. Here
+        # __file__ is the wrapper, which every kernel shares, so name the module the
+        # string form would have used, in the wrapper's directory.
+        if "filename=__file__" in src_code:
+            path = f"os.path.join(os.path.dirname(__file__), {kernel_file!r})"
+            src_code = src_code.replace("filename=__file__", f"filename={path}")
+            src_code = f"import os\n{src_code}"
         # src_code is already a complete module: the triton imports, the
         # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
         # @triton.jit def. Spliced at module level it binds kernel_name to the same
@@ -3875,20 +3891,6 @@ class PythonWrapperCodegen(CodeGen):
         # flex attention's forward_inner, ...) and, from a user kernel's closure, helper
         # defs and constants. In one shared namespace the later binding would win for
         # all of them, so _rename_kernel_module_globals makes each kernel-unique.
-        # benchmark_kernel and benchmark_combo_kernel append a get_args()/call()/__main__
-        # harness to every kernel. It stays in the per-kernel modules the pool builds,
-        # which is where benchmark_all_kernels looks for it, but at module level each
-        # kernel's __main__ block would run whenever the wrapper does.
-        if harness := _KERNEL_BENCHMARK_HARNESS.search(src_code):
-            src_code = src_code[: harness.start()]
-        # The string form passes filename=__file__ from its own module, which is named by
-        # the hash of this source, and the autotune cache keys on that basename. Here
-        # __file__ is the wrapper, which every kernel shares, so name the module the
-        # string form would have used, in the wrapper's directory.
-        if "filename=__file__" in src_code:
-            path = f"os.path.join(os.path.dirname(__file__), {kernel_file!r})"
-            src_code = src_code.replace("filename=__file__", f"filename={path}")
-            src_code = f"import os\n{src_code}"
         src_code = _rename_kernel_module_globals(src_code, kernel_name, subs_name)
         self.define_kernel(
             kernel_name,
