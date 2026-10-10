@@ -262,10 +262,10 @@ class HeaderOnlyArrayRef {
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::HeaderOnlyArrayRef;
 using IntHeaderOnlyArrayRef = HeaderOnlyArrayRef<int64_t>;
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 #if __cplusplus >= 202002L
 #include <ranges>

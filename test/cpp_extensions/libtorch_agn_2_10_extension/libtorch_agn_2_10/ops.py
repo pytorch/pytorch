@@ -788,6 +788,39 @@ def my_is_pinned(self) -> bool:
     return torch.ops.libtorch_agn_2_10.my_is_pinned.default(self)
 
 
+def my_sort(self, dim=-1, descending=False) -> tuple[Tensor, Tensor]:
+    """
+    Sorts the elements of the input tensor along a dimension.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to sort along
+        descending: bool - if True, sort in descending order
+
+    Returns: tuple[Tensor, Tensor] - the sorted values and their indices
+    """
+    return torch.ops.libtorch_agn_2_10.my_sort.default(self, dim, descending)
+
+
+def my_sort_stable(
+    self, stable=None, dim=-1, descending=False
+) -> tuple[Tensor, Tensor]:
+    """
+    Sorts the elements of the input tensor along a dimension.
+
+    Args:
+        self: Tensor - input tensor
+        stable: bool | None - if True, equal elements keep their relative order
+        dim: int - dimension to sort along
+        descending: bool - if True, sort in descending order
+
+    Returns: tuple[Tensor, Tensor] - the sorted values and their indices
+    """
+    return torch.ops.libtorch_agn_2_10.my_sort_stable.default(
+        self, stable, dim, descending
+    )
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #
