@@ -45,11 +45,6 @@ if TYPE_CHECKING:
     _FRAMES: str = ""
     _BACKENDS: str = ""
     _ENTRY_BINDING: str = ""
-    # An installed artifact carries the pickled Dynamo package and its backend
-    # artifacts instead of _FRAMES/_BACKENDS/_ENTRY_BINDING.
-    _PACKAGE: str = ""
-    BACKEND: str = ""
-    FN_NAME: str = ""
     _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
     TORCH_VERSION: str = ""
     NUM_POSITIONAL_ARGS: int = 0
@@ -556,8 +551,10 @@ def _build_multigraph_forward():
         if not frame["variants"]:
             # Nothing to dispatch, for one of two reasons the coverage-gap
             # error below would misdiagnose: adding examples fixes neither.
-            # A continuation must still bind its resume names, so its refusal
-            # is deferred to a call that reaches it.
+            # _serving_mode sends a capture that reaches such a frame to
+            # installed serving, so in a standalone artifact the record is dead
+            # unless it is the entry; a dead continuation must still bind its
+            # resume names, so its refusal is deferred to a call.
             if frame["bypassed"]:
                 cause = (
                     "was BYPASSED during capture (its guards could not be "
@@ -723,124 +720,3 @@ def _build_multigraph_forward():
             for _name in _frame["resume_names"]:
                 _seed(scope, _name, dispatcher)
     return entry
-
-
-def _build_installed_forward():
-    """Install a multi-graph artifact onto the live code objects; return ``forward``.
-
-    A graph break inside a function the entry calls (a child module's forward,
-    say) compiles that function as its own frame, entered by an ordinary call
-    the standalone dispatcher never sees. Serving those frames takes Dynamo's
-    own frame evaluator: this installs the captured package's guarded entries
-    onto the live code objects of the captured modules, the way a warm
-    torch.compile cache load does, and calls the entry through it. The entry's
-    callback is a _RefuseRecompileCallback bound at load, which
-    _callback_from_stance keeps even under stances that would compile, so, as
-    for a standalone artifact, a call no captured variant covers raises instead
-    of compiling.
-    """
-    import base64
-    import importlib
-    import operator
-    import pickle
-    import sys as _sys
-
-    import torch
-    from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list
-    from torch._dynamo.eval_frame import (
-        _RecompileRefusedError,
-        _RefuseRecompileCallback,
-        OptimizeContext,
-    )
-    from torch._dynamo.package import _lookup_code, CompilePackage
-    from torch._precompile import PrecompileError as _PrecompileError
-
-    if tuple(_DYNAMO_PYTHON_VERSION) != _sys.version_info[:2]:
-        raise _PrecompileError(
-            f"precompile: this artifact was produced on Python "
-            f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]} and cannot "
-            f"load on {_sys.version_info[0]}.{_sys.version_info[1]}: it carries "
-            f"serialized code objects. Regenerate the artifact under the serving "
-            f"Python."
-        )
-    if TORCH_VERSION != torch.__version__:
-        raise _PrecompileError(
-            f"precompile: this artifact was produced by torch {TORCH_VERSION} and "
-            f"cannot load on torch {torch.__version__}: it carries pickled Dynamo "
-            f"state. Regenerate the artifact under the serving torch."
-        )
-    package_state = pickle.loads(base64.b64decode(_PACKAGE))
-    dynamo = package_state["dynamo"]
-    module_name = dynamo.codes[0].python_module
-    if module_name == "__main__":
-        raise _PrecompileError(
-            "precompile: this artifact was captured from a function defined in the "
-            "capturing script's __main__ module, which no other process can import. "
-            "Regenerate the artifact from a function defined in an importable module."
-        )
-    try:
-        fn = operator.attrgetter(FN_NAME)(importlib.import_module(module_name))
-    except (ImportError, AttributeError) as _e:
-        raise _PrecompileError(
-            f"precompile: this installed artifact serves {module_name}.{FN_NAME}, "
-            f"which is not importable here ({_e})."
-        ) from _e
-    try:
-        # CompilePackage refuses a module whose captured source has changed.
-        package = CompilePackage(fn, dynamo)
-        if torch._dynamo.config.compiled_autograd:
-            # OptimizeContext would compile backward graphs through a fresh,
-            # non-refusing callback.
-            raise _PrecompileError(
-                "precompile: an installed artifact cannot load with "
-                "torch._dynamo.config.compiled_autograd enabled: backward graphs "
-                "would compile outside the artifact. Disable it before load()."
-            )
-        # The codes install() puts entries on; the entry's is innermost_fn's.
-        entries = package._codes.items()
-        targets = [_lookup_code(e) if e.code_source else c for c, e in entries]
-        live = [c.co_name for c in targets if _debug_get_cache_entry_list(c)]
-        if live:
-            raise _PrecompileError(
-                f"precompile: frames this artifact installs onto ({', '.join(live)}) "
-                f"already have live Dynamo cache entries in this process (the capture "
-                f"that produced this artifact, or a torch.compile of them), which "
-                f"would still serve any call the installed entries miss: load this "
-                f"artifact in a fresh process."
-            )
-        context = torch._dynamo.optimize(BACKEND, package=package)
-        if not isinstance(context, OptimizeContext):
-            raise _PrecompileError(
-                "precompile: an installed artifact serves through Dynamo, which is "
-                "disabled in this process (TORCHDYNAMO_DISABLE=1 or the "
-                "enable_dynamo killswitch)."
-            )
-        # The refusal is this callable's own callback, not the process-global
-        # stance, so other threads' compiles are unaffected. It must be bound
-        # before context(fn), which captures the callback when it wraps.
-        context.callback = _RefuseRecompileCallback(context.callback)
-        compiled = context(fn)
-        package.install(package_state["backends"])
-    except _PrecompileError:
-        raise
-    except Exception as _e:
-        raise _PrecompileError(
-            f"precompile: this installed artifact could not be installed onto "
-            f"{module_name}.{FN_NAME} ({type(_e).__name__}: {_e}). If that source "
-            f"changed since capture, regenerate the artifact against it."
-        ) from _e
-
-    def forward(*args, **kwargs):
-        try:
-            return compiled(*args, **kwargs)
-        except _RecompileRefusedError as _e:
-            raise _PrecompileError(
-                f"precompile: no captured variant matches this call. Either a "
-                f"guard on the call's arguments or on a module global the graph "
-                f"baked in no longer holds (restore that environment), or this "
-                f"call shape was never captured: the artifact serves only what "
-                f"capture exercised, so add an example covering it and "
-                f"recapture. Dynamo reported: {_e}"
-            ) from None
-
-    return forward
