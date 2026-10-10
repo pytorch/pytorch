@@ -737,10 +737,6 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     return compile_wrapper.getvalue()
 
 
-# benchmark_kernel and benchmark_combo_kernel append it to every kernel's source, last.
-_KERNEL_BENCHMARK_HARNESS = re.compile(r"^def get_args\(\):$", re.MULTILINE)
-
-
 def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) -> str:
     """Make what a kernel's source binds at its top level unique to the kernel.
 
@@ -763,13 +759,15 @@ def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) ->
     tree = ast.parse(src)
     renames: dict[str, str] = {}
     aliases: list[ast.alias] = []
+    seen_def = False
     for stmt in tree.body:
         if isinstance(stmt, ast.FunctionDef):
+            seen_def = True
             renames[stmt.name] = ""
         elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
             renames.update((t.id, "") for t in targets if isinstance(t, ast.Name))
-        elif isinstance(stmt, (ast.Import, ast.ImportFrom)) and renames:
+        elif isinstance(stmt, (ast.Import, ast.ImportFrom)) and seen_def:
             # `import a.b` binds `a`, which cannot be renamed in place; the closure
             # only emits aliased imports (`from a import b as c`, `import a.b as c`).
             bound = [a for a in stmt.names if a.asname or "." not in a.name]
@@ -2092,6 +2090,9 @@ class PythonWrapperCodegen(CodeGen):
         # Each module-level Triton kernel's (name in source, source), which
         # AsyncCompile compiles it from; see PyCodeCache.load_by_key_path.
         self.kernel_sources: dict[str, tuple[str, str]] = {}
+        # Cache keys of the kernel modules whose benchmark harness
+        # emit_triton_kernel_definition cut from the module-level kernel.
+        self.kernel_harness_modules: list[str] = []
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
         self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
@@ -4099,11 +4100,7 @@ class PythonWrapperCodegen(CodeGen):
         self.benchmark_compiled_module(output)
         # A module-level kernel's harness stays in its own module, which a run of this
         # one as a script does not otherwise load (see emit_triton_kernel_definition).
-        kernel_modules = [
-            get_hash(src.strip())
-            for _, src in self.kernel_sources.values()
-            if _KERNEL_BENCHMARK_HARNESS.search(src)
-        ]
+        kernel_modules = self.kernel_harness_modules
         modules_arg = f", kernel_modules={kernel_modules!r}" if kernel_modules else ""
 
         output.writelines(["", "", 'if __name__ == "__main__":'])
@@ -4222,7 +4219,8 @@ class PythonWrapperCodegen(CodeGen):
         # can start on it now, as it does for a string kernel. It gets the source the
         # string form would have compiled, so both forms share every compile cache.
         self.kernel_sources[kernel_name] = (subs_name, src_code)
-        kernel_file = f"{get_hash(src_code.strip())}.py"
+        kernel_key = get_hash(src_code.strip())
+        kernel_file = f"{kernel_key}.py"
         if async_compile.AsyncCompile.use_process_pool():
             async_compile.AsyncCompile().triton(subs_name, src_code)
         autotune_body = (
@@ -4238,18 +4236,20 @@ class PythonWrapperCodegen(CodeGen):
         # harness to every kernel. It stays in the per-kernel modules the pool builds,
         # which is where benchmark_all_kernels looks for it, but at module level each
         # kernel's __main__ block would run whenever the wrapper does.
-        if harness := _KERNEL_BENCHMARK_HARNESS.search(src_code):
+        if harness := re.search(r"^def get_args\(\):$", src_code, re.MULTILINE):
             src_code = src_code[: harness.start()]
+            self.kernel_harness_modules.append(kernel_key)
         if "if __name__ == '__main__':" in src_code:
             raise AssertionError(f"kernel {kernel_name} kept its benchmark harness")
-        # The string form passes filename=__file__ from its own module, which is named by
-        # the hash of this source, and the autotune cache keys on that basename. Here
-        # __file__ is the wrapper, which every kernel shares, so name the module the
-        # string form would have used, in the wrapper's directory.
+        # The string form passes filename=__file__ from its own module, which
+        # AsyncCompile writes to cache_dir()/<hash[1:3]>/<hash>.py for this source's
+        # hash, and the autotune cache keeps the kernel's .best_config beside it. Here
+        # __file__ is the wrapper, which a loader may put anywhere, so name that file.
         if "filename=__file__" in src_code:
-            path = f"os.path.join(os.path.dirname(__file__), {kernel_file!r})"
+            path = f"os.path.join(cache_dir(), {kernel_file[1:3]!r}, {kernel_file!r})"
             src_code = src_code.replace("filename=__file__", f"filename={path}")
-            src_code = f"import os\n{src_code}"
+            runtime_utils = "torch._inductor.runtime.runtime_utils"
+            src_code = f"import os\nfrom {runtime_utils} import cache_dir\n{src_code}"
         # src_code is already a complete module: the triton imports, the
         # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
         # @triton.jit def. Spliced at module level it binds kernel_name to the same
@@ -6310,6 +6310,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
+        self.kernel_harness_modules = root.kernel_harness_modules
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
