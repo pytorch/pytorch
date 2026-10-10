@@ -6025,6 +6025,32 @@ class GraphModule(torch.nn.Module):
         finally:
             torch = old_torch
 
+    def test_torch_op_overload_attr_recompiles(self):
+        def fn(x, y):
+            return torch.ops.aten.add.Tensor(x, y)
+
+        compile_count = 0
+
+        def backend(gm, _example_inputs):
+            nonlocal compile_count
+            compile_count += 1
+            return torch.fx.Interpreter(gm).run
+
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.tensor(2)
+        y = torch.tensor(3)
+        original = torch.ops.aten.add.Tensor
+        try:
+            self.assertEqual(fn(x, y), torch.tensor(5))
+            self.assertEqual(compiled(x, y), torch.tensor(5))
+            self.assertEqual(compile_count, 1)
+            torch.ops.aten.add.Tensor = torch.ops.aten.mul.Tensor
+            self.assertEqual(fn(x, y), torch.tensor(6))
+            self.assertEqual(compiled(x, y), torch.tensor(6))
+            self.assertEqual(compile_count, 2)
+        finally:
+            torch.ops.aten.add.Tensor = original
+
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_wrap_triton_handled_during_tracing(self):
         import triton
