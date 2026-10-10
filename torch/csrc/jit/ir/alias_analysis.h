@@ -287,6 +287,10 @@ class AliasDb {
   ska::flat_hash_map<TypePtr, std::optional<Element*>> wildcardTypeCache_;
   Element* getWildcard(const TypePtr& type) const;
   std::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
+  // Returns the wildcard index key for `type`: the sole mutable type, or a
+  // (memoized) UnionType when there are several.
+  TypePtr getWildcardKeyType(const TypePtr& type, const AliasTypeSet& mut_types)
+      const;
   void addContainedTypesToFreshElement(
       Element* container_elem,
       const AliasTypeSet& mut_types);
@@ -301,6 +305,9 @@ class AliasDb {
 
   // Cached mapping of type ptrs to their mutable types
   mutable ska::flat_hash_map<TypePtr, AliasTypeSet> mapped_mutable_types_;
+
+  // Cached mapping of declared types to their wildcard index key type
+  mutable ska::flat_hash_map<TypePtr, TypePtr> wildcard_key_types_;
 
   /**
    * State for tracking write info.
