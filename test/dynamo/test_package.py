@@ -437,7 +437,6 @@ print(eval(f"bbmod.{name}.{path}") is code)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), mod(x))
 
-    @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_installed_shape_guard_on_a_global_reads_the_live_module_dict(self):
         # install() roots the guards at sys.modules[...].__dict__, and a package
         # keeps every guard, so the serialized scope holds the global as a
@@ -570,6 +569,100 @@ print(eval(f"bbmod.{name}.{path}") is code)
         source = """
 import torch
 
+
+
+class Child(torch.nn.Module):
+    def forward(self, x):
+        return x.sin()
+
+
+CHILD = Child()
+
+
+def fn(x):
+    return CHILD(x)
+"""
+
+        def guard_filter_fn(guards):
+            # Keep the global guards, which is what puts the alias in the
+            # artifact, minus the types the serializer rejects.
+            unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            return [
+                guard.guard_type not in unsupported
+                and not any(d in unsupported for d in guard.derived_guard_types)
+                for guard in guards
+            ]
+
+        ctx = DiskDynamoStore()
+        self.addCleanup(sys.modules.pop, module_name, None)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            helper_path = os.path.join(tmp_dir, "package_alias_helper.py")
+            with open(helper_path, "w") as f:
+                f.write(source)
+            module = import_from_path(module_name, helper_path)
+            args = (torch.randn(3),)
+            expected = module.fn(*args)
+
+            aot_path = os.path.join(tmp_dir, "aot_fn.pt")
+            torch.compile(
+                module.fn,
+                fullgraph=True,
+                backend="eager",
+                options={"guard_filter_fn": guard_filter_fn},
+            ).aot_compile((args, {})).save_compiled_function(aot_path)
+
+            torch._dynamo.reset()
+            package = CompilePackage(module.fn)
+            compiled_fn = torch._dynamo.optimize(
+                backend="eager", package=package, guard_filter_fn=guard_filter_fn
+            )(module.fn)
+            compiled_fn(*args)
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(package, self.path())
+
+            torch._dynamo.reset()
+            # A fresh import, as the loading process would see the module: the
+            # alias is unbound there until the load seeds it.
+            module = import_from_path(module_name, helper_path)
+            scope = vars(module)
+            self.assertNotIn(alias, set(scope))
+            with open(aot_path, "rb") as f:
+                loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
+            self.assertIn(alias, set(scope))
+
+            package, backends = ctx.load_package(module.fn, self.path())
+            # Not a vacuous test: install() really does write this alias.
+            installs_alias = any(
+                alias in entry.import_sources for entry in package._codes.values()
+            )
+            self.assertTrue(installs_alias)
+            # The gate is scoped to the aliases: the backend ids go through
+            # the default record_only_if_new=False, so they are recorded and
+            # removed however the module scope looked beforehand.
+            backend_ids = set(backends)
+            self.assertTrue(backend_ids)
+            self.assertEqual(backend_ids & set(scope), set())
+            package.install(backends)
+            self.assertIn(alias, set(scope))
+            self.assertTrue(backend_ids <= set(scope))
+            package.uninstall()
+            self.assertIn(alias, set(scope))
+            self.assertEqual(backend_ids & set(scope), set())
+            self.assertEqual(loaded(*args), expected)
+
+            # The other arm of the record, which needs a scope where the alias
+            # is still unbound when install() runs: another fresh import gives
+            # one, and there the package IS the first binder, so uninstall()
+            # takes the alias back out.
+            module = import_from_path(module_name, helper_path)
+            unseeded_scope = vars(module)
+            self.assertNotIn(alias, set(unseeded_scope))
+            package, backends = ctx.load_package(module.fn, self.path())
+            package.install(backends)
+            self.assertIn(alias, set(unseeded_scope))
+            package.uninstall()
+            self.assertNotIn(alias, set(unseeded_scope))
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_bound_method_name_guard_survives_func_reached_first(self):
@@ -720,99 +813,6 @@ import torch
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], compiles)
-
-class Child(torch.nn.Module):
-    def forward(self, x):
-        return x.sin()
-
-
-CHILD = Child()
-
-
-def fn(x):
-    return CHILD(x)
-"""
-
-        def guard_filter_fn(guards):
-            # Keep the global guards, which is what puts the alias in the
-            # artifact, minus the types the serializer rejects.
-            unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            return [
-                guard.guard_type not in unsupported
-                and not any(d in unsupported for d in guard.derived_guard_types)
-                for guard in guards
-            ]
-
-        ctx = DiskDynamoStore()
-        self.addCleanup(sys.modules.pop, module_name, None)
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            helper_path = os.path.join(tmp_dir, "package_alias_helper.py")
-            with open(helper_path, "w") as f:
-                f.write(source)
-            module = import_from_path(module_name, helper_path)
-            args = (torch.randn(3),)
-            expected = module.fn(*args)
-
-            aot_path = os.path.join(tmp_dir, "aot_fn.pt")
-            torch.compile(
-                module.fn,
-                fullgraph=True,
-                backend="eager",
-                options={"guard_filter_fn": guard_filter_fn},
-            ).aot_compile((args, {})).save_compiled_function(aot_path)
-
-            torch._dynamo.reset()
-            package = CompilePackage(module.fn)
-            compiled_fn = torch._dynamo.optimize(
-                backend="eager", package=package, guard_filter_fn=guard_filter_fn
-            )(module.fn)
-            compiled_fn(*args)
-            for backend_id, backend in package.cached_backends.items():
-                ctx.record_eager_backend(backend_id, backend)
-            ctx.save_package(package, self.path())
-
-            torch._dynamo.reset()
-            # A fresh import, as the loading process would see the module: the
-            # alias is unbound there until the load seeds it.
-            module = import_from_path(module_name, helper_path)
-            scope = vars(module)
-            self.assertNotIn(alias, set(scope))
-            with open(aot_path, "rb") as f:
-                loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
-            self.assertIn(alias, set(scope))
-
-            package, backends = ctx.load_package(module.fn, self.path())
-            # Not a vacuous test: install() really does write this alias.
-            installs_alias = any(
-                alias in entry.import_sources for entry in package._codes.values()
-            )
-            self.assertTrue(installs_alias)
-            # The gate is scoped to the aliases: the backend ids go through
-            # the default record_only_if_new=False, so they are recorded and
-            # removed however the module scope looked beforehand.
-            backend_ids = set(backends)
-            self.assertTrue(backend_ids)
-            self.assertEqual(backend_ids & set(scope), set())
-            package.install(backends)
-            self.assertIn(alias, set(scope))
-            self.assertTrue(backend_ids <= set(scope))
-            package.uninstall()
-            self.assertIn(alias, set(scope))
-            self.assertEqual(backend_ids & set(scope), set())
-            self.assertEqual(loaded(*args), expected)
-
-            # The other arm of the record, which needs a scope where the alias
-            # is still unbound when install() runs: another fresh import gives
-            # one, and there the package IS the first binder, so uninstall()
-            # takes the alias back out.
-            module = import_from_path(module_name, helper_path)
-            unseeded_scope = vars(module)
-            self.assertNotIn(alias, set(unseeded_scope))
-            package, backends = ctx.load_package(module.fn, self.path())
-            package.install(backends)
-            self.assertIn(alias, set(unseeded_scope))
-            package.uninstall()
-            self.assertNotIn(alias, set(unseeded_scope))
 
     def test_file_change(self):
         ctx = DiskDynamoStore()
@@ -1028,7 +1028,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
 
     @parametrize("backend", ("eager", "inductor"))
     def test_basic_fn(self, device, backend):
-        if device != "cpu" and not has_triton():
+        if device != "cpu" and backend == "inductor" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
@@ -1066,8 +1066,9 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
+    @parametrize("backend", ("eager", "inductor"))
     def test_lazy_backward(self, device, backend):
-        if device != "cpu" and not has_triton():
+        if device != "cpu" and backend == "inductor" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
@@ -1108,8 +1109,9 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
+    @parametrize("backend", ("eager", "inductor"))
     def test_graph_break_bomb(self, device, backend):
-        if device != "cpu" and not has_triton():
+        if device != "cpu" and backend == "inductor" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
@@ -1167,8 +1169,9 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             ):
                 compiled_fn(torch.tensor(N), 0, N - 1)
 
+    @parametrize("backend", ("eager", "inductor"))
     def test_dynamic_shape(self, device, backend):
-        if device != "cpu" and not has_triton():
+        if device != "cpu" and backend == "inductor" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
         ctx = DiskDynamoStore()
 
@@ -1330,6 +1333,10 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
         self.assertEqual(result2, expected2)
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO or IS_LINUX,
+        "https://github.com/pytorch/pytorch/issues/183810",
+    )
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_graph_breaks(self, device):
         if device != "cpu" and not has_triton():
@@ -1372,6 +1379,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             # Should have same number of frames as on cold start
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/184832")
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_automatic_dynamo_lazy_backward(self, device):
         if device != "cpu" and not has_triton():
@@ -1527,6 +1535,7 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             compiled_fn(x)
             self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
 
+    @unittest.expectedFailure  # FUNCTION_MATCH guard not serializable today
     def test_nn_module(self, device):
         if device != "cpu" and not has_triton():
             raise unittest.SkipTest("Requires Triton")
