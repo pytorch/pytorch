@@ -285,9 +285,7 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertIn("\n\n\nasync_compile.wait(globals())\ndel async_compile\n", code)
 
     @requires_cuda_and_triton
-    def test_async_compile_survives_for_a_user_defined_triton_kernel(self):
-        # A user @triton.jit kernel is still an async_compile.triton(...) source string,
-        # the one Triton kernel that keeps the lifecycle alive in a readable module.
+    def test_user_defined_triton_kernel_is_hoisted(self):
         from torch.testing._internal.triton_utils import add_kernel
 
         def fn(x):
@@ -298,9 +296,8 @@ class TestReadableWrapperCodegen(TestCase):
         x = torch.randn(256, device="cuda")
         expected, code = _code_for(fn, x, readable_wrapper=True)
         self.assertEqual(expected, x + x)
-        self.assertEqual(code.count("= async_compile.triton("), 1)
-        for line in ("async_compile = AsyncCompile()", "async_compile.wait(globals())"):
-            self.assertEqual(code.count(line), 1, line)
+        self.assertNotIn("async_compile", code)
+        self.assertIn("def add_kernel_0(", code)
         self.assertEqual(self._run_standalone(code, [x])[0], expected)
 
     def test_cpp_kernels_in_root_and_subgraphs_run_standalone(self):

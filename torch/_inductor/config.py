@@ -2277,8 +2277,8 @@ class triton:
         os.environ.get("TORCHINDUCTOR_UNIQUE_KERNEL_NAMES", "1") == "1"
     )
 
-    # Define each generated Triton kernel as module-level code in the python wrapper
-    # instead of as a source string passed to async_compile.triton.
+    # Define each Triton kernel, generated or user-defined, as module-level code in the
+    # python wrapper instead of as a source string passed to async_compile.triton.
     module_level_kernels: bool = (
         os.environ.get("TORCHINDUCTOR_MODULE_LEVEL_KERNELS", "0") == "1"
     )

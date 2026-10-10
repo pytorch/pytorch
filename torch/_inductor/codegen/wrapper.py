@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import collections
 import contextlib
 import dataclasses
@@ -495,6 +496,74 @@ def user_defined_triton_kernel_transitive_closure_source_code(
 
 # benchmark_kernel and benchmark_combo_kernel append it to every kernel's source, last.
 _KERNEL_BENCHMARK_HARNESS = re.compile(r"^def get_args\(\):$", re.MULTILINE)
+
+
+def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) -> str:
+    """Make what a kernel's source binds at its top level unique to the kernel.
+
+    The def named subs_name becomes kernel_name, and every other def and assignment
+    (helpers, and globals like ``BLOCK = tl.constexpr(64)`` from a user kernel's
+    closure) gets a ``_<kernel_name>`` suffix, as does every import after the first
+    def, which a user kernel's closure emits (``from triton.language import exp as
+    op``). The imports above it are the common kernel header, the same in every
+    kernel. A name is renamed only where it refers to the global, so a parameter or
+    local that shares it keeps its name: autotune configs and launches pass parameters
+    by name.
+    """
+    defs = re.findall(r"^def (\w+)\(", src, re.MULTILINE)
+    assigns = re.search(r"^\w+\s*(:[^=\n]*)?=", src, re.MULTILINE)
+    body = src[src.find("\ndef ") :]
+    imports = re.search(r"^(from|import) ", body, re.MULTILINE)
+    if defs == [subs_name] and not assigns and not imports:
+        # Nearly every kernel inductor generates: one def, after its imports.
+        return src.replace(f"\ndef {subs_name}(", f"\ndef {kernel_name}(", 1)
+    tree = ast.parse(src)
+    renames: dict[str, str] = {}
+    aliases: list[ast.alias] = []
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef):
+            renames[stmt.name] = ""
+        elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+            renames.update((t.id, "") for t in targets if isinstance(t, ast.Name))
+        elif isinstance(stmt, (ast.Import, ast.ImportFrom)) and renames:
+            # `import a.b` binds `a`, which cannot be renamed in place; the closure
+            # only emits `from ... import ... as ...`.
+            bound = [a for a in stmt.names if a.asname or "." not in a.name]
+            aliases += bound
+            renames.update((a.asname or a.name, "") for a in bound)
+    for name in renames:
+        renames[name] = kernel_name if name == subs_name else f"{name}_{kernel_name}"
+    # ast column offsets are in UTF-8 bytes, so edit the lines as bytes.
+    lines = [line.encode() for line in src.splitlines(keepends=True)]
+    spans: list[tuple[int, int, str, str]] = []  # (line, start, old, new)
+    for a in aliases:
+        line, start = a.lineno - 1, a.col_offset
+        old = lines[line][start : a.end_col_offset].decode()
+        spans.append((line, start, old, f"{a.name} as {renames[a.asname or a.name]}"))
+    for stmt in tree.body:
+        local: OrderedSet[str] = OrderedSet()
+        if isinstance(stmt, ast.FunctionDef):
+            args = stmt.args
+            params = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+            params += [a for a in (args.vararg, args.kwarg) if a is not None]
+            local.update(a.arg for a in params)
+            for node in ast.walk(stmt):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                    local.add(node.id)
+            line = stmt.lineno - 1
+            start = lines[line].index(f"def {stmt.name}(".encode()) + len("def ")
+            spans.append((line, start, stmt.name, renames[stmt.name]))
+        globals_here = renames.keys() - local
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Name) and node.id in globals_here:
+                spans.append(
+                    (node.lineno - 1, node.col_offset, node.id, renames[node.id])
+                )
+    for line, start, old, new in sorted(spans, reverse=True):
+        end = start + len(old.encode())
+        lines[line] = lines[line][:start] + new.encode() + lines[line][end:]
+    return b"".join(lines).decode()
 
 
 def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
@@ -3853,7 +3922,11 @@ class PythonWrapperCodegen(CodeGen):
         if async_compile.AsyncCompile.use_process_pool():
             async_compile.AsyncCompile().triton(subs_name, src_code)
         autotune_body = (
-            self.async_compile_triton_body(subs_name, src_code, device_type)
+            self.async_compile_triton_body(
+                subs_name,
+                _escape_triton_kernel_source_for_wrapper(src_code),
+                device_type,
+            )
             if config.triton.autotune_at_compile_time
             else None
         )
@@ -3862,10 +3935,11 @@ class PythonWrapperCodegen(CodeGen):
         # @triton.jit def. Spliced at module level it binds kernel_name to the same
         # object async_compile.triton would have returned, so the launch site
         # (KERNEL.run(...)) is unchanged. Its def is named subs_name, which is `triton_`
-        # for every kernel without unique_kernel_names, and kernels define module-level
-        # @triton.jit helpers under names that are only unique per kernel (scan
-        # combine_fns, flex attention's forward_inner, ...). In one shared namespace the
-        # later def would win for all of them, so make every def name kernel-unique.
+        # for every kernel without unique_kernel_names, and kernels bind other top-level
+        # names that are only unique per kernel: @triton.jit helpers (scan combine_fns,
+        # flex attention's forward_inner, ...) and, from a user kernel's closure, helper
+        # defs and constants. In one shared namespace the later binding would win for
+        # all of them, so _rename_kernel_module_globals makes each kernel-unique.
         # benchmark_kernel and benchmark_combo_kernel append a get_args()/call()/__main__
         # harness to every kernel. It stays in the per-kernel modules the pool builds,
         # which is where benchmark_all_kernels looks for it, but at module level each
@@ -3880,12 +3954,7 @@ class PythonWrapperCodegen(CodeGen):
             path = f"os.path.join(os.path.dirname(__file__), {kernel_file!r})"
             src_code = src_code.replace("filename=__file__", f"filename={path}")
             src_code = f"import os\n{src_code}"
-        renames = {subs_name: kernel_name}
-        for helper in re.findall(r"^def (\w+)\(", src_code, re.MULTILINE):
-            if helper not in (kernel_name, subs_name):
-                renames[helper] = f"{helper}_{kernel_name}"
-        for old, new in renames.items():
-            src_code = re.sub(rf"\b{old}\b", new, src_code)
+        src_code = _rename_kernel_module_globals(src_code, kernel_name, subs_name)
         self.define_kernel(
             kernel_name,
             src_code,
@@ -3937,7 +4006,8 @@ class PythonWrapperCodegen(CodeGen):
     ):
         """Codegen a user-defined Triton kernel and return its cache entry.
 
-        Emits the ``async_compile.triton(...)`` wrapper, assigns a graph-unique
+        Emits the kernel's definition (see ``emit_triton_kernel_definition``, or an
+        ``async_compile.triton(...)`` source string), assigns a graph-unique
         name (with a leading dunder stripped to avoid Python class-based name
         mangling at the call site), and records the kernel in
         ``user_defined_kernel_cache``. Returns ``(name, triton_meta,
@@ -4217,16 +4287,15 @@ class PythonWrapperCodegen(CodeGen):
         if name.startswith("__") and not name.endswith("__"):
             name = name[1:]
 
-        compile_wrapper = IndentedBuffer()
-        if config.triton.unique_user_kernel_names:
-            compile_wrapper.writeline(f"async_compile.triton({name!r}, '''")
-        else:
-            compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
-
+        subs_name = name if config.triton.unique_user_kernel_names else original_name
         inductor_meta["kernel_name"] = name
         triton_info_kernel_cls = self._get_triton_info_kernel_cls()
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
+        as_code = self.defines_triton_kernels_as_code()
+        compile_wrapper = IndentedBuffer()
+        if not as_code:
+            compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
         for type_spec in get_importable_constexpr_types(
             triton_meta.get("constants", {}).values()
@@ -4258,19 +4327,20 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
-        kernel_src = _escape_triton_kernel_source_for_wrapper(kernel_src)
-        compile_wrapper.splice(kernel_src)
 
-        current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
+        device_type = V.graph.get_current_device_or_throw().type
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
-        self.define_kernel(
-            name,
-            compile_wrapper.getvalue(),
-            metadata,
-        )
+        if as_code:
+            compile_wrapper.splice(kernel_src)
+            self.emit_triton_kernel_definition(
+                name, subs_name, compile_wrapper.getvalue(), device_type, metadata
+            )
+        else:
+            compile_wrapper.splice(_escape_triton_kernel_source_for_wrapper(kernel_src))
+            compile_wrapper.writeline(f"''', device_str='{device_type}')")
+            self.define_kernel(name, compile_wrapper.getvalue(), metadata)
         # Add to the cache for the next use
         self.user_defined_kernel_cache[cache_key] = (name, triton_meta, inductor_meta)
         return name, triton_meta, inductor_meta, extra_launcher_call_args
