@@ -958,17 +958,25 @@ class TestFullyShardPrefetch(FSDPTest):
         return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_backward_prefetch_with_gradient_accumulation(self):
+    @parametrize("explicit_backward_prefetch", [False, True])
+    def test_backward_prefetch_with_gradient_accumulation(
+        self, explicit_backward_prefetch: bool
+    ):
         # Gradient accumulation without resharding until the last backward:
         # parameters stay unsharded across microbatches, so no backward should
         # unshard a sharded group. The first module's backward prefetch must
         # target nothing, not the previous microbatch's last module, which the
-        # last backward reshards before reaching the first module.
+        # last backward reshards before reaching the first module. With explicit
+        # backward prefetching on the later modules, the first module still
+        # prefetches implicitly, as torchtitan's embedding does.
         dim = 8
         model = nn.Sequential(*(nn.Linear(dim, dim) for _ in range(3)))
         for layer in model:
             fully_shard(layer, reshard_after_forward=False)
         fully_shard(model, reshard_after_forward=False)
+        if explicit_backward_prefetch:
+            model[2].set_modules_to_backward_prefetch([model[1]])
+            model[1].set_modules_to_backward_prefetch([model[0]])
         inp = torch.randn((4, dim), device=device_type.type)
         sharded_unshards: list[str] = []
         orig_unshard = FSDPParamGroup.unshard
@@ -1931,6 +1939,9 @@ class TestFullyShardPrefetch(FSDPTest):
             return ret
 
         return post_backward_with_record
+
+
+instantiate_parametrized_tests(TestFullyShardPrefetch)
 
 
 class TestFullyShardUnshardMultiProcess(FSDPTest):
