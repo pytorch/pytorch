@@ -2955,14 +2955,11 @@ class TestPrecompile(TestCase):
             backend_id: EagerCacheArtifact(key=backend_id, content=backend)
             for backend_id, backend in package.cached_backends.items()
         }
-        torch._dynamo.reset()
-        self._scrub_minted(step.__globals__)
-        binding = {"defaults": None, "kwdefaults": None}
-        build = self._multigraph_driver(frames, backends, binding)
         # Dynamo records a callback the continuation calls while it runs eager,
         # trivial and with no resume names. Defined in the capturing script, its
         # record names __main__; nothing names it, so that module is never
-        # imported and the load does not refuse.
+        # imported and the load does not refuse. Captured before the scrub, so
+        # the scrub also removes the globals this capture mints.
         cb_package = CompilePackage(_callback_step)
         torch._dynamo.optimize(
             backend="eager", package=cb_package, guard_filter_fn=default_guard_filter_fn
@@ -2970,6 +2967,10 @@ class TestPrecompile(TestCase):
         *_, recorded = _multigraph_frames(cb_package.cache_entry())
         self.assertEqual((recorded["trivial"], recorded["resume_names"]), (True, []))
         callback = {**recorded, "python_module": "__main__"}
+        torch._dynamo.reset()
+        self._scrub_minted(step.__globals__)
+        binding = {"defaults": None, "kwdefaults": None}
+        build = self._multigraph_driver(frames, backends, binding)
         with mock.patch.dict(build.__globals__, {"_FRAMES": _b64([*frames, callback])}):
             forward = build()
         served = torch.nn.Linear(4, 4)
