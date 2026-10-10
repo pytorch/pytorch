@@ -13,12 +13,16 @@ from torch._inductor.heuristics.template.triton import (
     FlexConfig,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestBlackwellGPUGemmConfig(TestCase):
     """Tests for BlackwellGPUGemmConfig class."""
 
-    def test_default_values(self):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_default_values(self, device):
         """Test that BlackwellGPUGemmConfig has correct default values."""
         config = BlackwellGPUGemmConfig(
             block_m=128,
@@ -39,7 +43,7 @@ class TestBlackwellGPUGemmConfig(TestCase):
         self.assertTrue(config.warp_specialize)  # default=True
         self.assertTrue(config.flatten)  # default=True
 
-    def test_custom_values(self):
+    def test_custom_values(self, device):
         """Test that BlackwellGPUGemmConfig accepts custom values for new fields."""
         config = BlackwellGPUGemmConfig(
             block_m=64,
@@ -58,6 +62,8 @@ class TestBlackwellGPUGemmConfig(TestCase):
 
 
 class TestTemplateHeuristicsRegistry(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         # Save original registry state
@@ -70,35 +76,41 @@ class TestTemplateHeuristicsRegistry(TestCase):
         _TEMPLATE_HEURISTIC_REGISTRY.update(self.original_registry)
         super().tearDown()
 
-    def test_register_class(self):
+    def test_register_class(self, device):
         """Test basic registration of a heuristic class."""
         # Clear registry for this isolated test
         clear_registry()
 
-        @register_template_heuristic("test_mm", "cuda")
+        device_type = torch.device(device).type
+
+        @register_template_heuristic("test_mm", device_type)
         class TestHeuristic(TemplateConfigHeuristics):
             pass
 
         # Verify registration
-        key = ("test_mm", "cuda", None)
+        key = ("test_mm", device_type, None)
         self.assertIn(key, _TEMPLATE_HEURISTIC_REGISTRY)
         self.assertEqual(_TEMPLATE_HEURISTIC_REGISTRY[key], TestHeuristic)
 
-    def test_assertion_existing_class(self):
-        @register_template_heuristic("triton::mm", "cuda")
+    def test_assertion_existing_class(self, device):
+        device_type = torch.device(device).type
+
+        @register_template_heuristic("triton::mm", device_type)
         class _CrossOpHeuristic(TemplateConfigHeuristics):
             """(template, device, None) - Cross-op for specific device"""
 
         """Test that registered class can be retrieved."""
         # The _CrossOpHeuristic is registered at module level for ("mm", "cuda", None)
         # Test retrieval - it should match for any op on cuda device
-        heuristic = get_template_heuristic("triton::mm", "cuda", "bmm")
+        heuristic = get_template_heuristic("triton::mm", device_type, "bmm")
         self.assertIsInstance(heuristic, _CrossOpHeuristic)
 
-    def test_hierarchy_lookup(self):
+    def test_hierarchy_lookup(self, device):
         """Test complete hierarchy: (template, device, op) -> (template, None, None)"""
 
-        @register_template_heuristic("triton::mm", "cuda", op_name="scaled_mm")
+        device_type = torch.device(device).type
+
+        @register_template_heuristic("triton::mm", device_type, op_name="scaled_mm")
         class _MostSpecificHeuristic(TemplateConfigHeuristics):
             """(template, device, op) - Most specific"""
 
@@ -106,7 +118,7 @@ class TestTemplateHeuristicsRegistry(TestCase):
         class _CrossDeviceHeuristic(TemplateConfigHeuristics):
             """(template, None, op) - Cross-device for specific op"""
 
-        @register_template_heuristic("triton::mm", "cuda")
+        @register_template_heuristic("triton::mm", device_type)
         class _CrossOpHeuristic(TemplateConfigHeuristics):
             """(template, device, None) - Cross-op for specific device"""
 
@@ -121,7 +133,7 @@ class TestTemplateHeuristicsRegistry(TestCase):
         # _MostGeneralHeuristic: ("mm", None, None) - Most general
 
         # Test 1: Exact match - should get most specific
-        heuristic = get_template_heuristic("triton::mm", "cuda", "scaled_mm")
+        heuristic = get_template_heuristic("triton::mm", device_type, "scaled_mm")
         self.assertIsInstance(heuristic, _MostSpecificHeuristic)
 
         # Test 2: Different device, same op - should get cross-device
@@ -129,15 +141,17 @@ class TestTemplateHeuristicsRegistry(TestCase):
         self.assertIsInstance(heuristic, _CrossDeviceHeuristic)
 
         # Test 3: Same device, different op - should get cross-op
-        heuristic = get_template_heuristic("triton::mm", "cuda", "bmm")
+        heuristic = get_template_heuristic("triton::mm", device_type, "bmm")
         self.assertIsInstance(heuristic, _CrossOpHeuristic)
 
         # Test 4: Different device and op - should get most general
         heuristic = get_template_heuristic("triton::mm", "xpu", "bmm")
         self.assertIsInstance(heuristic, _MostGeneralHeuristic)
 
-    def test_partial_hierarchy_scenarios(self):
+    def test_partial_hierarchy_scenarios(self, device):
         """Test hierarchy behavior with partial registrations"""
+
+        device_type = torch.device(device).type
 
         # Scenario 1: Register partial hierarchy using decorators
         @register_template_heuristic("triton::tma", None, op_name="scaled_tma")
@@ -149,20 +163,20 @@ class TestTemplateHeuristicsRegistry(TestCase):
             pass
 
         # Should get cross-device for matching op, regardless of device
-        heuristic = get_template_heuristic("triton::tma", "cuda", "scaled_tma")
+        heuristic = get_template_heuristic("triton::tma", device_type, "scaled_tma")
         self.assertIsInstance(heuristic, _TestCrossDeviceHeuristic)
 
         # Should fallback to general for different op
-        heuristic = get_template_heuristic("triton::tma", "cuda", "scaled_mm")
+        heuristic = get_template_heuristic("triton::tma", device_type, "scaled_mm")
         self.assertIsInstance(heuristic, _TestGeneralHeuristic)
 
         # Scenario 2: Only specific device exists
-        @register_template_heuristic("triton::bmm", "cuda")
+        @register_template_heuristic("triton::bmm", device_type)
         class _TestDeviceSpecificHeuristic(TemplateConfigHeuristics):
             pass
 
         # Should get device-specific for cuda
-        heuristic = get_template_heuristic("triton::bmm", "cuda", "any_op")
+        heuristic = get_template_heuristic("triton::bmm", device_type, "any_op")
         self.assertIsInstance(heuristic, _TestDeviceSpecificHeuristic)
 
         # Should return fallback instance for other devices (no specific heuristic registered)
@@ -177,46 +191,60 @@ class TestTemplateHeuristicsRegistry(TestCase):
             pass
 
         # Should always get general regardless of device/op
-        heuristic = get_template_heuristic("triton::mm", "cuda", "scaled_addmm")
+        heuristic = get_template_heuristic("triton::mm", device_type, "scaled_addmm")
         self.assertIsInstance(heuristic, _TestMostGeneralHeuristic)
 
         heuristic = get_template_heuristic("triton::mm", "xpu", "regular_addmm")
         self.assertIsInstance(heuristic, _TestMostGeneralHeuristic)
 
-    def test_fallback_behavior(self):
+    def test_fallback_behavior(self, device):
         """Test that fallback TemplateConfigHeuristics is returned when no heuristic is found"""
 
+        device_type = torch.device(device).type
+
         # Test 1: Get fallback for unregistered template
-        heuristic = get_template_heuristic("unknown_template", "cuda", "unknown_op")
+        heuristic = get_template_heuristic(
+            "unknown_template", device_type, "unknown_op"
+        )
         self.assertIsInstance(heuristic, TemplateConfigHeuristics)
         # Make sure it's the base class and not a subclass
         self.assertEqual(type(heuristic), TemplateConfigHeuristics)
 
         # Test 2: Verify fallback instances are NOT cached (new instance each time)
-        heuristic2 = get_template_heuristic("unknown_template", "cuda", "unknown_op")
+        heuristic2 = get_template_heuristic(
+            "unknown_template", device_type, "unknown_op"
+        )
         self.assertIsInstance(heuristic2, TemplateConfigHeuristics)
         self.assertEqual(type(heuristic2), TemplateConfigHeuristics)
         # Should be different instances (not cached)
         self.assertIsNot(heuristic, heuristic2)
 
         # Test 3: After registering a heuristic, should get the registered one instead
-        @register_template_heuristic("unknown_template", "cuda", op_name="unknown_op")
+        @register_template_heuristic(
+            "unknown_template", device_type, op_name="unknown_op"
+        )
         class _NewlyRegisteredHeuristic(TemplateConfigHeuristics):
             pass
 
         # Now should get the registered heuristic, not the fallback
-        heuristic3 = get_template_heuristic("unknown_template", "cuda", "unknown_op")
+        heuristic3 = get_template_heuristic(
+            "unknown_template", device_type, "unknown_op"
+        )
         self.assertIsInstance(heuristic3, _NewlyRegisteredHeuristic)
         self.assertNotEqual(type(heuristic3), TemplateConfigHeuristics)
 
         # Test 4: Verify registered instances ARE cached (same instance each time)
-        heuristic4 = get_template_heuristic("unknown_template", "cuda", "unknown_op")
+        heuristic4 = get_template_heuristic(
+            "unknown_template", device_type, "unknown_op"
+        )
         self.assertIsInstance(heuristic4, _NewlyRegisteredHeuristic)
         self.assertIs(heuristic3, heuristic4)  # Should be same cached instance
 
 
 class TestA100DefaultFlexConfig(TestCase):
-    def test_head_dim_192_entries(self):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_head_dim_192_entries(self, device):
         """``(bf16, 192)`` and ``(fp16, 192)`` entries are required for
         DeepSeek V3 MLA (qk_nope_head_dim=128 + qk_rope_head_dim=64 = 192,
         v_head_dim=128) on every ``capability >= (8, 0)`` board.
@@ -236,6 +264,13 @@ class TestA100DefaultFlexConfig(TestCase):
         h = CUDAConfigHeuristic()
         self.assertEqual(h.a100_default_flex_config[(torch.bfloat16, 192)], expected)
         self.assertEqual(h.a100_default_flex_config[(torch.float16, 192)], expected)
+
+
+instantiate_device_type_tests(TestBlackwellGPUGemmConfig, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestTemplateHeuristicsRegistry, globals(), only_for="cuda"
+)
+instantiate_device_type_tests(TestA100DefaultFlexConfig, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
