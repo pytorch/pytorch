@@ -34,7 +34,7 @@ from ..decorators import substitute_in_graph
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Callable, Iterable, Mapping
-    from typing_extensions import Self, TypeIs
+    from typing_extensions import TypeIs
 
     from torch.utils._cxx_pytree import PyTree
 
@@ -177,18 +177,14 @@ def tree_leaves(
     )
 
 
-class _Asterisk(str):
+class _ReprNoQuotes(str):
     __slots__ = ()
 
-    def __new__(cls) -> Self:
-        return super().__new__(cls, "*")
-
     def __repr__(self) -> str:
-        return "*"  # no quotes
+        return str(self)  # no quotes inside containers
 
 
-_asterisk = _Asterisk()
-del _Asterisk
+_asterisk = _ReprNoQuotes("*")
 
 
 @dataclass(frozen=True, repr=False, eq=False, unsafe_hash=False, slots=True)
@@ -237,7 +233,7 @@ class PyTreeSpec:
         object.__setattr__(self, "num_children", num_children)
 
     def __repr__(self, /) -> str:
-        def helper(treespec: PyTreeSpec) -> Any:
+        def helper(treespec: PyTreeSpec) -> _ReprNoQuotes:
             if treespec.is_leaf():
                 if treespec.type is not None:
                     raise AssertionError("Leaf treespec must have type None")
@@ -250,7 +246,7 @@ class PyTreeSpec:
                 raise AssertionError(
                     "Non-leaf treespec must have a callable unflatten_func"
                 )
-            children_representations: list[Any] = [
+            children_representations = [
                 helper(subspec) for subspec in treespec._children
             ]
             if (
@@ -259,14 +255,16 @@ class PyTreeSpec:
                 or optree.is_namedtuple_class(treespec.type)
                 or optree.is_structseq_class(treespec.type)
             ):
-                return unflatten_func(treespec._metadata, children_representations)
-            return (
+                return _ReprNoQuotes(
+                    repr(unflatten_func(treespec._metadata, children_representations))
+                )
+            return _ReprNoQuotes(
                 f"CustomTreeNode({treespec.type.__name__}[{treespec._metadata!r}], "
-                f"[{', '.join(map(str, children_representations))}])"
+                f"[{', '.join(children_representations)}])"
             )
 
         inner = [
-            str(helper(self)),
+            helper(self),
             *(["NoneIsLeaf"] if self.none_is_leaf else []),
             f"namespace={self.namespace!r}",
         ]
