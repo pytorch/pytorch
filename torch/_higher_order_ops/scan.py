@@ -53,6 +53,16 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 logger: logging.Logger = logging.getLogger(__name__)
 aten = torch._ops.ops.aten
+_SCAN_PARALLEL_BW_MIN_CHUNK_BUDGET_ELEMS: int = 2**20
+
+
+def _validate_parallel_backward_init(linit: list[torch.Tensor]) -> None:
+    first_dtype = linit[0].dtype
+    first_device = linit[0].device
+    if any(x.dtype != first_dtype or x.device != first_device for x in linit[1:]):
+        raise RuntimeError(
+            "All init leaves must have the same dtype and device when parallel_backward=True"
+        )
 
 
 def wrap_combine_fn_flat(
@@ -153,13 +163,14 @@ def scan(
         parallel_backward (bool): use an associative-scan backward instead of the default
             sequential one, default ``False``. Trades memory for depth: it materializes a
             ``[scan_length, D, D]`` Jacobian sequence, where ``D`` is the total number of
-            elements in the carry, so it wins only for small carries and long scans. Under
-            ``torch.vmap``, ``D`` counts the carry of a single batch element, so write
-            ``combine_fn`` for one sequence and vmap it rather than batching the carry by
-            hand, which would put the batch dimension into ``D``. Because the Jacobians are
-            composed densely, a non-finite entry in one of them can make the gradients of
-            all carry elements of that batch element ``nan``, where the sequential backward
-            keeps it confined to the affected elements.
+            elements in the carry, so it wins only for small carries and long scans. All
+            carry leaves must share the same dtype and device. Under ``torch.vmap``,
+            ``D`` counts the carry of a single batch element, so write ``combine_fn`` for
+            one sequence and vmap it rather than batching the carry by hand, which would put
+            the batch dimension into ``D``. Because the Jacobians are composed densely, a
+            non-finite entry in one of them can make the gradients of all carry elements of
+            that batch element ``nan``, where the sequential backward keeps it confined to
+            the affected elements.
         length (int or None): Optional number of scan iterations, default ``None``.
             When ``xs`` has tensor leaves, ``length`` is optional; if given it must equal
             ``xs.shape[dim]`` and serves only as a consistency check (no constraint when
@@ -262,6 +273,8 @@ def scan(
         for x in linit:
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All init leaves must be a Tensor but got {x}")
+        if pb:
+            _validate_parallel_backward_init(linit)
 
         # Checks for xs
         for x in lxs:
@@ -353,6 +366,18 @@ class ScanOp(HigherOrderOperator):
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
+        if not isinstance(parallel_backward, bool):
+            raise RuntimeError(
+                f"parallel_backward must be a bool, but got {type(parallel_backward)}"
+            )
+        if (
+            isinstance(num_vmap_dims, bool)
+            or not isinstance(num_vmap_dims, int)
+            or num_vmap_dims < 0
+        ):
+            raise RuntimeError(
+                f"num_vmap_dims must be a non-negative integer, got {num_vmap_dims!r}"
+            )
         kwargs: dict[str, Any] = {}
         if mutated_arg_indices:
             kwargs["mutated_arg_indices"] = mutated_arg_indices
@@ -729,6 +754,8 @@ class ScanAutogradImpl:
         self.xs = xs
         self.additional_inputs = additional_inputs
         self.parallel_backward = parallel_backward
+        if self.parallel_backward:
+            _validate_parallel_backward_init(self.init)
         # Trailing carry dims that are vmap batch dims, see _call_backward_parallel.
         self.num_vmap_dims = num_vmap_dims
         self.forward_intermediates_handling_policies: list[
@@ -1137,7 +1164,12 @@ class ScanAutogradImpl:
         columns_out = run_bw(
             bw_carry_gm,
             [b.unsqueeze(0).expand(scan_length, *b.shape) for b in basis],
-            [expand_over_basis(torch.zeros_like(y)) for y in grad_ys],
+            [
+                y.new_zeros(y.shape[1:])[None, None].expand(
+                    scan_length, n_elem, *y.shape[1:]
+                )
+                for y in grad_ys
+            ],
             [expand_over_basis(x) for x in saved_fw_xs],
             [expand_over_basis(x) for x in saved_intermediates],
             2,
@@ -1165,7 +1197,10 @@ class ScanAutogradImpl:
 
         flat_state0 = flatten_carry(list(grad_carry), 0)
         # carry_grads[s] is the gradient of the carry entering forward step s.
-        carry_grads = (comp_a @ flat_state0.unsqueeze(-1)).squeeze(-1) + comp_b
+        if n_elem == 1:
+            carry_grads = comp_a.squeeze(-1) * flat_state0 + comp_b
+        else:
+            carry_grads = (comp_a @ flat_state0.unsqueeze(-1)).squeeze(-1) + comp_b
         step_carry_out_grads = torch.cat(
             [carry_grads[1:], flat_state0.unsqueeze(0)], dim=0
         )
@@ -1175,8 +1210,11 @@ class ScanAutogradImpl:
         # every step's incoming carry gradient is known. bw_gm already reduces
         # additional-input grads over the batch dim but not over time, so vmapping it
         # over time yields a [steps, *addi] temporary that is summed chunk by chunk.
-        # Each chunk's temporary is capped at the size of the Jacobian buffers, which
-        # are freed first, so the reduction never raises the peak set by the scan.
+        # Each chunk's temporary is sized to the Jacobian buffers (with a floor of
+        # _SCAN_PARALLEL_BW_MIN_CHUNK_BUDGET_ELEMS elements to prevent excessive chunks
+        # when the carry is small). Since the Jacobian buffers are freed first, the
+        # reduction exceeds the Jacobian-buffer size by at most
+        # _SCAN_PARALLEL_BW_MIN_CHUNK_BUDGET_ELEMS elements.
         n_addi = sum(additional_inputs_tensor_masks)
         step_carry_leaves = unflatten_carry(step_carry_out_grads)
         addi_numel = sum(
@@ -1189,7 +1227,8 @@ class ScanAutogradImpl:
         del a_prefix, b_prefix, columns_out, comp_a, comp_b
         chunk = scan_length
         if addi_numel > 0:
-            chunk = max(1, min(scan_length, jacobian_numel // addi_numel))
+            budget = max(jacobian_numel, _SCAN_PARALLEL_BW_MIN_CHUNK_BUDGET_ELEMS)
+            chunk = max(1, min(scan_length, budget // addi_numel))
 
         grad_xs_parts: list[list[torch.Tensor]] = []
         grad_additional_inputs: list[torch.Tensor | None] = []

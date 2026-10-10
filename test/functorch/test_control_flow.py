@@ -5013,7 +5013,10 @@ class TestControlFlowDevice(_TestControlFlowBase):
             carry, ys = scan(combine_fn, init, xs, parallel_backward=parallel_backward)
             return torch.autograd.grad((carry, ys), [init, xs, W, a], cotangents)
 
-        self.assertEqual(grads(True), grads(False))
+        with unittest.mock.patch(
+            "torch._higher_order_ops.scan._SCAN_PARALLEL_BW_MIN_CHUNK_BUDGET_ELEMS", 0
+        ):
+            self.assertEqual(grads(True), grads(False))
 
     @skipIfTorchDynamo(
         "the sequential reference backward fails scan's init/carry stride check "
@@ -5079,6 +5082,123 @@ class TestControlFlowDevice(_TestControlFlowBase):
         xs = torch.randn(5, 3, device=device)
         with self.assertRaisesRegex(RuntimeError, "parallel_backward must be a bool"):
             scan(combine_fn, init, xs, parallel_backward=1)
+
+    def test_scan_parallel_backward_scan_length_one(self, device):
+        def combine_fn(carry, x):
+            next_carry = torch.tanh(carry + x)
+            return next_carry, next_carry.clone()
+
+        init = torch.randn(3, device=device, requires_grad=True)
+        xs = torch.randn(1, 3, device=device, requires_grad=True)
+        cotangents = (torch.randn_like(init), torch.randn(1, 3, device=device))
+
+        def grads(pb):
+            c, y = scan(combine_fn, init, xs, parallel_backward=pb)
+            return torch.autograd.grad((c, y), (init, xs), cotangents)
+
+        self.assertEqual(grads(True), grads(False))
+
+    def test_scan_parallel_backward_counter_loop(self, device):
+        def combine_fn(carry, _):
+            next_carry = torch.tanh(carry + 0.1)
+            return next_carry, next_carry.clone()
+
+        init = torch.randn(3, device=device, requires_grad=True)
+        cotangents = (torch.randn_like(init), torch.randn(5, 3, device=device))
+
+        def grads(pb):
+            c, y = scan(combine_fn, init, None, length=5, parallel_backward=pb)
+            return torch.autograd.grad((c, y), init, cotangents)
+
+        self.assertEqual(grads(True), grads(False))
+
+    def test_scan_parallel_backward_partial_grad(self, device):
+        def combine_fn(carry, x):
+            next_carry = torch.tanh(carry + x)
+            return next_carry, next_carry.clone()
+
+        init = torch.randn(3, device=device, requires_grad=True)
+        xs = torch.randn(5, 3, device=device, requires_grad=True)
+
+        c_par, _ = scan(combine_fn, init, xs, parallel_backward=True)
+        c_seq, _ = scan(combine_fn, init, xs, parallel_backward=False)
+        self.assertEqual(
+            torch.autograd.grad(c_par.sum(), (init, xs)),
+            torch.autograd.grad(c_seq.sum(), (init, xs)),
+        )
+
+        _, y_par = scan(combine_fn, init, xs, parallel_backward=True)
+        _, y_seq = scan(combine_fn, init, xs, parallel_backward=False)
+        self.assertEqual(
+            torch.autograd.grad(y_par.sum(), (init, xs)),
+            torch.autograd.grad(y_seq.sum(), (init, xs)),
+        )
+
+    def test_scan_parallel_backward_mixed_dtype_carry_error(self, device):
+        def combine_fn(carry, x):
+            c0, c1 = carry
+            return (c0 + x, c1 + x), (x.clone(),)
+
+        xs = torch.randn(5, 3, dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "All init leaves must be a Tensor"):
+            scan(
+                combine_fn,
+                (1, torch.zeros(3, device=device)),
+                xs,
+                parallel_backward=True,
+            )
+
+        init = (
+            torch.zeros(3, dtype=torch.float32, device=device),
+            torch.zeros(3, dtype=torch.float64, device=device),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "All init leaves must have the same dtype and device"
+        ):
+            scan(combine_fn, init, xs, parallel_backward=True)
+
+        init_mixed_device = (
+            torch.zeros(3, device="cpu"),
+            torch.zeros(3, device="meta"),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "All init leaves must have the same dtype and device"
+        ):
+            scan(combine_fn, init_mixed_device, xs, parallel_backward=True)
+
+    def test_scan_parallel_backward_num_vmap_dims_validation(self, device):
+        from torch._higher_order_ops.scan import scan_op
+
+        def combine_fn(carry, x):
+            return carry + x, (carry + x).clone()
+
+        init = torch.zeros(3, device=device)
+        xs = torch.randn(5, 3, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "num_vmap_dims must be a non-negative integer"
+        ):
+            scan_op(combine_fn, (init,), (xs,), (), num_vmap_dims=-1)
+        with self.assertRaisesRegex(
+            RuntimeError, "num_vmap_dims must be a non-negative integer"
+        ):
+            scan_op(combine_fn, (init,), (xs,), (), num_vmap_dims=True)
+
+    @skipCUDAIf(not SM70OrLater, "triton")
+    def test_scan_parallel_backward_compile_inference(self, device):
+        def combine_fn(carry, x):
+            next_carry = torch.tanh(carry + x)
+            return next_carry, next_carry.clone()
+
+        def f(init, xs):
+            return scan(combine_fn, init, xs, parallel_backward=True)
+
+        init = torch.randn(3, device=device)
+        xs = torch.randn(5, 3, device=device)
+        expected = f(init, xs)
+        compiled = torch.compile(f, backend="inductor", fullgraph=True)
+        self.assertEqual(expected, compiled(init, xs))
+        with torch.no_grad():
+            self.assertEqual(expected, compiled(init, xs))
 
     @onlyAccelerator
     def test_scan_input_mutation(self, device):
