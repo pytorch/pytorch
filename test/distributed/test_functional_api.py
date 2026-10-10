@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+import pickle
+import subprocess
 import sys
 import unittest
 from functools import partial, wraps
@@ -402,6 +404,26 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(2, len(res))
         self.assertEqual(torch.tensor([4], device=device), res[0])
         self.assertEqual(torch.tensor([8], device=device), res[1])
+
+
+class TestPublicAPI(TestCase):
+    def test_public_module(self):
+        import torch.distributed.functional_collectives as funcol
+
+        for name in funcol.__all__:
+            obj = getattr(funcol, name)
+            self.assertIs(obj, getattr(ft_c, name))
+            self.assertEqual(obj.__module__, funcol.__name__)
+            self.assertIs(pickle.loads(pickle.dumps(obj)), obj)
+
+    def test_private_import_loads_public_module(self):
+        # FX codegen resolves functions by their __module__ path.
+        code = (
+            "import torch.distributed._functional_collectives as ft_c; "
+            "import torch; "
+            "assert torch.distributed.functional_collectives.wait_tensor is ft_c.wait_tensor"
+        )
+        subprocess.check_call([sys.executable, "-c", code])
 
 
 class TestMetaCollectives(TestCase):
