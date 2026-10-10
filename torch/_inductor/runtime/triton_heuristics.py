@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import builtins
+import contextvars
 import copy
 import dataclasses
 import enum
@@ -3623,6 +3624,16 @@ def hash_configs(configs: list[Config]):
     return hasher.hexdigest()
 
 
+# While inductor loads a wrapper it compiled, maps each module-level kernel's name to a
+# thunk returning the kernel AsyncCompile builds from that kernel's own source (see
+# PyCodeCache.load_by_key_path), so the def binds the worker pool's result. Building it
+# from the def would compile serially, and miss Triton's cache, which keys on the def's
+# line number.
+compiled_kernels_for_load: contextvars.ContextVar[
+    dict[str, Callable[[], Any]] | None
+] = contextvars.ContextVar("compiled_kernels_for_load", default=None)
+
+
 def cached_autotune(
     size_hints: list[int] | None,
     configs: list[Config],
@@ -3639,6 +3650,13 @@ def cached_autotune(
     has additional debugging, error handling, and on-disk caching.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
+    compiled = compiled_kernels_for_load.get()
+    # Popped, so that only the wrapper's own def binds it: the pool may reload the kernel
+    # from its source module while the wrapper loads, and that def must build it.
+    name = inductor_meta.get("kernel_name")
+    if compiled is not None and (thunk := compiled.pop(name, None)) is not None:
+        kernel = thunk()
+        return lambda fn: kernel
     if size_hints is not None and heuristic_type in (
         HeuristicType.REDUCTION,
         HeuristicType.PERSISTENT_REDUCTION,
