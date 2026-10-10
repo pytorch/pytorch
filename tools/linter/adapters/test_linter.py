@@ -9,7 +9,9 @@ A JSON allowlist tracks test files that are not yet migrated to this linter's
 requirements. Files in the allowlist are skipped silently. Files not in the
 allowlist must satisfy the test case requirements defined below.
 
-All test classes inheriting from `TestCase` must first declare a valid
+A test class is any class defining a `test*` method; detection is by the
+presence of test methods rather than by `TestCase` inheritance, which cannot
+be resolved reliably through the AST. Every such class must declare a valid
 `hw_classification` attribute. Supported values are `GENERIC`, `ACCELERATOR`,
 `CPU`, `CUDA`, `MPS`, and `XPU`.
 
@@ -18,8 +20,8 @@ The requirements for each `hw_classification` are summarized below:
   GENERIC
     - Class must not be used with instantiate_device_type_tests.
     - Test methods must not accept device/devices parameter.
-    - Class body must not check accelerator availability, e.g.
-      torch.cuda.is_available().
+    - Class body must not use accelerator APIs, e.g. torch.cuda.is_available()
+      or torch.cuda.synchronize().
 
   ACCELERATOR
     - Class must be used with instantiate_device_type_tests.
@@ -77,7 +79,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "test_linter_allowlist.json"
 ALLOWLIST_REL_PATH = os.path.relpath(ALLOWLIST_PATH, REPO_ROOT)
 
-INCLUDE_PATTERNS = ("test/**/test_*.py", "test/**/*_test.py")
+TEST_DIR = "test"
+FILE_NAME_PATTERNS = ("test_*.py", "*_test.py")
 EXCLUDE_PREFIXES = (
     "test/cpp_extensions/open_registration_extension/",
     "test/cpython/",
@@ -145,21 +148,20 @@ _KWARG_UNKNOWN = _UnknownKwarg()  # sentinel: kwarg present but not a literal
 def _is_test_file(filename: str) -> bool:
     """True for test files this linter applies to."""
     rel_path = os.path.relpath(filename, REPO_ROOT).replace("\\", "/")
+    if not rel_path.startswith(f"{TEST_DIR}/"):
+        return False
     if rel_path.startswith(EXCLUDE_PREFIXES):
         return False
 
-    return any(
-        fnmatch.fnmatchcase(rel_path, pattern)
-        or fnmatch.fnmatchcase(rel_path, pattern.replace("**/", ""))
-        for pattern in INCLUDE_PATTERNS
-    )
+    name = rel_path.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in FILE_NAME_PATTERNS)
 
 
 def _discover_files() -> list[Path]:
     """Return the test files this linter applies to, sorted."""
     files: set[Path] = set()
-    for pattern in INCLUDE_PATTERNS:
-        for path in REPO_ROOT.glob(pattern):
+    for pattern in FILE_NAME_PATTERNS:
+        for path in REPO_ROOT.glob(f"{TEST_DIR}/**/{pattern}"):
             if _is_test_file(str(path)):
                 files.add(path)
     return sorted(files)
@@ -361,11 +363,11 @@ def _get_string_list_kwarg(
     return None
 
 
-def _accelerator_check(call: ast.Call) -> str | None:
-    """Return the dotted name of an accelerator is_available() call, or None."""
+def _accelerator_api_call(call: ast.Call) -> str | None:
+    """Return the dotted name of a call into an accelerator torch module, or None."""
 
-    # Device modules an availability check may probe. "accelerator" is included on
-    # purpose: torch.accelerator.is_available() still needs some accelerator.
+    # "accelerator" is included on purpose: torch.accelerator.* still needs an
+    # accelerator to exist.
     ACCELERATOR_MODULES = {
         "accelerator",
         "cuda",
@@ -447,7 +449,7 @@ class RuleId(Enum):
     HW_CLASSIFICATION = "hw_classification"
     DEVICE_PARAM = "device_param"
     INSTANTIATION = "instantiation"
-    ACCELERATOR_AVAILABILITY = "accelerator_availability"
+    ACCELERATOR_API = "accelerator_api"
     DECORATOR = "decorator"
     ONLY_FOR = "only_for"
 
@@ -633,27 +635,28 @@ class DeviceParamRule(Rule):
 
 
 @_register(HardwareClassification.GENERIC)
-class AcceleratorAvailabilityRule(Rule):
-    id = RuleId.ACCELERATOR_AVAILABILITY
+class AcceleratorApiRule(Rule):
+    id = RuleId.ACCELERATOR_API
     summary = (
-        "GENERIC classes must not check accelerator availability in the "
-        "class body.\n"
-        "Such checks make test behavior depend on the available accelerators, "
-        "which is inconsistent with the GENERIC classification. Move the "
-        "check to an ACCELERATOR or device-specific test class."
+        "GENERIC classes must not use accelerator APIs in the class body.\n"
+        "A GENERIC test must be runnable without any accelerator, so referencing "
+        "an accelerator API (torch.cuda.*, torch.xpu.*, torch.accelerator.*, ...) "
+        "makes its behavior depend on accelerators. Reclassify the class as "
+        "ACCELERATOR or device-specific instead."
     )
 
     @classmethod
     def check(cls, ctx: RuleContext) -> list[LintMessage]:
         messages: list[LintMessage] = []
-        for stmt in ctx.class_node.body:
+
+        for stmt in (*ctx.class_node.decorator_list, *ctx.class_node.body):
             owner = ctx.class_node.name
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 owner = f"{owner}.{stmt.name}"
             for node in ast.walk(stmt):
                 if not isinstance(node, ast.Call):
                     continue
-                check = _accelerator_check(node)
+                check = _accelerator_api_call(node)
                 if check is None:
                     continue
                 messages.append(
@@ -663,8 +666,7 @@ class AcceleratorAvailabilityRule(Rule):
                         line=node.lineno,
                         description=(
                             f"Test class '{ctx.class_node.name}' ({ctx.classification.value}): "
-                            f"must not check accelerator availability in '{owner}': "
-                            f"'{check}()'."
+                            f"must not use accelerator API '{check}()' in '{owner}'."
                             f"\n{cls.hint()}"
                         ),
                     )
@@ -772,7 +774,7 @@ def check_file(filename: str) -> list[LintMessage]:
         with open(filename, encoding="utf-8") as f:
             source = f.read()
         tree = ast.parse(source, filename=filename)
-    except (OSError, SyntaxError) as e:
+    except SyntaxError as e:
         logging.error("Failed to parse '%s': %s", filename, e)
         return []
 
@@ -887,6 +889,7 @@ def main() -> None:
                     print(json.dumps(lint_message._asdict()), flush=True)
             except Exception:
                 logging.critical('Failed at "%s".', futures[future])
+                raise
 
 
 if __name__ == "__main__":
