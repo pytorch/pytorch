@@ -239,6 +239,12 @@ class Vectorized<float> {
     }
     return loadu(tmp);
   }
+  float reduce_add() const {
+    return svaddv_f32(ptrue, values);
+  }
+  float reduce_max() const {
+    return svmaxv_f32(ptrue, values);
+  }
   Vectorized<float> abs() const {
     return svabs_f32_x(ptrue, values);
   }
