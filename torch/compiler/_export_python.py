@@ -6,14 +6,6 @@ self-contained, human-readable Python source artifact (see
 decorator keyed off a file on disk: the first run writes the emitted
 ``python_code`` to ``path``; every later run reads the ``.py`` back and executes
 it directly instead of recompiling.
-
-Because the artifact is self-contained, re-executable Python, ``path`` is meant to be
-committed and shipped -- and, when a kernel starts to matter, hand-edited in place by
-an engineer or an agent. This is ejectable compilation: the emitted source is the
-source of truth and is always exec'd, so an edit is simply what runs from then on, in
-production as much as in development. There is no acceleration cache and no
-``precompile.load`` round-trip, so keeping the edited source correct is the caller's
-responsibility.
 """
 
 import copy
@@ -173,7 +165,13 @@ class ExportedPythonArtifact:
         return bound.args
 
     def _check_supported_args(self, args: tuple[Any, ...]) -> None:
-        params = list(self._call_signature.parameters)
+        # args is the bound positional layout: the named positional parameters in
+        # order, then any *args values.
+        P = inspect.Parameter
+        params = self._call_signature.parameters.values()
+        positional = (P.POSITIONAL_ONLY, P.POSITIONAL_OR_KEYWORD)
+        names = [p.name for p in params if p.kind in positional]
+        var = next((p.name for p in params if p.kind == P.VAR_POSITIONAL), None)
         for pos, arg in enumerate(args):
             if isinstance(arg, torch.nn.Module):
                 continue
@@ -184,7 +182,7 @@ class ExportedPythonArtifact:
             ]
             if not unsupported:
                 continue
-            name = params[pos] if pos < len(params) else f"argument {pos}"
+            name = names[pos] if pos < len(names) else f"{var}[{pos - len(names)}]"
             # These two land often enough that the generic "close the constant over"
             # advice is actively wrong for them: a module must stay an argument, and an
             # optional parameter has no constant to close over in the first place.
