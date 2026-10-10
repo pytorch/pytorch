@@ -288,8 +288,16 @@ if sys.platform == "win32":
             )
 
         dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
+        test_only_dlls = {
+            "aoti_custom_ops.dll",
+            "torchbind_test.dll",
+            "jitbackend_test.dll",
+            "backend_with_compiler.dll",
+        }
         path_patched = False
         for dll in dlls:
+            if os.path.basename(dll).lower() in test_only_dlls:
+                continue
             is_loaded = False
             if with_load_library_flags:
                 res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
