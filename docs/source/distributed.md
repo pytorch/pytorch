@@ -741,6 +741,11 @@ if rank == 0:
 
 Unlike the collectives above, functional collectives take the group as an argument and return a new tensor instead of mutating their inputs. In eager mode, the returned tensor waits on the collective on first use; under `torch.compile`, they are traced into the graph so the compiler can reorder and overlap communication.
 
+```{eval-rst}
+.. note::
+    ``torch.distributed.nn.functional`` is deprecated in favor of this module.
+```
+
 ```python
 import torch.distributed.functional_collectives as funcol
 
