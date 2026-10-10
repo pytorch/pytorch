@@ -291,6 +291,22 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_enum_len_with_member_named_name(self):
+        """Test len() on Enum class that has a member called `name`."""
+
+        class Color(enum.Enum):
+            name = 1
+            GREEN = 2
+
+        def fn(x):
+            return x + len(Color)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_enum_iter(self):
         """Test iterating over Enum class."""
 
