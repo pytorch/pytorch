@@ -166,7 +166,7 @@ void pushNVTXCallbacks(
           state_ptr->config().report_input_shapes
               ? &enterNVTX</*report_input_shapes=*/true>
               : &enterNVTX</*report_input_shapes=*/false>,
-          [](const at::RecordFunction& fn, at::ObserverContext* ctx) {
+          [](const at::RecordFunction& fn, at::ObserverContext* /*ctx*/) {
             torch::profiler::impl::cudaStubs()->rangePop();
             updateOutputTensorTracker(fn);
           })

@@ -188,11 +188,7 @@ C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   Dtype *values, Dtype *newValues,
-  int64_t nnz, int64_t newNnz,
-#ifdef USE_ROCM
-  int64_t nsegments,
-#endif
-  int64_t stride) {
+  int64_t nnz, int64_t newNnz, int64_t stride) {
 
 #ifdef USE_ROCM
   int64_t seg = (blockIdx.x * gridDim.y + blockIdx.y) * 4 + threadIdx.y;
@@ -208,7 +204,7 @@ __global__ void coalesceValuesKernel(
     const int begin = segment_offsets[seg];
     const int end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
 #ifdef USE_ROCM
-    const int startFeature = threadIdx.x + blockIdx.z * nsegments * SZ;
+    const int startFeature = threadIdx.x + blockIdx.z * blockDim.x * SZ;
 #else
     const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
 #endif
@@ -250,11 +246,7 @@ C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE_UPPER_BOUND*4)
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   bool *values, bool *newValues,
-  int64_t nnz, int64_t newNnz,
-#ifdef USE_ROCM
-  int64_t nsegments,
-#endif
-  int64_t stride) {
+  int64_t nnz, int64_t newNnz, int64_t stride) {
 
 #ifdef USE_ROCM
   int64_t seg = (blockIdx.x * gridDim.y + blockIdx.y) * 4 + threadIdx.y;
@@ -270,7 +262,7 @@ __global__ void coalesceValuesKernel(
     const int begin = segment_offsets[seg];
     const int end = (seg < newNnz - 1) ? segment_offsets[seg + 1] : nnz;
 #ifdef USE_ROCM
-    const int startFeature = threadIdx.x + blockIdx.z * nsegments * SZ;
+    const int startFeature = threadIdx.x + blockIdx.z * blockDim.x * SZ;
 #else
     const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
 #endif
