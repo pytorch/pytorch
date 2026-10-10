@@ -3652,14 +3652,14 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> float | None:
 
 @dataclasses.dataclass(slots=True)
 class WhyNoFuse:
-    name1: str
-    name2: str
+    node1: BaseSchedulerNode
+    node2: BaseSchedulerNode
     reason: str
     args: tuple[Any, ...]
 
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
-        self.name1 = node1.get_name()
-        self.name2 = node2.get_name()
+        self.node1 = node1
+        self.node2 = node2
 
     def __call__(self, reason: str, *args: Any) -> None:
         self.reason = reason
@@ -3667,7 +3667,8 @@ class WhyNoFuse:
         fusion_log.debug(self)
 
     def __str__(self) -> str:
-        return f"cannot fuse {self.name1} with {self.name2}: " + (
+        # Resolve names lazily: get_name() on wide fused nodes joins every child.
+        return f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: " + (
             self.reason % self.args
         )
 
@@ -3804,7 +3805,6 @@ class SchedulerNode(BaseSchedulerNode):
         node: ir.ComputedBuffer | ir.TemplateBuffer,
     ) -> None:
         super().__init__(scheduler)
-        self._loop_mutation_listener: Callable[[SchedulerNode], None] | None = None
         self._loop_state_gen = 0
         self._init_from_node(node)
         self._compute_attrs()
@@ -3923,11 +3923,11 @@ class SchedulerNode(BaseSchedulerNode):
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
 
     def _before_loop_state_mutation(self) -> None:
-        if self._loop_mutation_listener is not None:
-            self._loop_mutation_listener(self)
+        for tracker in self.scheduler._loop_mutation_trackers:
+            tracker.track()
         # Identifies the current loop state, so analyses derived from it can be
         # cached across the O(n^2) fusion pair search. Bumped after notifying
-        # the listener, which snapshots the pre-mutation state: snapshot and
+        # the trackers, which snapshot the pre-mutation state: snapshot and
         # restore then carry the generation, so rolling a trial reindex back
         # also restores cache validity.
         self._loop_state_gen += 1
@@ -4855,7 +4855,19 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             foreach_match = len(producer.snodes) == len(consumer.snodes)
             if not foreach_match:
                 why("foreach do not have same length")
-            return foreach_match and all(
+                return False
+            # Each pair becomes one sub-kernel and the sub-kernels run in
+            # parallel, so a consumer may depend only on its own partner.
+            owner = {
+                name: i
+                for i, snode in enumerate(producer.snodes)
+                for name in snode.get_buffer_names()
+            }
+            for i, snode in enumerate(consumer.snodes):
+                if any(owner.get(dep.name, i) != i for dep in snode.unmet_dependencies):
+                    why("a consumer depends on another producer sub-node")
+                    return False
+            return all(
                 producer.scheduler.can_fuse(l, r)
                 for l, r in zip(producer.snodes, consumer.snodes)
             )
@@ -5801,62 +5813,29 @@ class _LoopMutationTracker:
     candidates do not inherit a speculative layout chosen for a fusion
     that did not happen.
 
-    Recursive can_fuse() calls chain their listeners so each scope captures its
-    own decision boundary while the outer scope still sees nested mutations.
+    Scopes are kept on Scheduler._loop_mutation_trackers. Every mutation
+    notifies all open scopes, so an outer scope still sees mutations made
+    inside nested can_fuse() calls.
 
     Use finish(rollback=False) to keep mutations or finish(rollback=True) to
     restore the original state. If no mutation occurred, finish() is a no-op.
     """
 
     nodes: tuple[BaseSchedulerNode, ...]
-    watched_nodes: OrderedSet[SchedulerNode] = dataclasses.field(
-        default_factory=OrderedSet
-    )
-    previous_listeners: dict[SchedulerNode, Callable[[SchedulerNode], None] | None] = (
-        dataclasses.field(default_factory=dict)
-    )
     state: _LoopStateSnapshot | None = None
 
-    @classmethod
-    def create(cls, nodes: tuple[BaseSchedulerNode, ...]) -> _LoopMutationTracker:
-        """Create a rollback scope and watch mutable leaf scheduler nodes."""
-        seen = OrderedSet(nodes)
-        tracker = cls(nodes=tuple(seen))
-        for node in _iter_loop_state_nodes(seen):
-            if isinstance(node, SchedulerNode):
-                tracker.watch(node)
-        return tracker
-
-    def watch(self, sn: SchedulerNode) -> None:
-        """Install this scope as the mutation listener for a leaf node."""
-        if sn in self.watched_nodes:
-            return
-        self.previous_listeners[sn] = sn._loop_mutation_listener
-        self.watched_nodes.add(sn)
-        sn._loop_mutation_listener = self.track
-
-    def track(self, sn: SchedulerNode) -> None:
+    def track(self) -> None:
         """Lazily snapshot candidate roots when the first mutation occurs."""
-        if sn not in self.watched_nodes:
-            raise AssertionError(f"scheduler node {sn} is not being watched")
-        if previous := self.previous_listeners[sn]:
-            previous(sn)
-        if self.state is not None:
-            # Keep the original pre-mutation snapshot for the whole scope.
-            return
-
-        # The listener tells us a child loop mutated. Snapshot the original
-        # candidate roots here so we also capture fused-node group state,
-        # which is reassigned directly and has no listener of its own.
-        self.state = _LoopStateSnapshot.create(self.nodes)
+        # Snapshot the candidate roots rather than just the mutated leaf so we
+        # also capture fused-node group state, which is reassigned directly and
+        # has no mutation hook of its own.
+        if self.state is None:
+            self.state = _LoopStateSnapshot.create(self.nodes)
 
     def finish(self, *, rollback: bool) -> None:
-        """Detach listeners and restore captured state if rolling back."""
-        for sn in self.watched_nodes:
-            sn._loop_mutation_listener = self.previous_listeners[sn]
-        if not rollback or self.state is None:
-            return
-        self.state.restore()
+        """Restore captured state if rolling back."""
+        if rollback and self.state is not None:
+            self.state.restore()
 
 
 # Distinguishes "not cached" from a cached None in _tiling_memory_cache.
@@ -5878,6 +5857,7 @@ class Scheduler:
         return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
     def _init(self, nodes: list[ir.Operation]) -> None:
+        self._loop_mutation_trackers: list[_LoopMutationTracker] = []
         self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
         # buffer name -> reuse key, see _single_user_read_reuse_keys
         self._fusion_reuse_keys: dict[str, Any] = {}
@@ -6376,7 +6356,10 @@ class Scheduler:
                 name
                 for name in names
                 if name in kept_node_names
-                and not isinstance(self.name_to_node[name], NopKernelSchedulerNode)
+                and not isinstance(
+                    self.name_to_node[name],
+                    (NopKernelSchedulerNode, ExternKernelSchedulerNode),
+                )
             ]
             if not names:
                 # All nodes eliminated
@@ -6385,18 +6368,32 @@ class Scheduler:
             removed_node_names.update(names)
             snodes = [self.name_to_node[name] for name in names]
 
+            # The nodes of a foreach kernel run in parallel, so a node that
+            # depends on an earlier one of the list starts a new kernel: in
+            # _foreach_add_([a, b], [b, a]) the value for b reads a after the
+            # first element has written it.
+            groups: list[list[tuple[str, BaseSchedulerNode]]] = [[]]
+            written: OrderedSet[str] = OrderedSet()
+            for name, snode in zip(names, snodes):
+                if any(dep.name in written for dep in snode.unmet_dependencies):
+                    groups.append([])
+                    written = OrderedSet()
+                groups[-1].append((name, snode))
+                written.update(snode.get_buffer_names())
+
             enable_autotune = config.combo_kernels_autotune > 1
-            fe_node = ForeachKernelSchedulerNode(
-                self,
-                snodes,
-                use_custom_partition_algo=False,
-                enable_autotune=enable_autotune,
-            )
+            for group in groups:
+                fe_node = ForeachKernelSchedulerNode(
+                    self,
+                    [snode for _, snode in group],
+                    use_custom_partition_algo=False,
+                    enable_autotune=enable_autotune,
+                )
 
-            fe_nodes.append(fe_node)
+                fe_nodes.append(fe_node)
 
-            for name in names:
-                self.name_to_fused_node[name] = fe_node
+                for name, _ in group:
+                    self.name_to_fused_node[name] = fe_node
 
         self.nodes = [
             node for node in self.nodes if node.get_name() not in removed_node_names
@@ -10367,28 +10364,32 @@ class Scheduler:
                 self.get_fused_node(node1) is not node1
                 or self.get_fused_node(node2) is not node2
             )
-        tracker = _LoopMutationTracker.create((node1, node2))
-        can_fuse = self._can_fuse_impl(
-            node1,
-            node2,
-            can_reorder=can_reorder,
-            allow_mix_order_reduction=allow_mix_order_reduction,
-        )
-        if (
-            can_fuse
-            and check_cycle
-            and memory_state is not None
-            and not is_nested_fusion
-            and self.will_fusion_create_cycle(node1, node2)
-        ):
-            can_fuse = False
-        memory_update = None
-        if can_fuse and memory_state is not None and not is_nested_fusion:
-            can_fuse, memory_update = self._can_fuse_peak_memory_check(
-                memory_state, node1, node2
+        tracker = _LoopMutationTracker(tuple(OrderedSet((node1, node2))))
+        self._loop_mutation_trackers.append(tracker)
+        try:
+            can_fuse = self._can_fuse_impl(
+                node1,
+                node2,
+                can_reorder=can_reorder,
+                allow_mix_order_reduction=allow_mix_order_reduction,
             )
-        if memory_state is not None and not is_nested_fusion:
-            memory_state.pending_update = memory_update
+            if (
+                can_fuse
+                and check_cycle
+                and memory_state is not None
+                and not is_nested_fusion
+                and self.will_fusion_create_cycle(node1, node2)
+            ):
+                can_fuse = False
+            memory_update = None
+            if can_fuse and memory_state is not None and not is_nested_fusion:
+                can_fuse, memory_update = self._can_fuse_peak_memory_check(
+                    memory_state, node1, node2
+                )
+            if memory_state is not None and not is_nested_fusion:
+                memory_state.pending_update = memory_update
+        finally:
+            self._loop_mutation_trackers.pop()
         tracker.finish(rollback=not can_fuse)
         return can_fuse
 
@@ -12552,6 +12553,9 @@ class Scheduler:
         self.current_device = self.default_device_context
         if self.previous_node is not None:
             raise AssertionError("expected previous_node to be None")
+        previous_nodes_by_stream: dict[
+            tuple[torch.device | None, int], BaseSchedulerNode
+        ] = {}
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -12579,6 +12583,8 @@ class Scheduler:
                     V.graph.wrapper_code.mark_multistream_alignment(multi)
 
         for node in nodes:
+            stream_key = (node.get_device(), self.get_node_stream(node))
+            self.previous_node = previous_nodes_by_stream.get(stream_key)
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -12667,7 +12673,7 @@ class Scheduler:
             # on multiple streams get one copy per stream.
             V.graph.wrapper_code.codegen_deferred_alignment_copies(
                 (dep.name for dep in node.read_writes.reads),
-                self.node_to_stream.get(node, 0),
+                stream_key[1],
             )
 
             self.current_node = node
@@ -12739,9 +12745,9 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                self.previous_node = node
+                previous_nodes_by_stream[stream_key] = node
             else:
-                self.previous_node = None
+                previous_nodes_by_stream.pop(stream_key, None)
 
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen
