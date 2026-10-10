@@ -14,6 +14,9 @@ from collections import namedtuple
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
+from unittest.mock import patch
+
+import sympy
 
 import torch
 import torch._dynamo as torchdynamo
@@ -32,16 +35,18 @@ from torch._export.serde.serialize import (
     deserialize_torch_artifact,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
+    GraphModuleDeserializer,
     GraphModuleSerializer,
     serialize,
     SerializeError,
 )
+from torch._export.utils import wrap_method
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._library.opaque_object import get_opaque_type_name, register_custom_class
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save, unflatten
 from torch.export.pt2_archive.constants import ARCHIVE_VERSION_PATH
-from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
+from torch.fx.experimental.symbolic_shapes import is_concrete_int, ShapeEnv, ValueRanges
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipMPSIf,
@@ -721,6 +726,20 @@ def forward(self, x):
             g.nodes[0].inputs[0].arg.as_tensor.name,
             g.nodes[1].inputs[0].arg.as_tensor.name,
         )
+
+    def test_canonicalize_empty_output(self) -> None:
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x
+
+            def some_method(self) -> list[torch.Tensor]:
+                return []
+
+        ep = export(wrap_method(Module().some_method), (), strict=True)
+        self.assertEqual(ep.graph_signature.output_specs, [])
+        s = ExportedProgramSerializer().serialize(ep)
+        c = canonicalize(s.exported_program)
+        self.assertEqual(c.graph_module.graph.outputs, [])
 
     def test_int_list(self) -> None:
         class M(torch.nn.Module):
@@ -1925,6 +1944,55 @@ instantiate_parametrized_tests(TestDeserialize)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestDeserializeSymExpr(TestCase):
+    def _deserializer(
+        self, symbol_name_to_range: dict[str, ValueRanges] | None = None
+    ) -> GraphModuleDeserializer:
+        # The state deserialize() sets up before it parses any expression.
+        deserializer = GraphModuleDeserializer()
+        deserializer.shape_env = ShapeEnv()
+        deserializer.sympy_functions = {}
+        deserializer.symbol_name_to_symbol = {}
+        deserializer.symbol_name_to_range = symbol_name_to_range or {}
+        deserializer.unbacked_symbols = set()
+        return deserializer
+
+    def test_parses_the_string_once(self) -> None:
+        deserializer = self._deserializer()
+        expr_str = " + ".join(f"s{i}" for i in range(64))
+
+        with patch.object(sympy, "sympify", wraps=sympy.sympify) as sympify:
+            expr = deserializer._parse_sym_expr(expr_str)
+
+        # Sub-expressions are already sympy objects; parsing them again would
+        # copy the whole symbol table once per node.
+        self.assertEqual(sympify.call_count, 1)
+        self.assertEqual(len(expr.free_symbols), 64)
+        self.assertEqual(len(deserializer.symbol_name_to_symbol), 65)
+
+    def test_processes_nested_subexpressions(self) -> None:
+        deserializer = self._deserializer(
+            {"s0": ValueRanges(2, 8), "u0": ValueRanges(0, 16)}
+        )
+
+        deserializer._parse_sym_expr("Max(s0, 2*u0 + 1)")
+
+        symbols = deserializer.symbol_name_to_symbol
+        s0, u0 = symbols["s0"], symbols["u0"]
+        self.assertIn("2*u0", symbols)
+        self.assertIn("2*u0 + 1", symbols)
+        self.assertEqual(deserializer.unbacked_symbols, {u0})
+        self.assertEqual(deserializer.shape_env.var_to_range[s0], ValueRanges(2, 8))
+        self.assertEqual(deserializer.shape_env.var_to_range[u0], ValueRanges(0, 16))
+
+    def test_hint_applies_to_the_parsed_symbol(self) -> None:
+        deserializer = self._deserializer()
+
+        s3 = deserializer._parse_sym_expr("s3", hint=7)
+
+        self.assertEqual(deserializer.shape_env.backed_var_to_val[s3], 7)
+
+
 class TestSchemaVersioning(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
