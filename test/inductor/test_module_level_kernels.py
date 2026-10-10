@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import itertools
 import os
 import re
 import tempfile
@@ -44,6 +45,10 @@ def _run_from_file(code, args):
 
 def _softmax(x):
     return torch.softmax(x * 2, dim=-1)
+
+
+def _double(x):
+    return x * 2
 
 
 def _cond_softmax(x):
@@ -258,6 +263,25 @@ class TestModuleLevelKernels(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @requires_cuda_and_triton
+    @config.patch(fx_graph_cache=False)
+    def test_hand_edit_to_a_cached_module_survives_a_recompile(self):
+        x = torch.ones(4, device="cuda")
+        # A fresh AOT counter makes the recompile emit the same module, at the same path.
+        counter = mock.patch(
+            "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
+        )
+        with counter:
+            _, code = _code_for(_double, x)
+        _, path = PyCodeCache.write(code)
+        self.assertIn("2.0, tl.float32", code)
+        with open(path, "w") as f:
+            f.write(code.replace("2.0, tl.float32", "8.0, tl.float32"))
+        PyCodeCache.cache_clear()
+        with counter:
+            result, _ = _code_for(_double, x)
+        self.assertEqual(result, x * 8)
+
+    @requires_cuda_and_triton
     @config.patch({"compile_threads": 2, "triton.unique_kernel_names": False})
     def test_kernels_without_unique_names(self):
         self.assertTrue(AsyncCompile.wait_process_pool_ready())
@@ -267,6 +291,8 @@ class TestModuleLevelKernels(TestCase):
         ):
             result, code = _code_for(_cond_softmax, x)
         self.assertEqual(result, _cond_softmax(x))
+        # The pool built the pre-rename sources; this compiles the renamed defs.
+        self.assertEqual(_run_from_file(code, [x])[0], result)
         self.assertNotIn("def triton_(", code)
         kernels = re.findall(r"^def (triton_\w+)\(", code, re.MULTILINE)
         self.assertGreater(len(kernels), 1, code)
