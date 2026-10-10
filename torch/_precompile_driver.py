@@ -541,7 +541,7 @@ def _build_multigraph_forward():
                 f"{list(target.co_freevars)!r}, which a self-contained artifact "
                 f"cannot rebuild. Regenerate it from a module-level function."
             )
-        if frame["trivial"] and not is_entry:
+        if frame["trivial"] and frame["resume_names"]:
             # Dynamo compiled nothing of this continuation, so it ran as plain
             # Python during capture; rebuild it as one.
             # Its module is opened for the globals the bytecode reads.
@@ -557,7 +557,8 @@ def _build_multigraph_forward():
             # Nothing to dispatch, for one of two reasons the coverage-gap
             # error below would misdiagnose: adding examples fixes neither.
             # A continuation must still bind its resume names, so its refusal
-            # is deferred to a call that reaches it.
+            # is deferred to a call that reaches it. An unnamed trivial record
+            # lands here too and binds nothing, because no frame names it.
             if frame["bypassed"]:
                 cause = (
                     "was BYPASSED during capture (its guards could not be "
@@ -689,7 +690,7 @@ def _build_multigraph_forward():
     for _frame in frames:
         module = _frame["python_module"]
         # The frames _make_dispatcher opens a scope for.
-        if _frame["variants"] or (_frame["trivial"] and not _frame["is_entry"]):
+        if _frame["variants"] or (_frame["trivial"] and _frame["resume_names"]):
             opened.add(module)
         for _name in _frame["resume_names"] if module in opened else ():
             existing = vars(_import(module)).get(_name)
