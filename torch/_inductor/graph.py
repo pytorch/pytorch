@@ -3115,7 +3115,12 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> CompiledModule:
         from .codecache import PyCodeCache
 
-        if config.triton.autotune_at_compile_time:
+        # A module that defines its kernels as code does not carry the string-form
+        # autotune block; generate_and_run_autotune_block logs it.
+        if (
+            config.triton.autotune_at_compile_time
+            and not self.wrapper_code.defines_triton_kernels_as_code()
+        ):
             # sanitize docstrings in kernel defs (#155006)
             kernel_autotune_defs = self.wrapper_code.kernel_autotune_defs.getvalue()
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
@@ -3127,12 +3132,7 @@ class GraphLowering(torch.fx.Interpreter):
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
                 + '"""\n'
             )
-            if self.wrapper_code.defines_triton_kernels_as_code():
-                # A record of what ran at compile time, which repeats every kernel. The
-                # module defines the kernels itself, so keep the record in the log only.
-                output_code_log.debug("%s", tuning_code)
-            else:
-                wrapper_code.value = tuning_code + wrapper_code.value
+            wrapper_code.value = tuning_code + wrapper_code.value
         if GraphLowering.save_output_code is not None:
             GraphLowering.save_output_code(wrapper_code.value)
         output_code_log.debug("Output code: \n%s", wrapper_code.value)
@@ -3147,6 +3147,13 @@ class GraphLowering(torch.fx.Interpreter):
             ]
             key, path = PyCodeCache.write(wrapper_code.value)
             output_code_log.debug("Output code written to: %s", path)
+            kernel_sources = self.wrapper_code.kernel_sources
+            if kernel_sources:
+                # write() keeps a file already at this path, e.g. a hand-edited copy;
+                # its defs must compile themselves.
+                with open(path) as f:
+                    if f.read() != wrapper_code.value:
+                        kernel_sources.clear()
 
             V.debug.output_code(path)
             V.debug.copy(os.path.splitext(path)[0] + ".debug")
