@@ -1060,7 +1060,8 @@ class AsyncCompile:
         # those here, concurrently, rather than serially at each kernel's first launch.
         # They compile in process, on threads: JITFunction.cache_key hashes the def's
         # source and starting line, which a process worker compiling the kernel's own
-        # string-form module does not reproduce.
+        # string-form module does not reproduce. As with _worker_compile_triton_thread,
+        # only the Triton compile runs on the threads; launchers load on this thread.
         # The interpreter leaves even string-form kernels uncompiled; keep it that way.
         if os.environ.get("TRITON_INTERPRET", "0") == "1":
             return
@@ -1069,16 +1070,19 @@ class AsyncCompile:
         pending = {
             key: value
             for key, value in scope.items()
-            if isinstance(value, CachingAutotuner) and not value.launchers
+            if isinstance(value, CachingAutotuner)
+            and not value.compile_results
+            and not value.launchers
         }
         if not pending:
             return
         _set_triton_ptxas_path()
         _set_triton_libdevice_path()
         pool = self.pool()
-        futures = {k: pool.submit(v.precompile) for k, v in pending.items()}
-        for _ in self._results(futures):
-            pass
+        warm = partial(CachingAutotuner.precompile, warm_cache_only=True)
+        futures = {k: pool.submit(warm, v) for k, v in pending.items()}
+        for key, _ in self._results(futures):
+            pending[key].precompile()
 
     def _wait_futures(self, scope: dict[str, Any]) -> None:
         kernels = {
