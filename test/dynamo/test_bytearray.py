@@ -349,7 +349,6 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             ),
         )
 
-
     def test_input_bytearray_hex_decode(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
