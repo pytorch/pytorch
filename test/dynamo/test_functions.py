@@ -5041,6 +5041,44 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
 
+    def test_operator_concat_iconcat_reduce(self):
+        # Regression test for the functools.reduce pattern reported in #116396.
+        def fn_concat(seqs):
+            return functools.reduce(operator.concat, seqs, [])
+
+        def fn_iconcat(seqs):
+            return functools.reduce(operator.iconcat, seqs, [])
+
+        seqs = [[1, 2], [3], [4, 5, 6]]
+        for fn in (fn_concat, fn_iconcat):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+                self.assertEqual(opt_fn(seqs), fn(seqs))
+
+    def test_operator_iconcat_inplace_mutation(self):
+        # operator.iconcat mutates its first argument in place and returns it.
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        a = [1, 2, 3]
+        b = [4, 5]
+        self.assertEqual(opt_fn(a, b), [1, 2, 3, 4, 5])
+        self.assertEqual(a, [1, 2, 3, 4, 5])
+
+    def test_operator_concat_iconcat_empty(self):
+        def fn_concat(a, b):
+            return operator.concat(a, b)
+
+        def fn_iconcat(a, b):
+            return operator.iconcat(a, b)
+
+        for fn in (fn_concat, fn_iconcat):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+                self.assertEqual(opt_fn([], [1, 2]), [1, 2])
+                self.assertEqual(opt_fn([1, 2], []), [1, 2])
+
     def test_attrgetter(self):
         for attrs in (
             ("shape",),
@@ -6102,6 +6140,24 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_dynamic_class_attribute_raw_descriptor(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            class C:
+                def foo(self):
+                    return 1
+
+                foo.__isabstractmethod__ = True
+                foo = types.DynamicClassAttribute(foo)
+
+            descriptor = C.__dict__["foo"]
+            return descriptor.__isabstractmethod__, x + 1
+
+        is_abstract, out = fn(torch.tensor(1))
+        self.assertTrue(is_abstract)
+        self.assertEqual(out, torch.tensor(2))
+
     def test_tuplegetter_on_instance(self):
         from collections import namedtuple
 
@@ -6210,6 +6266,42 @@ class GraphModule(torch.nn.Module):
         # the function VT carries the source, so the method needs no source_fn
         self.assertFalse(hasattr(method, "source_fn"))
         self.assertIs(method.get_source(), im_func.get_source())
+
+    def test_bound_builtin_method_qualname_renamed_in_frame(self):
+        class D(dict):
+            pass
+
+        inst_bound = D(t=torch.ones(1)).get
+        cls_bound = D.fromkeys
+
+        def fn(x):
+            D.__qualname__ = "Renamed"
+            return x + 1, inst_bound.__qualname__, cls_bound.__qualname__
+
+        x = torch.ones(1)
+        expected = fn(x)
+        self.assertEqual(expected[1:], ("Renamed.get", "Renamed.fromkeys"))
+        D.__qualname__ = "D"
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), expected)
+
+    def test_bound_builtin_method_getset(self):
+        class D(dict):
+            pass
+
+        d = D(a=torch.ones(1))
+        s = {1}
+        bounds = (d.get, s.add, (1,).count, dict.fromkeys, tuple.__new__)
+
+        def fn(x):
+            out = [x + 1, bounds[0].__self__ is d, bounds[1].__self__ is s]
+            for b in bounds:
+                out += [b.__name__, b.__qualname__, b.__doc__, b.__text_signature__]
+            return out
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
     # generate_pycode cannot reconstruct a TensorPropertySource, which is what
     # a symbolic size input is sourced by; the dynamic_shapes variant therefore
@@ -6385,6 +6477,21 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(torch.compile(m, backend=cnt)(x), m(x))
         with self.assertRaises(Unsupported):
             torch.compile(m, backend="eager", fullgraph=True)(x)
+
+    def test_torch_function_metadata_attrs_constant(self):
+        def fn(x):
+            names = [
+                torch.mul.__name__,
+                torch.Tensor.add_.__name__,
+                torch.sin.__module__,
+            ]
+            if torch.Tensor.add_.__name__.endswith("_"):
+                x = x + 1
+            return x, names
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
 
 def udf_mul(x, y):
