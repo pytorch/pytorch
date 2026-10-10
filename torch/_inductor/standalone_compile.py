@@ -684,13 +684,9 @@ def load_from_python(
     """
     if cache is not None:
         torch.compiler.load_cache_artifacts(cache)
-    from torch._inductor.codecache import PyCodeCache
+    from torch._inductor.codecache import exec_from_cache_file
 
-    # A module-level Triton kernel reads its source back from the module's file.
-    _, path = PyCodeCache.write(python_code)
-    namespace: dict[str, Any] = {"__name__": "__compile_to_python__", "__file__": path}
-    exec(compile(python_code, path, "exec"), namespace)
-    call = namespace.get("call")
+    call = exec_from_cache_file(python_code, "__compile_to_python__").get("call")
     if not callable(call):
         raise RuntimeError(
             "compile_to_python module did not define a callable ``call``."
