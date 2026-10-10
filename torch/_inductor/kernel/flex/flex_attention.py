@@ -56,6 +56,7 @@ from .flex_flash_attention import (
     is_trivial_mask_graph,
     is_trivial_score_graph,
 )
+from .flex_flydsl_attention import create_flydsl_flex_attention_kernel
 
 
 if TYPE_CHECKING:
@@ -249,6 +250,9 @@ def flex_attention(
     if backend == "FLASH":
         score_mod_other_buffers = realize_captures_for_cutedsl(score_mod_other_buffers)
         mask_mod_other_buffers = realize_captures_for_cutedsl(mask_mod_other_buffers)
+    elif backend == "FLYDSL":
+        score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+        mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
@@ -287,6 +291,27 @@ def flex_attention(
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
+
+    if backend == "FLYDSL":
+        return create_flydsl_flex_attention_kernel(
+            query=query,
+            key=key,
+            value=value,
+            kv_num_blocks=kv_num_blocks,
+            kv_indices=kv_indices,
+            full_kv_num_blocks=full_kv_num_blocks,
+            full_kv_indices=full_kv_indices,
+            subgraph=subgraph,
+            mask_graph=mask_graph,
+            score_mod_other_buffers=score_mod_other_buffers,
+            mask_mod_other_buffers=mask_mod_other_buffers,
+            scale=scale,
+            sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+            sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+            subgraph_buffer=subgraph_buffer,
+            mask_graph_buffer=mask_graph_buffer,
+            write_max_scores=kernel_options.get("OUTPUT_MAX", True),
+        )
 
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa

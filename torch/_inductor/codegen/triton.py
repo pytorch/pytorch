@@ -7770,6 +7770,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "dynamic_disable_pipelining": config.triton.dynamic_disable_pipelining,
         }
 
+        if config.incremental_autotune:
+            inductor_meta["incremental_autotune_max_dispatches"] = (
+                config.incremental_autotune_max_dispatches
+            )
+
         if config.write_are_deterministic_algorithms_enabled:
             inductor_meta["are_deterministic_algorithms_enabled"] = (
                 torch.are_deterministic_algorithms_enabled()
@@ -8898,6 +8903,7 @@ class TritonScheduling(SIMDScheduling):
         [
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
+            BackendFeature.INDIRECT_INDEXING,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
