@@ -5664,6 +5664,22 @@ class SourcelessBuilder:
         return ConstantVariable.create(value=value)
 
     @staticmethod
+    def wrap_frozendict(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
+        items = {}
+        for key, item in frozendict_items(value):
+            if FrozenDictVariable._has_unsafe_hash(key):
+                unimplemented(
+                    gb_type="Preexisting frozendict key with user-defined hash",
+                    context=type(key).__name__,
+                    explanation="Dynamo cannot recover the stored key hash without calling a potentially changed or side-effecting hash function.",
+                    hints=["Construct the frozendict inside the compiled function."],
+                )
+            items[SourcelessBuilder.create(tx, key)] = SourcelessBuilder.create(
+                tx, item
+            )
+        return FrozenDictVariable(items)
+
+    @staticmethod
     def make_type_handlers() -> dict[
         type, Callable[["InstructionTranslatorBase", Any], VariableTracker]
     ]:
@@ -5684,9 +5700,7 @@ class SourcelessBuilder:
             mutation_type=ValueMutationNew(),
         )
         if torch._has_frozendict:
-            handlers[torch._frozendict] = lambda tx, value: FrozenDictVariable(
-                {create(tx, k): create(tx, v) for k, v in frozendict_items(value)}
-            )
+            handlers[torch._frozendict] = SourcelessBuilder.wrap_frozendict
         handlers[list] = lambda tx, value: ListVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )
