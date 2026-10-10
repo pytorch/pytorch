@@ -20,7 +20,12 @@ from torch._inductor.codegen.triton_combo_kernel import (
     LARGE_NUMELS,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import clear_caches, fresh_cache, run_and_get_code
+from torch._inductor.utils import (
+    clear_caches,
+    fresh_cache,
+    run_and_get_code,
+    run_and_get_kernels,
+)
 from torch._inductor.virtualized import V
 from torch.profiler import kineto_available
 from torch.testing import FileCheck
@@ -1156,13 +1161,13 @@ class ComboKernelTests(TestCase):
             torch.rand(256, device=GPU_TYPE),
         ]
         out_eager = fn(*inps)
-        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        out_compiled, code = run_and_get_kernels(torch.compile(fn), *inps)
         self.assertEqual(out_eager, out_compiled)
         combined = " ".join(code)
-        # Count emitted kernels by their async_compile.triton(...) calls;
-        # generated_kernel_count is inflated by throwaway probe codegen so
-        # is not a reliable count of real kernels.
-        self.assertEqual(combined.count("async_compile.triton("), 1)
+        # Count emitted kernels by their sources; generated_kernel_count is
+        # inflated by throwaway probe codegen so is not a reliable count of
+        # real kernels.
+        self.assertEqual(len(code), 1)
 
         default_match = re.search(r"'default_config':\s*\{([^}]*)\}", combined)
         self.assertIsNotNone(default_match, "default_config not emitted")
@@ -1189,7 +1194,7 @@ class ComboKernelTests(TestCase):
         out_eager = fn(*inps)
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        out_compiled, code = run_and_get_code(torch.compile(fn), *inps)
+        out_compiled, code = run_and_get_kernels(torch.compile(fn), *inps)
         if GPU_TYPE == "xpu":
             # For this shape (64, 1024), XPU eager uses fewer threads (e.g. 32)
             # with strided access while Triton uses more threads (e.g. 256)
@@ -1199,7 +1204,7 @@ class ComboKernelTests(TestCase):
         else:
             self.assertEqual(out_eager, out_compiled)
         combined = " ".join(code)
-        self.assertEqual(combined.count("async_compile.triton("), 1)
+        self.assertEqual(len(code), 1)
 
         default_match = re.search(r"'default_config':\s*\{([^}]*)\}", combined)
         self.assertIsNotNone(default_match)
@@ -1234,13 +1239,12 @@ class ComboKernelTests(TestCase):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         with fresh_cache():
-            out_compiled, code = run_and_get_code(
+            out_compiled, code = run_and_get_kernels(
                 torch.compile(fn), a, b, c, boundaries
             )
         self.assertEqual(out_eager, out_compiled)
-        combined = " ".join(code)
         # 1 combo (b*2, c+1) + 1 standalone (bucketize) = 2 real kernels.
-        self.assertEqual(combined.count("async_compile.triton("), 2)
+        self.assertEqual(len(code), 2)
 
     @requires_gpu_and_triton
     @torch._inductor.config.patch(
@@ -1298,16 +1302,16 @@ class ComboKernelTests(TestCase):
         torch._dynamo.reset()
         out_eager = m(*inps)
         with fresh_cache():
-            out_compiled, code = run_and_get_code(torch.compile(m), *inps)
+            out_compiled, code = run_and_get_kernels(torch.compile(m), *inps)
         torch.testing.assert_close(out_eager, out_compiled, rtol=1e-4, atol=1e-4)
         # The total kernel count is device dependent: reduction_split_factor only
         # splits these 64-output reductions into a second phase when
         # 2 * multi_processor_count > 64, so a low-SM GPU legitimately emits one
         # kernel fewer. Assert the invariant instead -- each very-large reduction
         # (the same numel gate the partitioner uses) gets a kernel of its own.
-        # Co-fusing them emits both sub-kernels in a single async_compile block.
+        # Co-fusing them emits both sub-kernels in a single kernel.
         separated = 0
-        for kernel_src in " ".join(code).split("async_compile.triton(")[1:]:
+        for kernel_src in code:
             numels = re.findall(r"xnumel = (\d+)\s+r0_numel = (\d+)", kernel_src)
             if any(int(x) * int(r) > LARGE_NUMELS for x, r in numels):
                 separated += 1
@@ -1778,10 +1782,10 @@ class ComboKernelDynamicShapesTests(TestCase):
         ]
 
         out_eager = test_activations(*inps)
-        out_compiled, code = run_and_get_code(torch.compile(test_activations), *inps)
+        out_compiled, code = run_and_get_kernels(torch.compile(test_activations), *inps)
 
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(sum(s.count("async_compile.triton(") for s in code), 1)
+        self.assertEqual(len(code), 1)
 
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
@@ -1915,7 +1919,7 @@ class ComboKernelDynamicShapesTests(TestCase):
 
         out_eager = fn(*inps)
         fn_c = torch.compile(fn)
-        out_compiled, code = run_and_get_code(fn_c, *inps)
+        out_compiled, code = run_and_get_kernels(fn_c, *inps)
         code = " ".join(code)
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(code.count("def _triton_helper_fn_add0(arg0_0, arg1_0):"), 1)
@@ -1969,7 +1973,7 @@ class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
             torch.rand(4096, device=GPU_TYPE),
         )
 
-        out, code = run_and_get_code(torch.compile(fn), *inps)
+        out, code = run_and_get_kernels(torch.compile(fn), *inps)
         self.assertEqual(out, fn(*inps))
         code = " ".join(code)
 
@@ -1993,7 +1997,7 @@ class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
             torch.rand(8192, device=GPU_TYPE),
         )
 
-        out, code = run_and_get_code(torch.compile(fn), *inps)
+        out, code = run_and_get_kernels(torch.compile(fn), *inps)
         self.assertEqual(out, fn(*inps))
         code = " ".join(code)
 
@@ -2019,7 +2023,7 @@ class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
             torch.rand(8192, device=GPU_TYPE, dtype=torch.float64),
         )
 
-        out, code = run_and_get_code(torch.compile(fn), *inps)
+        out, code = run_and_get_kernels(torch.compile(fn), *inps)
         self.assertEqual(out, fn(*inps))
         code = " ".join(code)
 
@@ -2047,7 +2051,7 @@ class ComboKernelTestsPerSubkernelBlocks(ComboKernelTests):
             torch.rand(4096, device=GPU_TYPE),
         )
 
-        out, code = run_and_get_code(torch.compile(fn), *inps)
+        out, code = run_and_get_kernels(torch.compile(fn), *inps)
         self.assertEqual(out, fn(*inps))
         code = " ".join(code)
 
@@ -3179,7 +3183,8 @@ class ComboKernelMetadataTests(TestCase):
             return torch.relu(a), torch.sigmoid(b)
 
         inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
-        code = self._combo_code(fn, inps)
+        _, kernels = run_and_get_kernels(torch.compile(fn), *inps)
+        code = " ".join(kernels)
         self.assertRegex(code, r"num_gb = \d*\.\d+")
         self.assertIn(f"device='{GPU_TYPE}'", code)
         self.assertNotIn(f"device={GPU_TYPE}", code)
