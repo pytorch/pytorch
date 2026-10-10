@@ -53,6 +53,7 @@ def _no_runtime_tuning():
     with (
         mock.patch.object(CachingAutotuner, "autotune_to_one_config", tune),
         mock.patch.object(CachingAutotuner, "_coordinate_descent_tuning", tune),
+        mock.patch.object(CachingAutotuner, "_combo_sequential_autotune", tune),
         # a cached best config would replace the pinned one
         mock.patch.object(AutotuneCache, "create", tune),
     ):
@@ -106,6 +107,30 @@ class TestKernelConfigs(TestCase):
         for name, cfg in ns["KERNEL_CONFIGS"].items():
             (launcher,) = ns[name].launchers
             self.assertEqual(config_to_dict(launcher.config), cfg, name)
+
+    @requires_cuda_and_triton
+    @parametrize("per_subkernel", [False, True])
+    @config.patch(
+        combo_kernels=True,
+        benchmark_combo_kernel=False,
+        combo_kernel_max_distance=-1,
+        coordinate_descent_tuning=True,
+    )
+    def test_combo_kernel_launches_with_its_compile_time_config(self, per_subkernel):
+        def fn(a, b):
+            return a.relu(), b.sigmoid()
+
+        a, b = torch.randn(10, 10, device="cuda"), torch.randn(20, 20, device="cuda")
+        _, code = _code_for(fn, a, b, combo_kernel_per_subkernel_blocks=per_subkernel)
+        self.assertIn("combo_grid_meta", code)
+        with _no_runtime_tuning():
+            ns = _load_from_file(code)
+            self.assertEqual(ns["call"]([a, b]), fn(a, b))
+        ((name, cfg),) = ns["KERNEL_CONFIGS"].items()
+        (launcher,) = ns[name].launchers
+        self.assertEqual(config_to_dict(launcher.config), cfg)
+        if per_subkernel:
+            self.assertIn("XBLOCK_1", cfg)
 
     @requires_cuda_and_triton
     @config.patch(coordinate_descent_tuning=True)
