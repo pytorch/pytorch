@@ -35,6 +35,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     _Action,
     _BackendRendezvousStateHolder,
     _DistributedRendezvousOpExecutor,
+    _natural_sort_key,
     _NodeDesc,
     _NodeDescGenerator,
     _RendezvousCloseOp,
@@ -117,6 +118,64 @@ class NodeDescTest(TestCase):
 
         self.assertIn(desc1, descs)
         self.assertIn(desc2, descs)
+
+
+class NodeDescNaturalSortKeyTest(TestCase):
+    def test_ranks_follow_numeric_host_order(self) -> None:
+        addrs = ["node66", "node7", "node70", "node8"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        ordered = sorted(nodes, key=_natural_sort_key)
+
+        self.assertEqual(
+            [node.addr for node in ordered], ["node7", "node8", "node66", "node70"]
+        )
+
+    def test_zero_padded_hostnames_keep_lexicographic_order(self) -> None:
+        addrs = ["node070", "node007", "node066", "node008"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        self.assertEqual(sorted(nodes, key=_natural_sort_key), sorted(nodes))
+
+    def test_heterogeneous_addresses_do_not_raise(self) -> None:
+        addrs = ["10.0.0.7", "10.0.0.66", "gpu-a", "gpu-10", "gpu-2", "ip-10-0-1-5"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        ordered = [node.addr for node in sorted(nodes, key=_natural_sort_key)]
+
+        self.assertEqual(
+            ordered,
+            ["10.0.0.7", "10.0.0.66", "gpu-2", "gpu-10", "gpu-a", "ip-10-0-1-5"],
+        )
+
+    def test_non_decimal_digit_characters_do_not_raise(self) -> None:
+        # str.isdigit() is True for characters such as superscripts that int()
+        # rejects, hence the key checks str.isdecimal().
+        nodes = [_NodeDesc("node1²2", 1, 1), _NodeDesc("node3", 1, 1)]
+
+        ordered = [node.addr for node in sorted(nodes, key=_natural_sort_key)]
+
+        self.assertEqual(ordered, ["node1²2", "node3"])
+
+    def test_processes_on_same_host_stay_grouped_and_ordered(self) -> None:
+        nodes = [
+            _NodeDesc("node9", 7, 1),
+            _NodeDesc("node10", 3, 1),
+            _NodeDesc("node9", 3, 2),
+            _NodeDesc("node9", 3, 1),
+        ]
+
+        ordered = sorted(nodes, key=_natural_sort_key)
+
+        self.assertEqual(
+            ordered,
+            [
+                _NodeDesc("node9", 3, 1),
+                _NodeDesc("node9", 3, 2),
+                _NodeDesc("node9", 7, 1),
+                _NodeDesc("node10", 3, 1),
+            ],
+        )
 
 
 class NodeDescGeneratorTest(TestCase):
@@ -573,7 +632,9 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
     def tearDown(self) -> None:
         self._datetime_patch.stop()
 
-    def _create_settings(self) -> RendezvousSettings:
+    def _create_settings(
+        self, cas_backoff_max_seconds: float = 0.3
+    ) -> RendezvousSettings:
         return RendezvousSettings(
             run_id="dummy_run_id",
             min_nodes=self._min_nodes,
@@ -581,6 +642,7 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
             timeout=self._timeout,
             keep_alive_interval=timedelta(seconds=30),
             keep_alive_max_attempt=3,
+            cas_backoff_max_seconds=cas_backoff_max_seconds,
         )
 
     def _create_op_executor(
@@ -740,6 +802,36 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
 
                     self._mock_state_holder.reset_mock()
 
+    def test_run_assigns_ranks_in_natural_host_order(self) -> None:
+        # Hostnames whose lexicographic order differs from their numeric order.
+        # With a plain sort the ranks would be node10=0, node2=1, node9=2, i.e.
+        # they would not follow the node numbering (see gh-191190).
+        self._node = _NodeDesc("node2", 1, 1)
+
+        self._state = _RendezvousState()
+
+        for addr in ["node10", "node9"]:
+            node = _NodeDesc(addr, 1, 1)
+
+            self._state.participants[node] = 0
+            self._state.last_heartbeats[node] = self._now
+
+        self._state.wait_list.add(self._node)
+
+        self._state.deadline = self._now + self._timeout.last_call
+
+        self._min_nodes = 3
+        self._max_nodes = 3
+
+        self._run_action(_Action.ADD_TO_PARTICIPANTS)
+
+        self.assertTrue(self._state.complete)
+
+        self.assertEqual(
+            {node.addr: rank for node, rank in self._state.participants.items()},
+            {"node2": 0, "node9": 1, "node10": 2},
+        )
+
     def test_run_adds_to_waitlist(self) -> None:
         expected_state = _RendezvousState()
 
@@ -856,6 +948,29 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
         self.assertListEqual(
             self._mock_state_holder.mock_calls, [call.sync(), call.sync()]
         )
+
+    def test_run_backs_off_only_after_failed_state_write(self) -> None:
+        for has_set, delay in (
+            (False, 0.3),
+            (False, 0.7),
+            (True, 0.7),
+            (None, 0.7),
+            (False, 0),
+        ):
+            with self.subTest(has_set=has_set, delay=delay):
+                executor = self._create_op_executor(self._create_settings(delay))
+                with (
+                    patch.object(self._state_holder, "sync", return_value=has_set),
+                    patch(
+                        "torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay"
+                    ) as mock_delay,
+                ):
+                    executor.run(Mock(return_value=_Action.FINISH), deadline=1)
+
+                if has_set is False and delay > 0:
+                    mock_delay.assert_called_once_with(seconds=(0, delay))
+                else:
+                    mock_delay.assert_not_called()
 
 
 class AbstractTestRendezvousOp(ABC):
