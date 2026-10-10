@@ -321,7 +321,8 @@ def _capture_rng_devices(args: tuple[object, ...]) -> list[torch.device]:
     # The accelerator generators worth saving, found the way torch.random.fork_rng
     # finds them: devices of the current accelerator reachable from the arguments (at
     # any pytree depth, modules included) plus its current device if already
-    # initialized. Probing an uninitialized one would initialize it.
+    # initialized. Probing an uninitialized one would initialize it; a backend with
+    # no is_initialized (MPS) is treated as initialized and probed.
     accelerator = torch.accelerator.current_accelerator()
     if accelerator is None:
         return []
@@ -466,6 +467,8 @@ def _rng_devices_indicate_a_draw(drawn: set[torch.device] | None) -> bool:
 def _explicit_generator_draw(gm: torch.fx.GraphModule, node: torch.fx.Node) -> bool:
     gen = _node_arg(node, "generator")
     if isinstance(gen, torch.fx.Node):
+        if gen.op != "get_attr":
+            raise AssertionError(f"expected a get_attr generator, got {gen.op}")
         gen = operator.attrgetter(cast(str, gen.target))(gm)
     if not isinstance(gen, torch.Generator):
         return gen is not None
@@ -706,7 +709,8 @@ class MakeFxTracer:
     one that fails mid-trace has no graph to attribute draws to and restores nothing.
     The CPU generator is always saved; of the current accelerator (CUDA, XPU, MPS, ...)
     only an already-initialized current device and the devices reachable from the
-    arguments are, and a draw on any other device warns and is left as-is.
+    arguments are. A draw the graph shows on any other device warns and is left as-is;
+    one made inside an opaque op goes unnoticed.
     """
 
     decompositions: dict | None = None
