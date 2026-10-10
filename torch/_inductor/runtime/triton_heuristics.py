@@ -3635,7 +3635,6 @@ compiled_kernels_for_load: contextvars.ContextVar[
 
 
 _RETUNING_META = (
-    "pinned_config",
     "coordinate_descent_tuning",
     "combo_tuning_groups",
     "incremental_autotune",
@@ -3669,6 +3668,8 @@ def cached_autotune(
     # kernel launches with instead of tuning again.
     if (pinned := inductor_meta.get("pinned_config")) is not None:
         meta = {k: v for k, v in inductor_meta.items() if k not in _RETUNING_META}
+        # So that fixed_config does not come back here.
+        del meta["pinned_config"]
         return fixed_config(pinned, filename, triton_meta, meta)
     if size_hints is not None and heuristic_type in (
         HeuristicType.REDUCTION,
