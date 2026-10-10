@@ -22776,7 +22776,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     ),
     OpInfo(
         "nn.functional.pdist",
-        ref=reference_pdist,
+        ref=reference_pdist if TEST_SCIPY else None,
         sample_inputs_func=sample_inputs_pdist,
         dtypes=floating_types(),
         supports_out=False,
