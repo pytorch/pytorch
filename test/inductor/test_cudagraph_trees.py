@@ -6913,27 +6913,17 @@ if HAS_CUDA_AND_TRITON:
                 compiled_out, code = run_and_get_code(compiled_foo, x)
                 self.assertEqual(eager_out, compiled_out)
 
-                if autotune_at_compile_time:
-                    # auto-tuning block should only appear once. We generate auto-tuning code
-                    # for all the kernels no matter if they are defined in the main graph or
-                    # subgraph, to avoid the overhead of executing multiple auto-tuning code blocks.
-                    FileCheck().check_count(
-                        "Compile-time auto-tuning block", 1, exactly=True
-                    ).run(code[0])
-                    # triton_poi_fused_add_ should appear twice, first in the auto-tuning block,
-                    # and then in the main code block
-                    FileCheck().check_count(
-                        "def triton_poi_fused_add_", 2, exactly=True
-                    ).run(code[0])
-                    # cpu kernel definition should only appence once, not in the auto-tuning block
-                    FileCheck().check_count(
-                        "cpp_fused__to_copy_add_1 = ", 1, exactly=True
-                    ).run(code[0])
-                else:
-                    # triton_poi_fused_add_ should appear once, because of kernel reuse
-                    FileCheck().check_count(
-                        "def triton_poi_fused_add_", 1, exactly=True
-                    ).run(code[0])
+                # Each kernel is defined once: partition 2 reuses partition 1's
+                # triton kernel, and the module has no compile-time autotune block.
+                FileCheck().check_count(
+                    "Compile-time auto-tuning block", 0, exactly=True
+                ).run(code[0])
+                FileCheck().check_count(
+                    "def triton_poi_fused_add_", 1, exactly=True
+                ).run(code[0])
+                FileCheck().check_count(
+                    "cpp_fused__to_copy_add_1 = ", 1, exactly=True
+                ).run(code[0])
 
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
@@ -6967,9 +6957,8 @@ if HAS_CUDA_AND_TRITON:
             eager_out = foo(x, y)
             compiled_out, code = run_and_get_code(compiled_foo, x, y)
             self.assertEqual(eager_out, compiled_out)
-            FileCheck().check_count(
-                "async_compile.triton('add_kernel',", 1, exactly=True
-            ).run(code[0])
+            defs = re.findall(r"^def add_kernel\w*\(", code[0], re.MULTILINE)
+            self.assertEqual(len(defs), 1, code[0])
 
         def test_meta_tensor(self):
             def foobar(x, y):

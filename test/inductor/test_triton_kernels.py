@@ -31,6 +31,7 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.utils import (
     fresh_cache,
     run_and_get_code,
+    run_and_get_kernels,
     triton_version_uses_attrs_dict,
 )
 from torch._library import capture_triton
@@ -2342,9 +2343,8 @@ def forward(self, x_1, output_1):
 
         n = 8
         eager_out = f(n)
-        compiled_out, (triton_code,) = run_and_get_code(
-            torch.compile(f, fullgraph=True), n
-        )
+        compiled_out, kernels = run_and_get_kernels(torch.compile(f, fullgraph=True), n)
+        triton_code = "\n".join(kernels)
 
         # Verify the generated code has proper imports
         self.assertIn("from triton.language.core import dtype as dtype", triton_code)
@@ -6279,13 +6279,15 @@ else:
         ):
             foo(x, w)
 
-        output = "\n".join(record.getMessage() for record in log.records)
+        prefix = "Auto-tuning code written to "
+        messages = [record.getMessage() for record in log.records]
+        (path,) = [m.removeprefix(prefix) for m in messages if m.startswith(prefix)]
+        with open(path) as f:
+            tuning_code = f.read()
         # correct grid example values updated per block size
-        FileCheck().check("Compile-time auto-tuning block:").check(
-            "PrecomputedGrid"
-        ).check("(31 + _launcher_s0) // 32").check("(127 + _launcher_s0) // 128").run(
-            output
-        )
+        FileCheck().check("PrecomputedGrid").check("(31 + _launcher_s0) // 32").check(
+            "(127 + _launcher_s0) // 128"
+        ).run(tuning_code)
 
     # Triton 3.2.0 adds the required flags to the Autotuner object for this test
     # PR: https://github.com/triton-lang/triton/pull/5092

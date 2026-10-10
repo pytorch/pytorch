@@ -1585,6 +1585,11 @@ class CppWrapperGpu(CppWrapperCpu):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        # Ignored: a C++ wrapper compiles each Triton kernel from its source string, not
+        # from a module-level def (see defines_triton_kernels_as_code). Accepted to keep
+        # one signature across _define_kernel_helper implementations.
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         if gpu:
             self._kernel_name_to_body[kernel_name] = kernel_body
