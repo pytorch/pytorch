@@ -205,8 +205,8 @@ struct NodeBase {
 
 static PyObject* NodeBase_new(
     PyTypeObject* type,
-    PyObject* args,
-    PyObject* kwds) {
+    PyObject* /*args*/,
+    PyObject* /*kwds*/) {
   PyObject* self = type->tp_alloc(type, 0);
   if (!self)
     return nullptr;
@@ -215,7 +215,10 @@ static PyObject* NodeBase_new(
   return self;
 }
 
-static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
+static int NodeBase_init_fn(
+    NodeBase* self,
+    PyObject* args,
+    PyObject* /*kwds*/) {
   PyObject* graph = nullptr;
   PyObject* name = nullptr;
   PyObject* op = nullptr;
@@ -359,7 +362,7 @@ static PyObject* NodeBase__update_args_kwargs(
 
 static PyObject* NodeBase__remove_from_list(
     PyObject* self,
-    PyObject* _ignored) {
+    PyObject* /*_ignored*/) {
   reinterpret_cast<NodeBase*>(self)->remove_from_list();
   Py_RETURN_NONE;
 }
@@ -644,8 +647,8 @@ struct NodeIter {
 
 static PyObject* NodeIter_new(
     PyTypeObject* type,
-    PyObject* args,
-    PyObject* kwds) {
+    PyObject* /*args*/,
+    PyObject* /*kwds*/) {
   PyObject* self = type->tp_alloc(type, 0);
   if (!self)
     return nullptr;
@@ -787,7 +790,7 @@ bool NodeIter_init(PyObject* module) {
 ////////////////////////////////
 
 static PyObject* py_map_aggregate(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* const* args,
     Py_ssize_t nargs) {
   if (nargs != 2) {
@@ -806,7 +809,7 @@ static PyObject* py_map_aggregate(
 }
 
 static PyObject* py_map_arg(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* const* args,
     Py_ssize_t nargs) {
   if (nargs != 2) {
