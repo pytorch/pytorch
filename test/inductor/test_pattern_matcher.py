@@ -11,6 +11,7 @@ import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch._inductor.pattern_matcher as pattern_matcher
 import torch.nn.functional as F
+from torch._dynamo.source import ConstantSource
 from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
@@ -41,7 +42,9 @@ from torch._library.opaque_object import (
     get_opaque_type_name,
     register_custom_class,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import skipCUDAIf
@@ -678,6 +681,90 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], count)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], nodes)
 
+    def test_addmm_add_alpha(self):
+        # https://github.com/pytorch/pytorch/issues/199698
+        def fn(a, b, c):
+            return (
+                torch.add(a, torch.mm(b, c), alpha=0.5),
+                torch.add(torch.mm(b, c), a, alpha=0.5),
+            )
+
+        args = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(3)]
+        e1, e2 = fn(*args)
+        a1, a2 = torch.compile(fn)(*args)
+        torch.testing.assert_close(a1, e1)
+        torch.testing.assert_close(a2, e2)
+        # the addmm patterns don't declare alpha, so they must not match
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+
+    def test_undeclared_non_default_kwarg_blocks_match(self):
+        add, div = torch.ops.aten.add, torch.ops.aten.div
+        undeclared = CallFunction(add, KeywordArg("x"), KeywordArg("y"))
+        declared = CallFunction(add, KeywordArg("x"), KeywordArg("y"), alpha=Arg())
+        div_pattern = CallFunction(div, KeywordArg("x"), KeywordArg("y"))
+
+        def matches(pattern, op, **kwargs):
+            gm = make_fx(lambda x, y: op(x, y, **kwargs))(
+                torch.randn(2), torch.randn(2)
+            )
+            node = next(n for n in gm.graph.nodes if n.op == "call_function")
+            return bool(pattern.match(node))
+
+        self.assertTrue(matches(undeclared, add))
+        # make_fx drops kwargs equal to their default, so build alpha=1 by hand
+        graph = torch.fx.Graph()
+        x, y = graph.placeholder("x"), graph.placeholder("y")
+        explicit = graph.call_function(add.Tensor, (x, y), {"alpha": 1})
+        self.assertTrue(undeclared.match(explicit))
+        self.assertFalse(matches(undeclared, add, alpha=2))
+        self.assertTrue(matches(declared, add, alpha=2))
+        # rounding_mode is Optional with no schema default, so None is the default
+        self.assertTrue(matches(div_pattern, div, rounding_mode=None))
+        self.assertFalse(matches(div_pattern, div, rounding_mode="floor"))
+        # strided layout and unpinned memory are equivalent to their None default
+        empty_op = torch.ops.aten.empty.memory_format
+        empty = CallFunction(empty_op, Arg())
+        for k, v, ok in (
+            ("layout", torch.strided, True),
+            ("layout", torch.sparse_coo, False),
+            ("pin_memory", False, True),
+            ("pin_memory", True, False),
+        ):
+            node = graph.call_function(empty_op, ([2],), {k: v})
+            self.assertEqual(bool(empty.match(node)), ok)
+        # without a schema, any undeclared kwarg blocks the match
+        torch_add = CallFunction(torch.add, KeywordArg("x"), KeywordArg("y"))
+        self.assertTrue(torch_add.match(graph.call_function(torch.add, (x, y))))
+        node = graph.call_function(torch.add, (x, y), {"alpha": 1})
+        self.assertFalse(torch_add.match(node))
+
+    def test_failed_match_drops_traceback(self):
+        # A FailedMatch raised mid-match (here: one KeywordArg bound to two
+        # different nodes) is returned to the caller. Its traceback would hold
+        # the matcher frames and, via f_back, the whole calling stack (e.g. the
+        # real tensors of a backward that triggered compilation) in a cycle.
+        add = torch.ops.aten.add.Tensor
+        pattern = CallFunction(add, KeywordArg("x"), KeywordArg("x"))
+        graph = torch.fx.Graph()
+        x, y = graph.placeholder("x"), graph.placeholder("y")
+        m = pattern.match(graph.call_function(add, (x, y)))
+        self.assertFalse(m)
+        self.assertEqual(str(m), "kwarg mismatch: x")
+        self.assertIsNone(m.__traceback__)
+
+    def test_addcdiv_fma_keeps_add_alpha(self):
+        # https://github.com/pytorch/pytorch/issues/199839
+        args = [torch.randn(8, device=GPU_TYPE) for _ in range(3)]
+        for alpha, fuses in ((1, True), (0.1, False)):
+
+            def fn(m, t1, t2):
+                return torch.add(m, t1 / t2 * 0.01, alpha=alpha)
+
+            torch._dynamo.reset()
+            counters.clear()
+            torch.testing.assert_close(torch.compile(fn)(*args), fn(*args))
+            self.assertEqual(counters["inductor"]["addcdiv_fma_fused"], int(fuses))
+
     def test_addmm_symbolic_scalar(self):
         def fn(m1, m2):
             bias = m1.size(0)
@@ -1048,13 +1135,10 @@ class TestPatternMatcher(TestCase):
         def unbacked(x):
             return torch.full((2,), x.item(), dtype=dtype).cumsum(0).sum()
 
-        x = torch.tensor(3)
+        x = torch.tensor(0)
         result, (code,) = run_and_get_code(torch.compile(unbacked, fullgraph=True), x)
         self.assertEqual(result, unbacked(x))
-        if dtype == torch.bool:
-            self.assertNotIn("aten.cumsum", code)  # exempt, so this one still folds
-        else:
-            self.assertIn("aten.cumsum", code)
+        self.assertIn("aten.cumsum", code)
 
         def make(fill):
             def fn():
@@ -1615,6 +1699,25 @@ class TestPatternMatcher(TestCase):
         # hit the view path
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    @parametrize("op", (torch.addmm, torch.baddbmm))
+    @parametrize("device", ("cuda", "xpu", "mps"))
+    @parametrize("beta", (0, 1))
+    def test_unfuse_bias_zero_beta(self, op, device, beta):
+        def fn(inp, a, b):
+            return op(inp, a, b, beta=beta).relu()
+
+        mat_shape = (4, 4) if op is torch.addmm else (2, 4, 4)
+        with torch._subclasses.FakeTensorMode():
+            args = (
+                torch.empty(4, device=device),
+                torch.empty(mat_shape, device=device),
+                torch.empty(mat_shape, device=device),
+            )
+            gm = make_fx(fn)(*args)
+            patterns = torch._inductor.fx_passes.post_grad.pass_patterns[2]
+            # beta == 0 stays fused so the lowering drops the ignored input.
+            self.assertEqual(patterns.apply(gm), int(beta != 0))
 
     def test_unfuse_broadcast_bias_baddbmm(self):
         args = [
@@ -3202,6 +3305,43 @@ class TestPatternMatcher(TestCase):
                 dtype,
                 msg=lambda msg: f"{msg}\n{target}: {node.meta}",
             )
+
+    def test_meta_matches_specializes_backed_not_unbacked(self):
+        def meta_matches(shape_env, actual, expected):
+            with FakeTensorMode(shape_env=shape_env):
+                val = torch.empty(actual, 8)
+            node = torch.fx.Graph().placeholder("x")
+            node.meta["val"] = val
+            pattern = CallFunction(torch.ops.aten.mm.default, Arg(), Arg())
+            pattern.expected_meta = ((expected, 8), val.dtype, val.device)
+            num_guards = len(shape_env.guards)
+            matched = pattern._meta_matches(node)
+            return matched, shape_env.guards[num_guards:]
+
+        def backed(shape_env, hint, name):
+            return shape_env.create_unspecified_symint_and_symbol(
+                hint, ConstantSource(name), DimDynamic.DYNAMIC
+            )
+
+        # backed, equal at the hint: matches by guarding s0 == s1 + 1
+        shape_env = ShapeEnv()
+        s0, s1 = backed(shape_env, 5, "s0"), backed(shape_env, 4, "s1")
+        matched, guards = meta_matches(shape_env, s0, s1 + 1)
+        self.assertTrue(matched)
+        self.assertEqual(len(guards), 1)
+
+        # backed, not equal at the hint: rejected
+        shape_env = ShapeEnv()
+        s0, s1 = backed(shape_env, 5, "s0"), backed(shape_env, 5, "s1")
+        matched, _ = meta_matches(shape_env, s0, s1 + 1)
+        self.assertFalse(matched)
+
+        # unbacked: rejected without installing a guard
+        shape_env = ShapeEnv()
+        u0, u1 = shape_env.create_unbacked_symint(), shape_env.create_unbacked_symint()
+        matched, guards = meta_matches(shape_env, u0, u1 + 1)
+        self.assertFalse(matched)
+        self.assertEqual(guards, [])
 
     def test_metadata_propagation_register_replacement(self):
         """Verify metadata from matched nodes transfers to replacement nodes."""
