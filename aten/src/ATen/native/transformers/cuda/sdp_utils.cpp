@@ -705,6 +705,26 @@ bool check_cudnn_dropout(sdp_params const& params, bool debug) {
   return true;
 }
 
+#ifndef USE_ROCM
+bool check_flash_attention_grid_size(sdp_params const& params, bool debug) {
+  // Flash forward and backward auxiliary kernels put batch/heads in grid.y/z.
+  constexpr int64_t max_grid_size = 65535;
+  const auto batch_size = params.query.sym_size(0);
+  const auto num_heads = params.query.sym_size(1);
+  if (!(TORCH_GUARD_OR_FALSE(batch_size.sym_le(max_grid_size)) &&
+        TORCH_GUARD_OR_FALSE(num_heads.sym_le(max_grid_size)))) {
+    if (debug) {
+      TORCH_WARN(
+          "Flash attention does not support batch size or num_heads greater than ",
+          max_grid_size,
+          ". Got batch size: ", batch_size, ", num_heads: ", num_heads);
+    }
+    return false;
+  }
+  return true;
+}
+#endif
+
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   constexpr int64_t max_cudnn_dim_size = 65535;
   const auto b = params.query.sym_size(0);
@@ -1207,6 +1227,9 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention, true, true /*supports_mqa*/>,
+#ifndef USE_ROCM
+        check_flash_attention_grid_size,
+#endif
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>});
     for (auto& constraint : dense_constraints) {
