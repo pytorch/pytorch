@@ -237,7 +237,7 @@ class PyTreeSpec:
         object.__setattr__(self, "num_children", num_children)
 
     def __repr__(self, /) -> str:
-        def helper(treespec: PyTreeSpec) -> str:
+        def helper(treespec: PyTreeSpec) -> Any:
             if treespec.is_leaf():
                 if treespec.type is not None:
                     raise AssertionError("Leaf treespec must have type None")
@@ -245,11 +245,12 @@ class PyTreeSpec:
 
             if treespec.type is None:
                 raise AssertionError("Non-leaf treespec must have a type")
-            if not callable(treespec._unflatten_func):
+            unflatten_func = treespec._unflatten_func
+            if not callable(unflatten_func):
                 raise AssertionError(
                     "Non-leaf treespec must have a callable unflatten_func"
                 )
-            children_representations = [
+            children_representations: list[Any] = [
                 helper(subspec) for subspec in treespec._children
             ]
             if (
@@ -258,19 +259,14 @@ class PyTreeSpec:
                 or optree.is_namedtuple_class(treespec.type)
                 or optree.is_structseq_class(treespec.type)
             ):
-                return repr(
-                    treespec._unflatten_func(
-                        treespec._metadata,
-                        children_representations,
-                    )
-                )
+                return unflatten_func(treespec._metadata, children_representations)
             return (
                 f"CustomTreeNode({treespec.type.__name__}[{treespec._metadata!r}], "
-                f"[{', '.join(children_representations)}])"
+                f"[{', '.join(map(str, children_representations))}])"
             )
 
         inner = [
-            helper(self),
+            str(helper(self)),
             *(["NoneIsLeaf"] if self.none_is_leaf else []),
             f"namespace={self.namespace!r}",
         ]
