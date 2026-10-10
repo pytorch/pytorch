@@ -11,20 +11,17 @@ from torch._higher_order_ops.invoke_subgraph import (
     NestedCompileRegionOptions,
 )
 
-# ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
-# plus an acceleration cache. Re-exported from the private impl module, whose
-# ``_PrecompileApi.__module__`` is forced to "torch.compiler" so this is the single
-# public location. Distinct from ``torch._dynamo.config.caching_precompile`` (a
-# ``torch.compile`` guard-serialization caching mode), despite the shared word.
-# ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
-# conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
-# forced to "torch.compiler" in the impl module, matching this public location.
-from torch._precompile import (
-    precompile as precompile,
-    PrecompileError as PrecompileError,
-)
+# ``torch.compiler.precompile`` is the prototype ahead-of-time capture API: a submodule
+# (torch/compiler/precompile.py) that re-exports its public types from the private impl
+# modules and re-homes their ``__module__`` to itself. Distinct from
+# ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` guard-serialization
+# caching mode), despite the shared word. ``PrecompileError`` is re-exported here as
+# ``torch.compiler.PrecompileError`` so the conventional ``except`` spelling works; its
+# ``__module__`` is set to "torch.compiler" in the impl module to match. The order of
+# these two imports is not load-bearing: the submodule imports torch._precompile itself.
+from torch._precompile import PrecompileError as PrecompileError
 
-from . import config
+from . import config, precompile
 from ._cache import CacheInfo
 
 
@@ -1093,7 +1090,7 @@ def export_python(
     decompositions: dict | None = None,
     example_inputs: Sequence[object] | None = None,
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
-    r"""Export the Python emitted by :func:`torch.compiler.precompile` to disk.
+    r"""Export the Python emitted by a ``torch.compiler.precompile`` capture to disk.
 
     The first call captures ``fn`` and writes a self-contained, readable Python file to
     ``path``; later calls exec that file. ``path`` is a build artifact meant to be
@@ -1119,7 +1116,7 @@ def export_python(
     .. warning::
         This API is experimental and subject to change.
 
-    ``export_python`` is a decorator wrapping :func:`torch.compiler.precompile`.
+    ``export_python`` is a decorator over ``torch.compiler.precompile``'s make_fx capture.
     On the first run in an environment it precompiles the decorated function (make_fx
     capture plus backend lowering) and writes the emitted, self-contained Python
     source to ``path``. On any later run the ``.py`` is already present, so
@@ -1127,27 +1124,12 @@ def export_python(
     directly. There is no acceleration cache -- the emitted source is self-contained
     and always exec'd as written.
 
-    It is a distinct entry point rather than a ``path=`` kwarg on
-    :func:`torch.compiler.precompile` because the two have different shapes: the raw
-    ``precompile(fn, *example_inputs)`` primitive is eager, takes the example inputs
-    positionally (mirroring how ``fn`` is called), and returns ``(python_code,
-    cache)`` for the caller to manage. ``export_python`` is a decorator that owns the
-    on-disk artifact and returns a runnable, so ``fn`` arrives via ``@`` and the
-    example inputs move to a keyword-only ``example_inputs`` list.
-
-    Python attributes and Python control flow are specialized at capture and must remain compatible with the example.
-    That includes ``torch.is_grad_enabled()``: capture traces with grad enabled so a
-    backward inside ``fn`` is built as graph ops, so a ``fn`` that branches on it always
-    captures the grad-enabled branch, whatever the grad mode of the call that triggered
-    capture. Calling the artifact under ``torch.no_grad()`` is unaffected and is the
-    ordinary inference path.
-
-    Unlike a binary artifact, ``path`` is readable, re-executable Python: it can be
-    committed, reviewed, diffed across a release, and hand-edited by an engineer or an
-    agent (ejectable compilation). The emitted source is always exec'd, so edits always
-    take effect, and keeping the edited source correct is the caller's responsibility.
-    The original eager function stays in source as the reference to regenerate from
-    (delete ``path`` to re-precompile).
+    Python attributes and Python control flow are specialized at capture and must
+    remain compatible with the example. That includes ``torch.is_grad_enabled()``:
+    capture traces with grad enabled so a backward inside ``fn`` is built as graph
+    ops, so a ``fn`` that branches on it always captures the grad-enabled branch,
+    whatever the grad mode of the call that triggered capture. Calling the artifact
+    under ``torch.no_grad()`` is unaffected and is the ordinary inference path.
 
     Args:
         path: Filesystem path for the emitted Python source. Parent directories are
@@ -1158,14 +1140,13 @@ def export_python(
             does changing ``backend``, ``tracer``, ``decompositions``, or
             ``example_inputs``: an existing ``path`` is loaded as-is. A stale artifact
             after a source edit is the expected failure mode; delete ``path`` to force
-            a re-precompile. Loading any
-            existing artifact also warns before executing it because ``path`` is trusted
-            executable Python and may have been edited or replaced. New files use the
-            permissions selected by the process umask.
+            a re-precompile. Loading any existing artifact also warns before executing
+            it because ``path`` is trusted executable Python and may have been edited or
+            replaced. New files use the permissions selected by the process umask.
         backend: How the captured graph is realized: ``"inductor"`` (default) or
-            ``"eager"``. Forwarded to :func:`torch.compiler.precompile`.
+            ``"eager"``. Forwarded to the capture.
         tracer: Capture front-end; ``"make_fx"`` (default) is the only one
-            implemented. Forwarded to :func:`torch.compiler.precompile`.
+            implemented. Forwarded to the capture.
         decompositions: Optional decomposition table forwarded to ``make_fx`` during
             capture.
         example_inputs: Positional inputs used to drive precompilation, matching
