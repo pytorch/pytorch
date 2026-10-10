@@ -530,7 +530,7 @@ class CompiledFxGraph(OutputCode):
     )  # Do not display graph
     cache_linemap: list[tuple[int, str]] | None
     # See PyCodeCache.load_by_key_path.
-    kernel_sources: dict[str, tuple[str, str]] | None
+    kernel_sources: dict[str, tuple[str, str]]
     device_types: OrderedSet[str]
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
@@ -1045,7 +1045,7 @@ class CompiledFxGraph(OutputCode):
             # themselves, not bind the kernels built from this entry's sources.
             with open(artifact_path) as f:
                 if f.read() != self.source_code:
-                    kernel_sources = None
+                    kernel_sources = {}
 
         try:
             with dynamo_timed(
