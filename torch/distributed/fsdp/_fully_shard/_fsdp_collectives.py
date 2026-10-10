@@ -676,15 +676,29 @@ def foreach_reduce(
 
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
-    reduce_scatter_stream.wait_stream(current_stream)
+    # A single-rank group without all-reduce has nothing to communicate, so it
+    # reduces in place on the current stream. On the reduce-scatter stream, the
+    # reduce output and the sharded gradients cast from it would come from that
+    # stream's allocator pool, which memory freed on the current stream cannot
+    # refill, and with one rank those gradients are full size.
+    reduce_in_place = (
+        world_size == 1 and all_reduce_group is None and all_reduce_hook is None
+    )
+    reduce_stream = current_stream if reduce_in_place else reduce_scatter_stream
+    if not reduce_in_place:
+        reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
     all_reduce_event = None
 
-    with device_handle.stream(reduce_scatter_stream):
-        reduce_output = reduce_scatter_comm.allocate(
-            (reduce_scatter_output_numel,),
-            dtype=reduce_dtype,
-            device=device,
+    with device_handle.stream(reduce_stream):
+        reduce_output = (
+            reduce_scatter_input
+            if reduce_in_place
+            else reduce_scatter_comm.allocate(
+                (reduce_scatter_output_numel,),
+                dtype=reduce_dtype,
+                device=device,
+            )
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
         if world_size > 1:
@@ -694,6 +708,8 @@ def foreach_reduce(
                 group=reduce_scatter_group,
                 op=reduce_scatter_op,
             )
+        elif reduce_in_place:
+            _div_if_needed(reduce_output, gradient_divide_factor)
         else:
             # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
             # account for a possible gradient_divide_factor.
@@ -701,8 +717,8 @@ def foreach_reduce(
                 reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
             else:
                 reduce_output.copy_(reduce_scatter_input)
-        reduce_scatter_event = reduce_scatter_stream.record_event()
-        post_reduce_stream = reduce_scatter_stream
+        reduce_scatter_event = reduce_stream.record_event()
+        post_reduce_stream = reduce_stream
         if all_reduce_group is not None:  # HSDP or DDP/replicate
             # Accumulations must run in the reduce-scatter stream
             if not all_reduce_grads:
@@ -809,9 +825,9 @@ def foreach_reduce(
                     and not to_accumulate_grad
                     and not has_post_acc_grad_hook
                 )
-                # Since the GPU sharded gradient is allocated in the RS stream,
-                # we can free it here by not keeping a ref without waiting for
-                # the D2H copy since future RS-stream ops run after the copy
+                # Since the GPU sharded gradient is allocated in the post-reduce
+                # stream, we can free it here by not keeping a ref without waiting
+                # for the D2H copy since future ops in that stream run after the copy
                 new_sharded_grad = new_sharded_grad.to(
                     torch.device("cpu"), non_blocking=non_blocking
                 )

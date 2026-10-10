@@ -2313,7 +2313,7 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
 
         class RecordDivisions(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if func == torch.ops.aten.div.Tensor:
+                if func.overloadpacket in (torch.ops.aten.div, torch.ops.aten.div_):
                     divisions.append(func)
                 return func(*args, **(kwargs or {}))
 
@@ -2328,6 +2328,33 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         self.assertEqual(len(divisions), int(divide_factor not in (None, 1)))
         expected = torch.full_like(inp[:1].expand(4, -1), 3 / (divide_factor or 1))
         self.assertEqual(model.weight.grad.to_local(), expected)
+
+    def test_singleton_reduce_on_current_stream(self):
+        # With nothing to communicate, the reduction and the cast to the sharded
+        # gradient dtype stay on the current stream, so the sharded gradients come
+        # from the current stream's allocator pool.
+        streams = set()
+
+        class RecordStreams(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                streams.add(device_module.current_stream())
+                return func(*args, **(kwargs or {}))
+
+        model = nn.Linear(8, 4, bias=False, device=device_type)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        fully_shard(
+            model, mesh=init_device_mesh(device_type.type, (1,)), mp_policy=mp_policy
+        )
+        model.set_gradient_divide_factor(2.0)
+        loss = model(torch.ones(3, 8, device=device_type)).sum()
+        with RecordStreams():
+            loss.backward()
+        reduce_scatter_stream = model._get_fsdp_state()._comm_ctx.reduce_scatter_stream
+        self.assertNotIn(reduce_scatter_stream, streams)
+        self.assertEqual(model.weight.grad.dtype, torch.float32)
+        self.assertEqual(model.weight.grad.to_local(), torch.full((4, 8), 1.5))
 
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp
