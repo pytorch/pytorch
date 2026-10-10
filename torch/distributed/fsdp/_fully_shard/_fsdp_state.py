@@ -450,6 +450,17 @@ class FSDPState(_State):
                             fsdp_param_group.post_backward()
                     fsdp_param_group._training_state = TrainingState.IDLE
                 state._training_state = TrainingState.IDLE
+            # Each pre-backward pops its group's post-forward index. Once all
+            # are popped, the order is stale; keeping it past a non-last
+            # backward makes the next forward append after it, so its first
+            # group's backward prefetch would target the previous forward's
+            # last group, already resharded by the last backward.
+            if not any(
+                group._post_forward_indices
+                for state in self._state_ctx.all_states
+                for group in state._fsdp_param_groups
+            ):
+                self._comm_ctx.post_forward_order.clear()
             if self._state_ctx.is_last_backward and not manual_finalization:
                 self.wait_for_gradient_reduction()
             else:

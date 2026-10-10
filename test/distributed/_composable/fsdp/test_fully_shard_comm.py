@@ -958,6 +958,38 @@ class TestFullyShardPrefetch(FSDPTest):
         return min(4, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
+    def test_backward_prefetch_with_gradient_accumulation(self):
+        # Gradient accumulation without resharding until the last backward:
+        # parameters stay unsharded across microbatches, so no backward should
+        # unshard a sharded group. The first module's backward prefetch must
+        # target nothing, not the previous microbatch's last module, which the
+        # last backward reshards before reaching the first module.
+        dim = 8
+        model = nn.Sequential(*(nn.Linear(dim, dim) for _ in range(3)))
+        for layer in model:
+            fully_shard(layer, reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+        inp = torch.randn((4, dim), device=device_type.type)
+        sharded_unshards: list[str] = []
+        orig_unshard = FSDPParamGroup.unshard
+
+        def unshard_with_record(self, *args, **kwargs):
+            if self.is_sharded:
+                sharded_unshards.append(self._module_fqn)
+            return orig_unshard(self, *args, **kwargs)
+
+        num_microbatches = 3
+        for microbatch in range(num_microbatches):
+            is_last = microbatch == num_microbatches - 1
+            model.set_is_last_backward(is_last)
+            model.set_reshard_after_backward(is_last)
+            model.set_requires_gradient_sync(is_last)
+            loss = model(inp).sum()
+            with patch_unshard(unshard_with_record):
+                loss.backward()
+            self.assertEqual(sharded_unshards, [])
+
+    @skip_if_lt_x_gpu(2)
     def test_fully_shard_backward_prefetch(self):
         # Activation checkpointing should not affect the expected FSDP events
         self.run_subtests(
