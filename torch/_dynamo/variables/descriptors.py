@@ -22,6 +22,7 @@ from torch._guards import Source
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import create_call_function
 from ..exc import (
+    get_dynamo_observed_exception,
     raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
@@ -32,6 +33,7 @@ from ..source import AttrSource, TypeMROSource, TypeSource
 from ..utils import is_tensor_base_attr_getter, is_torch_class
 from .base import (
     AsPythonConstantNotImplementedError,
+    AttributeMutationNew,
     GetSet,
     getset_build,
     getset_load_or_build,
@@ -897,7 +899,35 @@ class StaticMethodVariable(VariableTracker):
         return python_constant_repr_impl(self, tx)
 
 
-class ClassMethodVariable(VariableTracker):
+class GenericMethodVariable(VariableTracker):
+    def __init__(
+        self,
+        im_func: VariableTracker,
+        im_self: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.im_func = im_func
+        self.im_self = im_self
+
+    def python_type(self) -> type[types.MethodType]:
+        return types.MethodType
+
+    tp_members = {
+        "__self__": Member(lambda s, _: s.im_self, readonly_setter),
+        "__func__": Member(lambda s, _: s.im_func, readonly_setter),
+    }
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.im_func.call_function(tx, [self.im_self, *args], kwargs)
+
+
+class ClassMethodVariable(UserDefinedObjectVariable):
     """classmethod descriptor wrapping a callable.
 
     CPython's classmethod (PyClassMethod_Type) is a non-data descriptor
@@ -914,13 +944,64 @@ class ClassMethodVariable(VariableTracker):
         "__wrapped__": Member(lambda s, _: s.descriptor, readonly_setter),
     }
 
-    def __init__(self, descriptor: VariableTracker, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        descriptor: VariableTracker,
+        value: classmethod | None = None,  # type: ignore[type-arg]
+        **kwargs: Any,
+    ) -> None:
+        if value is None:
+            value = classmethod(None)
+            value.__dict__.clear()
+        super().__init__(value, **kwargs)
         self.descriptor = descriptor
 
-    @staticmethod
-    def create(fn: VariableTracker) -> "ClassMethodVariable":
-        return ClassMethodVariable(fn)
+    @classmethod
+    def create(
+        cls,
+        tx: "InstructionTranslatorBase",
+        descriptor: VariableTracker,
+    ) -> "ClassMethodVariable":
+        result = cls(descriptor, mutation_type=AttributeMutationNew())
+        tx.output.side_effects.track_attribute_mutation_new(result)
+
+        attrs = ("__module__", "__name__", "__qualname__", "__doc__")
+        if sys.version_info < (3, 14):
+            attrs += ("__annotations__",)
+        for name in attrs:
+            try:
+                copied = _lookup_wraps_copied_attr(tx, descriptor, name)
+            except get_dynamo_observed_exception(AttributeError):
+                tx.exn_vt_stack.clear_current_exception()
+                continue
+            if copied is None:
+                raise AssertionError(f"expected classmethod copied attribute {name}")
+            result.get_dict_vt(tx).setitem(name, copied)
+        return result
+
+    def _get_wrapped_attr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        from .object_protocol import generic_getattr
+
+        return self.get_dict_vt(tx).getitem_or_default(
+            name, lambda: generic_getattr(tx, self.descriptor, name)
+        )
+
+    def _set_wrapped_attr(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        value: VariableTracker | None,
+    ) -> None:
+        attrs = self.get_dict_vt(tx)
+        if value is None:
+            if not attrs.contains(name):
+                msg = f"'classmethod' object has no attribute '{name}'"
+                raise_observed_exception(AttributeError, tx, args=[msg])
+            attrs.delitem(name)
+        else:
+            attrs.setitem(name, value)
 
     @classmethod
     def from_descriptor(
@@ -954,10 +1035,15 @@ class ClassMethodVariable(VariableTracker):
     def as_python_constant(self) -> classmethod:  # type: ignore[type-arg]
         return classmethod(self.descriptor.as_python_constant())
 
-    def lookup_instance_dict(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> VariableTracker | None:
-        return _lookup_wraps_copied_attr(tx, self.descriptor, name)
+    tp_getset = {
+        "__dict__": GetSet(lambda s, tx: s.get_dict_vt(tx), unmodeled_setter),
+    }
+    if sys.version_info >= (3, 14):
+        for attr in ("__annotations__", "__annotate__"):
+            tp_getset[attr] = GetSet(
+                lambda s, tx, name=attr: s._get_wrapped_attr(tx, name),
+                lambda s, tx, value, name=attr: s._set_wrapped_attr(tx, name, value),
+            )
 
     def _bound_source(
         self, owner: VariableTracker, func: BaseUserFunctionVariable
@@ -975,19 +1061,11 @@ class ClassMethodVariable(VariableTracker):
         obj: VariableTracker,
         owner: VariableTracker,
     ) -> VariableTracker:
-        # cm_descr_get binds the wrapped function to the class.
-        # https://github.com/python/cpython/blob/3.13/Objects/funcobject.c#L1215-L1227
         func = self.descriptor
         # NestedUserFunctionVariable is not a UserFunctionVariable, but it is a
         # Python function all the same and binds like one.
         if not isinstance(func, BaseUserFunctionVariable):
-            unimplemented(
-                gb_type="classmethod of non-Python function",
-                context=f"tp_descr_get {self} on {owner}",
-                explanation="Dynamo can only bind a classmethod wrapping a "
-                "Python function to its class.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            return GenericMethodVariable(func, owner)
         bound_source = self._bound_source(owner, func)
         if func.source is None and bound_source is not None:
             # The descriptor had no source of its own (C().f, where the class
