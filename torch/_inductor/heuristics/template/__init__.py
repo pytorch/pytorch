@@ -14,6 +14,7 @@ from torch._inductor.heuristics.registry import get_template_heuristic
 from . import (
     aten,
     base,
+    bmm,
     contiguous_mm,
     decompose_k,
     nv_universal_gemm,
