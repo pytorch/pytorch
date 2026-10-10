@@ -2402,7 +2402,7 @@ class PythonWrapperCodegen(CodeGen):
     def names_used_in(self, module: IndentedBuffer) -> OrderedSet[str]:
         self.scanning_for_uses = True
         try:
-            text = module.getrawvalue()
+            text = module.getvalue()
         finally:
             self.scanning_for_uses = False
         # Each kernel's provenance comment names its source ops ("Original ATen:
