@@ -1039,12 +1039,6 @@ class TestBlackwellTMALoadFusion(TestCase):
         self.assertEqual(actual, fn(a, b), atol=tol, rtol=tol)
         return re.findall(r"def (triton_\w+)\(", code[0]), code[0]
 
-    def _skip_if_meta_ws_subtiled(self, epilogue_subtile):
-        if epilogue_subtile > 1 and meta_ws_enabled():
-            self.skipTest(
-                "covered by test_blackwell_mm_reduction_epilogue_not_fused_meta_ws"
-            )
-
     def _assert_row_fused(self, kernels, code, op="sum"):
         self.assertEqual(len(kernels), 1, kernels)
         self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
@@ -1081,7 +1075,6 @@ class TestBlackwellTMALoadFusion(TestCase):
             self.skipTest(
                 "covered by test_blackwell_mm_row_reduction_epilogue_not_fused"
             )
-        self._skip_if_meta_ws_subtiled(epilogue_subtile)
         M, N, K = shape
         test_config = BlackwellGPUGemmConfig(
             128,
@@ -1300,7 +1293,6 @@ class TestBlackwellTMALoadFusion(TestCase):
     def test_blackwell_mm_col_reduction_epilogue_fusion(
         self, op: str, M: int, split: bool, epilogue_subtile: int
     ):
-        self._skip_if_meta_ws_subtiled(epilogue_subtile)
         kernels, _ = self._run_reduction(
             self.COL_OPS[op],
             M,
@@ -1417,7 +1409,6 @@ class TestBlackwellTMALoadFusion(TestCase):
         """Row reductions of an output wider than the tile fuse as per-tile
         partials that the wrapper finishes. The last column tile ends in a fully
         masked subtile at N=160 with EPILOGUE_SUBTILE=2 and N=160 or 200 with 4."""
-        self._skip_if_meta_ws_subtiled(epilogue_subtile)
         fn = {
             "sum": lambda a, b: (a @ b).float().sum(1),
             # Every output is negative, so unmasked out-of-range columns,
@@ -1519,7 +1510,6 @@ class TestBlackwellTMALoadFusion(TestCase):
         """Row and column reductions of one output fuse into one epilogue,
         including at sizes where they would otherwise form a mix-order
         reduction."""
-        self._skip_if_meta_ws_subtiled(epilogue_subtile)
         source = torch.randint(-2, 3, (M, 128), device=GPU_TYPE).float()
         gate = torch.randint(0, 3, (M, 128), device=GPU_TYPE) / 2
         fn = {
@@ -1612,9 +1602,10 @@ class TestBlackwellTMALoadFusion(TestCase):
         "Need Blackwell with device-side TMA support in Triton",
     )
     @parametrize("axis", (0, 1))
-    def test_blackwell_mm_reduction_epilogue_not_fused_meta_ws(self, axis: int):
-        """Meta automatic warp specialization can miscompile subtiled reduction
-        epilogues, so they stay unfused under it."""
+    def test_blackwell_mm_reduction_epilogue_fused_meta_ws_subtiled(self, axis: int):
+        """Subtiled reduction epilogues fuse under Meta automatic warp
+        specialization (facebookexperimental/triton#3803 keeps every subtile
+        read after the accumulator-ready wait)."""
         if not meta_ws_enabled():
             self.skipTest("needs Meta Triton autoWS enabled")
         kernels, _ = self._run_reduction(
@@ -1625,9 +1616,36 @@ class TestBlackwellTMALoadFusion(TestCase):
             BlackwellGPUGemmConfig(128, 128, 64, 3, 8, epilogue_subtile=2),
             **{"triton.template_reduction_epilogue": True},
         )
-        self.assertTrue(
+        self.assertFalse(
             any(k.startswith(("triton_red", "triton_per")) for k in kernels), kernels
         )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("epilogue_subtile", (2, 4))
+    def test_blackwell_mm_reduction_epilogue_meta_ws_subtiled_persistent(
+        self, epilogue_subtile: int
+    ):
+        """More tiles than SMs, so each CTA's next MMA reuses the accumulator: a
+        subtile read moved past the accumulator release would see the next tile."""
+        if not meta_ws_enabled():
+            self.skipTest("needs Meta Triton autoWS enabled")
+        for _ in range(3):
+            kernels, code = self._run_reduction(
+                lambda a, b: ((c := a @ b), c.float().sum(-1), c.float().sum(0)),
+                32768,
+                128,
+                256,
+                BlackwellGPUGemmConfig(
+                    128, 128, 64, 4, 8, epilogue_subtile=epilogue_subtile
+                ),
+                **{"triton.template_reduction_epilogue": True},
+            )
+            sources = code.split("async_compile.triton(")
+            template_src = next(k for k in sources if "triton_tem_" in k[:80])
+            self.assertIn("tl.sum", template_src)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
